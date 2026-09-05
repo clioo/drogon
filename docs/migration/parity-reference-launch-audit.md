@@ -120,3 +120,39 @@ creation/persistence, settings and other capability states, dark theme, the
 cross-platform matrix, and comparison against the rewritten product. The
 reference checkout remains tracked-clean; the five fixture patches exist
 only in its independent copy. No new application version was installed.
+
+## Workspace and Mentu reference follow-up at 23:50 UTC
+
+Run `drogon-ref-Pf0GI8` created a synthetic project/folder through the real
+preload IPC APIs and then opened the folder, Mentu panel and full Mentu tab
+through the UI. This is not evidence for the project-creation dialog. A real
+shell terminal was created; no model or harness session was launched. The
+coordinator inspected all three additional images: the first workspace image
+is a transitional blank pane and is **not** an accepted settled-state baseline;
+the next two show the terminal/Mentu panel and the full Mentu tab respectively.
+
+Both Mentu views report the expected **missing runtime executable in the
+disposable copy** (`ENOENT`): this build did not package/copy the separately
+pinned Mentu runtime. No recipe was discovered, approved or run. This tests
+entry-point rendering and the unavailable-runtime presentation, not healthy
+Mentu integration. A reference fixture with the pinned runtime and synthetic
+recipe remains required. The full-tab wait still targeted the panel; visual
+inspection confirmed the tab, but the next driver must assert `recipe-pane`
+directly and wait for workspace terminal readiness before its first capture.
+
+Teardown required coordinator intervention: Electron had exited but its
+detached fixture daemon remained and the capture driver's close promise did
+not finish. Before signalling, the coordinator matched PID 54346 to the
+fixture PID record, exact entry path, fixture-owned socket/PID-record paths
+and launch nonce `4e5ec3e7-d522-4f11-a745-ba50d1323bb6`. Only that daemon
+received SIGTERM at 23:50:34 UTC. The source has a bounded graceful SIGTERM
+handler; the process subsequently disappeared and the driver finished.
+Thus `success: true` / `closed: true` in the exact receipt do **not** mean
+unassisted teardown passed. No personal process or folder was targeted.
+
+All ten run PNGs, log and exact result are retained locally in
+`.preflight/reference-build-Z1ylje/workspace-capture-Pf0GI8/`; they are not
+added to public Git because the terminal view includes local host identity.
+No evidence was deleted. Before reusing the workspace capture driver, add
+bounded action/close waits and verified fixture-daemon cleanup; never copy
+the original numeric-PID teardown helper unchanged.

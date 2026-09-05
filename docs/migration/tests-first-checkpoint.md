@@ -351,6 +351,46 @@ audit assignments, not Sol leads or feature implementation. Separate
 worktrees/PRs and the three-level hierarchy remain the approved next phase
 after audit closure; active writers were not relocated.
 
+## Worker recovery and reference follow-up at 23:50 UTC
+
+Coordinator stopped GLM Task `task_4eea43d17c1b` after repeated unproductive
+whole-generator rewrites despite bounded-delivery guidance. This was an
+explicit rescoping decision, not an inference of death from missing mail.
+The exact audit terminal was inspected and closed; receipt confirmed
+`ptyKilled`, then worker inspection reported `exited`. Its Dispatch
+`ctx_065fb345b12b` is failed (`operator_close`) and released. Partial source
+files remain; syntax checking exited 0, but the partial generator had no
+complete executable entry and cannot be treated as a successful census.
+
+New Sonnet Task `task_5aa1f6ffe74a` / Dispatch `ctx_657a60ddb1fa`, terminal
+`term_65b18805-754a-41a2-86c0-342ea74d72a2`, owns the same four inventory
+outputs with a narrower CLI-registry-only contract. Settings/keybindings and
+recursive handler-to-RPC mapping are explicitly excluded from that attempt,
+not silently dropped from migration. It must retain the previous partial
+file before editing. No simultaneous replacement writer was launched.
+
+Muse's runner matrix and Sonnet's 28 UI-card checkpoint were received and
+released. They remain proposals under coordinator review, **not audit
+closure or dispatch acceptance**. Review found residual abbreviated command
+strings and unsupported closure/deferral language; mapping a broad surface
+or a test filename is not complete behavioral evidence. The validated static
+bridge census and initial visual receipts are in local commit `779c268`.
+
+The additional folder/Mentu reference run rendered both panel and full-tab
+entrypoints with an unavailable-runtime notice (the independently copied
+reference lacks the pinned Mentu executable). It performed no recipe run.
+Its detached daemon needed exact-identity SIGTERM cleanup after Electron
+exited; this is not an unassisted shutdown pass. Full limitations and retained
+records are in [the launch audit](parity-reference-launch-audit.md).
+
+Bounded follow-ups at 23:53 UTC: Sonnet Task `task_9f6d8a24721c` / Dispatch
+`ctx_c6abd77289e8` corrects only the two UI-card documents, particularly
+unsupported deferral and assertion-evidence claims. Muse Task
+`task_e3c9afe5cc1d` owns only new `parity-settings-keybindings.{json,md}`
+catalogs, separate from the active CLI writer. The completed runner matrix
+v2 still contains abbreviated command strings and is an unaccepted source
+index, not a runnable plan. No hierarchy or next feature wave started.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
