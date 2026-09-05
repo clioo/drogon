@@ -16,5 +16,7 @@ After migration acceptance, resume the Mentu/Bots/Meetings handoff and matched d
 
 - Checkout: `/Users/carlos/Documents/Drogon-rewrite`.
 - Orca Run: `run_d97e86c69c2e`.
-- First wave: read-only source inventory and controlled lifecycle tests. Product implementation has not started at goal activation.
+- Implementation began at approximately 19:20 UTC on September 5, 2026. The first functional rewrite target is approximately September 6 at 19:20 UTC, not a declaration that every gate will pass by then.
+- Source inventories and controlled lifecycle preflight completed. Rust core/service, CLI and Electron first-slice implementation are in progress; see [foundation status](foundation-status.md).
+- AGY reached its provider quota after inventory, before desktop implementation. The coordinator took desktop ownership after closing and settling that exact worker; Sonnet and GLM retain their disjoint lanes. No provider substitution or subscription change was made.
 - Earlier completed smoke: see [preflight results](preflight-results.md).

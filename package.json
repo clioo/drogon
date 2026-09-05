@@ -1,0 +1,21 @@
+{
+  "name": "drogon-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @drogon/desktop dev",
+    "build": "cargo build --workspace --locked && pnpm --filter @drogon/desktop build",
+    "typecheck": "pnpm --filter @drogon/desktop typecheck",
+    "test": "cargo test --workspace --locked && pnpm --filter @drogon/desktop test",
+    "accept:core-cli": "node scripts/accept-core-cli.mjs",
+    "accept:desktop": "node scripts/accept-desktop.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "prettier": "3.9.6"
+  }
+}

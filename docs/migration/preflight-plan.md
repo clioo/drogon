@@ -1,7 +1,7 @@
 # Drogon rewrite — preflight y plan de ejecución
 
-Fecha: 2026-09-05. Estado actualizado: **ambiente creado y smoke de tres harnesses aprobado; P0 completo y rewrite pendientes**.
-Este documento no es una recipe ejecutada. Se renombró el repositorio anterior, se creó el nuevo y se ejecutaron tres workers; no se inició implementación del producto. El [reporte de resultados](preflight-results.md) reemplaza los estados históricos del discovery que siguen abajo.
+Fecha: 2026-09-05. Estado actualizado: **preflight aceptado con limitaciones documentadas; implementación del primer corte en progreso**.
+Este documento no es una recipe ejecutada. Se renombró el repositorio anterior, se creó el nuevo y comenzó la implementación. El [checkpoint actual](foundation-status.md) reemplaza los estados históricos del discovery que siguen abajo.
 
 ## Objetivo y orden
 
