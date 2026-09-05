@@ -1,0 +1,66 @@
+diff --git a/src/main/browser/browser-cookie-key.ts b/src/main/browser/browser-cookie-key.ts
+index 76fc14cf..230ff78b 100644
+--- a/src/main/browser/browser-cookie-key.ts
++++ b/src/main/browser/browser-cookie-key.ts
+@@ -16,6 +16,9 @@ const PBKDF2_KEY_LENGTH = 16
+ const PBKDF2_SALT = 'saltysalt'
+ 
+ function runKeychainCommand(program: string, args: readonly string[], timeoutMs: number): string {
++  if (process.env.DROGON_REFERENCE_VISUAL_ONLY === '1') {
++    throw new Error('Reference visual fixture disables native credential access')
++  }
+   const result = runProcessSync({ program, args, timeoutMs })
+   if (result.code !== 0 || result.timedOut) {
+     throw new Error(`${program} exited with code ${result.code ?? 'unknown'}`)
+diff --git a/src/main/claude-accounts/keychain.ts b/src/main/claude-accounts/keychain.ts
+index 92c11e74..55424d90 100644
+--- a/src/main/claude-accounts/keychain.ts
++++ b/src/main/claude-accounts/keychain.ts
+@@ -229,6 +229,9 @@ function isKeychainNotFoundError(error: unknown): boolean {
+ }
+ 
+ function execSecurityCommand(args: string[]): Promise<SecurityCommandResult> {
++  if (process.env.DROGON_REFERENCE_VISUAL_ONLY === '1') {
++    return Promise.reject(new Error('Reference visual fixture disables native credential access'))
++  }
+   return new Promise((resolve, reject) => {
+     let settled = false
+     let child: ReturnType<typeof execFile> | undefined
+diff --git a/src/main/cli/cli-installer.ts b/src/main/cli/cli-installer.ts
+index d95e1649..8d5d18df 100644
+--- a/src/main/cli/cli-installer.ts
++++ b/src/main/cli/cli-installer.ts
+@@ -102,6 +102,9 @@ export class CliInstaller extends CliPathRegistration {
+   }
+ 
+   async install(): Promise<CliInstallStatus> {
++    if (process.env.DROGON_REFERENCE_VISUAL_ONLY === '1') {
++      throw new Error('Reference visual fixture disables CLI installation')
++    }
+     return this.runAppImageRegistrationOperation(() => this.installUnlocked())
+   }
+ 
+diff --git a/src/main/startup/configure-process.ts b/src/main/startup/configure-process.ts
+index 6b167d7f..d7224034 100644
+--- a/src/main/startup/configure-process.ts
++++ b/src/main/startup/configure-process.ts
+@@ -228,6 +228,7 @@ export function configureOrcaUserDataPathEnv(): void {
+ }
+ 
+ export function shouldInstallManagedHooks(isDev: boolean): boolean {
++  if (process.env.DROGON_REFERENCE_VISUAL_ONLY === '1') return false
+   void isDev
+   // Why: managed hooks now target Orca-owned Codex homes, not ~/.codex, so keep install on for all agents until each gets its own seam.
+   return true
+diff --git a/src/main/startup/main-process-runtime-launch.ts b/src/main/startup/main-process-runtime-launch.ts
+index 5f2691d6..4fe12be6 100644
+--- a/src/main/startup/main-process-runtime-launch.ts
++++ b/src/main/startup/main-process-runtime-launch.ts
+@@ -75,6 +75,7 @@ function installRuntimeRpc(
+     // Why: mobile pairing needs the stable pre-setName() path (getCanonicalUserDataPath), not a late app.getPath('userData') that drops paired devices across restarts.
+     userDataPath: getCanonicalUserDataPath(),
+     enableWebSocket: true,
++    ...(process.env.DROGON_REFERENCE_VISUAL_ONLY === '1' ? { pinnedBindHost: '127.0.0.1' } : {}),
+     // Why: STA-2370 — the desktop app binds the WS listener to loopback until the user pairs a device;
+     // `orca serve` is an explicit remote opt-in, and E2E keeps the wide bind its harness connects over.
+     exposeNetworkByDefault: Boolean(serveOptions) || isE2E,

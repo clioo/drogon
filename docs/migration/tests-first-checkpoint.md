@@ -313,9 +313,47 @@ Original source tracked state remains clean with its pre-existing untracked
 plan; the personal Orca process was not restarted or stopped. Launch isolation
 and the screenshot matrix remain the next reference gates.
 
+## Coordinator bridge and visual-reference checkpoint at 23:40 UTC
+
+Sonnet Task `task_7838312bb670` / Dispatch `ctx_a6ed836e8cd9` completed and
+was released. Coordinator independently ran the final 34 generator tests:
+**34 passed, zero failed/skipped** on Node 24.19.0. Deterministic regeneration
+matched; all 4,734 recorded source-file hashes matched the frozen source.
+The census now separates orphan exports and unresolved placeholders from
+reachable methods and resolved names. It records 87 assembled API domains,
+947 distinct IPC channels, 953 reachable bridge methods and 615 unique,
+resolved RPC names; no RPC placeholders remain for this source revision.
+The 14 Mentu names resolve through their real exported constants.
+
+Accepted scope is **static inventory**, not runtime contract coverage. The
+11 delegated methods, one dynamic channel, one disposer pairing and 162
+direction-specific main-side channel matches remain unresolved. A missing
+syntactic match is not a missing implementation. The coordinator corrected
+one further report overclaim: this parser does not trace all main-handler
+to-RPC links, so it cannot declare them inherently unresolvable. Generation
+and all 34 tests were rerun after that wording correction.
+
+The isolated reference visual build and first three rendered captures now
+succeeded. See [launch audit](parity-reference-launch-audit.md) and
+[durable screenshots/receipt](reference-captures/c9790628-light-empty/README.md).
+The captured application is the pinned legacy source with five documented
+main-process fixture guards, not the rewrite. It used a fresh synthetic
+profile, light theme and 1440 × 1000 viewport. All three images were visually
+reviewed. Original source remained tracked-clean; the personal app was not
+restarted or stopped. No new installation or model inference occurred.
+
+Remaining audit work is explicitly split with disjoint write ownership:
+GLM's existing CLI/settings census; Sonnet Task `task_4bbf433675d7` / Dispatch
+`ctx_5f80ad0b66a3` for bounded source-backed UI capability cards; Muse Task
+`task_cadcec43473d` / Dispatch `ctx_6806364fbb5a` for the original test runner
+and CI execution matrix, including all 14 inventory gap IDs. These are flat
+audit assignments, not Sol leads or feature implementation. Separate
+worktrees/PRs and the three-level hierarchy remain the approved next phase
+after audit closure; active writers were not relocated.
+
 ## Still not proven
 
-No full Orca suite run, no full test migration, no new rendered acceptance,
+No full Orca suite run, no full test migration, no rewrite rendered acceptance,
 no package acceptance or new installation, no platform parity, and no new
 Pi/Spark comparison occurred in this checkpoint. Passing the small rewrite
 suite cannot substitute for the original product's full test obligations.

@@ -1,9 +1,11 @@
 # Reference launch audit — coordinator correction
 
-Status: **launch not accepted**. This replaces the initial Muse report after
-source review found consequential errors in its isolation conclusions.
-No reference application has been launched. The personal Orca instance is
-not a test fixture and must not be restarted, modified or stopped.
+Status: **isolated visual reference captured; full acceptance still open**.
+This replaces the initial Muse report after source review found consequential
+errors in its isolation conclusions. The first three source-pinned reference
+screens were captured at 23:31 UTC; scope and fixture exceptions are below.
+The personal Orca instance is not a test fixture and must not be restarted,
+modified or stopped.
 
 ## Provenance
 
@@ -71,5 +73,50 @@ installed application lock matched the second document of the source lock,
 and the Electron/Vite wrapper exited 0 under Node 24.19.0. The source stayed
 clean. `build-result.json` records 1,105 output hashes and the explicit child
 environment; `build.log` retains the existing build guards and chunk warnings.
-No registry reinstallation, full desktop/native/CLI build, app launch or
-installation is implied. The prelaunch gates above remain open.
+At that checkpoint, no registry reinstallation, full desktop/native/CLI build,
+app launch or installation was implied.
+
+## First rendered reference at 23:31 UTC
+
+The coordinator retained all 1,105 unmodified output files in `frozen-out/`
+and verified them against the build receipt. Only the disposable source copy
+was then changed: a visual-only flag pins the runtime listener to loopback,
+blocks the two reviewed native keychain access paths and CLI installation,
+and disables managed-hook installation. Five main-process files changed;
+no renderer source changed. The separate visual build exited 0 and has its
+own 1,105-file output receipt. These guards are not product fixes or evidence
+that the guarded features work.
+
+Playwright's Electron interface launched the actual reference build with an
+explicit child environment, fresh home/profile/temp directories, mock keychain
+flags, telemetry/diagnostic opt-outs, and a synthetic onboarding-completed
+profile. Resolved Electron home, profile and application paths were asserted.
+Three observed main-process TCP listeners were on `127.0.0.1`; this is not an
+outbound-network sandbox or a complete child-process network audit.
+
+The light-theme, 1440 × 1000 captures show the initial workspace page, empty
+Bots page and empty Meetings page. The coordinator visually inspected all
+three. See [capture evidence](reference-captures/c9790628-light-empty/README.md).
+No personal workspace, credentials, model request or external mutation was
+part of those interactions. The application closed normally; subsequent
+inspection found its recorded main PID absent. No broad process cleanup was
+used, and this does not prove every independently detached helper exited.
+
+A second successful run captured the minimal Bot form, all 17 character
+choices, expanded advanced controls and General Settings, plus the original
+three states. It asserted Tyrion selection with an empty optional name and
+the corresponding placeholder, then cancelled without creating a Bot.
+See [the additional captures](reference-captures/c9790628-bot-settings/README.md).
+This confirms those reference UI interactions, not persistence or agent launch.
+
+Two earlier attempts remain failures: a long Unix-socket path plus an absent
+debug-store wait in `visual-run-VC0jnz`, and a stale `Your Bots` text locator
+in `drogon-ref-KpkNjB`. The successful run used a shorter nonce path and the
+actual visible `No Bots yet` label. Neither failure counts as behavioral RED
+for the rewrite. All records remain under `.preflight/reference-build-Z1ylje`.
+
+Still required: populated workspace/terminal and Mentu interactions, Bot
+creation/persistence, settings and other capability states, dark theme, the
+cross-platform matrix, and comparison against the rewritten product. The
+reference checkout remains tracked-clean; the five fixture patches exist
+only in its independent copy. No new application version was installed.
