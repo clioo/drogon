@@ -226,7 +226,12 @@ impl Engine {
             rows,
         )?;
 
-        self.sessions.lock().unwrap().insert(session_id, handle);
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(session_id, handle.clone());
+        // Retain ownership even when the post-spawn durable transition fails.
+        session::persist_admission(&handle)?;
         Ok(session_json)
     }
 
@@ -248,11 +253,7 @@ impl Engine {
         for row in rows {
             let (id, mut value) = row.map_err(error::from_sqlite)?;
             if let Some(handle) = sessions_guard.get(&id) {
-                value = session::to_json(
-                    handle,
-                    value["verdict"].as_str().unwrap_or("live"),
-                    value["exitCode"].as_i64(),
-                );
+                value = session::snapshot(handle);
             }
             if workspace_filter.is_none_or(|w| value["workspaceId"] == w) {
                 sessions.push(value);
@@ -304,7 +305,7 @@ impl Engine {
         // still retains. The handle's own state (`exit_code`) already makes
         // every subsequent read/write/resize/stop report the true verdict;
         // write/resize additionally refuse to act on an exited session.
-        Ok(session::stop(&handle))
+        session::stop(&handle)
     }
 
     fn session_row_as_value(&self, session_id: &str, incarnation: &str) -> Result<Value, RpcError> {
@@ -412,10 +413,7 @@ fn require_str<'a>(params: &'a Value, field: &str) -> Result<&'a str, RpcError> 
         .ok_or_else(|| error::invalid_argument(format!("missing or invalid field: {field}")))
 }
 
-/// A field that is absent (or explicitly `null`) uses `default`; a field
-/// that is *present* with the wrong type is rejected rather than silently
-/// falling back to `default` — an invalid value is never indistinguishable
-/// from an absent one.
+/// Only absence selects the default; malformed values must not broaden a request.
 fn optional_u64(params: &Value, field: &str, default: u64) -> Result<u64, RpcError> {
     match params.get(field) {
         None => Ok(default),

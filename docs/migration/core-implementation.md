@@ -4,7 +4,13 @@ Implements `docs/migration/protocol-v1.md` (frozen). Scope: `crates/drogon-core/
 `crates/drogond/**` only. No Electron, no CLI (`drogon-cli` is a separate lane), no root
 manifest/lockfile edits.
 
-## Compile and test status — Measured
+## Coordinator verification — 20:40 UTC
+
+The initial worker's 32-test report below is historical. The coordinator subsequently fixed explicit-null/argv validation, lock symlink refusal, receipt-failure replay, child-exit observation independent of PTY EOF, and post-spawn/exit persistence failure handling. Core/service now pass **39 tests** independently, plus **10 harness-library tests**, with strict Clippy. A started child remains owned and discoverable when its durable state transition fails; stop does not claim durable success if saving the observed exit fails. Tests inject real SQLite failures and verify exact recovery without another spawn.
+
+The current native CLI/service acceptance passes **19 checks** including installed-Pi startup (no inference), real 1.2 MB output and actual daemon SIGKILL/restart after children were stopped: `.preflight/acceptance/core-cli-1788640750491-cdcc64a4-3b11-4fd9-ac38-518cef05a03b.json`. This supersedes the earlier claim that over-capacity PTY output was only unit-tested. Live-child crash recovery and descendant cleanup remain unverified. See [foundation status](foundation-status.md) for subsequent changes and CI.
+
+## Initial worker compile and test status — historical
 
 `cargo check -p drogon-core -p drogond --offline` is clean (no warnings). `cargo test -p drogon-core
 -p drogond --offline` passes all 32 tests (3 `ring` unit, 14 `drogon-core` integration, 8 `drogond`
@@ -59,8 +65,8 @@ before reporting `unverifiable`, rather than a bare "not found."
 non-blockingly up to a 2s bounded budget (`STOP_VERIFY_TIMEOUT`), only returning `exited` once an
 actual exit status is reaped; on timeout it returns `unverifiable`, never a fabricated `exited`. PTY
 EOF is a *separate* fact from process exit — a child can close its own end of the pty and keep
-running — so the reader thread's own post-EOF reap also only ever calls the non-blocking
-`try_wait()`, in a loop with a sleep between attempts that holds no lock, for as long as it takes.
+running, or a descendant can retain the PTY after the direct child exits. A separate observer
+calls non-blocking `try_wait()` independently of the output reader, with no lock held across sleep.
 Both paths share one `exit_code: Mutex<Option<i64>>` cache so the underlying `try_wait()` only ever
 fires once, and neither can block the other waiting on the same lock. The confirmed-exited session
 handle is kept (not dropped) so its ring buffer stays readable — see the fixes list below.
@@ -181,9 +187,7 @@ first-owner-wins, live-incumbent-refuses, dead-incumbent-reclaimed; `crates/drog
 ## Known gaps, not claimed as done
 
 - **Windows/named pipes**: not implemented, not stubbed to look implemented; `ServeError::UnsupportedPlatform`.
-- **Over-capacity ring-buffer truncation** is exercised only in `ring.rs` unit tests, not end-to-end
-  through a real 1 MiB-plus PTY write, judged not worth the runtime cost for this slice; the unit
-  tests exercise the exact same code path (`RingBuffer::read`).
+- **Over-capacity ring-buffer truncation** now has real 1.2 MB PTY acceptance and pagination evidence; it is no longer a unit-only coverage gap.
 - **Process-group/descendant cleanup** is out of scope for this slice: `stop` only kills/waits the
   direct spawned child, matching `protocol-v1.md`'s "do not claim broad descendant cleanup based on
   killing one PID." A shell that backgrounds a grandchild can leave it running.
@@ -194,8 +198,8 @@ first-owner-wins, live-incumbent-refuses, dead-incumbent-reclaimed; `crates/drog
   removes the race *between two `drogond` processes* (both serialize on the lock first), but does
   not make probe-then-rename atomic against some other actor renaming the path in that exact window.
 - **`Engine.sessions` now grows for the process's lifetime**, since `stop` no longer evicts a
-  confirmed-exited handle (needed to keep its ring buffer readable — see the fixes list). Each entry
-  is small, but there is no eviction policy yet for a long-running service with many short sessions;
+  confirmed-exited handle (needed to keep its ring buffer readable — see the fixes list). Each ring
+  can retain 1 MiB and PTY resources are retained, so aggregate memory/descriptors need a retirement policy;
   not addressed here.
 - **No file-descriptor-exhaustion or `EBADF`-mid-read fault injection test** exists; "process death
   vs. host/handle unreachable" is exercised via the crash-simulation and closed-pty-but-alive tests,

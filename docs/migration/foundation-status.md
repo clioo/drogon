@@ -27,7 +27,9 @@ The expanded suite first reproduced stopped-output and malformed-null failures, 
 
 The native harness extension subsequently passed 47 core/service/harness tests. The 19-check optional installed-Pi acceptance passed at 20:30 UTC: `.preflight/acceptance/core-cli-1788640220268-a8f85732-08cb-4fa0-b1ac-16d4b87f12ae.json`. It launched the actual Pi TUI through Drogon's service, verified repeat admission returns the same session, and confirmed exact stop. Pi configuration was isolated in the temporary fixture; no prompt or inference request was sent. Another check verifies child processes do not inherit Orca runtime authority. This proves neither model authentication nor DGX connectivity. The updated CLI's 90 tests, strict Clippy and debug build passed independently afterward; full rendered harness acceptance is next.
 
-The foundation CI definition targets macOS/Linux checks and Windows compilation only. It has not run on GitHub and is not evidence of Windows runtime support or the final Linux glibc floor. No first-slice PR has been merged yet.
+The [foundation CI run](https://github.com/clioo/drogon/actions/runs/33990619377) passed on commit `4d7fe59`: macOS/Linux checks, builds and native acceptance, plus Windows compilation only. The previous run failed before those native checks because setup-node tried pnpm caching before pnpm installation; this was corrected explicitly. CI is not evidence of Windows runtime support or the final Linux glibc floor. No first-slice PR has been merged yet.
+
+Subsequent coordinator fault-injection tests now cover post-spawn state-save failure (ownership retained, duplicate admission fenced) and observed-exit save failure (no durable-success claim until storage recovers). Core/service pass 39 tests, plus ten harness tests. The 19-check actual CLI/service/Pi acceptance passed again with that binary: `.preflight/acceptance/core-cli-1788640750491-cdcc64a4-3b11-4fd9-ac38-518cef05a03b.json`.
 
 ## Deliberate first-slice limits
 

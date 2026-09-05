@@ -40,10 +40,7 @@ pub(crate) struct SessionHandle {
     child: Mutex<Box<dyn Child + Send + Sync>>,
     ring: Mutex<RingBuffer>,
     size: Mutex<(u16, u16)>,
-    /// `None` until reaped exactly once; both the reader thread (on PTY EOF)
-    /// and an explicit `stop` race to reap, guarded by this same mutex so
-    /// the underlying `wait()`/`try_wait()` is only ever called by whichever
-    /// gets here first.
+    /// Child observation is independent of PTY EOF and serialized with exact stop.
     exit_code: Mutex<Option<i64>>,
     db: Arc<Mutex<Connection>>,
 }
@@ -112,16 +109,6 @@ pub(crate) fn spawn(
                 db: db.clone(),
             });
             spawn_reader_thread(handle.clone(), reader);
-            // Conditional: only flips a still-`pending` row to `live`. If the
-            // reader thread already reaped a near-instant exit and wrote
-            // `exited`, this is a harmless no-op — the terminal state wins.
-            {
-                let conn = db.lock().unwrap();
-                let _ = conn.execute(
-                    "UPDATE sessions SET verdict = 'live' WHERE id = ?1 AND verdict = 'pending'",
-                    [&session_id],
-                );
-            }
             finish_spawn(&handle, &session_id)
         }
         Err(e) => {
@@ -209,9 +196,7 @@ fn finish_spawn(
     Ok((session_id.to_string(), handle.clone(), session_json))
 }
 
-/// How often the background poller (below) checks for exit after PTY EOF.
-/// Never held across a lock — see `poll_until_exit`.
-const EOF_POLL_INTERVAL: Duration = Duration::from_millis(30);
+const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(30);
 
 fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Send>) {
     let observed_child = handle.clone();
@@ -255,20 +240,42 @@ fn try_reap(handle: &SessionHandle) -> Option<i64> {
 /// costs nothing else while it waits.
 fn poll_until_exit(handle: &SessionHandle) {
     loop {
-        if let Some(code) = try_reap(handle) {
-            persist_exit(handle, code);
+        if let Some(code) = try_reap(handle)
+            && persist_exit(handle, code).is_ok()
+        {
             return;
         }
-        std::thread::sleep(EOF_POLL_INTERVAL);
+        std::thread::sleep(CHILD_POLL_INTERVAL);
     }
 }
 
-fn persist_exit(handle: &SessionHandle, exit_code: i64) {
+fn persist_exit(handle: &SessionHandle, exit_code: i64) -> Result<(), RpcError> {
     let conn = handle.db.lock().unwrap();
-    let _ = conn.execute(
-        "UPDATE sessions SET verdict = 'exited', exit_code = ?2 WHERE id = ?1",
-        rusqlite::params![handle.session_id, exit_code],
+    let changed = conn
+        .execute(
+            "UPDATE sessions SET verdict = 'exited', exit_code = ?2 WHERE id = ?1",
+            rusqlite::params![handle.session_id, exit_code],
+        )
+        .map_err(error::from_sqlite)?;
+    if changed != 1 {
+        return Err(error::io_error("Session exit record is missing"));
+    }
+    Ok(())
+}
+
+pub(crate) fn persist_admission(handle: &SessionHandle) -> Result<(), RpcError> {
+    let conn = handle.db.lock().unwrap();
+    let result = conn.execute(
+        "UPDATE sessions SET verdict = CASE WHEN verdict = 'pending' THEN 'live' ELSE verdict END WHERE id = ?1",
+        [&handle.session_id],
     );
+    if !matches!(result, Ok(1)) {
+        return Err(error::unverifiable(format!(
+            "Session {} started but its state could not be persisted; inspect its retained identity before further action",
+            handle.session_id,
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn check_incarnation(handle: &SessionHandle, incarnation: &str) -> Result<(), RpcError> {
@@ -348,9 +355,10 @@ pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Val
 /// Sends the kill, then waits up to `STOP_VERIFY_TIMEOUT` for the exit to be
 /// observed. Never assumes `kill()` returning `Ok` means the process is
 /// gone — only an actual reaped exit status does.
-pub(crate) fn stop(handle: &SessionHandle) -> Value {
+pub(crate) fn stop(handle: &SessionHandle) -> Result<Value, RpcError> {
     if let Some(code) = try_reap(handle) {
-        return to_json(handle, "exited", Some(code));
+        persist_exit(handle, code)?;
+        return Ok(to_json(handle, "exited", Some(code)));
     }
     {
         let mut child = handle.child.lock().unwrap();
@@ -359,11 +367,11 @@ pub(crate) fn stop(handle: &SessionHandle) -> Value {
     let deadline = Instant::now() + STOP_VERIFY_TIMEOUT;
     loop {
         if let Some(code) = try_reap(handle) {
-            persist_exit(handle, code);
-            return to_json(handle, "exited", Some(code));
+            persist_exit(handle, code)?;
+            return Ok(to_json(handle, "exited", Some(code)));
         }
         if Instant::now() >= deadline {
-            return to_json(handle, "unverifiable", None);
+            return Ok(to_json(handle, "unverifiable", None));
         }
         std::thread::sleep(STOP_POLL_INTERVAL);
     }
@@ -376,6 +384,11 @@ fn current_verdict(handle: &SessionHandle) -> (String, Option<i64>) {
         Some(code) => ("exited".to_string(), Some(code)),
         None => ("live".to_string(), None),
     }
+}
+
+pub(crate) fn snapshot(handle: &SessionHandle) -> Value {
+    let (verdict, code) = current_verdict(handle);
+    to_json(handle, &verdict, code)
 }
 
 pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i64>) -> Value {
