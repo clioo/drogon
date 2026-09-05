@@ -1,0 +1,46 @@
+{
+  "capsuleId": "orchestration-ask-timeout",
+  "description": "Pilot capsule for the pure orchestration-ask timeout clamp policy: no Electron, DOM, filesystem, network, or process dependency in the pinned files.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRevisionNote": "Verified via `git -C <source-root> rev-parse HEAD` at manifest authoring time; the runner re-verifies this on every invocation and refuses to stage on any mismatch.",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "entryTestFile": "src/shared/orchestration-ask-timeout.test.ts",
+  "files": [
+    {
+      "path": "src/shared/orchestration-ask-timeout.test.ts",
+      "role": "test",
+      "sha256": "37286eff3fb99e7a1e854854c2638ccc4a5e963edc176babc9e773d15299d13b"
+    },
+    {
+      "path": "src/shared/orchestration-ask-timeout.ts",
+      "role": "module",
+      "sha256": "6f6cafcfd2e4133736d3f861c728db98dad615e23e54cf6b3925c76c5579f930"
+    },
+    {
+      "path": "src/shared/timer-delay.ts",
+      "role": "module",
+      "sha256": "7e529ed30d1b25521f5d72d7c2a6d05d16efe66faf2619b859d67b330cca767f"
+    }
+  ],
+  "dependencyClosureNote": "orchestration-ask-timeout.test.ts imports only ./orchestration-ask-timeout and ./timer-delay (both relative, no aliasing). timer-delay.ts has zero imports. This is the complete transitive closure; no other legacy source file is read, staged, or executed by this capsule.",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 2
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "source test.environment is 'node' (matches capsule; no difference here)",
+    "source defines a global constant ORCA_FEATURE_WALL_ENABLED='true' at build time; the capsule's generated config defines nothing, since the pinned files never reference it",
+    "source registers three setupFiles (config/scripts/happy-dom-offscreen-canvas.ts, config/scripts/happy-dom-mutation-observer-retention.ts, config/scripts/vitest-host-ports-setup.ts); the capsule registers none, since the pinned files touch no DOM/canvas/host-port surface",
+    "source sets hookTimeout=60000ms and testTimeout=30000ms for its full, heavier suite; the capsule uses Vitest's built-in defaults",
+    "source passes execArgv ['--no-experimental-webstorage','--expose-gc'] to the worker process for retention tests elsewhere in the suite; the capsule passes none, since the pinned files allocate nothing that a GC-timing test would observe",
+    "installed capsule runner uses vitest 5.0.0 (apps/desktop/node_modules/.bin/vitest); the source project pins vitest ^4.1.11 in its own package.json. This is a real, unverified compatibility gap for anything beyond these two plain arithmetic/clamping assertions -- do not treat a pass under 5.0.0 as proof the source suite passes under its own pinned 4.1.11."
+  ],
+  "isolationRationale": "Both pinned modules are side-effect-free, import-free-of-runtime (timer-delay.ts has zero imports; orchestration-ask-timeout.ts imports nothing), and export only pure numeric functions/constants. The test file imports only these two sibling modules by relative path. No Electron, IPC, filesystem, network, timer-scheduling, or global mutation occurs anywhere in this closure, which is why this capsule was approved to execute; this property does not generalize to other files in the source tree."
+}
