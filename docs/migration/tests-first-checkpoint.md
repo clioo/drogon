@@ -254,6 +254,65 @@ historical pilot disclaimer. Both manifests document minimal-config differences
 from the full source environment. These are reference baselines, not tests
 ported to or passing against the rewritten product.
 
+## Coordinator allocation and reference-build checkpoint at 23:22 UTC
+
+The corrected allocation from Muse Task `task_7027d3a56a81` / Dispatch
+`ctx_29125dc2ba86` is settled and released. The coordinator independently
+validated 46 packages, all 9,037 unique source paths, retained dual provenance
+for the 9,038 records, exact hashes, no duplicate assignments, no dependency
+cycles, and a maximum dependency depth of five edges. All test-port boundaries
+are distinct. `scripts/check-parity-work-packages.mjs` now makes that check
+repeatable; its 12 regression tests passed. This accepts file-allocation
+integrity only, not semantic coverage or dispatch readiness. The proposal
+remains `dispatchable: false`; large buckets must become bounded leaf tasks.
+
+Sonnet correction Task `task_a6f5113c3c3f` / Dispatch `ctx_b748fc8e9bda`
+completed and was released. Coordinator ran all 29 bridge-generator tests:
+29 passed, zero failed/skipped. Review nevertheless found the claimed 615
+resolved RPC names included 14 unresolved placeholders, and the so-called
+reachable bridge count included all exports, including orphan exports. These
+are denominator-label errors, not product regressions. New bounded Task
+`task_7838312bb670` / Dispatch `ctx_a6ed836e8cd9` owns those corrections and
+static resolution of the 14 Mentu names. The source has real literal names
+in `src/shared/mentu-run-contract.ts`, re-exported through
+`mentu-recipe-contract.ts`; they are not absent functionality. GLM's separate
+command/settings census remains active. No Sol hierarchy is launched yet.
+
+Muse's reference-launch audit Task `task_9185fc83dd81` / Dispatch
+`ctx_a61b9d1b254e` completed and was released. Coordinator rejected its safety
+conclusions and replaced `parity-reference-launch-audit.md` with verified
+findings: E2E defaults to all-interface listening, the old cleanup helper
+trusts numeric PID files, and inherited environment is not a credential
+allowlist. The unchanged launch helper is not approved for this reference run.
+
+A fresh independent source clone now exists at
+`.preflight/reference-build-Z1ylje/source`, exact revision
+`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, clean before and after build.
+Dependencies were independently copied using macOS copy-on-write, not linked
+back to the source and not installed through lifecycle scripts. All 3,901
+symlinks resolved inside the copied dependency tree; no dangling links.
+The second document of the frozen pnpm lock matches the installed lock
+structurally, including importers/packages/snapshots/patches. The first
+document describes the package-manager dependency and was not confused with
+the application lock. This is reuse of installed dependencies, not a fresh
+registry/integrity verification of every dependency byte.
+
+Coordinator invoked only `config/scripts/run-electron-vite-build.mjs` with
+Node 24.19.0 and an explicit child environment, fresh build home/temp paths,
+no inherited credentials or release telemetry keys. Electron 43.4.1,
+electron-vite 5.0.0, rolldown-vite 7.3.1, TypeScript 7.0.2, node-pty 1.1.0.
+The build exited **0**, including the existing plain-Node entry smoke and
+renderer boot-graph guard; 1,105 output files have recorded hashes. Large
+renderer chunk warnings remain. This is a fresh bundle, not the full
+`build:desktop`, typecheck, native rebuild, CLI install, packaged release or
+application launch.
+
+Local receipts: `.preflight/reference-build-Z1ylje/build-start.json`,
+`build-result.json`, `build.log`, and the one-shot `build-reference.mjs`.
+Original source tracked state remains clean with its pre-existing untracked
+plan; the personal Orca process was not restarted or stopped. Launch isolation
+and the screenshot matrix remain the next reference gates.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no new rendered acceptance,
