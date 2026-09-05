@@ -1,7 +1,7 @@
 # Drogon rewrite — preflight y plan de ejecución
 
-Fecha: 2026-09-05. Estado: **plan propuesto; discovery comprobado, smoke multiagente pendiente**.
-Este documento no es una recipe ejecutada. No se inició implementación, no se lanzaron workers nuevos, no se renombraron repositorios ni se cambió su visibilidad durante este preflight.
+Fecha: 2026-09-05. Estado actualizado: **ambiente creado y smoke de tres harnesses aprobado; P0 completo y rewrite pendientes**.
+Este documento no es una recipe ejecutada. Se renombró el repositorio anterior, se creó el nuevo y se ejecutaron tres workers; no se inició implementación del producto. El [reporte de resultados](preflight-results.md) reemplaza los estados históricos del discovery que siguen abajo.
 
 ## Objetivo y orden
 
@@ -111,7 +111,7 @@ Esperas acotadas con `check --wait`, no loops de sleep ni reinicio por timeout/T
 
 ## Puertas de ejecución y validación
 
-### P0 — prueba REAL de coordinación (siguiente acción, todavía pendiente)
+### P0 — prueba REAL de coordinación (smoke aprobado; fallo controlado y cancelación pendientes)
 
 En fixture temporal sin datos privados ni repo productivo, cada uno de los tres workers debe leer un desafío, generar un artefacto diminuto, ejecutar un test determinista y enviar worker_done válido. El coordinador verifica contenido, salida, modelo efectivo cuando observable, Task/Dispatch y cleanup. Un caso incluye ask/reply; otro fallo controlado debe quedar como failed y no activar un duplicado. Probar cancelación sobre proceso propio, no sobre trabajo del usuario. No afirmar selección efectiva solo porque el modelo aparece en argv ni confiar en el nombre que escriba el agente.
 
@@ -145,6 +145,8 @@ Usar **Drogon Electron + drogon-cli** para lanzar, supervisar y cerrar una ola r
 
 Después retomar pendientes Mentu/Bots/Meetings y comparación con/sin Mentu exclusivamente Pi + DGX Spark, conservando resultados v1 fallidos. Migración lista ≠ todas las features pendientes terminadas.
 
-## Estado al entregar este plan
+## Estado histórico al entregar la primera versión del plan
 
 Única escritura: este documento local. Sin commit/PR nuevo, sin cambio de visibility/nombre, sin nuevos workers ni inferencia experimental, sin reactivación del goal antiguo. Preflight de discovery completado; aprobación técnica del transporte multiagente y validación de producto NO se han obtenido todavía. Próximo paso concreto: P0, no comenzar el rewrite masivo ni tocar repos antes de resolver las puertas descritas.
+
+Este párrafo describe la primera entrega, no el estado actual. Ver [resultados del ambiente y las ejecuciones](preflight-results.md).
