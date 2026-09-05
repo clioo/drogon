@@ -1,0 +1,26 @@
+{
+  "capsuleId": "remote-runtime-socket-liveness",
+  "description": "Original suspend/resume probe-window tests with fake timers and mock ping callbacks; no real sockets or remote hosts.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "entryTestFile": "src/shared/remote-runtime-socket-liveness.test.ts",
+  "files": [
+    { "path": "src/shared/remote-runtime-socket-liveness.test.ts", "role": "test", "sha256": "ff681fdd0ad979ab3e3b04f08d167367eeeb4f22644a2f0c12b46e6387547edf" },
+    { "path": "src/shared/remote-runtime-socket-liveness.ts", "role": "module", "sha256": "cd183251d2970e69493c841c8e9464c5af5eccda4948b30c0747b51329b8e91d" }
+  ],
+  "dependencyClosureNote": "Coordinator read both source bodies completely. The test imports Vitest and the sibling module; the module has no imports. beforeEach installs fake timers, afterEach restores them. Both cases inject a numeric clock and vi.fn ping/onDead callbacks, advance fake timers and stop their monitor.",
+  "expectedTestCounts": { "files": 1, "tests": 2 },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Both configurations use node. Execute this capsule with an explicit original installed Vitest 4.1.11 entry; runner receipts record the actual version/path.",
+    "The minimal capsule omits root renderer aliases, ORCA_FEATURE_WALL_ENABLED and the three DOM/host-port setup files; none is referenced by this source closure.",
+    "The capsule omits root execArgv webstorage/GC options and the Windows maxWorkers override, and uses default timeouts rather than root 30s test/60s hook timeouts. Timers and clock are controlled by the original tests. This does not establish full source-environment equivalence."
+  ],
+  "isolationRationale": "The source schedules only a fake interval inside its isolated Vitest worker. Its callbacks cannot perform network or process actions. No real socket, SSH connection, user session, credential, filesystem or application is touched by the staged source. The onDead callback describes a socket probe deadline, not evidence that a remote process exited; this baseline does not verify process liveness, reconnect integration, Drogon parity or actual suspend/resume on any OS."
+}

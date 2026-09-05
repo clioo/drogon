@@ -152,6 +152,108 @@ blocks. This is recorded in the master plan and AGENTS; no Sol lead was launched
 no runtime nesting setting was changed, and no active writer was moved as part
 of recording that authorization. Existing audit assignments remain authoritative.
 
+## Coordinator review and allocation follow-up at 22:52 UTC
+
+The verified census/capsule infrastructure and the full-fidelity plan are now
+in local commit `02a2c2a4f63ef4f4464a59dc3620423d0ef78b04`. This commit did not
+include the pending product/packaging changes or active census writers. It
+has not been pushed or merged by this checkpoint.
+
+Sonnet's bridge census Task `task_5f9fe8c2a38b` / Dispatch `ctx_7343abd008ce`
+reported completion and was released. Its initial 87 domain / 934 channel /
+422 RPC-name report is **not accepted as a complete denominator**. Coordinator
+read the generator, fixture tests and original method-group bodies and found:
+
+- `terminal.ts`, `orchestration.ts` and `github.ts` compose nonempty imported
+  method arrays, yet the generator labelled them resolved with zero methods.
+  `browser-network-tunnel.ts` uses `defineStreamingMethod` through a factory,
+  another omitted shape. Scanning only same-file `defineMethod` calls cannot
+  establish the released RPC registration surface.
+- Top-level telemetry functions were counted as API keys but their IPC bodies
+  were not enumerated; main-side handler registrations were left unread.
+  Four-file write ownership did not prohibit reading those source handlers.
+- Output validation checked the parent but not the leaf or fixture-directory
+  symlink. Computed identifier keys and subscription/disposer matching also
+  require more precise evidence than their initial labels imply.
+
+New Sonnet Task `task_a6f5113c3c3f` / Dispatch `ctx_b748fc8e9bda` owns only
+correction of that generator, its tests and two generated reports. Acceptance
+requires regression evidence, deterministic regeneration and explicit remaining
+unknowns. Initial worker fixture results are not independent acceptance.
+
+GLM Task `task_4eea43d17c1b` / Dispatch `ctx_065fb345b12b` continues its separate
+command/settings census. No ownership overlap or replacement writer was
+introduced. DeepSeek remains paused after the previously verified quota error.
+
+Muse Task `task_35edea6f8c22` / Dispatch `ctx_f037bfe07393` is preparing the
+test-work-package allocation in only `parity-work-packages.md` and
+`parity-test-work-packages.json`. It must assign every one of the 9,038 frozen
+assets exactly once, preserve hashes, separate support assets from runnable
+suites, and expose any unresolved allocation. The proposed future Sol leads
+and worktrees/PRs are planning metadata, not launched workers, accepted
+features or proof of test equivalence. File routing alone is not a semantic
+capability map. Existing audit gaps must retain owners and follow-up criteria.
+
+An independent allocation cross-check distinguishes **9,038 source records**
+from **9,037 unique paths**: `native/computer-use-macos/Package.swift` has two
+roles with the same hash. Muse independently documented the twin before the
+coordinator's follow-up message, which was rejected because its dispatch was
+already complete. Both roles must be preserved while assigning the physical
+file only once. No filename candidate was missing, and the source manifest is
+unchanged. The completed allocation report was released; its proposed execution
+dependencies still need review before it can be used for dispatch.
+
+Coordinator then checked the allocation JSON independently: 46 packages,
+9,037 unique assigned paths, zero missing paths, duplicate assignments or
+hash discrepancies. The dependency check **failed** on three reciprocal
+pairs: `ENG-SHARED`/`ENG-IPC`, `ENG-GIT`/`ENG-REMOTE`, and
+`ENG-NCHAT`/`UI-NCHAT`. The proposal also placed already-existing Drogon
+capabilities in the postmigration wave and had overlapping proposed shell
+write boundaries. None of that is authorized as an execution plan. Muse
+Task `task_7027d3a56a81` / Dispatch `ctx_29125dc2ba86` now owns only the two
+allocation reports for a bounded correction: separate test-port work from
+integration dependencies, preserve existing Drogon features within migration,
+make proposed test write paths exclusive, retain both Swift-record roles, and
+require smaller per-capability leaf cards before dispatch. The large file
+buckets are not worker-sized tasks or proof of observable-surface completeness.
+
+The original checkout was checked again: no tracked changes, and the same one
+untracked preflight plan. No user session, application, runtime nesting setting
+or installed build was changed in this follow-up.
+
+## Additional isolated source policies
+
+Coordinator read the full dependency closures and added two capsule manifests,
+without changing original source assertions or the already-verified runner:
+
+| Source suite | Source cases passed | Retained capsule |
+| --- | ---: | --- |
+| `src/shared/git-capability-cache.test.ts` | 4 | `.preflight/parity-baseline/coordinator-policy-JxFwcK` |
+| `src/shared/remote-runtime-socket-liveness.test.ts` | 2 | `.preflight/parity-baseline/coordinator-policy-oVmAeY` |
+
+Both used original installed Vitest **4.1.11**, Node **24.19.0**, exit 0,
+no failed/pending/todo cases. The coordinator independently read both
+`vitest-results.json` files and compared every staged file and license against
+the original and pinned digests: zero discrepancies. `coordinator-execution.json`
+retains each CLI execution receipt alongside those results. No prior run was
+overwritten. Capsule manifests are in `tests/parity/baseline-capsules/`.
+
+Manifest digests: Git cache
+`8035dc96928494b8581f0a38e97b0a81f54364070ea912419773556776d91dfc`;
+socket liveness
+`933e32c8490b14f18ead835be323b3dfab92106bccd5a2eff3e6c5150807634b`.
+
+The Git cases exercise in-memory retry caching, concurrent probe coalescing,
+supported-call concurrency and downgrade to unsupported. They do not execute
+Git binaries or verify host isolation. The socket cases use the original fake
+timers and mock callbacks to test a fresh probe window after a clock jump and
+clearing a probe on activity. No real socket or suspended machine is involved;
+the socket `onDead` callback is not evidence of remote process exit. This
+capsule is timer-driven, not a pure-function test despite the runner's generic
+historical pilot disclaimer. Both manifests document minimal-config differences
+from the full source environment. These are reference baselines, not tests
+ported to or passing against the rewritten product.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no new rendered acceptance,

@@ -27,6 +27,13 @@ pre-mkdir source-boundary and temp-suffix checks; all 9,038 recorded asset hashe
 match source and a fresh rerun is byte-identical. These observations accept the
 filename census, not runtime discovery, fixture closure or feature coverage.
 
+Coordinator allocation cross-check: the 9,038 records describe **9,037 distinct
+paths**. `native/computer-use-macos/Package.swift` appears with two roles
+(`swift-convention`/`native-swift` and `native-swift-config`), sharing the same
+raw-byte hash. Preserve both provenance roles but assign the physical file
+only once; the manifest is support configuration, not an executable test.
+The 8,978 filename-candidate count is unaffected.
+
 ## 1. Frozen denominator (complete, reconciled)
 
 Independent filename census (`git ls-files`, patterns `\.test\.[^.]+$`,

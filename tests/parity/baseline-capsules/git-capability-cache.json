@@ -1,0 +1,27 @@
+{
+  "capsuleId": "git-capability-cache",
+  "description": "Original Git capability retry/concurrency policy tests, isolated from real Git binaries, repositories and hosts.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "entryTestFile": "src/shared/git-capability-cache.test.ts",
+  "files": [
+    { "path": "src/shared/git-capability-cache.test.ts", "role": "test", "sha256": "430dee523d7f6d1b9a83f9275278c88dfcbd77ca6591de8fd7493c1e91412304" },
+    { "path": "src/shared/git-capability-cache.ts", "role": "module", "sha256": "685874631a3b30420bc1c4c0bfded4ab92d8f6b6cc01ed3e56b48f4446d21eaa" },
+    { "path": "src/shared/capability-probe-cache.ts", "role": "module", "sha256": "44d812ba79dd946810dff9c1e144d2a2a834c5268b193edcee689cbc4fb2d6be" }
+  ],
+  "dependencyClosureNote": "Coordinator read all three complete source bodies. The test imports Vitest and ./git-capability-cache; that module imports only ./capability-probe-cache, which has no imports. Test callbacks are local mocks returning controlled promises. No real Git command executes.",
+  "expectedTestCounts": { "files": 1, "tests": 4 },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Both configurations use node. Execute this capsule with an explicit original installed Vitest 4.1.11 entry; runner receipts record the actual version/path.",
+    "The minimal capsule omits root renderer aliases, ORCA_FEATURE_WALL_ENABLED and the three DOM/host-port setup files; none is referenced by this source closure.",
+    "The capsule omits root execArgv webstorage/GC options and the Windows maxWorkers override, and uses default timeouts rather than root 30s test/60s hook timeouts. No webstorage, DOM, GC assertion or platform-dependent branch occurs in these files. This does not establish full source-environment equivalence."
+  ],
+  "isolationRationale": "Only local Map/Set state, Date.now, synchronous values and explicitly settled promises are used. The in-memory capability callbacks are supplied by the original test, not substituted product implementations. No filesystem, socket, Electron, process, credential, Git binary or external service is accessed by the staged source. This baseline does not verify real-binary Git versions, host isolation, Drogon parity or all CapabilityProbeCache behavior."
+}
