@@ -1,0 +1,12 @@
+node_modules/
+target/
+dist/
+out/
+.DS_Store
+.env
+.env.*
+!.env.example
+.preflight/
+.mentu/runs/
+.mentu/runtime/
+*.log
