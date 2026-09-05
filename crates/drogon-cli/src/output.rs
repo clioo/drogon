@@ -5,8 +5,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::client::{
-    MethodResult, ReadResult, Session, SessionList, StatusResult, Workspace, WorkspaceList,
-    WriteResult,
+    HarnessCatalog, MethodResult, ReadResult, Session, SessionList, StatusResult, Workspace,
+    WorkspaceList, WriteResult,
 };
 
 pub fn status_line(result: &StatusResult) -> String {
@@ -136,6 +136,26 @@ pub fn session_closed(session: &Session) -> String {
     format!("Closed {} [{}].{}", session.id, session.verdict_str(), exit)
 }
 
+/// One line per discovered harness; unknown future harness ids render
+/// exactly as the service advertised them.
+pub fn harness_catalog(catalog: &HarnessCatalog) -> String {
+    if catalog.harnesses.is_empty() {
+        return "No harnesses advertised by this service.".into();
+    }
+    catalog
+        .harnesses
+        .iter()
+        .map(|entry| {
+            let executable = entry.executable.as_deref().unwrap_or("-");
+            format!(
+                "{} [{}] {} -> {}",
+                entry.harness_id, entry.availability, entry.display_name, executable
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Rendered text for a decoded result, given the invocation context. The
 /// context disambiguates the commands that share result shapes.
 pub fn render(result: &MethodResult, context: &RenderContext) -> String {
@@ -224,5 +244,31 @@ mod tests {
         let mut session = sample_session("exited");
         session.exit_code = Some(3);
         assert!(session_closed(&session).contains("exit=3"));
+    }
+}
+
+#[cfg(test)]
+mod harness_output_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn catalog_renders_unknown_harness_ids_without_crashing() {
+        let catalog: HarnessCatalog = serde_json::from_value(json!({
+            "hostId": "host-1",
+            "harnesses": [
+                {"harnessId": "pi", "displayName": "Pi", "availability": "available",
+                 "executable": "/opt/homebrew/bin/pi"},
+                {"harnessId": "future-harness-9", "displayName": "Future",
+                 "availability": "missing", "executable": null}
+            ]
+        }))
+        .unwrap();
+        let text = harness_catalog(&catalog);
+        assert!(text.contains("pi [available] Pi -> /opt/homebrew/bin/pi"));
+        assert!(
+            text.contains("future-harness-9 [missing] Future -> -"),
+            "unknown ids stay displayable: {text}"
+        );
     }
 }

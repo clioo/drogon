@@ -22,6 +22,32 @@ const session = z.object({
   createdAt: z.string(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const harness = z
+  .object({
+    harnessId: id,
+    displayName: z.string().min(1).max(128),
+    availability: z.enum(["available", "missing", "unsupported_launcher"]),
+    executable: z
+      .string()
+      .min(1)
+      .max(32768)
+      .refine((value) => !value.includes("\0"))
+      .nullable(),
+  })
+  .refine((value) =>
+    value.availability === "missing"
+      ? value.executable === null
+      : value.executable !== null &&
+        (/^\//.test(value.executable) ||
+          /^[a-z]:[\\/]/i.test(value.executable) ||
+          /^\\\\[^\\]/.test(value.executable)),
+  );
+const supportedHarnessIds = new Set([
+  "claude",
+  "pi",
+  "opencode",
+  "antigravity",
+]);
 export const resultSchemas: Record<string, z.ZodType> = {
   status: z.object({
     hostId: id,
@@ -51,4 +77,14 @@ export const resultSchemas: Record<string, z.ZodType> = {
   "session.write": z.object({ acceptedBytes: z.number().int().nonnegative() }),
   "session.resize": session,
   "session.stop": session,
+  "harness.list": z
+    .object({ hostId: id, harnesses: z.array(harness) })
+    .transform((value) => ({
+      ...value,
+      // A future host adapter must not disable known adapters in an older client.
+      harnesses: value.harnesses.filter((item) =>
+        supportedHarnessIds.has(item.harnessId),
+      ),
+    })),
+  "harness.start": session,
 };

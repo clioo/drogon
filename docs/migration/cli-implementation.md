@@ -263,3 +263,102 @@ explicitly (default 0) while `limitBytes` is only sent when the flag is
 given, matching the service defaults. The stopped-output acceptance tests
 owned by Sonnet were not touched; none of these changes weaken them — close
 verdict handling and cursor-span invariants make the CLI stricter, not laxer.
+
+## 9. Native harness commands (third dispatch, 2026-09-05)
+
+Implemented `harness list` and `harness start` per
+`docs/migration/harness-contract-v1.md`, gated on service capabilities.
+Read-only inputs: the frozen contract, `crates/drogon-harness` public types
+(availability enum, launch planning) and the `harness.list`/`harness.start`
+implementations in `crates/drogon-core` — none modified.
+
+### Surface
+
+```
+drogon-cli harness list
+drogon-cli harness start --workspace <id> --harness <id>
+           [--model <exact-id>] [--provider <Pi-provider>] [--effort <value>]
+           [--prompt <text>] [--permission-mode inherit|unattended]
+```
+
+### Behavior
+
+- **Capability gate before any optional method**: `harness list` requires
+  `harness.catalog.v1`, `harness start` requires `harness.launch.v1`, checked
+  via a read-only `status` preflight using a distinct request id. A missing
+  capability yields `method_not_found: this Drogon service does not advertise
+  <capability>; update the Drogon service on the execution host…` — exit 1,
+  no fallback to shell/session.start/anything (integration tests assert the
+  mock received *only* `status`).
+- **Replay identity**: the preflight status request id is distinct, but every
+  error is re-keyed onto the operation id via `CliError::retaining_request_id`
+  (transport failures, preflight decode failures, and missing-capability all
+  carry the caller's `--request-id`). The final `harness.start` mutation is
+  sent with the caller's id byte-for-byte; integration tests capture both
+  requests and prove the ids (mutation id unchanged, preflight id distinct).
+- **Typed catalog checks** (`check_harness_catalog`): catalog `hostId` must
+  equal the status `hostId`; every entry needs nonempty `harnessId` and
+  `displayName`; `availability` must be exactly `available`, `missing` or
+  `unsupported_launcher`; `available` requires a nonempty absolute host
+  path; `missing` must not claim an executable. Absolute-ness is judged by
+  path shape (unix `/...`, windows `X:\…`, `X:/…`, `\\unc`) — deliberately
+  not via the client's own `Path::is_absolute`, so Windows execution-host
+  paths pass on a macOS client. Additive/unknown JSON fields are preserved
+  verbatim, and unknown future harness ids remain displayable (typed checks
+  use strings, never the closed coordinator enum).
+- **Start result checks**: the returned `Session` goes through the existing
+  `check_session` invariants plus new identity assertions —
+  `workspaceId` must equal the requested `--workspace` and `hostId` must
+  equal the status host identity; mismatches exit 1.
+- **Literal forwarding, server-authoritative policy**: prompt/model/provider/
+  effort are forwarded as one JSON string each — no shell interpolation, no
+  @-file expansion, no rewriting (the service adds the `Drogon task:` Pi
+  prefix and equals-bound OpenCode prompt itself). CLI checks are
+  intentionally basic only: nonempty/bounded/no-control for ids and
+  preferences, leading-dash refusal on model/provider/effort (flag-injection
+  hygiene, mirrors the server), prompt ≤32768 bytes and non-blank, and the
+  `--permission-mode` enum (default `inherit`). Effort enums and the
+  Pi-only provider rule are server-side by design; `--harness` is
+  shape-checked, not enumerated, so additive future harness ids keep
+  working. `--prompt` accepts flag-like text (`allow_hyphen_values`),
+  matching the literal-prompt contract.
+
+### Verification (exit codes checked explicitly, no pipe masking)
+
+```
+cargo fmt --package drogon-cli && cargo fmt --package drogon-cli -- --check
+  → exit 0
+cargo test -p drogon-cli --locked --offline
+  → exit 0; 109 tests total: 53 unit + 49 integration + 7 binary argv,
+    0 failed, 0 ignored
+cargo clippy -p drogon-cli --all-targets --locked --offline -- -D warnings
+  → exit 0, zero diagnostics
+cargo build -p drogon-cli --offline --release → exit 0
+```
+
+New fake-native-service coverage: catalog rendering with unknown harness id
+and additive fields (text+JSON), missing `harness.catalog.v1` and missing
+`harness.launch.v1` refusals with operation-id retention and captured-methods
+proof of no fallback, literal prompt/model/provider/effort/permissionMode
+forwarding (prompt contains `@file`, flag-like text, quotes, newline),
+caller request id unchanged on the mutation with distinct preflight id,
+server `not_found` passthrough with operation id, catalog invariant refusal
+(empty displayName), and start-result workspace/host mismatch refusal.
+Unit coverage: permission-mode default/wire mapping and unknown-value
+rejection, flag-like model refusal (space and equals forms), preference
+shape checks, harness id shape-not-enum, prompt literal/blank/oversize,
+absolute-path shapes for both host conventions, catalog invariants, and
+additive-field tolerance.
+
+### Limits
+
+- `harness list`/`start` were tested against the in-process mock service
+  only; live acceptance against the real service (installed Pi TUI) is the
+  coordinator's `scripts/accept-core-cli.mjs --harness pi` run, which the
+  CLI surface was verified to match (`harness start` params map 1:1 to the
+  frozen `harness.start` method).
+- No new dependencies; `agy` alias resolution, effort enums, Pi provider
+  restriction and prompt prefixing are service-side and were not duplicated
+  in the CLI.
+- Windows: unchanged status — transport and launch adapters on Windows need
+  real platform evidence; nothing here claims it.

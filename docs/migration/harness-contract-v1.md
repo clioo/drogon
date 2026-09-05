@@ -15,3 +15,6 @@ The new Rust library `crates/drogon-harness` is coordinator-owned. Local discove
 ## Provenance
 
 Behavioral references read from the preserved checkout at `c97906287bb7a390b25e2025b600d9fb3c25d9c3`: `src/shared/tui-agent-config.ts` (Claude/Pi/OpenCode/Antigravity records) and `src/shared/tui-agent-startup-session-options.test.ts` (explicit preferences and argv boundaries). Installed `claude --help`, `pi --help`, `opencode --help`, `agy --help` were checked on 2026-09-05; Pi's actual `dist/cli/args.js` was read to verify its special positional parsing. Rust implementation is new; existing upstream notices are retained in `THIRD_PARTY_NOTICES.md` for reused frontend code.
+# Typed and rendered acceptance checkpoint
+
+The typed `drogon-cli harness list/start` surface and Electron launch menu now exercise this contract. Coordinator acceptance at 20:59 UTC proved typed/RPC same-request replay, installed Pi TUI startup, rendered form operation and exact identity recovery after reload/stop. See `foundation-status.md` for reports and limits. This does not prove model authentication or replace the separate Pi + DGX experiment.

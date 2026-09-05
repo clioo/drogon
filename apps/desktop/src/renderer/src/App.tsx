@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { Tooltip } from "radix-ui";
 import type {
+  Harness,
+  HarnessLaunchInput,
   Result,
   Session,
   Status,
@@ -17,10 +19,13 @@ import type {
 } from "../../shared/session-contract";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
+import { HarnessLaunchMenu } from "./HarnessLaunchMenu";
+import { supportsHarnessLaunch } from "./harness-capability";
 import { TerminalPane } from "./TerminalPane";
 import { updateSessionProjection } from "./session-projection";
+import { sessionLabel } from "./session-label";
 
-function IconButton({
+export function IconButton({
   label,
   children,
   ...props
@@ -56,6 +61,8 @@ export function App() {
     () => matchMedia("(min-width: 1101px)").matches,
   );
   const [revision, setRevision] = useState(0);
+  const [harnessCapability, setHarnessCapability] = useState(false);
+  const [harnesses, setHarnesses] = useState<Harness[]>([]);
   const current = workspaces.find((item) => item.id === selected);
   const terminal = sessions.find((item) => item.id === active);
   const checked = <T,>(value: Result<T>): T => {
@@ -91,6 +98,20 @@ export function App() {
             : (result.workspaces[0]?.id ?? ""),
         );
         setRevision((value) => value + 1);
+        const supportsHarnesses = supportsHarnessLaunch(connected.capabilities);
+        setHarnessCapability(supportsHarnesses);
+        if (!supportsHarnesses) {
+          setHarnesses([]);
+          return;
+        }
+        // Non-fatal: an older or momentarily flaky harness listing must not
+        // take down workspace/session loading, which already succeeded.
+        try {
+          const listed = await window.drogon.harnesses();
+          setHarnesses(listed.ok ? listed.result.harnesses : []);
+        } catch {
+          setHarnesses([]);
+        }
       }),
     [action],
   );
@@ -146,6 +167,15 @@ export function App() {
       setSessions((items) => [...items, result]);
       setActive(result.id);
     });
+  const launchHarness = (input: HarnessLaunchInput) => {
+    let launched = false;
+    return action(async () => {
+      const result = checked(await window.drogon.startHarness(input));
+      setSessions((items) => [...items, result]);
+      setActive(result.id);
+      launched = true;
+    }).then(() => launched);
+  };
   const close = (session: Session) =>
     action(async () => {
       const result = checked(
@@ -358,11 +388,11 @@ export function App() {
                       onClick={() => setActive(item.id)}
                     >
                       <TerminalSquare size={14} />
-                      <span>{item.command.split(/[\\/]/).at(-1)}</span>
+                      <span>{sessionLabel(item, harnesses)}</span>
                       <span className="session-verdict">{item.verdict}</span>
                     </button>
                     <IconButton
-                      label={`Close ${item.command.split(/[\\/]/).at(-1)} session`}
+                      label={`Close ${sessionLabel(item, harnesses)} session`}
                       disabled={busy || loadingSessions || !status}
                       onClick={() => void close(item)}
                     >
@@ -370,13 +400,23 @@ export function App() {
                     </IconButton>
                   </div>
                 ))}
-                <IconButton
-                  label="New terminal"
-                  disabled={!selected || !status || busy || loadingSessions}
-                  onClick={() => void create()}
-                >
-                  <Plus />
-                </IconButton>
+                {harnessCapability ? (
+                  <HarnessLaunchMenu
+                    workspaceId={selected}
+                    harnesses={harnesses}
+                    disabled={!selected || !status || busy || loadingSessions}
+                    onCreateTerminal={() => void create()}
+                    onLaunch={launchHarness}
+                  />
+                ) : (
+                  <IconButton
+                    label="New terminal"
+                    disabled={!selected || !status || busy || loadingSessions}
+                    onClick={() => void create()}
+                  >
+                    <Plus />
+                  </IconButton>
+                )}
               </div>
               <div
                 id="active-session-panel"

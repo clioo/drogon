@@ -1,6 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, session } from "electron";
 import path from "node:path";
 import { bridgeSchemas } from "../shared/bridge-validation";
+import {
+  readCursorMismatches,
+  writeByteCountMismatches,
+} from "./byte-consistency";
 import { callNative } from "./native-client";
 
 app.setName("Drogon");
@@ -14,6 +18,12 @@ const invalid = {
     retryable: false,
   },
 };
+function contractViolation(message: string) {
+  return {
+    ok: false as const,
+    error: { code: "internal_error", message, retryable: false },
+  };
+}
 let window: BrowserWindow | null = null;
 
 function registerBridge() {
@@ -54,23 +64,58 @@ function registerBridge() {
             cols: 80,
             rows: 24,
           });
-        case "read":
-          return callNative("session.read", {
+        case "read": {
+          const result = await callNative("session.read", {
             ...(value as object),
             limitBytes: 65536,
           });
+          if (result.ok) {
+            const read = result.result as {
+              dataBase64: string;
+              startCursor: number;
+              nextCursor: number;
+            };
+            if (
+              readCursorMismatches(
+                read.dataBase64,
+                read.startCursor,
+                read.nextCursor,
+              )
+            )
+              return contractViolation(
+                "The service's cursor advance does not match the decoded byte count.",
+              );
+          }
+          return result;
+        }
         case "write": {
           const data = bridgeSchemas.write.parse(value);
-          return callNative("session.write", {
+          const result = await callNative("session.write", {
             sessionId: data.sessionId,
             incarnation: data.incarnation,
             dataBase64: Buffer.from(data.text, "utf8").toString("base64"),
           });
+          if (result.ok) {
+            const written = result.result as { acceptedBytes: number };
+            if (writeByteCountMismatches(data.text, written.acceptedBytes))
+              return contractViolation(
+                "The service accepted a different byte count than was sent.",
+              );
+          }
+          return result;
         }
         case "resize":
           return callNative("session.resize", value as object);
         case "stop":
           return callNative("session.stop", value as object);
+        case "harnesses":
+          return callNative("harness.list", {});
+        case "startHarness": {
+          const { requestId, ...params } = value as {
+            requestId: string;
+          } & Record<string, unknown>;
+          return callNative("harness.start", params, requestId);
+        }
         default:
           return invalid;
       }

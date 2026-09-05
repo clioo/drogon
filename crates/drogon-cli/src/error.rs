@@ -59,6 +59,27 @@ impl CliError {
             }
         }
     }
+
+    /// Re-keys an error onto the operation's request id. Used for capability
+    /// preflight failures: the preflight `status` is a read-only request with
+    /// its own id, but every error the caller sees must retain the operation's
+    /// replay identity.
+    pub fn retaining_request_id(self, request_id: &str) -> Self {
+        match self {
+            CliError::Usage(message) => CliError::Usage(message),
+            CliError::Local { error, .. } => CliError::Local {
+                error,
+                request_id: request_id.to_string(),
+            },
+            CliError::Server { error, .. } => CliError::Local {
+                error: RpcError::new(
+                    error.code.clone(),
+                    format!("{} (during capability preflight)", error.message),
+                ),
+                request_id: request_id.to_string(),
+            },
+        }
+    }
 }
 
 pub fn invalid_argument(message: impl Into<String>) -> RpcError {
@@ -71,4 +92,11 @@ pub fn unverifiable(message: impl Into<String>) -> RpcError {
 
 pub fn internal_error(message: impl Into<String>) -> RpcError {
     RpcError::new("internal_error", message)
+}
+
+/// The service contract routes unknown-method/feature gaps here; the CLI
+/// reuses it when the capability preflight fails so the wording stays stable
+/// whether the capability was absent or the method was missing.
+pub fn method_not_found(message: impl Into<String>) -> RpcError {
+    RpcError::new("method_not_found", message)
 }

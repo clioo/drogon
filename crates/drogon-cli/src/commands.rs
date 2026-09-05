@@ -9,13 +9,13 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-use crate::cli::{Cli, Command, TerminalAction, WorkspaceAction};
+use crate::cli::{Cli, Command, HarnessAction, TerminalAction, WorkspaceAction};
 use crate::client::{
-    CallOk, Client, ReadResult, Session, SessionList, StatusResult, Verdict, Workspace,
-    WorkspaceList, WriteResult, check_read, check_session, check_session_list, check_status,
-    check_workspace, check_workspace_list, check_write,
+    CallOk, Client, HarnessCatalog, ReadResult, Session, SessionList, StatusResult, Verdict,
+    Workspace, WorkspaceList, WriteResult, check_harness_catalog, check_read, check_session,
+    check_session_list, check_status, check_workspace, check_workspace_list, check_write,
 };
-use crate::error::CliError;
+use crate::error::{CliError, method_not_found};
 use crate::output;
 use crate::paths;
 use crate::transport::DEFAULT_TIMEOUT;
@@ -75,6 +75,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             }
         },
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
+        Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Rpc { method, params } => {
             let params: Value = match params {
                 Some(text) => serde_json::from_str(text)
@@ -264,6 +265,116 @@ fn resolve_path_argument(path: &Path) -> Result<String, CliError> {
         .to_str()
         .map(str::to_string)
         .ok_or_else(|| CliError::Usage("workspace path must be valid UTF-8".into()))
+}
+
+/// Harness commands negotiate the service capability first: a read-only
+/// `status` preflight (its own request id) decides whether the optional
+/// method may be sent at all. Every failure — transport, preflight, or
+/// capability missing — is re-keyed onto the operation's request id so a
+/// caller-supplied `--request-id` stays replayable. There is never a
+/// shell/harness/model fallback.
+async fn harness(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &HarnessAction,
+) -> Result<RunOutcome, CliError> {
+    let required_capability = match action {
+        HarnessAction::List => "harness.catalog.v1",
+        HarnessAction::Start { .. } => "harness.launch.v1",
+    };
+    let status = capability_preflight(client, request_id, required_capability).await?;
+    match action {
+        HarnessAction::List => {
+            let call = client
+                .call("harness.list", json!({}), request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let catalog: HarnessCatalog =
+                Client::decode_checked(&call, "harness.list", |catalog| {
+                    check_harness_catalog(catalog, &status.host_id)
+                })?;
+            emit(call, json, || output::harness_catalog(&catalog), 0, None)
+        }
+        HarnessAction::Start {
+            workspace,
+            harness,
+            model,
+            provider,
+            effort,
+            prompt,
+            permission_mode,
+        } => {
+            let mut params = json!({
+                "workspaceId": workspace,
+                "harnessId": harness,
+                "permissionMode": permission_mode.as_wire(),
+            });
+            for (field, value) in [
+                ("model", model),
+                ("provider", provider),
+                ("effort", effort),
+                ("prompt", prompt),
+            ] {
+                if let Some(value) = value {
+                    // Literal one-JSON-string forwarding; no shell, no
+                    // @-expansion, no rewriting of any kind.
+                    params[field] = json!(value);
+                }
+            }
+            let call = client
+                .call("harness.start", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let requested_workspace = workspace.clone();
+            let host_id = status.host_id.clone();
+            let session: Session = Client::decode_checked(&call, "harness.start", |session| {
+                check_session(session)?;
+                if session.workspace_id != requested_workspace {
+                    return Err(format!(
+                        "session workspaceId {:?} does not match the requested workspace {:?}",
+                        session.workspace_id, requested_workspace
+                    ));
+                }
+                if session.host_id != host_id {
+                    return Err(format!(
+                        "session hostId {:?} does not match the service host identity {:?}",
+                        session.host_id, host_id
+                    ));
+                }
+                Ok(())
+            })?;
+            emit(call, json, || output::session_started(&session), 0, None)
+        }
+    }
+}
+
+/// Read-only status negotiation. The preflight request id is distinct from
+/// the operation's; any failure is re-keyed onto the operation id.
+async fn capability_preflight(
+    client: &Client,
+    operation_request_id: &str,
+    required_capability: &str,
+) -> Result<StatusResult, CliError> {
+    let preflight_request_id = uuid::Uuid::new_v4().to_string();
+    let call = client
+        .call("status", json!({}), &preflight_request_id, DEFAULT_TIMEOUT)
+        .await
+        .map_err(|err| err.retaining_request_id(operation_request_id))?;
+    let status: StatusResult = Client::decode_checked(&call, "status", check_status)
+        .map_err(|err| err.retaining_request_id(operation_request_id))?;
+    if !status
+        .capabilities
+        .iter()
+        .any(|cap| cap == required_capability)
+    {
+        return Err(CliError::local(
+            method_not_found(format!(
+                "this Drogon service does not advertise {required_capability}; \
+                 update the Drogon service on the execution host to a version with harness support"
+            )),
+            operation_request_id,
+        ));
+    }
+    Ok(status)
 }
 
 /// Success: human text or the raw validated envelope, exactly one stdout

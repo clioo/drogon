@@ -123,6 +123,29 @@ pub struct WriteResult {
     pub accepted_bytes: u64,
 }
 
+/// `harness.list` catalog. Harness ids stay strings (not the closed
+/// coordinator enum) so a future service can advertise new harnesses and
+/// older CLIs still display them; availability is checked against the
+/// contract's three known values.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessCatalog {
+    pub host_id: String,
+    pub harnesses: Vec<HarnessEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessEntry {
+    pub harness_id: String,
+    pub display_name: String,
+    pub availability: String,
+    pub executable: Option<String>,
+}
+
+/// The three availability values fixed by the harness contract.
+pub const HARNESS_AVAILABILITIES: [&str; 3] = ["available", "missing", "unsupported_launcher"];
+
 /// One decoded, validated protocol result.
 #[derive(Debug, Clone)]
 pub enum MethodResult {
@@ -346,6 +369,90 @@ pub fn check_write(result: &WriteResult, expected_bytes: u64) -> Result<(), Stri
     Ok(())
 }
 
+/// Catalog invariants: same host as the status identity, real ids and display
+/// names, contract availability values, and executable shape consistency —
+/// `available` demands an absolute host path, `missing` must not claim one.
+/// Absolute-ness is judged by path shape (unix `/...`, windows `X:\…`,
+/// `X:/…` or `\\unc`), never by the client's own platform path parser, so a
+/// Windows execution host's paths survive on a macOS client.
+pub fn check_harness_catalog(catalog: &HarnessCatalog, status_host_id: &str) -> Result<(), String> {
+    require_nonempty("hostId", &catalog.host_id)?;
+    if catalog.host_id != status_host_id {
+        return Err(format!(
+            "catalog hostId {:?} does not match the service host identity {:?}",
+            catalog.host_id, status_host_id
+        ));
+    }
+    for entry in &catalog.harnesses {
+        check_harness_entry(entry)
+            .map_err(|err| format!("harness {:?}: {err}", entry.harness_id))?;
+    }
+    Ok(())
+}
+
+fn check_harness_entry(entry: &HarnessEntry) -> Result<(), String> {
+    require_nonempty("harnessId", &entry.harness_id)?;
+    require_nonempty("displayName", &entry.display_name)?;
+    if !HARNESS_AVAILABILITIES.contains(&entry.availability.as_str()) {
+        return Err(format!(
+            "unknown availability {:?} (expected one of {HARNESS_AVAILABILITIES:?})",
+            entry.availability
+        ));
+    }
+    let executable_claimed = entry
+        .executable
+        .as_deref()
+        .is_some_and(|path| !path.is_empty());
+    match entry.availability.as_str() {
+        "available" => {
+            let executable = entry
+                .executable
+                .as_deref()
+                .filter(|path| !path.is_empty())
+                .ok_or_else(|| "is available but claims no executable".to_string())?;
+            if executable.chars().any(char::is_control) {
+                return Err("executable contains control characters".to_string());
+            }
+            if !looks_absolute_host_path(executable) {
+                return Err(format!(
+                    "is available but its executable {executable:?} is not an absolute host path"
+                ));
+            }
+        }
+        "missing" => {
+            if executable_claimed {
+                return Err("is missing but claims an executable".to_string());
+            }
+        }
+        // The launcher is known but unsupported on this host; the discovered
+        // path may or may not be present.
+        "unsupported_launcher" => {}
+        _ => unreachable!("availability enum checked above"),
+    }
+    Ok(())
+}
+
+/// Shape-based absolute-path check that accepts either execution-host
+/// convention: unix `/...`, windows drive `C:\...`/`C:/...`, or windows UNC
+/// `\\server\...`.
+pub fn looks_absolute_host_path(path: &str) -> bool {
+    if path.is_empty() || path.chars().any(char::is_control) {
+        return false;
+    }
+    if path.starts_with('/') {
+        return true;
+    }
+    let bytes = path.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+    {
+        return true;
+    }
+    path.starts_with("\\\\")
+}
+
 /// Strict UTC RFC3339 check (`YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]`). The
 /// service emits `Z`-suffixed second-resolution stamps, but fractional seconds
 /// and numeric offsets are legal RFC3339 too.
@@ -550,5 +657,119 @@ mod tests {
             "id": "w1", "path": "/tmp", "name": "n", "kind": "svn", "hostId": "h1"
         }));
         assert!(workspace.is_err());
+    }
+}
+
+#[cfg(test)]
+mod harness_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn entry(harness_id: &str, availability: &str, executable: Option<&str>) -> HarnessEntry {
+        serde_json::from_value(json!({
+            "harnessId": harness_id,
+            "displayName": "Display",
+            "availability": availability,
+            "executable": executable,
+            "futureField": 1
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn absolute_path_shapes_from_both_host_conventions() {
+        // Unix shape.
+        assert!(looks_absolute_host_path("/opt/homebrew/bin/pi"));
+        // Windows drive and UNC shapes must survive on a unix client.
+        assert!(looks_absolute_host_path(r"C:\Users\me\bin\claude.exe"));
+        assert!(looks_absolute_host_path("C:/Users/me/bin/claude.exe"));
+        assert!(looks_absolute_host_path(r"\\server\share\agy.cmd"));
+        // Relative and bare names are never absolute.
+        assert!(!looks_absolute_host_path("bin/pi"));
+        assert!(!looks_absolute_host_path("claude"));
+        assert!(!looks_absolute_host_path("./claude"));
+        assert!(!looks_absolute_host_path("../claude"));
+        assert!(!looks_absolute_host_path(""));
+        assert!(!looks_absolute_host_path("/bad\nline"));
+    }
+
+    #[test]
+    fn catalog_invariants() {
+        let good = HarnessCatalog {
+            host_id: "host-1".into(),
+            harnesses: vec![
+                entry("pi", "available", Some("/opt/homebrew/bin/pi")),
+                entry("opencode", "missing", None),
+                entry("agy", "unsupported_launcher", Some(r"C:\bin\agy.cmd")),
+            ],
+        };
+        assert!(check_harness_catalog(&good, "host-1").is_ok());
+
+        // Host identity must match the status result.
+        assert!(check_harness_catalog(&good, "other-host").is_err());
+
+        // available without executable.
+        let mut no_exec = good.clone();
+        no_exec.harnesses[0].executable = None;
+        assert!(check_harness_catalog(&no_exec, "host-1").is_err());
+
+        // available with a relative executable.
+        let mut rel_exec = good.clone();
+        rel_exec.harnesses[0].executable = Some("bin/pi".into());
+        assert!(check_harness_catalog(&rel_exec, "host-1").is_err());
+
+        // missing claiming an executable.
+        let mut claimed = good.clone();
+        claimed.harnesses[1].executable = Some("/usr/bin/opencode".into());
+        assert!(check_harness_catalog(&claimed, "host-1").is_err());
+
+        // unknown availability.
+        let mut weird = good.clone();
+        weird.harnesses[1].availability = "upgradable".into();
+        assert!(check_harness_catalog(&weird, "host-1").is_err());
+
+        // empty display name.
+        let mut unnamed = good.clone();
+        unnamed.harnesses[0].display_name = String::new();
+        assert!(check_harness_catalog(&unnamed, "host-1").is_err());
+
+        // empty harness id.
+        let mut idless = good;
+        idless.harnesses[0].harness_id = String::new();
+        assert!(check_harness_catalog(&idless, "host-1").is_err());
+    }
+
+    #[test]
+    fn catalog_tolerates_unknown_harness_ids_and_additive_fields() {
+        let catalog: HarnessCatalog = serde_json::from_value(json!({
+            "hostId": "host-1",
+            "harnesses": [
+                {
+                    "harnessId": "future-harness-9",
+                    "displayName": "Future",
+                    "availability": "available",
+                    "executable": "/usr/bin/future",
+                    "extra": {"nested": true}
+                }
+            ],
+            "futureCatalogField": 7
+        }))
+        .expect("unknown ids and additive fields must decode");
+        assert_eq!(catalog.harnesses[0].harness_id, "future-harness-9");
+        assert!(check_harness_catalog(&catalog, "host-1").is_ok());
+    }
+
+    #[test]
+    fn start_invariants_match_workspace_and_host() {
+        let session: Session = serde_json::from_value(json!({
+            "id": "s1", "workspaceId": "w1", "hostId": "host-1",
+            "incarnation": "tok", "command": "/usr/bin/pi", "args": [],
+            "cols": 80, "rows": 24, "verdict": "live", "exitCode": null,
+            "createdAt": "2026-09-05T12:00:00Z"
+        }))
+        .unwrap();
+        assert!(check_session(&session).is_ok());
+        assert_ne!(session.workspace_id, "other");
+        assert_ne!(session.host_id, "other-host");
     }
 }

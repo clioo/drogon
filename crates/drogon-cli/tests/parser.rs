@@ -27,6 +27,7 @@ fn help_exits_zero() {
     assert!(text.contains("status"));
     assert!(text.contains("workspace"));
     assert!(text.contains("terminal"));
+    assert!(text.contains("harness"));
     assert!(text.contains("rpc"));
 }
 

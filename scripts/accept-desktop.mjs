@@ -9,6 +9,13 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { startAcceptanceProcess } from "./acceptance-process.mjs";
+import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
+
+const withHarness = process.argv.slice(2).join(" ") === "--harness pi";
+assert.ok(
+  process.argv.length === 2 || withHarness,
+  "Use --harness pi or no arguments",
+);
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const appDir = path.join(root, "apps", "desktop");
@@ -61,7 +68,15 @@ try {
       process.platform === "win32" ? "drogond.exe" : "drogond",
     ),
     ["--data-dir", path.join(fixture, "data")],
-    { stdio: "ignore" },
+    {
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        ...(withHarness
+          ? { PI_CODING_AGENT_DIR: path.join(fixture, "pi") }
+          : {}),
+      },
+    },
   );
   let daemonError;
   daemon.on("error", (error) => {
@@ -168,6 +183,9 @@ try {
   assert.equal(reconnected?.incarnation, original.incarnation);
   report.checks.push("renderer-reload-retains-exact-session-and-output");
   await page.getByRole("button", { name: "New terminal", exact: true }).click();
+  await page
+    .getByRole("menuitem", { name: "New terminal", exact: true })
+    .click();
   await page.waitForFunction(
     () => document.querySelectorAll('[role="tab"]').length === 2,
   );
@@ -223,9 +241,22 @@ try {
   await page.getByRole("button", { name: /Close .* session/ }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   report.checks.push("exact-session-close-through-ui");
+  if (withHarness) {
+    report.checks.push(
+      ...(await probeRenderedHarness({
+        page,
+        workspaceId: registered.id,
+        output,
+      })),
+    );
+  }
   report.status = "PASSED";
 } catch (error) {
   report.error = error.message;
+  if (page) {
+    await page.screenshot({ path: path.join(output, "failure.png") }).catch(() => {});
+    report.failureUi = await page.locator("body").ariaSnapshot().catch(() => "Unavailable");
+  }
 } finally {
   if (page && registered) {
     try {

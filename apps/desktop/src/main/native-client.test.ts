@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { validateEnvelope } from "./native-client";
+import { identityMismatch, validateEnvelope } from "./native-client";
 import { bridgeSchemas } from "../shared/bridge-validation";
 import { resultSchemas } from "../shared/result-validation";
 
@@ -84,5 +84,59 @@ describe("desktop trust boundary", () => {
         "a",
       ),
     ).toThrow();
+  });
+  test("a harness/session launch result must match the requested workspace", () => {
+    const mismatch = identityMismatch(
+      "harness.start",
+      { workspaceId: "w1" },
+      { workspaceId: "w2", hostId: "h1" },
+      null,
+    );
+    expect(mismatch?.ok).toBe(false);
+    expect(
+      identityMismatch(
+        "harness.start",
+        { workspaceId: "w1" },
+        { workspaceId: "w1", hostId: "h1" },
+        null,
+      ),
+    ).toBeNull();
+  });
+  test("a launch result must match the execution host this client is connected to", () => {
+    const mismatch = identityMismatch(
+      "session.start",
+      { workspaceId: "w1" },
+      { workspaceId: "w1", hostId: "other-host" },
+      "known-host",
+    );
+    expect(mismatch?.ok).toBe(false);
+    expect(
+      identityMismatch(
+        "session.start",
+        { workspaceId: "w1" },
+        { workspaceId: "w1", hostId: "known-host" },
+        "known-host",
+      ),
+    ).toBeNull();
+    // No known host yet (e.g. before the first successful status call) —
+    // decline to check rather than falsely flagging every result.
+    expect(
+      identityMismatch(
+        "session.start",
+        { workspaceId: "w1" },
+        { workspaceId: "w1", hostId: "anything" },
+        null,
+      ),
+    ).toBeNull();
+  });
+  test("identity is only checked for methods that actually return a session", () => {
+    expect(
+      identityMismatch(
+        "workspace.list",
+        { workspaceId: "w1" },
+        { workspaceId: "different", hostId: "different" },
+        "known-host",
+      ),
+    ).toBeNull();
   });
 });

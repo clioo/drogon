@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 // This optional probe starts the installed Pi TUI without a prompt or inference request.
 export async function probeHarnessLaunch({
   rpc,
+  cli,
   eventually,
   workspace,
   sessions,
@@ -11,7 +12,7 @@ export async function probeHarnessLaunch({
   const status = await rpc("status");
   assert.ok(status.capabilities.includes("harness.catalog.v1"));
   assert.ok(status.capabilities.includes("harness.launch.v1"));
-  const catalog = await rpc("harness.list");
+  const catalog = (await cli(["harness", "list"])).result;
   assert.equal(catalog.hostId, status.hostId);
   const pi = catalog.harnesses.find((item) => item.harnessId === "pi");
   assert.equal(
@@ -24,10 +25,20 @@ export async function probeHarnessLaunch({
     workspaceId: workspace.id,
     harnessId: "pi",
     permissionMode: "unattended",
-    cols: 100,
-    rows: 32,
   };
-  const session = await rpc("harness.start", params, requestId);
+  const args = [
+    "harness",
+    "start",
+    "--workspace",
+    workspace.id,
+    "--harness",
+    "pi",
+    "--permission-mode",
+    "unattended",
+    "--request-id",
+    requestId,
+  ];
+  const session = (await cli(args)).result;
   sessions.push(session);
   assert.equal(session.hostId, status.hostId);
   assert.equal(session.workspaceId, workspace.id);
@@ -36,6 +47,7 @@ export async function probeHarnessLaunch({
   const replay = await rpc("harness.start", params, requestId);
   assert.equal(replay.id, session.id);
   assert.equal(replay.incarnation, session.incarnation);
+  assert.equal((await cli(args)).result.id, session.id);
   const identity = { sessionId: session.id, incarnation: session.incarnation };
   await eventually(
     () => rpc("session.read", { ...identity, cursor: 0 }),
@@ -54,6 +66,6 @@ export async function probeHarnessLaunch({
   assert.equal((await rpc("session.stop", identity)).verdict, "exited");
   return [
     "native-harness-discovery-on-execution-host",
-    "installed-pi-tui-launch-replay-and-exact-stop-without-inference",
+    "typed-cli-pi-launch-and-cross-client-replay-without-inference",
   ];
 }

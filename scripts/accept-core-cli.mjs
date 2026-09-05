@@ -300,7 +300,13 @@ try {
   );
   if (withHarness) {
     report.checks.push(
-      ...(await probeHarnessLaunch({ rpc, eventually, workspace, sessions })),
+      ...(await probeHarnessLaunch({
+        rpc,
+        cli,
+        eventually,
+        workspace,
+        sessions,
+      })),
     );
   }
   // No live children remain: this proves real service-crash persistence, not live-child recovery.

@@ -1278,3 +1278,407 @@ async fn close_with_exited_verdict_exits_zero() {
     assert!(stderr(&output).is_empty());
     drop(service);
 }
+
+// --- Native harness commands (harness.catalog.v1 / harness.launch.v1) ---
+
+const HARNESS_CAPABILITIES: &[&str] = &[
+    "workspace.v1",
+    "session.pty.v1",
+    "harness.catalog.v1",
+    "harness.launch.v1",
+];
+
+/// Status with configurable capabilities plus a harness catalog that includes
+/// an unknown future harness id and additive fields, and a harness.start that
+/// echoes the requested workspace and model.
+fn harness_service_behavior(capabilities: &[&str]) -> Behavior {
+    let capabilities: Vec<Value> = capabilities.iter().map(|c| json!(c)).collect();
+    std::sync::Arc::new(move |request| {
+        let request_id = request["requestId"].as_str().unwrap_or("").to_string();
+        match request["method"].as_str() {
+            Some("status") => Action::Respond(ok_envelope(
+                &request_id,
+                json!({
+                    "hostId": "host-1",
+                    "serviceInstanceId": "svc-1",
+                    "protocol": 1,
+                    "capabilities": capabilities,
+                    "version": "0.1.0"
+                }),
+            )),
+            Some("harness.list") => Action::Respond(ok_envelope(
+                &request_id,
+                json!({
+                    "hostId": "host-1",
+                    "harnesses": [
+                        {"harnessId": "pi", "displayName": "Pi", "availability": "available",
+                         "executable": "/opt/homebrew/bin/pi"},
+                        {"harnessId": "opencode", "displayName": "OpenCode",
+                         "availability": "missing", "executable": null},
+                        {"harnessId": "future-harness-9", "displayName": "Future",
+                         "availability": "available", "executable": "/usr/bin/future",
+                         "futureField": {"nested": true}}
+                    ],
+                    "futureCatalogField": 7
+                }),
+            )),
+            Some("harness.start") => {
+                let mut session = session_result("harness-sess-1");
+                session["workspaceId"] = request["params"]["workspaceId"].clone();
+                session["command"] = json!("/opt/homebrew/bin/pi");
+                session["args"] = json!(["--model", "mock-model"]);
+                Action::Respond(ok_envelope(&request_id, session))
+            }
+            other => Action::Respond(error_envelope(
+                &request_id,
+                "method_not_found",
+                &format!("mock does not implement {other:?}"),
+            )),
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn harness_list_renders_catalog_including_unknown_ids() {
+    let dir = temp_data_dir("harness-list");
+    let service = MockService::start(dir.path(), harness_service_behavior(HARNESS_CAPABILITIES));
+
+    let human = run_cli(dir.path(), &["harness", "list"]);
+    assert_eq!(human.status.code(), Some(0), "stderr: {}", stderr(&human));
+    let text = stdout(&human);
+    assert!(
+        text.contains("pi [available] Pi -> /opt/homebrew/bin/pi"),
+        "{text}"
+    );
+    assert!(text.contains("opencode [missing] OpenCode -> -"), "{text}");
+    assert!(
+        text.contains("future-harness-9 [available] Future -> /usr/bin/future"),
+        "unknown harness ids stay displayable: {text}"
+    );
+
+    let json = run_cli(dir.path(), &["--json", "harness", "list"]);
+    assert_eq!(json.status.code(), Some(0));
+    let envelope: Value = serde_json::from_str(&stdout(&json)).unwrap();
+    assert_eq!(envelope["result"]["harnesses"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        envelope["result"]["harnesses"][2]["futureField"],
+        json!({"nested": true}),
+        "additive fields are preserved verbatim"
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn harness_list_without_capability_refuses_without_sending_list() {
+    let dir = temp_data_dir("harness-nocap");
+    let service = MockService::start(
+        dir.path(),
+        harness_service_behavior(&["workspace.v1", "session.pty.v1"]),
+    );
+
+    let output = run_cli(
+        dir.path(),
+        &["--json", "--request-id", "op-rid-1", "harness", "list"],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).expect("one JSON envelope");
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(
+        envelope["requestId"], "op-rid-1",
+        "preflight failure retains the operation replay id"
+    );
+    assert_eq!(envelope["error"]["code"], "method_not_found");
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("harness.catalog.v1"),
+        "actionable: names the missing capability"
+    );
+    // No fallback: only the read-only status preflight reached the service.
+    let methods: Vec<_> = service
+        .captured()
+        .iter()
+        .map(|request| request["method"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        methods,
+        vec!["status".to_string()],
+        "no harness.list without the capability"
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn harness_start_without_launch_capability_never_falls_back() {
+    let dir = temp_data_dir("dg-hnl");
+    // Catalog capability present, launch capability absent.
+    let service = MockService::start(
+        dir.path(),
+        harness_service_behavior(&["workspace.v1", "session.pty.v1", "harness.catalog.v1"]),
+    );
+
+    let output = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "--request-id",
+            "op-rid-2",
+            "harness",
+            "start",
+            "--workspace",
+            "w1",
+            "--harness",
+            "pi",
+            "--model",
+            "m1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(envelope["requestId"], "op-rid-2");
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("harness.launch.v1")
+    );
+    // The mandatory requirement: never a fallback to session.start/shell.
+    let methods: Vec<_> = service
+        .captured()
+        .iter()
+        .map(|request| request["method"].as_str().unwrap().to_string())
+        .collect();
+    assert!(!methods.contains(&"session.start".to_string()));
+    assert!(!methods.contains(&"harness.start".to_string()));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn harness_start_forwards_literal_prompt_model_provider_and_mode() {
+    let dir = temp_data_dir("harness-start");
+    let service = MockService::start(dir.path(), harness_service_behavior(HARNESS_CAPABILITIES));
+
+    // Prompt contains flag-like text, @-file syntax, quotes and a newline:
+    // everything must arrive verbatim as one JSON string value.
+    let prompt = "@payload.txt --model=evil \"quoted\"\nsecond line";
+    let output = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "harness",
+            "start",
+            "--workspace",
+            "ws-1",
+            "--harness",
+            "pi",
+            "--model",
+            "mock-model",
+            "--provider",
+            "mock-provider",
+            "--effort",
+            "high",
+            "--prompt",
+            prompt,
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let requests = service.captured();
+    let start = requests
+        .iter()
+        .find(|request| request["method"] == "harness.start")
+        .expect("harness.start reached the service");
+    assert_eq!(start["params"]["workspaceId"], "ws-1");
+    assert_eq!(start["params"]["harnessId"], "pi");
+    assert_eq!(start["params"]["model"], "mock-model");
+    assert_eq!(start["params"]["provider"], "mock-provider");
+    assert_eq!(start["params"]["effort"], "high");
+    assert_eq!(
+        start["params"]["prompt"], prompt,
+        "prompt must be byte-identical"
+    );
+    assert_eq!(
+        start["params"]["permissionMode"], "inherit",
+        "default is inherit"
+    );
+    assert_eq!(
+        start["requestId"].as_str().unwrap().len(),
+        36,
+        "minted uuid request id"
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn harness_start_uses_caller_request_id_unchanged_for_the_mutation() {
+    let dir = temp_data_dir("harness-rid");
+    let service = MockService::start(dir.path(), harness_service_behavior(HARNESS_CAPABILITIES));
+
+    let output = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "--request-id",
+            "mutation-rid-77",
+            "harness",
+            "start",
+            "--workspace",
+            "ws-1",
+            "--harness",
+            "claude",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let requests = service.captured();
+    let start = requests
+        .iter()
+        .find(|request| request["method"] == "harness.start")
+        .expect("harness.start reached the service");
+    assert_eq!(
+        start["requestId"], "mutation-rid-77",
+        "the final mutating request keeps the caller's id byte-for-byte"
+    );
+    // The preflight status used a distinct read-only id.
+    let status = requests
+        .iter()
+        .find(|request| request["method"] == "status")
+        .expect("status preflight reached the service");
+    assert_ne!(status["requestId"], "mutation-rid-77");
+    // And the success envelope echoes the operation id.
+    let envelope: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(envelope["requestId"], "mutation-rid-77");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn harness_start_server_error_passes_through_with_operation_id() {
+    let dir = temp_data_dir("harness-err");
+    let behavior: Behavior = std::sync::Arc::new(|request| match request["method"].as_str() {
+        Some("status") => Action::Respond(ok_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            json!({
+                "hostId": "host-1", "serviceInstanceId": "svc-1", "protocol": 1,
+                "capabilities": HARNESS_CAPABILITIES.iter().map(|c| json!(c))
+                    .collect::<Vec<_>>(),
+                "version": "0.1.0"
+            }),
+        )),
+        Some("harness.start") => Action::Respond(error_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            "not_found",
+            "Harness is not installed on this execution host",
+        )),
+        _ => Action::Respond(error_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            "method_not_found",
+            "unexpected",
+        )),
+    });
+    let service = MockService::start(dir.path(), behavior);
+
+    let output = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "--request-id",
+            "op-rid-3",
+            "harness",
+            "start",
+            "--workspace",
+            "w1",
+            "--harness",
+            "pi",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["error"]["code"], "not_found");
+    assert_eq!(envelope["requestId"], "op-rid-3");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn harness_start_result_must_match_requested_workspace_and_status_host() {
+    let dir = temp_data_dir("dg-hmm");
+    let behavior: Behavior = std::sync::Arc::new(|request| match request["method"].as_str() {
+        Some("status") => Action::Respond(ok_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            json!({
+                "hostId": "host-1", "serviceInstanceId": "svc-1", "protocol": 1,
+                "capabilities": HARNESS_CAPABILITIES.iter().map(|c| json!(c))
+                    .collect::<Vec<_>>(),
+                "version": "0.1.0"
+            }),
+        )),
+        Some("harness.start") => {
+            // Session claims a different workspace than requested.
+            let mut session = session_result("s1");
+            session["workspaceId"] = json!("someone-elses-workspace");
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                session,
+            ))
+        }
+        _ => Action::Respond(error_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            "method_not_found",
+            "unexpected",
+        )),
+    });
+    let service = MockService::start(dir.path(), behavior);
+
+    let output = run_cli(
+        dir.path(),
+        &["harness", "start", "--workspace", "w1", "--harness", "pi"],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let err = stderr(&output);
+    assert!(
+        err.contains("does not match the requested workspace"),
+        "stderr: {err}"
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn harness_start_malformed_catalog_is_refused_but_start_still_works() {
+    // A malformed catalog entry must not be silently reshaped into success.
+    let dir = temp_data_dir("dg-hbc");
+    let behavior: Behavior = std::sync::Arc::new(|request| match request["method"].as_str() {
+        Some("status") => Action::Respond(ok_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            json!({
+                "hostId": "host-1", "serviceInstanceId": "svc-1", "protocol": 1,
+                "capabilities": HARNESS_CAPABILITIES.iter().map(|c| json!(c))
+                    .collect::<Vec<_>>(),
+                "version": "0.1.0"
+            }),
+        )),
+        Some("harness.list") => Action::Respond(ok_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            json!({
+                "hostId": "host-1",
+                "harnesses": [
+                    {"harnessId": "pi", "displayName": "", "availability": "available",
+                     "executable": "/opt/homebrew/bin/pi"}
+                ]
+            }),
+        )),
+        _ => Action::Respond(error_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            "method_not_found",
+            "unexpected",
+        )),
+    });
+    let service = MockService::start(dir.path(), behavior);
+
+    let output = run_cli(dir.path(), &["harness", "list"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("displayName"),
+        "stderr: {}",
+        stderr(&output)
+    );
+    drop(service);
+}
