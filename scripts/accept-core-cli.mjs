@@ -20,6 +20,13 @@ import {
 } from "./acceptance-process.mjs";
 import { probeNativeProtocol } from "./probe-native-protocol.mjs";
 import { probeSessionBoundaries } from "./probe-session-boundaries.mjs";
+import { probeHarnessLaunch } from "./probe-harness-launch.mjs";
+
+const withHarness = process.argv.slice(2).join(" ") === "--harness pi";
+assert.ok(
+  process.argv.length === 2 || withHarness,
+  "Use --harness pi or no arguments",
+);
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const suffix = process.platform === "win32" ? ".exe" : "";
@@ -120,6 +127,11 @@ function startDaemon() {
   daemon = startAcceptanceProcess(daemonPath, ["--data-dir", dataDir], {
     cwd: root,
     stdio: ["ignore", "ignore", "ignore"],
+    env: {
+      ...process.env,
+      ORCA_ACCEPTANCE_SENTINEL: "must-not-reach-new-runtime-children",
+      ...(withHarness ? { PI_CODING_AGENT_DIR: path.join(fixture, "pi") } : {}),
+    },
   });
   daemon.on("error", (error) => {
     daemonError = error;
@@ -172,7 +184,7 @@ try {
 
   const command = process.execPath;
   const program =
-    'process.stdout.write("READY\\n");process.stdin.setEncoding("utf8");process.stdin.on("data",s=>process.stdout.write("ACK:"+s));setTimeout(()=>process.exit(0),30000)';
+    'if(Object.keys(process.env).some(k=>k.toUpperCase().startsWith("ORCA_")))process.exit(81);process.stdout.write("READY\\n");process.stdin.setEncoding("utf8");process.stdin.on("data",s=>process.stdout.write("ACK:"+s));setTimeout(()=>process.exit(0),30000)';
   const params = {
     workspaceId: workspace.id,
     command,
@@ -216,6 +228,7 @@ try {
       Buffer.from(value.dataBase64, "base64").toString().includes("READY"),
     "PTY startup output",
   );
+  report.checks.push("child-does-not-inherit-orca-runtime-authority");
   const payload = `payload-${randomUUID()}`;
   const sent = await cli([
     "terminal",
@@ -285,6 +298,11 @@ try {
       sessions,
     })),
   );
+  if (withHarness) {
+    report.checks.push(
+      ...(await probeHarnessLaunch({ rpc, eventually, workspace, sessions })),
+    );
+  }
   // No live children remain: this proves real service-crash persistence, not live-child recovery.
   for (const session of sessions) {
     assert.equal(

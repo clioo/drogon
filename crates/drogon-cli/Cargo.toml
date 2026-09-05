@@ -1,0 +1,23 @@
+[package]
+name = "drogon-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Command-line client for the Drogon runtime (protocol v1)"
+
+[dependencies]
+drogon-protocol = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+base64 = { workspace = true }

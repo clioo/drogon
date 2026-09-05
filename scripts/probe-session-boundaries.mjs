@@ -38,7 +38,14 @@ export async function probeSessionBoundaries({
     "Fast child exit persisted",
   );
   assert.equal((await rpc("session.stop", fast)).verdict, "exited");
-  const retained = await rpc("session.read", { ...fast, cursor: 0 });
+  const retained = await eventually(
+    () => rpc("session.read", { ...fast, cursor: 0 }),
+    (value) =>
+      Buffer.from(value.dataBase64, "base64")
+        .toString()
+        .includes("FAST_EXIT_EVIDENCE"),
+    "Exited output drain",
+  );
   assert.equal(retained.session.verdict, "exited");
   assert.ok(
     Buffer.from(retained.dataBase64, "base64")
