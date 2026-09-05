@@ -6,17 +6,52 @@
 
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 pub const DB_FILE_NAME: &str = "drogon.sqlite3";
 
 pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
-    let conn = Connection::open(data_dir.join(DB_FILE_NAME))?;
+    let conn = Connection::open_with_flags(
+        data_dir.join(DB_FILE_NAME),
+        OpenFlags::default() | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
     create_tables(&conn)?;
     Ok(conn)
+}
+
+pub fn validate_files(data_dir: &Path) -> std::io::Result<()> {
+    for name in [
+        DB_FILE_NAME,
+        "drogon.sqlite3-wal",
+        "drogon.sqlite3-shm",
+        "drogon.sqlite3-journal",
+    ] {
+        let metadata = match std::fs::symlink_metadata(data_dir.join(name)) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Database paths must be ordinary private files",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if metadata.nlink() != 1 || metadata.uid() != std::fs::metadata(data_dir)?.uid() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Database files must have one link and the data-directory owner",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Restricts the main db file and its WAL/SHM siblings to owner-only.

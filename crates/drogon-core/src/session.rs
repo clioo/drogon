@@ -240,12 +240,14 @@ fn try_reap(handle: &SessionHandle) -> Option<i64> {
 /// costs nothing else while it waits.
 fn poll_until_exit(handle: &SessionHandle) {
     loop {
-        if let Some(code) = try_reap(handle)
-            && persist_exit(handle, code).is_ok()
-        {
-            return;
+        if let Some(code) = try_reap(handle) {
+            if persist_exit(handle, code).is_ok() {
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        } else {
+            std::thread::sleep(CHILD_POLL_INTERVAL);
         }
-        std::thread::sleep(CHILD_POLL_INTERVAL);
     }
 }
 

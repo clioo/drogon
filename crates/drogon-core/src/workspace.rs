@@ -21,7 +21,7 @@ pub(crate) fn register(
     if !canonical.is_dir() {
         return Err(error::invalid_argument("path is not a directory"));
     }
-    let canonical_str = canonical.to_string_lossy().to_string();
+    let canonical_str = utf8_workspace_path(&canonical)?.to_owned();
     let kind = classify(&canonical);
     let derived_name = name.map(str::to_string).unwrap_or_else(|| {
         canonical
@@ -54,6 +54,28 @@ pub(crate) fn register(
                 .ok_or_else(|| error::internal_error("workspace vanished after constraint race"))
         }
         Err(e) => Err(error::from_sqlite(e)),
+    }
+}
+
+fn utf8_workspace_path(path: &Path) -> Result<&str, drogon_protocol::RpcError> {
+    path.to_str()
+        .ok_or_else(|| error::invalid_argument("resolved workspace path is not UTF-8"))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    #[test]
+    fn non_utf8_paths_are_rejected_without_replacement_characters() {
+        let path = std::path::PathBuf::from(OsString::from_vec(b"/workspace-\xff".to_vec()));
+        assert!(utf8_workspace_path(&path).is_err());
+        assert_eq!(
+            utf8_workspace_path(Path::new("/workspace-é")).unwrap(),
+            "/workspace-é"
+        );
     }
 }
 

@@ -203,7 +203,7 @@ fn a_connection_cap_alone_does_not_permanently_exclude_clients() {
     // even though nothing is actually being served. A short idle timeout
     // (here, milliseconds instead of the production `DEFAULT_IDLE_TIMEOUT`)
     // must reclaim those slots.
-    let server = start_server_with_limits(2, Duration::from_millis(150));
+    let server = start_server_with_limits(2, Duration::from_millis(400));
 
     // Fill the cap with connections that send nothing.
     let _idle_a = connect(&server);
@@ -213,12 +213,23 @@ fn a_connection_cap_alone_does_not_permanently_exclude_clients() {
     // the OS level, then immediately closed with no data — indistinguishable
     // from EOF to this client).
     let mut over_cap = connect(&server);
+    over_cap.set_nonblocking(true).unwrap();
     let mut buf = [0u8; 1];
-    let n = over_cap.read(&mut buf).unwrap_or(0);
-    assert_eq!(
-        n, 0,
-        "an over-cap connection must be closed immediately, not silently held open"
-    );
+    let refusal_deadline = std::time::Instant::now() + Duration::from_millis(250);
+    loop {
+        match over_cap.read(&mut buf) {
+            Ok(0) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    std::time::Instant::now() < refusal_deadline,
+                    "over-cap connection was not closed promptly"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            other => panic!("unexpected over-cap response: {other:?}"),
+        }
+    }
 
     // Once the two idle connections time out, their slots free up and a
     // fresh connection must succeed — well within a bounded wait.
@@ -233,10 +244,12 @@ fn a_connection_cap_alone_does_not_permanently_exclude_clients() {
         let request = status_request("after-idle-timeout", Some(&server.token));
         let mut bytes = serde_json::to_vec(&request).unwrap();
         bytes.push(b'\n');
-        if stream.write_all(&bytes).is_ok() {
-            stream
-                .set_read_timeout(Some(Duration::from_millis(200)))
-                .unwrap();
+        // macOS can refuse socket options after the server has already closed an over-cap peer.
+        if stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .is_ok()
+            && stream.write_all(&bytes).is_ok()
+        {
             let mut reader = BufReader::new(stream);
             let mut line = String::new();
             if reader.read_line(&mut line).unwrap_or(0) > 0

@@ -91,6 +91,10 @@ impl Engine {
         // symlinked data directory or silently continue past a permission
         // failure it could not actually apply.
         reject_unsafe_data_dir(data_dir)?;
+        // Resolve platform aliases such as macOS /var before SQLite's no-follow open.
+        let canonical_data_dir = fs::canonicalize(data_dir)
+            .map_err(|e| error::io_error(format!("cannot resolve data dir: {e}")))?;
+        let data_dir = canonical_data_dir.as_path();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -99,6 +103,8 @@ impl Engine {
             })?;
         }
 
+        db::validate_files(data_dir)
+            .map_err(|e| error::io_error(format!("Unsafe database files: {e}")))?;
         let conn = db::open(data_dir).map_err(error::from_sqlite)?;
         #[cfg(unix)]
         db::harden_permissions(data_dir).map_err(|e| {
