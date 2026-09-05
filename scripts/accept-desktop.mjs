@@ -167,6 +167,40 @@ try {
   assert.equal(reconnected?.id, original.id);
   assert.equal(reconnected?.incarnation, original.incarnation);
   report.checks.push("renderer-reload-retains-exact-session-and-output");
+  await page.getByRole("button", { name: "New terminal", exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[role="tab"]').length === 2,
+  );
+  await page.getByRole("tab").last().focus();
+  await page.keyboard.press("Home");
+  await page.waitForFunction(() => {
+    const tab = document.querySelector('[role="tab"]');
+    return (
+      tab?.getAttribute("aria-selected") === "true" &&
+      document.activeElement === tab
+    );
+  });
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForFunction(() => {
+    const tab = [...document.querySelectorAll('[role="tab"]')].at(-1);
+    return (
+      tab?.getAttribute("aria-selected") === "true" &&
+      document.activeElement === tab
+    );
+  });
+  await page
+    .getByRole("button", { name: /^Close .* session$/ })
+    .last()
+    .click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[role="tab"]').length === 1,
+  );
+  await page.waitForFunction(
+    (value) =>
+      document.querySelector(".xterm-screen")?.textContent?.includes(value),
+    marker,
+  );
+  report.checks.push("keyboard-tab-navigation-and-sibling-close");
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });
     await page.screenshot({

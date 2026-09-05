@@ -79,7 +79,8 @@ export function TerminalPane({
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(surface);
     fitTerminal();
-    terminal.focus();
+    if (document.activeElement?.getAttribute("role") !== "tab")
+      terminal.focus();
     async function read() {
       if (disposed) return;
       try {

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import {
   access,
   mkdtemp,
   mkdir,
   realpath,
+  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -18,6 +19,7 @@ import {
   startAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { probeNativeProtocol } from "./probe-native-protocol.mjs";
+import { probeSessionBoundaries } from "./probe-session-boundaries.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const suffix = process.platform === "win32" ? ".exe" : "";
@@ -31,6 +33,14 @@ await mkdir(workspacePath);
 const report = {
   startedAt: new Date().toISOString(),
   platform: process.platform,
+  binarySha256: {
+    daemon: createHash("sha256")
+      .update(await readFile(daemonPath))
+      .digest("hex"),
+    cli: createHash("sha256")
+      .update(await readFile(cliPath))
+      .digest("hex"),
+  },
   status: "FAILED",
   checks: [],
   cleanup: [],
@@ -105,7 +115,8 @@ async function expectsRpcError(method, params, code, requestId = randomUUID()) {
   assert.equal(response.error.code, code);
 }
 
-try {
+function startDaemon() {
+  daemonError = undefined;
   daemon = startAcceptanceProcess(daemonPath, ["--data-dir", dataDir], {
     cwd: root,
     stdio: ["ignore", "ignore", "ignore"],
@@ -113,14 +124,37 @@ try {
   daemon.on("error", (error) => {
     daemonError = error;
   });
+}
+
+try {
+  startDaemon();
   await eventually(
     () => cli(["status"]),
     (value) => value.ok === true,
     "Service startup",
   );
   if (daemonError) throw daemonError;
+  const initialStatus = (await cli(["status"])).result;
+  const initialToken = await readFile(path.join(dataDir, "auth.token"));
   report.checks.push("daemon-start-and-cli-status");
   report.checks.push(...(await probeNativeProtocol(dataDir)));
+  await assert.rejects(
+    runAcceptanceProcess(daemonPath, ["--data-dir", dataDir], {
+      cwd: root,
+      timeout: 3000,
+    }),
+    (error) => error.code === 1 && !error.killed,
+    "A second daemon must refuse the owned directory promptly",
+  );
+  assert.ok(
+    (await readFile(path.join(dataDir, "auth.token"))).equals(initialToken),
+    "Rejected startup must not rotate the incumbent token",
+  );
+  assert.equal(
+    (await cli(["status"])).result.serviceInstanceId,
+    initialStatus.serviceInstanceId,
+  );
+  report.checks.push("second-start-refuses-without-mutating-incumbent");
   const addResponse = await cli([
     "workspace",
     "add",
@@ -242,6 +276,67 @@ try {
     incarnation: second.incarnation,
   });
   assert.equal(secondStop.verdict, "exited");
+  report.checks.push(
+    ...(await probeSessionBoundaries({
+      rpc,
+      expectsRpcError,
+      eventually,
+      workspace,
+      sessions,
+    })),
+  );
+  // No live children remain: this proves real service-crash persistence, not live-child recovery.
+  for (const session of sessions) {
+    assert.equal(
+      (
+        await rpc("session.stop", {
+          sessionId: session.id,
+          incarnation: session.incarnation,
+        })
+      ).verdict,
+      "exited",
+    );
+  }
+  const beforeCrash = (await rpc("session.list")).sessions;
+  const died = once(daemon, "exit");
+  assert.ok(daemon.kill("SIGKILL"));
+  await Promise.race([
+    died,
+    delay(3000).then(() => {
+      throw new Error("Owned crash fixture did not exit");
+    }),
+  ]);
+  report.cleanup.push({
+    service: "exited",
+    reason: "intentional-crash-fixture",
+  });
+  startDaemon();
+  const restarted = await eventually(
+    () => cli(["status"]),
+    (value) => value.ok,
+    "Service restart",
+  );
+  assert.equal(restarted.result.hostId, initialStatus.hostId);
+  assert.notEqual(
+    restarted.result.serviceInstanceId,
+    initialStatus.serviceInstanceId,
+  );
+  assert.ok(
+    !(await readFile(path.join(dataDir, "auth.token"))).equals(initialToken),
+    "Restart must rotate authentication",
+  );
+  assert.deepEqual((await rpc("session.list")).sessions, beforeCrash);
+  assert.ok(
+    (await cli(["workspace", "list"])).result.workspaces.some(
+      (item) => item.id === workspace.id,
+    ),
+  );
+  const replayAfterCrash = await rpc("session.start", params, requestId);
+  assert.equal(replayAfterCrash.id, first.id);
+  assert.equal((await rpc("session.list")).sessions.length, beforeCrash.length);
+  report.checks.push(
+    "actual-service-crash-preserves-identity-records-and-completed-receipts",
+  );
   report.status = "PASSED";
 } catch (error) {
   failure = error;

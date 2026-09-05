@@ -215,6 +215,12 @@ h2 {
   min-width: 0;
   flex: 1;
 }
+.active-session-panel {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
 .terminal-tabs {
   display: flex;
   align-items: center;

@@ -49,6 +49,7 @@ export function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadingSessions, setLoadingSessions] = useState(false);
   const [adding, setAdding] = useState(false);
   const [folderPath, setFolderPath] = useState("");
   const [inspector, setInspector] = useState(
@@ -106,11 +107,13 @@ export function App() {
   }, []);
   useEffect(() => {
     if (!selected || !status) {
+      setLoadingSessions(false);
       setSessions([]);
       setActive("");
       return;
     }
     let cancelled = false;
+    setLoadingSessions(true);
     void window.drogon
       .sessions(selected)
       .then((response) => {
@@ -129,6 +132,9 @@ export function App() {
       .catch(() => {
         if (!cancelled)
           setError("Could not load sessions. Retry the connection.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSessions(false);
       });
     return () => {
       cancelled = true;
@@ -176,7 +182,8 @@ export function App() {
         event.key.toLowerCase() === "n" &&
         selected &&
         status &&
-        !busy
+        !busy &&
+        !loadingSessions
       ) {
         event.preventDefault();
         void create();
@@ -323,7 +330,31 @@ export function App() {
                   >
                     <button
                       role="tab"
+                      id={`session-tab-${item.id}`}
                       aria-selected={item.id === active}
+                      aria-controls="active-session-panel"
+                      tabIndex={item.id === active ? 0 : -1}
+                      onKeyDown={(event) => {
+                        const index = sessions.findIndex(
+                          (value) => value.id === item.id,
+                        );
+                        const next =
+                          event.key === "ArrowRight"
+                            ? (index + 1) % sessions.length
+                            : event.key === "ArrowLeft"
+                              ? (index - 1 + sessions.length) % sessions.length
+                              : event.key === "Home"
+                                ? 0
+                                : event.key === "End"
+                                  ? sessions.length - 1
+                                  : -1;
+                        if (next < 0) return;
+                        event.preventDefault();
+                        setActive(sessions[next].id);
+                        document
+                          .getElementById(`session-tab-${sessions[next].id}`)
+                          ?.focus();
+                      }}
                       onClick={() => setActive(item.id)}
                     >
                       <TerminalSquare size={14} />
@@ -332,7 +363,7 @@ export function App() {
                     </button>
                     <IconButton
                       label={`Close ${item.command.split(/[\\/]/).at(-1)} session`}
-                      disabled={busy || !status}
+                      disabled={busy || loadingSessions || !status}
                       onClick={() => void close(item)}
                     >
                       <X />
@@ -341,56 +372,66 @@ export function App() {
                 ))}
                 <IconButton
                   label="New terminal"
-                  disabled={!selected || !status || busy}
+                  disabled={!selected || !status || busy || loadingSessions}
                   onClick={() => void create()}
                 >
                   <Plus />
                 </IconButton>
               </div>
-              {terminal && status ? (
-                <TerminalPane
-                  key={`${terminal.id}:${revision}`}
-                  session={terminal}
-                  onError={setError}
-                  onSession={(value) =>
-                    setSessions((items) =>
-                      updateSessionProjection(items, value),
-                    )
-                  }
-                />
-              ) : (
-                <div className="empty-state">
-                  <TerminalSquare size={32} />
-                  <h1>
-                    {status
-                      ? current
-                        ? "Start a session"
-                        : "A place for your next task"
-                      : "Connect to Drogon"}
-                  </h1>
-                  <p>
-                    {status
-                      ? current
-                        ? "Open a terminal in this workspace. Your sessions stay with the service when this window closes."
-                        : "Choose a folder or repository. No Git setup is required."
-                      : "Start the Drogon service, then retry the connection. Your existing work is unchanged."}
-                  </p>
-                  {status ? (
-                    <Button
-                      disabled={busy}
-                      onClick={() =>
-                        current ? void create() : setAdding(true)
-                      }
-                    >
-                      {current ? "New terminal" : "Add workspace"}
-                    </Button>
-                  ) : (
-                    <Button disabled={busy} onClick={() => void refresh()}>
-                      Retry connection
-                    </Button>
-                  )}
-                </div>
-              )}
+              <div
+                id="active-session-panel"
+                role="tabpanel"
+                aria-labelledby={
+                  terminal ? `session-tab-${terminal.id}` : undefined
+                }
+                className="active-session-panel"
+                aria-busy={loadingSessions}
+              >
+                {terminal && status ? (
+                  <TerminalPane
+                    key={`${terminal.id}:${revision}`}
+                    session={terminal}
+                    onError={setError}
+                    onSession={(value) =>
+                      setSessions((items) =>
+                        updateSessionProjection(items, value),
+                      )
+                    }
+                  />
+                ) : (
+                  <div className="empty-state">
+                    <TerminalSquare size={32} />
+                    <h1>
+                      {status
+                        ? current
+                          ? "Start a session"
+                          : "A place for your next task"
+                        : "Connect to Drogon"}
+                    </h1>
+                    <p>
+                      {status
+                        ? current
+                          ? "Open a terminal in this workspace. Your sessions stay with the service when this window closes."
+                          : "Choose a folder or repository. No Git setup is required."
+                        : "Start the Drogon service, then retry the connection. Your existing work is unchanged."}
+                    </p>
+                    {status ? (
+                      <Button
+                        disabled={busy || loadingSessions}
+                        onClick={() =>
+                          current ? void create() : setAdding(true)
+                        }
+                      >
+                        {current ? "New terminal" : "Add workspace"}
+                      </Button>
+                    ) : (
+                      <Button disabled={busy} onClick={() => void refresh()}>
+                        Retry connection
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
             </section>
             {inspector && (
               <aside className="session-details" aria-label="Session details">
