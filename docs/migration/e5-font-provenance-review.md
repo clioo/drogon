@@ -2,7 +2,7 @@
 
 ## Decision
 
-Accept a reproducible byte-origin join for the bundled Symbols Nerd Font Mono file. **Do not accept complete notice clearance, Geist provenance, installed-package completeness or full E5 closure.** This narrows AO-NOTICES-01 without changing glyphs or the visual system.
+Accept a reproducible byte-origin join for the bundled Symbols Nerd Font Mono file and an exact Geist1.7.0 distribution/source-font match. **Do not accept complete glyph notice clearance, installed-package completeness or full E5 closure.** This narrows AO-NOTICES-01 without changing glyphs or the visual system.
 
 The source checkout remains read-only at `c97906287bb7a390b25e2025b600d9fb3c25d9c3`. All five source font/notice files were compared with pinned Git blobs.
 
@@ -27,7 +27,15 @@ Renderer and site files are byte-identical:69,436 bytes, SHA256 `e24cec106619c03
 
 A pinned upstream1.800 TTF at `10dc7658f13c38a474cde201bb09a4617267545b` has975 glyphs and converts to69,760 bytes, **not** the source font. Six bounded historical WOFF2 candidates also differ; one older path returns404. None was installed or substituted. Matching family/version labels are insufficient to preserve exact glyph coverage and metrics.
 
-The current [upstream OFL declaration](https://github.com/vercel/geist-font/blob/10dc7658f13c38a474cde201bb09a4617267545b/OFL.txt) supports the observed2024 Project Authors wording, not a byte-origin match for the bundled font. Exact origin and applicable packaged attribution remain open.
+The current [upstream OFL declaration](https://github.com/vercel/geist-font/blob/10dc7658f13c38a474cde201bb09a4617267545b/OFL.txt) supports the observed2024 Project Authors wording, not a byte-origin match for the bundled font. This was the initial unresolved result; the version-specific package check below resolves the distribution correspondence without replacing the font.
+
+### Exact distribution match: geist1.7.0
+
+The published `geist@1.7.0` archive contains `package/dist/fonts/geist-sans/Geist-Variable.woff2`, identical to both source files. Registry SHA512 and the recorded archive SHA256 match. All106 archive member names are unique; the exact font, package identity and `LICENSE.txt` were read without extraction or installation.
+
+`package/LICENSE.txt` is4,368 bytes, SHA256 `930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137`. It names2023 Vercel/basement.studio and contains the same words as the source site's embedded OFL text; only whitespace differs. **The2023 notice is therefore not disproved by the font's2024 internal metadata.** Preserve both rather than replacing the packaged notice with a newer repository notice.
+
+The archive is4,988,330 bytes, SHA256 `eacd923c2f0e6b2fc27a3a9068bcdba2b89ddd3f4304dbef414117f280e72965`; exact URL/integrity and selected member hashes are in the evidence. This establishes distribution-byte and notice correspondence, not the original author's download route, a verified npm publisher signature or final installed notices. The source has no Geist dependency lock entry; do not invent one to describe this historical vendoring.
 
 ## Reproduce and boundaries
 
@@ -40,7 +48,7 @@ uv run --no-project \
   /Users/carlos/Documents/Drogon-mentu-session
 ```
 
-The verifier passed. It binds source Git bytes, upstream SHA256/size limits, inspection-tool versions and the full Nerd conversion result; the nonmatching Geist candidate is reported as nonmatching, not cleared by the successful command. Three separate in-memory helper fixtures passed (valid bytes, wrong hash, oversized response), without network or product execution. [Machine evidence](e5-font-provenance-evidence.json) includes metadata, notices' hashes/URLs and rejected candidates.
+The extended verifier passed. It binds source Git bytes, upstream SHA256/size limits, inspection-tool versions, the full Nerd conversion and Geist package-member/notice correspondence. The earlier nonmatching Geist TTF remains explicitly rejected. Three separate in-memory helper fixtures passed previously (valid bytes, wrong hash, oversized response). Five new literal-archive fixtures passed: valid archive, duplicate member, wrong font bytes, wrong package identity and wrong notice. These fixture checks use mocked fetches, not network or product execution. [Machine evidence](e5-font-provenance-evidence.json) includes metadata, notices' hashes/URLs and rejected candidates. The first archive inspection failed because bsdtar interpreted `[wght]` as a pattern; literal tarfile lookup corrected that inspection error without changing product code or assertions.
 
 Default/bundled Python lacked FontTools and fc-scan could not parse these files. The inspection used an isolated uv cached environment; no source/product dependencies or global Python settings were changed. Font downloads/conversions stayed in memory. This is an audit verification, not a product test, native/rendered glyph check, service action or release packaging check.
 

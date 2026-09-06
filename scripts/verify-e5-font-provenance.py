@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Read pinned font provenance; never rewrite or install product assets."""
 
+import base64
 import hashlib
 import importlib.metadata
 import io
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
+import tarfile
 import urllib.request
 
 from fontTools.ttLib import TTFont
@@ -58,6 +61,48 @@ def converted_woff2(data):
     return output.getvalue()
 
 
+def verify_geist_distribution(local, source_notice):
+    metadata_url = "https://registry.npmjs.org/geist/1.7.0"
+    raw_metadata = fetch_pinned(metadata_url, "9bf4ce965fbd026e301f991a29863184a57e9c9efefc2a823e7c0ed245e8dc60", 1024 * 1024)
+    package_metadata = json.loads(raw_metadata)
+    archive_url = "https://registry.npmjs.org/geist/-/geist-1.7.0.tgz"
+    archive_bytes = fetch_pinned(archive_url, "eacd923c2f0e6b2fc27a3a9068bcdba2b89ddd3f4304dbef414117f280e72965", 16 * 1024 * 1024)
+    integrity = "sha512-" + base64.b64encode(hashlib.sha512(archive_bytes).digest()).decode()
+    if package_metadata["dist"]["tarball"] != archive_url or integrity != package_metadata["dist"]["integrity"]:
+        raise ValueError("Geist registry/archive integrity mismatch")
+    selected = {}
+    font_member = "package/dist/fonts/geist-sans/Geist-Variable.woff2"
+    with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive:
+        members = archive.getmembers()
+        if len(members) != 106 or len({m.name for m in members}) != 106:
+            raise ValueError("Unexpected/duplicate Geist archive members")
+        for name in [font_member, "package/LICENSE.txt", "package/package.json"]:
+            member = archive.getmember(name)
+            if not member.isfile() or member.size > 2 * 1024 * 1024:
+                raise ValueError("Invalid Geist archive member")
+            selected[name] = archive.extractfile(member).read()
+    if selected[font_member] != local:
+        raise ValueError("Geist package does not reproduce source font")
+    identity = json.loads(selected["package/package.json"])
+    if identity["name"] != "geist" or identity["version"] != "1.7.0":
+        raise ValueError("Geist package identity mismatch")
+    notice = selected["package/LICENSE.txt"]
+    fences = re.findall(r"```text\n(.*?)\n```", source_notice.decode(), re.S)
+    if len(fences) != 1 or fences[0].split() != notice.decode().split():
+        raise ValueError("Source embedded notice differs beyond whitespace")
+    return {
+        "package": "geist", "version": "1.7.0", "metadataUrl": metadata_url,
+        "metadataSha256": digest(raw_metadata), "archiveUrl": archive_url,
+        "archiveSha256": digest(archive_bytes), "archiveBytes": len(archive_bytes),
+        "integrity": integrity, "archiveMembers": len(members), "sourceByteEqual": True,
+        "selected": [{"member": key, "bytes": len(value), "sha256": digest(value)} for key, value in selected.items()],
+        "sourceEmbeddedNoticeSha256": digest(fences[0].encode()),
+        "sourceEmbeddedNoticeByteEqual": fences[0].encode() == notice,
+        "sourceEmbeddedNoticeWhitespaceNormalizedEqual": True,
+        "signatureVerified": False,
+    }
+
+
 def verify(source):
     versions = {name: importlib.metadata.version(name) for name in ["fonttools", "brotli", "zopfli"]}
     if versions != {"fonttools": "4.64.0", "brotli": "1.2.0", "zopfli": "0.4.3"}:
@@ -95,6 +140,7 @@ def verify(source):
     geist_url = f"https://raw.githubusercontent.com/vercel/geist-font/{GEIST_REVISION}/fonts/Geist/variable/Geist%5Bwght%5D.ttf"
     geist_ttf = fetch_pinned(geist_url, "73894e0448cae90a92b6c2f8732b7bb9acb7b94c418bff559dad4a18e1de9659", 1024 * 1024)
     geist_converted = converted_woff2(geist_ttf)
+    geist_distribution = verify_geist_distribution(files[GEIST], files["docs/site/THIRD_PARTY_NOTICES.md"])
     return {
         "schema": "drogon.audit.font-provenance.v1",
         "sourceRevision": SOURCE_REVISION,
@@ -111,12 +157,13 @@ def verify(source):
         },
         "geist": {
             "metadata": metadata(files[GEIST]), "rendererEqualsSite": True,
+            "distribution": geist_distribution,
             "candidateUrl": geist_url, "candidateTtfSha256": digest(geist_ttf),
             "candidateMetadata": metadata(geist_ttf),
             "candidateConvertedSha256": digest(geist_converted),
             "candidateConvertedBytes": len(geist_converted),
             "candidateByteEqual": geist_converted == files[GEIST],
-            "finding": "Local internal version1.800 and2024 Project Authors notice differ from source site's2023 Vercel notice. This pinned upstream1.800 candidate is not an exact match; no original binary provenance or replacement is accepted for Geist here.",
+            "finding": "Exact source font matches geist@1.7.0 archive; its2023 Vercel OFL notice matches the site's embedded notice after whitespace normalization. Internal2024 Project Authors metadata also remains preserved. The prior upstream1.800 TTF candidate is not a match and must not replace the source font. Distribution-byte/notice correspondence is established, not publisher-signature verification or final installed notices.",
         },
         "limits": "Source provenance/notice evidence only; not publisher-signature verification, per-glyph clearance, actual installed notices, rendered glyph coverage, permission for unrelated assets or full E5 acceptance. HTTP downloads and font conversion remain in memory; no product assets or source files are changed.",
     }

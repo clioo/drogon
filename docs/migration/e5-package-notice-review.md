@@ -1,6 +1,6 @@
 # E5 exact dependency-notice evidence
 
-Font follow-up: e5-font-provenance-review.md and e5-font-provenance-evidence.json now establish exact Nerd3.4.0 TTF-to-WOFF2 reproduction and identify source/upstream notice discrepancies. Geist binary origin and complete glyph/packaged notices remain open. This does not change the four package-archive results below.
+Font follow-up: e5-font-provenance-review.md and e5-font-provenance-evidence.json now establish exact Nerd3.4.0 TTF-to-WOFF2 reproduction and Geist1.7.0 package/source-byte correspondence. The source Geist notice matches that package after whitespace normalization; Nerd mixed-glyph and complete installed notices remain open. This does not change the four package-archive results below.
 
 Root accepts the bounded package-byte/notice join recorded in `e5-package-notice-evidence.json`, observed 2026-09-06. This narrows AO-NOTICES-01; it does not close E5, authorize unrelated assets or prove final distributable contents.
 

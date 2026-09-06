@@ -187,7 +187,40 @@
     "candidateConvertedSha256": "2ffebe993e969069a9789d15164b7715d42491b5835516c5e3b935d5f81b05f1",
     "candidateConvertedBytes": 69760,
     "candidateByteEqual": false,
-    "finding": "Local internal version1.800 and2024 Project Authors notice differ from source site's2023 Vercel notice. This pinned upstream1.800 candidate is not an exact match; no original binary provenance or replacement is accepted for Geist here.",
+    "finding": "Exact source font matches geist@1.7.0 archive; its2023 Vercel OFL notice matches the site's embedded notice after whitespace normalization. Internal2024 Project Authors metadata also remains preserved. The prior upstream1.800 TTF candidate is not a match and must not replace the source font. Distribution-byte/notice correspondence is established, not publisher-signature verification or final installed notices.",
+    "distribution": {
+      "package": "geist",
+      "version": "1.7.0",
+      "metadataUrl": "https://registry.npmjs.org/geist/1.7.0",
+      "metadataSha256": "9bf4ce965fbd026e301f991a29863184a57e9c9efefc2a823e7c0ed245e8dc60",
+      "archiveUrl": "https://registry.npmjs.org/geist/-/geist-1.7.0.tgz",
+      "archiveSha256": "eacd923c2f0e6b2fc27a3a9068bcdba2b89ddd3f4304dbef414117f280e72965",
+      "archiveBytes": 4988330,
+      "integrity": "sha512-ZaoiZwkSf0DwwB1ncdLKp+ggAldqxl5L1+SXaNIBGkPAqcu+xjVJLxlf3/S8vLt9UHx1xu5fz3lbzKCj5iOVdQ==",
+      "archiveMembers": 106,
+      "sourceByteEqual": true,
+      "selected": [
+        {
+          "member": "package/dist/fonts/geist-sans/Geist-Variable.woff2",
+          "bytes": 69436,
+          "sha256": "e24cec106619c03f0b3519e31b9bc55e0d5e926b6a95b8d798cd8cef215b1505"
+        },
+        {
+          "member": "package/LICENSE.txt",
+          "bytes": 4368,
+          "sha256": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137"
+        },
+        {
+          "member": "package/package.json",
+          "bytes": 1534,
+          "sha256": "f6e183cb59f7c992348a9598c2895a3d643ecc4eb5de906783b58b5780f691ce"
+        }
+      ],
+      "sourceEmbeddedNoticeSha256": "0f0f04637dc8231a56f7ec084d4de7549a6d6334912778334354e4f43400c234",
+      "sourceEmbeddedNoticeByteEqual": false,
+      "sourceEmbeddedNoticeWhitespaceNormalizedEqual": true,
+      "signatureVerified": false
+    },
     "boundedRejectedWoffCandidates": [
       {
         "revision": "5f44fc08b5b2ee500ac3c2c49a48331dd21ec703",
