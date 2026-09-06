@@ -23,7 +23,7 @@ fn start_server() -> TestServer {
     let engine = Arc::new(Engine::open(dir.path()).unwrap());
     let token_arc: Arc<str> = Arc::from(token.as_str());
     std::thread::spawn(move || {
-        drogond::server::accept_loop(listener, engine, token_arc);
+        let _ = drogond::server::accept_loop(listener, engine, token_arc);
     });
     // Give the accept loop a moment to be actively listening; connect()
     // to a bound-but-not-yet-`accept`-ing socket still succeeds (queued in
@@ -39,7 +39,7 @@ fn start_server_with_limits(max_connections: usize, idle_timeout: Duration) -> T
     let engine = Arc::new(Engine::open(dir.path()).unwrap());
     let token_arc: Arc<str> = Arc::from(token.as_str());
     std::thread::spawn(move || {
-        drogond::server::accept_loop_with_limits(
+        let _ = drogond::server::accept_loop_with_limits(
             listener,
             engine,
             token_arc,
@@ -298,4 +298,187 @@ fn a_connection_cap_alone_does_not_permanently_exclude_clients() {
         reconnected,
         "a connection cap must not permanently exclude clients once idle slots time out"
     );
+}
+
+#[test]
+fn transient_accept_errors_do_not_end_the_service() {
+    // Regression for: `for incoming in listener.incoming()` broke out of the
+    // loop on the first accept error, so one transient OS failure (fd
+    // exhaustion, ECONNABORTED, EINTR) ended the whole service and `main`
+    // returned. The deterministic error-then-valid sequence below proves the
+    // loop now retries transient failures and serves the next real
+    // connection.
+    let dir = tempfile::tempdir().unwrap();
+    let listener = drogond::endpoint::establish(dir.path()).unwrap();
+    let token = drogond::auth::ensure_token(dir.path()).unwrap();
+    let engine = Arc::new(Engine::open(dir.path()).unwrap());
+    let socket_path = dir.path().join("runtime-v1.sock");
+
+    // Queue a real client before the loop starts, so the accept source has a
+    // genuine connection to hand over after the injected errors.
+    let mut client = UnixStream::connect(&socket_path).unwrap();
+
+    let injected = std::cell::RefCell::new(vec![
+        // EMFILE: transient fd exhaustion.
+        std::io::Error::from_raw_os_error(24),
+        // Kind-only transient failure (no raw OS code): must not be fatal.
+        std::io::Error::new(std::io::ErrorKind::ConnectionAborted, "injected abort"),
+    ]);
+    let engine_for_loop = engine.clone();
+    let token_for_loop: Arc<str> = Arc::from(token.as_str());
+    std::thread::spawn(move || {
+        let _ = drogond::server::run_accept_loop(
+            move || {
+                if let Some(error) = injected.borrow_mut().pop() {
+                    return Err(error);
+                }
+                listener.accept().map(|(stream, _)| stream)
+            },
+            engine_for_loop,
+            token_for_loop,
+            drogond::server::DEFAULT_MAX_CONCURRENT_CONNECTIONS,
+            drogond::server::DEFAULT_IDLE_TIMEOUT,
+            // Tiny deterministic backoff for the test.
+            Duration::from_millis(1),
+            4,
+        );
+    });
+
+    // Error-then-valid: after the two injected failures the queued client is
+    // served normally.
+    send(&mut client, &status_request("after-errors", Some(&token)));
+    let mut reader = BufReader::new(client.try_clone().unwrap());
+    let response = recv(&mut reader);
+    assert!(response.ok, "{response:?}");
+    assert_eq!(response.request_id, "after-errors");
+
+    // And the loop keeps accepting subsequent connections.
+    let mut second = UnixStream::connect(&socket_path).unwrap();
+    send(&mut second, &status_request("still-alive", Some(&token)));
+    let mut reader2 = BufReader::new(second.try_clone().unwrap());
+    let response2 = recv(&mut reader2);
+    assert!(response2.ok, "{response2:?}");
+    assert_eq!(response2.request_id, "still-alive");
+}
+
+#[test]
+fn fatal_accept_listener_failures_are_returned_not_swallowed() {
+    // A broken listener (EBADF shape, via the host's own libc constant)
+    // must surface as an error rather than loop or silently stop.
+    let dir = tempfile::tempdir().unwrap();
+    let token = drogond::auth::ensure_token(dir.path()).unwrap();
+    let engine = Arc::new(Engine::open(dir.path()).unwrap());
+    let outcome = drogond::server::run_accept_loop(
+        || Err(std::io::Error::from_raw_os_error(libc::EBADF)),
+        engine,
+        Arc::from(token.as_str()),
+        drogond::server::DEFAULT_MAX_CONCURRENT_CONNECTIONS,
+        drogond::server::DEFAULT_IDLE_TIMEOUT,
+        Duration::from_millis(1),
+        4,
+    );
+    let error = outcome.expect_err("a broken listener must be reported");
+    assert_eq!(error.raw_os_error(), Some(libc::EBADF));
+}
+
+#[test]
+fn consecutive_transient_accept_errors_exhaust_the_budget_and_surface() {
+    // Regression for: an unbounded retry loop would spin forever on a
+    // persistently failing (but not fatal) accept. After
+    // `max_consecutive_accept_errors` consecutive transient failures the
+    // loop must return the last error with its original errno, not keep
+    // retrying or exit silently.
+    let dir = tempfile::tempdir().unwrap();
+    let token = drogond::auth::ensure_token(dir.path()).unwrap();
+    let engine = Arc::new(Engine::open(dir.path()).unwrap());
+    let outcome = drogond::server::run_accept_loop(
+        || Err(std::io::Error::from_raw_os_error(libc::EMFILE)),
+        engine,
+        Arc::from(token.as_str()),
+        drogond::server::DEFAULT_MAX_CONCURRENT_CONNECTIONS,
+        drogond::server::DEFAULT_IDLE_TIMEOUT,
+        Duration::from_millis(1),
+        3,
+    );
+    let error = outcome.expect_err("exhausting the transient budget must surface the failure");
+    assert_eq!(error.raw_os_error(), Some(libc::EMFILE));
+}
+
+#[test]
+fn a_successful_accept_resets_the_consecutive_error_budget() {
+    // Deterministic reset proof: each injected error pair reaches (but does
+    // not exceed) a budget of 2, and a genuinely served client sits between
+    // the pairs. Without a reset on success the cumulative count passes the
+    // budget on the third error and the loop dies before the second client
+    // is served; with the reset, both clients are served.
+    let dir = tempfile::tempdir().unwrap();
+    let listener = drogond::endpoint::establish(dir.path()).unwrap();
+    let token = drogond::auth::ensure_token(dir.path()).unwrap();
+    let engine = Arc::new(Engine::open(dir.path()).unwrap());
+    let socket_path = dir.path().join("runtime-v1.sock");
+
+    // Queued before the loop starts: served right after the first pair.
+    let mut first = UnixStream::connect(&socket_path).unwrap();
+    first
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+
+    let engine_for_loop = engine.clone();
+    let token_for_loop: Arc<str> = Arc::from(token.as_str());
+    let call_index = std::cell::Cell::new(1u32);
+    // Accept calls are strictly sequential in the loop, so call indices are
+    // a deterministic injection schedule: errors on calls 1-2 (budget
+    // reached), the first queued client accepted on call 3, errors on calls
+    // 4-5 (budget reached again only if the counter was reset), the second
+    // client accepted on call 6, and a fatal EBADF on call 7 so the loop —
+    // and its thread — end deterministically after the assertions' clients
+    // were handed to handlers. Without a reset the loop dies on call 4 and
+    // the second client is never served.
+    std::thread::spawn(move || {
+        let _ = drogond::server::run_accept_loop(
+            move || {
+                let call = call_index.get();
+                call_index.set(call + 1);
+                if call == 7 {
+                    return Err(std::io::Error::from_raw_os_error(libc::EBADF));
+                }
+                if matches!(call, 1 | 2 | 4 | 5) {
+                    return Err(std::io::Error::from_raw_os_error(libc::EMFILE));
+                }
+                listener.accept().map(|(stream, _)| stream)
+            },
+            engine_for_loop,
+            token_for_loop,
+            drogond::server::DEFAULT_MAX_CONCURRENT_CONNECTIONS,
+            drogond::server::DEFAULT_IDLE_TIMEOUT,
+            Duration::from_millis(1),
+            2,
+        );
+    });
+
+    send(
+        &mut first,
+        &status_request("after-first-pair", Some(&token)),
+    );
+    let response = recv(&mut BufReader::new(first.try_clone().unwrap()));
+    assert!(response.ok, "{response:?}");
+    assert_eq!(response.request_id, "after-first-pair");
+
+    // The loop is now back to accepting: connect the second client and let
+    // the loop burn the second injected pair (reaching, not exceeding, the
+    // budget again) before serving it.
+    let mut second = UnixStream::connect(&socket_path).unwrap();
+    second
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    send(
+        &mut second,
+        &status_request("after-second-pair", Some(&token)),
+    );
+    let response = recv(&mut BufReader::new(second.try_clone().unwrap()));
+    assert!(
+        response.ok,
+        "budget must reset after a successful accept: {response:?}"
+    );
+    assert_eq!(response.request_id, "after-second-pair");
 }

@@ -60,7 +60,11 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let listener = endpoint::establish(data_dir).map_err(ServeError::Io)?;
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = Arc::new(Engine::open(data_dir).map_err(ServeError::Engine)?);
-    server::accept_loop(listener, engine, Arc::from(token.as_str()));
+    // Transient accept errors are retried with backoff inside the loop, up
+    // to a bounded consecutive-error budget; a fatal listener failure or an
+    // exhausted budget surfaces here, and either must end the process with
+    // a failure rather than silently stop serving.
+    server::accept_loop(listener, engine, Arc::from(token.as_str())).map_err(ServeError::Io)?;
     // `_lock` is held for this entire call, released only on process exit
     // or an early `?` return above.
     Ok(())

@@ -351,32 +351,34 @@ fn future_cursor_is_invalid_argument() {
 }
 
 #[test]
-fn crash_then_restart_marks_prior_sessions_unverifiable_and_never_respawns() {
+fn handle_loss_then_reopen_marks_prior_sessions_unverifiable_and_never_respawns() {
     let dir = tempfile::tempdir().unwrap();
-    let session_id;
-    let incarnation;
-    {
-        let engine = Engine::open(dir.path()).unwrap();
-        let workspace_id = register_workspace(&engine, dir.path(), "ws-1");
-        // Long-lived on purpose: its reader thread must stay blocked in
-        // read() for the rest of this test so it cannot race the second
-        // Engine's crash-recovery sweep by reaping and persisting a real
-        // exit after we have already asserted `unverifiable`.
-        let session = ok(
-            &engine,
-            "session.start",
-            "start-1",
-            json!({ "workspaceId": workspace_id, "command": "/bin/sh", "args": ["-c", "sleep 30"] }),
-        );
-        session_id = session["id"].as_str().unwrap().to_string();
-        incarnation = session["incarnation"].as_str().unwrap().to_string();
-        // Simulates a crash: the Engine (and, in a real service, the whole
-        // process) goes away without an orderly session shutdown. The OS
-        // process spawned above is deliberately not killed here.
-    }
+    // The original engine is retained for the whole test on purpose: it is
+    // the only exact cleanup path for the fixture child (`session.stop` with
+    // the real incarnation — never a name/PID-based kill), so the child does
+    // not outlive the test. What this models is a second Engine over the
+    // same store finding rows whose in-memory handles it does not have; it
+    // is NOT real process death and is not crash-recovery proof. A fixture
+    // where the spawning process actually dies remains an open follow-up.
+    let original = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&original, dir.path(), "ws-1");
+    // Long-lived on purpose: its reader thread must stay blocked in
+    // read() for the rest of this test so it cannot reap and persist a
+    // real exit after the assertions below have already been made against
+    // the restarted engine's view.
+    let session = ok(
+        &original,
+        "session.start",
+        "start-1",
+        json!({ "workspaceId": workspace_id, "command": "/bin/sh", "args": ["-c", "sleep 30"] }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
 
-    let engine2 = Engine::open(dir.path()).unwrap();
-    let list = ok(&engine2, "session.list", "list-1", json!({}));
+    // A second Engine over the same store has no access to `original`'s
+    // in-memory handle; opening it runs the prior-instance sweep.
+    let restarted = Engine::open(dir.path()).unwrap();
+    let list = ok(&restarted, "session.list", "list-1", json!({}));
     let row = list["sessions"]
         .as_array()
         .unwrap()
@@ -387,7 +389,7 @@ fn crash_then_restart_marks_prior_sessions_unverifiable_and_never_respawns() {
 
     // Read/write/resize must refuse to act without a retained handle.
     let read_code = err_code(
-        &engine2,
+        &restarted,
         "session.read",
         "read-1",
         json!({ "sessionId": session_id, "incarnation": incarnation, "cursor": 0 }),
@@ -397,12 +399,26 @@ fn crash_then_restart_marks_prior_sessions_unverifiable_and_never_respawns() {
     // Stop is allowed to report the known state without erroring, but must
     // not claim a new spawn or a fabricated exit.
     let stopped = ok(
-        &engine2,
+        &restarted,
         "session.stop",
         "stop-1",
         json!({ "sessionId": session_id, "incarnation": incarnation }),
     );
     assert_eq!(stopped["verdict"], "unverifiable");
+
+    // Exact fixture cleanup through the retained original handle: the
+    // fixture child is killed and reaped via its own session identity, so
+    // nothing is left running after the test.
+    let cleaned = ok(
+        &original,
+        "session.stop",
+        "fixture-cleanup",
+        json!({ "sessionId": session_id, "incarnation": incarnation }),
+    );
+    assert_eq!(
+        cleaned["verdict"], "exited",
+        "fixture child must be cleaned up exactly through the retained handle"
+    );
 }
 
 #[test]
@@ -775,4 +791,365 @@ fn base64_decode(text: &str) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD
         .decode(text)
         .unwrap()
+}
+
+#[test]
+fn unknown_session_ids_are_not_found_while_recovered_ones_are_unverifiable() {
+    // Regression for: a session id that never existed got the same
+    // `unverifiable` answer as a real prior-instance session whose handle is
+    // gone, and only `session.stop` checked the incarnation on that path.
+    let dir = tempfile::tempdir().unwrap();
+    // Retained for the whole test: the exact cleanup path for the fixture
+    // child (`session.stop` with the real incarnation), so the child does
+    // not outlive the test. The second Engine below has no access to this
+    // engine's in-memory handles; that is the prior-instance model here,
+    // not real process death.
+    let original = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&original, dir.path(), "ws-1");
+    let session = ok(
+        &original,
+        "session.start",
+        "start-1",
+        json!({ "workspaceId": workspace_id, "command": "/bin/sh", "args": ["-c", "sleep 30"] }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    // Sweeps the row to `unverifiable`: this engine holds no handle for it.
+    let engine = Engine::open(dir.path()).unwrap();
+
+    for method in [
+        "session.read",
+        "session.write",
+        "session.resize",
+        "session.stop",
+    ] {
+        let params = match method {
+            "session.write" => json!({
+                "sessionId": "never-existed", "incarnation": "inc", "dataBase64": "aGk="
+            }),
+            "session.resize" => json!({
+                "sessionId": "never-existed", "incarnation": "inc", "cols": 80, "rows": 24
+            }),
+            "session.read" => json!({
+                "sessionId": "never-existed", "incarnation": "inc", "cursor": 0
+            }),
+            _ => json!({ "sessionId": "never-existed", "incarnation": "inc" }),
+        };
+        assert_eq!(
+            err_code(&engine, method, &format!("missing-{method}"), params),
+            "not_found",
+            "a never-existing session id must be not_found for {method}"
+        );
+    }
+
+    // Prior-instance row with the correct incarnation: unverifiable.
+    assert_eq!(
+        err_code(
+            &engine,
+            "session.read",
+            "recovered-read",
+            json!({ "sessionId": session_id, "incarnation": incarnation, "cursor": 0 }),
+        ),
+        "unverifiable"
+    );
+
+    // Prior-instance row with a wrong incarnation: stale_incarnation,
+    // consistently across methods.
+    for method in [
+        "session.read",
+        "session.write",
+        "session.resize",
+        "session.stop",
+    ] {
+        let params = match method {
+            "session.write" => json!({
+                "sessionId": session_id, "incarnation": "wrong", "dataBase64": "aGk="
+            }),
+            "session.resize" => json!({
+                "sessionId": session_id, "incarnation": "wrong", "cols": 80, "rows": 24
+            }),
+            "session.read" => json!({
+                "sessionId": session_id, "incarnation": "wrong", "cursor": 0
+            }),
+            _ => json!({ "sessionId": session_id, "incarnation": "wrong" }),
+        };
+        assert_eq!(
+            err_code(&engine, method, &format!("stale-{method}"), params),
+            "stale_incarnation",
+            "wrong incarnation must be stale_incarnation for {method}"
+        );
+    }
+
+    // Exact fixture cleanup through the retained original handle: the
+    // fixture child is killed and reaped via its own session identity, so
+    // nothing is left running after the test.
+    let cleaned = ok(
+        &original,
+        "session.stop",
+        "fixture-cleanup",
+        json!({ "sessionId": session_id, "incarnation": incarnation }),
+    );
+    assert_eq!(
+        cleaned["verdict"], "exited",
+        "fixture child must be cleaned up exactly through the retained handle"
+    );
+}
+
+#[test]
+fn child_environment_is_stripped_of_runtime_control_context() {
+    // Regression for: inherited ORCA_* was stripped, but this runtime's own
+    // DROGON_* authority (notably DROGON_DATA_DIR) leaked into every child,
+    // letting a harness agent accidentally target the spawning service.
+    //
+    // The probe runs in an owned subprocess — this same test binary,
+    // re-invoked into the isolated `#[ignore]` entry below — whose
+    // environment is configured here, entirely before spawn: two
+    // control-context canaries the PTY child must NOT see (`ORCA_*`,
+    // `DROGON_*`) and one benign inherited canary it must still see. The
+    // test process's own environment is never mutated, so no concurrently
+    // running test can ever observe a forged one.
+    let exe = std::env::current_exe().expect("current test binary path");
+    let mut command = std::process::Command::new(exe);
+    command.args([
+        "--exact",
+        "child_environment_probe_entry",
+        "--ignored",
+        "--nocapture",
+    ]);
+    command.env_clear();
+    command.env("PROBE_CHILD_MODE", "1");
+    command.env("ORCA_TEST_CONTROL", "orca-leak-canary");
+    command.env("DROGON_DATA_DIR", "/tmp/drogon-should-not-inherit");
+    // Not a control variable: the PTY child must inherit it unchanged.
+    command.env("PROBE_KEEP_ME", "inherited-canary");
+    command.env("PATH", std::env::var("PATH").unwrap_or_default());
+    command.env("TMPDIR", std::env::temp_dir());
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut probe = command.spawn().expect("spawn isolated probe subprocess");
+
+    // Bounded completion on the exact owned handle. If the deadline passes,
+    // this exact child is killed — never a shared-name or PID search.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let status = loop {
+        match probe.try_wait().expect("probe subprocess state") {
+            Some(status) => break status,
+            None => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = probe.kill();
+                    let _ = probe.wait();
+                    panic!("probe subprocess exceeded its completion deadline");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    };
+    // The probe prints only a few bytes, so reading after exit cannot block
+    // on a full pipe.
+    use std::io::Read as _;
+    let mut stdout = String::new();
+    probe
+        .stdout
+        .take()
+        .expect("piped stdout")
+        .read_to_string(&mut stdout)
+        .expect("read probe stdout");
+
+    assert!(
+        status.success(),
+        "probe subprocess failed ({status}); stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("PROBE keep=inherited-canary"),
+        "a benign inherited value must survive into the PTY child: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("orca=unset") && stdout.contains("drogon=unset"),
+        "runtime control context leaked into the PTY child: {stdout:?}"
+    );
+}
+
+/// Isolated entry point re-invoked as an owned subprocess by
+/// `child_environment_is_stripped_of_runtime_control_context`. Ignored so
+/// ordinary test runs (including `cargo test -- --ignored` without the
+/// marker) never execute the probe outside its explicit environment.
+#[test]
+#[ignore = "probe entry: only run via the exact re-invocation with PROBE_CHILD_MODE=1"]
+fn child_environment_probe_entry() {
+    if std::env::var("PROBE_CHILD_MODE").as_deref() != Ok("1") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine, dir.path(), "ws-1");
+    let probe = "printf 'PROBE keep=%s orca=%s drogon=%s' \"${PROBE_KEEP_ME:-unset}\" \"${ORCA_TEST_CONTROL:-unset}\" \"${DROGON_DATA_DIR:-unset}\"";
+    let session = ok(
+        &engine,
+        "session.start",
+        "start-1",
+        json!({
+            "workspaceId": workspace_id,
+            "command": "/bin/sh",
+            "args": ["-c", probe.to_string()],
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut output = String::new();
+    while std::time::Instant::now() < deadline {
+        output = read_output(&engine, &session_id, &incarnation);
+        if output.contains("PROBE keep=") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Exact cleanup of the fixture child through its own session handle.
+    let _ = ok(
+        &engine,
+        "session.stop",
+        "fixture-cleanup",
+        json!({ "sessionId": session_id, "incarnation": incarnation }),
+    );
+    println!("{output}");
+    assert!(
+        output.contains("PROBE keep="),
+        "probe shell never produced its verdict: {output:?}"
+    );
+}
+
+fn read_output(engine: &Engine, session_id: &str, incarnation: &str) -> String {
+    let read = ok(
+        engine,
+        "session.read",
+        "probe-read",
+        json!({ "sessionId": session_id, "incarnation": incarnation, "cursor": 0 }),
+    );
+    let encoded = read["dataBase64"].as_str().unwrap_or("");
+    String::from_utf8_lossy(&base64_decode(encoded)).into_owned()
+}
+
+/// Stops the session on drop, so even a failing assertion cleans up the
+/// fixture child exactly (via its own session identity, never a name/PID
+/// search). An explicit successful stop in the test body makes the later
+/// drop a harmless no-op.
+struct SessionGuard {
+    engine: std::sync::Arc<Engine>,
+    session_id: String,
+    incarnation: String,
+}
+
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        let _ = self.engine.dispatch(req(
+            "session.stop",
+            "guard-cleanup",
+            json!({ "sessionId": self.session_id, "incarnation": self.incarnation }),
+        ));
+    }
+}
+
+#[test]
+fn a_large_write_to_a_stalled_child_does_not_stall_resize() {
+    // Reproduction review for: `NativePty` holding the writer and master
+    // under one mutex. A write that blocks on a child which never reads
+    // (`sleep` never drains its stdin; the kernel tty queue fills) must not
+    // serialize master operations — `session.resize` has to stay responsive
+    // while that write is still outstanding.
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(Engine::open(dir.path()).unwrap());
+    let workspace_id = register_workspace(&engine, dir.path(), "ws-1");
+    let session = ok(
+        &engine,
+        "session.start",
+        "start-1",
+        json!({
+            "workspaceId": workspace_id,
+            "command": "/bin/sh",
+            "args": ["-c", "exec sleep 30"]
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+    let guard = SessionGuard {
+        engine: engine.clone(),
+        session_id: session_id.clone(),
+        incarnation: incarnation.clone(),
+    };
+
+    // Far larger than any kernel tty queue: once the queue fills, the
+    // master-side `write_all` blocks until the (never-reading) child exits.
+    let encoded = base64_of(&"x".repeat(1_048_576));
+
+    // Give the freshly spawned child a moment to be established.
+    std::thread::sleep(Duration::from_millis(150));
+
+    let (write_tx, write_rx) = std::sync::mpsc::channel();
+    {
+        let engine = engine.clone();
+        let session_id = session_id.clone();
+        let incarnation = incarnation.clone();
+        std::thread::spawn(move || {
+            let response = engine.dispatch(req(
+                "session.write",
+                "big-write",
+                json!({
+                    "sessionId": session_id,
+                    "incarnation": incarnation,
+                    "dataBase64": encoded,
+                }),
+            ));
+            let _ = write_tx.send(response);
+        });
+    }
+    // Let the write enter `write_all` and block on the full queue.
+    std::thread::sleep(Duration::from_millis(300));
+
+    let (resize_tx, resize_rx) = std::sync::mpsc::channel();
+    {
+        let engine = engine.clone();
+        let session_id = session_id.clone();
+        let incarnation = incarnation.clone();
+        std::thread::spawn(move || {
+            let response = engine.dispatch(req(
+                "session.resize",
+                "resize-while-write",
+                json!({
+                    "sessionId": session_id,
+                    "incarnation": incarnation,
+                    "cols": 101,
+                    "rows": 41
+                }),
+            ));
+            let _ = resize_tx.send(response);
+        });
+    }
+    let resized = resize_rx
+        .recv_timeout(Duration::from_secs(3))
+        .expect("session.resize must complete while a large write is blocked on a stalled child");
+    assert!(
+        resized.ok,
+        "resize during a blocked write failed: {:?}",
+        resized.error
+    );
+    assert_eq!(resized.result.unwrap()["cols"], 101);
+
+    // Cleanup: stopping the child unblocks (and fails) the outstanding
+    // write; both the stop and the write thread must return in bounded
+    // time. The explicit stop also makes the guard's drop a no-op.
+    let stopped = ok(
+        &engine,
+        "session.stop",
+        "stop-1",
+        json!({ "sessionId": session_id, "incarnation": incarnation }),
+    );
+    assert_eq!(stopped["verdict"], "exited");
+    drop(guard);
+    let _ = write_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the blocked write must return once the child is stopped");
 }
