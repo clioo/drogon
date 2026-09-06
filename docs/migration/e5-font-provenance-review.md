@@ -15,11 +15,21 @@ The original WOFF2 metadata identifies Nerd Fonts3.4.0 with10,413 glyphs. The pu
 
 This establishes a reproducible origin candidate at an immutable revision; it is not an independently verified publisher signature or proof of the historical download route.
 
-**The source's adjacent OFL notice is not a faithful copy of the matching upstream folder's MIT notice.** The upstream repository also documents multiple glyph-source licenses; do not replace the aggregate accounting with a blanket MIT label. Its pinned audit lists Font Logos as “Unlicensed,” which must remain an explicit component follow-up rather than an inferred permission. These are observed declarations, not a legal opinion.
+**The source's adjacent OFL notice is not a faithful copy of the matching upstream folder's MIT notice.** The upstream repository also documents multiple glyph-source licenses; do not replace the aggregate accounting with a blanket MIT label. Its pinned audit's ambiguous Font Logos “Unlicensed” entry is resolved below as the actual Unlicense declaration, not missing permission. These are observed declarations, not a legal opinion.
 
 Sources: [exact SymbolsOnly notice](https://github.com/ryanoasis/nerd-fonts/blob/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/patched-fonts/NerdFontsSymbolsOnly/LICENSE), [root licensing distinctions](https://github.com/ryanoasis/nerd-fonts/blob/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/LICENSE), [version-specific glyph license audit](https://github.com/ryanoasis/nerd-fonts/blob/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/license-audit.md).
 
 Follow-up: preserve the exact applicable upstream notices and resolve the glyph-source declarations before public packaging. Do not remove or replace private-use terminal glyphs implicitly. No product notice or asset was edited here.
+
+### Font Logos ambiguity resolved
+
+The exact Nerd3.4.0 source component `src/glyphs/font-logos.ttf` matches `font-logos-1.3.0/assets/font-logos.ttf` in the upstream GitHub release byte for byte:48,592 bytes,134 glyphs, SHA256 `7f0b055275bb3710afee586519884f3e302ec295a2f4ff4158daacf437c49852`. Release ZIP SHA256 is `53376d5496cfbc78035ca60f58791ba5b2bfec6a9e751ac521aace6acdacb012`.
+
+The release license also matches [the exact1.3.0 tag's Unlicense text](https://github.com/lukas-w/font-logos/blob/e92426e28ee5bbf4ca328b33e3a393b7a5045f01/LICENSE). Therefore the shorthand “Unlicensed” must not be reported as absence of a license. Preserve the separate [upstream brand-identity warning](https://github.com/lukas-w/font-logos/blob/e92426e28ee5bbf4ca328b33e3a393b7a5045f01/README.md); this is not blanket trademark clearance.
+
+The npm package with the same1.3.0 label is **not** a matching binary: its TTF reports internal1.2.0 and133 glyphs. Its registry integrity matched, but that does not make it the same font. The negative observation is retained in the evidence; no substitution was performed.
+
+This source-component/release/notice join does not reproduce the entire aggregate Nerd font build from all glyph sources. Other glyph-family notices and final package inspection remain required. The extended verifier passed exact component,141-entry release, tag license and README checks with pinned hashes, entirely in memory. Four separate mocked-fetch ZIP fixtures passed (valid, duplicate member, wrong font, wrong license); those are audit-tool checks, not product tests.
 
 ## Geist
 

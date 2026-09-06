@@ -35,6 +35,87 @@
   ],
   "nerd": {
     "upstreamRevision": "fa7b859994228a9c8759f99c55a8d31ee92a1b5e",
+    "fontLogos": {
+      "componentUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/font-logos.ttf",
+      "componentSha256": "7f0b055275bb3710afee586519884f3e302ec295a2f4ff4158daacf437c49852",
+      "componentBytes": 48592,
+      "metadata": {
+        "names": [
+          {
+            "id": 0,
+            "platform": 1,
+            "value": "Copyright (c) 2014-2024, Lukas W"
+          },
+          {
+            "id": 1,
+            "platform": 1,
+            "value": "font-logos"
+          },
+          {
+            "id": 3,
+            "platform": 1,
+            "value": "FontForge 2.0 : font-logos : 28-10-2024"
+          },
+          {
+            "id": 5,
+            "platform": 1,
+            "value": "1.3.0"
+          },
+          {
+            "id": 0,
+            "platform": 3,
+            "value": "Copyright (c) 2014-2024, Lukas W"
+          },
+          {
+            "id": 1,
+            "platform": 3,
+            "value": "font-logos"
+          },
+          {
+            "id": 3,
+            "platform": 3,
+            "value": "FontForge 2.0 : font-logos : 28-10-2024"
+          },
+          {
+            "id": 5,
+            "platform": 3,
+            "value": "1.3.0"
+          }
+        ],
+        "glyphCount": 134,
+        "fontRevision": 1.29998779296875
+      },
+      "releaseUrl": "https://github.com/lukas-w/font-logos/releases/download/v1.3.0/font-logos-1.3.0.zip",
+      "releaseSha256": "53376d5496cfbc78035ca60f58791ba5b2bfec6a9e751ac521aace6acdacb012",
+      "releaseBytes": 350700,
+      "releaseEntries": 141,
+      "componentByteEqual": true,
+      "licenseByteEqual": true,
+      "upstreamRevision": "e92426e28ee5bbf4ca328b33e3a393b7a5045f01",
+      "licenseUrl": "https://raw.githubusercontent.com/lukas-w/font-logos/e92426e28ee5bbf4ca328b33e3a393b7a5045f01/LICENSE",
+      "licenseSha256": "88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd",
+      "licenseBytes": 1210,
+      "declaredLicense": "Unlicense",
+      "signatureVerified": false,
+      "finding": "The ambiguous Unlicensed row is not absence of a license: exact release1.3.0 carries Unlicense and matches the Nerd3.4.0 source glyph file. Preserve the separate trademark/identity-use warning; this is not a complete aggregate-font build or every-glyph rights audit.",
+      "readmeUrl": "https://raw.githubusercontent.com/lukas-w/font-logos/e92426e28ee5bbf4ca328b33e3a393b7a5045f01/README.md",
+      "readmeSha256": "b7c98abe0c74e0804e5852fa508ee2bc51b44a4aee45a8384204938a705fabf8",
+      "rejectedNpmCandidate": {
+        "package": "font-logos",
+        "version": "1.3.0",
+        "archiveSha256": "05eddcb3a028d5e2fb342edc478d6a8fe3b37358fdd20f76f073048f1c2434b7",
+        "archiveUrl": "https://registry.npmjs.org/font-logos/-/font-logos-1.3.0.tgz",
+        "metadataSha256": "cefdff7edfa2a2604a876289221d7ba26aac1357587e3627c8297f8959120208",
+        "integrity": "sha512-YGqFNu8+0bWFTU7bh3aveSl4CSsUEOEPEkRW4tP1EnmLHzAunpeHagD3ICVttn7/oPHRWO/UStMkS/tYTZTt5g==",
+        "fontMember": "package/assets/font-logos.ttf",
+        "fontSha256": "b1368c1cfef326907efb4a76f2f5c1948ccc2f388434ce23473bf50066784de4",
+        "fontBytes": 48408,
+        "internalVersion": "1.2.0",
+        "glyphs": 133,
+        "byteEqual": false,
+        "scope": "One-off bounded archive/metadata inspection; not refetched by the regular verifier. Do not substitute for the exact matching GitHub release."
+      }
+    },
     "tagObserved": "v3.4.0",
     "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/patched-fonts/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf",
     "ttfSha256": "f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60",
