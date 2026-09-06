@@ -1,0 +1,81 @@
+{
+  "capsuleId": "shutdown-checkpoint-restart-lifecycle",
+  "description": "Unchanged original suite against pinned source bytes, executed inside a nonce capsule (source checkout never the cwd).",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/renderer/src/app-shell/shutdown-checkpoint-restart-lifecycle.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 4
+  },
+  "files": [
+    {
+      "path": "src/renderer/src/app-shell/shutdown-checkpoint-persist.ts",
+      "role": "module",
+      "sha256": "4516edf3690549c7f3051bad200c4d5dae229cd2c27995831041f5ea8389cb9e"
+    },
+    {
+      "path": "src/renderer/src/app-shell/shutdown-checkpoint-restart-lifecycle.test.ts",
+      "role": "test",
+      "sha256": "4dc096bd4c6ce625efc4f730e970368a67ee10a3ef4fa9b202f9ceadbba07444"
+    },
+    {
+      "path": "src/renderer/src/lib/crash-breadcrumb-recorder.ts",
+      "role": "module",
+      "sha256": "aa4602d1e2162e49249b9cb0e6f785b4a51326526593722b136e1e1b47fdd15a"
+    },
+    {
+      "path": "src/renderer/src/lib/shutdown-checkpoint-guard.ts",
+      "role": "module",
+      "sha256": "12731c56e8b1bcd7e9d7c43d5d98cedb8a203a80e57cd5d835743f11fd6023d8"
+    },
+    {
+      "path": "src/renderer/src/lib/updater-beforeunload.ts",
+      "role": "module",
+      "sha256": "79b67eb76e596dd79d1373205ffc2333c312cd45614e69cf60f110a98a4c8886"
+    },
+    {
+      "path": "src/shared/editor-save-events.ts",
+      "role": "module",
+      "sha256": "2fb1adac742aa3795ad7ef0d9ae4982da9c30134be5059ee6a0d3cd9d22bacf2"
+    },
+    {
+      "path": "src/shared/renderer-restart-preparation.ts",
+      "role": "module",
+      "sha256": "ccbe3af4bd913cd6699f03693f05f364ce7253ae8b3f27d62b39ba8844be5b24"
+    },
+    {
+      "path": "src/shared/renderer-shutdown-events.ts",
+      "role": "module",
+      "sha256": "bdd87131e559f09a968a947cbc6099c2b640dc460bed0f4d3ed7c391f75f5362"
+    },
+    {
+      "path": "src/shared/updater-renderer-events.ts",
+      "role": "module",
+      "sha256": "e9f7f159c92a1d0a8350fd0ca8351b9c5b2064a8deceff177fd879d765aefba0"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Minimal node environment with per-file @vitest-environment overrides; source setup files, aliases, feature-wall defines and extended timeouts omitted.",
+    "Type-only local imports are erased by the transform and are not staged (4 transitive type-only files recorded in the closure note)."
+  ],
+  "rendererRuntime": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "happy-dom": "20.11.8"
+  },
+  "isolationRationale": "Pinned-byte capsule under .preflight/parity-baseline; no network, services, or credentials.",
+  "typeOnlyClosureFiles": [
+    "src/renderer/src/lib/workspace-session-host-persistence.ts",
+    "src/shared/crash-reporting.ts",
+    "src/shared/persisted-ui-state-types.ts",
+    "src/shared/update-status-types.ts"
+  ]
+}

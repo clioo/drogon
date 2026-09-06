@@ -1,0 +1,41 @@
+{
+  "capsuleId": "main-ipc-renderer-shutdown-checkpoint",
+  "description": "Unchanged original suite against pinned source bytes, executed inside a nonce capsule (source checkout never the cwd).",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/main/ipc/renderer-shutdown-checkpoint.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 8
+  },
+  "files": [
+    {
+      "path": "src/main/ipc/renderer-shutdown-checkpoint.test.ts",
+      "role": "test",
+      "sha256": "b833b18bf7df80a6a1bb88599fa88e6981a0353d07eb37df2df87c93e16f269c"
+    },
+    {
+      "path": "src/main/ipc/renderer-shutdown-checkpoint.ts",
+      "role": "module",
+      "sha256": "ed8d98e2e6bfaeb426013d7dc3b721c68415019ef9abbc48bc0054c11375ea15"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Minimal node environment with per-file @vitest-environment overrides; source setup files, aliases, feature-wall defines and extended timeouts omitted.",
+    "Type-only local imports are erased by the transform and are not staged (4 transitive type-only files recorded in the closure note)."
+  ],
+  "isolationRationale": "Pinned-byte capsule under .preflight/parity-baseline; no network, services, or credentials.",
+  "typeOnlyClosureFiles": [
+    "src/main/persistence.ts",
+    "src/shared/execution-host.ts",
+    "src/shared/persisted-ui-state-types.ts",
+    "src/shared/workspace-session-state-types.ts"
+  ]
+}

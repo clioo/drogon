@@ -1,0 +1,63 @@
+{
+  "capsuleId": "shutdown-checkpoint-guard",
+  "description": "Unchanged original suite against pinned source bytes, executed inside a nonce capsule (source checkout never the cwd).",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/renderer/src/lib/shutdown-checkpoint-guard.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 15
+  },
+  "files": [
+    {
+      "path": "src/renderer/src/components/use-terminal-editor-close-foundation.ts",
+      "role": "module",
+      "sha256": "88fe996eb623c47d0a6d7d4d5840b33fb87442515cccf5463be52e8777f4c640"
+    },
+    {
+      "path": "src/renderer/src/components/use-terminal-window-lifecycle.ts",
+      "role": "module",
+      "sha256": "f6066aef40ddb959bb040e25b7cbec81fbe474b23d23b8c2c5f9844badf837ce"
+    },
+    {
+      "path": "src/renderer/src/lib/crash-breadcrumb-recorder.ts",
+      "role": "module",
+      "sha256": "aa4602d1e2162e49249b9cb0e6f785b4a51326526593722b136e1e1b47fdd15a"
+    },
+    {
+      "path": "src/renderer/src/lib/shutdown-checkpoint-guard.test.ts",
+      "role": "test",
+      "sha256": "25d1c5e6fdac50e2f3b6ff0fa7e1ea830372b32f2459b7e8184059bb15f8371d"
+    },
+    {
+      "path": "src/renderer/src/lib/shutdown-checkpoint-guard.ts",
+      "role": "module",
+      "sha256": "12731c56e8b1bcd7e9d7c43d5d98cedb8a203a80e57cd5d835743f11fd6023d8"
+    },
+    {
+      "path": "src/shared/renderer-shutdown-events.ts",
+      "role": "module",
+      "sha256": "bdd87131e559f09a968a947cbc6099c2b640dc460bed0f4d3ed7c391f75f5362"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Minimal node environment with per-file @vitest-environment overrides; source setup files, aliases, feature-wall defines and extended timeouts omitted.",
+    "Type-only local imports are erased by the transform and are not staged (1 transitive type-only files recorded in the closure note)."
+  ],
+  "rendererRuntime": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "happy-dom": "20.11.8"
+  },
+  "isolationRationale": "Pinned-byte capsule under .preflight/parity-baseline; no network, services, or credentials.",
+  "typeOnlyClosureFiles": [
+    "src/shared/crash-reporting.ts"
+  ]
+}
