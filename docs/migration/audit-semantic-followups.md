@@ -67,6 +67,26 @@ Root independently checked E4 S1's 74 declared source-file hashes and E5 release
 
 After verifying the depth-2 release receipt, root authorized one disjoint leaf for each active E2–E5 lead (not proof launched): E2 up to22 remaining shortcut handlers via Claude Sonnet5 medium; E3 Skills callback family via OpenCode Muse; E4 S5 formatters via OpenCode `alibaba-token-plan/deepseek-v4-flash-0731`; E5 O4 installation helpers via Claude Sonnet5 medium. Messages respectively `msg_da946dfc2d74`, `msg_128584005065`, `msg_9bcf6eb24424`, `msg_6f224cfc9ad2`. Existing-task scope and leaf-only write directories are explicit; leads must skip redundant spawning, review results and release children before completion. All remain audit-only. No acceptance percentage changes.
 
+### 06:56 UTC source-review and coordination checkpoint
+
+The preceding user-reminder turn was an acknowledgement, not technical progress. This continuation revalidated the same ready Orca runtime and advanced source acceptance and active assignments; the goal remains active.
+
+Root accepted the bounded E1 web projection and ratified navigation identity rules in `audit-root-followup-review.md` (commit28a5dd3), after independently checking158 pinned/working source hashes, all50 web production modules and concrete navigation source. This does not close E1 or raise the approximate60% estimate (7/12, medium-low confidence). The accepted214-field E2,21-callback Bots/Mentu,234-command S1 and release-entrypoint source dispositions are recorded in that same root document; older pending-review statements above are historical.
+
+| Area | Current Task / Dispatch | Current ownership |
+| --- | --- | --- |
+| E1 | `task_5f2606b1a214` / `ctx_0677ac521e0a` | Exact13 inherited caller chains; `e1-ui/followup-caller-boundaries.md/json`; optional single disjoint Claude leaf |
+| E2 | `task_a8ec40535eb1` / `ctx_79157abd58d2` | Existing88 shortcut-action follow-up; independently observed exact worker live |
+| E3 | `task_1875ceb5017c` / `ctx_ec50da0dfe3b` | Remaining45 callbacks, reviewing its Muse leaf and assertion bodies |
+| E4 | `task_b9fa5d3075c4` / `ctx_4f079b6cf63c` | S2–S5 CLI boundaries, reviewing its DeepSeek leaf |
+| E5 | `task_847c9c4d5410` / `ctx_e2a12738296d` | Remaining G7/platform/cloud entrypoint source gaps and consolidated G1–G20 dispositions; `e5-platform/followup-remaining-platform.md/json`; optional single cloud Claude leaf |
+
+E1/E5 prior successful leads were immediately reused via verified ready/input-accepted receipts on their exact existing terminals; no restart or competing writer. E5's18-contract install/build candidate is delivered, not yet semantically accepted: root independently verified all39 fingerprints against pinned Git blobs and working bytes with zero mismatches. Its sentence saying the earlier release-entrypoint report was unaccepted is stale; root acceptance in the newer review document governs.
+
+Root independently observed both nested workers completed/succeeded: E3's `ctx_8c4191667f5a` (Muse) and E4's `ctx_ce488cd0179a` (DeepSeek). Their leads own review and child release before parent completion; root has not taken over their Runs or claimed release receipts it has not inspected. E2 and prior E5 explicitly skipped redundant child launches after completing the relevant reading. Authorized leaves must not be counted as actual launches.
+
+Root delivery `delivery_e5b828269c2a` was acknowledged after E5 reuse; the resulting root check had no pending messages. Audit-only source work continues. No implementation, product test run, install, push or PR was performed in this checkpoint; Sol implementation leads remain gated on full audit acceptance. The full-fidelity24-hour target remains high risk, not a guaranteed ETA.
+
 ## Additional root source finding for E2-O01
 
 Mentu Navigator 1.1.1 successfully located the Settings toggle, and root read the actual rich-editor prop chain in the reference checkout. `TabGroupPanel.tsx:381` passes no annotation-enabled override; `EditorPanel.tsx:35` defaults `markdownAnnotationsEnabled` to true and forwards it at 389. `EditorPanelShell.tsx:165` and `EditorMarkdownFileSurface.tsx:119` propagate it to `RichMarkdownEditor`, whose independent default is false at 52 and whose review-controller call forwards the prop at 116. `useRichMarkdownReviewData.ts:43` derives permission from that prop and relative-path existence. `FloatingTerminalPanelSurface.tsx:296–300` explicitly sets the prop false. These paths are under `src/renderer/src/components/` in the read-only original.
