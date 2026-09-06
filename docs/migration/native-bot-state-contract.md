@@ -146,3 +146,33 @@ dependency, report the exact source semantics, candidate options and affected
 tests to root before installing anything. Continue independent record/transaction
 work; neither silently choose binary sorting nor substitute a fake comparator in
 production. The whole ordering requirement remains open until actually bound.
+
+## Provisional production bindings and contention review, 17:48 UTC
+
+At the CAP lead's request (`msg_fe8ad1a6f4f2`), root added working-tree public
+module bindings for global automations, Bot records/storage and locale ordering.
+`cargo check -p drogon-core --locked --offline` exited 0 in 1.64 seconds.
+These registrations remain uncommitted alongside the active leaf's unfinished
+implementation, not accepted Engine persistence. Root did not call migrations,
+bind a host locale or add RPCs. Existing dirty session-lookup work is preserved.
+The leaf must now test actual `drogon_core` modules rather than path-import copies.
+
+Root review of the draft found two existing acceptance requirements needing
+stronger implementation/tests; guidance `msg_ce4a16fa051f` keeps them with the
+same Sonnet leaf under Sol direction:
+
+- Timestamp equality is not a write fence. Two updates can share `updated_at`,
+  and projection/owner-repair writes can deliberately preserve it. Reproduce
+  an outer read/update whose closure performs another connection's same-clock
+  update; the outer stale write must not overwrite that intervening mutation.
+  Use a separate monotonic row revision or equally strong transactional
+  admission without changing source-visible timestamp semantics.
+- Responsibility history's read-then-upsert-by-new-ID sequence has no unique
+  Bot/automation-run guard in the draft. Prove separate-connection concurrent
+  calls for one automation run cannot create duplicate history or lose merge
+  fields, while missing automation-run IDs retain their distinct-run semantics.
+  Deduplication, merge, ownership checks and rollback/reopen must remain coherent.
+
+These are code-review findings, not root-executed candidate reproductions or
+newly accepted storage behavior. Preserve a real failing regression before the
+fix and the same passing assertions afterward. No additional worker is needed.
