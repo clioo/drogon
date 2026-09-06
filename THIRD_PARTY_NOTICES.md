@@ -2,6 +2,13 @@
 
 ## Orca
 
+The Rust provider-session record/handle model and transition in
+`crates/drogon-core/src/session_authority/`, its migrated tests, and its frozen
+source-oracle cases derive from the same pinned Orca revision identified below.
+Source paths, hashes and case mappings are recorded under
+`tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/`.
+The original MIT notice is retained below and in `tests/parity/ports/LICENSE.orca`.
+
 The selected tokens in `apps/desktop/src/renderer/src/assets/main.css` and the Button/Input adaptations in `apps/desktop/src/renderer/src/components/ui/` derive from Orca's corresponding renderer files at source revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`. The source migration inventories document additional behavior used as reference. Drogon does not include Orca's telemetry, update service, account credentials or runtime as an execution dependency.
 
 The native Bot/Automation record and storage ports in
