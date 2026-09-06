@@ -1,20 +1,19 @@
 # Audit progress — reporting baseline
 
-Updated 2026-09-06 05:20 UTC, during work after b4a53ee. User requested percentage estimates and explicitly flagged the pace and 24-hour risk.
+Updated 2026-09-06 07:04 UTC. User requested percentage estimates and explicitly flagged the pace and24-hour risk. Earlier deadline figures below are a historical checkpoint, not current remaining-time estimates.
 
-**Estimated audit progress: approximately60%, medium-low confidence.** This is an orientation estimate, not measured coverage or remaining-effort accuracy. Its reproducible reference is the existing audit ledger:7 accepted metadata blocks (M1–M7) and5 unresolved enumeration/reconciliation groups (E1–E5), so the coarse unweighted closed-block index is7/12 =58.3%. These groups differ substantially in size; do not describe the index as58.3% of code understood, tests passed, hours spent or product completed.
+**Estimated audit progress: approximately67%, medium-low confidence.** The stable ledger now has7 accepted metadata blocks (M1–M7),1 accepted source-reconciliation group (E2), and4 open groups (E1/E3/E4/E5):8/12 =66.7%, up one group from7/12 =58.3%. This is an orientation index, not measured code coverage, tests passed, remaining-effort accuracy or product completion. Unequal group sizes prevent a linear time forecast.
 
 Keep this denominator stable. Closing a group requires its actual evidence, not splitting it into easier subgroups, writing another report or increasing isolated test counts. If discovery changes the scope, expose the old/new denominator and explain the revision. This baseline does not retroactively assert a previous percentage.
 
 | Open group | Closure work still required |
 | --- | --- |
 | E1 | Remaining UI surfaces and observable journey/card reconciliation |
-| E2 | Settings/shortcut routing semantics and platform/dynamic boundaries |
 | E3 | Bridge payload/state semantics and explicit unresolved legacy identities |
 | E4 | Remaining per-command behavior and passthrough dispatch contracts |
 | E5 | Specific platform/relay/distribution reviews and journey reconciliation |
 
-The authoritative detail remains parity-audit-gate-ledger.json and linked source contracts. M1–M7 accept only their stated metadata scopes, not every feature in those areas. Recent mobile, relay and packaging follow-ups are partial progress inside open groups; none closes E1–E5 by itself.
+The authoritative detail remains parity-audit-gate-ledger.json and linked source contracts. Root accepted E2 after214-field/O01/O02 reconciliation,13 persistence contracts,16 shared shortcut boundaries and all88 action routes; see audit-root-followup-review.md for samples and fingerprint checks. Monaco integration questions, source defect corrections and every baseline/port/render/platform obligation remain T1–T4 gates, not silently accepted behavior. M1–M7 retain metadata-only scope. Partial E1/E3/E4/E5 follow-ups do not close those groups.
 
 ## Deadline assessment
 
@@ -26,4 +25,4 @@ There is not yet a defensible numerical ETA for closing the audit. The user subs
 
 Report: audit estimate and confidence; delta since this baseline; which group actually moved/closed; next closure milestone; deadline risk. Separately name product/test-migration progress when evidenced. Do not invent a whole-product percentage before a defensible capability denominator exists. Report an unchanged percentage honestly even when supporting evidence improved.
 
-Current delta: first reporting baseline, no closed-block increase. The active packaging slice adds20 original unit cases and broader source review, but E5 remains open. These do not prove an installed build or full-platform acceptance.
+Current delta: E2 source-reconciliation accepted, +1 of the unchanged12 groups (+8.3 percentage points in the unweighted index). Four additional original pure Windows environment cases passed on macOS; this is separate baseline evidence and does not affect the index or prove Windows installation. E1/E3/E4/E5, complete test migration and product fidelity remain unfinished. The flexible24-hour full-fidelity target remains high risk, with no defensible completion ETA yet.

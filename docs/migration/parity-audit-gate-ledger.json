@@ -56,13 +56,15 @@
     },
     {
       "id": "E2",
+      "status": "accepted-source-characterization",
       "owner": [
         "WP-UI-SETTINGS",
         "WP-ENG-SHARED"
       ],
       "evidence": "parity-settings-properties.json fields; parity-settings-keybindings.json; parity-settings-consumers.json bounded routing census (39 scanner fixtures, independently reviewed); parity-settings-unobserved-contracts.json coordinator-reviewed v2; parity-settings-persistence-contracts.json (SP01-SP13,15 hashes); reference-captures/c9790628-durable-file-write/README.md; reference-captures/c9790628-durable-file-write-syscall-proof/README.md",
       "resolution": "The472-file census and10 no-observed-field traces remain accepted bounded evidence, not unused-field or full type-checker claims. Central profile-preparation, mutation/authority, owner routing and write lifecycle now characterized separately in SP01-SP13. Generic settings acknowledgement is not durability; remote visibility is not client state or an atomic multi-host transaction.14 original filesystem cases pass, not Store lifecycle or candidate parity. The214-field routing/internal-storage classification is now mapped with explicit evidence tiers in parity-settings-field-routing.json;180 inherited rows still require semantic validation in their owned test-port work. Do not repeat accepted censuses or central traces.",
-      "proofStillOwed": "Root now accepts the214-field bounded source reconciliation in audit-closure/e2-settings/closure.json with271 pinned hashes and independent consumer samples; see audit-root-followup-review.md. Three exceptions are retained explicit source dispositions, not settings removal or universal no-effect claims. Still required for E2: E2-O03 all88 action handler/effect reconciliation plus SK boundary acceptance. Persistence, override/migration, rendered settings and OS shortcut execution remain T1-T4 obligations."
+      "sourceGateDecision": "Root accepts E2 source reconciliation:214 fields including O01/O02 dispositions, SP01-SP13, SK01-SK16 and all88 action handler/effect contracts in audit-closure/e2-settings/closure.json and followup-shortcut-actions.json. Final88 identities exactly match accepted catalog;146 pinned files and360 cited-range hashes verified. See audit-root-followup-review.md for independent samples, source defects, external-library boundaries and retained acceptance obligations. Earlier180-row semantic uncertainty in resolution is superseded at this source-routing boundary, not by test execution.",
+      "proofStillOwed": "T1-T4: all93 focused original test paths plus full-suite allocation, faithful field/action ports and behavioral RED-GREEN, persistence/override/migration, real OS/SSH/renderer event order. Retain SA-U01-SA-U07, including Monaco default/custom/unbound replace baseline before its feature wave and unverifiable pane-close correction. No product parity, optional capability removal or full-audit closure is inferred."
     },
     {
       "id": "E3",
