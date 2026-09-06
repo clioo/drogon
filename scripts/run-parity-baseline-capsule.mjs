@@ -373,9 +373,12 @@ export default { test: { include: ["**/*.test.ts"], environment: "node" } };
 `;
 
 function generatedVitestConfig(entryTestFile) {
-  return entryTestFile.endsWith('.test.mjs')
-    ? GENERATED_VITEST_CONFIG.replace('**/*.test.ts', '**/*.test.mjs')
-    : GENERATED_VITEST_CONFIG;
+  for (const extension of ['mjs', 'tsx']) {
+    if (entryTestFile.endsWith(`.test.${extension}`)) {
+      return GENERATED_VITEST_CONFIG.replace('**/*.test.ts', `**/*.test.${extension}`);
+    }
+  }
+  return GENERATED_VITEST_CONFIG;
 }
 
 /**

@@ -282,7 +282,7 @@ describe("stageCapsule", () => {
     expect(onDisk.capsuleRoot).toBe(outcome.capsuleRoot);
   });
 
-  it.each(["ts", "mjs"])("selects only the reviewed %s test extension without changing source bytes", (extension) => {
+  it.each(["ts", "tsx", "mjs"])("selects only the reviewed %s test extension without changing source bytes", (extension) => {
     const entry = `src/shared/config-entry.test.${extension}`;
     const source = "import { it, expect } from 'vitest'; it('fixture', () => expect(1).toBe(1));\n";
     writeFileSync(path.join(fixture.root, entry), source);
