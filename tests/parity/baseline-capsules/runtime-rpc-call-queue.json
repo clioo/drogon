@@ -1,0 +1,59 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleId": "runtime-rpc-call-queue",
+  "entryTestFile": "src/shared/runtime-rpc-call-queue.test.ts",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use original installed Vitest4.1.11 with Node24.19.0. Minimal node configuration omits renderer aliases, DOM/canvas/host-port setup, feature-wall define, GC/WebStorage flags and extended source timeouts. Reviewed whole tests use none of those hooks; no full-config or cross-platform equivalence claimed."
+  ],
+  "files": [
+    {
+      "path": "src/shared/runtime-rpc-call-queue.test.ts",
+      "sha256": "81a8303117138df86a243256dff7bedfff8406aa8f0d44df5575cb21c9ecb318",
+      "role": "test"
+    },
+    {
+      "path": "src/shared/runtime-rpc-call-queue.ts",
+      "sha256": "45921658a10ffeefe0247673227aab643d1b5251d24aa460244fadd5480fc349",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/abort-signal-reason.ts",
+      "sha256": "ef979f2aa87e3d6712dc80abb4d86a8c6e0fa7a1d807cfa1bf35c82b362b7455",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-memory-limits.ts",
+      "sha256": "862a317d7f564a2cc54cfa60b6c093de5dc8a61714eac45daa178608c1f6acb1",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/node-bounded-json-stringify.ts",
+      "sha256": "fcadabc537aa3125d1ee514026ecca5b8e2a76aabca7e29f08d3d35008001622",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-client-error.ts",
+      "sha256": "593ff4ee6466c4b18b69f65a20631967205fb8e1bd5e46239cf7f526b764156a",
+      "role": "module"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 8
+  },
+  "allocation": {
+    "package": "WP-ENG-SHARED",
+    "authority": "docs/migration/parity-test-work-packages.json",
+    "sourceTest": "src/shared/runtime-rpc-call-queue.test.ts"
+  },
+  "isolationRationale": "Whole original test and complete runtime import closure reviewed by root. Foreground/background admission, synchronous failures, queued abort, 71-call ordering, per-selector/global queue caps and retained-byte recovery. In-memory callbacks/promises only; no transport is opened. Type-only imports are erased by the original Vitest transform; this does not typecheck the whole source.",
+  "testEvidenceBoundary": "Original isolated behavior only, not a port, candidate behavioral RED/GREEN, real Electron/SSH/network or product parity. No assertion or source bytes are changed."
+}

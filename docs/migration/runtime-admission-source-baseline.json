@@ -1,0 +1,257 @@
+{
+  "schema": "drogon.baseline.runtime-admission-and-cancellation.v1",
+  "observedAt": "2026-09-06T12:34:46.306Z",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "nodeVersion": "24.19.0",
+  "vitestVersion": "4.1.11",
+  "platform": "darwin-arm64",
+  "batchPath": "tests/parity/baseline-batches/runtime-admission-and-cancellation.json",
+  "batchSha256": "cea79f3b3a99efea2b4c30d432896fede92e454ccf0b625915660a5ef9eafaf1",
+  "batchExitCode": 0,
+  "concurrency": 3,
+  "passed": 18,
+  "failed": 0,
+  "skipped": 0,
+  "distinctPinnedFilesIncludingLicense": 12,
+  "allocation": {
+    "path": "docs/migration/parity-test-work-packages.json",
+    "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a",
+    "packages": 46,
+    "files": 9037
+  },
+  "runs": [
+    {
+      "capsuleId": "runtime-rpc-call-queue",
+      "capsuleRoot": ".preflight/parity-baseline/runtime-rpc-call-queue-e3263k",
+      "manifestPath": "tests/parity/baseline-capsules/runtime-rpc-call-queue.json",
+      "manifestSha256": "4b3ba55956294532ebb030c40b304436bb80c179ec4aa89dc8e1f78e8b126f46",
+      "stageReceiptSha256": "32b267f2465a64f56f9d037d2efc54542ccda632d3c92e4ace46fdfefa5bee0b",
+      "resultsSha256": "7334b5c1e0a81555237bbfe17cc08cffcbca95c644778a3ad1a783e2effa5b4a",
+      "sourceTest": {
+        "path": "src/shared/runtime-rpc-call-queue.test.ts",
+        "sha256": "81a8303117138df86a243256dff7bedfff8406aa8f0d44df5575cb21c9ecb318",
+        "domain": "unit-vitest"
+      },
+      "owner": "WP-ENG-SHARED",
+      "files": [
+        {
+          "path": "src/shared/runtime-rpc-call-queue.test.ts",
+          "role": "test",
+          "sha256": "81a8303117138df86a243256dff7bedfff8406aa8f0d44df5575cb21c9ecb318"
+        },
+        {
+          "path": "src/shared/runtime-rpc-call-queue.ts",
+          "role": "module",
+          "sha256": "45921658a10ffeefe0247673227aab643d1b5251d24aa460244fadd5480fc349"
+        },
+        {
+          "path": "src/shared/abort-signal-reason.ts",
+          "role": "module",
+          "sha256": "ef979f2aa87e3d6712dc80abb4d86a8c6e0fa7a1d807cfa1bf35c82b362b7455"
+        },
+        {
+          "path": "src/shared/remote-runtime-memory-limits.ts",
+          "role": "module",
+          "sha256": "862a317d7f564a2cc54cfa60b6c093de5dc8a61714eac45daa178608c1f6acb1"
+        },
+        {
+          "path": "src/shared/node-bounded-json-stringify.ts",
+          "role": "module",
+          "sha256": "fcadabc537aa3125d1ee514026ecca5b8e2a76aabca7e29f08d3d35008001622"
+        },
+        {
+          "path": "src/shared/remote-runtime-client-error.ts",
+          "role": "module",
+          "sha256": "593ff4ee6466c4b18b69f65a20631967205fb8e1bd5e46239cf7f526b764156a"
+        }
+      ],
+      "assertions": [
+        {
+          "name": "runtime RPC call queue classifies per-worktree decoration lookups as background work",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "runtime RPC call queue limits background calls while allowing foreground runtime work through",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "runtime RPC call queue frees the queue slot when a runtime call throws synchronously",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "runtime RPC call queue removes an aborted call before it starts",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "runtime RPC call queue preserves queued background ordering across large bursts",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "runtime RPC call queue rejects per-selector overload and accepts work after the queue drains",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "runtime RPC call queue caps queued calls across selectors and recovers after draining",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "runtime RPC call queue caps retained call bytes across active and queued work, then recovers",
+          "status": "passed",
+          "failureMessages": []
+        }
+      ]
+    },
+    {
+      "capsuleId": "shared-control-retired-request-ids",
+      "capsuleRoot": ".preflight/parity-baseline/shared-control-retired-request-ids-RcTsK4",
+      "manifestPath": "tests/parity/baseline-capsules/shared-control-retired-request-ids.json",
+      "manifestSha256": "75649d3382b35e0c1a85f1b22ba47d264b2f6aa1d9e4022ba529b88888eab21b",
+      "stageReceiptSha256": "00f73c974c8e028373d6c83c61499993b1744cb734d2894c534bde4f700b53ad",
+      "resultsSha256": "61247a14aa7b71a7cc6e4f2bb5c65ea42e6f035379c9052e00aaf88d928ce893",
+      "sourceTest": {
+        "path": "src/shared/remote-runtime-shared-control-retired-request-ids.test.ts",
+        "sha256": "65f1b2f11806165f75045a6c33d40b1a8b61d244fc40fc4ff67ed4d1bf15b466",
+        "domain": "unit-vitest"
+      },
+      "owner": "WP-ENG-SHARED",
+      "files": [
+        {
+          "path": "src/shared/remote-runtime-shared-control-retired-request-ids.test.ts",
+          "role": "test",
+          "sha256": "65f1b2f11806165f75045a6c33d40b1a8b61d244fc40fc4ff67ed4d1bf15b466"
+        },
+        {
+          "path": "src/shared/remote-runtime-shared-control-retired-request-ids.ts",
+          "role": "module",
+          "sha256": "9ee42f6e27855cf4561426930359e78b2ee9828d7ae6f44aa56d63239512bc4b"
+        }
+      ],
+      "assertions": [
+        {
+          "name": "SharedControlRetiredRequestIds retains recent ids through repeated late frames and expires them",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "SharedControlRetiredRequestIds evicts the oldest ids at its configured bound",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "SharedControlRetiredRequestIds refreshes an existing id to the newest eviction rank",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "SharedControlRetiredRequestIds expires ids correctly after the clock moves backward",
+          "status": "passed",
+          "failureMessages": []
+        }
+      ]
+    },
+    {
+      "capsuleId": "promise-settlement-waiters",
+      "capsuleRoot": ".preflight/parity-baseline/promise-settlement-waiters-5RcxCB",
+      "manifestPath": "tests/parity/baseline-capsules/promise-settlement-waiters.json",
+      "manifestSha256": "2310a9e84f3009456e7b9af5259be6d3a5e5f7b2b9a7e0200cf116fa4519216c",
+      "stageReceiptSha256": "53b8aa84e1af18574949bb575af435df84a838731f6645855f2991326db3d39e",
+      "resultsSha256": "84ede96142f422eea6da705702654552338a0260cf03b047312f30d1de613c73",
+      "sourceTest": {
+        "path": "src/shared/promise-settlement-waiters.test.ts",
+        "sha256": "1e274da93106f31b9b57aa48fd965a4d81c8adf4ebe1bfa20a196aa3e529a73a",
+        "domain": "unit-vitest"
+      },
+      "owner": "WP-ENG-SHARED",
+      "files": [
+        {
+          "path": "src/shared/promise-settlement-waiters.test.ts",
+          "role": "test",
+          "sha256": "1e274da93106f31b9b57aa48fd965a4d81c8adf4ebe1bfa20a196aa3e529a73a"
+        },
+        {
+          "path": "src/shared/promise-settlement-waiters.ts",
+          "role": "module",
+          "sha256": "b0b60bae6dcca4bb4f335ef7dda250f4350aa5b0306d3595b887cc4af4493060"
+        }
+      ],
+      "assertions": [
+        {
+          "name": "PromiseSettlementWaiters removes ten thousand aborted callers while one anchor remains pending",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "PromiseSettlementWaiters removes timed-out callers and clears their timers on settlement",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "PromiseSettlementWaiters notifies ownership cleanup for an already-aborted caller",
+          "status": "passed",
+          "failureMessages": []
+        }
+      ]
+    },
+    {
+      "capsuleId": "remote-runtime-memory-limits",
+      "capsuleRoot": ".preflight/parity-baseline/remote-runtime-memory-limits-T3Ryrd",
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-memory-limits.json",
+      "manifestSha256": "dc59ad1909c8b6fe2621787dc7261d4f75eb0a28694027527c7220c9b9687c65",
+      "stageReceiptSha256": "b0508e119b77a1336cf8d22281cd2a8d776e402ff6ea8373ecdff85b65d6dd3c",
+      "resultsSha256": "6dba798c8a4bbe7b75a64cf3ace1e285e5632ee8677f910be1160634ab1255c8",
+      "sourceTest": {
+        "path": "src/shared/remote-runtime-memory-limits.test.ts",
+        "sha256": "87b6bb6c4dfdeda5d925706e5762dfc374895ae2b87990dc06b917b81742d1e1",
+        "domain": "unit-vitest"
+      },
+      "owner": "WP-ENG-SHARED",
+      "files": [
+        {
+          "path": "src/shared/remote-runtime-memory-limits.test.ts",
+          "role": "test",
+          "sha256": "87b6bb6c4dfdeda5d925706e5762dfc374895ae2b87990dc06b917b81742d1e1"
+        },
+        {
+          "path": "src/shared/remote-runtime-memory-limits.ts",
+          "role": "module",
+          "sha256": "862a317d7f564a2cc54cfa60b6c093de5dc8a61714eac45daa178608c1f6acb1"
+        },
+        {
+          "path": "src/shared/node-bounded-json-stringify.ts",
+          "role": "module",
+          "sha256": "fcadabc537aa3125d1ee514026ecca5b8e2a76aabca7e29f08d3d35008001622"
+        },
+        {
+          "path": "src/shared/remote-runtime-client-error.ts",
+          "role": "module",
+          "sha256": "593ff4ee6466c4b18b69f65a20631967205fb8e1bd5e46239cf7f526b764156a"
+        }
+      ],
+      "assertions": [
+        {
+          "name": "remote runtime memory limits accepts exact outbound JSON bytes and rejects the next byte",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "remote runtime memory limits accepts exact retained parameter bytes and rejects the next byte",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "name": "remote runtime memory limits accepts an exact outbound binary frame and rejects the next byte",
+          "status": "passed",
+          "failureMessages": []
+        }
+      ]
+    }
+  ],
+  "scope": "Four complete unchanged original suites in isolated capsules, not whole source suite, test ports, candidate RED/GREEN, SSH/Electron or product parity."
+}

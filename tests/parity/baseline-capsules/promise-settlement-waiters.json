@@ -1,0 +1,39 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleId": "promise-settlement-waiters",
+  "entryTestFile": "src/shared/promise-settlement-waiters.test.ts",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use original installed Vitest4.1.11 with Node24.19.0. Minimal node configuration omits renderer aliases, DOM/canvas/host-port setup, feature-wall define, GC/WebStorage flags and extended source timeouts. Reviewed whole tests use none of those hooks; no full-config or cross-platform equivalence claimed."
+  ],
+  "files": [
+    {
+      "path": "src/shared/promise-settlement-waiters.test.ts",
+      "sha256": "1e274da93106f31b9b57aa48fd965a4d81c8adf4ebe1bfa20a196aa3e529a73a",
+      "role": "test"
+    },
+    {
+      "path": "src/shared/promise-settlement-waiters.ts",
+      "sha256": "b0b60bae6dcca4bb4f335ef7dda250f4350aa5b0306d3595b887cc4af4493060",
+      "role": "module"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 3
+  },
+  "allocation": {
+    "package": "WP-ENG-SHARED",
+    "authority": "docs/migration/parity-test-work-packages.json",
+    "sourceTest": "src/shared/promise-settlement-waiters.test.ts"
+  },
+  "isolationRationale": "Whole original test and complete runtime import closure reviewed by root. 10,000 aborted callers with one retained anchor, timeout cleanup and already-aborted ownership notification. AbortController, promises and scoped fake timers only; no external operations. Type-only imports are erased by the original Vitest transform; this does not typecheck the whole source.",
+  "testEvidenceBoundary": "Original isolated behavior only, not a port, candidate behavioral RED/GREEN, real Electron/SSH/network or product parity. No assertion or source bytes are changed."
+}

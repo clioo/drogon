@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "capsules": [
+    {
+      "manifestPath": "tests/parity/baseline-capsules/runtime-rpc-call-queue.json",
+      "approvedManifestSha256": "4b3ba55956294532ebb030c40b304436bb80c179ec4aa89dc8e1f78e8b126f46"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/shared-control-retired-request-ids.json",
+      "approvedManifestSha256": "75649d3382b35e0c1a85f1b22ba47d264b2f6aa1d9e4022ba529b88888eab21b"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/promise-settlement-waiters.json",
+      "approvedManifestSha256": "2310a9e84f3009456e7b9af5259be6d3a5e5f7b2b9a7e0200cf116fa4519216c"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-memory-limits.json",
+      "approvedManifestSha256": "dc59ad1909c8b6fe2621787dc7261d4f75eb0a28694027527c7220c9b9687c65"
+    }
+  ]
+}
