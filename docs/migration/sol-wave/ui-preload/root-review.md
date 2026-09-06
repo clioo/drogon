@@ -1,5 +1,21 @@
 # Root review — preload authority/recovery preparation
 
+## Independent module checks, 2026-09-06 15:25 UTC
+
+Root read all nine delivered candidate modules and both supplemental test files.
+Against the real candidate modules, the three frozen suites (12 cases) plus the
+two supplemental files (21 cases) passed 33/33 under Node24/Vitest5. The scoped
+supplemental tsconfig typecheck passed. This does not prove Electron isolated-world
+behavior, live preload caller wiring, shutdown persistence or packaged installation.
+Sol-UI's additional GLM child `ctx_767afff4ac1b` is still active/reviewing; final
+acceptance waits for the settled lead report and remaining scope qualifications.
+
+The first GLM report labels inherited code as prior-leaf work; it was Sol's
+partial implementation before the delegation-policy correction. Root sent
+`msg_de7b688b8eaf` requesting accurate attribution without redundant rewriting.
+
+## Earlier preparation checkpoint
+
 2026-09-06. Task `task_bbff561b17bb`, Dispatch `ctx_e58cb09f5a82` completed.
 Root read the full report, mapping and execution evidence. Independent frozen
 test checking confirms all four complete bodies and source hashes; SSH remains

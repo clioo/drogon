@@ -21,6 +21,22 @@ Sol-CAP now directs Sonnet to require explicit execution and test side-effect-fr
 validation/import plus truthful failure classification. That work is not accepted
 yet. Baseline records are source-only; no candidate Bot implementation is admitted.
 
+## Runner hardening review, 15:27 UTC: not accepted
+
+Root read the new runner and CLI tests and reproduced two classifier defects
+without executing a source suite: a SIGKILL/null-exit record with full-count JSON
+returns `source_behavioral_failure`; a full-total record with one pending case
+and two failures also returns that completed-result classification. Both must
+remain incomplete/setup-block evidence, with observed assertion failures retained
+separately. Total discovered tests alone is not proof of completion. The leaf's
+test explicitly blessing pending cases does not establish correct behavior.
+
+Root requested delegated Sonnet regression coverage for signals, missing exit
+status, pending/todo and malformed JSON, with raw process errors retained and
+timeouts distinguished from other signals. Guidance `msg_a7a5e3a7a934` plus one
+terminal nudge was sent to the active Sol-CAP lead; actual receipt/correction is
+not yet confirmed. No manual root/Sol runner fix or real UI rerun was performed.
+
 ## Earlier preparation checkpoint
 
 2026-09-06. Accept the four files as **preserved test preparation**, not four
