@@ -804,6 +804,54 @@ No implementation wave, Sol hierarchy, original terminal test execution,
 installation, push or PR mutation occurred. Existing product changes stay
 unaccepted and untouched. Audit/goal remain active.
 
+## Ten scanner-unobserved settings reviewed and corrected
+
+The preceding goal turn made progress in `4092b76` by accepting corrected
+terminal CLI contracts; this turn completed source-backed characterization of
+the10 scanner-unobserved settings. No blocked condition occurred. The original
+tracked source remains unchanged at the pinned revision. Mentu Navigator1.1.1
+was used read-only; its GitLab symbol pointers exposed an omitted runtime test.
+Navigator's dirty flag is not proof of tracked drift (the known untracked
+preflight document remains unrelated).
+
+Coordinator source and relevant assertion-body review corrected v1:
+
+- SSH skip ids are shared profile settings keyed by target, not per-worktree
+  lists. Retry does not clear a persisted skip; the recheck path does.
+- Legacy keybinding getter runs per service construction before the migration
+  tests file existence; it is not a lifetime-once getter/read-drain. Pending
+  cohort can retry and become done. A real service test at209-226 already
+  injects a seed-write failure and asserts caught failure plus pending state;
+  the previous missing-test claim is withdrawn.
+- Skill nudge cap is512, Set insertion order not LRU. Explicit dismissal,
+  stale presentation retraction and failed settings writes have distinct paths.
+- Sidekick normalization writes the new pet field and preserves the old key
+  through the inspected strip/spread. Activity migration depends on its rollout
+  marker; prior true survives normalization but is not universally permanent.
+- Sidebar's273-line test uses IntroShown as fixture input for a different
+  assertion; it does not test acknowledgement persistence. The166-181 test
+  actually checks migrated versus empty intro visibility. Dashboard's snapshot
+  assertion proves showIdle serialization, not card filtering.
+- GitLab state is host/path arrays in global settings, not per-account data or
+  a UI toggle. Main lookup paths write history, preserving reserved pinned
+  entries. The runtime test at gitlab-and-pr-bases-part-02.spec.ts:23-77 asserts
+  update after success and no update after null with a stub store; an IPC mock
+  elsewhere does not establish absence of this test. Disk effects remain unproven.
+
+Corrected JSON v2 and Markdown are accepted for these bounded contracts.
+Independent checks verified34 source hashes, exact10-field scanner cohort,
+all10 absent builder defaults and52 citation anchors within hashed files.
+Four coordinator-authored range endpoints initially exceeded file length and
+were corrected before acceptance; range validation then passed. File bounds
+alone are not semantic proof; the relevant bodies were independently read.
+
+**Zero original tests ran in this turn.** New test pointers and assertion reads
+do not increase the82-case executed baseline. Full214-field routing, store
+reset/reload/persistence, OS shortcuts, remote behavior and candidate results
+remain owed. UI state artifacts are next for independent review; no audit
+worker is currently assigned. No feature wave, hierarchy, installation, push,
+PR change, personal setting or product-source edit occurred. Goal stays active.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
