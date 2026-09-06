@@ -29,6 +29,32 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+### Current integration checkpoint: 17:36 UTC
+
+Commit `2ecb23d` admits the two renderer checkpoint policy modules and their
+source/leaf/lead evidence after root's final independent 34/34 regression run
+and two successful typechecks. Read `sol-wave/ui-preload/root-checkpoint-policy-acceptance.md`
+for the explicit missing historical behavioral RED and remaining production
+caller/durability/DOM gates. No new installed preview is claimed.
+
+The next full persisted renderer model migration is actually delegated:
+Sol parent `task_2ae98477787f / ctx_ccc470781ffd`; GLM child Run
+`run_c7e93ad3a68d`, Task `task_fc98ab95eee9`, Dispatch `ctx_323c1f3d8f61`.
+Root independently observed depth 2, input accepted, exact-worker live and
+the GLM-5.3-Flash Z.AI Coding Plan terminal. Its new-file ownership contract is
+`persisted-renderer-contract-migration.md`; this explicit transfer preserves
+root final contract admission and avoids manual Sol implementation.
+
+ENG's active Kimi correction remains `task_409e1056b0a9 / ctx_09689a2eb286`,
+observed live; queued foundation follow-up `task_3555b53c24b1` is not started.
+CAP's active Sonnet assignment remains `ctx_ec035066fe68`, with the bounded
+fork deviation disclosed below. Root asked the lead to confirm that conditional
+resume reached the existing leaf because its latest transcript still showed
+the paused escalation; observation lag is not process death or retry authority.
+
+Audit is unchanged at 11/12 (91.7%, medium confidence, delta 0). E5 publication
+and resources remain open; full-fidelity 24-hour delivery risk remains high.
+
 ### Native Bot input admitted: 17:17 UTC
 
 Commit `e34f6f0` integrates the five public native Bot input parsers and shared
