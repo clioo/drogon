@@ -703,6 +703,51 @@ No worker is active, no nested hierarchy launched, no original product tests
 were executed, and no preview was installed during this tooling checkpoint.
 All preexisting product edits remain untouched; the goal and audit stay open.
 
+## Remote error baseline and next audit deliveries
+
+Following accepted settings scanner commit `4fe379b`, the coordinator ran the
+reviewed remote-ENOENT capsule against the pinned original source. Explicit
+Node24.19.0 / original Vitest4.1.11 returned **7 pass, 0 fail, 0 skipped** in
+one actual test file. Both complete source files were read before execution;
+all staged source/license bytes and seven assertion results were independently
+verified afterwards. A cleared/allowlisted environment was used; no model,
+real SSH/IPC, product stat operation, personal session or application ran.
+
+Evidence is archived at `reference-captures/c9790628-remote-enoent/`; original
+receipts remain in fresh stage `coordinator-remote-enoent-Mwk3fP`. Archive JSON
+values are identical with a trailing newline added, and both sets of raw
+hashes are disclosed. The manifest records minimal-config differences. The
+six isolated original capsules now establish82 passing cases, not a full
+original suite baseline or candidate behavioral RED/GREEN.
+
+`parity-remote-enoent-contract.md` records G20's actual host numeric-code
+transformation, client error reconstruction, phrase fallback and one caller.
+An additive structured-errno extension is proposed by the original guide,
+not existing behavior implemented by this audit. Mixed-version transport
+execution remains owed; G20's bounded result does not close all E5 gaps.
+
+Three flat audit tasks were dispatched, input acceptance verified, and then
+settled/released before acknowledgement:
+
+- Terminal CLI: `task_5adfe9a73999` / `ctx_774bf22f5ef0`; worker reports11
+  canonical commands and53 statically expanded cases. Both owned artifacts
+  are received, **not independently accepted or executed**.
+- Ten scanner-unobserved settings: `task_3ab6b9ed9296` / `ctx_50a4945c5b3e`;
+  worker reports27 source hashes and consumer traces for all10. Artifacts
+  await full independent body review; absence/permanence prose is not accepted.
+- Bots/Mentu/Meetings states: `task_1cdd18b81b2d` / `ctx_3225e0aa98b8`;
+  **not accepted**. Coordinator found test-title-only coverage labels,
+  inconsistent row granularity, incomplete controller/diagnostic predicates,
+  an invalid convention anchor and a scope-cutting shared-spaces statement.
+
+Correction `task_8f0c08014510` / `ctx_c389d8d0a9e2` is active on the same
+Muse terminal, owning only `parity-drogon-ui-state-contracts.json/.md`.
+Its input was accepted; other leaf workers are idle pending coordinator review.
+All original-wave mail through `delivery_faf29342c263` was acknowledged after
+release decisions. No nested agents, feature wave, installation, push or PR
+change occurred. Existing product edits remain untouched. Audit and goal stay
+open; next is independent terminal/settings review and UI correction review.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

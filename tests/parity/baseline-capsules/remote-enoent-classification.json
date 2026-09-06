@@ -1,0 +1,34 @@
+{
+  "capsuleId": "remote-enoent-classification",
+  "description": "Original pure isENOENT classification tests, including reconstructed SSH/IPC error objects. No real transport is exercised.",
+  "entryTestFile": "src/main/ipc/filesystem-path-containment-remote-enoent.test.ts",
+  "expectedTestCounts": { "files": 1, "tests": 7, "plainIt": 7, "tableRows": 0 },
+  "files": [
+    {
+      "path": "src/main/ipc/filesystem-path-containment-remote-enoent.test.ts",
+      "role": "test",
+      "sha256": "8634d5d377bd7b0c066174ac51b2d12dec613bf5e261c61297098a8155aa9ce2"
+    },
+    {
+      "path": "src/main/ipc/filesystem-path-containment.ts",
+      "role": "module",
+      "sha256": "f2a6d09644d78129b595715a0e760a565512aab5b6b075b748556e2fa92af2b2"
+    }
+  ],
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "isolationRationale": "Coordinator read both complete source files. Seven unchanged direct it() bodies call only isENOENT on in-memory Error instances or primitive values. The module imports node:path and realpath from node:fs/promises, but none of its filesystem/path operations is called by this entry test. No Electron, application state, sockets, processes, network, credentials or model calls are reached. This is source-inspected isolation, not a security sandbox.",
+  "dependencyClosureNote": "The test imports vitest and one relative module. The module imports only Node builtins. NodeJS.ErrnoException is a type erased by the runner; this capsule does not establish a TypeScript typecheck or actual SSH/IPC transport behavior.",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Both configurations use node. Use explicit original installed Vitest 4.1.11 and Node 24.19.0; actual receipt versions are authoritative.",
+    "The capsule omits renderer aliases, ORCA_FEATURE_WALL_ENABLED and the three DOM/host-port setup files; the fully read closure does not use them.",
+    "Root execArgv webstorage/GC flags, Windows worker limit and 30s test/60s hook timeouts are omitted. These synchronous in-memory assertions use no DOM, GC, webstorage, timers or platform-specific branch. This is not full source-environment equivalence."
+  ]
+}

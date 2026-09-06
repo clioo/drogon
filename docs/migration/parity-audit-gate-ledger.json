@@ -87,7 +87,7 @@
       "owner": [
         "Coordinator"
       ],
-      "evidence": "rewrite-parity-plan.md section3; parity-work-packages.md gaps register; parity-ui-journeys.md; parity-platform-audit.md; parity-speech-catalog.json (G15 built-in registry)",
+      "evidence": "rewrite-parity-plan.md section3; parity-work-packages.md gaps register; parity-ui-journeys.md; parity-platform-audit.md; parity-speech-catalog.json (G15 built-in registry); parity-remote-enoent-contract.md (G20 bounded source path + seven original unit cases)",
       "resolution": "Reconcile all existing gap IDs and named observer registries against accepted artifacts and E1-E4; add only source-backed omissions with concrete owners. Do not turn a speculative17-registry list into17 asserted blockers.",
       "proofStillOwed": "Full functional/visual/platform/performance acceptance; file allocation alone cannot close this audit."
     }
