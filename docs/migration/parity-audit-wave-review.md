@@ -1,6 +1,21 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
-## Current review queue after6339736
+## Current review disposition at129598f
+
+G7 config/serve v2 now has bounded coordinator source acceptance:23 direct
+reads,28 source hashes verified against checkout and pinned blobs,33 unchanged
+original parser cases passed in two isolated capsules. Its MD/JSON correct
+omitted fields versus empty arrays, trust versus execution, SSH response
+differences, launch output and boolean precedence. U1–U4 retain explicit
+owners for supervisor, trust persistence/callers, setup consumption and build
+configuration. Other five assertion-body summaries remain leaf claims.
+
+Remaining unaccepted worker drafts are the four window/browser and wire
+JSON/MD files. Do not repeat G7's accepted bounded contracts. Baseline is now
+151 distinct original cases/15 capsules; no full-suite/candidate acceptance.
+No new worker or nested hierarchy was launched in this review.
+
+## Historical review queue after6339736
 
 Three new flat tasks reused exact, live, settled external worker terminals.
 All reported succeeded; each was released with retained/external_terminal,

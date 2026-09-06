@@ -1111,6 +1111,37 @@ review of config/serve, relay/mobile/agentWait and window/browser authority.
 Do not rerun accepted censuses or infer a live writer from retained terminals.
 Product changes, profiles and installed app remain untouched by this wave.
 
+## Config/serve coordinator review and original parser baseline
+
+Previous turn made progress in129598f by retaining the upstream Mentu route
+in worker instructions. This turn independently reviewed G7 product config,
+hook precedence/trust, SSH method differences and serve parser/launch/readiness.
+The corrected v2 lists23 direct reads (core.ts/constants.ts explicitly partial)
+and28 unique hashes verified against both frozen checkout and pinned Git blobs.
+Five other worker assertion summaries remain leaf claims, not coordinator
+assertion acceptance. U1–U4 keep supervisor, trust persistence/callers, setup
+env consumption and config build entrypoints assigned; no scope was removed.
+
+Two new isolated capsules execute the unchanged original serve-mode-argv
+and serve-options tests using original Vitest4.1.11/Node24.19.0.17+16 cases
+passed with zero failures/skips; original baseline is now151 distinct cases
+across15 capsules. One exhaustive case explores22621 argv tails, not22621
+tests. Actual source imports close over reviewed pure modules and Vitest;
+no network, application, profile, model or child service is invoked by them.
+Archived results/receipts match the original stage records, with newline only.
+
+Important preserved distinctions: JSON presence differs from boolean value;
+final alias occurrence wins; runHook is not a trust gate; getRepoHooks and
+checkRepoHooks have different SSH errors; getSetupCommandSource can disagree
+with effective run-both execution when only local setup exists. That last
+source discrepancy remains an explicit regression/intent-review obligation.
+
+Four window/browser and wire drafts still await coordinator acceptance.
+No product changes integrated, source changes, model calls, worker launches,
+installation, push or PR in this pass. Audit/goal remain open. Next: bounded
+review of those two existing drafts and G7 U1–U4/G8 remaining entrypoints,
+not another census of completed inventories.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

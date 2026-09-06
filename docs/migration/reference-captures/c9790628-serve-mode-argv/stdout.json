@@ -1,0 +1,61 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned pure-function capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "serve-mode-argv",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-mode-argv-yYRhSV",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/main/startup/serve-mode-argv.test.ts",
+        "role": "test",
+        "sha256": "670bca554be192ce00dc54fc8fe59d70d25187438bf2226bceb7c5edd668a617",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-mode-argv-yYRhSV/src/main/startup/serve-mode-argv.test.ts"
+      },
+      {
+        "path": "src/main/startup/serve-mode-argv.ts",
+        "role": "module",
+        "sha256": "6c84e4b3836bdf97ed00f53905334caf1a4675e8aba21868190c41eee4dfbd1c",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-mode-argv-yYRhSV/src/main/startup/serve-mode-argv.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-mode-argv-yYRhSV/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Original installed Vitest4.1.11 using Node24.19.0 on macOS. Minimal node config omits original aliases, setupFiles, feature-wall define, GC/webstorage and platform worker settings. Complete reviewed closure does not use these; no full-config/typecheck equivalence claim.",
+    "Default unit timeout instead of original30s/60s; outer timeout30s; fresh owned stage, no installs."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "d784ca7d8dd7e774d2a7fcc7e307317f66efc98d3dbbac9fca1a11f0f41eb161",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 17,
+      "numPassedTests": 17,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 17
+    }
+  }
+}

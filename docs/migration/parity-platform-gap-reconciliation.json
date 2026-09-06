@@ -107,13 +107,17 @@
         "WP-SUP-CONFIG",
         "WP-ENG-CLI"
       ],
-      "state": "partially-located",
+      "state": "bounded-source-reviewed-followups-owned",
       "evidence": [
         "parity-source-contracts.json",
         "parity-cli-argument-contract.json",
-        "parity-orcad-launch-contract.md"
+        "parity-orcad-launch-contract.md",
+        "parity-config-serve-contracts.json",
+        "parity-config-serve-contracts.md",
+        "reference-captures/c9790628-serve-mode-argv/README.md",
+        "reference-captures/c9790628-serve-options/README.md"
       ],
-      "enumerationDisposition": "serve registry and shared parser metadata exist; config/orca.yaml consumer precedence and serve execution need bounded source review. orcad options cannot substitute for serve.",
+      "enumerationDisposition": "G7 v2 characterizes YAML shape/limits, per-hook precedence, trust inspection versus executor, SSH method distinctions and serve argv/launch/readiness.23 direct reads and28 fingerprints verified.33 unchanged original parser cases pass; no candidate parity. U1-U4 retain full supervisor, trust persistence/callers, setup-env consumption and config build-entrypoint work with existing owners. Do not repeat accepted source contracts; orcad cannot substitute for serve.",
       "acceptance": "Produce config-schema/precedence/error and serve handler contracts, then source/candidate tests using isolated profiles and explicit network exposure."
     },
     {
