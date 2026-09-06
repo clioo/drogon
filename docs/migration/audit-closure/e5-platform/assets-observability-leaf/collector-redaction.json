@@ -1,0 +1,324 @@
+{
+  "leaf": "assets-observability-leaf",
+  "task": "task_ba832020f6e0",
+  "sourcePinnedCommit": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRepo": "/Users/carlos/Documents/Drogon-mentu-session",
+  "rewriteRepo": "/Users/carlos/Documents/Drogon-rewrite",
+  "rewriteStatusAtAudit": "no observability/ or crash-reporting/ directory present under apps/desktop/src/main — candidate source handoff, not a parity diff",
+  "scopeNote": "audit-only, no descendants; finite assigned file set only; no recursive import census; not a claim that all ~57 diagnostic-suite test bodies were read",
+  "contracts": [
+    {
+      "id": "OBS-COL-01",
+      "file": "src/main/observability/bundle.ts",
+      "function": "collectBundle",
+      "blobSha256": "750f41fead9c3b45971623c7fb55065297ff3667",
+      "lines": 191,
+      "readDepth": "full",
+      "summary": "Newest-first NDJSON scan across rotated trace + optional daemon-log family; end-time lookback filter (default 30 min); per-record and cumulative 4 MiB cap enforcement; second server-mode redaction pass; 50MiB per-file stat guard before read."
+    },
+    {
+      "id": "OBS-COL-02",
+      "file": "src/main/observability/bundle.ts",
+      "function": "generateBundleSubmissionId",
+      "blobSha256": "750f41fead9c3b45971623c7fb55065297ff3667",
+      "lines": 191,
+      "readDepth": "full",
+      "summary": "128-bit randomBytes(16) base64url id, generated fresh per bundle, never persisted, not derived from/joinable to install_id."
+    },
+    {
+      "id": "OBS-COL-03",
+      "file": "src/main/observability/local-file-sink.ts",
+      "function": "createLocalFileSink",
+      "blobSha256": "b2a74bbbb40888273127541752ec2d950f5fe610",
+      "lines": 282,
+      "readDepth": "full",
+      "summary": "Synchronous fd-based NDJSON append with size-based rotation, per-record oversize drop, per-batch chunk split, 0700/0600 permission hardening, single reopen+retry then silent drop on write failure."
+    },
+    {
+      "id": "OBS-COL-04",
+      "file": "src/main/observability/diagnostic-bundle-limits.ts",
+      "function": "MAX_BUNDLE_BYTES",
+      "blobSha256": "cb70c7c95691e5f09c40e8c16d712032c9be1b6b",
+      "lines": 1,
+      "readDepth": "full",
+      "summary": "4 MiB constant shared by OBS-COL-01 and the (out-of-leaf) upload path."
+    },
+    {
+      "id": "OBS-COL-05",
+      "file": "src/main/observability/logs-directory.ts",
+      "function": "getLogsDirectory/getTraceFilePath/getDaemonLogFilePath",
+      "blobSha256": "20ad104af740d6ed458d996c56c64e5c6bdb74f4",
+      "lines": 44,
+      "readDepth": "full",
+      "summary": "Single source of truth for userData/logs, trace file and daemon log paths; intentionally diverges from Electron's getPath('logs') to avoid stranding existing bundles."
+    },
+    {
+      "id": "OBS-COL-06",
+      "file": "src/main/observability/redactor.ts",
+      "function": "redactString/redactValue/redactAttributes/redactSpan",
+      "blobSha256": "da8feb0a8b0af99bdbc870765114aad15d73827f",
+      "lines": 237,
+      "readDepth": "full",
+      "summary": "4 idempotent string rules (labeled kv, provider-key fingerprints, URL userinfo, .env-shape) plus attribute-key blocklist with server-only identity-key extension. No per-value length cap by design."
+    },
+    {
+      "id": "OBS-COL-07",
+      "file": "src/main/observability/tracer.ts",
+      "function": "withSpan/startSpan/flushActiveSink",
+      "blobSha256": "c151aa6a2fb77093d76b4e678bafad466976a963",
+      "lines": 283,
+      "readDepth": "full",
+      "summary": "AsyncLocalStorage-based span lifecycle recorder; every finalized span redacted client-mode before push to sink; noopSpan when no sink installed; flushActiveSink swallows sink errors by design."
+    },
+    {
+      "id": "OBS-COL-08",
+      "file": "src/main/observability/instrumentation.ts",
+      "function": "withGitSpan/withWorktreeSpan/withUpdaterSpan",
+      "blobSha256": "8569ab6ef048c2f3fbaf74f9d9cb683094b26179",
+      "lines": 332,
+      "readDepth": "full",
+      "summary": "Span-boundary wrappers for git/worktree/updater; bounded (512-bucket) fast-success sampling window for git.exec spans."
+    },
+    {
+      "id": "OBS-COL-09",
+      "file": "src/main/crash-reporting/crash-report-store.ts",
+      "function": "CrashReportStore",
+      "blobSha256": "143210418ce6821c769826a0d583d12c6de3fba0",
+      "lines": 259,
+      "readDepth": "full",
+      "summary": "Atomic temp-file+rename JSON persistence, MAX_REPORTS=5 cap, serialized writes, Windows EPERM/EACCES/EBUSY retry ladder with one ACL-repair attempt, sibling-crash auto-dismiss within 5s window, sanitizes via OBS-COL-13 at write time."
+    },
+    {
+      "id": "OBS-COL-10",
+      "file": "src/main/crash-reporting/crashpad-capture.ts",
+      "function": "startCrashpadCapture/waitForCrashMinidump/captureMinidumpSignature",
+      "blobSha256": "1f628fe9c24e90c5766f5d6401cd0fab49d78416",
+      "lines": 317,
+      "readDepth": "full",
+      "summary": "Starts Electron Crashpad with uploadToServer:false; pairs dumps via 30s recency window + 64MiB size ceiling; prunes stored dumps against 128MiB/64-file budget protecting claimed/reserved paths; delegates signature parse to out-of-leaf minidump-crash-signature.ts."
+    },
+    {
+      "id": "OBS-COL-11",
+      "file": "src/main/crash-reporting/crash-breadcrumb-store.ts",
+      "function": "recordCrashBreadcrumb/recordCoalescedCrashBreadcrumb/getCrashBreadcrumbSnapshot",
+      "blobSha256": "2c0b68b043eaecd697a2fe40ac45a201a6ba0cda",
+      "lines": 281,
+      "readDepth": "full",
+      "summary": "In-memory 30-entry ring plus 8-entry retained-threshold map plus 128-key bounded coalescing map folding repeat bursts into suppressedSinceLast; not itself persisted to disk."
+    },
+    {
+      "id": "OBS-COL-12",
+      "file": "src/main/crash-reporting/durable-crash-breadcrumb.ts",
+      "function": "recordDurableCrashBreadcrumb/recordCoalescedDurableCrashBreadcrumb",
+      "blobSha256": "ff1c77bc9c65ea2bc410a8d9d3d1f8ea7589eabf",
+      "lines": 88,
+      "readDepth": "full",
+      "summary": "Wraps OBS-COL-11 with main-process lifecycle identity tagging and forces flushActiveSink() after every write/failure."
+    },
+    {
+      "id": "OBS-COL-13",
+      "file": "src/shared/crash-report-redaction.ts",
+      "function": "sanitizeCrashReportString/sanitizeCrashReportDetails/sanitizeCrashReportBreadcrumbs",
+      "blobSha256": "510792de2d85c62cb5faf8b17091cdda88f0e688",
+      "lines": 109,
+      "readDepth": "full",
+      "summary": "Independent (from OBS-COL-06) path/credential/secret regex set; per-string 240-char cap (4000 for stack-shaped keys); breadcrumbs capped to newest 30, name capped to 80 chars. Directly called by OBS-COL-09."
+    },
+    {
+      "id": "OBS-COL-13b",
+      "file": "src/shared/crash-reporting.ts",
+      "function": "formatCrashReportText",
+      "blobSha256": "194760afa8137c49858b7ebaeb4a73ec3e27a2d0",
+      "lines": 276,
+      "readDepth": "partial (exports list full; function body lines 192-241 read in full; remainder pointer-only)",
+      "summary": "Directly called by OBS-COL-09's formatDiagnosticText; re-emits report.details/breadcrumbs verbatim, safe only because OBS-COL-09 sanitizes at write time via OBS-COL-13."
+    }
+  ],
+  "testAssociations": [
+    {
+      "sourceFile": "src/main/observability/bundle.ts",
+      "testFile": "src/main/observability/bundle.test.ts",
+      "testFileLines": 582,
+      "readDepth": "partial-body",
+      "bodyReadLineRange": "247-330",
+      "bodyReadCases": [
+        "does not append a span that would push the payload over the upload cap",
+        "keeps the newest spans when the bundle size cap truncates a file",
+        "skips individually oversized recent spans and keeps smaller recent context",
+        "skips oversized middle spans after accepting newer context"
+      ],
+      "pointerOnlyCases": [
+        "bundle — submission ID (2 cases)",
+        "reads spans from the rotated family",
+        "drops spans older than the lookback window",
+        "merges the daemon lifecycle log, bounded by the same lookback",
+        "collects no daemon log lines when no daemon log path is given",
+        "runs the redactor on the merged payload",
+        "uses server-mode structured redaction for nested auth and identity keys",
+        "skips malformed (non-JSON) lines without throwing",
+        "skips valid JSON lines that are not span objects without throwing",
+        "validateUploadUrl (6 cases) -- out of leaf: tests lead-owned upload seam",
+        "uploadBundle and deleteBundle (8 cases) -- out of leaf: tests lead-owned upload seam"
+      ]
+    },
+    {
+      "sourceFile": "src/main/observability/local-file-sink.ts",
+      "testFile": "src/main/observability/local-file-sink.test.ts",
+      "testFileLines": 272,
+      "readDepth": "partial-body",
+      "bodyReadLineRange": "111-217",
+      "bodyReadCases": [
+        "rotates when the byte cap is exceeded",
+        "uses UTF-8 byte length for rotation accounting",
+        "drops an individual record that exceeds the file byte cap",
+        "splits an oversized buffered batch instead of dropping valid records",
+        "caps total disk usage at maxFiles x maxBytes (worst case)"
+      ],
+      "pointerOnlyCases": [
+        "basic write (4 cases)",
+        "listing + clearing (1+ cases)",
+        "robustness (2 cases: circular records, close-after-close)"
+      ]
+    },
+    {
+      "sourceFile": "src/main/observability/redactor.ts",
+      "testFile": "src/main/observability/redactor.test.ts",
+      "testFileLines": 342,
+      "readDepth": "pointer-only",
+      "pointerOnlyCases": [
+        "provider-key fingerprints (per-tag x4 sub-cases)",
+        "labeled key-value (5 cases)",
+        "URL userinfo strip (2 cases)",
+        ".env-shape line (2 cases)",
+        "attribute-key blocklist (7 cases)",
+        "server mode adds install_id keys (2 cases)",
+        "recursive value redaction (3 cases)",
+        "idempotence (1 case)",
+        "span shape (3 cases)"
+      ]
+    },
+    {
+      "sourceFile": "src/main/observability/tracer.ts",
+      "testFile": "src/main/observability/tracer.test.ts",
+      "testFileLines": 203,
+      "readDepth": "not read this pass",
+      "pointerOnlyCases": []
+    },
+    {
+      "sourceFile": "src/main/observability/instrumentation.ts",
+      "testFile": "src/main/observability/instrumentation.test.ts",
+      "testFileLines": 251,
+      "readDepth": "not read this pass",
+      "pointerOnlyCases": []
+    },
+    {
+      "sourceFile": "src/main/crash-reporting/crash-report-store.ts",
+      "testFile": "src/main/crash-reporting/crash-report-store.test.ts",
+      "testFileLines": 266,
+      "readDepth": "partial-body",
+      "bodyReadLineRange": "162-218",
+      "bodyReadCases": [
+        "repairs the Windows userData ACL and retries a denied crash write",
+        "recovers a pending report after a transient Windows EPERM/EACCES/EBUSY read failure",
+        "retries a transient Windows rename lock",
+        "removes its temp file after a terminal write failure"
+      ],
+      "pointerOnlyCases": [
+        "records sanitized pending reports and returns the latest pending report",
+        "caps reports to the newest five",
+        "recovers corrupt JSON as an empty report list",
+        "allows a pending report to reach one terminal status only",
+        "dismisses sibling pending records from the same Electron crash event",
+        "dismisses sibling pending records after one crash report is sent",
+        "persists a submitted dismissed report as sent",
+        "serializes concurrent writes",
+        "waits for an in-flight crash write before reading the pending report",
+        "attachDetails (4 cases)"
+      ]
+    },
+    {
+      "sourceFile": "src/main/crash-reporting/crashpad-capture.ts",
+      "testFile": "src/main/crash-reporting/crashpad-capture.test.ts",
+      "testFileLines": 292,
+      "readDepth": "pointer-only",
+      "pointerOnlyCases": [
+        "waitForCrashMinidump (8 cases)",
+        "captureMinidumpSignature (6 cases)",
+        "Crashpad dump pruning (3 cases)"
+      ]
+    },
+    {
+      "sourceFile": "src/main/crash-reporting/crash-breadcrumb-store.ts",
+      "testFile": "src/main/crash-reporting/crash-breadcrumb-store.test.ts + crash-breadcrumb-store-leak.test.ts + crash-breadcrumb-store-orphan-cleanup.test.ts",
+      "testFileLines": 858,
+      "readDepth": "not read this pass",
+      "pointerOnlyCases": [],
+      "note": "largest unread test surface in this leaf; needed before any coalescing/eviction correctness claim"
+    },
+    {
+      "sourceFile": "src/main/crash-reporting/durable-crash-breadcrumb.ts",
+      "testFile": "src/main/crash-reporting/durable-crash-breadcrumb.test.ts",
+      "testFileLines": 97,
+      "readDepth": "not read this pass",
+      "pointerOnlyCases": []
+    },
+    {
+      "sourceFile": "src/shared/crash-report-redaction.ts + src/shared/crash-reporting.ts",
+      "testFile": "src/shared/crash-reporting.test.ts",
+      "testFileLines": 502,
+      "readDepth": "not read this pass",
+      "pointerOnlyCases": [],
+      "note": "most directly relevant to Finding F1; should be the next read"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Divergent secret-redaction coverage between OBS-COL-06 and OBS-COL-13",
+      "verdict": "PLAUSIBLE",
+      "evidence": "OBS-COL-06 has explicit AWS-secret-access-key and bare-JWT patterns; OBS-COL-13's SECRET_ASSIGNMENT_PATTERN key-name alternation requires a \\b immediately before 'secret', which does not match the '_' preceding 'secret' in 'aws_secret_access_key', and OBS-COL-13 has no bare-JWT pattern (only Bearer-prefixed).",
+      "failureScenario": "A crash-report detail string containing 'aws_secret_access_key=AKIA...restofsecret...' or a bare JWT (no 'Bearer ' prefix) passes OBS-COL-13 unredacted into crash-reports.json and into formatCrashReportText's verbatim output, while the same string in a trace span is redacted by OBS-COL-06.",
+      "confirmedByTestRead": false,
+      "nextStep": "read src/shared/crash-reporting.test.ts assertion bodies for aws_secret_access_key-shaped or bare-JWT input cases"
+    },
+    {
+      "id": "F2",
+      "title": "Silent data loss on local sink write failure, no observability signal",
+      "verdict": "PLAUSIBLE",
+      "evidence": "OBS-COL-03's writeChunk swallows both the original write error and a retry-after-reopen failure with no callback, counter, or breadcrumb (by design per source comment).",
+      "failureScenario": "A persistent disk-full or permission condition produces a trace file that silently stops growing with no signal anywhere in this leaf's files that data is being lost.",
+      "confirmedByTestRead": false,
+      "nextStep": "read local-file-sink.test.ts 'robustness' describe block bodies (pointer-only currently)"
+    },
+    {
+      "id": "F3",
+      "title": "Unknown external/OS seams out of this leaf's characterization",
+      "verdict": "not-applicable-informational",
+      "items": [
+        "minidump-crash-signature.ts (parseMinidumpCrashSignature) — called by OBS-COL-10, file outside assigned set",
+        "Electron's real Crashpad handler process — OS-level dump-writer timing not verifiable from source",
+        "../win32-utils (grantDirAclAsync, isPermissionError) — called by OBS-COL-09, outside assigned set",
+        "../../shared/app-environment (getAppEnvironment/hasAppEnvironment) — depended on by OBS-COL-05, not read"
+      ]
+    }
+  ],
+  "nextTestsRanked": [
+    "src/shared/crash-reporting.test.ts (502 lines) — confirm/refute F1",
+    "crash-breadcrumb-store.test.ts + -leak.test.ts + -orphan-cleanup.test.ts (858 lines combined) — largest unread surface",
+    "src/main/observability/redactor.test.ts (342 lines) — confirm OBS-COL-06 rule coverage rigor",
+    "src/main/observability/tracer.test.ts (203) and instrumentation.test.ts (251) — untouched this pass",
+    "crashpad-capture.test.ts (292) and crash-report-store.test.ts remaining ~12 cases — confirm pruning/cap/sibling-dismiss behavior"
+  ],
+  "constraints": {
+    "testsRun": false,
+    "servicesCalled": false,
+    "uploadsOrTelemetryQueries": false,
+    "sourceWrites": false,
+    "credentialsTouched": false,
+    "dependenciesInstalled": false,
+    "gitMutations": false,
+    "uiTouched": false,
+    "originalTelemetryDestinationsProposedForReuse": false
+  },
+  "precedence": "Candidate for lead/root review, not E5 closure, not implementation parity. Not a claim that all diagnostic-suite test bodies were read. Source counts/hashes are provenance, not behavior proof."
+}

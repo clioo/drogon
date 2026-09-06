@@ -20,6 +20,10 @@ The initial directory assignments below are historical. E2/E4 source gates remai
 
 E1 retains `task_544ba69fa3ba / ctx_d78d71a450c6` for final UI source gaps. E3 retains `task_89c732c9e750 / ctx_b0d85751e42b` for usage24 and downstream owner joins. No lead may edit another output or central ledger. E5 CI owns workflows/IAM/ops entrypoints; E5 services owns deployment-operation/state/transport bodies; E5 assets owns provenance and diagnostic submission. Cross-links must name actual contracts, not replace missing source evidence with an owner label. Lead-owned children still require independent review and official release before completion. Source fixture debt and unresolved external asset authorization remain visible; no silent scope reduction.
 
+### Subsequent assets handoff checkpoint
+
+`task_421ba7560bf2 / ctx_e269f89983b0` has completed and received the official release result retained/external_terminal/processAction none, receipt `1e4d5ab2-41b8-4ff2-8951-3450825c639f`. Its17 finite assets/observability source records are independently accepted with explicit AO obligations, not full E5 or publication acceptance. It has no new Task. The other four rows/assignments above remain active; their latest completions must be checked through Orca before reuse. The audit-to-Sol gate is unchanged. Root's independent review and lifecycle correction are recorded in audit-root-followup-review.md and audit-semantic-followups.md.
+
 ## Initial ownership and bounded deliverables
 
 Root Astra owns acceptance, shared contracts, progress ledger, Git, integration and installation. Five fresh Codex `gpt-6-astra` leads own only the corresponding new directory under `docs/migration/audit-closure/`. They read the current evidence and pinned original source; no product edits, dependency installs, personal profile changes or background services in this audit wave. Reports must correct evidence rather than re-enumerate accepted M1–M7.
