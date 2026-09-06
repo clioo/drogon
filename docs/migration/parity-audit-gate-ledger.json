@@ -69,8 +69,8 @@
       "owner": [
         "WP-ENG-IPC"
       ],
-      "evidence": "parity-source-bridges.json and parity-bridge-enumeration.md denominator/gaps",
-      "resolution": "Resolve or source-ground named11delegated methods,1dynamic channel,1disposer and54invoke/12send/96push attribution gaps. Unknown linkage is not missing implementation.",
+      "evidence": "parity-source-bridges.json and parity-bridge-enumeration.md; parity-bridge-delegated-resolution.json coordinator-reviewed v2",
+      "resolution": "The11delegated+1dynamic+1disposer facts are source-resolved across12distinct methods; do not repeat that slice. Trace54invoke/12send/96push main-side attribution gaps in disjoint new artifacts. Source linkage is not execution proof or universal lifecycle correctness.",
       "proofStillOwed": "Actual request/response/error/subscription contracts and mixed-version behavior."
     },
     {
@@ -78,8 +78,8 @@
       "owner": [
         "WP-ENG-CLI"
       ],
-      "evidence": "parity-cli-argument-contract.json handler obligations + parity-source-contracts.json handlerGroupMembership",
-      "resolution": "Map per-command required/default/type/value validation and output/error contracts through actual owning handlers, including passthrough dispatch. Shared parser metadata is already accepted; do not repeat that census.",
+      "evidence": "parity-cli-argument-contract.json + parity-source-contracts.json + parity-cli-skills-contracts.json coordinator-reviewed v2",
+      "resolution": "Six skills handlers characterized, including RPC-vs-local JSON, host checks, update --project and permission layers. Continue remaining command value/default/required/output/error contracts and passthrough dispatch. Accepted shared parser and skill guide/placement metadata need not be repeated.",
       "proofStillOwed": "Original CLI commands and candidate dual-target results with no assertion weakening."
     },
     {

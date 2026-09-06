@@ -569,6 +569,36 @@ still require the bounded follow-ups in `parity-audit-gate-ledger.json`.
 No dispatched worker remains from this wave. Audit and product acceptance
 remain open; no implementation was promoted or installed.
 
+## Six skills handlers and delegated bridge linkage
+
+Coordinator accepted corrected static traces from tasks `task_cb1cc499501e`
+and `task_0de16c5eb36d`; both dispatches settled and were released before reuse.
+The six skills contracts distinguish direct JSON from RPC envelopes, selection
+listing from actual installed state, local update `--project`, and tolerant CLI
+preflight from authoritative runtime default-off publication. Worker counts
+omitted literal table expansion: there are61 statically enumerable cases in
+three cited files, not53; none was executed in this audit.
+
+The bridge slice links12 distinct methods covering11delegated+1dynamic+1disposer
+facts. Seven delegated functions, four built-in calls and one inline dynamic
+subscription are source-identified. Coordinator corrected worker totals and
+unsubscribe semantics: remote per-ID unsubscribe is attempted on every call;
+only shared local listener removal waits for an empty callback map. Lexical
+pairing does not imply universally idempotent or correct lifecycle behavior.
+
+`scripts/check-parity-skills-bridge-traces.mjs` passed under Node24.19.0:
+six commands,17 skills source hashes,53 direct declarations plus3 tables =61
+cases,12 exact bridge census selectors and16 unique bridge source hashes.
+It imports no inspected source modules and executes no original tests. This
+reproducible metadata check is not a candidate or runtime acceptance test.
+
+Current flat assignments remain disjoint: settings consumers
+`task_9e85a2e6b0db` / `ctx_a51cca3904da`; main request/send attribution
+`task_5b7ea136a29c` / `ctx_e3ff8d99ee75`; main push attribution
+`task_df8fdc1a1f44` / `ctx_c020f8eb529c`. All three were accepted by Orca;
+none has delivered an accepted result at this checkpoint. No hierarchy or
+feature wave started, and no installed build or personal session was changed.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
