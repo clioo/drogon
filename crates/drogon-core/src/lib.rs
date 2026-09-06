@@ -348,15 +348,17 @@ impl Engine {
     ) -> Result<(Arc<SessionHandle>, String), RpcError> {
         let session_id = require_str(params, "sessionId")?.to_string();
         let incarnation = require_str(params, "incarnation")?;
-        let handle = self
-            .sessions
-            .lock()
-            .unwrap()
-            .get(&session_id)
-            .cloned()
-            .ok_or_else(|| {
-                error::unverifiable("session has no active handle in this service instance")
-            })?;
+        let handle = self.sessions.lock().unwrap().get(&session_id).cloned();
+        let Some(handle) = handle else {
+            // Same identity distinction `session.stop` makes: a
+            // never-existing id is `not_found`, a wrong incarnation on an
+            // existing row is `stale_incarnation`, and only a *prior-instance
+            // session that genuinely has no handle here* is `unverifiable`.
+            self.session_row_as_value(&session_id, incarnation)?;
+            return Err(error::unverifiable(
+                "session exists but has no active handle in this service instance",
+            ));
+        };
         session::check_incarnation(&handle, incarnation)?;
         Ok((handle, session_id))
     }

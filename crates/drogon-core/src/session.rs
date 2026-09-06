@@ -9,6 +9,7 @@
 //! module deliberately does not reuse.
 
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -35,14 +36,32 @@ pub(crate) struct SessionHandle {
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
     pub(crate) created_at: String,
-    master: Mutex<Box<dyn MasterPty + Send>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    /// The PTY master, dropped once the child's exit has been positively
+    /// observed *and* the reader thread finished draining output.
+    /// Retained ring output is in-memory and survives this release.
+    native: Mutex<Option<NativePty>>,
+    /// The PTY writer, under its own lock — deliberately NOT the master's.
+    /// A write can block for a long time on a child that never reads its
+    /// input; that must never serialize master operations (`resize`) or
+    /// native release behind the blocked writer. Only writes pay for a
+    /// blocked write.
+    writer: Mutex<Option<Box<dyn Write + Send>>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
     ring: Mutex<RingBuffer>,
     size: Mutex<(u16, u16)>,
     /// Child observation is independent of PTY EOF and serialized with exact stop.
     exit_code: Mutex<Option<i64>>,
+    /// Set by the reader thread when the PTY read side reached EOF or an
+    /// unrecoverable read error — i.e. the drain phase is over.
+    reader_done: AtomicBool,
     db: Arc<Mutex<Connection>>,
+}
+
+/// The native PTY master held open while the session can still resize.
+/// Releasing this struct closes the master descriptor. The writer lives
+/// separately (see `SessionHandle::writer`).
+struct NativePty {
+    master: Box<dyn MasterPty + Send>,
 }
 
 fn now_rfc3339() -> String {
@@ -100,12 +119,13 @@ pub(crate) fn spawn(
                 command: command.clone(),
                 args: args.clone(),
                 created_at: created_at.clone(),
-                master: Mutex::new(master),
-                writer: Mutex::new(writer),
+                native: Mutex::new(Some(NativePty { master })),
+                writer: Mutex::new(Some(writer)),
                 child: Mutex::new(child),
                 ring: Mutex::new(RingBuffer::new()),
                 size: Mutex::new((cols, rows)),
                 exit_code: Mutex::new(None),
+                reader_done: AtomicBool::new(false),
                 db: db.clone(),
             });
             spawn_reader_thread(handle.clone(), reader);
@@ -164,12 +184,15 @@ fn spawn_pty(
         .map_err(|e| error::io_error(format!("take pty writer failed: {e}")))?;
 
     let mut cmd = CommandBuilder::new(command);
+    // Remove control-plane context from the child environment: a foreign
+    // runtime's identifiers (ORCA_*) and this runtime's own authority binding
+    // (DROGON_*), so a harness or agent inside a session cannot accidentally
+    // act on this service (or another one) through inherited variables. The
+    // service injects no credentials here; scoped identity injection is a
+    // separate, future coordination concern.
     for (key, _) in std::env::vars_os() {
-        if key
-            .to_string_lossy()
-            .to_ascii_uppercase()
-            .starts_with("ORCA_")
-        {
+        let upper = key.to_string_lossy().to_ascii_uppercase();
+        if upper.starts_with("ORCA_") || upper.starts_with("DROGON_") {
             cmd.env_remove(key);
         }
     }
@@ -211,6 +234,11 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
             }
         }
         // EOF and child exit are independent; descendants can keep the slave open.
+        handle.reader_done.store(true, Ordering::Release);
+        // The reader finishing may be the last of the two facts (exit observed
+        // + drain done) — try to release the native halves right away. The
+        // exit observer (stop or the poller) covers the other ordering.
+        try_release_native(&handle);
     });
 }
 
@@ -235,13 +263,14 @@ fn try_reap(handle: &SessionHandle) -> Option<i64> {
 }
 
 /// Polls (never blocks, never holds a lock across the sleep) until the
-/// child's real exit is observed, then persists it. Runs for as long as it
-/// takes — a background thread waiting on its own session's eventual exit
-/// costs nothing else while it waits.
+/// child's real exit is observed, then persists it and releases the native
+/// PTY halves. Runs for as long as it takes — a background thread waiting on
+/// its own session's eventual exit costs nothing else while it waits.
 fn poll_until_exit(handle: &SessionHandle) {
     loop {
         if let Some(code) = try_reap(handle) {
             if persist_exit(handle, code).is_ok() {
+                try_release_native(handle);
                 return;
             }
             std::thread::sleep(Duration::from_secs(1));
@@ -249,6 +278,26 @@ fn poll_until_exit(handle: &SessionHandle) {
             std::thread::sleep(CHILD_POLL_INTERVAL);
         }
     }
+}
+
+/// Drops the PTY master and writer exactly once, and only after BOTH facts
+/// hold: the child's exit was positively observed (reaped exit status) and
+/// the reader thread finished draining output. Retained ring output is
+/// in-memory and unaffected, so `session.read` keeps serving the retained
+/// tail after release. No descendant cleanup is claimed, attempted, or
+/// implied. Each lock is taken only for the instant of a check or a
+/// `take()`; this never blocks while holding the DB or session-map locks.
+/// The master is taken before the writer: even if a writer-side write is
+/// still unwinding, the master descriptor is released first.
+fn try_release_native(handle: &SessionHandle) {
+    if handle.exit_code.lock().unwrap().is_none() {
+        return;
+    }
+    if !handle.reader_done.load(Ordering::Acquire) {
+        return;
+    }
+    drop(handle.native.lock().unwrap().take());
+    drop(handle.writer.lock().unwrap().take());
 }
 
 fn persist_exit(handle: &SessionHandle, exit_code: i64) -> Result<(), RpcError> {
@@ -314,7 +363,16 @@ pub(crate) fn write(handle: &SessionHandle, data: &[u8]) -> Result<usize, RpcErr
             "session already exited; cannot accept more input",
         ));
     }
+    // Writer lock only: a long/blocking write must not serialize master
+    // operations (`resize`) or native release behind it.
     let mut writer = handle.writer.lock().unwrap();
+    let Some(writer) = writer.as_mut() else {
+        // Exit was observed and output drained between the reap check and the
+        // lock; the writer is gone by design, not by failure.
+        return Err(error::unverifiable(
+            "session already exited; cannot accept more input",
+        ));
+    };
     writer
         .write_all(data)
         .map_err(|e| error::io_error(format!("pty write failed: {e}")))?;
@@ -331,17 +389,24 @@ pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Val
             "session already exited (code {code}); cannot resize"
         )));
     }
-    handle
-        .master
-        .lock()
-        .unwrap()
-        .resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| error::io_error(format!("pty resize failed: {e}")))?;
+    {
+        let mut native = handle.native.lock().unwrap();
+        let Some(native) = native.as_mut() else {
+            // Exit was observed and output drained between the reap check and
+            // the lock; the master is gone by design, not by failure. (A
+            // blocked writer holds only the writer lock, never this one.)
+            return Err(error::unverifiable("session already exited; cannot resize"));
+        };
+        native
+            .master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| error::io_error(format!("pty resize failed: {e}")))?;
+    }
     *handle.size.lock().unwrap() = (cols, rows);
     let conn = handle.db.lock().unwrap();
     conn.execute(
@@ -360,6 +425,7 @@ pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Val
 pub(crate) fn stop(handle: &SessionHandle) -> Result<Value, RpcError> {
     if let Some(code) = try_reap(handle) {
         persist_exit(handle, code)?;
+        try_release_native(handle);
         return Ok(to_json(handle, "exited", Some(code)));
     }
     {
@@ -370,9 +436,12 @@ pub(crate) fn stop(handle: &SessionHandle) -> Result<Value, RpcError> {
     loop {
         if let Some(code) = try_reap(handle) {
             persist_exit(handle, code)?;
+            try_release_native(handle);
             return Ok(to_json(handle, "exited", Some(code)));
         }
         if Instant::now() >= deadline {
+            // The poller thread owns release for this ordering: it will
+            // observe the exit and release the native halves once drained.
             return Ok(to_json(handle, "unverifiable", None));
         }
         std::thread::sleep(STOP_POLL_INTERVAL);
