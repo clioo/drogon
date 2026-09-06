@@ -1,0 +1,59 @@
+Bounded real-regression RED capture — numeric extraction defects (root review findings)
+======================================================================================
+Task task_496eabe1ef0c / ctx_16049bee8b80. Captured BEFORE the numeric
+correction, against the production module with only the new regression tests
+added (no stubs, no artificial defects). Companion to red-round-stub.txt
+(deliberate-stub sensitivity run, first delivery); this file is NOT
+overwritten by it and records a genuine observed defect instead.
+
+Command (working directory: Drogon-rewrite repo root):
+  cargo test -p drogon-core --test session_authority --locked
+
+Verbatim failing lines from the recorded run:
+  test numeric_extraction_accepts_integral_float_spellings_from_raw_json ... FAILED
+  test numeric_extraction_accepts_exponent_spelling_from_raw_json ... FAILED
+  test numeric_extraction_accepts_exact_safe_integer_boundaries_from_raw_json ... FAILED
+  test numeric_extraction_rejects_fractions_unsafe_integers_and_i64_min_from_raw_json ... FAILED
+
+Verbatim panic evidence (real defect, not setup/compile):
+  thread 'numeric_extraction_rejects_fractions_unsafe_integers_and_i64_min_from_raw_json' (...) panicked at /opt/homebrew/Cellar/rust/1.98.0/lib/rustlib/src/rust/library/core/src/num/mod.rs:451:5:
+
+Summary line:
+  test result: FAILED. 47 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+Classification:
+- numeric_extraction_accepts_integral_float_spellings_from_raw_json —
+  genuine behavioral failure: raw JSON `1.0` spellings of persisted numeric
+  fields were rejected by `Value::as_i64` although Node `JSON.parse` +
+  `Number.isSafeInteger` accept them (root finding 3).
+- numeric_extraction_accepts_exponent_spelling_from_raw_json — same defect,
+  `1e0` spelling.
+- numeric_extraction_accepts_exact_safe_integer_boundaries_from_raw_json —
+  same defect at the exact ±(2^53-1) boundary (raw integer spellings parse as
+  u64 in serde_json and also fail `as_i64`).
+- numeric_extraction_rejects_fractions_unsafe_integers_and_i64_min_from_raw_json —
+  panic evidence: raw JSON `-9223372036854775808` parses as a plain i64 and
+  reached `i64::abs()` inside `is_safe_integer`, overflowing (root finding 2).
+  Distinct from the three assertion failures above; this test also contains
+  passing sub-assertions (fraction and 2^53+1 were already rejected).
+
+Not evidence: compile errors during test authoring (fixed before the run);
+47 previously green tests stayed green (47 passed above).
+
+Correction-round addendum (honest classification, recorded after the fix):
+- The i64::MIN panic line is the PURE reproduction of root finding 2
+  (`i64::abs` overflow): it fired in fence validation before any fixture
+  content mattered, and the post-fix code quarantines the same raw input as
+  invalid without panicking.
+- The three acceptance-test failures were genuine candidate failures, but
+  not purely attributable to the `as_i64` defect (root finding 3): the new
+  fixture itself had an independent bug (an invalid deathEvidence kind
+  spelling "exit_zero" instead of the source enum spelling "exit-observed"),
+  discovered during correction. The mechanism of finding 3 is nonetheless
+  mechanical and was confirmed: `serde_json::from_str::<Value>("1.0")`
+  yields a float-stored number for which `Value::as_i64` returns None while
+  Node `JSON.parse("1.0")` + `Number.isSafeInteger` accept it, and the
+  post-fix suite admits the same raw inputs through the single
+  `json_safe_integer` path. The fixture bug was fixed alongside the numeric
+  correction; the authoritative post-fix evidence is the 51/51 GREEN run
+  recorded in report.md / report.json.

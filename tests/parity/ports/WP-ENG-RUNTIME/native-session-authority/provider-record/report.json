@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06",
+  "taskId": "task_496eabe1ef0c",
+  "priorTaskIds": ["task_1cddc148cebf", "task_409e1056b0a9", "task_0970a0550c79"],
+  "dispatchId": "ctx_16049bee8b80",
+  "priorDispatchIds": ["ctx_09689a2eb286", "ctx_afada235a4cc"],
+  "leaf": "kimi-for-coding/kimi-for-coding (OpenCode, --auto)",
+  "contract": "docs/migration/native-session-authority-contract.md",
+  "slice": "dependency slice 1 exactly: provider handle chain + schema-v2 record model + persisted-record admission/serialization + record_agent_session_provider_handle only",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "rootReview": "docs/migration/sol-wave/eng-identity/root-provider-record-boundaries.md (guidance msg_4858386acfb9): NEL trim, i64::abs panic, as_i64 spelling rejection; all three addressed this round",
+  "candidateRunner": {
+    "cargo": "1.98.0 (Homebrew)",
+    "platform": "darwin-arm64",
+    "nodeVectors": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node v24.19.0"
+  },
+  "commands": {
+    "redAgainstDeliberateStub": {
+      "command": "cargo test -p drogon-core --test session_authority --locked (against deliberate stubs, first delivery)",
+      "passed": 7,
+      "failed": 62,
+      "skipped": 0,
+      "classification": "genuine_behavioral_red_compiling_stub",
+      "evidence": "red-round-stub.txt — bounded capture: two verbatim failing lines plus the 7/62 summary, not a full transcript"
+    },
+    "greenAfterCorrection": {
+      "focused": "cargo test -p drogon-core --test session_authority --locked -> 45 passed, 0 failed, 0 skipped",
+      "fullCrate": "cargo test -p drogon-core --locked -> 12 suites ok (claim_identity 39 unchanged, session_authority 45)",
+      "workspace": "cargo check --workspace --locked -> clean",
+      "warnings": "zero warnings in the session_authority build",
+      "format": "rustfmt --edition 2024 --check -> clean on all owned files",
+      "jsonValidation": "report.json and source-case-map.json parsed with pinned Node 24"
+    },
+    "greenAfterAcceptanceCorrection": {
+      "focused": "cargo test -p drogon-core --test session_authority --locked -> 46 passed, 0 failed, 0 skipped",
+      "workspace": "cargo check --workspace --locked -> clean",
+      "format": "rustfmt --edition 2021 --check -> clean on all owned files",
+      "generatorVerification": "generate-vectors.mjs re-executed on pinned Node 24 after NUL-byte fix; output byte-identical to original capture; trim-vectors.mjs executed and captured to trim-vectors.out.json",
+      "unrelatedPreExistingFailure": "cargo test -p drogon-core --locked exposed automation_records.rs optional_and_nullable_fields_distinguish_absent_null_and_value (Some(None) serde round-trip) in files owned by other in-flight work; leaf scope is entirely new untracked files with zero overlap; reported, not fixed (out of scope)"
+    },
+    "greenAfterRootReviewContinuation": {
+      "focused": "cargo test -p drogon-core --test session_authority --locked -> 51 passed, 0 failed, 0 skipped",
+      "fullCrate": "cargo test -p drogon-core --locked -> all suites ok, including automation_records 21 passed (its prior Some(None) failure was fixed by its own owner; outside leaf scope)",
+      "workspace": "cargo check --workspace --locked -> clean",
+      "format": "rustfmt --edition 2021 --check -> clean on all owned files",
+      "warnings": "zero warnings in the session_authority build",
+      "generatorVerification": "generate-vectors.mjs and trim-vectors.mjs re-executed on pinned Node 24; outputs captured to generate-vectors.out.json (a199002b...) and trim-vectors.out.json (bc0898a9...); both sources verified zero NUL bytes and pure ASCII",
+      "jsonValidation": "report.json and source-case-map.json parsed with pinned Node 24",
+      "numericRed": "red-round-numeric.txt — bounded real-regression capture: 4 failing tests pre-fix including the i64::abs panic at core/src/num/mod.rs:451; addendum discloses the fixture kind-spelling bug fixed alongside"
+    }
+  },
+  "totals": {
+    "candidateTests": 51,
+    "sourceCases": 19,
+    "sourceExpectSites": 49,
+    "sourceExpectBreakdown": {
+      "agent-session-provider-handle.test.ts": { "cases": 17, "expectSites": 45 },
+      "agent-session-provider-handle-transition.test.ts": { "cases": 2, "expectSites": 4 }
+    },
+    "composition": "19 source_case_* ports + 32 schema/boundary tests (was 69 before later-slice tests were removed; +1 trim allow-list test in the acceptance round, +5 numeric-extraction regression tests in the root-review continuation)",
+    "expectSitesMeaning": "49 is static source expect sites (it/expect counts at the pin), NOT claimed dynamic assertion evaluations, per the root review"
+  },
+  "modeledFields": {
+    "identity": ["schemaVersion(2)", "sessionId", "provider", "providerHandleChain"],
+    "location": ["executionHostId", "wslDistro(nullable)", "workspaceId", "workspaceKind(git-worktree|folder)"],
+    "provenance": ["accountHome.variable(CLAUDE_CONFIG_DIR|CODEX_HOME)", "accountHome.path", "options(optional, <=32)", "launchArgs(optional, 16KiB JSON byte bound)"],
+    "lease": ["sessionId", "runtimeKind(native|tui)", "runtimeFence", "handoffStage(nullable enum)", "provenHandleLinkId(nullable)", "ownerProcess(nullable)", "reservedSpawnToken(nullable)", "processlessAt(absent|null)", "leaseDeadlineAt", "lastRenewedAt", "handoffOperationId(nullable)", "journalCheckpoint(nullable)", "claimKeyId", "claimStatus(reserved|live|conflicted|released)", "unreconciled", "minimumNextFence(raw persisted Value preserved verbatim; unvalidated by source)", "deathEvidence(nullable)", "settlementRetryRequired(absent|bool)", "settlementRetryId(absent|string)"],
+    "timestamps": ["createdAt", "updatedAt"]
+  },
+  "nullVsAbsent": "fields the source requires (handoffStage, provenHandleLinkId, ownerProcess, reservedSpawnToken, handoffOperationId, journalCheckpoint, deathEvidence) must be present with null allowed; processlessAt accepts absent or null; settlementRetryRequired/settlementRetryId reject JSON null; launchEnv presence on a record is refused; forkedFromKey must be absent unless origin is forked",
+  "trimSemantics": "JavaScript String.prototype.trim exactly, by reuse of the established crate::claim_identity::js_trim (single ECMAScript WhiteSpace + LineTerminator table; no local trim logic remains in session_authority); FEFF-positive and U+0085-negative assertions retained, pinned by node-vectors/trim-vectors.mjs and trim-vectors.out.json on the pinned Node 24 runtime; the test harness path-includes the existing claim_identity module (permitted; unedited) with a scoped allow for the path-inclusion artifact",
+  "numericExtraction": "single non-panicking source-faithful path: json_safe_integer(&Value) = Number.isSafeInteger(JSON.parse(raw)) over the parsed double — accepts 1, 1.0, 1e0 and exact ±(2^53-1) boundary spellings; rejects fractions, >safe range, and -9223372036854775808 without panic; is_safe_integer is a range comparison, never i64::abs. Covers handle mintedAtFence/observedAt (parse + typed validation), runtimeFence, leaseDeadlineAt, lastRenewedAt, createdAt, updatedAt, processlessAt, ownerProcess pid/processStartTimeMs, journalCheckpoint epoch/sequence, deathEvidence observedAt, typed conversion, validation, and transition equality via the typed values it produces. minimumNextFence raw preservation untouched (source validator ignores it). Defects reproduced pre-fix in red-round-numeric.txt",
+  "keyEncoding": "handle keys embed exact JSON.stringify output captured from pinned Node 24 (claude:[\"sess\",\"leaf\"], claude:[\"sess\",null], codex:\"thread\"); escape matrix: \\b \\f \\n \\r \\t \\\" \\\\, lowercase \\u00xx for other <0x20, DEL/U+2028/U+2029/non-ASCII verbatim",
+  "lengthBounds": "all source string bounds are JS UTF-16 code units (encode_utf16().count()); safe-integer checks enforce ±(2^53-1)",
+  "optionsKeyOrder": "classified as a non-contract byte-order limitation, not an original assertion divergence: the source serializer uses JSON.stringify and source tests compare with order-insensitive toEqual; the port's sorted serde_json map keeps logical object equality exact",
+  "removedAsOutOfScope": {
+    "modules": ["admission.rs (deleted)"],
+    "transitionFunctions": ["reserve", "commit_process_identity", "prove", "renew", "evict", "set_handoff_stage", "set_journal_checkpoint"],
+    "errorVariantsRemoved": ["CheckpointStale", "Conflict", "OperationConflict", "OwnerReconciling", "IdentityRequired"],
+    "errorVariantsKeptBecauseUsedByAssignedSurface": ["OwnershipUnknown (raised by record_agent_session_provider_handle)"]
+  },
+  "processDisclosures": {
+    "temporaryFileDeviation": "worker-created /var/folders/8g/w9x4n8ws4mx6vxjhmnrnwy640000gn/T/opencode/jsvec.mjs existed; that exact file was deleted and the retained generator placed under native-session-authority/provider-record/node-vectors/ with exact command/runtime/hash, no source-cwd execution",
+    "priorPythonRewrite": "first delivery used inline Python for one bulk test edit despite the patch preference; this correction used only the patch mechanism (file edits plus one explicit line-range deletion)",
+    "secondCorrection": "acceptance round task_0970a0550c79: (1) generate-vectors.mjs still contained one literal NUL byte in the nul vector despite the pure-ASCII claim; re-spelled as \\u0000 via byte-level patch, verified zero NUL bytes (file: ASCII text), re-executed on pinned Node 24, output byte-identical to original capture; (2) test-suite header rewritten to limit the mapped claim to the handle suite, transition suite, and record validators, naming lease policy/transitions as pending later slices; (3) rustfmt applied to owned files after pre-existing formatting drift was found in record.rs/transition.rs import ordering and older test sections (formatting only, verified by GREEN); (4) pre-existing unrelated automation_records.rs Some(None) serde failure in other-owned files reported, not fixed",
+    "thirdRound": "root-review continuation task_496eabe1ef0c: (1) local trim allow-list replaced by reuse of crate::claim_identity::js_trim; test harness path-includes claim_identity (permitted, unedited) with scoped allow; (2) numeric defects reproduced pre-fix and preserved in red-round-numeric.txt with honest addendum (i64::MIN panic pure; acceptance failures also involved an independent fixture kind-spelling bug fixed alongside); (3) single json_safe_integer path + non-panicking is_safe_integer range comparison across all persisted numeric fields; minimumNextFence preservation untouched; (4) 49 wording corrected to static expect sites; (5) verification paused mid-round while another worker's in-progress automations module broke the lib build; fixed by its owner, no out-of-scope files touched"
+  },
+  "pendingSourceSuites": {
+    "disposition": "pending_slice2_or_later (root-owned store/lease-policy/RPC/integration); no claim that pure coverage completed them",
+    "suites": [
+      "src/shared/agent-session-lease-adjudication.ts + agent-session-lease-adjudication.test.ts (writer admission, CAS acquisition, restart adjudication, probes, spawn-token classification, next-fence policy)",
+      "src/main/runtime/agent-session-lease-transitions.ts (reserve/commit/prove/renew/evict/set-handoff-stage/set-journal-checkpoint) and any lease-transitions test coverage",
+      "src/main/runtime/agent-session-lease-renewal.test.ts (durable batch atomicity)",
+      "src/main/runtime/agent-session-record-store.test.ts and store-file/store-security/serialization/transaction-queue/transaction-lock",
+      "src/main/runtime/agent-session-record-unsupported-schema.test.ts (store-level quarantine/reconciliation)",
+      "src/main/runtime/agent-session-unreadable-record-salvage.test.ts",
+      "src/main/runtime/agent-session-handoff-lease-transitions.test.ts / handoff-record-transitions.ts",
+      "src/main/runtime/agent-session-restart-lease-transitions.ts / restart-reconciliation.ts / restart-handoff-adjudication.test.ts",
+      "src/main/runtime/agent-session-backup-recovery.test.ts / backup-recovery-fence.ts",
+      "src/main/runtime/agent-session-record-options.test.ts / record-options.ts",
+      "operation ledger / mutation envelope / journal schemas / refusal-retry / reconciliation-target / surface-release-transition suites",
+      "src/shared/agent-session-resume.test.ts, pty-write-*, reservation-admission, operation-admission, launch-env-admission, spawn-token process-scan/readback, process-identity-probe, orphan-child-reaper"
+    ]
+  },
+  "integrationBoundary": {
+    "notBuilt": ["SQLite store", "lease transitions/adjudication policy", "RPC/CLI", "caller integration", "process supervisor", "second database"],
+    "consumableBy": "root-owned slice-2 store through the existing Engine rusqlite Connection; module is pure (no I/O)",
+    "pathInclusion": "temporary until root registers session_authority in lib.rs; never a parallel production backend"
+  },
+  "platformGaps": "executed on darwin-arm64 only; no Windows/other-platform execution claimed",
+  "hashes": {
+    "crates/drogon-core/src/session_authority/mod.rs": "1c0a2c722497c796c04ec40a7722d5cc3bfec3b4a5f3789deb796cd3e9f3abec",
+    "crates/drogon-core/src/session_authority/error.rs": "76a27aa680d5428a3425a31d45b13c921c5b4c62c95ecade68f0d836e9ee0302",
+    "crates/drogon-core/src/session_authority/provider_handle.rs": "0216c46f609625fb196fbed7b0ffe5e4347f1791e0bcf0f3549f0d1af915a625",
+    "crates/drogon-core/src/session_authority/record.rs": "cdf1cc0848df2203f872efbe7559dcedad8c20ee8fdf50ecca12188783e642fa",
+    "crates/drogon-core/src/session_authority/transition.rs": "38b4fb8acf855fb40eb8b798a19ceeff25d9c34eda55a27313dc8b403dbcbe41",
+    "crates/drogon-core/tests/session_authority.rs": "379336e7ea9b16544e2e6675b805bf6775ed1542b4299bcea83d2f241dee9ae3",
+    "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/node-vectors/generate-vectors.mjs": "2f48dda047d75ebd74eefacaa6f11075043c3d38374473299cc209d1681b741e",
+    "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/node-vectors/generate-vectors.out.json": "a199002b65e3d52b004ffdc94d5f93349fbf1cad7df6a99f33c84b0e5c0bf595",
+    "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/node-vectors/trim-vectors.mjs": "b4bb6afbb237b87ad636494c1377950a6e8d391f307491b6f5e6dab6950c74a6",
+    "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/node-vectors/trim-vectors.out.json": "bc0898a99afacc08dc0b1bd6740f394c61d162036fd96d83bc26983a63889f34"
+  },
+  "sourceHashes": {
+    "src/shared/agent-session-provider-handle.ts": "418c5dfd36702716c26421b3b82e45903d98a00de683c0282304ad8d58cbb18b",
+    "src/shared/agent-session-provider-handle.test.ts": "98c3ffdbfd7be3f447748a92cc8d6394094a92059b04886e1c4a3db55f955d75",
+    "src/shared/agent-session-record.ts": "c1b9ebaaa37c0263e72fb5aa3657015b645367901073f3cd349cad8983d2293c",
+    "src/shared/agent-session-record.test-fixture.ts": "1cb2523a8971eca7a90e10358e58fb1c5933d7c36f5c7e814a53ef08230a8f9c",
+    "src/main/runtime/agent-session-provider-handle-transition.ts": "eccbcb776b492ec18d81ea93b5e9f0e4b4b5d30e3439637ecfc78c73ab8a0317",
+    "src/main/runtime/agent-session-provider-handle-transition.test.ts": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1"
+  }
+}
