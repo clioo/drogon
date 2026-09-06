@@ -34,12 +34,18 @@ Record actual Task/Dispatch IDs, requested/effective model, live depth and any d
 
 | Group | Actual Task ID | Launch checkpoint |
 | --- | --- | --- |
-| E1 | `task_671da369fc93` | Terminal created; blocked on repository trust before dispatch |
-| E2 | `task_34d223f6c73e` | Ready, not launched |
-| E3 | `task_4a5fe24b773f` | Ready, not launched |
-| E4 | `task_75e78e6ac486` | Ready, not launched |
-| E5 | `task_2b68b0e8ee1d` | Ready, not launched |
+| E1 | `task_671da369fc93` | Active Dispatch `ctx_2b1bbe519b1c`, input accepted |
+| E2 | `task_34d223f6c73e` | Active Dispatch `ctx_4d1d028772be`, input accepted |
+| E3 | `task_4a5fe24b773f` | Active Dispatch `ctx_35f11d099b92`, input accepted |
+| E4 | `task_75e78e6ac486` | Active Dispatch `ctx_902b01623a5b`, input accepted |
+| E5 | `task_2b68b0e8ee1d` | Active Dispatch `ctx_d0e4b0ecf5ca`, input accepted |
 
 E1 terminal `term_c317aa5c-b92d-4338-a888-e88676e58fde`, title `Astra E1 UI audit lead`, was launched with `codex --model gpt-6-astra -c model_reasoning_effort="high" --dangerously-bypass-approvals-and-sandbox --no-alt-screen`. Codex0.153.4 displayed its repository-trust screen; model access/inference is not yet proved. Orca rejected terminal input with `agent_prompt_blocked`. The user authorized continuing in chat, but subsequent terminal inspection still showed the trust screen; root asked for the actual UI confirmation. No permission guard was bypassed, no global setting was edited by the coordinator and no second model process was launched to evade the screen. Live nested depth remains unverified.
+
+Subsequent checkpoint2026-09-06T05:38Z: the user resolved the trust screen. E1 TUI displayed `gpt-6-astra high`, Orca accepted its Task injection and worker-read returned an actual assistant response from the Codex transcript. The other four terminals launched with the same command, reached tui-idle and accepted their independent Tasks. All five delivered live-context status messages through their Dispatches. Because custom-command terminals are attached through `worker-start --terminal`, the receipt model fields are null; command/TUI evidence is recorded separately and not presented as a server-authenticated model identity.
+
+Read-only inspection of the active profile found persisted `nestedWorkerMaxDepth: 1`. All five Dispatches are depth1; their preambles omit maxDepth/canDispatchSubWorkers. The root told all five to continue their source audits directly, with no children, and asked the user to set the supported Orchestration UI depth to2. This setting has NOT been changed by the coordinator. Successful two-generation delegation is still unproved; do not label the full hierarchy active until a child Dispatch actually succeeds and its evidence/lifecycle are reviewed.
+
+Terminal routing for recovery: E2 `term_06b0aa79-c95c-4be8-826e-7fc44e92ad71`; E3 `term_233f0742-c797-43da-b5b9-0efd8e91ad43`; E4 `term_628055f8-e9bc-4f00-995c-0f119af80751`; E5 `term_86e2b660-83d2-4440-811e-50467ae6fed8`. Revalidate each exact handle before action; never restart on timeout. These are root-created custom terminals attached as external resources, so release receipts may retain them; follow the returned ownership decision rather than forcing resource cleanup.
 
 Audit reporting remains approximately60%, medium-low confidence, with unweighted7/12 accepted-group baseline. New delegation and reports do not raise that number. Deadline estimates must reflect completed groups, remaining dependencies and observed throughput rather than model count.
