@@ -1,0 +1,31 @@
+{
+  "capsuleId": "windows-environment-expansion",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/shared/windows-environment-expansion.test.ts",
+  "expectedTestCounts": { "files": 1, "tests": 4 },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "src/shared/windows-environment-expansion.test.ts",
+      "role": "test",
+      "sha256": "688208beed26a40efff6e1f5380d92e566eb45b0428fef2b33239201771c4218"
+    },
+    {
+      "path": "src/shared/windows-environment-expansion.ts",
+      "role": "module",
+      "sha256": "b0bebbd420d5ca71e4472b00515fae9dbf4b4350870e0015620f469b98da10e1"
+    }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Only the unchanged selected test and pure production module; no global source setup hooks or aliases.",
+    "Platform branches receive explicit fixture values. Running these on macOS is not a Windows OS, registry, shell or installed-CLI test.",
+    "No renderer package links, dependency installation, environment mutation outside fixture objects or network operation is needed."
+  ]
+}

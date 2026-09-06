@@ -79,6 +79,21 @@ Navigation targets and page opening remain separate operations. Target validatio
 
 E1's exact13 caller-chain follow-up is now active as `task_5f2606b1a214` / `ctx_0677ac521e0a`, reusing the completed lead's exact terminal with a verified input-accepted receipt. No source edits, feature implementation or duplicate factory census were assigned. Any other inherited source gap must retain a named owner/boundary; it cannot disappear merely because the13-row task finishes. Source-audit acceptance and execution debt remain separate gates.
 
+## E5 O3/O4/O5: accepted18 install/build source boundaries
+
+Root accepts the finite18-contract source characterization in `audit-closure/e5-platform/followup-install-build-boundaries.md/json`, with its imported-boundary exclusions and G7/G8 source remainder intact. All39 fingerprints matched pinned Git blobs and working bytes in the preceding checkpoint. Root read the full report across bounded ranges, independently read complete AppImage pruning/registration-lock modules and Windows environment expansion source/tests, and checked Electron install/extract/publication control flow at `config/scripts/install-electron-package-binary.mjs:53–120,144–190,355–425` plus `ensure-native-runtime.mjs:254–274`.
+
+Confirmed consequential limits:
+
+- Extracted executable existence is checked before publication, but package version usability is checked after publication. The rename rollback covers publication failures, not that subsequent usability failure; wrong-version archives must get an explicit pre-publication candidate regression. `process.exit(1)` inside the missing-executable branch bypasses its surrounding finally cleanup.
+- Process-tree native health only requires the addon; the nearby comment claims enumeration that the body does not perform. ABI load is not a functioning process table.
+- AppImage pruning protects named roots and staging within its namespace but treats failed age reads as stale; endpoint read errors can drop a protection. These are source heuristics, not proof an owner exited.
+- Registration lock rejection always produces timeout/removal-advice text, regardless of actual error/elapsed time. Its existing three mocked tests cover option bounds, ELOCKED wording and release after operation failure, not real elapsed deadlines, live-owner safety or release-error masking. No lock or installer was executed during this review.
+
+The earlier report's statement that release-entrypoint review was unaccepted is stale; the accepted bounded disposition above governs. No further transitive library review or real OS/package/signing success is inferred. Runtime verification remains mandatory before changing an installed preview.
+
+Root separately executed all **four unchanged original Windows environment-expansion cases** in an isolated pinned capsule, all passed with no failed/pending/todo cases. They exercise explicit Windows/Linux branch values and fixture objects on macOS arm64, not a Windows shell/registry or personal PATH. Reproduction, source/result hashes and limits: `windows-environment-baseline-review.md`. This supersedes I07's unrun status only; the other18 test files and all real platform obligations retain their prior evidence state. E5 remains open and the audit percentage is unchanged.
+
 ## Migration decisions and phase boundary
 
 Preserve workflow capabilities and the actual user experience, not unsafe interpretations of source comments. Drogon's eventual publication proof must cover **every** publishing path; asset presence alone must never be described as verified signatures, compatible binaries or successful prior tests. Unknown process contact must not justify deleting/replacing owned resources. Source defects get explicit characterization and intended-behavior regression tests during implementation, not silent deletion of capabilities or claims that the source already satisfies these invariants.
