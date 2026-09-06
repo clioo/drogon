@@ -3,8 +3,10 @@
 //! SQLite database and `portable-pty` sessions. `drogond` owns framing,
 //! auth and the transport; this crate never sees a raw socket.
 
+pub mod automations;
 pub mod bots;
 pub mod claim_identity;
+pub mod locale_ordering;
 
 mod db;
 mod error;
@@ -109,12 +111,13 @@ impl Engine {
         db::validate_files(data_dir)
             .map_err(|e| error::io_error(format!("Unsafe database files: {e}")))?;
         let conn = db::open(data_dir).map_err(error::from_sqlite)?;
+        // Migration refusal must roll back recovery and host identity too.
+        let host_id = db::migrate_and_recover(&conn)
+            .map_err(|e| error::internal_error(format!("startup schema/recovery gate: {e}")))?;
         #[cfg(unix)]
         db::harden_permissions(data_dir).map_err(|e| {
             error::io_error(format!("cannot restrict database file permissions: {e}"))
         })?;
-        db::recover_from_prior_instance(&conn).map_err(error::from_sqlite)?;
-        let host_id = read_or_create_host_id(&conn)?;
 
         Ok(Engine {
             data_dir: data_dir.to_path_buf(),
@@ -393,25 +396,6 @@ fn reject_unsafe_data_dir(data_dir: &Path) -> Result<(), RpcError> {
 #[cfg(not(unix))]
 fn reject_unsafe_data_dir(_data_dir: &Path) -> Result<(), RpcError> {
     Ok(())
-}
-
-fn read_or_create_host_id(conn: &Connection) -> Result<String, RpcError> {
-    let existing: Option<String> = conn
-        .query_row("SELECT value FROM meta WHERE key = 'host_id'", [], |r| {
-            r.get(0)
-        })
-        .optional()
-        .map_err(error::from_sqlite)?;
-    if let Some(id) = existing {
-        return Ok(id);
-    }
-    let id = uuid::Uuid::new_v4().to_string();
-    conn.execute(
-        "INSERT INTO meta (key, value) VALUES ('host_id', ?1)",
-        [&id],
-    )
-    .map_err(error::from_sqlite)?;
-    Ok(id)
 }
 
 fn require_str<'a>(params: &'a Value, field: &str) -> Result<&'a str, RpcError> {

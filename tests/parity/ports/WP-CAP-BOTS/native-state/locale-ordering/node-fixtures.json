@@ -1,0 +1,492 @@
+{
+  "resolvedDefaultLocale": "en-US",
+  "nodeVersion": "v24.19.0",
+  "icuVersion": "78.3",
+  "cases": {
+    "accent": {
+      "default": [
+        "cafe",
+        "café",
+        "cafz"
+      ],
+      "en-US": [
+        "cafe",
+        "café",
+        "cafz"
+      ],
+      "es-MX": [
+        "cafe",
+        "café",
+        "cafz"
+      ],
+      "sv": [
+        "cafe",
+        "café",
+        "cafz"
+      ],
+      "tr": [
+        "cafe",
+        "café",
+        "cafz"
+      ],
+      "de": [
+        "cafe",
+        "café",
+        "cafz"
+      ],
+      "ja": [
+        "cafe",
+        "café",
+        "cafz"
+      ]
+    },
+    "case": {
+      "default": [
+        "apple",
+        "Apple",
+        "APPLE",
+        "banana"
+      ],
+      "en-US": [
+        "apple",
+        "Apple",
+        "APPLE",
+        "banana"
+      ],
+      "es-MX": [
+        "apple",
+        "Apple",
+        "APPLE",
+        "banana"
+      ],
+      "sv": [
+        "apple",
+        "Apple",
+        "APPLE",
+        "banana"
+      ],
+      "tr": [
+        "apple",
+        "Apple",
+        "APPLE",
+        "banana"
+      ],
+      "de": [
+        "apple",
+        "Apple",
+        "APPLE",
+        "banana"
+      ],
+      "ja": [
+        "apple",
+        "Apple",
+        "APPLE",
+        "banana"
+      ]
+    },
+    "canonical_equivalent": {
+      "default": [
+        "eclair",
+        "éclair",
+        "éclair"
+      ],
+      "en-US": [
+        "eclair",
+        "éclair",
+        "éclair"
+      ],
+      "es-MX": [
+        "eclair",
+        "éclair",
+        "éclair"
+      ],
+      "sv": [
+        "eclair",
+        "éclair",
+        "éclair"
+      ],
+      "tr": [
+        "eclair",
+        "éclair",
+        "éclair"
+      ],
+      "de": [
+        "eclair",
+        "éclair",
+        "éclair"
+      ],
+      "ja": [
+        "eclair",
+        "éclair",
+        "éclair"
+      ]
+    },
+    "punctuation": {
+      "default": [
+        "A B",
+        "A-B",
+        "A.B",
+        "AB"
+      ],
+      "en-US": [
+        "A B",
+        "A-B",
+        "A.B",
+        "AB"
+      ],
+      "es-MX": [
+        "A B",
+        "A-B",
+        "A.B",
+        "AB"
+      ],
+      "sv": [
+        "A B",
+        "A-B",
+        "A.B",
+        "AB"
+      ],
+      "tr": [
+        "A B",
+        "A-B",
+        "A.B",
+        "AB"
+      ],
+      "de": [
+        "A B",
+        "A-B",
+        "A.B",
+        "AB"
+      ],
+      "ja": [
+        "A B",
+        "A-B",
+        "A.B",
+        "AB"
+      ]
+    },
+    "numeric_substring": {
+      "default": [
+        "item1",
+        "item10",
+        "item2"
+      ],
+      "en-US": [
+        "item1",
+        "item10",
+        "item2"
+      ],
+      "es-MX": [
+        "item1",
+        "item10",
+        "item2"
+      ],
+      "sv": [
+        "item1",
+        "item10",
+        "item2"
+      ],
+      "tr": [
+        "item1",
+        "item10",
+        "item2"
+      ],
+      "de": [
+        "item1",
+        "item10",
+        "item2"
+      ],
+      "ja": [
+        "item1",
+        "item10",
+        "item2"
+      ]
+    },
+    "non_latin": {
+      "default": [
+        "English",
+        "Анна",
+        "Борис",
+        "カタカナ",
+        "日本語"
+      ],
+      "en-US": [
+        "English",
+        "Анна",
+        "Борис",
+        "カタカナ",
+        "日本語"
+      ],
+      "es-MX": [
+        "English",
+        "Анна",
+        "Борис",
+        "カタカナ",
+        "日本語"
+      ],
+      "sv": [
+        "English",
+        "Анна",
+        "Борис",
+        "カタカナ",
+        "日本語"
+      ],
+      "tr": [
+        "English",
+        "Анна",
+        "Борис",
+        "カタカナ",
+        "日本語"
+      ],
+      "de": [
+        "English",
+        "Анна",
+        "Борис",
+        "カタカナ",
+        "日本語"
+      ],
+      "ja": [
+        "English",
+        "カタカナ",
+        "日本語",
+        "Анна",
+        "Борис"
+      ]
+    },
+    "equal_name_ties": {
+      "default": [
+        "first",
+        "second",
+        "third",
+        "fourth-distinct"
+      ],
+      "en-US": [
+        "first",
+        "second",
+        "third",
+        "fourth-distinct"
+      ],
+      "es-MX": [
+        "first",
+        "second",
+        "third",
+        "fourth-distinct"
+      ],
+      "sv": [
+        "first",
+        "second",
+        "third",
+        "fourth-distinct"
+      ],
+      "tr": [
+        "first",
+        "second",
+        "third",
+        "fourth-distinct"
+      ],
+      "de": [
+        "first",
+        "second",
+        "third",
+        "fourth-distinct"
+      ],
+      "ja": [
+        "first",
+        "second",
+        "third",
+        "fourth-distinct"
+      ]
+    }
+  },
+  "pairwise": {
+    "default": [
+      {
+        "a": "cafe",
+        "b": "café",
+        "sign": -1
+      },
+      {
+        "a": "apple",
+        "b": "Apple",
+        "sign": -1
+      },
+      {
+        "a": "item2",
+        "b": "item10",
+        "sign": 1
+      },
+      {
+        "a": "dup",
+        "b": "dup",
+        "sign": 0
+      },
+      {
+        "a": "éclair",
+        "b": "éclair",
+        "sign": 0
+      }
+    ],
+    "en-US": [
+      {
+        "a": "cafe",
+        "b": "café",
+        "sign": -1
+      },
+      {
+        "a": "apple",
+        "b": "Apple",
+        "sign": -1
+      },
+      {
+        "a": "item2",
+        "b": "item10",
+        "sign": 1
+      },
+      {
+        "a": "dup",
+        "b": "dup",
+        "sign": 0
+      },
+      {
+        "a": "éclair",
+        "b": "éclair",
+        "sign": 0
+      }
+    ],
+    "es-MX": [
+      {
+        "a": "cafe",
+        "b": "café",
+        "sign": -1
+      },
+      {
+        "a": "apple",
+        "b": "Apple",
+        "sign": -1
+      },
+      {
+        "a": "item2",
+        "b": "item10",
+        "sign": 1
+      },
+      {
+        "a": "dup",
+        "b": "dup",
+        "sign": 0
+      },
+      {
+        "a": "éclair",
+        "b": "éclair",
+        "sign": 0
+      }
+    ],
+    "sv": [
+      {
+        "a": "cafe",
+        "b": "café",
+        "sign": -1
+      },
+      {
+        "a": "apple",
+        "b": "Apple",
+        "sign": -1
+      },
+      {
+        "a": "item2",
+        "b": "item10",
+        "sign": 1
+      },
+      {
+        "a": "dup",
+        "b": "dup",
+        "sign": 0
+      },
+      {
+        "a": "éclair",
+        "b": "éclair",
+        "sign": 0
+      }
+    ],
+    "tr": [
+      {
+        "a": "cafe",
+        "b": "café",
+        "sign": -1
+      },
+      {
+        "a": "apple",
+        "b": "Apple",
+        "sign": -1
+      },
+      {
+        "a": "item2",
+        "b": "item10",
+        "sign": 1
+      },
+      {
+        "a": "dup",
+        "b": "dup",
+        "sign": 0
+      },
+      {
+        "a": "éclair",
+        "b": "éclair",
+        "sign": 0
+      }
+    ],
+    "de": [
+      {
+        "a": "cafe",
+        "b": "café",
+        "sign": -1
+      },
+      {
+        "a": "apple",
+        "b": "Apple",
+        "sign": -1
+      },
+      {
+        "a": "item2",
+        "b": "item10",
+        "sign": 1
+      },
+      {
+        "a": "dup",
+        "b": "dup",
+        "sign": 0
+      },
+      {
+        "a": "éclair",
+        "b": "éclair",
+        "sign": 0
+      }
+    ],
+    "ja": [
+      {
+        "a": "cafe",
+        "b": "café",
+        "sign": -1
+      },
+      {
+        "a": "apple",
+        "b": "Apple",
+        "sign": -1
+      },
+      {
+        "a": "item2",
+        "b": "item10",
+        "sign": 1
+      },
+      {
+        "a": "dup",
+        "b": "dup",
+        "sign": 0
+      },
+      {
+        "a": "éclair",
+        "b": "éclair",
+        "sign": 0
+      }
+    ]
+  }
+}

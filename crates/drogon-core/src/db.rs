@@ -5,20 +5,41 @@
 //! depend on a system SQLite.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension};
+
+use crate::automations::storage as automations_storage;
+use crate::bots::storage as bots_storage;
 
 pub const DB_FILE_NAME: &str = "drogon.sqlite3";
 
+/// The initial WAL switch can return BUSY/LOCKED without invoking SQLite's busy handler.
+fn set_wal_journal_mode_with_retry(conn: &Connection) -> rusqlite::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match conn.pragma_update(None, "journal_mode", "WAL") {
+            Ok(()) => return Ok(()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if matches!(e.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Schema changes belong to the rollback-safe aggregate startup transaction.
 pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open_with_flags(
         data_dir.join(DB_FILE_NAME),
         OpenFlags::default() | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
+    set_wal_journal_mode_with_retry(&conn)?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
-    create_tables(&conn)?;
     Ok(conn)
 }
 
@@ -75,8 +96,8 @@ pub fn harden_permissions(data_dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn create_tables(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(
+fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
+    tx.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS meta (
             key TEXT PRIMARY KEY,
@@ -116,13 +137,53 @@ fn create_tables(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
-/// Runs once per `Engine::open`. Any session or request left `pending`/`live`
-/// by a prior process instance has no retained handle in *this* process, so
-/// per `protocol-v1.md` it becomes `unverifiable` rather than being silently
+/// The aggregate startup transaction rolls back on any component or SQL failure.
+#[derive(Debug)]
+pub enum StartupError {
+    Automations(automations_storage::StorageError),
+    Bots(bots_storage::StorageError),
+    /// Main-schema, recovery, or host-identity failure.
+    Sqlite(rusqlite::Error),
+}
+
+impl std::fmt::Display for StartupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Automations(e) => write!(f, "automations: {e}"),
+            Self::Bots(e) => write!(f, "bots: {e}"),
+            Self::Sqlite(e) => write!(f, "sqlite error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for StartupError {}
+
+impl From<rusqlite::Error> for StartupError {
+    fn from(value: rusqlite::Error) -> Self {
+        Self::Sqlite(value)
+    }
+}
+
+/// Main schema, capability migrations, recovery and host identity commit together.
+pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
+    let tx = automations_storage::begin_immediate(conn).map_err(StartupError::Automations)?;
+    create_tables(&tx)?;
+    automations_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Automations)?;
+    bots_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Bots)?;
+    recover_from_prior_instance(&tx)?;
+    let host_id = read_or_create_host_id(&tx)?;
+    tx.commit()?;
+    Ok(host_id)
+}
+
+/// Runs once per `Engine::open`, inside [`migrate_and_recover`]'s
+/// transaction. Any session or request left `pending`/`live` by a prior
+/// process instance has no retained handle in *this* process, so per
+/// `protocol-v1.md` it becomes `unverifiable` rather than being silently
 /// respawned or trusted. This never touches a session this process itself
-/// spawned during the current run — it only fires once, at open time, before
-/// any spawn happens.
-pub fn recover_from_prior_instance(conn: &Connection) -> rusqlite::Result<()> {
+/// spawned during the current run — it only fires once, at open time,
+/// before any spawn happens.
+fn recover_from_prior_instance(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE sessions SET verdict = 'unverifiable' WHERE verdict IN ('pending', 'live')",
         [],
@@ -138,4 +199,25 @@ pub fn recover_from_prior_instance(conn: &Connection) -> rusqlite::Result<()> {
         [unverifiable_error],
     )?;
     Ok(())
+}
+
+/// Reads the durable per-database host id, creating one if this is a
+/// fresh database. Moved here (from `lib.rs`) so it can run inside
+/// [`migrate_and_recover`]'s transaction: a fresh id created here must not
+/// survive a later rollback in the same startup attempt.
+fn read_or_create_host_id(conn: &Connection) -> rusqlite::Result<String> {
+    let existing: Option<String> = conn
+        .query_row("SELECT value FROM meta WHERE key = 'host_id'", [], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('host_id', ?1)",
+        [&id],
+    )?;
+    Ok(id)
 }

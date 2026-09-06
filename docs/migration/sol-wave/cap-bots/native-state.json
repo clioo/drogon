@@ -1,0 +1,138 @@
+{
+  "status": "bounded_storage_slice_delivered_full_feature_incomplete",
+  "source": {
+    "checkout": "/Users/carlos/Documents/Drogon-mentu-session",
+    "revision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "revisionIsLowerHex40": true,
+    "readOnly": true,
+    "suiteDigests": {
+      "src/main/bots/bot-responsibility-owner.test.ts": "f4ae1f7e05c58cb3019c61777b0599821243535c378bb420b13c11e582edef6f",
+      "src/shared/drogon-bot-contract.test.ts": "cf53484ae09bf95dff4da4095b1baf769b77ab1f5f1a89d32678a5bad094ce5f",
+      "src/main/persistence-bot-automation.test.ts": "e2d8da6ccfdb08c992d92456832d16282c03ebcc34d347e5c6f336e2dbf84346"
+    },
+    "hostFenceReferenceDigests": {
+      "src/shared/automation-owner-precondition.ts": "85ec1872b51ca3904cd3b95f4c09b2e874b43938894770f1f1637955e1fa624d",
+      "src/main/persistence/scheduling-automations/automation-owner-projection.ts": "4b2d0bff66c018ea55f4861c8cfa8caea81c7fca1d28128d732a6b5c83e3f68d"
+    }
+  },
+  "originalCaseMap": {
+    "artifact": "tests/parity/ports/WP-CAP-BOTS/native-state/case-map.json",
+    "total": 20,
+    "covered": 12,
+    "partial": 5,
+    "open": 3,
+    "fullParityClaimed": false
+  },
+  "verification": [
+    {
+      "command": "cargo test -p drogon-core --locked --offline --test bot_storage --test automation_records --test locale_ordering",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "exitCode": 0,
+      "results": {
+        "automation_records": { "passed": 21, "failed": 0, "ignored": 0 },
+        "bot_storage": { "passed": 38, "failed": 0, "ignored": 0 },
+        "locale_ordering": { "passed": 5, "failed": 0, "ignored": 0 },
+        "totalPassed": 64,
+        "totalFailed": 0
+      },
+      "classification": "focused_production_binding_green"
+    },
+    {
+      "command": "cargo check -p drogon-core --locked --offline",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "exitCode": 0,
+      "classification": "package_compile_pass"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "exitCode": 1,
+      "classification": "integration_formatting_failure",
+      "detail": "Formatting diffs include this slice and unrelated dirty files; no edit or new correction task was authorized at the stable-handoff boundary."
+    }
+  ],
+  "redGreen": {
+    "historicalLeafAssertionRed": "optional_and_nullable_fields_distinguish_absent_null_and_value initially failed because serde collapsed present null and absent Option<Option<T>>; it passed after double_option normalization",
+    "historicalRedIndependentlyReproducedByLead": false,
+    "earlyPathSeamClassification": "setup_scaffolding_not_green_removed",
+    "sshHostFenceClassification": "unimplemented_dependency_gate_not_behavioral_red_not_green"
+  },
+  "mandatoryFollowOn": [
+    "Provision a real SSH-target registry with monotonic registration generations",
+    "Provision workspace-host and repo/connection projection resolution",
+    "Port assertAutomationOwnerFence against live self/ssh(targetId,targetGeneration)/orphan resolution before global Automation mutation/deletion RPC admission",
+    "Register Bot and Automation migrations in Engine::open/db.rs",
+    "Bind host-default locale discovery",
+    "Complete the five partial and three open source cases in Engine/execution/UI scope",
+    "Run root-owned whole-workspace, RPC/CLI, packaged-app, and installation acceptance",
+    "Resolve formatting check without overwriting unrelated dirty work"
+  ],
+  "scopeGuards": {
+    "fullBotExperienceComplete": false,
+    "engineRpcCliRegistered": false,
+    "sshHostAuthorityImplemented": false,
+    "botIdOwnerCheckSubstitutesForSshHostFence": false,
+    "servicesStarted": false,
+    "userDataReadOrImported": false,
+    "publicationAssetsServices": "held"
+  },
+  "progress": {
+    "auditCapabilityGroupsClosed": 11,
+    "auditCapabilityGroupsTotal": 12,
+    "auditPercent": 91.7,
+    "auditConfidence": "medium",
+    "deltaPercentagePoints": 0,
+    "fullFidelity24HourRisk": "high"
+  },
+  "files": {
+    "crates/drogon-core/src/bots/records.rs": "8e6651c683694e5e2d37dc782519055c3ae943cff3bec2c60b561a02be0d7e2c",
+    "crates/drogon-core/src/bots/storage.rs": "e2f20d3ea376e419bcf0315a96eabfcd84e7d3b565a5b51adc80a290e4c964fb",
+    "crates/drogon-core/src/automations/records.rs": "e71a82c5efda3964d7aeabd377145d22184b69ec52820927df5a3c82d756e5d2",
+    "crates/drogon-core/src/automations/storage.rs": "10956b04a14513cfcb9a84ec6b5d64baef2d771a93f762121fea62b6a895e8fb",
+    "crates/drogon-core/src/locale_ordering.rs": "7c3ee5fb1cd02241e880e79ca917a1169a2e46a1fa5ea425e7cf5cc4ddc87e37",
+    "crates/drogon-core/tests/bot_storage.rs": "38bded95df7f52b30e2dad06128d579d95d36a75f381e39833f1354387ef3adc",
+    "crates/drogon-core/tests/automation_records.rs": "ca881db36a376c58b4091aa849d4565755afe660fd38978b6b16de6a77f988e3",
+    "crates/drogon-core/tests/locale_ordering.rs": "15b83c5dd343915169ed236c5d64104e9caf0e192ca06fdc2250f5744b08054a",
+    "tests/parity/ports/WP-CAP-BOTS/native-state/EVIDENCE.md": "3016c3209abbb43cc83a24c2a332399539f7d3c4fe5db73ba1167818dfaeee54",
+    "tests/parity/ports/WP-CAP-BOTS/native-state/case-map.json": "5a51b9ec3d62ec9410ddae7356e175bd97b86651a69aa9f6be22a80918d17118",
+    "tests/parity/ports/WP-CAP-BOTS/native-state/locale-ordering/gen-locale-fixtures.mjs": "5b4e164e1e7afe2bcc174b35207f4e69b13f418918e3bba599bc9e4035c7226a",
+    "tests/parity/ports/WP-CAP-BOTS/native-state/locale-ordering/node-fixtures.json": "4560622c1d8dfbb2f3cb7e780c7445cdeb911651fcc6a858c805abbe799b398c"
+  },
+  "child": {
+    "runId": "run_8423468a5d2a",
+    "terminal": "term_92216223-9ebd-47c2-becf-81068d9830f7",
+    "verifiedOriginalLaunch": {
+      "taskId": "task_20f54b0c0cc0",
+      "dispatchId": "ctx_962337f3057b",
+      "requested": { "agent": "claude", "model": "claude-sonnet-5", "effort": "medium" },
+      "effective": { "agent": "claude", "model": "claude-sonnet-5", "effort": "medium" },
+      "perInvocationBypassVisible": true
+    },
+    "deliveries": [
+      { "taskId": "task_3890a143c777", "dispatchId": "ctx_ec035066fe68", "status": "succeeded_settled", "completedAtUtc": "2026-09-06T17:51:47Z" },
+      { "taskId": "task_22d37d4b6e77", "dispatchId": "ctx_613d1c90de2a", "status": "succeeded_settled", "completedAtUtc": "2026-09-06T18:08:55Z" },
+      { "taskId": "task_e7b5da6c276b", "dispatchId": "ctx_00b3f8b9d6b0", "status": "succeeded_settled", "completedAtUtc": "2026-09-06T18:16:32Z", "deliveryId": "delivery_a3bc3d15512b" }
+    ],
+    "release": {
+      "receiptId": "91553a85-af23-40d1-8d60-9a34cd29a3c3",
+      "state": "retained",
+      "reason": "external_terminal",
+      "processAction": "none",
+      "releasedBeforeAck": true,
+      "forceClosed": false
+    },
+    "deviations": [
+      "One forbidden provider-native internal Agent(fork) performed read-only source research; root audited and adjudicated continuation",
+      "One transient read-only source-checkout cwd use occurred during audit; no write occurred and it did not recur",
+      "Early test-local path seams were rejected as GREEN and removed after root-owned provisional module registration"
+    ]
+  },
+  "rootOwnedWorkingTreeIntegration": {
+    "paths": [
+      "crates/drogon-core/src/lib.rs",
+      "crates/drogon-core/src/bots/mod.rs",
+      "crates/drogon-core/src/automations/mod.rs"
+    ],
+    "commitClaimed": false
+  }
+}
