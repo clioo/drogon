@@ -29,6 +29,28 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+### Active corrections and full-model work: 18:02 UTC
+
+Root revalidated all three exact workers as live at depth 2; no new instance was
+started. ENG Kimi is on `task_496eabe1ef0c / ctx_16049bee8b80`, CAP Sonnet on
+`task_22d37d4b6e77 / ctx_613d1c90de2a`, and UI GLM remains on
+`task_fc98ab95eee9 / ctx_323c1f3d8f61`. Earlier attempts below are history, not
+current ownership. The lead-only policy is persisted in `AGENTS.md` and was
+reaffirmed to all three current Sol Dispatches; corrections remain leaf work.
+
+ENG confirmed (`msg_7ce33024c214`) that root's committed actual-source oracle
+`bf394ba` reached the current Kimi: 266 raw-JSON cases, 163 admitted and 103
+rejected by the pinned source. Native replay must preserve numeric source text;
+the source oracle alone does not prove candidate parity. CAP is correcting real
+cross-connection contention and migration behavior. Root additionally rejected
+substitution of a Bot-owner check for the source SSH host-authority fence; the
+mandatory separate admission gate is in `native-bot-state-contract.md`.
+
+Native module bindings remain provisional and uncommitted; no Engine migration,
+new RPC, preview installation or public push is claimed. Audit is still 11/12
+(91.7%, medium confidence, delta 0); E5 resources/publication is the next closure
+milestone and full-fidelity 24-hour delivery remains high risk.
+
 ### Root review and delegated correction: 17:43 UTC
 
 ENG's current correction is `task_0970a0550c79 / ctx_afada235a4cc`, verified

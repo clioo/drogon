@@ -176,3 +176,29 @@ same Sonnet leaf under Sol direction:
 These are code-review findings, not root-executed candidate reproductions or
 newly accepted storage behavior. Preserve a real failing regression before the
 fix and the same passing assertions afterward. No additional worker is needed.
+
+## Host authority is not Bot ownership, 18:02 UTC
+
+Root compared the current storage draft with the pinned
+`src/shared/automation-owner-precondition.ts`. A Bot-ID equality check is useful
+but is **not** the source automation owner fence. Guidance
+`msg_80ee2d7bfde1` assigns the naming/evidence correction to Sol-CAP's existing
+Sonnet leaf, without extending its implementation into a fabricated registry.
+
+The mandatory host-authority dependency remains:
+
+- Project the actual stored selector as `self`, `ssh` with target ID and
+  registration generation, or `orphan`, using real registry/workspace context.
+- Refuse orphan execution even when the caller omits its expected owner.
+- Preserve legacy optional-wire behavior: bare reads remain admitted, but
+  mutations/execution of generation-bound SSH rows require an owner capture.
+- Compare both target ID and generation; a reused target ID is not the same
+  authority. Preserve the source conflict codes and their precedence.
+- Resolve destinations against the saved registry, and compare the actual
+  landing selector after workspace SSH pin projection, not just stored type.
+
+Keep Bot ownership types/functions domain-specific and map this host fence as
+pending until its real dependencies and original tests are ported. No global
+automation read/mutate/execute RPC may be accepted through a Bot-only substitute.
+This gate preserves the original rewrite scope; it does not defer SSH support
+out of the final product or declare record/storage tests full feature parity.
