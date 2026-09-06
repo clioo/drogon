@@ -1,0 +1,56 @@
+{
+  "capsuleId": "emulator-stream-listener-cleanup",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "description": "Three unchanged original emulator IPC listener-cleanup cases with the original dependency mocks; not ownership/security or real-stream acceptance.",
+  "entryTestFile": "src/main/ipc/emulator-stream-listener-cleanup.test.ts",
+  "files": [
+    {
+      "path": "src/main/ipc/emulator-stream-listener-cleanup.test.ts",
+      "role": "test",
+      "sha256": "541d98239085904de6430588a8d21c1b11ef7df451df22c5b6ac892dadb01565"
+    },
+    {
+      "path": "src/main/ipc/emulator-frame-stream.ts",
+      "role": "module",
+      "sha256": "57b5c5eed134bc0336e751edff935e8809ae9f71795225301da07b293e68eff9"
+    },
+    {
+      "path": "src/main/ipc/emulator-video-stream.ts",
+      "role": "module",
+      "sha256": "936b78190ba8d972f8370493107f900a9ec0f852413196493f0ca1d14e8c4823"
+    },
+    {
+      "path": "src/main/emulator/mjpeg-frame-stream.ts",
+      "role": "module",
+      "sha256": "11124c0db3f64df1638ff8b1a372dd8c681bf1e10d9b900ff5b0054406f5cda4"
+    },
+    {
+      "path": "src/main/emulator/scrcpy-video-registry.ts",
+      "role": "module",
+      "sha256": "6548a16d2d8f4d4a90eede0b0eef039d8f045622238c1111b6b1083cc0120294"
+    },
+    {
+      "path": "src/main/emulator/emulator-probe.ts",
+      "role": "module",
+      "sha256": "2fba16f1b4a8d97686f41cc9a707d19f942c7173ab9dd6b4fd2950ec07c09568"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use original installed Vitest4.1.11 with Node24, no installation or reference-tree writes.",
+    "Minimal node config omits original renderer aliases, DOM/host-port setup, feature-wall define, execArgv and broader includes/timeouts. This reviewed closure exercises in-memory IPC handler functions with original hoisted dependency mocks, not a running app; no full config or typecheck equivalence claimed."
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 3
+  },
+  "isolationRationale": "Full bodies of all six staged files read. The unchanged original test mocks electron, MjpegFrameStream, scrcpyVideoRegistry and emulatorProbe before handler imports. Real EventEmitter listeners and random UUIDs are exercised; video zero-delay callbacks see removed subscriptions and return. Mock-target source files are included for resolution/provenance but their network/registry/probe implementations are not exercised. No app, emulator, network connection, child harness or real profile is started. Runner stages only under its canonical temporary fixture directory. This is not a security sandbox or real Electron test.",
+  "testEvidenceBoundary": "Two frame cases assert15 explicit stop cycles and owner-destroy cleanup; one video case asserts15 explicit stop cycles. No cross-owner stop rejection, stream bytes, actual device, rendering, mixed-version transport, full registry cleanup, cross-platform run or rewritten Drogon parity. Frame stop ignores sender while video stop checks owner in source; these tests do not assert that asymmetry."
+}

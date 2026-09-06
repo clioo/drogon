@@ -1,0 +1,76 @@
+{
+  "numTotalTestSuites": 3,
+  "numPassedTestSuites": 3,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 3,
+  "numPassedTests": 3,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1788673955484,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "emulator frame stream listener cleanup"
+          ],
+          "fullName": "emulator frame stream listener cleanup removes the destroyed listener on explicit stop and does not accumulate across cycles",
+          "status": "passed",
+          "title": "removes the destroyed listener on explicit stop and does not accumulate across cycles",
+          "duration": 1.5609579999999994,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "emulator frame stream listener cleanup"
+          ],
+          "fullName": "emulator frame stream listener cleanup still tears down via the destroyed event when the window closes without a stop",
+          "status": "passed",
+          "title": "still tears down via the destroyed event when the window closes without a stop",
+          "duration": 0.13437499999997726,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "emulator video stream listener cleanup"
+          ],
+          "fullName": "emulator video stream listener cleanup removes the destroyed listener on explicit stop and does not accumulate across cycles",
+          "status": "passed",
+          "title": "removes the destroyed listener on explicit stop and does not accumulate across cycles",
+          "duration": 0.4622090000000014,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1788673955648,
+      "endTime": 1788673955650.4622,
+      "status": "passed",
+      "message": "",
+      "name": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn/src/main/ipc/emulator-stream-listener-cleanup.test.ts"
+    }
+  ]
+}
