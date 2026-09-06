@@ -29,6 +29,28 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+### User-directed transition to direct non-OpenAI workers
+
+Carlos replaced the Sol-lead hierarchy with root Astra directly planning,
+coordinating and integrating approved non-OpenAI workers. Root delivered the
+close-and-handoff instruction to all three live Sol Dispatches:
+`ctx_0477d3c64e87` (ENG), `ctx_ccc470781ffd` (UI), and `ctx_fc8476745cba`
+(CAP), using structured guidance plus a self-contained terminal message so a
+lead bound to its child Run can receive the direction without rebinding mail.
+
+The leads must finish their current dispatched leaf correction and focused
+review, report evidence/unresolved findings, settle/release their child and
+then end. No further Sol or child follow-up is authorized from those leads.
+This is a requested transition, not a claim their assignments already ended.
+Root will directly dispatch subsequent GLM/Kimi/Sonnet work after settlement,
+with a maximum of three active leaves and no duplicate ownership. Existing
+depth-2 attempts retain their real provenance; new root dispatches use depth 1.
+
+Queued foundation `task_3555b53c24b1` and package `task_f97178f8b8fa` work
+remain required, but their old Sol-lead specs must be re-scoped by root before
+dispatch. No active worker is canceled or replaced merely to change topology.
+All fidelity, source-provenance, testing, SSH and installation gates remain.
+
 ### Active corrections and full-model work: 18:02 UTC
 
 Root revalidated all three exact workers as live at depth 2; no new instance was
