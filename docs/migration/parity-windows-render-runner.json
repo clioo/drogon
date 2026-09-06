@@ -1,0 +1,57 @@
+{
+  "schema": "drogon.windows-render-runner/1",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceGapId": "candidates:unclassified-present",
+  "allocation": "WP-UNRESOLVED-01",
+  "classification": "powershell-native-render-test",
+  "runnerIdentified": true,
+  "executed": false,
+  "owner": "Coordinator / WP-ENG-NATIVE / WP-CAP-DEVICE",
+  "sources": [
+    {
+      "file": "native/computer-use-windows/runtime-render.test.ps1",
+      "sha256": "a3a3fd5cbd414be197182166f9101c0dfbc3315dcc95686de579d13427b5d894"
+    },
+    {
+      "file": "native/computer-use-windows/runtime.ps1",
+      "sha256": "a4c5a1d650d29921aa24de435dfb3ca9501cdee7dba5f7f260cda60c100d2353"
+    },
+    {
+      "file": "config/scripts/verify-computer-native.mjs",
+      "sha256": "b53b413c546dab74d9148aa6a8d0ec2ef246c851c2b44d765d32087dbbd67a1e"
+    },
+    {
+      "file": "package.json",
+      "sha256": "b8dbb3ab7d5f5709dc71780675c91c69f323851a1c71e09711a2d2db0a794810"
+    },
+    {
+      "file": ".github/workflows/computer-e2e.yml",
+      "sha256": "0b5bb1114c902252fcb018a9c4b3ea5585fb5af1cd4d7db9c5767b2585b9c74a"
+    }
+  ],
+  "route": {
+    "packageScript": "verify:computer-native",
+    "wrapper": "config/scripts/verify-computer-native.mjs",
+    "entryName": "Windows snapshot renderer tests",
+    "platformCondition": "process.platform === 'win32'",
+    "executable": "powershell.exe",
+    "sourceArgv": [
+      "-NoLogo",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "native/computer-use-windows/runtime-render.test.ps1"
+    ],
+    "workflow": ".github/workflows/computer-e2e.yml",
+    "job": "windows",
+    "runsOn": "windows-latest",
+    "jobCondition": "github.event_name != 'pull_request'"
+  },
+  "requiredEvidence": [
+    "Test actually launched, not skipped because command is missing",
+    "Source assertion results/exit plus windows-snapshot-render-tests-ok marker",
+    "Native runtime execution safety review before running",
+    "Candidate assertions preserved; setup/import failure is not behavioral RED"
+  ]
+}

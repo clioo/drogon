@@ -58,15 +58,16 @@ exhaustivos. Sus resultados se consolidan en un registro canónico de capacidade
 | Auditoría | Responsable actual | Salida |
 | --- | --- | --- |
 | UI, navegación, formularios, menús, atajos y estados | Claude Sonnet 5 | `parity-ui-audit.md` |
-| CLI pública, skills y orquestación completa | Claude Sonnet 5 corrige el censo acotado de registros; intento GLM cerrado y conservado | `parity-cli-audit.md`, `parity-source-contracts.json` |
+| CLI pública, skills y orquestación completa | Censo de registros y parser aceptado como metadata; semántica por handler pendiente | `parity-cli-audit.md`, `parity-source-contracts.json`, `parity-cli-argument-contract.json` |
 | Plataformas, preferencias, contratos y servicios | Muse Spark 1.3 Contributor / OpenCode Go | `parity-platform-audit.md` |
 | Cambios Drogon: Mentu, Bots, Meetings, marca y pendientes | GLM-5.3-Flash / Z.AI Coding Plan | `parity-drogon-delta-audit.md` |
 | Consolidación, contradicciones, capturas y aceptación | Coordinador | Este plan y registro de evidencia |
 | Censo reproducible de suites/tests/configs/fixtures | Muse Spark corrige y valida el censo inicial de GLM | `parity-source-tests.json`, `parity-test-inventory.md` |
 | Contratos completos interfaz/motor, canales y registros RPC | Claude Sonnet 5 | `parity-source-bridges.json`, `parity-bridge-enumeration.md` |
 | Portabilidad de assertions y contrato de doble ejecución | Muse Spark 1.3 Contributor | `parity-test-porting.md` |
-| Ajustes/atajos y propiedades persistidas | Muse Spark 1.3 Contributor | `parity-settings-keybindings.{json,md}`; propiedades en auditoría separada |
-| Catálogo de harnesses y sus registros de capacidades | Claude Sonnet 5 | `parity-harness-catalog.{json,md}` en preparación |
+| Ajustes/atajos y propiedades persistidas | Metadata verificada por coordinador; bindings y comportamiento pendientes | `parity-settings-keybindings.{json,md}`, `parity-settings-properties.{json,md}` |
+| Catálogo de harnesses y sus registros de capacidades | 36 IDs y registros de probes reconciliados; no pruebas de modelos | `parity-harness-catalog.{json,md}` |
+| Guías incluidas y registros de skills/proveedores | Censo estático y proyecciones verificados por coordinador | `parity-skill-provider-catalog.{json,md}` |
 
 Los catálogos de ajustes/atajos y las 28 fichas UI son checkpoints de fuente,
 no un inventario completo aceptado ni pruebas de funcionamiento. La matriz de

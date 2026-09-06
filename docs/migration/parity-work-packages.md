@@ -40,8 +40,10 @@ proposals only**, requiring exact future leaf-task carve-outs and exclusions;
 shared protocol/manifests are assigned to **no** Sol writer (WP-ENG-SHARED
 lead: Coordinator). Bridge/CLI census files
 (`parity-source-bridges.json`, `parity-contract-enumeration.md` incl.
-`parity-source-contracts.json`) are **active and unaccepted**: referenced
-provisionally (WP-UI-PRELOAD, WP-ENG-CLI), never as frozen baselines.
+`parity-source-contracts.json`) have been accepted as bounded static inventories
+after coordinator checks (see `tests-first-checkpoint.md`). They are not
+complete handler contracts or runtime baselines. Named dynamic/delegated
+attribution gaps and per-command semantics remain owned proof obligations.
 
 ## 2. Packages (counts exact; implementWave deps form a DAG, depth measured 5)
 
@@ -144,7 +146,7 @@ resolution of its members.
 | Pending ledger 1–9 + unknowns | parity-drogon-delta-audit.md §§7, 9 | Sol-CAP / W4–W5; upstream → coordinator+human |
 | Bridge limits (disjoint namespaces, G6 ipcMain, signature names, cross-file channels) — provisional | parity-bridge-enumeration.md gaps register | ENG-IPC / W0–W1 |
 | Contract unknowns §6 — provisional | parity-contract-enumeration.md §6 | ENG-CLI / W2 |
-| Unresolved bucket: ps1 runner unknown | WP-UNRESOLVED-01 | coordinator / W0 |
+| Previously unresolved ps1 runner: static route identified, Windows execution unverified | `parity-windows-render-runner.md`; stable WP-UNRESOLVED-01 bucket retained | coordinator + ENG-NATIVE / W0 |
 
 ## 5. Closure statement (audit NOT closed)
 

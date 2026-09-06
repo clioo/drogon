@@ -68,7 +68,7 @@ The independent disposable source copy + recorded build receipt
 
 | # | Gap ID | State | Executable closure (command + owner) | Remaining read question |
 |---|---|---|---|---|
-| 1 | candidates:unclassified-present | unresolved | Owner test-infra: trace `runtime-render.test.ps1` in Windows CI legs; if runnerless keep explicit bucket | Which job, if any, invokes the ps1? |
+| 1 | candidates:unclassified-present | static-route-resolved-execution-pending | Coordinator traced package script → native verifier → Windows CI job; see `parity-windows-render-runner.md`. Frozen bucket retained. | Does the named Windows test run and pass, without a wrapper skip? |
 | 2 | cases:static-markers-only | inventoried | No static resolution exists; each lane run records runner-reported counts as baseline receipt (lane leads, W1+) | none (method limit, stated) |
 | 3 | cloud:pnpm-recursive | planned | Owner ENG-CLOUD: `pnpm -r test` from `cloud/` on fixture checkout; record per-workspace selection | none (runtime-resolved by design) |
 | 4 | imports:binary-unscanned | execution-pending | 1 file (`src/relay/dispatcher.test.ts`); run it, confirm collection (test-infra, W0) | none |

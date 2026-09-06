@@ -1,0 +1,139 @@
+{
+  "schema": "drogon.parity-audit-gate-ledger/3",
+  "status": "coordinator-reviewed-checkpoint-not-complete-audit",
+  "auditClosed": false,
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "correction": "Supersedes worker v1/v2. Removes stale active assignments, missing references, undefined owners and invented blocker counts; separates enumeration from execution. Existing required behavior is never scoped out.",
+  "acceptedMetadata": [
+    {
+      "id": "M1",
+      "evidence": "parity-source-tests.json + parity-test-work-packages.json",
+      "scope": "9037 unique source paths allocated without omission/duplication; not behavioral coverage"
+    },
+    {
+      "id": "M2",
+      "evidence": "parity-source-bridges.json",
+      "scope": "87 domains,947 channels,953 reachable methods,615 RPC names; unresolved attribution explicitly retained"
+    },
+    {
+      "id": "M3",
+      "evidence": "parity-source-contracts.json + parity-cli-argument-contract.json",
+      "scope": "234 command registry records and bounded shared-parser rules, not all handler behavior"
+    },
+    {
+      "id": "M4",
+      "evidence": "parity-settings-properties.json + parity-settings-keybindings.json",
+      "scope": "214 settings fields,187 defaults,88 core keybindings plus36 generated agent definitions; actual bindings/gating not proven"
+    },
+    {
+      "id": "M5",
+      "evidence": "parity-harness-catalog.json",
+      "scope": "36 harness IDs and specific probe registries;26 absent from a specialized registry does not mean26 missing harnesses"
+    },
+    {
+      "id": "M6",
+      "evidence": "parity-skill-provider-catalog.json",
+      "scope": "8guide projections,9native skill destinations,36community mappings,4task providers,10wire constants"
+    },
+    {
+      "id": "M7",
+      "evidence": "parity-windows-render-runner.json",
+      "scope": "PowerShell source test routing identified; Windows execution not performed"
+    }
+  ],
+  "enumerationFollowUps": [
+    {
+      "id": "E1",
+      "owner": [
+        "WP-UI-CORE",
+        "WP-UI-SETTINGS",
+        "WP-UI-WORK",
+        "WP-UI-AUX"
+      ],
+      "evidence": "parity-ui-capability-cards.json remainingGapsNotCarded/testFilesVerifiedButNotCarded; parity-ui-remaining-surface-cards.json pending review",
+      "resolution": "Reconcile remaining named surfaces with source entrypoints, state/action/error/recovery and ownership. Correct unsupported original-behavior claims before freezing cards.",
+      "proofStillOwed": "Rendered actions, screenshots and source tests belong execution waves."
+    },
+    {
+      "id": "E2",
+      "owner": [
+        "WP-UI-SETTINGS",
+        "WP-ENG-SHARED"
+      ],
+      "evidence": "parity-settings-properties.json fields; parity-settings-keybindings.json",
+      "resolution": "For214settings, trace actual observable consumer or explicitly classify internal storage; distinguish defaults, hydration and UI gates. For shortcut actions retain platform normalization and dynamic plugin boundaries.",
+      "proofStillOwed": "Persistence, override/migration and OS shortcut execution."
+    },
+    {
+      "id": "E3",
+      "owner": [
+        "WP-ENG-IPC"
+      ],
+      "evidence": "parity-source-bridges.json and parity-bridge-enumeration.md denominator/gaps",
+      "resolution": "Resolve or source-ground named11delegated methods,1dynamic channel,1disposer and54invoke/12send/96push attribution gaps. Unknown linkage is not missing implementation.",
+      "proofStillOwed": "Actual request/response/error/subscription contracts and mixed-version behavior."
+    },
+    {
+      "id": "E4",
+      "owner": [
+        "WP-ENG-CLI"
+      ],
+      "evidence": "parity-cli-argument-contract.json handler obligations + parity-source-contracts.json handlerGroupMembership",
+      "resolution": "Map per-command required/default/type/value validation and output/error contracts through actual owning handlers, including passthrough dispatch. Shared parser metadata is already accepted; do not repeat that census.",
+      "proofStillOwed": "Original CLI commands and candidate dual-target results with no assertion weakening."
+    },
+    {
+      "id": "E5",
+      "owner": [
+        "Coordinator"
+      ],
+      "evidence": "rewrite-parity-plan.md section3; parity-work-packages.md gaps register; parity-ui-journeys.md; parity-platform-audit.md",
+      "resolution": "Reconcile all existing gap IDs and named observer registries against accepted artifacts and E1-E4; add only source-backed omissions with concrete owners. Do not turn a speculative17-registry list into17 asserted blockers.",
+      "proofStillOwed": "Full functional/visual/platform/performance acceptance; file allocation alone cannot close this audit."
+    }
+  ],
+  "executionGates": [
+    {
+      "id": "T1",
+      "owner": "Coordinator + per-package leads",
+      "evidenceNeeded": "Complete original suite discovery/baseline per reviewed runner, versions/config/effects recorded; skip/missing tool never PASS"
+    },
+    {
+      "id": "T2",
+      "owner": "Per-package leads",
+      "evidenceNeeded": "All source test obligations ported before feature wave; assertions preserved or explicit equivalent Rust checks, source-to-candidate mapping"
+    },
+    {
+      "id": "T3",
+      "owner": "Coordinator + leads",
+      "evidenceNeeded": "Behavioral RED then GREEN for implementation; compilation/setup failure is not RED"
+    },
+    {
+      "id": "T4",
+      "owner": "WP-ENG-REMOTE / WP-ENG-IPC / WP-ENG-NATIVE / UI leads",
+      "evidenceNeeded": "Both version skews, OS and SSH/folder boundaries, rendered journeys/captures, recovery and performance"
+    },
+    {
+      "id": "T5",
+      "owner": "Coordinator",
+      "evidenceNeeded": "Finite ownership/acceptance for each future dispatch. Audit closes before Sol hierarchy; not every leaf must exist before leads can plan test ports."
+    }
+  ],
+  "finalAcceptance": {
+    "owner": "Coordinator",
+    "requirements": [
+      "100% required Orca experience plus implemented Drogon changes",
+      "Zero required capabilities lacking acceptance",
+      "Installed verified Electron build plus own drogon-cli/core/service, reversible data migration",
+      "Real Drogon-coordinated task without execution dependence on orca-cli",
+      "Cross-platform/remote/recovery/performance evidence and current handoff",
+      "After accepted migration: remaining Mentu/Bots/Meetings features and Pi+Spark comparison as authorized"
+    ]
+  },
+  "notAuditBlockers": [
+    "A specialized probe registry intentionally lacks other harnesses",
+    "Missing runtime receipts are execution debt, not proof a source registry was unenumerated",
+    "Genuinely preexisting postmigration feature requests do not block enumeration; already-implemented behavior remains required",
+    "No speculative source census absence is accepted from filename or directory searches alone"
+  ]
+}

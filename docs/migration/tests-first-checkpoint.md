@@ -520,6 +520,55 @@ omissions. As `parity-work-packages.md` §5 specifies, full baseline execution,
 test-port validation and runtime proof remain test-wave gates; they must not
 be mistaken for already-completed audit evidence or silently waived.
 
+## Skill/provider registries and Windows runner routing
+
+Coordinator added a restricted literal-AST census without importing inspected
+source modules or executing guide instructions. All eight bundled guides match
+their normalized source Markdown; all eight installable stub projections match
+the generator. Separate registries enumerate nine native skill destinations,
+36 community CLI agent mappings (30 values, six nulls), four task providers,
+and ten skill wire capability declarations. All 35 source files were checked
+against pinned Git blobs; two regenerated results were byte-identical to the
+artifact. Six checker regression tests passed on Node 24.19.0. These are
+registry/projection facts, not installation or provider integration proof.
+
+The coordinator traced the previously unclassified Windows render test through
+the native verification script, package scripts and Windows CI job. The
+source test was read in full; no PowerShell or native helper was executed.
+The routing question is resolved in `parity-windows-render-runner.json/.md`;
+its frozen allocation stays intact and Windows execution remains unverified.
+The verifier can skip a missing command and still exit zero, so a future
+baseline must demonstrate that this specific test actually ran.
+
+The first gate-ledger worker draft was NOT accepted: it mixed obsolete active
+worker status, resolved registry gaps and test-wave runtime proof into audit
+blockers. A bounded correction is assigned to `task_490a6a3a0388`.
+UI citation corrections (`task_2f57477a1edb`) and named remaining surface cards
+(`task_d105209f130d`) are also active, with disjoint document ownership.
+No Sol/nested workers, new feature wave or preview installation was started.
+
+Those audit Tasks then settled and were released. Coordinator superseded the
+second gate-ledger draft with v3: it no longer invents a 14-blocker count or
+requires runtime receipts before enumeration can close; five grouped existing
+enumeration follow-ups are separated from execution/final acceptance.
+
+The UI correction removed false global absence claims and unsupported source
+behavior asserted by analogy. Existing 28 cards now cite 60 test-file entries;
+the 14 additional named-surface cards cite 21. Coordinator rechecked all 81 paths,
+337 line-anchored title strings (226 + 111), and 30 new source hashes. One old
+paraphrased title was corrected to exact source wording; two unread it.each
+structure notes were removed from the new quoted-title count (113 to 111).
+One older path-only summary remains explicitly unquoted. The reproducible
+checker is `scripts/check-parity-ui-citations.mjs`. These checks validate
+metadata, not assertion bodies or execution. New missing-invariant suggestions
+must characterize original behavior before becoming candidate assertions.
+
+The named remaining surfaces are now carded, but full per-state enumeration,
+settings consumer bindings, bridge attribution and per-command handler contracts
+still require the bounded follow-ups in `parity-audit-gate-ledger.json`.
+No dispatched worker remains from this wave. Audit and product acceptance
+remain open; no implementation was promoted or installed.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

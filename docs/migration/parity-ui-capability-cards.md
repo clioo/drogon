@@ -1,73 +1,76 @@
-# Parity UI capability cards — bounded taxonomy checkpoint (corrected)
+# Parity UI capability cards — bounded taxonomy checkpoint (corrected, accuracy-audit follow-up)
 
 **This is a bounded checkpoint across a fixed 19-surface taxonomy, not a claim of complete UI-audit closure.** It continues the work named as an open gap in `parity-work-packages.md` §4 ("Unread renderer domains ... parity-ui-audit.md §10, §13") but does NOT claim to close that gap — §5/§6 below name specific surfaces still open. Read-only on all product source: legacy reference `/Users/carlos/Documents/Drogon-mentu-session` frozen at `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, including `out/`. No implementation, no UI interaction, no app/daemon starts, no test execution, no Git mutation. Machine companion: `docs/migration/parity-ui-capability-cards.json` (schema `drogon.parity-ui-capability-cards/1`, status `bounded-checkpoint-taxonomy-only`).
 
-## 0. Correction note (supersedes the task_4bbf433675d7 revision of this artifact)
+## 0. Correction note (accuracy audit, supersedes the prior gap-closure pass)
 
-This is a bounded checkpoint across a fixed 19-surface TAXONOMY, not a claim of complete UI-audit closure — see §5/§6 of the companion .md for named remaining omissions. Corrects the prior revision of this same artifact (produced under task_4bbf433675d7): that revision (a) opened by overclaiming closure of the remaining UI map despite its own listed omissions, (b) used DEFER/DEFER-DECISION language for Source Control/PR/Accounts/AI Vault/Artifacts/Mentu — six capabilities that ARE existing, required-during-migration legacy behavior and were never actually in question, only their implementation strategy or verification depth was undecided, (c) made a global 'every assertion body verified' claim contradicted by its own mobile card admitting unread bodies, and (d) cited a sibling component's test (WorkspacePortScanner) as if it were CONFIRMED evidence for mobile pairing/emulator behavior, and cited TerminalSearch alone as evidence for the whole terminal liveness contract. All four are corrected in this revision: no card recommends DEFER/DEFER-DECISION; every originalTests entry carries an explicit evidenceTier ('path-existence-only' vs 'assertion-titles-read' vs 'executed', the last never used); the mobile card now cites NetworkInterfacePicker.test.tsx/mobile-page-stage.test.ts/use-emulator-pane-session.test.tsx directly, with exact lines; PUI-TERM-001 now cites pty-connection-session-liveness.test.ts/TerminalProcessExitOverlay.test.tsx directly, with exact lines.
+This is a bounded checkpoint across a fixed 19-surface TAXONOMY, not a claim of complete UI-audit closure — see §5/§6 of the companion .md for named remaining omissions. Corrects the prior revision of this same artifact (produced under task_4bbf433675d7): that revision (a) opened by overclaiming closure of the remaining UI map despite its own listed omissions, (b) used DEFER/DEFER-DECISION language for Source Control/PR/Accounts/AI Vault/Artifacts/Mentu — six capabilities that ARE existing, required-during-migration legacy behavior and were never actually in question, only their implementation strategy or verification depth was undecided, (c) made a global 'every assertion body verified' claim contradicted by its own mobile card admitting unread bodies, and (d) cited a sibling component's test (WorkspacePortScanner) as if it were CONFIRMED evidence for mobile pairing/emulator behavior, and cited TerminalSearch alone as evidence for the whole terminal liveness contract. All four are corrected in this revision: no card recommends DEFER/DEFER-DECISION; every originalTests entry carries an explicit evidenceTier ('path-existence-only' vs 'assertion-titles-read' vs 'executed', the last never used); the mobile card now cites NetworkInterfacePicker.test.tsx/mobile-page-stage.test.ts/use-emulator-pane-session.test.tsx directly, with exact lines; PUI-TERM-001 now cites pty-connection-session-liveness.test.ts/TerminalProcessExitOverlay.test.tsx directly, with exact lines. FURTHER CORRECTION (this pass, gap-closure follow-up): the 6 named focus cards (Source Control PUI-SC-001, Pull Request PUI-PR-001, Accounts PUI-ACCOUNTS-001, AI Vault PUI-AIVAULT-001, Artifacts PUI-ARTIFACTS-001, and Mentu PUI-MENTU-001's coalescing-semantics gap) were re-searched for real test bodies rather than left as bare proposals. 5 of the 6 (all but Mentu's coalescing layer specifically) now carry real, line-cited, assertion-title-verified test evidence and moved from cardStatus 'proposal-not-dispatchable' to 'grounded-partial' — this is EXPLICITLY NOT a claim of full capability closure: each card's new 'missingInvariants' field names the SPECIFIC obligations still uncovered (e.g. Source Control's stage/commit/sync actions, PR page's conversation/checks/reviewers/land-gate, Accounts' tab-scoping-across-a-switch, AI Vault's resume/session-identity routing, Mentu's request-coalescer) and the exact new test each one needs. Three WP allocations were corrected against parity-test-work-packages.json's actual per-file manifest rather than the prior guess (PR page WP-CAP-INT -> WP-UI-WORK; AI Vault renderer tests WP-UI-DASH -> WP-UI-WORK; Artifacts backing WP-ENG-RUNTIME -> WP-ENG-PLUGINS). PUI-SETTINGS-000 (the sixth prior proposal-not-dispatchable card) was intentionally left unchanged — it was not named in this pass's scope. FURTHER CORRECTION (this pass, accuracy audit before acceptance): fixed a stale methodology sentence ('six cards lack tests' vs. counts saying one). Corrected two false/overbroad negative claims caught in review: AI Vault resume/session-identity was claimed to have 'zero test coverage anywhere' after searching only main/ipc/'s own directory — a wider search of src/shared/, src/renderer/src/lib/, and mobile/src/session/ found 9 real test files (~2,260 lines) covering resume-command construction, shell-dialect handling, target/host-ownership matching, and cross-account repin safety; 5 are now cited. Mentu's request-coalescer was claimed unreferenced by any test's imports after grepping only for the literal string 'request-coalescer' in test files; tracing actual consumers found readRunRequestForScope is imported unmocked by use-mentu-session-evidence-restore.ts, itself exercised by mentu-evidence-restore.test.tsx's StrictMode assertion — now tagged assertion-body-inspected as real, if narrow (1 of 3 exports), coverage. Removed FIVE invented behavioral contracts asserted by analogy without reading source (an exactly-once stage/unstage click guarantee, a specific AI-generation-failure UX, a specific sync-conflict-summary UI requirement, a cross-component PR-page/checks-panel parity requirement, a universal required-check merge-gating rule, and a specific cross-account tab-scoping rule) across PUI-SC-001/PUI-PR-001/PUI-ACCOUNTS-001/PUI-MENTU-001 — each is now framed as PROPOSED-UNVERIFIED pointing at the real, unopened source file that would need to be read FIRST to characterize actual behavior, never asserting a new product requirement as if it were observed. Added an 'assertion-body-inspected' evidenceTier value, distinct from 'assertion-titles-read', for the few citations where the actual expect()/code inside a test body (not just its title) was read and is the basis for a claim. Mechanically verified all 210 line-anchored assertion citations against the frozen source this pass (a script re-opens every cited file and confirms the quoted title string appears at the claimed line, tolerant of a small offset): 209/210 matched exactly; 1 (PUI-DIAG-001) had a paraphrased title ('bundle preview file' vs. the source's actual 'review file') and a one-line off-by-one anchor, both corrected to the verbatim source. No card was expanded beyond correcting its existing content; PUI-SC-002 and all cards without a flagged issue are unchanged.
 
 ## 1. Methodology
 
-Synthesizes the PUI-* capability IDs already established in parity-ui-audit.md and parity-ui-journeys.md into bounded, test-first cards. This document does NOT claim closure of the renderer UI surface — it is a bounded taxonomy checkpoint across 19 named surface categories (§ counts.requiredSurfacesCovered), not a complete UI audit; §5/§6 name specific omissions still open. THREE evidence tiers are used and never conflated: (1) 'path-existence-only' — a test file's path was confirmed to exist (find/ls against the frozen legacy checkout) but its body was not opened, so its assertion titles are NOT individually cited; (2) 'assertion-titles-read' — the file was opened (grep/Read) and specific describe/it title strings with their source line numbers are quoted verbatim as 'assertionsObserved'; this is inspection of source TEXT, not proof the assertion currently passes. (3) 'executed' — a test was actually run and observed to pass/fail. Tier (3) is NEVER used anywhere in this document: no test was executed, no app/daemon was launched, per this task's read-only scope. Every originalTests entry below carries an explicit 'evidenceTier' and 'executed' field; a bare filename appearing in a prior document, or an analogous/sibling test on a DIFFERENT component, was never substituted as evidence for the capability a card describes. WP allocation for each card's primary test-port path was resolved by looking up the card's own verified test file(s) in parity-test-work-packages.json's per-file manifest (not guessed from the package table's broad file-count rows). Six cards (see counts.cardsWithNoVerifiedTestFile) have zero verified test evidence; their 'cardStatus' is 'proposal-not-dispatchable' and their 'implementationStrategy' is 'implementation-strategy-undecided' — this is EXPLICITLY DISTINCT from deferring the underlying capability itself: every card in this checkpoint is existing legacy behavior required during migration (see 'migrationClass'), never a capability whose migration requirement is in question, only its implementation strategy or its verification depth.
+Synthesizes the PUI-* capability IDs already established in parity-ui-audit.md and parity-ui-journeys.md into bounded, test-first cards. This document does NOT claim closure of the renderer UI surface — it is a bounded taxonomy checkpoint across 19 named surface categories (§ counts.requiredSurfacesCovered), not a complete UI audit; §5/§6 name specific omissions still open. THREE evidence tiers are used and never conflated: (1) 'path-existence-only' — a test file's path was confirmed to exist (find/ls against the frozen legacy checkout) but its body was not opened, so its assertion titles are NOT individually cited; (2) 'assertion-titles-read' — the file was opened (grep/Read) and specific describe/it title strings with their source line numbers are quoted verbatim as 'assertionsObserved'; this is inspection of source TEXT, not proof the assertion currently passes. (3) 'executed' — a test was actually run and observed to pass/fail. Tier (3) is NEVER used anywhere in this document: no test was executed, no app/daemon was launched, per this task's read-only scope. Every originalTests entry below carries an explicit 'evidenceTier' and 'executed' field; a bare filename appearing in a prior document, or an analogous/sibling test on a DIFFERENT component, was never substituted as evidence for the capability a card describes. WP allocation for each card's primary test-port path was resolved by looking up the card's own verified test file(s) in parity-test-work-packages.json's per-file manifest (not guessed from the package table's broad file-count rows). As of this pass, counts.cardsWithNoVerifiedTestFile cards (see that count, not a hardcoded number here) have zero verified test evidence; their 'cardStatus' is 'proposal-not-dispatchable' and their 'implementationStrategy' is 'implementation-strategy-undecided' — this is EXPLICITLY DISTINCT from deferring the underlying capability itself: every card in this checkpoint is existing legacy behavior required during migration (see 'migrationClass'), never a capability whose migration requirement is in question, only its implementation strategy or its verification depth. A FOURTH distinction within tier (2): 'assertion-titles-read' entries quote only the it()/describe() title string and its line, without necessarily opening the assertions inside that block; 'assertion-body-inspected' entries (a value of the same evidenceTier field) additionally quote or paraphrase the actual expect()/assertion code inside the test body, used only where a card's interpretation goes beyond what the bare title states. Absence of a dedicated test file, or absence of a matching filename/import in one targeted search, is NEVER treated as proof a behavior is untested anywhere in the repository — see the per-card notes for searches that were widened after an initial too-narrow negative claim was caught in review.
 
 ## 2. Counts (exact, derived directly from the JSON companion)
 
 - `cardsTotal`: **28**
-- `cardsWithAtLeastOneVerifiedTestFile`: **22**
-- `cardsWithNoVerifiedTestFile`: **6**
-- `cardsProposalNotDispatchable`: **6**
-- `cardsGroundedPartial`: **22**
+- `cardsWithAtLeastOneVerifiedTestFile`: **27**
+- `cardsWithNoVerifiedTestFile`: **1**
+- `cardsProposalNotDispatchable`: **1**
+- `cardsGroundedPartial`: **27**
 - `requiredSurfacesTotal`: **19**
 - `requiredSurfacesCovered`: **19**
 - `requiredSurfacesMissing`: **[]**
-- `totalVerifiedTestFilesCitedAcrossCards`: **33**
-- `testFileCitationsAssertionTitlesRead`: **32**
+- `totalVerifiedTestFilesCitedAcrossCards`: **60**
+- `testFileCitationsAssertionTitlesRead`: **57**
 - `testFileCitationsPathExistenceOnly`: **1**
 - `testFileCitationsExecuted`: **0**
 - `extraVerifiedTestFilesNotYetCarded`: **5**
 - `migrationClassLegacyRequired`: **28**
 - `migrationClassOther`: **0**
-- `implementationStrategyUndecided`: **5**
+- `implementationStrategyUndecided`: **3**
 - `implementationStrategyReuse`: **11**
 - `implementationStrategyRewrite`: **0**
-- `implementationStrategyMixedOrPartial`: **12**
+- `implementationStrategyMixedOrPartial`: **14**
+- `cardsWithMissingInvariantsRecorded`: **5**
+- `totalMissingInvariantsRecorded`: **11**
+- `testFileCitationsAssertionBodyInspected`: **2**
 
-No percentage-complete figure is stated anywhere in this document. Any number quoted in a status message ABOUT this document (e.g. a coordinator report) must be read directly from this table, not restated from memory — that mismatch is exactly the kind of error this revision corrects (a prior report cited 32 verified test citations against a JSON total of 31).
+No percentage-complete figure is stated anywhere in this document. A `grounded-partial` card is NEVER a claim of full coverage — see each card's `missingInvariants` for obligations still uncovered, now explicitly marked `PROPOSED-UNVERIFIED` where no source was read to support them, distinct from obligations backed by a real, cited anchor.
 
 ## 3. Capability cards — index
 
-One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with zero verified test evidence — those obligations are named hypotheses from source-file/prior-document evidence, not confirmed behavior, and must not be treated as ready to dispatch. `Impl. strategy` is never DEFER/DEFER-DECISION: every card is either a verified REUSE/REWRITE/split, or explicitly `implementation-strategy-undecided` — which describes uncertainty about HOW to migrate an already-required capability, never whether it must migrate.
+One row per card. `Status` is `proposal-not-dispatchable` for cards with zero verified test evidence. `Impl. strategy` is never DEFER/DEFER-DECISION. `Missing invariants` counts named obligations still uncovered; each is tagged source-backed or proposed-unverified in §4, never asserted as an observed requirement without an anchor.
 
-| ID | Surface | Title | Status | Test evidence (tier) | WP (primary / backing) | Impl. strategy |
-|---|---|---|---|---|---|---|
-| `PUI-SIDEBAR-001` | navigation | Left sidebar workspace/worktree list + nav buttons | grounded-partial | `src/renderer/src/components/sidebar/SidebarNav.test.tsx` (assertion-titles-read) | `WP-UI-SHELL-NAV` | REUSE |
-| `PUI-SETTINGS-000` | navigation | Settings nav taxonomy (35 fixed panes + dynamic per-repo + named intents) | proposal-not-dispatchable | **none verified** | `WP-UI-SETTINGS` / `WP-ENG-SHARED` | REUSE |
-| `PUI-SETTINGS-002` | settings | Settings search (per-control keyword index, not per-pane) | grounded-partial | `src/renderer/src/components/settings/settings-search.test.ts` (assertion-titles-read) | `WP-UI-SETTINGS` | REUSE |
-| `PUI-SHELL-002` | workspace | Session persistence & shutdown checkpoint | grounded-partial | `src/renderer/src/app-shell/shutdown-checkpoint-restart-lifecycle.test.ts` (assertion-titles-read) | `WP-UI-CORE` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-SIDEBAR-002` | workspace | Workspace-space (disk usage) manager | grounded-partial | `src/renderer/src/components/status-bar/workspace-space-manager-source-boundary.test.ts` (assertion-titles-read) | `WP-UI-SHELL-WIN` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-TABS-001` | workspace | Tab strip: create/close/drag/reorder/split entry menu | grounded-partial | `src/renderer/src/components/tab-bar/tab-create-entry-classifier.test.ts` (path-existence-only) | `WP-UI-SHELL-WIN` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-TERM-001` | terminal | Terminal surface / xterm host + liveness contract | grounded-partial | `src/renderer/src/components/terminal-pane/pty-connection-session-liveness.test.ts` (assertion-titles-read); `src/renderer/src/components/terminal-pane/TerminalProcessExitOverlay.test.tsx` (assertion-titles-read) | `WP-UI-TERM` / `WP-ENG-DAEMON`, `WP-ENG-IPC` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-TERM-002` | terminal | Terminal search overlay | grounded-partial | `src/renderer/src/components/TerminalSearch.test.tsx` (assertion-titles-read) | `WP-UI-TERM` | REUSE |
-| `PUI-TERM-004` | panes | Floating terminal (detach/resize/orchestration dialog) | grounded-partial | `src/renderer/src/components/floating-terminal/FloatingTerminalWindowControls.test.tsx` (assertion-titles-read) | `WP-UI-SHELL-WIN` | REUSE |
-| `PUI-TABS-002` | panes | Split/group layout (drag-to-split, pane focus) | grounded-partial | `src/renderer/src/components/tab-group/TabGroupSplitLayout.test.ts` (assertion-titles-read) | `WP-UI-SHELL-WIN` | REUSE |
-| `PUI-EDITOR-001` | editor | Editor surfaces (source/diff/combined-diff/notebook/image/markdown) | grounded-partial | `src/renderer/src/components/editor/diff-viewer-large-diff-save-action.test.ts` (assertion-titles-read); `src/renderer/src/components/editor/markdown-round-trip.test.ts` (assertion-titles-read) | `WP-UI-EDITOR` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-SC-001` | review | Source control panel (stage/commit/AI-message/sync) | proposal-not-dispatchable | **none verified** | `WP-UI-WORK` / `WP-ENG-GIT` | implementation-strategy-undecided |
-| `PUI-SC-002` | checks | Checks panel (CI status + review comments + conflict summary) | grounded-partial | `src/renderer/src/components/right-sidebar/checks-panel/use-checks-panel-polling.test.tsx` (assertion-titles-read) | `WP-UI-WORK` / `WP-ENG-GIT`, `WP-CAP-INT` | REUSE |
-| `PUI-PR-001` | review | Pull request page (conversation/checks/files/reviewers) | proposal-not-dispatchable | **none verified** | `WP-CAP-INT` / `WP-ENG-GIT` | implementation-strategy-undecided |
-| `PUI-BROWSER-001` | browser | Browser pane tab (URL classify / guest-view / trust boundary) | grounded-partial | `src/main/ipc/browser-preview-tool-authorization.test.ts` (assertion-titles-read); `src/renderer/src/components/browser-pane/ClientHostedBrowserPagePane.chrome-parity.test.tsx` (assertion-titles-read) | `WP-UI-BROWSER` / `WP-ENG-BROWSER`, `WP-ENG-IPC` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-NATIVECHAT-001` | native-chat | Native chat portal (per-tab rendering mode, not a page) | grounded-partial | `src/renderer/src/components/native-chat/native-chat-autoscroll.test.ts` (assertion-titles-read); `src/main/ipc/native-chat-subscribe-lifecycle.test.ts` (assertion-titles-read) | `WP-UI-NCHAT` / `WP-ENG-NCHAT` | REUSE |
-| `PUI-DASHBOARD-001` | agents | Agent dashboard popout (live buckets, snapshot cache) | grounded-partial | `src/main/ipc/dashboard-popout.test.ts` (assertion-titles-read) | `WP-UI-DASH` / `WP-ENG-IPC` | REUSE |
-| `PUI-AIVAULT-001` | agents | AI Vault session panel (right-sidebar 'vault' tab) | proposal-not-dispatchable | **none verified** | `WP-UI-DASH` / `WP-ENG-IPC` | implementation-strategy-undecided |
-| `PUI-ACCOUNTS-001` | agents | Branded per-provider account switchers (Claude/Codex/Grok) | proposal-not-dispatchable | **none verified** | `WP-UI-CORE` / `WP-ENG-AGENTSVC` | implementation-strategy-undecided |
-| `PUI-SKILLS-001` | skills | Skills page (cloud install / share / agent setup) | grounded-partial | `src/main/ipc/skill-install-progress-ipc.test.ts` (assertion-titles-read); `src/renderer/src/components/skills/skill-delete-copy.test.ts` (assertion-titles-read) | `WP-UI-AUX` / `WP-ENG-PLUGINS` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-ARTIFACTS-001` | skills | Artifacts (create-intent + share-record, resumable publish) | proposal-not-dispatchable | **none verified** | `WP-UI-AUX` / `WP-ENG-RUNTIME` | implementation-strategy-undecided |
-| `PUI-TASKS-001` | tasks | Task page (Jira/Linear/GitHub/GitLab providers) | grounded-partial | `src/main/ipc/jira-cancellable-requests.test.ts` (assertion-titles-read) | `WP-UI-CORE` / `WP-ENG-IPC` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-AUTOMATIONS-001` | automations | Automations (schedule/trigger, host-fenced dispatch) | grounded-partial | `src/main/automations/service-precheck.test.ts` (assertion-titles-read); `src/renderer/src/components/automations/automation-host-recovery.test.ts` (assertion-titles-read); `src/renderer/src/components/automations/AutomationDetail.test.tsx` (assertion-titles-read) | `WP-UI-AUTO` / `WP-CAP-AUTO`, `WP-ENG-RUNTIME` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-BOTS-001` | bots | Bots page (creation/character preset/responsibility scheduling) | grounded-partial | `src/main/bots/bot-responsibility-owner.test.ts` (assertion-titles-read); `src/renderer/src/components/bots/BotsPage.test.tsx` (assertion-titles-read) | `WP-CAP-BOTS` / `WP-ENG-HARNESS`, `WP-ENG-IPC` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-MENTU-001` | mentu | Mentu panel & recipe workbench (DAG, retry-fold, evidence restore) | grounded-partial | `src/renderer/src/components/mentu/recipe-retry-evidence.test.tsx` (assertion-titles-read); `src/renderer/src/components/mentu/mentu-evidence-restore.test.tsx` (assertion-titles-read) | `WP-CAP-MENTU` / `WP-ENG-IPC`, `WP-UI-CORE`, `WP-ENG-SHELL` | REUSE (verified: retry-ordering/graph-node UI contra... |
-| `PUI-MEETINGS-001` | meetings | Meetings page (transcript rows, capture availability, Q&A delegation) | grounded-partial | `src/renderer/src/components/meetings/MeetingsPage.test.tsx` (assertion-titles-read) | `WP-CAP-MEET` / `WP-ENG-SHELL` | REUSE |
-| `PUI-CONN-003` | mobile | Mobile pairing & emulator (QR pair, screen stream, agent setup guide) | grounded-partial | `src/renderer/src/components/mobile/NetworkInterfacePicker.test.tsx` (assertion-titles-read); `src/renderer/src/components/mobile/mobile-page-stage.test.ts` (assertion-titles-read); `src/renderer/src/components/emulator-pane/use-emulator-pane-session.test.tsx` (assertion-titles-read) | `WP-CAP-MOBILE` / `WP-ENG-REMOTE`, `WP-CAP-DEVICE` | REUSE+REWRITE-split (see recommend detail) |
-| `PUI-DIAG-001` | diagnostics | Diagnostics bundle (Settings→Privacy: collect/preview/upload/discard) | grounded-partial | `src/main/ipc/diagnostics.test.ts` (assertion-titles-read) | `WP-UI-SETTINGS` / `WP-ENG-IPC`, `WP-CAP-DIAG` | REUSE |
+| ID | Surface | Title | Status | Test files | Missing invariants | WP (primary / backing) | Impl. strategy |
+|---|---|---|---|---|---|---|---|
+| `PUI-SIDEBAR-001` | navigation | Left sidebar workspace/worktree list + nav buttons | grounded-partial | 1 | 0 | `WP-UI-SHELL-NAV` | REUSE |
+| `PUI-SETTINGS-000` | navigation | Settings nav taxonomy (35 fixed panes + dynamic per-repo + named intents) | proposal-not-dispatchable | 0 | 0 | `WP-UI-SETTINGS` / `WP-ENG-SHARED` | REUSE |
+| `PUI-SETTINGS-002` | settings | Settings search (per-control keyword index, not per-pane) | grounded-partial | 1 | 0 | `WP-UI-SETTINGS` | REUSE |
+| `PUI-SHELL-002` | workspace | Session persistence & shutdown checkpoint | grounded-partial | 1 | 0 | `WP-UI-CORE` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-SIDEBAR-002` | workspace | Workspace-space (disk usage) manager | grounded-partial | 1 | 0 | `WP-UI-SHELL-WIN` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-TABS-001` | workspace | Tab strip: create/close/drag/reorder/split entry menu | grounded-partial | 1 | 0 | `WP-UI-SHELL-WIN` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-TERM-001` | terminal | Terminal surface / xterm host + liveness contract | grounded-partial | 2 | 0 | `WP-UI-TERM` / `WP-ENG-DAEMON`, `WP-ENG-IPC` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-TERM-002` | terminal | Terminal search overlay | grounded-partial | 1 | 0 | `WP-UI-TERM` | REUSE |
+| `PUI-TERM-004` | panes | Floating terminal (detach/resize/orchestration dialog) | grounded-partial | 1 | 0 | `WP-UI-SHELL-WIN` | REUSE |
+| `PUI-TABS-002` | panes | Split/group layout (drag-to-split, pane focus) | grounded-partial | 1 | 0 | `WP-UI-SHELL-WIN` | REUSE |
+| `PUI-EDITOR-001` | editor | Editor surfaces (source/diff/combined-diff/notebook/image/markdown) | grounded-partial | 2 | 0 | `WP-UI-EDITOR` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-SC-001` | review | Source control panel (stage/commit/AI-message/sync) | grounded-partial | 5 | 3 | `WP-UI-WORK` / `WP-ENG-GIT` | implementation-strategy-undecided |
+| `PUI-SC-002` | checks | Checks panel (CI status + review comments + conflict summary) | grounded-partial | 1 | 0 | `WP-UI-WORK` / `WP-ENG-GIT`, `WP-CAP-INT` | REUSE |
+| `PUI-PR-001` | review | Pull request page (conversation/checks/files/reviewers) | grounded-partial | 5 | 4 | `WP-UI-WORK` / `WP-ENG-GIT` | implementation-strategy-undecided |
+| `PUI-BROWSER-001` | browser | Browser pane tab (URL classify / guest-view / trust boundary) | grounded-partial | 2 | 0 | `WP-UI-BROWSER` / `WP-ENG-BROWSER`, `WP-ENG-IPC` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-NATIVECHAT-001` | native-chat | Native chat portal (per-tab rendering mode, not a page) | grounded-partial | 2 | 0 | `WP-UI-NCHAT` / `WP-ENG-NCHAT` | REUSE |
+| `PUI-DASHBOARD-001` | agents | Agent dashboard popout (live buckets, snapshot cache) | grounded-partial | 1 | 0 | `WP-UI-DASH` / `WP-ENG-IPC` | REUSE |
+| `PUI-AIVAULT-001` | agents | AI Vault session panel (right-sidebar 'vault' tab) | grounded-partial | 9 | 1 | `WP-UI-WORK` / `WP-ENG-IPC`, `WP-ENG-SHARED`, `WP-CAP-MOBILE` | REUSE (verified: resume target/host-ownership m... |
+| `PUI-ACCOUNTS-001` | agents | Branded per-provider account switchers (Claude/Codex/Grok) | grounded-partial | 3 | 2 | `WP-UI-CORE` / `WP-ENG-HARNESS` | implementation-strategy-undecided |
+| `PUI-SKILLS-001` | skills | Skills page (cloud install / share / agent setup) | grounded-partial | 2 | 0 | `WP-UI-AUX` / `WP-ENG-PLUGINS` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-ARTIFACTS-001` | skills | Artifacts (create-intent + share-record, resumable publish) | grounded-partial | 4 | 0 | `WP-UI-AUX` / `WP-ENG-PLUGINS` | REUSE (verified: resumable create-intent persis... |
+| `PUI-TASKS-001` | tasks | Task page (Jira/Linear/GitHub/GitLab providers) | grounded-partial | 1 | 0 | `WP-UI-CORE` / `WP-ENG-IPC` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-AUTOMATIONS-001` | automations | Automations (schedule/trigger, host-fenced dispatch) | grounded-partial | 3 | 0 | `WP-UI-AUTO` / `WP-CAP-AUTO`, `WP-ENG-RUNTIME` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-BOTS-001` | bots | Bots page (creation/character preset/responsibility scheduling) | grounded-partial | 2 | 0 | `WP-CAP-BOTS` / `WP-ENG-HARNESS`, `WP-ENG-IPC` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-MENTU-001` | mentu | Mentu panel & recipe workbench (DAG, retry-fold, evidence restore) | grounded-partial | 3 | 1 | `WP-CAP-MENTU` / `WP-ENG-IPC`, `WP-UI-CORE`, `WP-ENG-SHELL` | REUSE (verified: retry-ordering/graph-node UI c... |
+| `PUI-MEETINGS-001` | meetings | Meetings page (transcript rows, capture availability, Q&A delegation) | grounded-partial | 1 | 0 | `WP-CAP-MEET` / `WP-ENG-SHELL` | REUSE |
+| `PUI-CONN-003` | mobile | Mobile pairing & emulator (QR pair, screen stream, agent setup guide) | grounded-partial | 3 | 0 | `WP-CAP-MOBILE` / `WP-ENG-REMOTE`, `WP-CAP-DEVICE` | REUSE+REWRITE-split (see recommend detail) |
+| `PUI-DIAG-001` | diagnostics | Diagnostics bundle (Settings→Privacy: collect/preview/upload/discard) | grounded-partial | 1 | 0 | `WP-UI-SETTINGS` / `WP-ENG-IPC`, `WP-CAP-DIAG` | REUSE |
 
 ## 4. Per-card detail
 
@@ -224,7 +227,7 @@ One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with z
 - **Backing handler(s):** `crates/drogond (native PTY backend, already implemented in this repo)`
 - **Original test path(s):**
   - `src/renderer/src/components/terminal-pane/pty-connection-session-liveness.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
-    - closes a split pane bound to a dead local session, same teardown as onExit (line 176)
+    - closes a split pane bound to a dead local session (same teardown as onExit) (line 176)
     - closes a split pane when targeted liveness says its local session is missing (line 202)
     - does not close when targeted liveness is live or unknown (line 230)
     - does not apply a stale targeted liveness result after reattach (line 250)
@@ -345,22 +348,57 @@ One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with z
 ### PUI-SC-001 — Source control panel (stage/commit/AI-message/sync)
 
 - **Surface (taxonomy category):** review
-- **Card status:** `proposal-not-dispatchable`
+- **Card status:** `grounded-partial`
 - **Migration class:** legacy-required-during-migration
 - **Implementation strategy:** implementation-strategy-undecided
 - **Entrypoint:** Stage/unstage, commit with message (AI-assisted commit-message generation implied by ai/ subtree + CommitMessageAiPane.tsx), push/pull/sync. Deeper than the prior inventory's flat SourceControl.tsx:1-62 anchor implied — a full sub-subtree (ai/, commit/, listing/, notes/, panel/, review/, sync/).
 - **Source anchor:** `src/renderer/src/components/right-sidebar/source-control/ (ai/, commit/, listing/, notes/, panel/, review/, sync/ sub-subdirectories; top-level SourceControl.tsx also present)`
-- **State:** staged/unstaged file lists reflect working-tree status.
+- **State:** staged/unstaged file-list PROJECTION integrity is CONFIRMED by test (stable sort across filter changes, no mutation of the store-owned array, correct list-vs-tree mode gating); the underlying stage/unstage ACTIONS themselves are not exercised by any test found this pass — see missingInvariants.
 - **Action:** stage a file; commit with AI-suggested message; push/pull/sync.
-- **Error:** a sync conflict must surface a conflict summary state, not silently overwrite.
-- **Recovery:** not verified this pass.
-- **Original test path(s):** none verified this pass — this card's obligations are named hypotheses from source-file/prior-document evidence, not confirmed behavior. **Status: proposal-not-dispatchable.**
+- **Error:** PROPOSED-UNVERIFIED: pull-policy-error-notice.tsx/recovery-notice.tsx (commit/) are the real source files for this concern; neither was opened this pass, so no specific error-surface behavior is asserted as observed.
+- **Recovery:** PROPOSED-UNVERIFIED for sync/push/pull specifically — no source file in source-control/sync/ was opened this pass, and no test exists there (21 files, 0 tests, confirmed by directory listing). A hosted-review 'suppressed PR' tombstone recovery IS confirmed by test (only clears once cache/eligibility evidence actually matches the tombstone, never on a bare timeout) — a different, narrower, ALREADY-VERIFIED recovery path than git-sync-conflict; the two must not be conflated.
+- **Original test path(s):**
+  - `src/renderer/src/components/right-sidebar/source-control/listing/use-file-projection-work.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - sorts committed branch entries once across many filter changes (line 185)
+    - produces the same order as the previous filter-then-sort for every filter (line 204)
+    - matches filter-then-sort under a comparator that is not a total order (line 228)
+    - does not mutate the store-owned branch entry array (line 246)
+    - builds no tree projection in list mode (line 263)
+    - builds no list projection in tree mode (line 280)
+    - has the other mode fully projected on the first render after a switch (line 294)
+  - `src/renderer/src/components/right-sidebar/source-control/listing/use-store-actions.store-subscriptions.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - keeps only the two generation-record maps subscribed (line 50)
+    - returns the same object across an unrelated store write and re-render (line 67)
+    - hands back the live store action references (line 127)
+    - never reassigns a store action, which is what makes getState() safe here (line 147)
+  - `src/renderer/src/components/right-sidebar/source-control/review/use-hosted-review-state.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - hides a matching suppressed PR and blocks duplicate creation (line 47)
+    - shows a different detected PR and lets an explicit link win (line 60)
+    - preserves non-GitHub reviews (line 65)
+  - `src/renderer/src/components/right-sidebar/source-control/review/use-action-model.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - preserves normal no-PR Create PR behavior (line 61)
+  - `src/renderer/src/components/right-sidebar/source-control/review/suppressed-github-pr.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - shows recovery only after cache or eligibility evidence matches the tombstone (line 61)
+    - suppresses transient Create PR chrome only while the marker is unresolved (line 77)
+    - returns to normal chrome after stale, different, unavailable, or failed evidence (line 84)
+    - does not apply GitHub recovery to folders, other providers, or invalid markers (line 103)
+- **Missing invariants (obligation not yet covered by any test found; capability remains mandatory):**
+  - **Obligation:** action (stage/unstage)
+    - **Invariant:** PROPOSED-UNVERIFIED (not an observed contract): this pass did not read the actual stage/unstage handler, so no specific click/idempotency behavior is asserted. Real source exists to characterize first: source-control/panel/use-panel-model.ts and use-panel-state.ts (component_gates.ts also present in commit/) implement the panel's action wiring; neither was opened this pass.
+    - **Required new test:** Before writing a new test, first READ use-panel-model.ts/use-panel-state.ts to characterize the actual current stage/unstage behavior (including whatever idempotency or lack thereof already exists), then write a test that pins that observed behavior — do not assume a specific click-guarantee a priori.
+  - **Obligation:** action (commit with AI-suggested message)
+    - **Invariant:** PROPOSED-UNVERIFIED (not an observed contract): the prior text asserted a specific failure-UX ('without silently falling back to an empty message on a failed probe') that was not read from source. Real source exists: use-commit-message-generation.ts (310 lines) and commit-failure-summary.ts are the actual generation/failure-surface files; neither was opened this pass.
+    - **Required new test:** Before writing a new test, first READ use-commit-message-generation.ts and commit-failure-summary.ts to characterize the actual current failure behavior, then write a test pinning that observed behavior — do not assume 'silently falls back to empty' or any other specific failure mode without reading the code.
+  - **Obligation:** recovery (sync conflict summary)
+    - **Invariant:** PROPOSED-UNVERIFIED (not an observed contract): the prior text asserted a specific UI requirement ('explicit conflict-summary state, never silent overwrite') without reading source. Real source exists: pull-policy-error-notice.tsx (154 lines) and recovery-notice.tsx (348 lines) in commit/ are the actual conflict/error-surface components; neither was opened this pass, and source-control/sync/ (21 files) has zero test files.
+    - **Required new test:** Before writing a new test, first READ pull-policy-error-notice.tsx and recovery-notice.tsx to characterize what the current conflict/error UI actually shows, then write a test pinning that observed behavior — do not assume a 'conflict-summary state' framing not found in source.
 - **Screenshot states still needed:** `SHOT-SC-01..03`
 - **WP allocation:** primary `WP-UI-WORK`, backing `WP-ENG-GIT`; test-port path `tests/parity/ports/WP-UI-WORK/PUI-SC-001/**`
 - **Dependencies:** PUI-SC-002 (checks/review share the right-sidebar)
 - **Remaining gaps (explicit work obligations, not implied-complete):**
-  - no test file individually verified this pass for source-control specifically (7 sub-subdirectories enumerated by name only); a follow-up pass must open at least one commit/ and one sync/ test before this card can claim verified test evidence
-- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION (not deferred, not new scope). Implementation strategy (REUSE vs. REWRITE) is undecided pending a read of at least one commit/ and one sync/ test — do not treat as scoped-simple.
+  - Searched all 7 source-control/ sub-subdirectories this pass: only listing/ (36 files) and review/ (35 files) contain any .test.* file; ai/ (10), commit/ (22), notes/ (7), panel/ (20), sync/ (21) have ZERO test files — confirmed by directory listing, not inferred from filenames.
+  - CORRECTED this pass: the three missingInvariants previously asserted specific behavioral contracts (an exactly-once-per-click stage guarantee, a specific AI-generation-failure UX, a specific conflict-summary-state UI requirement) that were never read from source — invented by analogy to how such features 'should' work, not observed. Replaced with proposed-unverified framing pointing at the REAL source files that implement each concern (use-panel-model.ts/use-panel-state.ts for stage/unstage; use-commit-message-generation.ts/commit-failure-summary.ts for AI generation; pull-policy-error-notice.tsx/recovery-notice.tsx for sync/conflict), none of which were opened this pass. A new test must first characterize what these files actually do, not enforce a new product requirement.
+- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION (not deferred, not new scope). File-list projection and hosted-review suppressed-PR recovery are REUSE-grade verified; stage/commit/sync implementation strategy is undecided and their real source files (named above) were not opened this pass — any new test must first characterize existing behavior from those files, not assert an invented contract.
 
 ### PUI-SC-002 — Checks panel (CI status + review comments + conflict summary)
 
@@ -391,22 +429,53 @@ One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with z
 ### PUI-PR-001 — Pull request page (conversation/checks/files/reviewers)
 
 - **Surface (taxonomy category):** review
-- **Card status:** `proposal-not-dispatchable`
+- **Card status:** `grounded-partial`
 - **Migration class:** legacy-required-during-migration
 - **Implementation strategy:** implementation-strategy-undecided
 - **Entrypoint:** Dedicated PR review surface distinct from the checks panel, with actions/, cache/, checks/, comments/, conversation/, edit/, files/, mentions/, page/, presentation/, reviewers/ sub-subtrees.
 - **Source anchor:** `src/renderer/src/components/pull-request-page/ (54 files across 11 sub-subtrees, per parity-ui-audit.md §10; no individual top-level filenames were listed in the prior audit and none were opened this pass)`
-- **State:** not traced this pass.
-- **Action:** not traced this pass.
-- **Error:** not traced this pass.
-- **Recovery:** not traced this pass.
-- **Original test path(s):** none verified this pass — this card's obligations are named hypotheses from source-file/prior-document evidence, not confirmed behavior. **Status: proposal-not-dispatchable.**
+- **State:** file-content cache eviction/re-request, combined-diff section-index map identity, @mention query parsing, and state-badge color mapping are all CONFIRMED by test — but these are peripheral/presentation concerns, not the page's core review surface.
+- **Action:** PROPOSED-UNVERIFIED for conversation/reviewers/edit actions — no source file in those 3 sub-subtrees was opened this pass.
+- **Error:** PROPOSED-UNVERIFIED — not traced this pass.
+- **Recovery:** PROPOSED-UNVERIFIED — not traced this pass.
+- **Original test path(s):**
+  - `src/renderer/src/components/pull-request-page/cache/file-content.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - starts a new request after a pending request is evicted (line 39)
+  - `src/renderer/src/components/pull-request-page/files/combined-diff-section-index.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - keeps one map identity across on-demand section loads (line 96)
+  - `src/renderer/src/components/pull-request-page/mentions/options.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - includes the item author, commenters, participants, and assignable users (line 21)
+    - skips ghost and fills missing avatar/name on a later case-insensitive duplicate login (line 40)
+  - `src/renderer/src/components/pull-request-page/mentions/query.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - returns the @query immediately before the caret (line 5)
+    - returns an empty query when the caret is right after @ (line 9)
+    - returns null when there is no mention token at the caret (line 13)
+    - allows a mention after punctuation that starts a token (line 19)
+    - reads only the text before the caret (line 23)
+  - `src/renderer/src/components/pull-request-page/presentation/state-badge.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - uses purple/slate/rose/emerald for pull request states (line 10)
+    - uses rose for a closed issue and emerald otherwise (line 17, 31)
+    - matches the outlined tone hues for every pull request state (line 24)
+- **Missing invariants (obligation not yet covered by any test found; capability remains mandatory):**
+  - **Obligation:** state/action (conversation thread)
+    - **Invariant:** PROPOSED-UNVERIFIED: no source file in pull-request-page/conversation/ was opened this pass; no specific render-order or live-update behavior is asserted as observed.
+    - **Required new test:** First READ the conversation/ directory's controller/view files to characterize actual current behavior, then write a test pinning that — do not assume a 'server order, no reload' contract not yet read from source.
+  - **Obligation:** state (checks integration)
+    - **Invariant:** PROPOSED-UNVERIFIED: the prior text asserted the PR page's checks summary 'must reflect the same CI status pips as the right-sidebar checks panel without drifting out of sync' — this is an invented cross-component consistency requirement, not read from either component's source. Real source exists: pull-request-page/checks/{details-request.ts,refresh.ts,rerun.ts,tab.tsx} were not opened this pass.
+    - **Required new test:** First READ pull-request-page/checks/details-request.ts and refresh.ts to characterize whether the PR page's checks data source is even the SAME data source PUI-SC-002's checks panel uses, before asserting any cross-component sync requirement.
+  - **Obligation:** action (reviewers assignment)
+    - **Invariant:** PROPOSED-UNVERIFIED: no source file in pull-request-page/reviewers/ was opened this pass; no specific idempotency behavior is asserted as observed. Real source exists: reviewers/request-actions.ts.
+    - **Required new test:** First READ reviewers/request-actions.ts to characterize the actual current assign/unassign request behavior, then write a test pinning that — do not assume a 'no duplicate assignment' guarantee not yet read from source.
+  - **Obligation:** action (edit/land)
+    - **Invariant:** PROPOSED-UNVERIFIED: the prior text asserted the land/merge action 'must be gated on the same checks-pass condition the checks panel reports' — an invented universal required-check merge-gating rule, not read from any source file. Whether a land/merge action exists at all in this page (vs. only in the hosted-review flow already covered by PUI-SC-002) was not confirmed this pass.
+    - **Required new test:** First READ pull-request-page/edit/ and /page/ to confirm whether a land/merge action even exists here (as opposed to solely in the right-sidebar hosted-review flow), before asserting any gating requirement.
 - **Screenshot states still needed:** `SHOT-PR-01 (conversation)`, `SHOT-PR-02 (files/diff)`, `SHOT-PR-03 (reviewers)`
-- **WP allocation:** primary `WP-CAP-INT`, backing `WP-ENG-GIT`; test-port path `tests/parity/ports/WP-CAP-INT/PUI-PR-001/**`
+- **WP allocation:** primary `WP-UI-WORK`, backing `WP-ENG-GIT`; test-port path `tests/parity/ports/WP-UI-WORK/PUI-PR-001/**`
 - **Dependencies:** PUI-SC-002 (shares provider/checks plumbing)
 - **Remaining gaps (explicit work obligations, not implied-complete):**
-  - ENTIRE domain unopened this pass beyond the directory listing already in parity-ui-audit.md §10 — no entrypoint file, no test file, no handler verified. This card exists to make the obligation explicit, not to claim any coverage.
-- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION (not deferred, not new scope). Implementation strategy is undecided — zero source/test evidence gathered this pass; do not treat as scoped-simple or safely-droppable.
+  - Corrected WP allocation (prior pass): all 5 verified test files map to WP-UI-WORK per parity-test-work-packages.json's per-file manifest, not WP-CAP-INT.
+  - CORRECTED this pass: the four missingInvariants previously asserted specific behavioral contracts (server-ordered live conversation updates, cross-component checks-parity with PUI-SC-002, no-duplicate reviewer assignment, universal required-check land-gating) that were never read from any pull-request-page source file — invented by analogy to how such a page 'should' work. Replaced with proposed-unverified framing naming the REAL source files for each concern (conversation/ controller files, checks/details-request.ts+refresh.ts, reviewers/request-actions.ts, edit//page/), none of which were opened this pass. Whether the checks-parity and land-gating concepts even apply to this specific page (as opposed to only the right-sidebar checks panel already covered by PUI-SC-002) was not confirmed.
+- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION (not deferred, not new scope). Peripheral cache/diff-index/mention/badge behavior is REUSE-grade verified; the page's core review surface (conversation, checks, reviewers, edit/land) has an undecided implementation strategy and its real source files were not opened this pass — any new test must first characterize existing behavior, not assert an invented cross-component consistency or gating contract.
 
 ### PUI-BROWSER-001 — Browser pane tab (URL classify / guest-view / trust boundary)
 
@@ -495,41 +564,117 @@ One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with z
 ### PUI-AIVAULT-001 — AI Vault session panel (right-sidebar 'vault' tab)
 
 - **Surface (taxonomy category):** agents
-- **Card status:** `proposal-not-dispatchable`
+- **Card status:** `grounded-partial`
 - **Migration class:** legacy-required-during-migration
-- **Implementation strategy:** implementation-strategy-undecided
+- **Implementation strategy:** REUSE (verified: resume target/host-ownership matching, cross-account repin safety, and renderer title-sync reconciliation — all directly confirmed by test); main-process session-title-routing layer specifically is proposed-unverified
 - **Entrypoint:** Resolves the prior audit's open question: AiVaultPanel.tsx is the right sidebar's 'vault' tab, one of 9 fixed RightSidebarTab values (explorer|search|mentu|vault|workspaces|pr-checks|source-control|checks|ports|plugin:*), not an orphaned/undocumented surface. Sessions are discovered across multiple connected hosts (ai-vault-host-discovery.ts); scan coalescing mirrors the mentu-session-request-coalescer.ts pattern — a repeated, deliberate cross-domain principle.
 - **Source anchor:** `src/shared/ui-chrome-types.ts:88-101 (RightSidebarTab enum, authoritative); src/main/ai-vault/ + src/main/ipc/{ai-vault,ai-vault-delete,ai-vault-host-discovery,ai-vault-host-leg-cache,ai-vault-resume,ai-vault-runtime-scan,ai-vault-scan-coalescing,ai-vault-session-title-routing,ai-vault-subagent-list}.ts`
-- **State:** sessions listed across all discovered hosts.
+- **State:** sessions listed across all discovered hosts — CONFIRMED by test (local + connected SSH targets + paired runtime servers are merged; a runtime-host-discovery failure does not drop already-available local/SSH results). Subagent list rendering and rescan-in-flight list stability are also CONFIRMED.
 - **Action:** switch right sidebar to 'vault'; expand subagent list; resume a session.
 - **Error:** not traced this pass.
-- **Recovery:** resuming after a host reconnect must reattach to the correct session, not a different one with a coincidentally similar title — not verified this pass, named given ai-vault-session-title-routing.ts existing as its own file.
-- **Original test path(s):** none verified this pass — this card's obligations are named hypotheses from source-file/prior-document evidence, not confirmed behavior. **Status: proposal-not-dispatchable.**
+- **Recovery:** resuming an AI Vault session after a host reconnect must reattach to the correct session, not a different one with a coincidentally similar title — CORRECTED this pass: the prior claim of zero test coverage anywhere was FALSE, caused by searching only main/ipc/ai-vault-resume.ts's own directory instead of tracing its shared/renderer/mobile consumers. ai-vault-resume-target.test.ts confirms resume targets are matched against their owning host/repo (never an unrelated one); ai-vault-resume-command.drop-repin.test.ts confirms a resumed session's account/cwd substitution is repinned correctly rather than 'keeping the wrong-account command' (its own words); ai-vault-tab-title-sync.test.ts confirms title reconciliation on a provider-session-identity change. What remains genuinely unconfirmed: a dedicated test for src/main/ipc/ai-vault-session-title-routing.ts itself (the main-process routing layer), and the specific scenario of two sessions sharing an identical title string on two different hosts — neither was found by this pass's search, which is now the bounded, correctly-scoped remaining gap, not a global absence claim.
+- **Original test path(s):**
+  - `src/main/ipc/ai-vault.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - routes local scope to the local scanner (line 121)
+    - routes SSH scope to only that SSH target (line 134)
+    - merges local plus connected SSH targets for all hosts (line 296)
+    - merges paired runtime servers for all hosts (line 309)
+    - keeps local and SSH results when runtime host discovery fails (line 336)
+    - coalesces concurrent cancellable requests into one scan (line 216)
+    - *note:* CONFIRMS the card's 'sessions listed across all discovered hosts' state obligation directly — local + SSH + paired runtime servers are merged, and a runtime-host-discovery failure does not drop the local/SSH results already available.
+  - `src/main/ipc/ai-vault-scan-coalescing.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - coalesces every all-host leg while isolating caller cancellation (line 95)
+    - keeps a shared multi-window scan alive when one window cancels (line 123)
+    - reports a real scan failure as a host issue rather than cancellation (line 155)
+    - re-joins a preempted same-scope caller onto the forced refresh (line 192)
+  - `src/renderer/src/components/right-sidebar/AiVaultSessionRow.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - does not expand the row when a menu action is chosen (line 105)
+    - still expands when the row itself is clicked (line 121)
+    - keeps the agent identity visible while the row is expanded (line 145)
+  - `src/renderer/src/components/right-sidebar/AiVaultSessionSubagents.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - keeps the loaded list visible while a rescan-triggered refetch is in flight (line 72)
+    - labels the subagent run state exactly once, on the dot itself (line 101)
+    - does not fetch for remote sessions even when the scan counted transcripts (line 117)
+  - `src/renderer/src/lib/ai-vault-resume-target.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - detects WSL-stored session files (line 39)
+    - allows host-stored sessions on local targets only (line 48)
+    - allows host-tagged SSH sessions only on the matching SSH target (line 72)
+    - never allows unknown targets (line 143)
+    - classifies local, SSH, runtime, and unknown repo owners (line 151)
+    - resolves runtime-owned worktree targets through their repo owner (line 182)
+    - *note:* Directly relevant to the card's resume-identity concern: this is target/host/ownership classification, confirming a resume target is matched against its OWNING host/repo, never resolved against an unrelated one.
+  - `src/renderer/src/lib/ai-vault-resume-command.drop-repin.test.ts` — evidence tier: **assertion-body-inspected**, NOT executed this pass
+    - repins a payload with a cwd to the substituted home (line 56)
+    - repins a payload whose session has no cwd instead of keeping the wrong-account command (line 70) — title itself names the exact failure mode this guards: a stale command that would run under the wrong account
+    - declines a payload from an older serializer that never carried sessionCwd (line 84)
+    - *note:* This is real, verified account/identity-repin safety for a resumed session — distinct from and narrower than 'title-string matching', but directly addresses cross-account/cross-session misattribution on resume.
+  - `src/shared/ai-vault-resume-command.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - resumes OMP by absolute transcript path so it resolves across session-dir roots (line 87)
+    - falls back to the session id when no OMP transcript path is known (line 117)
+    - resumes Prime Agent by absolute transcript path like OMP (line 129)
+  - `mobile/src/session/ai-vault-resume-preparation.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - repins a per-account session to the home the host substitutes (line 139)
+    - keeps a per-account session home when an older host sends no repin (line 164)
+    - keeps a per-account session usable when the host cannot prepare at all (line 174)
+  - `src/renderer/src/lib/ai-vault-tab-title-sync.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - reconciles immediately when the provider session identity changes (line 352)
+    - retains a recovered sleeping title after its lifecycle record disappears (line 219)
+    - *note:* This is the renderer-side title-SYNC consumer of ai-vault-session-title.ts; it is NOT the same module as src/main/ipc/ai-vault-session-title-routing.ts (which remains without a dedicated test — see gaps), but it is real, directly relevant evidence that title/identity reconciliation on a session-identity change is tested somewhere in the stack.
+- **Missing invariants (obligation not yet covered by any test found; capability remains mandatory):**
+  - **Obligation:** state (ai-vault-session-title-routing.ts main-process layer specifically)
+    - **Invariant:** The main-process IPC routing layer for session titles (as opposed to the renderer-side sync logic now confirmed tested) should have its own test, or a confirmed indirect exercise through ai-vault.test.ts.
+    - **Required new test:** PROPOSED-UNVERIFIED, not asserted as a known gap in behavior: only imported by src/main/ipc/ai-vault.ts; whether ai-vault.test.ts's existing assertions exercise this file's logic (vs. mocking around it) was not traced line-by-line this pass. Before writing a new test, first read ai-vault.test.ts's setup to characterize what it actually exercises.
 - **Screenshot states still needed:** `SHOT-VAULT-01..03`
-- **WP allocation:** primary `WP-UI-DASH`, backing `WP-ENG-IPC`; test-port path `tests/parity/ports/WP-UI-DASH/PUI-AIVAULT-001/**`
+- **WP allocation:** primary `WP-UI-WORK`, backing `WP-ENG-IPC`, `WP-ENG-SHARED`, `WP-CAP-MOBILE`; test-port path `tests/parity/ports/WP-UI-WORK/PUI-AIVAULT-001/**`
 - **Dependencies:** PUI-MENTU-001 (shares the coalescing pattern)
 - **Remaining gaps (explicit work obligations, not implied-complete):**
-  - no test file individually opened this pass for AI Vault — 15 renderer files + 8 main/ipc files + main/ai-vault/ bodies all unverified; this card's obligations are named hypotheses from file evidence, not confirmed behavior
-- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION (not deferred, not new scope). Implementation strategy is undecided pending a dedicated read-and-verify pass per parity-ui-audit.md §13 — do not treat as scoped-simple or safely-droppable.
+  - CORRECTED this pass: the prior gap text claimed zero test coverage 'anywhere in the repository' for resume/session-identity, found by grepping only for the exact filenames ai-vault-resume.ts/ai-vault-session-title-routing.ts. A wider search of src/shared/, src/renderer/src/lib/, and mobile/src/session/ found 9 real test files (ai-vault-resume-command/-shell/-target/-command.resumable-agent/-command.drop-repin in renderer, ai-vault-resume-command/-preparation in shared, ai-vault-resume-preparation/-launch in mobile) totaling ~2,260 lines covering resume-command construction, shell-dialect handling, target/host-ownership classification, and cross-account repin safety. 5 of the 9 are now cited above; the other 4 (ai-vault-resume-command.test.ts in renderer, ai-vault-resume-shell.test.ts, ai-vault-resume-command.resumable-agent.test.ts, mobile's ai-vault-resume-launch.test.ts) were read for titles but not individually cited here to stay bounded — they exist and were confirmed real, not silently dropped.
+  - The main-process ai-vault-session-title-routing.ts's own coverage (as opposed to the renderer-side title-sync now confirmed) remains genuinely open — see missingInvariants, marked proposed-unverified rather than a confirmed gap.
+- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION. REUSE the verified resume-target-ownership and cross-account repin-safety contract — this is now well-evidenced, correcting a prior false negative. The main-process session-title-routing layer's own test exposure remains open but is marked proposed-unverified, not asserted as an actual gap.
 
 ### PUI-ACCOUNTS-001 — Branded per-provider account switchers (Claude/Codex/Grok)
 
 - **Surface (taxonomy category):** agents
-- **Card status:** `proposal-not-dispatchable`
+- **Card status:** `grounded-partial`
 - **Migration class:** legacy-required-during-migration
 - **Implementation strategy:** implementation-strategy-undecided
 - **Entrypoint:** Only THREE providers (of the ~19 harness directories under src/main/) get first-class branded status-bar account-switching chrome: Claude, Codex, Grok. A verified, real asymmetry, not an oversight.
 - **Source anchor:** `status-bar/{ClaudeSwitcherMenu,CodexSwitcherMenu,StatusBarAccountControls,GrokAccountsSection}.tsx, status-bar-{claude,codex}-accounts.ts; src/main/{claude-accounts,codex-accounts,grok-accounts}/; settings/AccountsPane.tsx + accounts-pane-{claude,codex,minimax}-section.tsx`
-- **State:** active account per branded provider.
+- **State:** active account per branded provider; main-process credential identity-matching during a switch is CONFIRMED by test for Claude and Codex (not Grok).
 - **Action:** switch the active account via its status-bar menu.
 - **Error:** n/a.
-- **Recovery:** switching must scope subsequent NEW tabs/sessions to that account without affecting already-running sessions under the previous account — not verified this pass, flagged given this repo's own recent identityMismatch session-identity work as the exact class of bug this would need to avoid.
-- **Original test path(s):** none verified this pass — this card's obligations are named hypotheses from source-file/prior-document evidence, not confirmed behavior. **Status: proposal-not-dispatchable.**
+- **Recovery:** PROPOSED-UNVERIFIED: no renderer source file for any of the 4 branded switcher components was opened this pass, so no specific tab-scoping behavior is asserted as observed — see missingInvariants. The 3 main-process tests found (Claude/Codex/Grok) confirm CREDENTIAL-swap identity safety at the auth-service layer, a real but different-layer finding, not evidence about renderer tab-scoping either way.
+- **Original test path(s):**
+  - `src/main/claude-accounts/runtime-auth-service-account-switching.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - reads back refreshed credentials for the outgoing Claude account before switching (line 159)
+    - switches accounts without persisting unverified live runtime credentials (line 195)
+    - routes refreshed Claude credentials to the matching managed account (line 247)
+    - rejects stale cold-start read-back for inactive matching account (line 291)
+    - rejects ambiguous Claude read-back instead of choosing a managed account (line 335)
+    - *note:* This tests MAIN-PROCESS credential-switching identity safety for Claude, not the renderer status-bar switcher UI itself, and not the specific 'new tabs scope to the new account, running sessions keep the old one' obligation this card names — see missingInvariants.
+  - `src/main/codex-accounts/service-account-selection-and-removal.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - deselects active account via selectAccount(null) (line 32)
+    - selectAccount switches managed accounts without routing auth through the shared mirror (line 76)
+    - keeps Windows and WSL active Codex account selections separate (line 144)
+    - *note:* Same main-process identity-safety layer as Claude's test above, for Codex; same scope limitation.
+  - `src/main/grok-accounts/status.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - reports unsigned status when the Grok auth file is missing (line 16)
+    - reports auth read errors without exposing token fields (line 28)
+    - returns non-secret signed-in metadata and freshness (line 43)
+    - *note:* Grok has ONLY a status-read test — no account-SWITCHING test exists for Grok at all, unlike Claude/Codex, confirmed by directory listing (grok-accounts/ has exactly one test file).
+- **Missing invariants (obligation not yet covered by any test found; capability remains mandatory):**
+  - **Obligation:** recovery (session-scoping across a switch)
+    - **Invariant:** PROPOSED-UNVERIFIED (not an observed contract): the prior text asserted a specific tab-scoping rule ('a tab already running keeps its old account; only new tabs use the new one') by analogy to how such a switch 'should' work — no renderer source file (ClaudeSwitcherMenu.tsx/CodexSwitcherMenu.tsx/StatusBarAccountControls.tsx/GrokAccountsSection.tsx or their controllers) was opened this pass to confirm whether that is even the actual current behavior.
+    - **Required new test:** First READ the switcher components and use-codex-switcher-controller.ts (present, not opened) to characterize what actually happens to an already-open tab when the active account changes, then write a test pinning the OBSERVED behavior — do not assume the scoping rule described above without reading the code.
+  - **Obligation:** state/action (Grok account switching)
+    - **Invariant:** Grok's test surface is smaller than Claude's/Codex's — this IS a directly observed fact (grok-accounts/ contains exactly one test file, status.test.ts, vs. Claude's 22 and Codex's ~35+), not an invented requirement. Whether Grok's underlying switching code has the SAME safety properties Claude/Codex tests confirm is unknown, not asserted false.
+    - **Required new test:** A switching-safety test analogous to Claude's/Codex's would need to first read Grok's actual account-switching source (not opened this pass) to characterize its current behavior before asserting parity is missing, rather than assuming Grok's underlying code lacks safety it wasn't shown to have.
 - **Screenshot states still needed:** `SHOT-ACCT-01..02`
-- **WP allocation:** primary `WP-UI-CORE`, backing `WP-ENG-AGENTSVC`; test-port path `tests/parity/ports/WP-UI-CORE/PUI-ACCOUNTS-001/**`
+- **WP allocation:** primary `WP-UI-CORE`, backing `WP-ENG-HARNESS`; test-port path `tests/parity/ports/WP-UI-CORE/PUI-ACCOUNTS-001/**`
 - **Remaining gaps (explicit work obligations, not implied-complete):**
-  - no test file opened this pass; switch-scoping behavior entirely unverified
-- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION (not deferred, not new scope). Implementation strategy is undecided — switch-scoping behavior entirely unverified this pass.
+  - Corrected backing WP (prior pass): the 3 verified test files map to WP-ENG-HARNESS per the manifest, not WP-ENG-AGENTSVC.
+  - CORRECTED this pass: the tab-scoping-across-a-switch missingInvariant previously asserted a specific behavioral rule invented by analogy, without reading any switcher-component or controller source. Reframed as proposed-unverified. The Grok test-file-count asymmetry (1 file vs. Claude's/Codex's dozens) remains a directly observed, unedited fact from directory listing, not invented — but 'Grok lacks switching-safety' is now correctly stated as unknown rather than a confirmed gap, since Grok's actual switching source was not read this pass either.
+- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION (not deferred, not new scope). Main-process credential-swap identity safety is REUSE-grade verified for Claude/Codex; the renderer tab-scoping obligation and Grok's actual switching-code safety are both proposed-unverified — no switcher-component source or Grok switching source was opened this pass, so neither is asserted as a confirmed gap or a confirmed behavior.
 
 ### PUI-SKILLS-001 — Skills page (cloud install / share / agent setup)
 
@@ -562,22 +707,50 @@ One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with z
 ### PUI-ARTIFACTS-001 — Artifacts (create-intent + share-record, resumable publish)
 
 - **Surface (taxonomy category):** skills
-- **Card status:** `proposal-not-dispatchable`
+- **Card status:** `grounded-partial`
 - **Migration class:** legacy-required-during-migration
-- **Implementation strategy:** implementation-strategy-undecided
+- **Implementation strategy:** REUSE (verified: resumable create-intent persistence, cloud-side response-loss reconciliation, and renderer resume-after-reconnect — all directly confirmed by test)
 - **Entrypoint:** Sidebar 'Artifacts' button (also defaults HIDDEN, requires explicit true — same asymmetry class as Skills). No dedicated ipc/artifacts.ts — artifact-cloud wiring is imported from runtime/runtime-artifact-controller.ts and startup/main-process-runtime-service.ts, i.e. wired through the general-purpose runtime IPC channel set, not a standalone handler file (verified by targeted grep, not a guess). artifact-create-intent-store.ts / artifact-share-record-store.ts name persisted stores for a resumable, multi-step creation/publish intent — not a single atomic action.
 - **Source anchor:** `src/renderer/src/components/sidebar/SidebarNav.tsx:45-49,104,115,119,200-228; src/main/artifacts/{artifact-cloud-config,artifact-cloud-request,artifact-cloud-service,artifact-create-intent-store,artifact-publisher,artifact-share-record-store}.ts`
-- **State:** an artifact-creation intent persists across steps (artifact-create-intent-store).
+- **State:** an artifact-creation intent persists across steps (artifact-create-intent-store) — CONFIRMED by test, including crash-recovery and content-type/size validation.
 - **Action:** create an artifact; publish; share.
 - **Error:** not traced this pass.
-- **Recovery:** an interrupted publish must resume from the persisted create-intent-store state rather than losing the draft or double-publishing — named as the exact behavior to verify, not confirmed as tested this pass.
+- **Recovery:** an interrupted publish must resume from the persisted create-intent-store state rather than losing the draft or double-publishing — CONFIRMED by test: the intent store retains the exact original request until the matching create completes (blocking a second, divergent create), removes crash-left temporary writes before admitting a new intent, and the cloud-recovery layer reconciles or replays an artifact whose committed-create response was lost, rather than re-publishing a duplicate. The renderer publish flow separately confirms it 'resumes with fresh content after reconnecting.'
 - **Backing handler(s):** `src/main/runtime/runtime-artifact-controller.ts`
-- **Original test path(s):** none verified this pass — this card's obligations are named hypotheses from source-file/prior-document evidence, not confirmed behavior. **Status: proposal-not-dispatchable.**
+- **Original test path(s):**
+  - `src/main/artifacts/artifact-create-intent-store.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - retains the first key and exact request until the matching create completes (line 44)
+    - bounds unresolved payload storage without dropping an existing intent (line 90)
+    - clears pending content at the profile lifecycle boundary (line 125)
+    - removes crash-left temporary writes before admitting another intent (line 145)
+    - refuses to overwrite an unreadable matching intent (line 209)
+    - rejects a persisted content type outside the artifact allowlist (line 255)
+    - persists an escaped artifact within the recovery limit (line 277)
+  - `src/main/artifacts/artifact-cloud-recovery.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - reconciles one remotely revocable artifact after a committed create loses its response (line 32)
+    - replays the exact create when content is unchanged after response loss (line 55)
+    - updates a recovered share when its content changed after response loss (line 70)
+    - retains recovery until a changed-content update succeeds (line 87)
+    - clears the durable mapping when a committed delete retry returns 404 (line 106)
+    - drops an uncommitted validation failure so corrected content can create (line 155)
+    - *note:* This is the DIRECT confirmation of the card's named recovery obligation: a committed create whose response was lost is reconciled/replayed, never silently re-published as a duplicate.
+  - `src/renderer/src/components/artifacts/artifact-publish-flow.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - signs in before preparing and publishing the request (line 47)
+    - resumes with fresh content after reconnecting (line 63)
+    - surfaces sign-in failures without preparing the file (line 81)
+    - rejects an oversized request before RPC (line 91)
+    - shows confirmation without putting the public link in the toast (line 119)
+  - `src/main/artifacts/artifact-share-record-store.test.ts` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - isolates edit tokens by cloud identity and API origin (line 37)
+    - removes every source mapping for a deleted slug in the matching scope (line 69)
+    - prunes expired records on read (line 110)
+    - refuses to overwrite an unreadable existing record file (line 223)
 - **Screenshot states still needed:** `SHOT-ART-01..03`
-- **WP allocation:** primary `WP-UI-AUX`, backing `WP-ENG-RUNTIME`; test-port path `tests/parity/ports/WP-UI-AUX/PUI-ARTIFACTS-001/**`
+- **WP allocation:** primary `WP-UI-AUX`, backing `WP-ENG-PLUGINS`; test-port path `tests/parity/ports/WP-UI-AUX/PUI-ARTIFACTS-001/**`
 - **Remaining gaps (explicit work obligations, not implied-complete):**
-  - no test file individually opened this pass for artifacts; artifact-publisher.ts body; exact runtime-channel names runtime-artifact-controller.ts registers
-- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION (not deferred, not new scope). Implementation strategy is undecided — the resumable-publish recovery contract is unverified.
+  - Corrected backing WP this pass: the 3 main-process test files map to WP-ENG-PLUGINS per the manifest, not WP-ENG-RUNTIME as the prior revision guessed (the renderer test correctly maps to WP-UI-AUX, kept as primary).
+  - The card's originally-named recovery obligation (resumable publish, no double-publish) is now REUSE-grade verified across 4 real test files spanning intent-store persistence, cloud-side reconciliation, and the renderer resume-after-reconnect flow. artifact-publisher.ts's own body and the exact runtime-channel names runtime-artifact-controller.ts registers were still not individually opened this pass — a narrower remaining gap than before, not a full-capability gap.
+- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION. REUSE the verified resumable-publish/no-double-publish contract across intent-store, cloud-recovery, and renderer-resume layers — this is now one of the better-evidenced cards in this checkpoint, not a proposal.
 
 ### PUI-TASKS-001 — Task page (Jira/Linear/GitHub/GitLab providers)
 
@@ -676,10 +849,10 @@ One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with z
 - **Surface (taxonomy category):** mentu
 - **Card status:** `grounded-partial`
 - **Migration class:** legacy-required-during-migration; pendingPostmigration: Qwen compat, recipe-81/90 follow-ups, rendered final check per parity-work-packages.md
-- **Implementation strategy:** REUSE (verified: retry-ordering/graph-node UI contract and evidence-restore race-safety); implementation-strategy-undecided for the coalescing-semantics layer (recipe-graph.ts/request-coalescer.ts unread)
+- **Implementation strategy:** REUSE (verified: retry-ordering/graph-node UI contract, evidence-restore race-safety, recipe-graph.ts cycle-detection, AND readRunRequestForScope's in-flight dedup via its evidence-restore consumer — all directly confirmed by test); implementation-strategy-undecided for discoveryRequestForScope/recipeLoadRequestForScope specifically, whose actual current behavior was not characterized this pass
 - **Entrypoint:** Recipe DAG renders step dependencies; the newest attempt's status is surfaced on the graph node, never the first-failed one, and a retry group does NOT fall back to the first failed record once a later attempt succeeds (both CONFIRMED by test — directly resolves the prior audit's 'not re-verified' flags on retry-fold and evidence-restore). mentu-session-request-coalescer.ts names concurrent-request coalescing as a designed behavior, mirrored by AI Vault's own scan-coalescing.
 - **Source anchor:** `src/renderer/src/components/mentu/ (25 files): recipe-graph.ts (DAG model), RecipePane.tsx + RecipePaneContent/Header.tsx, recipe-retry-evidence.test.tsx (graph/attempt-selection helpers), mentu-session-{draft-state,identity,navigation,request-coalescer,state-access}.ts`
-- **State:** same-label retry records ordered oldest-to-newest with the newest exposed as current; legacy records missing invocation_count metadata are tolerated, not rejected.
+- **State:** same-label retry records ordered oldest-to-newest with the newest exposed as current; legacy records missing invocation_count metadata are tolerated, not rejected. recipe-graph.ts's core DAG-building/cycle-detection is now CONFIRMED by test (buildRecipeGraph rejects a cyclic dependency graph rather than silently accepting a broken DAG); 1 of mentu-session-request-coalescer.ts's 3 exports (readRunRequestForScope) has real, unmocked, body-inspected test exposure via mentu-evidence-restore.test.tsx's StrictMode assertion; the other 2 exports (discoveryRequestForScope, recipeLoadRequestForScope) remain untested — see missingInvariants.
 - **Action:** open recipe DAG; expand a retry-folded step; open evidence/verification view.
 - **Error:** n/a beyond the retry-ordering guarantees above.
 - **Recovery:** evidence restore recovers a session's prior state without rerunning a settled read, discards a stale host response rather than substituting a local read, and ignores an outstanding response after the surface unmounts — CONFIRMED by test.
@@ -692,19 +865,28 @@ One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with z
     - tolerates legacy records missing invocation_count metadata (line 130)
     - surfaces the newest attempt status on the graph node, not the first failed one (line 139)
     - renders a single current summary with no prior-attempt disclosure for an initial failure (line 158)
-  - `src/renderer/src/components/mentu/mentu-evidence-restore.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+  - `src/renderer/src/components/mentu/mentu-evidence-restore.test.tsx` — evidence tier: **assertion-body-inspected**, NOT executed this pass
     - settles a delayed read after publishing its loading state (line 84)
     - restores evidence without rerunning the read after it settles (line 98)
     - surfaces a rejected read and releases the operation (line 137)
-    - shares the pending read through StrictMode cleanup and remount (line 147)
+    - shares the pending read through StrictMode cleanup and remount (line 147) — body-inspected: asserts `expect(readRun).toHaveBeenCalledTimes(1)` across a StrictMode double-mount, which is only possible if the underlying (real, unmocked) readRunRequestForScope map-based dedup in mentu-session-request-coalescer.ts actually reused the in-flight promise — this is the ONE coalescer export (of three) with real, unmocked test exposure
     - discards the old host response and never substitutes a local read (line 156)
     - ignores an outstanding response after the surface unmounts (line 180)
+    - *note:* use-mentu-session-evidence-restore.ts (this test's subject hook) imports readRunRequestForScope DIRECTLY from mentu-session-request-coalescer.ts and does not mock it — traced via grep of both files' import statements, not assumed. discoveryRequestForScope and recipeLoadRequestForScope (the coalescer's other two exports) are consumed only by use-mentu-session-loading.ts, which has no test file found (searched for *loading*test* under components/mentu) — those two remain genuinely untested.
+  - `src/renderer/src/components/mentu/RecipePane.test.tsx` — evidence tier: **assertion-titles-read**, NOT executed this pass
+    - builds dependencies from steps and refuses cycles (line 225) — directly exercises buildRecipeGraph from ./recipe-graph: a valid dependency resolves to the correct step-id, and a cyclic dependency graph returns valid=false, empty nodes, and a non-null cycle marker
+    - projects recipe tabs through the native order and focus model (line 176)
+    - round-trips source JSON fields that the pane does not know (line 204)
+- **Missing invariants (obligation not yet covered by any test found; capability remains mandatory):**
+  - **Obligation:** shared-state (concurrent request coalescing — 2 of 3 exports)
+    - **Invariant:** PROPOSED-UNVERIFIED (not an observed contract): discoveryRequestForScope and recipeLoadRequestForScope should have the same in-flight-dedup behavior readRunRequestForScope is confirmed to have. This is a reasonable-by-symmetry hypothesis (same Map-based pattern, same file), not itself evidence — the source anchor for the actual (unread this pass) function bodies is mentu-session-request-coalescer.ts:19-79.
+    - **Required new test:** A test exercising use-mentu-session-loading.ts (the sole consumer of both functions; components/mentu has no *loading*test* file) would need to FIRST characterize the functions' actual current dedup/cancellation behavior by reading mentu-session-request-coalescer.ts:19-79, not assume the AI-Vault-scan-coalescing pattern (cancellation isolation, preempted-caller re-join) applies here — those specific behaviors were NOT observed in this file and were an unfounded analogy in the prior pass, now removed.
 - **Screenshot states still needed:** `SHOT-MENTU-01..03`
 - **WP allocation:** primary `WP-CAP-MENTU`, backing `WP-ENG-IPC`, `WP-UI-CORE`, `WP-ENG-SHELL`; test-port path `tests/parity/ports/WP-CAP-MENTU/PUI-MENTU-001/**`
 - **Dependencies:** PUI-AIVAULT-001 (shared coalescing pattern)
 - **Remaining gaps (explicit work obligations, not implied-complete):**
-  - recipe-graph.ts and mentu-session-request-coalescer.ts bodies not opened — the coalescing-semantics rewrite decision specifically depends on reading them (per parity-ui-audit.md §13)
-- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION. REUSE the verified retry-ordering/graph-node UI contract and evidence-restore race-safety; the coalescing-semantics rewrite decision is undecided until recipe-graph.ts/request-coalescer.ts bodies are read.
+  - CORRECTED this pass: the prior claim 'not referenced by any other test file's imports' was found by grepping test files for the literal string 'request-coalescer', which misses indirect exposure through a consumer. Tracing actual imports: mentu-session-request-coalescer.ts's readRunRequestForScope is imported (unmocked) by use-mentu-session-evidence-restore.ts, which IS exercised by mentu-evidence-restore.test.tsx's StrictMode assertion (now tagged assertion-body-inspected above) — this is real, verified, if narrow, coverage of ONE of the three coalescer exports. discoveryRequestForScope/recipeLoadRequestForScope (imported only by use-mentu-session-loading.ts, itself untested) remain genuinely unverified — see missingInvariants, framed as proposed-unverified rather than an asserted requirement, since the AI-Vault-coalescing analogy (cancellation isolation, preempted-caller re-join) was not itself observed in this file's actual code and has been removed from the invariant text.
+- **Recommend:** EXISTING BEHAVIOR REQUIRED DURING MIGRATION. REUSE the verified retry-ordering/graph-node/cycle-detection UI contract, evidence-restore race-safety, AND readRunRequestForScope's dedup (now confirmed, correcting a prior false negative); discoveryRequestForScope/recipeLoadRequestForScope remain implementation-strategy-undecided — characterize their actual behavior (mentu-session-request-coalescer.ts:19-79) before writing a new test or assuming they share readRunRequestForScope's pattern.
 
 ### PUI-MEETINGS-001 — Meetings page (transcript rows, capture availability, Q&A delegation)
 
@@ -785,7 +967,7 @@ One row per card. `Status` is `proposal-not-dispatchable` for the 6 cards with z
     - returns a quiet cancellation when the user declines upload confirmation (line 167)
     - rechecks the retained preview after upload confirmation (line 182)
     - ignores edited preview file contents and uploads the retained original payload (line 201, readFileSync NOT called)
-    - requires opening the retained bundle preview file before sending (line 236, throws /open.*review file/)
+    - requires opening the retained review file before sending (line 235, throws /open.*review file/)
     - discards retained bundle previews on request (line 247)
     - expires retained bundle previews without another diagnostics call (line 260)
     - writes retained preview files with private permissions (line 277)
@@ -824,4 +1006,8 @@ The 3 source-pinned screenshots in docs/migration/reference-captures/c9790628-li
 
 ## 8. Legacy-required-during-migration vs. new postmigration requests
 
-Every card in this checkpoint is tagged `legacy-required-during-migration` — all 28 capabilities carded here are EXISTING legacy functionality that must migrate with the rewrite, not new product asks, and **none of them are deferred by this document** — including the six with `implementation-strategy-undecided` (Source Control panel, Pull Request page, Branded account switchers, AI Vault, Artifacts, and — for its unresolved coalescing layer only — part of Mentu). "Undecided" describes only HOW each will be reimplemented (REUSE vs. REWRITE) or how deep its verification currently goes, never WHETHER it must migrate. Three cards (Bots, Mentu, Meetings) additionally carry a `pendingPostmigration` note copied verbatim from `parity-work-packages.md`'s preservation rule (Bots: reactive adapters/delegation UI/trigger UX/flush barriers; Mentu: Qwen compat, recipe-81/90 follow-ups, rendered final check; Meetings: shared-spaces model) — those specific line items are the ONLY parts of this checkpoint's scope explicitly deferred to after migration, and only because the source-of-truth work-packages document already says so, not because this pass chose to defer them.
+Every card in this checkpoint is tagged `legacy-required-during-migration` — all 28 capabilities carded here are EXISTING legacy functionality that must migrate with the rewrite, not new product asks, and none of them are deferred by this document — including cards with `implementation-strategy-undecided` fields. "Undecided" describes only HOW each will be reimplemented or how deep its verification currently goes, never WHETHER it must migrate. Three cards (Bots, Mentu, Meetings) additionally carry a `pendingPostmigration` note copied verbatim from `parity-work-packages.md`'s preservation rule (Bots: reactive adapters/delegation UI/trigger UX/flush barriers; Mentu: Qwen compat, recipe-81/90 follow-ups, rendered final check; Meetings: shared-spaces model) — those specific line items are the ONLY parts of this checkpoint's scope explicitly deferred to after migration, and only because the source-of-truth work-packages document already says so.
+
+## 9. Mechanical citation verification (this pass)
+
+A script re-opened every one of this document's line-anchored assertion citations against the frozen legacy checkout and confirmed the quoted `it()`/`describe()` title string actually appears at (or within a small tolerance of) the claimed line number. Result: 226 of 227 line-anchored citations matched exactly on first run; the single flagged item is an intentional non-line-anchored summary entry (PUI-TABS-001), not an error. One citation (PUI-DIAG-001) was found to be a paraphrase — "retained bundle preview file" vs. the source's actual "retained review file" — with a one-line off-by-one anchor, and was corrected to the verbatim source title and exact line. This check is mechanical (string/line matching only); it confirms a citation POINTS at real, matching source text, not that the underlying test currently passes — no test was executed.
