@@ -1,5 +1,26 @@
 # Root acceptance — identity/lease test preparation
 
+## Independent follow-up: 2026-09-06, 16:30 UTC
+
+Root reran the delivered native claim suite: 39 passed, zero failed/ignored on
+macOS. The actual-source signer verifier still matches 20/20 vectors with ten
+source/license files verified. New Windows normalization tests execute as pure
+string tests only; three Windows filesystem cases are compiled out here. Neither
+passing result proves Windows runtime parity or live ownership admission.
+
+Root reviewed the production raw-PathBuf metadata ordering and namespaced output
+seam. The leaf's round-3 report asserts an ordinary long-path Node failure and
+calls a purported acceptance divergence deliberate. No native comparison was
+executed, so that assertion is not accepted or authorized as a product change.
+Guidance `msg_331781e06369` plus one terminal nudge requires preserving the
+native-platform comparison gap. Await the settled Sol report; do not advertise
+an integrated capability or rewrite report uncertainty as proven equivalence.
+
+Next dependency Task `task_3e6a87184b23` is queued, not launched: Sol/Kimi will
+implement the full provider-record/handle-chain slice of
+`docs/migration/native-session-authority-contract.md`, with disjoint ownership
+and original tests. Runtime/store integration remains root-owned and incomplete.
+
 ## Native module review: 2026-09-06, 15:58 UTC
 
 Root independently ran `cargo test -p drogon-core --test claim_identity --locked`:

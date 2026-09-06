@@ -29,6 +29,20 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+### Active follow-on work: 16:30 UTC
+
+CAP native input has a verified actual Sonnet child `ctx_0ff3cf03977e` under
+Sol `ctx_6fafe36da2ca`, depth 2. The prior 91-case baseline runner is accepted
+and committed in `ce4b269`; these tests do not establish Bot product parity.
+Sol-UI accepted shutdown-checkpoint Task `task_356786067bc3`, Dispatch
+`ctx_2f30e3d88a5f`, with mandatory GLM delegation. Its scope preserves complete
+source tests and the renderer retry/degrade/dirty-draft guard; durable IPC and
+caller integration remain root-owned. Lead acceptance is not proof of leaf launch.
+ENG provider-record Task `task_3e6a87184b23` is queued after its current claim
+review, not dispatched. Root independently verifies 39 claim tests and 20 actual
+source signer vectors; Windows native execution remains missing. These follow-on
+tasks preserve the full session model and do not redefine parity around the shell.
+
 ### User correction: leads delegate execution
 
 Carlos clarified that Sol must conserve OpenAI usage by directing non-OpenAI
