@@ -31,3 +31,15 @@ An earlier ad-hoc attempt expected a TypeScript JavaScript compiler API that
 the installed TypeScript 7 package does not expose; it did not run a comparison.
 The verified Babel comparison above supersedes that setup failure. No runtime
 restart defect is claimed reproduced by these static checks.
+
+## Independent post-correction check
+
+The same unchanged comparator subsequently returned **129/129, exit 0** after
+the GLM correction on `task_fa4d182c67ce / ctx_f2f252e21be9` (same terminal,
+verified live at depth 2). Corrected `agent-session-resume.ts` SHA256:
+`0869d62614f45ab5216be56bd6a73b27b631f2fab1b8eef821c9206da3374d10`.
+Root confirmed both fields appear in the positive fixture and the invalid
+blocking discriminator in the negative compile fixture. The envelope now aliases
+the exported `ShutdownCheckpointPersistDeps` generic directly. Fixture presence
+is not proof those tests pass; final leaf/lead results and root admission remain
+pending. No candidate contract files are committed by this review checkpoint.
