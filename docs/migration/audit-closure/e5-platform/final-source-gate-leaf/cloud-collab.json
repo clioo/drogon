@@ -1,0 +1,126 @@
+{
+  "schema": "drogon.audit.e5-final-source-gate-leaf-cloud-collab/1",
+  "groupId": "D-CLOUD-COLLAB final-source-gate leaf",
+  "dispatch": {
+    "taskId": "task_45110ec5a842",
+    "dispatchId": "ctx_b8b7e5673b90",
+    "parentTerminal": "term_86e2b660-83d2-4440-811e-50467ae6fed8",
+    "depth": 2,
+    "canDispatchSubWorkers": false,
+    "childrenOwned": 0
+  },
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "sourceAccess": "read-only; one git rev-parse HEAD check only, no other Git command; no build/install/test/import-execution/cloud/secret/config writes",
+  "execution": "not-executed-by-this-leaf",
+  "evidenceTier": "source-full-body-six-files-plus-directly-owned-tests; candidate, not root acceptance",
+  "proposedDisposition": "candidate-for-parent-review",
+  "preservedUnchanged": [
+    "docs/migration/audit-closure/e5-platform/services-final.md",
+    "docs/migration/audit-closure/e5-platform/services-final.json"
+  ],
+  "reusedEvidence": "docs/migration/audit-closure/e5-platform/services-final.md line 190 and line 359 (D-CLOUD-COLLAB definition and exact six-path list)",
+  "scope": {
+    "directory": "cloud/apps/relay/src",
+    "files": [
+      "cell-admission-selector.ts",
+      "cell-admission-migration-registration.ts",
+      "assignment-connection-headroom-query.ts",
+      "assignment-identity-queue.ts",
+      "regional-rehome-safety.ts",
+      "registered-migration-abandonment.ts"
+    ],
+    "noRecursiveImportCensus": "database.ts, @orca-cloud/relay-contract, relay-observability.ts, and assignment-store.ts are cited only as external callers/collaborators, not expanded into"
+  },
+  "fullBodyReadThisLeaf": [
+    { "path": "cloud/apps/relay/src/cell-admission-selector.ts", "lines": 505, "range": "1-505", "sha256": "0bc2f18a5931334865f2ed27a83df9bcfeeaec45bd8285bb9419719cd06d221b" },
+    { "path": "cloud/apps/relay/src/cell-admission-migration-registration.ts", "lines": 346, "range": "1-346", "sha256": "9f2a592dc9299343e43c2f6a0959cf45a91d2c6f89e96ce4c8ab3cec9f0c926d" },
+    { "path": "cloud/apps/relay/src/assignment-connection-headroom-query.ts", "lines": 15, "range": "1-15", "sha256": "388d5a8d8332da952cf8fe75d5d6a20ea141131ae5719cc36ca2473bdc9514fe" },
+    { "path": "cloud/apps/relay/src/assignment-identity-queue.ts", "lines": 24, "range": "1-24", "sha256": "c070ae8e07e06ff4a98cb3cda3df25abede52d3ae3aa5cea293b4a24c7e7dab4" },
+    { "path": "cloud/apps/relay/src/regional-rehome-safety.ts", "lines": 86, "range": "1-86", "sha256": "c7707d914017101684ad82fd46968af11c2ffe9bf194d2b5298f91045489b635" },
+    { "path": "cloud/apps/relay/src/registered-migration-abandonment.ts", "lines": 81, "range": "1-81", "sha256": "17adaf0e9f99410a186cbb4aab4a55a3ba736b9b490048d880d7f5a355822af8" },
+    { "path": "cloud/apps/relay/src/cell-admission-selector.test.ts", "lines": 580, "range": "1-580", "sha256": "8e6052e68953d5e48637df440189a981edc1c76e2ce6e7e54b9c331ec8f2a09e", "itsCount": 14, "itsAllRead": true },
+    { "path": "cloud/apps/relay/src/assignment-identity-queue.test.ts", "lines": 70, "range": "1-70", "sha256": "dab786e0cbe6d182633e1bedf654e83acff0c4c5bf951232e8dc069f8dd7ee37", "itsCount": 3, "itsAllRead": true },
+    { "path": "cloud/apps/relay/src/regional-rehome-safety.test.ts", "lines": 109, "range": "1-109", "sha256": "77980bf5fe7f764cb21780acda9ccf61965799f0027cac0dd0aca62fdcba61e5", "itsCount": 7, "itsAllRead": true }
+  ],
+  "namedUnrunTestsNotOpened": [
+    { "path": "cloud/apps/relay/src/assignment-connection-headroom-postgres.test.ts", "lines": 348, "note": "tests assignment-store.ts's consumption of the query, not the query file's own logic (which has none); postgres-suffixed, requires a real database" },
+    { "path": "cloud/apps/relay/src/registered-migration-inventory.test.ts", "lines": 117, "note": "consumer-side test of assignment-store.ts's use of these SQL fragments" },
+    { "path": "cloud/apps/relay/src/registered-migration-inventory-postgres.test.ts", "lines": 139, "note": "postgres-suffixed, requires a real database" }
+  ],
+  "records": [
+    {
+      "id": "cell-admission-selector",
+      "path": "cloud/apps/relay/src/cell-admission-selector.ts",
+      "immediateBodies": "CellAdmissionState enum + type library; RelayCellAdmissionSelector class (apply, inspect, persistIntent); free functions ensureCellAdmission, cellAdmissionState(s), setCellAdmissionBeforeBoundary, synchronizeCellAdmissionBoundary, lockedSelector, requireSelectorMatchesAdmission, normalizeMembership, encodeMembership/decodeMembership, stateFromEnabled/enabledForState/parseCellAdmissionState.",
+      "stateOwned": "relay_admission_selectors singleton row (selector_id='general'); relay_admission_selector_intents (durable pre-commit CAS record, one row per attemptId); writes through to relay_cells.enabled / relay_cell_admission for every governed cell.",
+      "authLifecycle": "Two-phase intent-then-commit CAS protocol. persistIntent durably records the attempt before the mutating transaction. apply() requires exact full-inventory membership coverage, exact generation match (or idempotent replay if already advanced), a mandatory SHA-256 membership fingerprint at generation 0 (optional above), re-verification that live admission state has not drifted from the selector's recorded membership, a one-way-door refusal to move any cell out of existingOnly back into migration/general once generation>0 (admission_selector_legacy_reenable), and a final optimistic-concurrency UPDATE...WHERE generation=? whose affected-row count is the real CAS gate.",
+      "failureCancel": "An error after persistIntent commits leaves a durable, safely-retryable intent row; inspect() reports intent.state='unchanged' until a retry succeeds; persistIntent itself is idempotent for identical input, admission_selector_attempt_mismatch for divergent input under the same attemptId.",
+      "concurrency": "No in-process mutex; relies entirely on the database's conditional UPDATE for single-winner-under-race. Confirmed by direct test: two concurrent apply() calls at the same expectedGeneration produce exactly one fulfilled and one rejected result.",
+      "realAssertionEvidence": "cell-admission-selector.test.ts, 14/14 its read (lines 135-579): sticky-vs-placement interaction with an active selector, dormant-placement exclusion, unfenced-dead-cell non-recovery under a selector, atomic-commit + idempotent-replay + inspect(committed), generation-zero membership-drift rejection via AfterTransactionDatabase fault injection, admission-age preservation across a CAS, failed-CAS-intent persistence without membership mutation, duplicate/incomplete membership rejection before mutation, ambiguous-commit recovery via FailAfterIntentDatabase fault injection, concurrent-CAS single-winner + legacy-reenable refusal, selector-boundary survival across compatible/incompatible reconciliation.",
+      "sourceDefectsVsCorrections": "None found in this file specifically."
+    },
+    {
+      "id": "cell-admission-migration-registration",
+      "path": "cloud/apps/relay/src/cell-admission-migration-registration.ts",
+      "immediateBodies": "RelayMigrationCellRegistrar class with single public method add(input); free helpers normalizeMigrationCells, validateMigrationCell, membershipAfterAddition, requireExactAddedCells, insertCell, encodeCells. Imports lockedSelector/requireSelectorMatchesAdmission/encodeMembership/decodeMembership/normalizeMembership directly from cell-admission-selector.ts -- the one direct source-level dependency among the six files.",
+      "stateOwned": "Inserts new relay_cells (enabled=1 unconditionally), relay_cell_regions, relay_cell_admission (admission_state='migration-only' unconditionally), relay_cell_connection_limits rows; writes relay_admission_selector_intents (shared table) and relay_admission_selector_cell_additions (operation-specific table storing exact cells_json); advances the shared relay_admission_selectors row.",
+      "authLifecycle": "Requires the selector boundary already active (generation>=1, else admission_selector_boundary_inactive) -- addition only follows cutover, never precedes it. Full per-cell (id/url length, capacity 1..100000, legal hard cap, unobserved bound within relayCellAdmissionBounds, legal region) and per-batch (1..128 cells, no duplicate id/url) validation, then requires none of the added cells already exist in inventory. Idempotent-replay branch cross-checks BOTH the shared intent row and the operation-specific additions row exist together (torn write between the two is a hard admission_selector_attempt_mismatch, not treated as an ambiguous-retry case), and on confirmed prior success re-verifies every added cell's live state field-by-field via requireExactAddedCells -- stricter than apply()'s own replay check.",
+      "failureCancel": "Same intent-durability shape as apply(); an interrupted commit after intents/additions rows are written but before the selector advances is recoverable by retry. No dedicated fault-injection test for this file was found (unlike cell-admission-selector.test.ts's FailAfterIntentDatabase/AfterTransactionDatabase harnesses).",
+      "concurrency": "Same conditional-UPDATE CAS mechanism as apply(), inheriting the same single-winner-under-race property by direct reading, but NO test in this codebase was found exercising two concurrent addMigrationCells calls the way apply()'s concurrency is explicitly tested -- named as a discriminating gap below.",
+      "realAssertionEvidence": "cell-admission-selector.test.ts, last 2 of its 14 its (lines 467-579): 'atomically adds exact migration-only cells after the selector boundary' (confirms membership update, idempotent replay, cellDeploymentStatus reflecting the new cell's exact connection capacity) and 'rejects additive cells before cutover and exact-attempt config reuse' (confirms admission_selector_boundary_inactive pre-cutover, admission_selector_attempt_mismatch on a changed cell field under the same attemptId, and admission_selector_attempt_mismatch when a subsequent apply() call reuses the same attemptId with different membership).",
+      "sourceDefectsVsCorrections": "None found in this file specifically."
+    },
+    {
+      "id": "assignment-connection-headroom-query",
+      "path": "cloud/apps/relay/src/assignment-connection-headroom-query.ts",
+      "immediateBodies": "Single exported string constant ASSIGNMENT_CONNECTION_HEADROOM_QUERY -- no function, no class, no logic. LEFT JOIN across relay_cell_connection_limits, relay_cell_connection_snapshots, relay_cell_runtime plus a correlated subquery counting relay_control_connection_reservations in states (reserved, late-arrival-debt, claimed) per cell.",
+      "stateOwned": "None (read-only query text, no execution of its own).",
+      "authLifecycle": "N/A -- all freshness/incarnation/headroom-arithmetic semantics live entirely in the sole caller (assignment-store.ts's connectionHeadroomByCell, already characterized in the prior services-leaf pass).",
+      "failureCancel": "N/A.",
+      "concurrency": "N/A.",
+      "realAssertionEvidence": "None specific to this file; assignment-connection-headroom-postgres.test.ts (348 lines) exists but tests the caller's consumption, not this file's text, and was not opened this leaf.",
+      "sourceDefectsVsCorrections": "None found; a 15-line SQL constant has essentially no surface for either."
+    },
+    {
+      "id": "assignment-identity-queue",
+      "path": "cloud/apps/relay/src/assignment-identity-queue.ts",
+      "immediateBodies": "AssignmentIdentityQueue class, single public method run<T>(identity, operation): Promise<T>, implementing a per-key serial-execution queue via a Map<string, Promise<void>> of chained tail promises keyed by JSON.stringify([userId, relayHostId]).",
+      "stateOwned": "Purely in-memory, per-process (the tails map); no database, no cross-process coordination -- process-local serialization only.",
+      "authLifecycle": "None -- pure concurrency primitive, no authorization surface.",
+      "failureCancel": "run() chains via previous.catch(()=>undefined).then(operation) -- a rejected prior operation does NOT block or fail the next queued operation for the same key; the queue's own tail-tracking similarly swallows both outcomes. The caller of run() still receives the ORIGINAL rejection via return await result -- only the internal chain is failure-transparent, confirmed by the 'continues after a rejected operation' test.",
+      "concurrency": "Confirmed by direct test evidence: same-identity operations are strictly serialized (execution-order assertion via a deferred promise gate); different-identity operations run fully concurrently with no queueing (second identity completes and is observed before the first identity's still-blocked operation releases). The finally-block guard `if (this.tails.get(key) === tail) this.tails.delete(key)` prevents a completed operation from deleting a newer tail that has since replaced it -- confirmed correct by reading, but no test in the 70-line file specifically exercises a three-or-more-operation interleaving that would distinguish this guard firing correctly vs. incorrectly (named as a discriminating gap below).",
+      "realAssertionEvidence": "assignment-identity-queue.test.ts, 3/3 its read (all 70 lines): same-identity serialization, cross-identity concurrency, rejection-does-not-block-queue.",
+      "sourceDefectsVsCorrections": "None found in this file."
+    },
+    {
+      "id": "regional-rehome-safety",
+      "path": "cloud/apps/relay/src/regional-rehome-safety.ts",
+      "immediateBodies": "Six named numeric constants (each with a source comment citing specific production measurement dates/values) and three pure functions: regionalRehomePoolPressure, regionalRehomeSafetyFailure, combineRegionalRehomeSafety.",
+      "stateOwned": "None -- pure functions over caller-supplied snapshot objects, no I/O, no database access.",
+      "authLifecycle": "regionalRehomeSafetyFailure checks in fixed priority order, first match wins: monitoring_stale (observedAt===0 or >60s old) -> sql_failures (strictly >250, exclusive-at-limit confirmed by test) -> database_pool_pressure (either pool metric strictly exceeding its limit) -> control_recovery_failures (zero-tolerance, any value >0, the only metric with no grace band) -> elevated_reconnects (reconnects > Math.max(1,requiredCells)*250, a SCALED not fixed limit) -> null.",
+      "failureCancel": "N/A -- read-only scoring, 'failure' means the scored condition, not an exception; no function in this file throws.",
+      "concurrency": "N/A -- pure functions, no shared mutable state. combineRegionalRehomeSafety uses deliberately asymmetric per-field combinators: observedAt takes the MINIMUM (most-stale-wins), sqlFailures and controlActivityRecoveryFailures SUM, reconnects is taken ONLY from fleetSafety (processSafety.reconnects is silently discarded entirely -- the one field with no processSafety contribution), and both pool-pressure fields take the MAXIMUM.",
+      "realAssertionEvidence": "regional-rehome-safety.test.ts, 7/7 its read (all 109 lines): healthy-baseline pool-micro-wait pass, routine-reconnect-churn pass, pool-pressure-bound fail-closed (both sub-metrics), reconnect-storm fail-closed, ambient-55P03-retry-noise pass, sql-failure-storm fail-closed with exact-at-limit-passes edge case, zero-tolerance control-recovery-failure and stale-monitoring fail-closed. No test directly exercises combineRegionalRehomeSafety.",
+      "sourceDefectsVsCorrections": "SD-RRS1 (intended-correction-candidate, not a confirmed defect): combineRegionalRehomeSafety silently discards processSafety.reconnects entirely while every other field combines both inputs -- likely intentional (per-process reconnect counting may not be meaningful here) but the function signature accepting a field it then ignores is a footgun for a future caller assuming uniform combination; worth an explicit comment or narrower parameter type."
+    },
+    {
+      "id": "registered-migration-abandonment",
+      "path": "cloud/apps/relay/src/registered-migration-abandonment.ts",
+      "immediateBodies": "One numeric constant REGISTERED_MIGRATION_ABANDON_MS=24h; two exported raw SQL boolean-expression fragment strings: DURABLY_FENCED_MIGRATION_SOURCE and ABANDONED_REGISTERED_MIGRATION (which embeds the first via string interpolation and itself requires exactly 3 positional ? parameters in a specific order: migration.expires_at, target_admission.updated_at, source_admission.updated_at).",
+      "stateOwned": "None directly -- read-only predicate fragments interpolated into assignment-store.ts's own queries (already characterized in the prior services-leaf pass).",
+      "authLifecycle": "DURABLY_FENCED_MIGRATION_SOURCE is disjunctive over two independent proof paths (Terraform-managed committed fence with completed/non-aborted attempt and attested_at>=last_heartbeat_at freshness, OR legacy attestation adoption with the same freshness requirement). ABANDONED_REGISTERED_MIGRATION requires target-registered AND expired, THEN (target durably existing-only-disabled past the abandon window) OR (source durably existing-only-disabled-or-fenced past the window AND target live/admitted AND source has zero remaining activity leases) -- AND in every case the target must have no live (non-pending) control lease.",
+      "failureCancel": "N/A -- pure SQL text fragments, no independent execution; all transactional guarantees belong to the caller queries.",
+      "concurrency": "N/A.",
+      "realAssertionEvidence": "None read directly for this file; registered-migration-inventory.test.ts (117 lines) and registered-migration-inventory-postgres.test.ts (139 lines) exist but test the caller's consumption of these fragments and were not opened this leaf.",
+      "sourceDefectsVsCorrections": "None found in this file specifically."
+    }
+  ],
+  "discriminatingUnrunGaps": [
+    "No test exercises two concurrent RelayMigrationCellRegistrar.add() calls, unlike the explicit concurrent-apply() test for RelayCellAdmissionSelector.",
+    "No dedicated unit test for combineRegionalRehomeSafety's field-by-field combination logic (including the reconnects asymmetry, SD-RRS1).",
+    "assignment-identity-queue.ts's tail-replacement cleanup guard has no test exercising a three-or-more-operation interleaving that would distinguish it firing correctly vs. incorrectly.",
+    "The three named Postgres-suffixed/consumer test files were not opened; whether they surface any defect specific to these six files' SQL text (as opposed to caller query construction) is unresolved."
+  ],
+  "rootIndex": { "note": "No claim of percentage increase from this leaf; candidate for parent review only, never root acceptance." }
+}

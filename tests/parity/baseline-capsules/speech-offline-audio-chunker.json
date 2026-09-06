@@ -1,0 +1,36 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 and Node24.19.0; no install or source-tree writes.",
+    "Minimal node configuration omits feature-wall define, renderer aliases, original DOM/host-port setup, GC/WebStorage execArgv and extended timeouts. Complete imports are only Vitest and the pure relative source module; no full-suite configuration equivalence claimed."
+  ],
+  "isolationRationale": "Pure deterministic in-memory Float32Array fixtures; no native speech worker, microphone, model, filesystem, network, cloud inference or secret store imports. Licensed pinned source and unchanged assertions staged by the reviewed runner.",
+  "capsuleId": "speech-offline-audio-chunker",
+  "description": "Seven unchanged original bounded chunk and sample conservation cases.",
+  "entryTestFile": "src/main/speech/stt-offline-audio-chunker.test.ts",
+  "files": [
+    {
+      "path": "src/main/speech/stt-offline-audio-chunker.test.ts",
+      "role": "test",
+      "sha256": "c0eda15494dba60a2126ab50b50f5ee7853d8ad787b2e526ad501f8d9d61de42"
+    },
+    {
+      "path": "src/main/speech/stt-offline-audio-chunker.ts",
+      "role": "module",
+      "sha256": "76a823c3e6bb9a6a70aabfc19246f086ae96574d7e500f6727cb760ce1dacafb"
+    }
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 7
+  },
+  "testEvidenceBoundary": "Original cases test buffered, bounded, quiet split, multi-push, oversized input and sample-value conservation. They do not establish a bound on all intermediate allocations, invalid-rate handling, real audio quality, native inference or candidate parity."
+}
