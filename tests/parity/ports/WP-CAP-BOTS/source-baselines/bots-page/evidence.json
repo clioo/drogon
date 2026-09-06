@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "suite": "src/renderer/src/components/bots/BotsPage.test.tsx",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceTestSha256": "bd056caf58c50dc0f3f09ebc9729db05153bd15d48d5cc9a1481a544739d264f",
+  "classification": "source_behavioral_failure",
+  "manifest": {
+    "path": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/manifest.json",
+    "sha256": "187454eaab1ce24841a466131f8e99d81f1768866f930c10b1b48a580e0fb1e3"
+  },
+  "outerCommand": {
+    "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+    "executable": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "args": [
+      "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs"
+    ],
+    "exitCode": 0,
+    "meaning": "The fixture runner completed and classified a genuine source failure; this is not a claim that Vitest exited zero."
+  },
+  "testCommand": {
+    "cwd": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-page-GicgDb",
+    "executable": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "args": [
+      "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+      "run",
+      "src/renderer/src/components/bots/BotsPage.test.tsx",
+      "--root",
+      "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-page-GicgDb",
+      "--config",
+      "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-page-GicgDb/bots-page.vitest.config.mjs",
+      "--reporter=json",
+      "--outputFile=/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-page-GicgDb/bots-page-results.json"
+    ],
+    "timeoutMs": 120000,
+    "environmentNames": ["PATH", "TMPDIR", "TMP", "TEMP", "CI"],
+    "exitCode": 1,
+    "signal": null
+  },
+  "runner": {
+    "nodeVersion": "v24.19.0",
+    "vitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0"
+  },
+  "capsule": {
+    "root": ".preflight/parity-baseline/wp-cap-bots-page-GicgDb",
+    "stageReceiptSha256": "b6ab7abc7fe4b609e29421513c8f87bf57033a05110c11e9fae6aac4cdae2a4c",
+    "generatedRunnerConfigSha256": "65f2c567f10c5e4fdf50e577f9d7834843f623ce585899fec41546fdd360de70",
+    "executionConfigSha256": "3a8b84230bd9439245489678a83a032295fcc856e6819f8d7bbce4a9d86e9da4",
+    "rawResults": {
+      "path": ".preflight/parity-baseline/wp-cap-bots-page-GicgDb/bots-page-results.json",
+      "sha256": "b975d517b38e5b09bb64e3728212392f243627cb8a52a1898f965b2164dc4579"
+    },
+    "cache": ".preflight/parity-baseline/wp-cap-bots-page-GicgDb/.vitest-cache",
+    "temp": ".preflight/parity-baseline/wp-cap-bots-page-GicgDb/.tmp"
+  },
+  "sourceVitestConfig": {
+    "path": "config/vitest.config.ts",
+    "sha256": "19d14b8f028a84ff3401534c22f3241d4ed5695fea5c5df3a140ba2c9f3c0880",
+    "preserved": [
+      "ORCA_FEATURE_WALL_ENABLED=true",
+      "@ and @renderer source-root aliases (the suite uses @)",
+      "automatic JSX",
+      "--no-experimental-webstorage and --expose-gc worker argv",
+      "happy-dom test annotation",
+      "happy-dom OffscreenCanvas compatibility setup",
+      "happy-dom MutationObserver callback-retention setup",
+      "60000ms hook and 30000ms test timeouts"
+    ],
+    "omitted": [
+      "vitest-host-ports-setup.ts: it creates and later removes a temp user-data directory and installs app/secret host ports; every suite case injects loadSnapshot and the source test supplies its own hoisted store mock"
+    ]
+  },
+  "runtimePackages": [
+    { "name": "react", "version": "19.2.8", "packageSha256": "e40c3ed9b633c9ecf188e09a4be309780a1ea0a9c068278a30ff6a27e7b2dbb6", "treeSha256": "18c57ab83da9696557e36a215ed48b80999f8aa3c9a51e01b1e8cfee892fadd7", "files": 27, "bytes": 171598 },
+    { "name": "react-dom", "version": "19.2.8", "packageSha256": "7c82f0967114d4b5d38b1f07e543af87c9919e8d3243f9604004819319cb2200", "treeSha256": "250899d012a61de2814d7df9b778ae1df2eb3fe6f95d65f0f81abe0a593ff592", "files": 43, "bytes": 7319407 },
+    { "name": "happy-dom", "version": "20.11.8", "packageSha256": "a60eeb9edb492d01d10923ff47e32ef55dfe076881dc85fe7f380712aa0466e3", "treeSha256": "1a5a7b74bae2a420c2e6692b537aa1e784f6c8bad8e252340adfc0ff6136ccb7", "files": 3003, "bytes": 8593843 },
+    { "name": "@testing-library/react", "version": "16.3.2", "packageSha256": "67974b165512b3f03785a70ce8228c1df0ab84408f02d2185aafac171621ed6e", "treeSha256": "4272e7f43cc427078e62bb209768e6a7c1bfb98c2814a26bc71a30e95cb0009d", "files": 25, "bytes": 336758 },
+    { "name": "lucide-react", "version": "0.577.0", "packageSha256": "74e771c3aa9be63b8d3a06409ed025705d4fb6ad494dd9f14f32a489aadad986", "treeSha256": "e603ddef47664aadb1363866719e128a30168a70ce97825709adc27f501f5555", "files": 3940, "bytes": 37064801 },
+    { "name": "class-variance-authority", "version": "0.7.1", "packageSha256": "f487885eb010b36aec829ab8fb5fc845918006c4633e3c88c750e73bd35c6381", "treeSha256": "83fcc17977c2abeb8fb97fdcc81417f1a8eba772d5796493acee682299071d16", "files": 9, "bytes": 22073 },
+    { "name": "radix-ui", "version": "1.6.2", "packageSha256": "11468f5960f30725657677dc73d948f448b35e4ed252a8c5d40f9158f1fafda8", "treeSha256": "641f8e94fefb134867e3cb605c9f84b70260159cd0db17eb67757db4f2927943", "files": 17, "bytes": 45227 },
+    { "name": "clsx", "version": "2.1.1", "packageSha256": "a5e616b9883177fb47c1fca22b6a4ab42be1c3ed6ffae8595a5c7d88630eeec2", "treeSha256": "9dafaf0b7e4ab35293e17bd3b97aaaacd5f787690e6666ef5387cc8012926831", "files": 10, "bytes": 8555 },
+    { "name": "tailwind-merge", "version": "3.5.0", "packageSha256": "1358964098a2e5c2d23ff14d01db747b852a0a368ada191fc223de7c456101da", "treeSha256": "f89fdea6ad900faaaceff3591fdeb640617dfc95d11a56254ef4f0efcb779c35", "files": 29, "bytes": 984210 }
+  ],
+  "fixtureSeams": [
+    { "module": "@/store", "sha256": "f4887c12d29ff3535d5fbc392736dcacc3df5b808ef55b7680f0adb4e423ffca", "qualification": "The original test's hoisted vi.mock supplies useAppStore; the stand-in throws if it is ever evaluated." },
+    { "module": "@/lib/launch-drogon-bot-session", "sha256": "4b97a9d76cc0c4d09c05ff1bcb72f7f24b8afd16b496711cbd81ff93b99662ac", "qualification": "No original case invokes session launch; the stand-in throws if called." },
+    { "module": "@/lib/agent-catalog", "sha256": "43e90d99bba9fe4db0387dfb6de60824a6ae4ec8454c6475f15da249abf8aa2d", "qualification": "Preserves codex -> Codex for rendered text. It is called but no original assertion observes that label, so full environment equivalence remains qualified." },
+    { "module": "all ?url asset imports", "qualification": "Returns a deterministic capsule URL without copying media. Assertions do not inspect src or bytes; image URL equivalence remains unproven." }
+  ],
+  "counts": {
+    "numTotalTestSuites": 2,
+    "numPassedTestSuites": 0,
+    "numFailedTestSuites": 2,
+    "numTotalTests": 8,
+    "numPassedTests": 6,
+    "numFailedTests": 2,
+    "numPendingTests": 0,
+    "numTodoTests": 0,
+    "success": false
+  },
+  "cases": [
+    { "name": "BotsPage renders the Bot description fallback: 'Reviewer'", "status": "passed" },
+    { "name": "BotsPage renders the Bot description fallback: 'Review changes'", "status": "passed" },
+    { "name": "BotsPage renders the Bot description fallback: 'Ready for a purpose'", "status": "passed" },
+    { "name": "BotsPage renders an actionable empty state", "status": "passed" },
+    { "name": "BotsPage keeps model selection at the harness default and applies a real character preset", "status": "failed", "firstFailure": "BotsPage.test.tsx:80 expected model.value to be 'Harness default'; actual value was ''. Later assertions in this case did not execute." },
+    { "name": "BotsPage does not invent a harness when discovery returns none", "status": "failed", "firstFailure": "BotsPage.test.tsx:92 could not find label 'Display name'; the pinned component exposes 'Name (optional)'. Later assertions in this case did not execute." },
+    { "name": "BotsPage runs a responsibility through the Bot card that owns it", "status": "passed" },
+    { "name": "BotsPage renders a recoverable error state", "status": "passed" }
+  ],
+  "denominatorCorrection": {
+    "priorStaticClaim": 9,
+    "executedExpandedCases": 8,
+    "reason": "The parameter table expands to three cases and the file contains five additional it calls, not six.",
+    "retainedNonAdmittedStage": {
+      "root": ".preflight/parity-baseline/wp-cap-bots-page-hCDjWw",
+      "manifestExpectedTests": 9,
+      "stageReceiptSha256": "412e1c60bc4fb26d78d638ee2e275181c0154c5c0d8a94e75990e2f2dfcc25fd",
+      "rawResultsSha256": "9720b3ea3c222673735748783843ee339ab8acdf5b6c5f514c20e76b50d699e3",
+      "disposition": "retained but superseded because its manifest expected the incorrect static denominator"
+    }
+  },
+  "verdict": "The entire original suite executed in isolation and produced a reproducible source behavioral failure: 6 passed and 2 failed of 8, with no skipped/todo cases. This establishes an original baseline only and makes no candidate implementation, parity, RED or GREEN claim."
+}

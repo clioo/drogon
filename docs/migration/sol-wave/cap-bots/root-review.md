@@ -1,5 +1,25 @@
 # Root review: Bots test preparation and first Sol cycle
 
+## Final runner acceptance: 2026-09-06, 16:29 UTC
+
+Root accepts the bounded baseline runner after independent 91/91 regression
+verification, complete review of the new normalization/file-fixture cases and
+the final Sol report. The actual execution path uses the reviewed helpers;
+filesystem read, JSON parse and schema errors retain distinct diagnostics and
+cannot become completed source results. Earlier signal/count/pending rejections
+are covered. This supersedes the partial runner-safety acceptance below only.
+
+The original manifest, historical evidence and three stand-in hashes remain
+unchanged, independently rechecked at 16:21 UTC. Schema 3/3 and qualified
+BotsPage 6/2 source outcomes are retained unchanged. No candidate behavior was
+tested by these 91 runner tests; no full source-environment equivalence is claimed.
+
+The settled Sol parent transferred to native input Task `task_d43ff0348684`,
+Dispatch `ctx_6fafe36da2ca`, on the exact existing Sol terminal before delivery
+acknowledgment. Root verified its actual Sonnet child `ctx_0ff3cf03977e`, depth 2,
+ready/input accepted in the assigned rewrite checkout. Sol supervises only.
+The current native validation work does not edit this accepted baseline tree.
+
 ## Runner acceptance checkpoint: 2026-09-06, 15:58 UTC
 
 Root independently ran the delivered focused Vitest 5 suite with Node24:

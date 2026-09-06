@@ -1,0 +1,59 @@
+{
+  "capsuleId": "wp-cap-bots-page-source",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/renderer/src/components/bots/BotsPage.test.tsx",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 8
+  },
+  "rendererRuntime": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "happy-dom": "20.11.8"
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    { "path": "src/renderer/src/components/bots/BotsPage.test.tsx", "role": "test", "sha256": "bd056caf58c50dc0f3f09ebc9729db05153bd15d48d5cc9a1481a544739d264f" },
+    { "path": "src/renderer/src/components/bots/BotsPage.tsx", "role": "module", "sha256": "8248113181a616fd732bf5fbaa83a49f85879c854a25ef31cedc728f7ff78781" },
+    { "path": "src/renderer/src/components/bots/BotResponsibilityCard.tsx", "role": "module", "sha256": "74431888fc757260a5a25ca6de887dec5dc08ea74563988f4dfece6343070fe8" },
+    { "path": "src/renderer/src/components/bots/BotsPageForms.tsx", "role": "module", "sha256": "88794cf1b57124186e85b23af29251341931527579da30ccceb82c72baa4a69d" },
+    { "path": "src/renderer/src/components/bots/BotCreationForm.tsx", "role": "module", "sha256": "01609c1a091ddbc9b89a259826530e24fd51c261ac964b54af990f30d6948c78" },
+    { "path": "src/renderer/src/components/bots/BotCharacterPicker.tsx", "role": "module", "sha256": "2c1e7794026ace521465419198e85c4a72162770aaa7c9c6b762b9f726c23957" },
+    { "path": "src/renderer/src/components/bots/BotsPageStates.tsx", "role": "module", "sha256": "4229f16ec4d9da0f599bba1b7a865afc0aa70230d2b3f72d2f3879902d484f9b" },
+    { "path": "src/renderer/src/components/bots/DrogonBotAvatar.tsx", "role": "module", "sha256": "373ef86faa9f7a6b4bdbc74f1c1e2968869fb58c7630a5b45bb833b5c06e149d" },
+    { "path": "src/renderer/src/components/bots/bots-page-model.ts", "role": "module", "sha256": "d9862fe13aff0de727c6267a94d9612a38ac2affafb96328544ea2435a836299" },
+    { "path": "src/renderer/src/components/bots/use-bots-page-controller.ts", "role": "module", "sha256": "2d53d87ca0747ab24361856379ff563a76f48b600666e5495f81ed09a04daadd" },
+    { "path": "src/renderer/src/components/ui/button.tsx", "role": "module", "sha256": "1fc299ec43c1e8bfb20fb4835468e491ee7a537d85b2519f8bfdff62639c174c" },
+    { "path": "src/renderer/src/components/ui/badge.tsx", "role": "module", "sha256": "71cefd8d8001155d942d6de2a90e4c9f04116eb5512fb0b4be48bf78c867f5ed" },
+    { "path": "src/renderer/src/components/ui/card.tsx", "role": "module", "sha256": "93bb13802426e8ad3c07a7d8914ca53d0f982b803c80811d15f9e55313d601ad" },
+    { "path": "src/renderer/src/components/ui/input.tsx", "role": "module", "sha256": "844ce70cb4a4103ce0974c091a4d5bc2f00d0cee919df7f734b508ea0888ee47" },
+    { "path": "src/renderer/src/components/ui/textarea.tsx", "role": "module", "sha256": "d23afcbaf3ff58b473a6f454105af671685ba6e77f63b416a9dc0b016b4285a5" },
+    { "path": "src/renderer/src/lib/utils.ts", "role": "module", "sha256": "e46429536f43f5910f5b2b0c50bb2769b510a4558bb4b5d20a3b0a9091dbf7c3" },
+    { "path": "src/renderer/src/lib/drogon-bot-avatar-assets.ts", "role": "module", "sha256": "bb9023c9c8f51f936e7dc125f229141c8e08da820a5cc09f9dc538ac8aa3ae79" },
+    { "path": "src/shared/drogon-bot-characters.ts", "role": "module", "sha256": "1a5cd6034a639079878084de33f3c88b18c653d8d3c985f2e18565e4cb1aae87" },
+    { "path": "src/shared/tui-agent-config.ts", "role": "module", "sha256": "192226db679f6241bc68a3093b4aac2e8922d11079beeb16cddc26698b4f1b7f" },
+    { "path": "src/shared/orca-cli-command-name.ts", "role": "module", "sha256": "c90b037ec7a6143770a40dd907bf9d053fb2cede21128b60b78a78671c0780c0" },
+    { "path": "src/shared/drogon-bot-contract.ts", "role": "module", "sha256": "870600454e28b6f51ed73017b6c8d390f8bdc0ba3a0ed61509982c6cef7cfd66" },
+    { "path": "src/shared/tui-agent.ts", "role": "module", "sha256": "7c470c858ddc10988ea2b7e230d127a8d9bc70acf03e8dc8226d799749ce023b" },
+    { "path": "config/vitest.config.ts", "role": "module", "sha256": "19d14b8f028a84ff3401534c22f3241d4ed5695fea5c5df3a140ba2c9f3c0880" },
+    { "path": "config/scripts/happy-dom-offscreen-canvas.ts", "role": "module", "sha256": "888cef91689976d56d944a2069cd4a163aac301936e20180ace8881cc0e4b2a0" },
+    { "path": "config/scripts/happy-dom-mutation-observer-retention.ts", "role": "module", "sha256": "2329269f6b31cb288f7ca7cf6b8e122c678af24c6d00394f3a890ca99f03796d" }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "The execution config narrows include to the one unchanged original test and uses a stage-local cache/output path.",
+    "The source aliases, automatic JSX, feature-wall define, execArgv, timeouts, happy-dom environment annotation, offscreen-canvas setup and MutationObserver retention setup are preserved.",
+    "The host-port setup is omitted because every case injects loadSnapshot and the source test hoists its own store mock; the omitted setup creates an unrelated temporary user-data directory and installs app/secret host ports.",
+    "Three declared fixture seams resolve the source test's own mocked store target, the uncalled launch-session boundary, and getAgentLabel; the latter preserves codex -> Codex but is a qualification because it is called during rendering even though no assertion observes its text.",
+    "All ?url asset imports resolve to deterministic stage-only URLs without reading or copying media; no assertion reads src values or image bytes, but rendered image URLs are therefore qualified.",
+    "Six supplemental installed package links are separately version-checked, package-metadata hashed, full-tree hashed, and reverified because the accepted renderer helper links only react, react-dom and happy-dom."
+  ],
+  "dependencyClosureNote": "Exact runtime source closure for the eight Vitest-expanded original cases, plus direct shared type-contract evidence. Type-only transitive declarations erased by esbuild are not executed. Three explicit fixture seams and the asset URL seam are declared above.",
+  "isolationRationale": "Runs only from a fresh .preflight capsule with stage-local cache/temp/results. The test injects loadSnapshot/runResponsibility, hoists its store mock, and does not call session launch, filesystem, service, credential, network, cloud or publication APIs."
+}

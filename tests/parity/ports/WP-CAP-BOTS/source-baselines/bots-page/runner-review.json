@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 4,
+  "reviewedFile": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs",
+  "sourceRevisionUnchanged": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "priorEvidenceUnchanged": [
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/manifest.json",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/evidence.json",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/store.ts",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/launch-drogon-bot-session.ts",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/agent-catalog.ts"
+  ],
+  "followUpPass": {
+    "reason": "Coordinator focused review found the prior classification too permissive (allowed failed-suite-only-with-zero-failed-assertions as a behavioral failure; conflated any signal with a timeout; did not check spawn errors, missing/incomplete assertionResults, or per-case/count agreement) and found the test suite's sole no-write proof (diffing the real, shared .preflight/parity-baseline listing) was not an isolated, concurrency-safe oracle.",
+    "changes": [
+      "classifyExecution rewritten: source_behavioral_failure now requires a normally spawned (no spawnError), unsignaled, non-timeout process; parseable results with every required count field a finite non-negative integer; internally coherent counts (passed+failed+pending+todo === total); the exact manifest-pinned denominator; zero pending/todo tests; a per-case list whose length and passed/failed split agree exactly with the reported counts; and at least one genuinely failed assertion (numFailedTests > 0). A failed-suite-only report with zero failed assertions, a spawn error, a signal, a timeout, a missing result, malformed/incoherent counts, a denominator mismatch, or an incomplete/mismatched per-case list is always setup_block.",
+      "runExecute now records run.error (spawn-level failure, e.g. ENOENT) verbatim as execution.spawnError / report.spawn.error, distinct from exitCode/signal.",
+      "report.rawCounts, report.evaluation, and the new report.spawn block retain the full raw evidence regardless of classification, so a genuine failure is never hidden and a setup_block is never silently reclassified.",
+      "resolveSupplementalRuntime, readOnlyStandinsCheck, readOnlySourceRevisionCheck, and readOnlyBinaryCheck now take injectable root/path parameters (defaulting to the real source/standins/binary locations used by runCheck/runExecute), so tests can point them at throwaway fixtures instead of the real checkout.",
+      "main() now takes an injectable argv array and a { runCheckImpl, runExecuteImpl } boundary (defaulting to the real runCheck/runExecute), so tests can substitute tripwires and prove, entirely in-process, that invalid argv and check-mode argv can never reach the write-capable execute path -- replacing the prior sole reliance on diffing the real, shared .preflight/parity-baseline directory listing (a mutable location other concurrent capsules write into, so it was not an isolated or concurrency-safe oracle).",
+      "A narrow real default/check smoke (spawning the actual CLI) is retained, but now asserts only exit code and report shape -- never a directory diff -- so it stays read-only and concurrency-safe."
+    ]
+  },
+  "secondCorrectionPass": {
+    "reason": "Root's mid-turn correction on this same follow-up: (1) timedOut must be keyed to a specific spawn error code, not inferred from elapsed wall-clock time against the configured timeout -- an elapsed-time heuristic is an approximation vulnerable to scheduler jitter, and ordinary early/late signals (unrelated to our own timeout) must remain signal-classified setup_block, never reclassified as timedOut. (2) Malformed/truncated results JSON must be caught into a structured diagnostic, not left to escape as an unstructured top-level thrown error, and both the diagnostic and the setup_block classification need dedicated tests.",
+    "verification": "Empirically confirmed against this runtime's Node (see commandsRun below): spawnSync surfaces its own configured `timeout` option as `error.code === 'ETIMEDOUT'` on the returned error object, in addition to killing the child and setting `signal`. An ordinary externally-delivered signal (tested via a child that sends itself SIGKILL well inside a generous timeout) leaves `error` null and only sets `signal`. A genuine spawn failure (tested via a nonexistent executable path) sets `error.code` to a different code (e.g. ENOENT) with `signal` null. These three empirical probes are the basis for deriveTimedOut.",
+    "changes": [
+      "Added deriveTimedOut(spawnError): timedOut is now `Boolean(spawnError) && spawnError.code === 'ETIMEDOUT'` -- keyed strictly to that error code. The prior wall-clock elapsed-time heuristic (elapsedMs >= timeoutMs - 1000ms tolerance) is removed entirely; elapsedMs is still recorded in report.spawn as raw telemetry, but no longer participates in the timedOut decision.",
+      "Added parseResultsFile(resultsPath): wraps the existing JSON.parse(readFileSync(...)) in a try/catch, returning { results, resultsParseError } instead of letting a SyntaxError from a malformed/truncated results file escape to the top-level isMainModule catch block (which would have reported it as an undifferentiated 'Unexpected error' with exit code 1). A missing file (never written) still yields both fields null, distinct from a present-but-malformed file, which yields resultsParseError = { message, path, byteLength } with results null.",
+      "classifyExecution gained an explicit `if (execution.resultsParseError) return 'setup_block'` check (in addition to the pre-existing `!execution.results` check, which already covered this since results stays null on a parse failure) so the malformed-JSON case is unambiguously and directly gated, not just incidentally caught by the generic missing-results branch.",
+      "report gained a top-level `resultsParseError` field (sibling to rawCounts/evaluation/cases) so a malformed-results run is diagnosable from the report alone, distinct from a run where no results file was ever produced at all.",
+      "Both deriveTimedOut and parseResultsFile are exported and unit-tested directly against synthetic/throwaway inputs (no real spawn needed for deriveTimedOut; a throwaway fixture file with deliberately truncated JSON for parseResultsFile), proving both (a) the diagnostic is structured, never a thrown escape, and (b) downstream classification is setup_block."
+    ]
+  },
+  "thirdCorrectionPass": {
+    "reason": "Root judged the blocking matrix still under-specified despite 55 passing tests: classifyExecution's logic already handled every branch correctly (verified: no logic change was needed), but there was no test pinning the exact combination of a genuine full 8-total/6-passed/2-failed results JSON (the same shape as the admitted evidence.json baseline) together with each specific piece of unclean spawn-level evidence. Root also flagged that the runCheck doc comment overclaimed 'no process spawn is created', when readOnlySourceRevisionCheck does spawn one read-only `git rev-parse` child process.",
+    "changes": [
+      "Added 5 explicit regression tests (new describe block \"root's blocking matrix: full 8/6/2 failed JSON under unclean spawn-level evidence\" inside the classifyExecution suite), each building the identical full 8-total/6-passed/2-failed results shape (8 cases, 2 with status 'failed') and varying only the spawn-level evidence: (1) signal: 'SIGKILL' with exitCode: null: setup_block. (2) spawnError: { code: 'ENOENT' } with exitCode: null: setup_block. (3a) no signal/spawnError but exitCode: null: setup_block. (3b) no signal/spawnError and exitCode entirely absent (deleted, not merely null -- asserted via toBeUndefined()): setup_block. (4) the same shape but with numTodoTests: 1 alongside the 2 failures (numTotalTests still coherent at 8): setup_block. Every one of these 5 tests also asserts evaluation.counts.numFailedTests === 2 (and case (1) also asserts the case-level failed count), directly proving the raw failure evidence is retained/observable even though the run is not certified as a completed source result.",
+      "The pre-existing tests already covering the genuine, spawn-clean full 8/6/2 normal-exit failure (source_behavioral_failure) and the genuine full 8/8/0 normal-exit pass (source_pass) were left unchanged and still pass, confirming no classification logic regressed.",
+      "No change was made to classifyExecution itself in this pass: tracing its existing branches confirmed all 4 matrix scenarios were already correctly gated (signal check, spawnError check, exitCode null/undefined check, and the pending/todo>0 check respectively) -- this pass adds the missing explicit test coverage pinning that behavior, it does not change behavior.",
+      "Corrected the runCheck doc comment (previously: 'no capsule directory, cache, temp directory, or process spawn is created') to accurately state it creates no capsule directory, cache, temp directory, or test process, while explicitly noting it does spawn one read-only `git rev-parse` child process via readOnlySourceRevisionCheck to confirm the pinned source revision -- a read, not a write, and not the vitest test process --execute would spawn. The report's own `sideEffects` string ('none: no capsule directory, cache, temp directory, or test process was created') was already accurate and needed no change."
+    ]
+  },
+  "cliContract": {
+    "modes": {
+      "no-args": "read-only, equivalent to --check",
+      "--check": "read-only: validates manifest, source-revision pin, fixture-seam hashes, supplemental runtime metadata, and runner-binary presence; creates no capsule directory, cache, temp directory, or child process for tests",
+      "--execute": "the only mode that stages the capsule, links runtime packages, writes the generated Vitest config, and spawns the pinned Vitest entry; preserves the exact full source execution semantics already recorded in evidence.json"
+    },
+    "rejectedBeforeSideEffects": [
+      "unknown flag (e.g. --bogus)",
+      "positional argument",
+      "duplicate flag (--check --check, --execute --execute)",
+      "--check and --execute together (mutually exclusive)"
+    ],
+    "importSafety": "importing run-baseline.mjs (isMainModule guard on process.argv[1]) executes and stages nothing; only invoking it directly as node run-baseline.mjs [...] can reach main()"
+  },
+  "classificationGuard": {
+    "function": "classifyExecution",
+    "requiredForAnyCompletedResult": [
+      "no spawnError (this also excludes an ETIMEDOUT-coded timeout, since that surfaces as a spawnError -- see timedOut below)",
+      "signal === null",
+      "timedOut === false (keyed strictly to spawnError.code === 'ETIMEDOUT' via deriveTimedOut, never to elapsed wall-clock time)",
+      "resultsParseError is null (malformed/truncated results JSON, caught structurally by parseResultsFile, not an escaped throw)",
+      "exitCode is not null/undefined",
+      "results is present and parseable",
+      "numTotalTests/numPassedTests/numFailedTests/numPendingTests/numTodoTests are all finite non-negative integers",
+      "passed+failed+pending+todo === numTotalTests",
+      "numTotalTests matches the manifest-pinned expectedTestCounts.tests exactly",
+      "numPendingTests === 0 and numTodoTests === 0",
+      "the per-case list length equals numTotalTests, every case has a non-empty status string, and the passed/failed split agrees exactly with numPassedTests/numFailedTests"
+    ],
+    "sourceBehavioralFailure": "only within the above envelope, when numFailedTests > 0 -- a failed-suite-only report with zero failed assertions does not qualify",
+    "sourcePass": "only within the above envelope, when numFailedTests === 0 and evaluation.ok === true",
+    "otherwise": "setup_block, unconditionally"
+  },
+  "rawEvidenceRetention": {
+    "report.spawn": "{ error, exitCode, signal, timedOut, elapsedMs, timeoutMs } -- always present in an --execute report regardless of classification; timedOut is derived from error.code, elapsedMs/timeoutMs are raw wall-clock telemetry only and do not drive timedOut",
+    "report.resultsParseError": "{ message, path, byteLength } if the results file existed but did not parse as JSON; null if it parsed fine or never existed -- distinct from a genuinely missing results file",
+    "report.evaluation": "unchanged output of evaluateExecution, retained verbatim",
+    "report.rawCounts": "unchanged raw counts straight from the Vitest JSON reporter, retained verbatim",
+    "report.cases": "the full per-case list (status, duration, failureMessages), retained verbatim"
+  },
+  "sideEffectVerificationMethod": {
+    "previous": "diffed the real, shared .preflight/parity-baseline directory listing before/after every test in the suite",
+    "current": [
+      "in-process main() dispatch tests with an injected { runCheckImpl, runExecuteImpl } tripwire boundary, proving invalid/check argv never reaches the write-capable execute path, without touching any disk location at all",
+      "in-process unit tests of the read-only helpers (resolveSupplementalRuntime, readOnlyStandinsCheck, readOnlySourceRevisionCheck, readOnlyBinaryCheck, deriveTimedOut, parseResultsFile) against per-test throwaway fixture directories (mkdtempSync under os.tmpdir(), removed in afterEach), never the real source checkout or standins/ directory",
+      "one narrow real default/--check smoke (spawns the actual CLI) asserting only exit code and report shape, with no directory diff -- read-only and concurrency-safe by construction, since check mode cannot write regardless of what else is happening in .preflight/parity-baseline concurrently"
+    ]
+  },
+  "commandsRun": [
+    {
+      "purpose": "empirical probe: does spawnSync's own configured timeout set error.code === ETIMEDOUT?",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "node -e \"const { spawnSync } = require('node:child_process'); const r = spawnSync(process.execPath, ['-e', 'setTimeout(()=>{}, 5000)'], { timeout: 200 }); console.log(JSON.stringify({ error: r.error ? { message: r.error.message, code: r.error.code } : null, signal: r.signal, status: r.status }))\"",
+      "result": "error.code === 'ETIMEDOUT', signal === 'SIGTERM', status === null"
+    },
+    {
+      "purpose": "empirical probe: does an ordinary external signal (unrelated to our timeout) also set error?",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "node -e \"const { spawnSync } = require('node:child_process'); const r = spawnSync(process.execPath, ['-e', 'process.kill(process.pid, \\\"SIGKILL\\\")'], { timeout: 30000 }); console.log(JSON.stringify({ error: r.error, signal: r.signal, status: r.status }))\"",
+      "result": "error === null, signal === 'SIGKILL', status === null -- confirms an ordinary signal is NOT surfaced via error, only via signal"
+    },
+    {
+      "purpose": "empirical probe: does a genuine spawn failure (nonexistent executable) set a different error code?",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "node -e \"const { spawnSync } = require('node:child_process'); const r = spawnSync('/nonexistent/binary-xyz', [], { timeout: 5000 }); console.log(JSON.stringify({ error: r.error ? { message: r.error.message, code: r.error.code } : null, signal: r.signal, status: r.status }))\"",
+      "result": "error.code === 'ENOENT', signal === null, status === null"
+    },
+    {
+      "purpose": "static syntax check of the edited runner",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs",
+      "exitCode": 0
+    },
+    {
+      "purpose": "static syntax check of the updated test suite",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/cli-contract.test.mjs",
+      "exitCode": 0
+    },
+    {
+      "purpose": "focused unit + CLI-contract test suite (Node24 on PATH)",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "PATH=\"/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH\" apps/desktop/node_modules/.bin/vitest run tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/cli-contract.test.mjs --root . --dir tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page",
+      "result": "Test Files  1 passed (1) / Tests  60 passed (60)",
+      "exitCode": 0
+    },
+    {
+      "purpose": "manual smoke: default (no args) is read-only check mode",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs",
+      "exitCode": 0,
+      "reportMode": "check",
+      "reportOk": true
+    },
+    {
+      "purpose": "manual smoke: --check explicit",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs --check",
+      "exitCode": 0
+    },
+    {
+      "purpose": "manual smoke: --check and --execute rejected as mutually exclusive before side effects",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs --check --execute",
+      "stderr": "CLI argument refused: --check and --execute are mutually exclusive",
+      "exitCode": 2
+    },
+    {
+      "purpose": "manual smoke: importing the module executes/stages nothing",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --input-type=module -e \"import('./tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs')\"",
+      "exitCode": 0,
+      "stdout": ""
+    }
+  ],
+  "manualSideEffectSpotCheck": {
+    "method": "counted entries under .preflight/parity-baseline immediately before and after the manual smoke commands above (default, --check, mutually-exclusive, import), as a spot check only -- not the test suite's oracle",
+    "before": 146,
+    "after": 146,
+    "result": "unchanged"
+  },
+  "notExecuted": {
+    "note": "The costly real UI baseline (--execute against the pinned Drogon-mentu-session source, spawning the real Vitest suite) was not rerun as part of this review, per instruction to ask through Orca first. The frozen evidence.json (source_behavioral_failure, 6 passed / 2 failed of 8) is unchanged and remains the admitted execute-mode evidence. Its shape is compatible with the new report.spawn/report.resultsParseError fields, which would simply add spawnError:null/timedOut:false/elapsedMs/timeoutMs/resultsParseError:null alongside the already-recorded exitCode/signal on a future rerun."
+  },
+  "caseCounts": {
+    "cli-contract.test.mjs": {
+      "testFiles": 1,
+      "tests": 60,
+      "passed": 60,
+      "failed": 0,
+      "breakdown": {
+        "parseCliArgs": 9,
+        "main() dispatch boundary": 7,
+        "read-only helpers against injected throwaway roots": 7,
+        "deriveTimedOut": 3,
+        "parseResultsFile": 3,
+        "classifyExecution (general)": 19,
+        "classifyExecution (root's blocking matrix: full 8/6/2 failed JSON under unclean spawn-level evidence)": 5,
+        "narrow real default/check smoke": 7
+      }
+    }
+  },
+  "blockingMatrixRegressions": [
+    {
+      "scenario": "(1) SIGKILL, exitCode: null",
+      "resultsShape": "full 8-total/6-passed/2-failed, 8 cases (2 failed)",
+      "expectedClassification": "setup_block",
+      "rawFailureEvidenceRetained": "evaluation.counts.numFailedTests === 2; case-level failed count === 2"
+    },
+    {
+      "scenario": "(2) spawnError ENOENT, exitCode: null",
+      "resultsShape": "full 8-total/6-passed/2-failed, 8 cases (2 failed)",
+      "expectedClassification": "setup_block",
+      "rawFailureEvidenceRetained": "evaluation.counts.numFailedTests === 2"
+    },
+    {
+      "scenario": "(3a) unsignaled, no spawnError, exitCode: null",
+      "resultsShape": "full 8-total/6-passed/2-failed, 8 cases (2 failed)",
+      "expectedClassification": "setup_block",
+      "rawFailureEvidenceRetained": "evaluation.counts.numFailedTests === 2"
+    },
+    {
+      "scenario": "(3b) unsignaled, no spawnError, exitCode entirely missing (undefined, not merely null)",
+      "resultsShape": "full 8-total/6-passed/2-failed, 8 cases (2 failed)",
+      "expectedClassification": "setup_block",
+      "rawFailureEvidenceRetained": "evaluation.counts.numFailedTests === 2"
+    },
+    {
+      "scenario": "(4) full total includes numTodoTests: 1 alongside 2 genuine failed assertions (5 passed + 2 failed + 1 todo = 8)",
+      "resultsShape": "full 8-total/5-passed/2-failed/1-todo, 8 cases (2 failed, 1 todo)",
+      "expectedClassification": "setup_block",
+      "rawFailureEvidenceRetained": "evaluation.counts.numFailedTests === 2"
+    },
+    {
+      "scenario": "control (unchanged, pre-existing test): genuine full 8/6/2 normal-exit assertion failure (no signal, no spawnError, exitCode 0, resultsParseError null)",
+      "resultsShape": "full 8-total/6-passed/2-failed, 8 cases (2 failed)",
+      "expectedClassification": "source_behavioral_failure"
+    },
+    {
+      "scenario": "control (unchanged, pre-existing test): genuine full 8/8/0 normal-exit all-passing run",
+      "resultsShape": "full 8-total/8-passed/0-failed, 8 cases (0 failed)",
+      "expectedClassification": "source_pass"
+    }
+  ]
+}

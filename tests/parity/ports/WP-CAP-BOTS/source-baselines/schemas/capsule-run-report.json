@@ -1,0 +1,107 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned test capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "wp-cap-bots-bot-schemas",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/main/ipc/bot-schemas.test.ts",
+        "role": "test",
+        "sha256": "ceeed197fc9ed3d6835a6d089d918f1140d7e6c94d142e0a8a3aae373ce284f6",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/main/ipc/bot-schemas.test.ts"
+      },
+      {
+        "path": "src/main/ipc/bot-schemas.ts",
+        "role": "module",
+        "sha256": "6f3316eea51381dc341b772278a43afaa3f0c80d82fe092e27a355731b3f14d5",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/main/ipc/bot-schemas.ts"
+      },
+      {
+        "path": "src/shared/drogon-bot-contract.ts",
+        "role": "module",
+        "sha256": "870600454e28b6f51ed73017b6c8d390f8bdc0ba3a0ed61509982c6cef7cfd66",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/shared/drogon-bot-contract.ts"
+      },
+      {
+        "path": "src/shared/tui-agent-config.ts",
+        "role": "module",
+        "sha256": "192226db679f6241bc68a3093b4aac2e8922d11079beeb16cddc26698b4f1b7f",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/shared/tui-agent-config.ts"
+      },
+      {
+        "path": "src/shared/orca-cli-command-name.ts",
+        "role": "module",
+        "sha256": "c90b037ec7a6143770a40dd907bf9d053fb2cede21128b60b78a78671c0780c0",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/shared/orca-cli-command-name.ts"
+      },
+      {
+        "path": "src/shared/tui-agent.ts",
+        "role": "module",
+        "sha256": "7c470c858ddc10988ea2b7e230d127a8d9bc70acf03e8dc8226d799749ce023b",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/shared/tui-agent.ts"
+      },
+      {
+        "path": "src/shared/automations-types.ts",
+        "role": "module",
+        "sha256": "ac7b60881d60f8bd777b56bacb99de3c3661ea26ed77cb8f233f8375956761e9",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/shared/automations-types.ts"
+      },
+      {
+        "path": "src/shared/mentu-run-contract.ts",
+        "role": "module",
+        "sha256": "29a1ee32ef1352166322a1390c12191a38b37d3d6506afe0ea4c7d5e18ef4988",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/shared/mentu-run-contract.ts"
+      },
+      {
+        "path": "src/shared/worktree/create-types.ts",
+        "role": "module",
+        "sha256": "f6052e0a1d84eb3f24a2a90e012ae0bef2de9026ba29d507dd0728ce7b30dbed",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/src/shared/worktree/create-types.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/wp-cap-bots-schemas-otoIL4/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Both configurations use node. Explicit Node24 (v24.19.0, /Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node) and original installed Vitest 4.1.11 (pinned source entry) are required and recorded; no dependencies are installed.",
+    "Minimal capsule config omits renderer aliases (@renderer, @), the ORCA_FEATURE_WALL_ENABLED define and the happy-dom/host-port setup scripts. This runtime closure uses none of those symbols, aliases, DOM or host-port facilities; no .tsx files are involved.",
+    "Root GC/webstorage execArgv (--no-experimental-webstorage, --expose-gc), the Windows maxWorkers override and 60s/30s hook/test timeouts are omitted. The 3 tests are synchronous pure parses with no GC/webstorage assertions, no OS-specific branches and no timed waits; default Vitest timeouts and the runner's outer bound apply. Not full source-environment equivalence.",
+    "Source include glob src/**/*.test.ts would run the whole source suite; the capsule executes only the pinned entry test file, as declared."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "fac50877e931e7db2f807ec708167b3ad4417303e589f2569fd2dd06ec0ba5cd",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 3,
+      "numPassedTests": 3,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 3,
+      "plainIt": 3,
+      "tableRows": 0
+    }
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T15:43:00Z",
+  "scope": "WP-CAP-BOTS BotsPage original-source baseline runner hardening",
+  "decision": "focused_runner_contract_verified_pending_root_acceptance",
+  "sourceBaseline": {
+    "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+    "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "realExecuteRerun": false,
+    "frozenClassification": "source_behavioral_failure",
+    "frozenCounts": {
+      "tests": 8,
+      "passed": 6,
+      "failed": 2
+    },
+    "qualification": "The frozen original-source result is unchanged and is neither candidate parity nor GREEN."
+  },
+  "runnerContract": {
+    "default": "read-only validation, equivalent to --check",
+    "--check": "read-only validation; no staging, cache, temp, service, or test-process execution writes; one read-only git rev-parse child is permitted",
+    "--execute": "the sole staging and source-test execution mode",
+    "invalidArguments": "unknown flags, positionals, duplicate flags, and mutually exclusive --check/--execute are rejected before side effects with exit code 2",
+    "import": "module import does not invoke main, stage, or execute",
+    "executeExitPolicy": "setup_block exits 2; completed source_pass or source_behavioral_failure exits 0 while retaining the raw Vitest exit, signal, spawn error, timeout, counts, cases, and parse diagnostics in the report"
+  },
+  "classificationContract": {
+    "completedResultRequires": [
+      "no spawn error",
+      "no signal",
+      "timedOut is false and is derived only from spawnError.code === ETIMEDOUT",
+      "non-null and present exit status",
+      "parseable result JSON",
+      "all required counts are finite non-negative integers",
+      "passed + failed + pending + todo equals total",
+      "total equals the manifest-pinned denominator",
+      "pending and todo are both zero",
+      "assertionResults are complete and their status split agrees with counts"
+    ],
+    "rootBlockingRegressions": [
+      "SIGKILL + null exit + full 8/6/2 failed JSON => setup_block",
+      "spawn ENOENT + null exit + full 8/6/2 failed JSON => setup_block",
+      "no signal/spawn error + null exit + full 8/6/2 failed JSON => setup_block",
+      "no signal/spawn error + missing exit + full 8/6/2 failed JSON => setup_block",
+      "5 passed + 2 failed + 1 todo of 8 => setup_block"
+    ],
+    "controls": [
+      "clean complete 8/6/2 original assertion failure => source_behavioral_failure",
+      "clean complete 8/8/0 result => source_pass"
+    ],
+    "rawFailureEvidence": "Observed failed assertions remain present in counts and cases even when the run is conservatively classified setup_block."
+  },
+  "verification": {
+    "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+    "node": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestCommand": "PATH=\"/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH\" apps/desktop/node_modules/.bin/vitest run tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/cli-contract.test.mjs --root . --dir tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page",
+    "vitestVersion": "5.0.0",
+    "testFiles": 1,
+    "tests": 60,
+    "passed": 60,
+    "failed": 0,
+    "exitCode": 0,
+    "runnerSyntaxCommand": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs",
+    "runnerSyntaxExitCode": 0,
+    "runnerReviewJsonValid": true,
+    "preflightEntryCountBefore": 146,
+    "preflightEntryCountAfter": 146,
+    "note": "The entry-count comparison is a corroborating spot check only; isolated throwaway fixtures and injected execution boundaries provide the concurrency-safe no-side-effect proof."
+  },
+  "preservedFiles": [
+    {
+      "path": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/manifest.json",
+      "sha256": "187454eaab1ce24841a466131f8e99d81f1768866f930c10b1b48a580e0fb1e3"
+    },
+    {
+      "path": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/evidence.json",
+      "sha256": "999124fea7d298a8c479523e5de4ddffccf7053fe990c1003a0eb469f8fe0436"
+    },
+    {
+      "path": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/store.ts",
+      "sha256": "f4887c12d29ff3535d5fbc392736dcacc3df5b808ef55b7680f0adb4e423ffca"
+    },
+    {
+      "path": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/launch-drogon-bot-session.ts",
+      "sha256": "4b97a9d76cc0c4d09c05ff1bcb72f7f24b8afd16b496711cbd81ff93b99662ac"
+    },
+    {
+      "path": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/agent-catalog.ts",
+      "sha256": "43e90d99bba9fe4db0387dfb6de60824a6ae4ec8454c6475f15da249abf8aa2d"
+    }
+  ],
+  "delegation": {
+    "runId": "run_d8c2d8a18b0d",
+    "depth": 2,
+    "workerCount": 1,
+    "terminal": "term_92216223-9ebd-47c2-becf-81068d9830f7",
+    "agent": "claude",
+    "requestedModel": "claude-sonnet-5",
+    "effectiveModel": "claude-sonnet-5",
+    "requestedEffort": "medium",
+    "effectiveEffort": "medium",
+    "permissionEvidence": "terminal preview reported bypass permissions on; launcher inspection showed the per-invocation --dangerously-skip-permissions option",
+    "tasks": [
+      {
+        "taskId": "task_20f54b0c0cc0",
+        "dispatchId": "ctx_962337f3057b",
+        "purpose": "initial runner contract hardening",
+        "status": "completed"
+      },
+      {
+        "taskId": "task_be6a81bc1f7d",
+        "dispatchId": "ctx_5bb26fee1ef9",
+        "purpose": "focused conservative-classification correction on the same worker terminal",
+        "status": "completed"
+      },
+      {
+        "taskId": "task_0c89fbad5f94",
+        "dispatchId": "ctx_8b25853f9f53",
+        "purpose": "root-blocking exact regression matrix and comment correction on the same worker terminal",
+        "status": "completed"
+      },
+      {
+        "taskId": "task_aa51de9d69d5",
+        "dispatchId": "ctx_3a0146d98a26",
+        "purpose": "metadata-only correction of the independently detected case-breakdown typo on the same worker terminal",
+        "status": "completed"
+      }
+    ],
+    "descendants": 0,
+    "finalDelivery": "delivery_6af4cbefafc2",
+    "release": {
+      "performedBeforeAcknowledgement": true,
+      "requestId": "ba4cc56f-24b8-452e-9df7-6ec0e700fa03",
+      "state": "retained",
+      "reason": "external_terminal",
+      "processAction": "none",
+      "manualClose": false
+    },
+    "deliveryAcknowledged": true
+  },
+  "progress": {
+    "auditClosure": {
+      "closedCapabilityGroups": 11,
+      "denominator": 12,
+      "percent": 91.7,
+      "confidence": "medium",
+      "deltaSincePriorUpdatePercentagePoints": 0
+    },
+    "testMigration": "Runner contract hardening is focused-test verified; root acceptance remains required.",
+    "productFidelity": "No candidate implementation was exercised and no GREEN claim is made.",
+    "nextClosureMilestone": "Root independently accepts this runner-hardening prerequisite and determines the next T2 gate.",
+    "deadlineRisk24h": "high"
+  },
+  "files": {
+    "workerReport": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/runner-review.md",
+    "workerEvidence": "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/runner-review.json",
+    "parentReport": "docs/migration/sol-wave/cap-bots/runner-hardening.md",
+    "parentEvidence": "docs/migration/sol-wave/cap-bots/runner-hardening.json"
+  }
+}
