@@ -1,7 +1,31 @@
 # Root review: Bots test preparation and first Sol cycle
 
-Latest blocking native review is the final section, **Native parser review**.
-It supersedes runner-only acceptance for native implementation decisions.
+## Independent native follow-up: 2026-09-06, 17:04 UTC
+
+Root replayed all 144 fixtures through the actual pinned source parser: 102
+accepted with matching output and 42 rejected. The production source catalog
+contains exactly the native catalog's 36 IDs. Verification is repeatable with
+`node scripts/verify-native-bot-source-fixtures.mjs`: it checks the frozen manifest,
+ten source/license files, the complete pinned Zod package tree, allowed in-memory
+bundle inputs/imports and unique fixture IDs. It never stages or writes files.
+Import is inert and unsupported arguments fail before verification, separately
+checked in subprocesses. It depends on the retained local capsule/toolchain and
+is not portable CI or execution of the native candidate.
+
+Fixture SHA256: `bf074a1d5f7beda2ba10738f52b2efdafc794e0cb4f0ea0402a13dc270dabd8b`.
+Root separately ran the actual public native crate tests with locked Cargo:
+Bot parser 9/9 and known-agent catalog 6/6 passed. Review confirms shared exact
+ECMAScript trim, finite numeric preservation, the explicit serialized saturation
+regression and unknown-key privacy. Numeric-value fixture comparisons alone
+cannot establish exact integer preservation; that dedicated regression matters.
+
+Await the settled Sol review and final formatting before admission. Targeted
+rustfmt currently reports formatting differences. Historical RED remains leaf
+evidence, not independently recreated by root. These files/registration were
+uncommitted working-tree changes when reviewed; references to a prior committed
+parser in the leaf narrative are inaccurate. No RPC, persistence, installed Bot
+feature or full-product parity is accepted. The original blocking findings are
+retained in the final **Native parser review** section for provenance.
 
 ## Final runner acceptance: 2026-09-06, 16:29 UTC
 
