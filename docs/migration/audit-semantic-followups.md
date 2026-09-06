@@ -87,6 +87,18 @@ Root independently observed both nested workers completed/succeeded: E3's `ctx_8
 
 Root delivery `delivery_e5b828269c2a` was acknowledged after E5 reuse; the resulting root check had no pending messages. Audit-only source work continues. No implementation, product test run, install, push or PR was performed in this checkpoint; Sol implementation leads remain gated on full audit acceptance. The full-fidelity24-hour target remains high risk, not a guaranteed ETA.
 
+### 07:06 UTC acceptance and resource checkpoint
+
+Root accepted E2's complete source-reconciliation gate in7c267a4 after verifying all88 identities,146 source-file hashes and360 range hashes plus independent action samples. Audit is now approximately67% (8/12, medium-low confidence), not a product-completion estimate. Root accepted E5's18 install/build boundaries and ran4 unchanged original Windows environment-expansion assertions in de9800a; source-compatible macOS capsule evidence is in `windows-environment-baseline-review.md`, not Windows OS acceptance.
+
+E2 task_a8ec40535eb1/ctx_79157abd58d2 completed; root release request7e8bcad0-23be-4603-a4cc-e5a828a982c0 returned retained/external_terminal/processAction none. No follow-up source scan or implementation task assigned to E2. The late status send was refused as dispatch_inactive rather than reopening stale authority.
+
+E4's S2–S5 candidate is delivered and awaits root semantic review. Its lead was immediately reused with verified input acceptance for **task_25d311c47480/ctx_a67f0505b20a**, resolving the exact30 named source boundaries in `followup-final-boundaries.md/json`. Its14-hook subset uses its own child Run run_e436c9848848, Task task_d9f6b4cea867, Dispatch ctx_569264623570, on the same DeepSeek terminal term_fb38efd1-70b7-45a4-8334-7ce638505da3. Root independently verified that new child live at depth2; this is not stale prior S5 work.
+
+E5's cloud child was independently verified live at depth2: Run run_cb9df16a185c, Task task_3f732ca93c03, Dispatch ctx_10daadc276ba, terminal term_76a9606d-55db-4da9-b472-047ecdd20558. E1 is doing the13 caller routes directly, without a redundant new leaf. E3 retains its current45-callback assignment and owns prior child release before delivery. Leads retain lifecycle authority for their own children.
+
+Root sent the new percentage/source-gate checkpoint to the four active Dispatches; send receipts prove queued mail, not that nested leads consumed it. E2/E4 completion Delivery was acknowledged only after official release/reuse; the latest root check after delivery_9b03905a52cc acknowledgement had no pending messages. E1/E3/E4/E5 and full implementation remain unfinished; goal stays active. Sol is still gated on full audit acceptance. Accepted worker artifacts under audit-closure remain untracked and need root archival review before publication; current root decisions and baseline manifests are committed.
+
 ## Additional root source finding for E2-O01
 
 Mentu Navigator 1.1.1 successfully located the Settings toggle, and root read the actual rich-editor prop chain in the reference checkout. `TabGroupPanel.tsx:381` passes no annotation-enabled override; `EditorPanel.tsx:35` defaults `markdownAnnotationsEnabled` to true and forwards it at 389. `EditorPanelShell.tsx:165` and `EditorMarkdownFileSurface.tsx:119` propagate it to `RichMarkdownEditor`, whose independent default is false at 52 and whose review-controller call forwards the prop at 116. `useRichMarkdownReviewData.ts:43` derives permission from that prop and relative-path existence. `FloatingTerminalPanelSurface.tsx:296–300` explicitly sets the prop false. These paths are under `src/renderer/src/components/` in the read-only original.
