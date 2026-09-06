@@ -36,6 +36,10 @@ pub fn record_agent_session_provider_handle(
     let proven_link_id = chain_head(&provider_handle_chain)
         .map(|head| head.link_id.clone())
         .ok_or(SessionAuthorityError::ProviderHandleInvalid)?;
+    // Spread parity: the clone carries every extension member (record,
+    // lease, links, handles, nested evidence) forward untouched; only known
+    // fields are rewritten below, so updates can never resurrect stale
+    // values from a shadow copy.
     let mut next = record.clone();
     next.provider_handle_chain = provider_handle_chain;
     next.lease.last_renewed_at = now;

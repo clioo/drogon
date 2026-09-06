@@ -1,0 +1,86 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running tests/provider_extension_roundtrip.rs (target/debug/deps/provider_extension_roundtrip-2b3014961cfb3432)
+
+running 10 tests
+test codex_handle_and_link_extensions_reject_known_smuggling_and_roundtrip ... ok
+test future_version_quarantine_preserves_extensions_raw ... ok
+test typed_known_keys_in_extensions_never_override_serialization ... ok
+test retry_append_dedupe_preserves_head_link_extensions ... ok
+test raw_unknown_values_and_minimum_next_fence_survive_roundtrip ... ok
+test transition_known_field_updates_never_resurrect_stale_values ... ok
+test extensions_survive_live_transition_and_appended_link_known_fields_win ... ok
+test death_evidence_extension_survives_admission_and_repeat_roundtrip ... ok
+test admitted_extensions_survive_admission_serialization_and_repeat ... ok
+test known_optional_null_and_absent_states_roundtrip_faithfully ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/provider_record_boundary_matrix.rs (target/debug/deps/provider_record_boundary_matrix-4013d17a06ed86e7)
+
+running 6 tests
+test minimum_next_fence_raw_values_survive_admission_and_roundtrip ... ok
+test matrix_shape_matches_admitted_source_oracle ... ok
+test matrix_integrity_rejects_edited_cases_with_unchanged_hash_metadata ... ok
+test source_boundary_validators_agree_with_source_oracle ... ok
+test source_boundary_record_admission_agrees_with_source_oracle ... ok
+test admitted_record_cases_roundtrip_through_typed_model ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/session_authority.rs (target/debug/deps/session_authority-b2da9f72a1d0e716)
+
+running 51 tests
+test js_json_quote_matches_pinned_node_escaping ... ok
+test js_utf16_len_counts_code_units_like_javascript ... ok
+test agent_session_id_pattern_matches_source ... ok
+test admit_persisted_record_non_record_values_are_invalid_not_unsupported ... ok
+test handle_field_trim_matches_javascript_whitespace_set ... ok
+test handle_keys_embed_exact_node_json_for_tricky_ids ... ok
+test handle_field_trim_set_is_exact_ecmascript_allowlist ... ok
+test handle_field_bounds_are_utf16_and_trim_checked ... ok
+test execution_location_equality_includes_workspace_kind ... ok
+test execution_location_validator_enforces_shape ... ok
+test process_identity_validator_enforces_pid_and_spawn_token ... ok
+test admit_persisted_record_rejects_unknown_version_without_rewriting ... ok
+test admit_persisted_record_rejects_invalid_v2_without_rewriting ... ok
+test admitted_record_round_trips_to_equal_json ... ok
+test admitted_record_preserves_optional_recovery_and_settlement_fields ... ok
+test record_handle_rejects_provider_and_fence_mismatched_links ... ok
+test record_handle_retry_updates_renewal_without_duplicating_chain ... ok
+test record_handle_stale_fence_uses_distinct_transition_code ... ok
+test numeric_extraction_accepts_integral_float_spellings_from_raw_json ... ok
+test record_handle_unknown_ownership_is_distinct_from_stale_fence ... ok
+test scope_key_joins_host_distro_workspace_with_nul_separator ... ok
+test lease_validator_enforces_null_vs_absent_matrix ... ok
+test numeric_extraction_accepts_exponent_spelling_from_raw_json ... ok
+test source_case_chain_append_never_mutates_input_chain ... ok
+test source_case_chain_append_records_fork_only_with_new_root_and_seed ... ok
+test source_case_chain_append_refuses_fork_recorded_as_resume ... ok
+test account_home_variable_discriminant_is_exact ... ok
+test source_case_chain_append_rejects_link_minted_under_older_fence ... ok
+test record_validator_live_claim_requires_owner_proof_at_current_fence ... ok
+test source_case_chain_append_rejects_provider_change_mid_chain ... ok
+test source_case_chain_append_rejects_stable_link_id_reuse ... ok
+test source_case_chain_append_same_handle_same_fence_is_retry_not_new_link ... ok
+test source_case_chain_append_starts_only_created_or_adopted ... ok
+test source_case_chain_validation_finds_link_and_reports_head ... ok
+test numeric_extraction_accepts_exact_safe_integer_boundaries_from_raw_json ... ok
+test record_validator_enforces_live_invariants_and_field_matrix ... ok
+test minimum_next_fence_raw_value_is_preserved_verbatim ... ok
+test source_case_handle_identity_claude_key_uses_session_and_leaf ... ok
+test source_case_handle_identity_codex_key_uses_thread_alone ... ok
+test source_case_handle_identity_collision_free_keys_with_delimiters ... ok
+test source_case_chain_validation_rejects_persisted_chains_bypassing_append ... ok
+test source_case_handle_identity_null_leaf_vs_empty_and_malformed ... ok
+test source_case_handle_identity_rejects_unknown_provider_names ... ok
+test typed_link_validation_rejects_i64_min_without_panic ... ok
+test source_case_transition_advances_live_claude_chain_head_and_proof ... ok
+test source_case_transition_records_leaf_during_proof_without_granting_ownership ... ok
+test launch_args_bounds_match_source_json_byte_length ... ok
+test numeric_extraction_rejects_fractions_unsafe_integers_and_i64_min_from_raw_json ... ok
+test source_case_chain_validation_rejects_over_cap_or_malformed_persisted_chain ... ok
+test launch_env_bounds_match_source ... ok
+test source_case_chain_append_refuses_growth_past_cap ... ok
+
+test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
