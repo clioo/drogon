@@ -49,6 +49,14 @@ Sources independently reviewed in this follow-up include `src/shared/default-glo
 
 E2-O01/O02 source dispositions accepted; live true/false behavior, persistence, host/OS and candidate correction proofs stay T1–T4 debt. E2-O03's88-action semantics and SK boundary acceptance are still required before E2 closure. Root sent this disposition to the current E2 Dispatch in `msg_71e1f96369f5`; no duplicate scan or leaf is requested.
 
+### E2 SK01–SK16 source boundary acceptance
+
+Root accepts the16-row shared shortcut-boundary characterization in `audit-closure/e2-settings/shortcut-contracts.tsv` together with its explicit future acceptance obligations. All271 evidence hashes were already independently verified. Additional source sampling fully read definitions, normalization, matching-key, plugin-command-keybindings, plugin alias identities and Option-as-Alt detection/hook; read actual conflict grouping, renderer capture/plugin/blur order, native recorder/paste/dictation/held-switcher ownership and symbolic-hotkey parameter/layout conversion. Prior keybinding file/service/migration review covers the persistence-specific rows.
+
+Concrete distinctions survive acceptance: dynamic plugin keys are syntax-validated and bounded to400 characters, not a finite catalog; aliasable built-in actions are a different closed set. Matching uses exact modifier equality and conditional logical/physical fallback, not universal AltGr immunity. App-focus plugin precedence is guarded by earlier editable/floating handling. The Option-as-Alt result is based on the implemented nine-key fingerprint, not proof of an OS layout name; explicit sided overrides bypass the default. File/API null semantics, cached snapshots, publication and actual renderer effects remain separate. No real keyboard layout was changed/probed and no Electron keyboard journey ran in this review.
+
+This accepts the shared source boundaries, not E2-O03's pending88 action-body map or source/candidate/platform execution. The original93-file test queue and complete source-suite obligations are preserved. E2 remains open until the final action map is independently reconciled.
+
 ## E3 Bots/Mentu21: accepted bounded source characterization
 
 Root verified all78 declared source hashes against pinned Git blobs and working bytes. The21 unique callback rows contain input/result descriptions, source anchors and explicit missing-acceptance obligations. Full original Bots and Mentu registration modules independently confirm the7+14 identity set, trusted-renderer guard, outer cast-only argument forwarding, Mentu remove/re-register and Bots direct registration. Typed Mentu arguments are not runtime validation.
