@@ -47,6 +47,7 @@ fn claude_handle() -> ProviderHandle {
     ProviderHandle::Claude {
         session_id: "sess-1".to_string(),
         leaf_uuid: Some("leaf-1".to_string()),
+        extensions: serde_json::Map::new(),
     }
 }
 
@@ -58,6 +59,7 @@ fn link(overrides: impl FnOnce(&mut ProviderHandleLink)) -> ProviderHandleLink {
         minted_at_fence: 1,
         observed_at: 1_000,
         forked_from_key: None,
+        extensions: serde_json::Map::new(),
     };
     overrides(&mut built);
     built
@@ -149,11 +151,13 @@ fn resumed_link(fence: i64) -> ProviderHandleLink {
         handle: ProviderHandle::Claude {
             session_id: "provider-session-alpha-1".to_string(),
             leaf_uuid: Some("leaf-2".to_string()),
+            extensions: serde_json::Map::new(),
         },
         origin: HandleOrigin::Resumed,
         minted_at_fence: fence,
         observed_at: 4_000,
         forked_from_key: None,
+        extensions: serde_json::Map::new(),
     }
 }
 
@@ -336,6 +340,7 @@ fn source_case_handle_identity_claude_key_uses_session_and_leaf() {
     let branch_b = ProviderHandle::Claude {
         session_id: "sess-1".to_string(),
         leaf_uuid: Some("leaf-2".to_string()),
+        extensions: serde_json::Map::new(),
     };
     assert_ne!(handle_key(&claude_handle()), handle_key(&branch_b));
     assert_eq!(handle_root(&claude_handle()), handle_root(&branch_b));
@@ -345,11 +350,13 @@ fn source_case_handle_identity_claude_key_uses_session_and_leaf() {
 fn source_case_handle_identity_codex_key_uses_thread_alone() {
     let codex = ProviderHandle::Codex {
         thread_id: "thread-1".to_string(),
+        extensions: serde_json::Map::new(),
     };
     assert_eq!(handle_key(&codex), "codex:\"thread-1\"");
     assert_eq!(handle_root(&codex), "codex:\"thread-1\"");
     let other = ProviderHandle::Codex {
         thread_id: "thread-2".to_string(),
+        extensions: serde_json::Map::new(),
     };
     assert!(!handles_equal(&codex, &other));
 }
@@ -359,11 +366,13 @@ fn source_case_handle_identity_null_leaf_vs_empty_and_malformed() {
     let null_leaf = ProviderHandle::Claude {
         session_id: "sess-1".to_string(),
         leaf_uuid: None,
+        extensions: serde_json::Map::new(),
     };
     assert!(ProviderHandle::from_json(&null_leaf.to_json()).is_some());
     let empty_leaf = ProviderHandle::Claude {
         session_id: "sess-1".to_string(),
         leaf_uuid: Some(String::new()),
+        extensions: serde_json::Map::new(),
     };
     assert!(ProviderHandle::from_json(&empty_leaf.to_json()).is_none());
     assert!(ProviderHandle::from_json(&json!({"provider": "claude", "sessionId": ""})).is_none());
@@ -381,10 +390,12 @@ fn source_case_handle_identity_collision_free_keys_with_delimiters() {
     let left = ProviderHandle::Claude {
         session_id: "a#b".to_string(),
         leaf_uuid: Some("c".to_string()),
+        extensions: serde_json::Map::new(),
     };
     let right = ProviderHandle::Claude {
         session_id: "a".to_string(),
         leaf_uuid: Some("b#c".to_string()),
+        extensions: serde_json::Map::new(),
     };
     assert_ne!(handle_key(&left), handle_key(&right));
     assert!(!handles_equal(&left, &right));
@@ -426,6 +437,7 @@ fn source_case_chain_append_refuses_fork_recorded_as_resume() {
         link.handle = ProviderHandle::Claude {
             session_id: "sess-2".to_string(),
             leaf_uuid: Some("leaf-9".to_string()),
+            extensions: serde_json::Map::new(),
         };
         link.minted_at_fence = 2;
     });
@@ -445,6 +457,7 @@ fn source_case_chain_append_records_fork_only_with_new_root_and_seed() {
         link.handle = ProviderHandle::Claude {
             session_id: "sess-2".to_string(),
             leaf_uuid: Some("leaf-9".to_string()),
+            extensions: serde_json::Map::new(),
         };
         link.minted_at_fence = 2;
         link.forked_from_key = Some(seed_key.clone());
@@ -456,6 +469,7 @@ fn source_case_chain_append_records_fork_only_with_new_root_and_seed() {
         link.handle = ProviderHandle::Claude {
             session_id: "sess-2".to_string(),
             leaf_uuid: Some("leaf-9".to_string()),
+            extensions: serde_json::Map::new(),
         };
         link.minted_at_fence = 2;
         link.forked_from_key = Some("claude:other".to_string());
@@ -486,6 +500,7 @@ fn source_case_chain_append_rejects_link_minted_under_older_fence() {
         link.handle = ProviderHandle::Claude {
             session_id: "sess-1".to_string(),
             leaf_uuid: Some("leaf-2".to_string()),
+            extensions: serde_json::Map::new(),
         };
         link.minted_at_fence = 4;
     });
@@ -502,6 +517,7 @@ fn source_case_chain_append_rejects_provider_change_mid_chain() {
         link.origin = HandleOrigin::Resumed;
         link.handle = ProviderHandle::Codex {
             thread_id: "thread-1".to_string(),
+            extensions: serde_json::Map::new(),
         };
         link.minted_at_fence = 2;
     });
@@ -548,6 +564,7 @@ fn source_case_chain_append_rejects_stable_link_id_reuse() {
         link.handle = ProviderHandle::Claude {
             session_id: "sess-1".to_string(),
             leaf_uuid: Some("leaf-2".to_string()),
+            extensions: serde_json::Map::new(),
         };
         link.minted_at_fence = 2;
     });
@@ -567,6 +584,7 @@ fn source_case_chain_append_refuses_growth_past_cap() {
             link.handle = ProviderHandle::Claude {
                 session_id: "sess-1".to_string(),
                 leaf_uuid: Some(format!("leaf-{}", index + 1)),
+                extensions: serde_json::Map::new(),
             };
             link.minted_at_fence = (index + 1) as i64;
         }));
@@ -578,6 +596,7 @@ fn source_case_chain_append_refuses_growth_past_cap() {
         link.handle = ProviderHandle::Claude {
             session_id: "sess-1".to_string(),
             leaf_uuid: Some("leaf-overflow".to_string()),
+            extensions: serde_json::Map::new(),
         };
         link.minted_at_fence = 999;
     });
@@ -603,6 +622,7 @@ fn source_case_chain_append_never_mutates_input_chain() {
             link.handle = ProviderHandle::Claude {
                 session_id: "sess-1".to_string(),
                 leaf_uuid: Some("leaf-2".to_string()),
+                extensions: serde_json::Map::new(),
             };
             link.minted_at_fence = 2;
         }),
@@ -625,6 +645,7 @@ fn source_case_chain_validation_finds_link_and_reports_head() {
             link.handle = ProviderHandle::Claude {
                 session_id: "sess-1".to_string(),
                 leaf_uuid: Some("leaf-2".to_string()),
+                extensions: serde_json::Map::new(),
             };
             link.minted_at_fence = 2;
         }),
@@ -679,6 +700,7 @@ fn source_case_chain_validation_rejects_persisted_chains_bypassing_append() {
         link.handle = ProviderHandle::Claude {
             session_id: "sess-1".to_string(),
             leaf_uuid: Some("leaf-2".to_string()),
+            extensions: serde_json::Map::new(),
         };
         link.minted_at_fence = 2;
     })
@@ -698,6 +720,7 @@ fn source_case_chain_validation_rejects_persisted_chains_bypassing_append() {
             link.handle = ProviderHandle::Claude {
                 session_id: "sess-2".to_string(),
                 leaf_uuid: Some("leaf-2".to_string()),
+                extensions: serde_json::Map::new(),
             };
             link.minted_at_fence = 2;
         })
@@ -793,22 +816,26 @@ fn handle_keys_embed_exact_node_json_for_tricky_ids() {
         handle_root(&ProviderHandle::Claude {
             session_id: "sess-1".to_string(),
             leaf_uuid: Some("leaf-1".to_string()),
+            extensions: serde_json::Map::new(),
         }),
         "claude:\"sess-1\""
     );
     let null_leaf = ProviderHandle::Claude {
         session_id: "sess-1".to_string(),
         leaf_uuid: None,
+        extensions: serde_json::Map::new(),
     };
     assert_eq!(handle_key(&null_leaf), "claude:[\"sess-1\",null]");
     let nul_id = ProviderHandle::Claude {
         session_id: "a\u{0}b".to_string(),
         leaf_uuid: None,
+        extensions: serde_json::Map::new(),
     };
     assert_eq!(handle_key(&nul_id), "claude:[\"a\\u0000b\",null]");
     let quoted = ProviderHandle::Claude {
         session_id: "q\"w".to_string(),
         leaf_uuid: Some("e\\f".to_string()),
+        extensions: serde_json::Map::new(),
     };
     assert_eq!(handle_key(&quoted), "claude:[\"q\\\"w\",\"e\\\\f\"]");
 }
@@ -961,6 +988,7 @@ fn scope_key_joins_host_distro_workspace_with_nul_separator() {
                 location["workspaceKind"].as_str().unwrap(),
             )
             .unwrap(),
+            extensions: serde_json::Map::new(),
         })
     };
     assert_eq!(scope(json!({})), "local\u{0}\u{0}workspace-1");
@@ -982,6 +1010,7 @@ fn execution_location_equality_includes_workspace_kind() {
         wsl_distro: None,
         workspace_id: "workspace-1".to_string(),
         workspace_kind: WorkspaceKind::from_str_opt(kind).unwrap(),
+        extensions: serde_json::Map::new(),
     };
     assert!(agent_session_execution_locations_equal(
         &location("git-worktree"),
@@ -1339,7 +1368,8 @@ fn admitted_record_preserves_optional_recovery_and_settlement_fields() {
         record.lease.journal_checkpoint,
         Some(JournalCheckpoint {
             epoch: 4,
-            sequence: 9
+            sequence: 9,
+            extensions: serde_json::Map::new(),
         })
     );
     // Options order: serde_json's Map sorts keys, so the port canonicalizes
@@ -1358,7 +1388,7 @@ fn admitted_record_preserves_optional_recovery_and_settlement_fields() {
         record.launch_args.as_deref(),
         Some(["--model".to_string(), "opus".to_string()].as_slice())
     );
-    assert_eq!(record.lease.processless_at, Some(12));
+    assert_eq!(record.lease.processless_at, Some(Some(12)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1383,6 +1413,7 @@ fn record_handle_rejects_provider_and_fence_mismatched_links() {
     let codex_link = ProviderHandleLink {
         handle: ProviderHandle::Codex {
             thread_id: "thread-1".to_string(),
+            extensions: serde_json::Map::new(),
         },
         ..resumed_link(7)
     };
@@ -1439,11 +1470,13 @@ fn record_handle_retry_updates_renewal_without_duplicating_chain() {
         handle: ProviderHandle::Claude {
             session_id: "provider-session-alpha-1".to_string(),
             leaf_uuid: None,
+            extensions: serde_json::Map::new(),
         },
         origin: HandleOrigin::Resumed,
         minted_at_fence: 7,
         observed_at: 4_000,
         forked_from_key: None,
+        extensions: serde_json::Map::new(),
     };
     let next = record_agent_session_provider_handle(&record, 7, &retry_link, 4_500)
         .expect("same-handle same-fence retry");

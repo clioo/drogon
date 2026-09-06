@@ -22,3 +22,37 @@ pub mod error;
 pub mod provider_handle;
 pub mod record;
 pub mod transition;
+
+use serde_json::Value;
+
+/// JSON members beyond one object level's known schema-v2 fields. The source
+/// keeps a single object representation: every record mutation spreads the
+/// previous object and rewrites only known keys, so unknown members are
+/// load-bearing persisted state, never a secondary shadow of known fields.
+pub type Extensions = serde_json::Map<String, Value>;
+
+/// Split one validated JSON object into its unknown members, verbatim.
+pub(crate) fn split_extensions(
+    object: &serde_json::Map<String, Value>,
+    known: &[&str],
+) -> Extensions {
+    object
+        .iter()
+        .filter(|(key, _)| !known.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+/// Serialization filter: the extensions maps are public, so a typed caller
+/// may insert known keys into them; skipping those keys keeps known-field
+/// authority with the typed state and cannot resurrect absent optionals.
+pub(crate) fn serialized_extensions(
+    extensions: &Extensions,
+    known: &[&str],
+) -> Vec<(String, Value)> {
+    extensions
+        .iter()
+        .filter(|(key, _)| !known.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
