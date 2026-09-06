@@ -37,6 +37,13 @@ timeouts distinguished from other signals. Guidance `msg_a7a5e3a7a934` plus one
 terminal nudge was sent to the active Sol-CAP lead; actual receipt/correction is
 not yet confirmed. No manual root/Sol runner fix or real UI rerun was performed.
 
+The first reply output was lost by the lead's execution bridge; root repeated
+the same correction in `msg_1673e02240ed` and identified this file as the durable
+fallback. Root also verified the timeout signal with a 30ms owned Node24 child:
+`status:null`, `signal:SIGTERM`, `error.code:ETIMEDOUT`. The leaf's intermediate
+claim that Node cannot distinguish timeout except by elapsed-time heuristics is
+incorrect; use the actual error code and preserve raw diagnostics.
+
 ## Earlier preparation checkpoint
 
 2026-09-06. Accept the four files as **preserved test preparation**, not four

@@ -43,7 +43,31 @@ CAP's already-completed baseline runs are not repeated merely to attach a worker
 its next execution work follows this same delegation policy. Runtime child receipts
 remain required before describing the transfers as launched.
 
-### Current delegation checkpoint: 15:23 UTC
+### Current integration checkpoint: 15:35 UTC
+
+Root accepted the UI module delivery at `bb85b83` after independent 33/33 and
+both scoped/desktop typechecks, preserving its missing historical behavioral RED
+and absent live wiring as explicit limitations. Sol-UI now directs actual Electron
+CDP regression Task `task_44c27c1d8129`, Dispatch `ctx_e4fd122db853`; its GLM leaf
+is `task_628785b1ed30 / ctx_78a2b0d5fe44` under Run `run_7b409d221a8a`, depth 2,
+ready/input_accepted. Leaf owns only the new acceptance runner/tests/evidence;
+root owns the production entry and build. Root built the actual desktop successfully
+before installing any guard. The leaf must retain genuine descriptor-mismatch RED
+against that unmodified build before root wiring and same-test GREEN. No simulated
+app, privileged globals, service or user profile is used for this boundary check.
+
+CAP's runner remains rejected pending its delegated Sonnet correction
+`task_be6a81bc1f7d / ctx_5bb26fee1ef9`. Root's review reply was lost once; the
+repeated answer `msg_1673e02240ed` points to the persisted root-review record.
+Native claim implementation remains owned by Kimi `ctx_3bfc08a56fa1`; its visible
+temporary RED stub is active work, not a final candidate or accepted module.
+Do not compile/register it as production until its completed report and review.
+
+Audit stays 11/12 (91.7%, medium confidence, +0), E5 held and full-fidelity target
+risk high. These implementation/test milestones do not close another audit group.
+No newly packaged build has passed installation acceptance yet.
+
+### Earlier delegation checkpoint: 15:23 UTC
 
 All three engineering leads have actual depth-two non-OpenAI workers; root
 verified their Dispatch state rather than inferring delegation from a prompt.
