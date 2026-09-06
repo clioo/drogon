@@ -1,0 +1,36 @@
+running 5 tests
+test matrix_shape_matches_admitted_source_oracle ... ok
+test admitted_record_cases_roundtrip_through_typed_model ... FAILED
+test minimum_next_fence_raw_values_survive_admission_and_roundtrip ... ok
+test source_boundary_validators_agree_with_source_oracle ... FAILED
+test source_boundary_record_admission_agrees_with_source_oracle ... FAILED
+
+failures:
+
+---- admitted_record_cases_roundtrip_through_typed_model stdout ----
+
+thread 'admitted_record_cases_roundtrip_through_typed_model' (11473832) panicked at crates/drogon-core/tests/provider_record_boundary_matrix.rs:193:41:
+case record:schemaVersion:2.0 must admit: UnsupportedSchema { raw: Object {"accountHome": Object {"path": String("/home/user/.claude"), "variable": String("CLAUDE_CONFIG_DIR")}, "createdAt": Number(1000), "lease": Object {"claimKeyId": String("key-1"), "claimStatus": String("live"), "deathEvidence": Object {"detail": String("fixture-only"), "kind": String("exit-observed"), "observedAt": Number(1)}, "handoffOperationId": Null, "handoffStage": Null, "journalCheckpoint": Object {"epoch": Number(1), "sequence": Number(2)}, "lastRenewedAt": Number(30000), "leaseDeadlineAt": Number(60000), "ownerProcess": Object {"hostId": String("local"), "pid": Number(4242), "processStartTimeMs": Number(1700000000000), "spawnToken": String("spawn-tui")}, "processlessAt": Null, "provenHandleLinkId": String("link-1"), "reservedSpawnToken": String("spawn-tui"), "runtimeFence": Number(7), "runtimeKind": String("tui"), "sessionId": String("session-alpha-1"), "unreconciled": Bool(false)}, "location": Object {"executionHostId": String("local"), "workspaceId": String("workspace-1"), "workspaceKind": String("git-worktree"), "wslDistro": Null}, "provider": String("claude"), "providerHandleChain": Array [Object {"handle": Object {"leafUuid": Null, "provider": String("claude"), "sessionId": String("provider-session-alpha-1")}, "linkId": String("link-1"), "mintedAtFence": Number(7), "observedAt": Number(1000), "origin": String("created")}], "schemaVersion": Number(2.0), "sessionId": String("session-alpha-1"), "updatedAt": Number(2000)} }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- source_boundary_validators_agree_with_source_oracle stdout ----
+
+thread 'source_boundary_validators_agree_with_source_oracle' (11473836) panicked at crates/drogon-core/tests/provider_record_boundary_matrix.rs:149:5:
+1 validator mismatches against the pinned source oracle:
+record:schemaVersion:2.0: source accepted=true but production validator accepts=false
+
+---- source_boundary_record_admission_agrees_with_source_oracle stdout ----
+
+thread 'source_boundary_record_admission_agrees_with_source_oracle' (11473835) panicked at crates/drogon-core/tests/provider_record_boundary_matrix.rs:175:5:
+1 record-admission mismatches against the pinned source oracle:
+record:schemaVersion:2.0: source accepted=true but record admission admits=false
+
+
+failures:
+    admitted_record_cases_roundtrip_through_typed_model
+    source_boundary_record_admission_agrees_with_source_oracle
+    source_boundary_validators_agree_with_source_oracle
+
+test result: FAILED. 2 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p drogon-core --test provider_record_boundary_matrix`

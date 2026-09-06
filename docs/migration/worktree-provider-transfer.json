@@ -1,0 +1,83 @@
+{
+  "date": "2026-09-06",
+  "base": "14cfc74dd674b016328efba54c7236769326667e",
+  "sourceCheckout": "/Users/carlos/Documents/Drogon-rewrite",
+  "sourceHead": "0f915cf26c6121fe4cd85ad902e9dbb7f0de7709",
+  "destination": "/Users/carlos/orca/workspaces/Drogon-rewrite/codex-provider-session-authority",
+  "scope": "provider",
+  "status": "preserved unaccepted drafts; root transferred before a new direct-worker dispatch; not validation",
+  "files": [
+    {
+      "path": "crates/drogon-core/src/session_authority/error.rs",
+      "sourceSha256": "76a27aa680d5428a3425a31d45b13c921c5b4c62c95ecade68f0d836e9ee0302"
+    },
+    {
+      "path": "crates/drogon-core/src/session_authority/mod.rs",
+      "sourceSha256": "1c0a2c722497c796c04ec40a7722d5cc3bfec3b4a5f3789deb796cd3e9f3abec"
+    },
+    {
+      "path": "crates/drogon-core/src/session_authority/provider_handle.rs",
+      "sourceSha256": "0216c46f609625fb196fbed7b0ffe5e4347f1791e0bcf0f3549f0d1af915a625"
+    },
+    {
+      "path": "crates/drogon-core/src/session_authority/record.rs",
+      "sourceSha256": "cdf1cc0848df2203f872efbe7559dcedad8c20ee8fdf50ecca12188783e642fa"
+    },
+    {
+      "path": "crates/drogon-core/src/session_authority/transition.rs",
+      "sourceSha256": "38b4fb8acf855fb40eb8b798a19ceeff25d9c34eda55a27313dc8b403dbcbe41"
+    },
+    {
+      "path": "crates/drogon-core/tests/session_authority.rs",
+      "sourceSha256": "379336e7ea9b16544e2e6675b805bf6775ed1542b4299bcea83d2f241dee9ae3"
+    },
+    {
+      "path": "docs/migration/sol-wave/eng-identity/provider-record.md",
+      "sourceSha256": "926eca60b50ceeed402f8bf96dd8a20ae8edf0af070add235802dbed9d61f542"
+    },
+    {
+      "path": "docs/migration/sol-wave/eng-identity/provider-record.json",
+      "sourceSha256": "c839be712773749658b5a2bf739da5cb5eb4dedc4683cb0f65324c9704499825"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/node-vectors/generate-vectors.mjs",
+      "sourceSha256": "2f48dda047d75ebd74eefacaa6f11075043c3d38374473299cc209d1681b741e"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/node-vectors/generate-vectors.out.json",
+      "sourceSha256": "a199002b65e3d52b004ffdc94d5f93349fbf1cad7df6a99f33c84b0e5c0bf595"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/node-vectors/trim-vectors.mjs",
+      "sourceSha256": "b4bb6afbb237b87ad636494c1377950a6e8d391f307491b6f5e6dab6950c74a6"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/node-vectors/trim-vectors.out.json",
+      "sourceSha256": "bc0898a99afacc08dc0b1bd6740f394c61d162036fd96d83bc26983a63889f34"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/red-round-numeric.txt",
+      "sourceSha256": "d8f118413ec7030d10d9afa5e0b07722c38dec537b1a6a72fbbcb04c459ddf1b"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/red-round-stub.txt",
+      "sourceSha256": "6441946eaa9e19b9afa574cde92400f03489ea47c7d421c9486124fb3633722d"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/report.json",
+      "sourceSha256": "cbb0749f68cfd005ecaee1d1b07848192453fc8a9b437370964565ab8712506d"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/report.md",
+      "sourceSha256": "d55d22ae0efd2083418be1ab95a9d50a965cef8c12c71d232d1a1be925501120"
+    },
+    {
+      "path": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/source-case-map.json",
+      "sourceSha256": "a88fc38bd2f093303f75a0a721d1d18cb58789d4bdd73e617d9e913f361c41ec"
+    }
+  ],
+  "notes": [
+    "Added a newly generated actual-source 266-case rawJson matrix, casesSha256 e942e2f26becdcf9d8a29418fc949aadb8f8dd76eddb9ec67be282dc18f323c0.",
+    "Source code draft still needs production registration and numeric schema correction."
+  ]
+}

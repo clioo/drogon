@@ -1,0 +1,3005 @@
+{
+ "schemaVersion": 1,
+ "date": "2026-09-06",
+ "taskId": "task_b0baea14d74f",
+ "dispatchId": "ctx_fc2da489804c",
+ "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+ "oracle": {
+  "matrix": "tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/source-boundary-cases.json",
+  "cases": 266,
+  "accepted": 163,
+  "rejected": 103,
+  "casesSha256": "e942e2f26becdcf9d8a29418fc949aadb8f8dd76eddb9ec67be282dc18f323c0",
+  "generator": "scripts/verify-native-provider-source-boundaries.mjs --fixtures (root-generated, frozen; never rerun from another cwd)"
+ },
+ "candidateTestFile": "crates/drogon-core/tests/provider_record_boundary_matrix.rs",
+ "candidateModule": "crates/drogon-core/src/session_authority/ (registered pub mod in drogon-core)",
+ "statusMeaning": {
+  "oracle_agreement": "every case's rawJson is parsed verbatim and must receive exactly the source accepted verdict from the named production validator; record cases must additionally admit/reject identically through admit_persisted_record, and accepted record cases must roundtrip through the typed model",
+  "not_claimed": "this map covers record/handle/link/process validation and record admission only; durable store, lease CAS, process supervision, RPC/CLI and caller integration remain later root-owned slices"
+ },
+ "cases": [
+  {
+   "id": "record:schemaVersion:0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:-0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:1.0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:1e0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:7.0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:7e0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:9007199254740991",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:schemaVersion:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord (schemaVersion === 2, JavaScript number equality)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:createdAt:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:createdAt:-1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:createdAt:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:createdAt:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:updatedAt:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:updatedAt:-1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:updatedAt:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:updatedAt:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionRecord",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:-0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:1.0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:1e0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:2.0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:9007199254740991",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.runtimeFence:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:-1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.leaseDeadlineAt:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:-1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.lastRenewedAt:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.epoch:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.journalCheckpoint.sequence:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.deathEvidence.observedAt:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:-0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.pid:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess.processStartTimeMs:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:-0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:1.0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:1e0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:2.0",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:-1",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:9007199254740991",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.mintedAtFence:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:-0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:1.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:1e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:2.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:7.0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:7e0",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:0.5",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:-1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:9007199254740991",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:9007199254740992",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:providerHandleChain.0.observedAt:-9223372036854775808",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink (chain element)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:0",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:-0",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:1",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:1.0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:1e0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:2.0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:7.0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:7e0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:0.5",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:-1",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:9007199254740991",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:9007199254740992",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:pid:-9223372036854775808",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:-0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:1",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:1.0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:1e0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:2.0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:7.0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:7e0",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:0.5",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:-1",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:9007199254740991",
+   "target": "process",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:9007199254740992",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "process:processStartTimeMs:-9223372036854775808",
+   "target": "process",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionProcessIdentity",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:-0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:1",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:1.0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:1e0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:2.0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:7.0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:7e0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:0.5",
+   "target": "link",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:-1",
+   "target": "link",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:9007199254740991",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:9007199254740992",
+   "target": "link",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:mintedAtFence:-9223372036854775808",
+   "target": "link",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:-0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:1",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:1.0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:1e0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:2.0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:7.0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:7e0",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:0.5",
+   "target": "link",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:-1",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:9007199254740991",
+   "target": "link",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:9007199254740992",
+   "target": "link",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "link:observedAt:-9223372036854775808",
+   "target": "link",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandleLink",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:codex:leading-NEL",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:claude:leading-NEL",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:codex:trailing-NEL",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:claude:trailing-NEL",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:codex:leading-BOM",
+   "target": "handle",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:claude:leading-BOM",
+   "target": "handle",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:codex:trailing-BOM",
+   "target": "handle",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:claude:trailing-BOM",
+   "target": "handle",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:codex:leading-MVS",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:claude:leading-MVS",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:codex:leading-zero-width",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:claude:leading-zero-width",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:codex:astral-512-units",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:claude:astral-512-units",
+   "target": "handle",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:codex:astral-514-units",
+   "target": "handle",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "handle:claude:astral-514-units",
+   "target": "handle",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-provider-handle.ts::isAgentSessionProviderHandle",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:unvalidated-minimumNextFence:null",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease (minimumNextFence deliberately unchecked)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model",
+    "minimum_next_fence_raw_values_survive_admission_and_roundtrip"
+   ]
+  },
+  {
+   "id": "record:unvalidated-minimumNextFence:0.5",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease (minimumNextFence deliberately unchecked)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model",
+    "minimum_next_fence_raw_values_survive_admission_and_roundtrip"
+   ]
+  },
+  {
+   "id": "record:unvalidated-minimumNextFence:-1",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease (minimumNextFence deliberately unchecked)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model",
+    "minimum_next_fence_raw_values_survive_admission_and_roundtrip"
+   ]
+  },
+  {
+   "id": "record:unvalidated-minimumNextFence:\"future-fence\"",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease (minimumNextFence deliberately unchecked)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model",
+    "minimum_next_fence_raw_values_survive_admission_and_roundtrip"
+   ]
+  },
+  {
+   "id": "record:unvalidated-minimumNextFence:{\"future\":true}",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease (minimumNextFence deliberately unchecked)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model",
+    "minimum_next_fence_raw_values_survive_admission_and_roundtrip"
+   ]
+  },
+  {
+   "id": "record:unvalidated-minimumNextFence:[]",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease (minimumNextFence deliberately unchecked)",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model",
+    "minimum_next_fence_raw_values_survive_admission_and_roundtrip"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:missing",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.processlessAt:null",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.settlementRetryRequired:missing",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.settlementRetryRequired:null",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.settlementRetryId:missing",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  },
+  {
+   "id": "record:lease.settlementRetryId:null",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess:missing",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.ownerProcess:null",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.handoffStage:missing",
+   "target": "record",
+   "sourceAccepted": false,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle"
+   ]
+  },
+  {
+   "id": "record:lease.handoffStage:null",
+   "target": "record",
+   "sourceAccepted": true,
+   "sourceAnchor": "src/shared/agent-session-record.ts::isAgentSessionLease / isAgentSessionRecord live invariants",
+   "candidateTests": [
+    "matrix_shape_matches_admitted_source_oracle",
+    "source_boundary_validators_agree_with_source_oracle",
+    "source_boundary_record_admission_agrees_with_source_oracle",
+    "admitted_record_cases_roundtrip_through_typed_model"
+   ]
+  }
+ ]
+}
