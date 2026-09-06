@@ -1,5 +1,7 @@
 # Build + distribution entrypoints (G8, G7-U4) — repaired
 
+Later coordinator review: [packaging contracts and20 original unit cases](parity-packaging-coordinator-review.md). Full builder/test bodies and selected modules reviewed; M8 traversal is LIFO, not BFS, and inherited-env probes are not hermetic. Original leaf tiers below are historical. G8 remains open.
+
 Status `leaf-reported-pending-coordinator-review`. No G8 closure.
 Frozen source `c9790628` read-only; no execution/packaging/network.
 Full matrix + hashes: companion JSON (schema v3). No secrets recorded.

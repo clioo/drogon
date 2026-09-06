@@ -1,0 +1,61 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned test capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "updater-local-preview-marker",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-updater-local-preview-marker-Z5xcrq",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/main/updater-local-preview-marker.test.ts",
+        "role": "test",
+        "sha256": "26880dac4a7a044f97721d09bbc61e592435b6b49e73e12e25173ddfaaff018c",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-updater-local-preview-marker-Z5xcrq/src/main/updater-local-preview-marker.test.ts"
+      },
+      {
+        "path": "src/main/updater-local-preview-marker.ts",
+        "role": "module",
+        "sha256": "111cdd71739b1cbdc7661ae75ac7b6163eaff644316c0c947a60695a9a328ede",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-updater-local-preview-marker-Z5xcrq/src/main/updater-local-preview-marker.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-updater-local-preview-marker-Z5xcrq/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Use original installed Vitest4.1.11 with Node24.19.0; no installation or original-tree writes.",
+    "Minimal node config includes only the declared test extension (.test.ts or .test.mjs); omits renderer aliases, feature-wall define, DOM/host-port setup, execArgv and original extended timeouts. Reviewed closure does not depend on those facilities. No full-config or typecheck equivalence claimed."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "622642bea104247e931172996fe0f2a15e099968ee6302fde6bfebfbfc7d257c",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 10,
+      "numPassedTests": 10,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 10
+    }
+  }
+}

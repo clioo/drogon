@@ -282,6 +282,22 @@ describe("stageCapsule", () => {
     expect(onDisk.capsuleRoot).toBe(outcome.capsuleRoot);
   });
 
+  it.each(["ts", "mjs"])("selects only the reviewed %s test extension without changing source bytes", (extension) => {
+    const entry = `src/shared/config-entry.test.${extension}`;
+    const source = "import { it, expect } from 'vitest'; it('fixture', () => expect(1).toBe(1));\n";
+    writeFileSync(path.join(fixture.root, entry), source);
+    const revision = commitFixture(fixture.root, "add configuration test fixture");
+    const manifest = buildManifest(fixture.root, revision);
+    manifest.entryTestFile = entry;
+    manifest.files = [{ path: entry, role: "test", sha256: digestOf(path.join(fixture.root, entry)) }];
+    const manifestPath = writeManifest(workDir, manifest);
+    const outcome = stageCapsule({ manifestPath, sourceRoot: fixture.root, repoRoot: fakeRepoRoot });
+    const config = readFileSync(outcome.configPath, "utf8");
+    expect(config).toContain(`include: ["**/*.test.${extension}"]`);
+    expect(config).not.toContain(extension === "mjs" ? "**/*.test.ts" : "**/*.test.mjs");
+    expect(readFileSync(outcome.staged[0].target, "utf8")).toBe(source);
+  });
+
   it("creates a fresh, uniquely-named directory on every call (atomic, non-colliding)", () => {
     const manifest = buildManifest(fixture.root, fixture.revision);
     const manifestPath = writeManifest(workDir, manifest);

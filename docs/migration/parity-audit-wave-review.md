@@ -1,5 +1,13 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
+## Packaging follow-up and progress reporting after b4a53ee
+
+[Packaging review](parity-packaging-coordinator-review.md):15 source fingerprints,
+full builder/test bodies,20 unchanged original cases passing without skips, and68
+capsule infrastructure regressions passing. Broad builder/Mentu integration suites
+and real packages remain unverified. [Audit estimate](audit-progress.md):approximately60%,
+medium-low confidence, no closed-group increase;24-hour rewrite is high risk.
+
 ## Relay boundary follow-up after e0a1491
 
 The [coordinator boundary review](parity-relay-boundary-review.md) corrects

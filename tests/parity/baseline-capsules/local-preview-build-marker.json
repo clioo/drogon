@@ -1,0 +1,41 @@
+{
+  "capsuleId": "local-preview-build-marker",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "description": "4 unchanged original packaging contract cases.",
+  "entryTestFile": "config/scripts/local-preview-build-marker.test.mjs",
+  "files": [
+    {
+      "path": "config/scripts/local-preview-build-marker.test.mjs",
+      "role": "test",
+      "sha256": "218d53faee3a1b17bda44e5f592338f32db76904de2b956c61f98dd7204ede94"
+    },
+    {
+      "path": "config/scripts/local-preview-build-marker.cjs",
+      "role": "module",
+      "sha256": "72e0888c3aed84cc3b0fdd4552abb073ea49cb40e06add86c15bb6aa1090be72"
+    },
+    {
+      "path": "src/shared/local-preview-marker-contract.json",
+      "role": "module",
+      "sha256": "34d8dd5e93edcd91b514cd1fcab4267cb5ca2a09da5e56ae7a272f740c944fc9"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use original installed Vitest4.1.11 with Node24.19.0; no installation or original-tree writes.",
+    "Minimal node config includes only the declared test extension (.test.ts or .test.mjs); omits renderer aliases, feature-wall define, DOM/host-port setup, execArgv and original extended timeouts. Reviewed closure does not depend on those facilities. No full-config or typecheck equivalence claimed."
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 4
+  },
+  "isolationRationale": "Real temporary directories, marker writes and reads; ORCA_LOCAL_PREVIEW_BUILD modified only in the test process and restored. No updater, release check, installer or external access.",
+  "testEvidenceBoundary": "Writer contract and explicit flag only. The filename test compares a literal, not the reader source; no packaged updater integration."
+}

@@ -2,6 +2,17 @@
   "schemaVersion": 1,
   "phase": "audit-only",
   "auditClosed": false,
+  "packagingFollowup": {
+    "afterCommit": "b4a53ee",
+    "contract": "parity-packaging-coordinator-review.json",
+    "sourceFilesVerified": 15,
+    "originalCasesPassed": 20,
+    "originalCasesFailed": 0,
+    "originalCasesSkipped": 0,
+    "infrastructureCasesPassed": 68,
+    "auditProgressReference": "audit-progress.md",
+    "limits": "Bounded source and unit baseline; E5 and real packaging acceptance remain open."
+  },
   "relayBoundaryFollowup": {
     "afterCommit": "e0a1491",
     "status": "bounded-source-review-and-original-baseline-only",
