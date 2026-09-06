@@ -208,9 +208,9 @@
   "testsActuallyRead": "NONE this dispatch (source-only instruction; no test bodies opened, none executed); original test obligations remain with WP-ENG-RELAY / WP-ENG-REMOTE per accepted gaps G13-gap-1..3"
  },
  "semanticTestObligationsRemaining": [
-  "dual-lane methods (relay.configureGraceTime, session.registerRoot): both lanes mutate state; request returns {ok:true}; name counted once in any surface assertion",
+  "dual-lane methods: session.registerRoot request returns {ok:true}, relay.configureGraceTime request returns {graceTimeMs:number}; both also accept notifications; name counted once in any surface assertion. Coordinator correction: parity-relay-boundary-review.json",
   "rpc.cancel inline abort cancels an in-flight request's AbortController without touching the notification map",
-  "aiVault.* absent on unsupported platform AND on failed service construction (soft-disable, startup survives)",
+  "aiVault.* absent on unsupported platform or missing service; failed-constructor startup-survival claim withdrawn. Runtime composition calls factory without a catch; later child startup failures need separate characterization. Coordinator correction: parity-relay-boundary-review.json",
   "plugin resolver answers {ok:false,code:'unavailable'} for both plugin methods under the daemon null identity resolver; panel admission gate separate",
   "WSL guest dispatcher: exactly 13 runtime lanes (2 shared-source preflight + 2 agent_hook + 9 wslfs) and no fs/git/pty methods",
   "orca.cli proxy excludes calling client and applies remoteCliRequestTimeoutMs",

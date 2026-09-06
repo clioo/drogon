@@ -1,0 +1,42 @@
+{
+  "capsuleId": "wsl-hook-fs-bridge",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "description": "Twelve unchanged original POSIX guest filesystem bridge cases on macOS, not WSL runtime acceptance.",
+  "entryTestFile": "src/relay/wsl-hook-fs-bridge.test.ts",
+  "files": [
+    {
+      "path": "src/relay/wsl-hook-fs-bridge.test.ts",
+      "role": "test",
+      "sha256": "6d7b072e4a3907102a69dd8a24183d8d1f7c26e0ff82a95e159ec9ce72499293"
+    },
+    {
+      "path": "src/relay/wsl-hook-fs-bridge.ts",
+      "role": "module",
+      "sha256": "ac7e2c0b290782dd63a0f5c067434ef11683d555aa2a6c2d6facc57f6dc17a33"
+    },
+    {
+      "path": "src/shared/wsl-hook-relay-contract.ts",
+      "role": "module",
+      "sha256": "0e5c66e8bc3360be7f4289b60d06389361f650c0a7f795ac35ab68f53dcb7db0"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use original installed Vitest4.1.11 with Node24; no dependency installation or original-tree writes.",
+    "Minimal node config omits original renderer aliases, feature-wall define, DOM/host-port setup, execArgv, broader include and extended timeouts. This reviewed closure uses none of those app facilities; no full configuration/typecheck equivalence claimed.",
+    "Original suite skips win32. This macOS run cannot prove Linux guest execution, Windows host integration, WSL installation or transport behavior."
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 12
+  },
+  "isolationRationale": "Full test, bridge and shared contract bodies read. Type-only dispatcher imports erased. Real files and directories created only under per-case mkdtemp homes and cleaned by original afterEach. Read-only readdir probes on temporary-home ancestor and /; names are not printed. Reviewed lexical checks reject outside writes/renames/mkdir before fs calls. No relay process, WSL command, network, model or real home configuration. This is NOT a pure-function capsule or filesystem sandbox: inside-home symlinks are followed by source design; no such symlinks are created here.",
+  "testEvidenceBoundary": "Twelve original cases unchanged. No successful rename/unlink/chmod/stat handler coverage, complete registration-set assertion, symlink behavior assertion, wire errors, real guest process or candidate parity."
+}

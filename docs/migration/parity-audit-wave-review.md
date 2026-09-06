@@ -1,5 +1,15 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
+## Relay boundary follow-up after e0a1491
+
+The [coordinator boundary review](parity-relay-boundary-review.md) corrects
+dual-lane response schemas and AI Vault failure assumptions. Nineteen source
+fingerprints match the pinned checkout and Git. Twelve unchanged original
+filesystem cases passed without skips on macOS; real WSL and candidate parity
+remain unproven. Delivery cancellation is traced to the client without treating
+delivery retirement as evidence of process exit. Full handler semantics,
+composition, packaging and overall audit acceptance remain open.
+
 ## Mobile caller attribution afterb09e289
 
 The [coordinator method-flow review](parity-mobile-method-review.md) completes

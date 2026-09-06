@@ -2,6 +2,18 @@
   "schemaVersion": 1,
   "phase": "audit-only",
   "auditClosed": false,
+  "relayBoundaryFollowup": {
+    "afterCommit": "e0a1491",
+    "status": "bounded-source-review-and-original-baseline-only",
+    "contract": "parity-relay-boundary-review.json",
+    "verifiedSourceFingerprints": 19,
+    "originalCases": 12,
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0,
+    "evidence": "reference-captures/c9790628-wsl-hook-fs-bridge/runner-report.json",
+    "limits": "Original POSIX bridge on macOS, not real WSL or candidate parity. Dual-lane response and AI Vault failure claims corrected; cancellation proof boundary traced, actual transport/settlement tests remain open."
+  },
   "mobileMethodFlowFollowup": {
     "afterCommit": "b09e289",
     "status": "31-site-attribution-reviewed-not-full-mobile-acceptance",

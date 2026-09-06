@@ -1,5 +1,7 @@
 # Relay Registration & Composition Reconciliation v2 (G13-gap-2/3 portion)
 
+Coordinator follow-up: [bounded boundary review](parity-relay-boundary-review.md) corrects obligations1/3 below, traces the delivery-cancellation producer/consumer boundary and archives12 unchanged original filesystem cases. Original leaf read tiers below describe its dispatch, not the later review. Full composition/runtime acceptance remains open.
+
 Corrected leaf report for task `task_5f6097897f74`, dispatch `ctx_32b26a8bba25`. Status: **leaf-reported-pending-coordinator-review**; runtime acceptance **unproven**; no universal surface count and no audit closure.
 Source: frozen `/Users/carlos/Documents/Drogon-mentu-session` @ `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, read-only; source review only (no scanner rerun, no tests/scripts executed). Machine form: `parity-relay-registration-composition.json` (schema v2, contains the exact 147-entry source call-site map; all summaries below are computed from that mapping).
 
@@ -63,9 +65,9 @@ Handler errors → handler code else `-32000`; `error.data` published only throu
 
 ## 8. Remaining semantic test obligations (labeled, not executed)
 
-1. Dual-lane methods (`relay.configureGraceTime`, `session.registerRoot`): both lanes mutate state; request returns `{ok:true}`; name asserted once per surface.
+1. Dual-lane methods: `session.registerRoot` request returns `{ok:true}`; `relay.configureGraceTime` request returns `{graceTimeMs:number}`. Both also accept notifications; name asserted once per surface. Corrected by coordinator source review; runtime tests remain required.
 2. `rpc.cancel` inline abort cancels an in-flight request without touching the notification map.
-3. `aiVault.*` absent on unsupported platform and on failed service construction (startup survives).
+3. `aiVault.*` absent on unsupported platform or missing service. The prior assertion about failed service construction surviving startup is withdrawn: runtime composition calls the factory without a catch. Later child-process startup failures require separate characterization.
 4. Plugin resolver answers `unavailable` for both plugin methods under the daemon null identity resolver; panel admission gate separate.
 5. WSL guest dispatcher: exactly 13 runtime lanes (2 shared preflight + 2 agent_hook + 9 wslfs); no fs/git/pty methods.
 6. `orca.cli` proxy excludes the calling client and applies `remoteCliRequestTimeoutMs`.
