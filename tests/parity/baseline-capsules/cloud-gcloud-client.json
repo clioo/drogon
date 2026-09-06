@@ -1,0 +1,36 @@
+{
+  "capsuleId": "cloud-gcloud-client",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "cloud/apps/relay-ops/src/gcloud-client.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 2
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "cloud/apps/relay-ops/src/gcloud-client.test.ts",
+      "role": "test",
+      "sha256": "19255160dbb2eedc6849abb0c1f857170764b96301484949bf2707ddee383a74"
+    },
+    {
+      "path": "cloud/apps/relay-ops/src/gcloud-client.ts",
+      "role": "module",
+      "sha256": "5babd097efc869108d072b78e9ccda980eec63b93648bcc69f30025ad1890666"
+    }
+  ],
+  "sourceVitestVersion": "4.1.9",
+  "sourceVitestConfigFile": null,
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "The relay-ops package invokes Vitest without a custom configuration. Capsule uses an explicit Node environment and exact original test path; root desktop setup and other suites are not loaded.",
+    "Vitest4.1.9, Vite8.0.16, esbuild0.28.1, tsx4.22.4 and @types/node24.13.2 match the cloud lockfile's inspected runner versions. Installed in a separate disposable tool directory with lifecycle scripts disabled; its newly resolved transitive lockfile is recorded separately, not claimed byte-equivalent to the complete cloud lockfile.",
+    "Original whole test/module files are unchanged. Both tests inject tokenCommand; neither invokes the default gcloud process function, network, real tokens, file writes or user profiles. Node24 execution is explicitly selected."
+  ],
+  "isolationRationale": "Root read both original files in full; imports are Vitest plus Node child_process/util. Functions with potential subprocess effects are not invoked by these two original tests. Synthetic token strings are original fixtures. Preserve exact test bodies and MIT notice, nonce staging and independently checked results.",
+  "contract": "E5 INF17 bounded original access-refresh single-flight and per-audience identity-token cache; source baseline only, not authenticated credentials, provider success, full token-expiry behavior or candidate parity."
+}
