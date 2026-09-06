@@ -37,6 +37,22 @@ Confirmed distinct shell-escaping contracts: terminal wrappers double percent si
 
 ## Migration decisions and phase boundary
 
+## E2 field reconciliation and explicit source exceptions
+
+Root accepts the bounded214-field source routing reconciliation in `audit-closure/e2-settings/closure.json`, not the complete E2 gate. Names are unique, match canonical declaration order exactly, and every row has a contract, source anchor and remaining acceptance obligation. All271 source-file hashes match both pinned Git blobs and working bytes. Independent samples confirmed startup's actual legacy keybinding getter (before file-existence migration checks), dedicated cached file authority, temp-write/rename without fsync, Claude teams mode launch consumption, PTY history isolation defaulting true and sidebar migration preferring an explicit UI boolean.
+
+The three exceptions remain **preserved contracts**, not missing rows or authorization to remove settings:
+
+- **E2-O02 / artifactsEnabled:** declaration explicitly deprecated; default true. Strict RPC `SettingsUpdate` does not admit it; the located five-case artifact capability test distinguishes it from `artifactSharingEnabled`, including fail-closed reads. Root read that test but did not execute it. Preserve legacy data and current artifact availability/publish-consent/visibility as distinct concepts.
+- **E2-O02 / experimentalMobile:** default false and telemetry whitelist membership verified. Keep as legacy/metadata in this bounded source characterization, not a proven live feature gate or an alias for default-true `mobileEmulatorEnabled` or `showMobileButton`. Targeted production-name search also found test-support fixtures; no claim of a universal absence of dynamic consumers or permission to drop data.
+- **E2-O01 / markdownReviewToolsEnabled:** Settings toggle persists independently from the traced standard/floating editor annotation props. Root traced `useRichMarkdownReviewData` into controller creation guard and review-rail positioning. Standard editor defaults true, floating explicitly false, RichMarkdownEditor default false; canAnnotate requires the prop and a relative source path. Rail visibility (existing notes plus open state) is distinct from creation/positioning permissions. Accept this explicit source mismatch, not “no effect anywhere” or a rendered toggle test. Preserve the advertised capability and require an explicit source-characterization/intended-fix regression during migration.
+
+Sources independently reviewed in this follow-up include `src/shared/default-global-settings.ts:139,215`, `global-settings-types.ts:229–236,403–405`, `telemetry-property-schemas.ts:179–205`, complete `src/main/runtime/rpc/methods/client-settings-schemas.ts` and `artifact-sharing-capability-grant.test.ts`, startup/account/keybinding source neighborhoods, and editor `useRichMarkdownReviewData.ts` plus controller/rail guards. Prior full prop-chain evidence remains in `audit-semantic-followups.md`.
+
+E2-O01/O02 source dispositions accepted; live true/false behavior, persistence, host/OS and candidate correction proofs stay T1–T4 debt. E2-O03's88-action semantics and SK boundary acceptance are still required before E2 closure. Root sent this disposition to the current E2 Dispatch in `msg_71e1f96369f5`; no duplicate scan or leaf is requested.
+
+## Migration decisions and phase boundary (continued)
+
 Preserve workflow capabilities and the actual user experience, not unsafe interpretations of source comments. Drogon's eventual publication proof must cover **every** publishing path; asset presence alone must never be described as verified signatures, compatible binaries or successful prior tests. Unknown process contact must not justify deleting/replacing owned resources. Source defects get explicit characterization and intended-behavior regression tests during implementation, not silent deletion of capabilities or claims that the source already satisfies these invariants.
 
 These are scoped acceptance decisions within open groups, not new denominator units. Audit remains approximately60% (7/12 accepted groups, medium-low confidence). Next: independently review remaining E2/E3/E1 reconciliations and new E4/E5 boundaries, then close groups only against the unchanged full obligations. Implementation remains **root Astra → Sol leads → approved workers** after full audit acceptance.
