@@ -5,6 +5,10 @@ obsolete assignments, accepted metadata and future execution debt. This is
 a current decision ledger, not a claim of a fully enumerated product.
 The machine record contains exact owners, artifacts and remaining evidence.
 
+Latest bounded review: `parity-audit-wave-review.md` records supervisor12-case
+source acceptance and mobile/relay/packaging leaf reports still pending full
+independent review. Those reports do not close E1–E5 or the execution gates.
+
 ## Accepted metadata — do not repeat completed censuses
 
 Source/test allocation: 9,037 unique paths. Bridge: 87 domains, 975 extracted

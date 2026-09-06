@@ -1,5 +1,46 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
+## Latest review checkpoint after7070097
+
+Audit remains open. This is a source-review checkpoint, not an implementation
+or installed-preview release. Machine record: `parity-audit-wave-review.json`.
+
+- Accepted bounded supervisor review and12 unchanged original signal/late-write
+  cases, all passing, no skips. Commit7070097 preserves receipt and results.
+- Mobile leaf: all31 remaining syntax sites mapped exactly once;35 source hashes
+  independently match checkout and pinned Git.25 reported names are distinct
+  from the previous163; remaining caller/receiver semantics still need review.
+  Seven bodies were read independently, not their whole runtime dependency graph.
+- Relay leaf corrected after coordinator review:147 source sites,148 expansions,
+  137 daemon lanes and13 WSL lanes. Shared preflight sites instantiate twice;
+  dual-lane method names are not distinct-name additions. The full map matches
+  the accepted syntax census; remaining constants/composition/auth are not accepted.
+- Packaging leaf restored21 concrete entries and corrected partial-read tiers,
+  Linux fixed install locations, raw symlink deletion matching and Mentu's
+  remove-then-rename gap.26 explicit file fingerprints independently verified.
+  Builder/CI/cloud contracts and actual packages still require coordinator review.
+
+All six dispatch attempts in this wave settled; release receipts retained the
+pre-existing agent terminals without process action. No active writer from this
+wave remains. The first relay completion attempt had a mistyped handle and was
+rejected; only its later valid exact-dispatch completion was accepted.
+
+## Next owner actions
+
+Coordinator first finishes these pending source reviews; do not repeat the
+accepted censuses. Preserve corrected arithmetic and explicit remaining owners.
+The six leaf files are durable **pending-review reports**, not accepted product
+contracts. Then continue E1–E5/G7–G14 unresolved obligations in the existing gate
+ledger. Sol-lead hierarchy starts only after audit acceptance; original9037
+test-path obligations, full baseline/ports, rendered/OS/SSH/skew and installed
+product acceptance are unchanged.
+
+Mentu's single-platform bundled lock is an integration packaging constraint,
+not proof that Mentu upstream lacks that platform. If implementation proves a
+Mentu gap, preserve the justified English PR + regression evidence route and
+verify a pinned local build without waiting for merge. Material scope expansion
+still goes to the user. No upstream PR or product edit was needed in this wave.
+
 ## Current review disposition atb909fa0
 
 Wire v3 independently scans1140 pinned TS/TSX files with461 syntax candidates.
