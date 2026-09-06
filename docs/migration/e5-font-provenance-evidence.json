@@ -34,6 +34,39 @@
     }
   ],
   "nerd": {
+    "originJoins": {
+      "catalogSha256": "fd9d46a241391e6e5b9b9c171ea83814e95ac3c384e2c381e260ec2fa25989ad",
+      "joins": [
+        {
+          "id": "font-awesome-extension",
+          "byteEqual": true,
+          "noticeSha256": "b47b15d771c4507a75ff65beca3a78168d6af4cca9b45177a1aa817139c64ba5"
+        },
+        {
+          "id": "iec-power",
+          "byteEqual": true,
+          "noticeSha256": "11aef1cdf2d58d822e6857e2574870ccc59d4900052bf5c098e319d750e7ac3d"
+        },
+        {
+          "id": "weather-icons",
+          "byteEqual": true,
+          "noticeSha256": "fe5d8059a785adb47571fbae05d55ae88059224f1817dc1e797504a6098d6161"
+        }
+      ],
+      "remaining": [
+        "Complete Devicons mixed-origin attribution",
+        "Seti and Original SVG-source attribution",
+        "Aggregate glyph transformation and packaged notice verification",
+        "Preserve Weather OFL template unchanged plus evidenced separate attribution; no invented RFN/dates"
+      ],
+      "verification": {
+        "livePinnedComparison": "passed; existing Nerd/Geist joins and15 declaration files also passed",
+        "offlineFixtures": 9,
+        "newOfflineFixtures": 3,
+        "fixtureScope": "three binary matches, rejection of different bytes and floating ref; six previous component-catalog checks rerun",
+        "limitations": "Source-byte/notice correspondence only, not independent publisher signature, aggregate font reconstruction or complete packaging acceptance"
+      }
+    },
     "componentNotices": {
       "catalogSha256": "d15d7c942ed499f53472d92fad034add73c6a7bf17d28b66834fc47518b599e2",
       "files": [

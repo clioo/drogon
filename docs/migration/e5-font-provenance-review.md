@@ -46,6 +46,22 @@ Concrete distinctions for the eventual package:
 
 The catalog retains six finite follow-ups: Devicons, Font Awesome Extension, IEC and Seti-derived source notices; complete Weather attribution; aggregate transformation/final package verification. This checkpoint preserves exact source statements, not a legal clearance or completed build. No product asset, packaged notice or global environment was changed.
 
+### Three further exact origins
+
+The subsequent `e5-nerd-origin-joins.json` narrows the prior six-item component follow-up list. Three supplied Nerd glyph files now match immutable upstream source files byte for byte:
+
+| Component | Bytes | Versioned origin notice |
+| --- | ---: | --- |
+| Font Awesome Extension | 49,316 | [LICENCE at09d8024](https://github.com/AndreLZGava/font-awesome-extension/blob/09d80249058ee8018a45da30add4339289dbb466/LICENCE), MIT, Copyright2017 André Luiz Gava |
+| IEC Power Symbols | 3,168 | [LICENSE.txt at805536f](https://github.com/jloughry/Unicode/blob/805536fb6f93604da985d80e0c6b099f98f8b4d9/LICENSE.txt), MIT, Copyright2013 Joe Loughry |
+| Weather Icons | 99,564 | [README atbb80982](https://github.com/erikflowers/weather-icons/blob/bb80982bf1f43f2d57f9dd753e7413bf88beb9ed/README.md), separate icon-font/code/docs declarations and credits |
+
+Weather's exact font metadata names Erik Flowers and Lukas Bischoff; the README independently identifies both artists. Preserve that attribution alongside the supplied OFL, without inventing placeholder dates or reserved names. Extension's real notice uses British `LICENCE` spelling; the first license-filename filter omitted it, but inspecting the complete nine-entry tree found it. No missing-license conclusion was accepted from that filter. An initial Nerd root `README.md` lookup returned404; actual `readme.md` was discovered and read without changing assets.
+
+The full pinned font verifier passed with these three binary pairs and notices, while preserving the earlier Nerd/Geist correspondence. Nine offline fixtures passed: three new pair/ref checks plus six previous catalog checks. The nine fixtures are not product tests or publisher-signature verification.
+
+**Remaining mixed origins are concrete:** the Devicons generator selects upstreamv2.16.0 but also copies Vorillaz and fixed glyphs. Its modern primary MIT notice is pinned in the join catalog, but is not complete attribution for that mix. The legacy README calls1.8.1 a local name for a default-branch snapshot, not an actual release. Seti/Original combines distinct SVG sources (Original uses `_nf` suffixes); its font metadata reports3.3.0, not the aggregate Nerd3.4.0. Preserve these distinctions when reconciling the final two source-notice families. The generator was read only, never executed; its destructive build shell commands were not run. Aggregate transformation/installed notices and unrelated E5 decisions remain open.
+
 ## Geist
 
 Renderer and site files are byte-identical:69,436 bytes, SHA256 `e24cec106619c03f0b3519e31b9bc55e0d5e926b6a95b8d798cd8cef215b1505`. Their internal name table reports version1.800,973 glyphs and2024 Geist Project Authors; the checked-in site notice names2023 Vercel/basement.studio.

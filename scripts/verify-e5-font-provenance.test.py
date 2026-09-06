@@ -61,5 +61,35 @@ class ComponentNoticeTests(unittest.TestCase):
             self.run_catalog(CATALOG, -1)
 
 
+class OriginJoinTests(unittest.TestCase):
+    def setUp(self):
+        self.catalog = json.loads((Path(__file__).parent.parent / "docs/migration/e5-nerd-origin-joins.json").read_bytes())
+
+    def verify_mock(self, mismatch=False):
+        targets = {j["target"]["url"] for j in self.catalog["joins"]}
+
+        def fake_fetch(url, expected, size):
+            return (b"y" if mismatch and url in targets else b"x") * size
+
+        with patch.object(Path, "read_bytes", return_value=json.dumps(self.catalog).encode()):
+            with patch.object(provenance, "fetch_pinned", side_effect=fake_fetch):
+                return provenance.verify_origin_joins()
+
+    def test_three_matching_binary_pairs(self):
+        result = self.verify_mock()
+        self.assertEqual(len(result["joins"]), 3)
+        self.assertTrue(all(j["byteEqual"] for j in result["joins"]))
+
+    def test_different_binary_bytes_rejected(self):
+        with self.assertRaisesRegex(ValueError, "binary mismatch"):
+            self.verify_mock(mismatch=True)
+
+    def test_floating_upstream_ref_rejected(self):
+        entry = self.catalog["joins"][0]["target"]
+        entry["url"] = entry["url"].replace("09d80249058ee8018a45da30add4339289dbb466", "main")
+        with self.assertRaisesRegex(ValueError, "Unpinned"):
+            self.verify_mock()
+
+
 if __name__ == "__main__":
     unittest.main()

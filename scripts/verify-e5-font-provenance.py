@@ -169,6 +169,33 @@ def verify_component_notices():
     }
 
 
+def verify_origin_joins():
+    catalog_path = Path(__file__).resolve().parent.parent / "docs/migration/e5-nerd-origin-joins.json"
+    raw = catalog_path.read_bytes()
+    catalog = json.loads(raw)
+    joins = catalog["joins"]
+    if catalog["schemaVersion"] != 1 or catalog["nerdRevision"] != NERD_REVISION:
+        raise ValueError("Unexpected origin catalog revision")
+    if len(joins) != 3 or {j["id"] for j in joins} != {"font-awesome-extension", "iec-power", "weather-icons"}:
+        raise ValueError("Unexpected origin joins")
+    verified = []
+    for join in joins:
+        payloads = {}
+        for role in ["source", "target", "notice"]:
+            entry = join[role]
+            if not re.fullmatch(r"https://raw\.githubusercontent\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/[0-9a-f]{40}/[A-Za-z0-9_./-]+", entry["url"]) or ".." in entry["url"]:
+                raise ValueError("Unpinned origin URL")
+            if not isinstance(entry["bytes"], int) or not 0 < entry["bytes"] <= 2 * 1024 * 1024:
+                raise ValueError("Invalid origin size")
+            payloads[role] = fetch_pinned(entry["url"], entry["sha256"], entry["bytes"])
+            if len(payloads[role]) != entry["bytes"]:
+                raise ValueError("Origin length mismatch")
+        if payloads["source"] != payloads["target"]:
+            raise ValueError("Origin binary mismatch")
+        verified.append({"id": join["id"], "byteEqual": True, "noticeSha256": digest(payloads["notice"])})
+    return {"catalogSha256": digest(raw), "joins": verified, "remaining": catalog["remaining"]}
+
+
 def verify(source):
     versions = {name: importlib.metadata.version(name) for name in ["fonttools", "brotli", "zopfli"]}
     if versions != {"fonttools": "4.64.0", "brotli": "1.2.0", "zopfli": "0.4.3"}:
@@ -221,6 +248,7 @@ def verify(source):
             "declarations": declarations,
             "fontLogos": verify_font_logos_component(),
             "componentNotices": verify_component_notices(),
+            "originJoins": verify_origin_joins(),
             "finding": "Exact pinned TTF-to-WOFF2 reproduction; adjacent source OFL notice differs from upstream SymbolsOnly MIT declaration. Upstream root license/audit explicitly retains multiple glyph-source licenses; a single MIT or OFL label is not complete component notice accounting.",
         },
         "geist": {
