@@ -1,0 +1,61 @@
+{
+  "capsuleId": "mobile-relay-stream-failures",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "mobile/src/transport/mobile-relay-rpc-streams.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 6
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "mobile/src/transport/mobile-relay-rpc-streams.test.ts",
+      "role": "test",
+      "sha256": "6827d287fef5e1480e24da46ac3a1de7ae37c0398f41a4044db334ab35c84587"
+    },
+    {
+      "path": "mobile/src/transport/mobile-relay-rpc-streams.ts",
+      "role": "module",
+      "sha256": "85cf8a7573a8613da0ecc36023fa4eac8a50c7d69ccf132fe927b5a798181478"
+    },
+    {
+      "path": "mobile/src/transport/browser-screencast-protocol.ts",
+      "role": "module",
+      "sha256": "a46ddb6091b401eb4b7999c665a4e88bffebf43869cafe2eaf0b8a38057ca66d"
+    },
+    {
+      "path": "mobile/src/transport/rpc-client-terminal-binary-frame.ts",
+      "role": "module",
+      "sha256": "ebefb4a8dfb8c077d6c8c3998574cfd23a663e305dab1b3f42f5d83be4bfa214"
+    },
+    {
+      "path": "mobile/src/transport/rpc-client-terminal-subscription.ts",
+      "role": "module",
+      "sha256": "cd8264d10eb8be9e6f0d8e390eef91f3bf4d8554406a17571728c01ba4ec8fa8"
+    },
+    {
+      "path": "mobile/src/transport/terminal-stream-protocol.ts",
+      "role": "module",
+      "sha256": "4798024edb670617d9603e5468859a45392158fdab76a27d6929563ef33e06ad"
+    },
+    {
+      "path": "src/shared/native-chat-stream-unsubscribe.ts",
+      "role": "module",
+      "sha256": "5f2e9959a570730bba610107e07d0c40e47bdf4834b87fed6126ac85de2ef49b"
+    }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "mobile/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use the already installed original-root Vitest4.1.11 with explicit Node24.19.0. No dependency installation or source-tree writes.",
+    "Minimal Node capsule omits mobile setupFiles (IS_REACT_ACT_ENVIRONMENT only), react-test-renderer warning filtering, broad TS/TSX collection and oxc.tsconfig=false. Closure has no React/TSX/app aliases and no tsconfig is staged. This is not whole-mobile config or typecheck equivalence.",
+    "All six original assertion bodies and seven runtime test/module files are unchanged; type-only imports are erased, not replaced with product stubs."
+  ],
+  "isolationRationale": "Root read the entire test and stream manager plus all five transitive runtime modules. Only Vitest, in-memory maps/deferred Promises, binary decoders and pure unsubscribe builders. Original tests inject sendFrame/waitForConnected and never open sockets, devices, files, credentials, subprocesses or model providers. Preserve all original assertions and MIT notice; minimal config is not a security sandbox.",
+  "contract": "S-M3 source baseline for RPC error, wait rejection, failed send, queued cancellation, cleared session and throwing error listener. Does not test successful method-specific server cleanup, end-listener throws, real reconnect, E2EE or rewritten-product parity."
+}

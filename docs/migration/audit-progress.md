@@ -15,6 +15,8 @@ The authoritative detail remains parity-audit-gate-ledger.json and linked source
 
 ## Latest services checkpoint
 
+Subsequent source-regression check passed41 admitted capsules /286 original cases, zero failed/skipped, under Node24.19.0 and Vitest4.1.11 with three workers. Root reopened all results and checked208 staged hashes/139 distinct pinned files. The six newly admitted mobile relay failure cases are included in that rerun, not counted twice as new coverage. Cloud4.1.9 and renderer/dedicated-environment capsules remain separate. See source-regression-node-20260906.md. This changes baseline evidence, not audit acceptance or product fidelity.
+
 Root accepted19 immediate services/control-flow contracts with explicit corrections, verifying515 evidence records/323 pinned files/340 ranges,147 canonical relay rows and216 mobile receiver/allowlist joins. E5 overall stays open; the fifth Astra received a fresh final-reconciliation assignment, so five audit leads are active again (four E3, one E5). New original mutation-lease baseline passed5/5 under the admitted isolated cloud runner; no real cloud operation or candidate parity was tested. Audit delta0, still10/12=83.3%, medium-low confidence. Next milestone remains complete E3/E5 source reconciliation, followed by actual Sol implementation leads; no defensible completion ETA.
 
 ## Deadline assessment
