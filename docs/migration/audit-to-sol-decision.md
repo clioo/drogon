@@ -1,4 +1,11 @@
-# Audit → Sol: decisión pendiente
+# Audit → Sol: separación autorizada
+
+Carlos respondió **«autorizo»** a la pregunta de iniciar Sol en trabajo técnico
+independiente manteniendo bloqueadas publicación y decisiones de servicios.
+La excepción de fase queda aprobada el 6 de septiembre de 2026. Las secciones
+de propuesta/espera de abajo son el registro previo, no el estado vigente.
+E5 continúa abierto; no se concedieron derechos ni se eligió una política de
+servicios. El reparto operativo está en `sol-test-wave.md`.
 
 Estado al 6 de septiembre de 2026, tras `f33bf85`. Este documento prepara el
 relevo; no lo autoriza ni cambia los gates acordados.

@@ -1,5 +1,11 @@
 # Plan de reescritura con fidelidad completa
 
+**Excepción autorizada, 6 de septiembre:** Carlos permite iniciar trabajo técnico
+independiente con Sol sin esperar las decisiones de publicación/recursos/servicios
+de E5. Estas quedan bloqueadas y E5 no se declara cerrado. Esta decisión sustituye
+la secuencia histórica de espera completa descrita abajo, no los gates tests-first
+ni el alcance. Véanse `audit-to-sol-decision.md` y `sol-test-wave.md`.
+
 Estado: planificación en curso, 2026-09-05. Este documento sustituye el alcance
 reducido de «foundation/MVP», **no** declara paridad conseguida. No empieza otra
 ola de features hasta cerrar el inventario y el contrato de aceptación.

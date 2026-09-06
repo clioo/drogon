@@ -2,6 +2,12 @@
   "schema": "drogon.parity-audit-gate-ledger/3",
   "status": "coordinator-reviewed-checkpoint-not-complete-audit",
   "auditClosed": false,
+  "technicalPhaseException": {
+    "authorizedBy": "Carlos: autorizo, replying to the explicit technical/publication separation question",
+    "date": "2026-09-06",
+    "scope": "Actual Sol leads and bounded approved workers may begin independent technical work while E5 publication/resources/services remain held. Supersedes historical complete-E5-before-Sol wording in this ledger, not E5 acceptance, tests-first or final parity.",
+    "evidence": "audit-to-sol-decision.md; sol-test-wave.md"
+  },
   "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
   "correction": "Supersedes worker v1/v2. Removes stale active assignments, missing references, undefined owners and invented blocker counts; separates enumeration from execution. Existing required behavior is never scoped out.",
   "acceptedMetadata": [

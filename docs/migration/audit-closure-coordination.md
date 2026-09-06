@@ -1,5 +1,7 @@
 # Five-lead audit closure assignment
 
+**Current phase override, 2026-09-06:** Carlos explicitly authorized the technical/publication separation in `audit-to-sol-decision.md`. Sol technical work may start under finite assignments while E5 publication/resources/services stay held. This supersedes the historical complete-E5 prerequisite below, not tests-first or full-product acceptance. All audit Tasks are settled; see `sol-test-wave.md` for the new phase rather than reusing their lifecycle authority.
+
 User-approved direction, 2026-09-06. Supersedes the older three-worker flat audit scheduling, not the Sol implementation phase. It does not change the scope or claim the Codex goal text was programmatically replaced. The24-hour target is flexible; preserve full fidelity.
 
 ## Mandatory phase transition
