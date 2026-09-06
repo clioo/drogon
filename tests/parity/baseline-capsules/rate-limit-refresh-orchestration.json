@@ -1,0 +1,186 @@
+{
+  "capsuleId": "rate-limit-refresh-orchestration",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/main/rate-limits/service-refresh-orchestration.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 17
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "src/main/rate-limits/service-refresh-orchestration.test.ts",
+      "role": "test",
+      "sha256": "4924cd05e8704adb35f68bfd2bc12ad1be17802458ce5711bf49a2cf532db080"
+    },
+    {
+      "path": "src/main/rate-limits/rate-limit-service-test-harness.ts",
+      "role": "module",
+      "sha256": "52189ad16b711c3f2253b182fa0ead37c7dca471bd7e8ee975691140c5f26d1b"
+    },
+    {
+      "path": "src/main/rate-limits/service.ts",
+      "role": "module",
+      "sha256": "ca6ac43533bc479d3a48fabe453ab4b0ff289452dce01df2bc3d114d59231f5e"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-state.ts",
+      "role": "module",
+      "sha256": "dfa36fe5b8be05a00634d54a5ac021764fcd666b757b5ccfd33352573d861da7"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-account-refresh.ts",
+      "role": "module",
+      "sha256": "2dbf82de770226ad908245a74f5fd3f6383aa86d3a245a7acbd0966b56866b7d"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-result-policy.ts",
+      "role": "module",
+      "sha256": "c4a4398f66c2cf230eb557a97f0cebb11e3e3fc084daaaa6f149e7fa59767343"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-full-cycle-application.ts",
+      "role": "module",
+      "sha256": "2441fabc8f5f6a0c2a764cc083a2527da2ec6136171ee1117b9aac683f025eec"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-provider-cycles.ts",
+      "role": "module",
+      "sha256": "2e53ffb91bfeece73726daffeca1157439e280445ef90267d95eb6c9340730a2"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-inactive-accounts.ts",
+      "role": "module",
+      "sha256": "8f789f49e4dcd38c54792ab8416871f44057816d80b85b8e8b4887933406a870"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-fetch-control.ts",
+      "role": "module",
+      "sha256": "f1bb006cc82991377f1f273e9129c27bfccc867d10c588d4de58a9981f649c80"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-fetch-policy.ts",
+      "role": "module",
+      "sha256": "20c2b699f26a906f35eaa497e9ae0cfeded21e3ed3bcdf1539b34bb6643ac23e"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-fetch-queue.ts",
+      "role": "module",
+      "sha256": "69801f8ad8de7d0133b4408d015e464ae0523030434e2d709364a72c9361d150"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-full-cycle-preparation.ts",
+      "role": "module",
+      "sha256": "c1f1b4792f5d74b6d5535751c2b7aa2a4ef265073d89dac0c2e182d04ef23f14"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-fetch-targets.ts",
+      "role": "module",
+      "sha256": "75f0b6bc0e1669e2dfe0412c096f641d677af7a80834c0295ee49985f5e89b55"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-types.ts",
+      "role": "module",
+      "sha256": "02f467d328902a6c1cb8d74bf3e56a236b6fe5a494a9d931654aadc8b9da5811"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-polling.ts",
+      "role": "module",
+      "sha256": "a4d6ba8a090090de8642df05ac5992b6b3c4fc201b2e8fb504e05b8d826b9d8b"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-configuration.ts",
+      "role": "module",
+      "sha256": "158257b4874109e66ec7175bf15488672a1d2dd29cd9abf1a8db18c19426f31c"
+    },
+    {
+      "path": "src/main/rate-limits/claude-usage-window.ts",
+      "role": "module",
+      "sha256": "77e85290d6c42505ba5e8901df6d08945c795df9cd13c2673429e11cb2360508"
+    },
+    {
+      "path": "src/main/rate-limits/antigravity-usage-mirror.ts",
+      "role": "module",
+      "sha256": "0a00856d7f84acdb486b21b428ba85e80fa5b7e4d2f1fb0674da8123bb956621"
+    },
+    {
+      "path": "src/main/rate-limits/claude-fetcher.ts",
+      "role": "module",
+      "sha256": "4c78c05e09531a165b96e6ab05d7291893ba37bf5f04bd8c67cefaf3e1941ba3"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher.ts",
+      "role": "module",
+      "sha256": "9c6f0a9f7f244478c55f41bbcb8dd65ea6ea380ef6317aec6cb6228a93fa5444"
+    },
+    {
+      "path": "src/main/rate-limits/gemini-usage-fetcher.ts",
+      "role": "module",
+      "sha256": "1949bd3030b076024a532f0d4be90b8902e589fd66d8765d1510ab33cb6d9ead"
+    },
+    {
+      "path": "src/main/rate-limits/kimi-fetcher.ts",
+      "role": "module",
+      "sha256": "b96a373e6a22155c8aee2e31d7cec5729620bbe7406fb258f340df9653576099"
+    },
+    {
+      "path": "src/main/rate-limits/minimax-fetcher.ts",
+      "role": "module",
+      "sha256": "a44e2ada134d3260e2bdf22aaff338ec29dae47c9edecc8b374659436c031d7c"
+    },
+    {
+      "path": "src/main/rate-limits/grok-fetcher.ts",
+      "role": "module",
+      "sha256": "7b3e1af98f5c57ca62582608db2607c153203a2a04daab25c1bd457e0251c3e6"
+    },
+    {
+      "path": "src/main/rate-limits/grok-auth.ts",
+      "role": "module",
+      "sha256": "c5f1f3cb79cba165a47f9ef9ac4176b777e6475f0d57ea4dc58d552495ed948d"
+    },
+    {
+      "path": "src/main/rate-limits/opencode-go-usage-fetcher.ts",
+      "role": "module",
+      "sha256": "768e3258fa3ac07f7563fce9ce2e2bee108aede6c2ef919b77f7f1d1542ca25c"
+    },
+    {
+      "path": "src/main/minimax/minimax-cookie-store.ts",
+      "role": "module",
+      "sha256": "a32478895adc2040c3446b886e590063f3d0e9ee8ce17eecbf3d9c439f3f7ec8"
+    },
+    {
+      "path": "src/main/claude-accounts/runtime-selection.ts",
+      "role": "module",
+      "sha256": "fed23a04cf160d0c8eb73e417babd43cc72923bbdd7116ef45c6c59945e62c61"
+    },
+    {
+      "path": "src/main/codex-accounts/runtime-selection.ts",
+      "role": "module",
+      "sha256": "370be038141ec7fffed7cdc8907fe6890edc41d8935d1cf1f1971068633be889"
+    },
+    {
+      "path": "src/shared/codex-selection-lane.ts",
+      "role": "module",
+      "sha256": "0a2b193931ae81dcc62756ccc1ffa31522d6b77f4f6afe03d064c06aee6458b3"
+    },
+    {
+      "path": "src/shared/rate-limit-types.ts",
+      "role": "module",
+      "sha256": "456b32b23c91972e5910be9b11efa9ec7b55276873e388e892eb0d717236446c"
+    }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 under explicit Node24.19.0; minimal Node capsule, no original-source writes or install.",
+    "Omit original renderer aliases, happy-dom/host-port setup, feature-wall define and GC/webstorage flags: this entire test uses no DOM/canvas/ports/feature gate/GC-sensitive assertions. This is not full source configuration or typecheck equivalence.",
+    "All 17 original assertions and declared whole files stay unchanged. Nine provider/auth/cookie entry modules are present for resolution but hoisted original vi.mock factories replace their execution; omitted transitive provider/native dependencies are not runtime coverage."
+  ],
+  "isolationRationale": "Root read the entire 17-case original test, shared test harness, all14 service layers, service entry, Claude window mapper, Antigravity mirror and runtime selection implementations. Original hoisted mocks replace all seven provider fetchers, Grok auth and MiniMax cookie I/O before service construction. Real service policy, queues, state and AbortControllers run in memory; tests never call start/attach or real providers, credentials, reset credit, sockets, native processes or inference. Whole mocked entry files are copied for resolution only, not asserted source-review coverage. Minimal config is not an OS sandbox.",
+  "contract": "Original P-ACCOUNT-STATE service orchestration baseline: stale-data retention, forced refresh/replayed subscriptions, queued refresh, provider failure isolation, progressive Grok publication, abort signals, config invalidation and resolved target forwarding. Does not cover every queue interleaving, actual provider schema/credential behavior, real cancellation, native/SSH operation, reset mutation or rewritten-product parity."
+}

@@ -8,7 +8,13 @@ The user's latest instruction before sleeping is explicit: **these five Astra ar
 
 This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoints below are not current state; consult audit-semantic-followups.md and audit-progress.md. No tool-supported objective rewrite was performed: the old Codex goal's flat-worker text is superseded by this later user direction, not a reason to complete or replace an unfinished goal.
 
-## Current checkpoint — E5 final source reconciliation
+## Current checkpoint — E3 platform final local joins
+
+Platform result Task `task_d472a9fbf442 / ctx_76d7be38749c` delivered126 method records and explicitly failed its full source-closure objective because eight finite local/cross-owner obligations remain. Root processed that actual outcome, not a synthetic success, and officially released it: receipt `0d8e3f09-d4ca-44e6-8de9-947c5bf2c513`, retained/external_terminal/processAction none. The delivered report and leaf artifacts stay frozen, pending full independent acceptance.
+
+Fresh Task `task_487675cb5877 / ctx_9b21fa561b55` reuses exact Astra terminal `term_628055f8-e9bc-4f00-995c-0f119af80751` after release, receipt `bdf8c349-2bf7-4721-9f8c-0801aa6d169d`, ready/input_accepted, no setup/residual resources. It writes only `audit-closure/e3-bridge/result-platform/final-local.md/json` and `final-local-leaf/`. Parent owns AI Vault parsers/cache, emulator result producers and exact cross-owner reconciliation; at most one approved Claude Sonnet5 medium child may own computer native result producers/cache/permissions, with the established per-invocation flag and no descendants. Original126 rows are not a new census. Root supplied `rate-limit-source-review.md/json` for the account-cycle join; speech/download evidence remains an explicit E5 join. Receipt null model fields do not relabel this retained Astra process as Sol. Five audit leads remain, with other four assignments unchanged.
+
+## E5 final source reconciliation
 
 After independent acceptance of the19 bounded services contracts (not full E5), root created `task_9f72f8ecff7a` and reused the exact released E5 Astra terminal `term_86e2b660-83d2-4440-811e-50467ae6fed8`. New Dispatch `ctx_8dbbbe469ed9` returned ready/input_accepted, no setup/residual resources, receipt `b52757b1-fd4c-4eca-ba44-2a179a59a29c`. Existing-terminal receipt model fields are null; actual Astra launch provenance is retained from the earlier verified session, not inferred from those null fields. Five area assignments are active again: four E3 result/consumer assignments plus this E5 consolidation.
 
