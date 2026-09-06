@@ -3,6 +3,8 @@
 //! SQLite database and `portable-pty` sessions. `drogond` owns framing,
 //! auth and the transport; this crate never sees a raw socket.
 
+pub mod claim_identity;
+
 mod db;
 mod error;
 mod harness;

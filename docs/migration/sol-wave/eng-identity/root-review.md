@@ -1,5 +1,41 @@
 # Root acceptance — identity/lease test preparation
 
+## Public native claim registration: 2026-09-06, 16:45 UTC
+
+Root accepted the settled Windows review with its explicit native-platform gap,
+then registered `drogon_core::claim_identity`. The production Windows seam remains
+private and platform-gated. Public behavior tests now import the actual library;
+only the private Windows string-normalization seam remains path-included for
+macOS tests. The first registration check failed at compilation because a test
+retained a module-qualified type without importing the module; adding the module
+import fixed that setup error. It is not a behavioral RED.
+
+Independent checks after registration and targeted formatting:
+
+- `cargo test -p drogon-core --test claim_identity --locked`: 39/39 passed.
+- `cargo check --workspace --locked`: passed on the current working tree.
+- Actual pinned source signer verifier: 20/20 vectors, ten source/license files
+  verified; vector digest remains `5c7c6df9ffa53f0b63a1d65dd299f91e404da26c326f197aa0f62c474d73c949`.
+- Targeted five-file `rustfmt --check` and `git diff --check`: passed.
+
+Post-registration SHA256 values (historical leaf hashes remain unchanged in their
+reports): `mod.rs` = `304b64acf6fa3fb68463f50f62d1e2c71fc9dc1372bf983877bf76a5914de328`;
+`tests/claim_identity.rs` = `3019b62115c516c9db214c3517daa5af6de0bebaf11d35af263b9b45429a7e74`.
+The other three production files retain the settled lead-review hashes.
+
+This admits a tested native library slice, not durable leases, RPC wiring,
+Windows/Linux execution, a packaged installation, or full session parity. Three
+Windows filesystem tests remain unexecuted. No user application was restarted.
+Unrelated dirty changes were preserved; only the core module-registration hunk
+is admitted from the existing `lib.rs` diff.
+
+The next provider-record Task is now running, superseding the queued status below:
+parent `task_3e6a87184b23` / `ctx_0477d3c64e87`; Sol delegated at depth two to Kimi
+Run `run_5ef473a02da0`, Task `task_1cddc148cebf`, Dispatch `ctx_ae31d647c99d`.
+The verified exact terminal/incarnation was reused with ready/input-accepted
+receipt and live activity. Source, tests and implementation remain leaf-owned;
+Sol directs/reviews, root integrates. Audit stays 11/12 (91.7%), change +0.
+
 ## Independent follow-up: 2026-09-06, 16:30 UTC
 
 Root reran the delivered native claim suite: 39 passed, zero failed/ignored on

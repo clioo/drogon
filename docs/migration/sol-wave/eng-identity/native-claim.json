@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "status": "native_module_accepted_pending_root_integration",
+  "source": {
+    "repository": "/Users/carlos/Documents/Drogon-mentu-session",
+    "revision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "runnerCwdUsed": false,
+    "writeAccessUsed": false,
+    "baseline": {
+      "cases": 3,
+      "assertionEvaluations": 7,
+      "admitted": true
+    }
+  },
+  "worker": {
+    "provider": "kimi-for-coding/kimi-for-coding",
+    "client": "OpenCode 1.18.29",
+    "permissionMode": "--auto",
+    "smokeResponse": "KIMI_SMOKE_OK",
+    "terminal": "term_e6ecb4fa-9345-4e40-8806-136dc6f67f81",
+    "incarnation": "6a053fdb-744a-4d93-ac10-3f97cbaa63b8",
+    "runId": "run_515d60c7b482",
+    "tasks": [
+      {
+        "taskId": "task_e34dcfe25a76",
+        "dispatchId": "ctx_3bfc08a56fa1",
+        "depth": 2,
+        "outcome": "succeeded",
+        "release": "retained_no_owned_resource"
+      },
+      {
+        "taskId": "task_e9b5fdceb064",
+        "dispatchId": "ctx_2c050b7c89ad",
+        "depth": 2,
+        "outcome": "succeeded",
+        "release": "retained_no_owned_resource"
+      },
+      {
+        "taskId": "task_87c328c2dc5d",
+        "dispatchId": "ctx_5faa92f375b4",
+        "depth": 2,
+        "outcome": "succeeded",
+        "release": "retained_no_owned_resource"
+      }
+    ],
+    "uniqueWorkers": 1,
+    "delegatedByChild": false
+  },
+  "testsFirst": {
+    "setup": {
+      "classification": "compile_import_setup_failure_not_red",
+      "collectedBehavioralTests": 0
+    },
+    "red": {
+      "classification": "genuine_behavioral_red_against_compiling_stub",
+      "total": 32,
+      "passed": 8,
+      "failed": 24,
+      "skipped": 0
+    },
+    "green": {
+      "classification": "green_against_production_rust_module",
+      "total": 32,
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "command": "cargo test -p drogon-core --test claim_identity --locked",
+      "reviewExitCode": 0,
+      "reviewDurationSeconds": 0.52
+    },
+    "nodeReferenceVectors": 20,
+    "sourceCasesMapped": 3,
+    "sourceAssertionEvaluationsMapped": 7
+  },
+  "review": {
+    "rustfmtCommand": "rustfmt --edition 2024 --check crates/drogon-core/src/claim_identity/mod.rs crates/drogon-core/src/claim_identity/resume.rs crates/drogon-core/src/claim_identity/signer.rs crates/drogon-core/tests/claim_identity.rs",
+    "rustfmtExitCode": 0,
+    "fixtureHygiene": "RAII_owned_no_intentional_leaks",
+    "stubsTodosIgnoredTests": 0,
+    "hashes": {
+      "crates/drogon-core/src/claim_identity/mod.rs": "bc6f45af9753a6a6e2149f9252101d20145da46e48dbc8d848d9d14bae7d34f9",
+      "crates/drogon-core/src/claim_identity/resume.rs": "4b0a00ea7dee39bbd5f2850d0fcc634bfc0a0c6c29b90d207c6f2d173fe95d54",
+      "crates/drogon-core/src/claim_identity/signer.rs": "4713d68a7c95bf0359426578bd227a1144c855a9e40313c66b0c78119b36471f",
+      "crates/drogon-core/tests/claim_identity.rs": "a15ed9638d4f8c81e1e567c6a9850ee3ccea48d888fbde5c00fce8f312fd463e",
+      "tests/parity/ports/WP-ENG-RUNTIME/native-claim-identity/reference-vectors/generate-vectors.mjs": "88251fb139d8691380f27a0720018c4afb5a3823e8836afa8ada233169094b2e",
+      "tests/parity/ports/WP-ENG-RUNTIME/native-claim-identity/reference-vectors/vectors.json": "5c7c6df9ffa53f0b63a1d65dd299f91e404da26c326f197aa0f62c474d73c949"
+    }
+  },
+  "parity": {
+    "sourceBaseline": "admitted",
+    "nativeModule": "accepted",
+    "integratedCandidate": "pending_root_exports_wiring_and_acceptance",
+    "fullSessionParityClaimed": false
+  },
+  "architecture": {
+    "durableOwnershipAndLeases": "rust_execution_host",
+    "parallelStatefulTypeScriptBackendAccepted": false,
+    "rootOwnedRemaining": [
+      "library export registration",
+      "callers and RPC/protocol wiring",
+      "durable lease capability",
+      "provider-handle transitions",
+      "integration and packaged acceptance",
+      "Git and installation"
+    ]
+  },
+  "processDeviation": {
+    "observed": true,
+    "description": "first Kimi pass invoked read-only git status and rev-parse despite the no-Git rule",
+    "usedAsCleanlinessProof": false,
+    "writeSideGitOperation": false,
+    "furtherGitCommands": false
+  },
+  "audit": {
+    "closedGroups": 11,
+    "denominator": 12,
+    "percent": 91.7,
+    "confidence": "medium",
+    "change": 0,
+    "nextMilestone": "root registration and versioned integration of the native claim module",
+    "risk24Hours": "high"
+  },
+  "childReport": "tests/parity/ports/WP-ENG-RUNTIME/native-claim-identity/child-report.md"
+}
