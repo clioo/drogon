@@ -58,13 +58,21 @@ exhaustivos. Sus resultados se consolidan en un registro canónico de capacidade
 | Auditoría | Responsable actual | Salida |
 | --- | --- | --- |
 | UI, navegación, formularios, menús, atajos y estados | Claude Sonnet 5 | `parity-ui-audit.md` |
-| CLI pública, skills y orquestación completa | GLM-5.3-Flash recupera el censo; DeepSeek pausado por cuota | `parity-cli-audit.md`, `parity-source-contracts.json` |
+| CLI pública, skills y orquestación completa | Claude Sonnet 5 corrige el censo acotado de registros; intento GLM cerrado y conservado | `parity-cli-audit.md`, `parity-source-contracts.json` |
 | Plataformas, preferencias, contratos y servicios | Muse Spark 1.3 Contributor / OpenCode Go | `parity-platform-audit.md` |
 | Cambios Drogon: Mentu, Bots, Meetings, marca y pendientes | GLM-5.3-Flash / Z.AI Coding Plan | `parity-drogon-delta-audit.md` |
 | Consolidación, contradicciones, capturas y aceptación | Coordinador | Este plan y registro de evidencia |
 | Censo reproducible de suites/tests/configs/fixtures | Muse Spark corrige y valida el censo inicial de GLM | `parity-source-tests.json`, `parity-test-inventory.md` |
 | Contratos completos interfaz/motor, canales y registros RPC | Claude Sonnet 5 | `parity-source-bridges.json`, `parity-bridge-enumeration.md` |
 | Portabilidad de assertions y contrato de doble ejecución | Muse Spark 1.3 Contributor | `parity-test-porting.md` |
+| Ajustes/atajos y propiedades persistidas | Muse Spark 1.3 Contributor | `parity-settings-keybindings.{json,md}`; propiedades en auditoría separada |
+| Catálogo de harnesses y sus registros de capacidades | Claude Sonnet 5 | `parity-harness-catalog.{json,md}` en preparación |
+
+Los catálogos de ajustes/atajos y las 28 fichas UI son checkpoints de fuente,
+no un inventario completo aceptado ni pruebas de funcionamiento. La matriz de
+runners es un índice de referencias con ejemplos pendientes de concretar;
+ninguna de sus filas es despachable todavía. El progreso y las correcciones
+de afirmaciones anteriores se registran en `tests-first-checkpoint.md`.
 
 Antes de congelar el registro hay que reconciliar: comandos/help/flags y
 skill-guides; rutas, menús y atajos; preload/IPC/RPC; preferencias persistidas;
@@ -315,8 +323,14 @@ Capturas de la instancia personal son referencias locales, no artefactos para
 el repositorio público. No publicar nombres de proyectos, conversaciones,
 credenciales ni historial. Tests nuevos: perfiles y repos de fixture aislados,
 Electron/Playwright CDP. No reiniciar la instancia personal para habilitar CDP.
-La captura solicitada el 5 de septiembre quedó bloqueada por permiso de
-Accesibilidad; no se obtuvo imagen ni se cambió ningún permiso.
+El intento inicial en la instancia personal quedó bloqueado por permiso de
+Accesibilidad; no se cambió ese permiso. Posteriormente sí se obtuvieron
+capturas por Electron/Playwright de una copia independiente del commit fijado,
+con perfil sintético y cinco protecciones de fixture documentadas en
+`parity-reference-launch-audit.md`. Hay referencias de Bots y ajustes bajo
+`reference-captures/`; no son capturas de aceptación de la reescritura. El
+recorrido adicional de Mentu mostró un runtime ausente en esa copia y exigió
+limpieza manual del daemon identificado: no prueba ejecución ni cierre sano.
 
 Matriz obligatoria por capacidad aplicable: macOS/Linux/Windows; local/SSH/WSL;
 folder/Git; claro/oscuro; ancho/estrecho; ratón/teclado/IME; éxito/error/retry;

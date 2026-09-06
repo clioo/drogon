@@ -391,6 +391,48 @@ catalogs, separate from the active CLI writer. The completed runner matrix
 v2 still contains abbreviated command strings and is an unaccepted source
 index, not a runnable plan. No hierarchy or next feature wave started.
 
+## Metadata checkpoints independently checked after 00:00 UTC, September 6
+
+The settings/keybinding checkpoint resolves 35 static navigation targets,
+3 intents, 88 core keybinding IDs and a rule generating 36 agent-tab IDs.
+The 124 definition count is a static catalog count, not runtime visibility,
+enabled shortcuts or successful interactions; plugin contributions remain
+open-ended. Coordinator independently rehashed all 15 cited source files,
+compared all 88 core IDs with the four source shards and checked every ID's
+reported source line. All matched. Chord matching, normalization, persistence
+and platform execution were not tested by these metadata checks.
+
+The corrected UI checkpoint has 28 cards, 33 test-file citations (32 tagged
+assertion-titles-read and one path-existence-only), and zero executed tests.
+Coordinator independently checked those counts and each cited path's existence.
+This accepts a bounded, explicitly partial source map, not all assertion bodies
+or 100% UI coverage. Existing behavior remains required during migration;
+an undecided implementation strategy does not authorize feature deferral.
+
+The runner matrix v2 still falsely described all entries as exact commands.
+Coordinator changed it to schema v3, `source-index-draft-not-executable`,
+renamed `exactCommands` to `entryExamples`, marked every lane non-dispatchable
+and documented remaining abbreviated/placeholder entries. It is retained as
+a navigation index, not executable runner cards or closure of the 14 gaps.
+
+CLI Task `task_5aa1f6ffe74a` delivered 234 source command records, but review
+found dangling-symlink/output confinement and provenance-guard problems.
+Same-terminal correction Task `task_bc77ef3e3df5` / `ctx_33a5254ca61c` now owns
+only the four CLI census artifacts. The exact Node 24.19.0 runtime path was
+provided; the worker's earlier claim that it was unavailable was incorrect.
+Its initial nine fixture passes on Node 26 are not final acceptance.
+
+Two independent flat follow-ups have accepted dispatch receipts: Muse Task
+`task_758e9d321196` / `ctx_c5f1863c77e4` for settings properties and Sonnet Task
+`task_249f2d45704e` / `ctx_beaa45df2b02` for harness catalog reconciliation.
+They own separate new documents, not implementation or shared source edits.
+UI/settings prior deliveries were settled and released before reuse; Orca
+retained their externally-created terminals without any process action.
+
+Worktree/PR isolation remains approved for subsequent coherent blocks. No
+active writer was relocated, no Sol hierarchy enabled, and no feature wave
+or preview installation was accepted in this checkpoint.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
