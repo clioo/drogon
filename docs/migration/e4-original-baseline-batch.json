@@ -1,0 +1,396 @@
+{
+  "schema": "drogon.original-baseline-batch/1",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "date": "2026-09-06",
+  "runtime": {
+    "node": "v24.19.0",
+    "vitest": "4.1.11",
+    "platform": "darwin",
+    "arch": "arm64",
+    "rawJSONAvailableInSameNodeBinary": true,
+    "branchInstrumentation": false
+  },
+  "scope": "Five unchanged original suites; not full source suite, candidate behavioral RED/GREEN, real filesystem race, real ACL, OS or product acceptance.",
+  "counts": {
+    "files": 5,
+    "tests": 24,
+    "passed": 24,
+    "failed": 0,
+    "pending": 0,
+    "todo": 0
+  },
+  "runs": [
+    {
+      "capsuleId": "github-repository-identity",
+      "manifestPath": "tests/parity/baseline-capsules/github-repository-identity.json",
+      "manifestSha256": "6454ff684b1fcead03366993ac89ae544ad8920bce06d9eb2131e36f8bbb98b3",
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-github-repository-identity-MVHTtd",
+      "stagedFiles": [
+        {
+          "path": "src/shared/github/repository-identity-key.test.ts",
+          "role": "test",
+          "sha256": "2a50bd0267389c62476ef85a52bd6a394dcc89ec7b2c8d2a21bbfe46dc66594b"
+        },
+        {
+          "path": "src/shared/github/repository-identity-key.ts",
+          "role": "module",
+          "sha256": "755c06306f7f614aa7695d2f877117f8c5b7c03176bada531bff7b5a2f953416"
+        }
+      ],
+      "license": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "execution": {
+        "mode": "execute",
+        "ok": true,
+        "problems": [],
+        "approvedManifestSha256": "6454ff684b1fcead03366993ac89ae544ad8920bce06d9eb2131e36f8bbb98b3",
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "timedOut": false,
+        "exitCode": 0,
+        "signal": null,
+        "testCounts": {
+          "numTotalTests": 1,
+          "numPassedTests": 1,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "expectedTestCounts": {
+          "files": 1,
+          "tests": 1
+        }
+      },
+      "root": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-github-repository-identity-MVHTtd",
+      "resultSha256": "5c64ffeeb1b66df70a3ffbed7c4802f0a59f80ac74c55d1bdfbd72cd73163f41",
+      "success": true,
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "pending": 0,
+      "todo": 0,
+      "assertions": [
+        {
+          "name": "GitHub repository identity normalizes case and harmless surrounding whitespace without merging GHES hosts",
+          "status": "passed"
+        }
+      ],
+      "receiptSha256": "8b42cbd2984d41252bbf5fabb35d97b92e869da329d3b969d493b9c7598adf03"
+    },
+    {
+      "capsuleId": "json-text-structure",
+      "manifestPath": "tests/parity/baseline-capsules/json-text-structure.json",
+      "manifestSha256": "4be5caa37e8763358cc113cc2df8d82a200c01e5b297c5e09d309a48510d10ea",
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-json-text-structure-PHlbvL",
+      "stagedFiles": [
+        {
+          "path": "src/shared/json-text-structure-limit.test.ts",
+          "role": "test",
+          "sha256": "a3306a92332fddc40b14045cab307ae7b9905410bb88ad2306d0c8e96be298b9"
+        },
+        {
+          "path": "src/shared/json-text-structure-limit.ts",
+          "role": "module",
+          "sha256": "d2c02e311eda500d935589f167106890cec715a141d4976dc89860c0dc6b6bfd"
+        }
+      ],
+      "license": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "execution": {
+        "mode": "execute",
+        "ok": true,
+        "problems": [],
+        "approvedManifestSha256": "4be5caa37e8763358cc113cc2df8d82a200c01e5b297c5e09d309a48510d10ea",
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "timedOut": false,
+        "exitCode": 0,
+        "signal": null,
+        "testCounts": {
+          "numTotalTests": 3,
+          "numPassedTests": 3,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "expectedTestCounts": {
+          "files": 1,
+          "tests": 3
+        }
+      },
+      "root": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-json-text-structure-PHlbvL",
+      "resultSha256": "bfdcbc42f50fc9bf0a9e0f471d2e7f057eebb42fbab44e33664d5bfd011ab355",
+      "success": true,
+      "tests": 3,
+      "passed": 3,
+      "failed": 0,
+      "pending": 0,
+      "todo": 0,
+      "assertions": [
+        {
+          "name": "JSON text structure admission preserves exact token and nesting boundaries",
+          "status": "passed"
+        },
+        {
+          "name": "JSON text structure admission rejects token and nesting limit +1",
+          "status": "passed"
+        },
+        {
+          "name": "JSON text structure admission does not count escaped structural characters inside strings",
+          "status": "passed"
+        }
+      ],
+      "receiptSha256": "0e64f397de4d75e2141f4c0d4e94fcdcf8cc2fcc4c251ab88143566d17f5bfb0"
+    },
+    {
+      "capsuleId": "bounded-node-file-read",
+      "manifestPath": "tests/parity/baseline-capsules/bounded-node-file-read.json",
+      "manifestSha256": "f54fa1b6bb79d8b8eed43eed9604357855a75e51988fcd486868fe90f5bd6b65",
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-bounded-node-file-read-7eeTVw",
+      "stagedFiles": [
+        {
+          "path": "src/shared/node-bounded-file-reader.test.ts",
+          "role": "test",
+          "sha256": "20642738f6395a46372599e794ff829ed7705dc3e0a0ae53a8d550a2e7d39aaf"
+        },
+        {
+          "path": "src/shared/node-bounded-file-reader.ts",
+          "role": "module",
+          "sha256": "2cffa451b72d059226e0c2d4b6d2a5203cb8ddafb358d5e828dcd3436d197ecb"
+        }
+      ],
+      "license": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "execution": {
+        "mode": "execute",
+        "ok": true,
+        "problems": [],
+        "approvedManifestSha256": "f54fa1b6bb79d8b8eed43eed9604357855a75e51988fcd486868fe90f5bd6b65",
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "timedOut": false,
+        "exitCode": 0,
+        "signal": null,
+        "testCounts": {
+          "numTotalTests": 7,
+          "numPassedTests": 7,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "expectedTestCounts": {
+          "files": 1,
+          "tests": 7
+        }
+      },
+      "root": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-bounded-node-file-read-7eeTVw",
+      "resultSha256": "4005da4a127cf54fe9b7fe1b3a095d89e95adab52e5d97f4ba6db83008e9ecb3",
+      "success": true,
+      "tests": 7,
+      "passed": 7,
+      "failed": 0,
+      "pending": 0,
+      "todo": 0,
+      "assertions": [
+        {
+          "name": "readNodeFileWithinLimit reads a stable file and closes its descriptor",
+          "status": "passed"
+        },
+        {
+          "name": "readNodeFileWithinLimit rejects an oversized initial size before reading file bytes",
+          "status": "passed"
+        },
+        {
+          "name": "readNodeFileWithinLimit includes growth that remains within the read limit",
+          "status": "passed"
+        },
+        {
+          "name": "readNodeFileWithinLimit reads proc-style content whose reported file size is zero",
+          "status": "passed"
+        },
+        {
+          "name": "readNodeFileWithinLimit rejects growth beyond the limit without allocating the oversized content",
+          "status": "passed"
+        },
+        {
+          "name": "readNodeFileWithinLimit closes its descriptor when 'stat' fails",
+          "status": "passed"
+        },
+        {
+          "name": "readNodeFileWithinLimit closes its descriptor when 'read' fails",
+          "status": "passed"
+        }
+      ],
+      "receiptSha256": "b19c1305af52bce945e3e018fb9697eca44b8373236dc8470ff5c74ce11c895f"
+    },
+    {
+      "capsuleId": "bounded-json-serialization",
+      "manifestPath": "tests/parity/baseline-capsules/bounded-json-serialization.json",
+      "manifestSha256": "73d6a33428d1586dad2c48b1a83af0faa51e6fc97b94f397b3509b6b7c58fa1f",
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-bounded-json-serialization-wKojPb",
+      "stagedFiles": [
+        {
+          "path": "src/shared/node-bounded-json-stringify.test.ts",
+          "role": "test",
+          "sha256": "d1f1df524d224477dbb1ead31b4d30a4a63480b9e22826b65acc803c881205fb"
+        },
+        {
+          "path": "src/shared/node-bounded-json-stringify.ts",
+          "role": "module",
+          "sha256": "fcadabc537aa3125d1ee514026ecca5b8e2a76aabca7e29f08d3d35008001622"
+        }
+      ],
+      "license": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "execution": {
+        "mode": "execute",
+        "ok": true,
+        "problems": [],
+        "approvedManifestSha256": "73d6a33428d1586dad2c48b1a83af0faa51e6fc97b94f397b3509b6b7c58fa1f",
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "timedOut": false,
+        "exitCode": 0,
+        "signal": null,
+        "testCounts": {
+          "numTotalTests": 9,
+          "numPassedTests": 9,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "expectedTestCounts": {
+          "files": 1,
+          "tests": 9
+        }
+      },
+      "root": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-bounded-json-serialization-wKojPb",
+      "resultSha256": "99fc13f7de927caa962739f707b03a36d202d57de62877c937423d185b466481",
+      "success": true,
+      "tests": 9,
+      "passed": 9,
+      "failed": 0,
+      "pending": 0,
+      "todo": 0,
+      "assertions": [
+        {
+          "name": "stringifyJsonWithinByteLimit matches native JSON for nested values, escaping, and omitted fields",
+          "status": "passed"
+        },
+        {
+          "name": "stringifyJsonWithinByteLimit matches native indented JSON and counts whitespace before materializing it",
+          "status": "passed"
+        },
+        {
+          "name": "stringifyJsonWithinByteLimit matches native numeric and string indentation normalization",
+          "status": "passed"
+        },
+        {
+          "name": "stringifyJsonWithinByteLimit stops visiting indented collections when whitespace crosses the limit",
+          "status": "passed"
+        },
+        {
+          "name": "stringifyJsonWithinByteLimit measures values after toJSON without invoking it twice",
+          "status": "passed"
+        },
+        {
+          "name": "stringifyJsonWithinByteLimit rejects a large root string before materializing escaped JSON",
+          "status": "passed"
+        },
+        {
+          "name": "stringifyJsonWithinByteLimit stops visiting a large collection as soon as it crosses the limit",
+          "status": "passed"
+        },
+        {
+          "name": "stringifyJsonWithinByteLimit measures raw JSON values before native serialization materializes them",
+          "status": "passed"
+        },
+        {
+          "name": "stringifyJsonWithinByteLimit rejects invalid limits and unserializable roots like native JSON",
+          "status": "passed"
+        }
+      ],
+      "receiptSha256": "7b4957200efc01f295d6ab41fb25903393cc8cd577220d3e2a2062161e855618"
+    },
+    {
+      "capsuleId": "secure-path-cache",
+      "manifestPath": "tests/parity/baseline-capsules/secure-path-cache.json",
+      "manifestSha256": "cfdbf6c8932516881dbd3838924813174a4a3524ff90bedd8f8011db3103a631",
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-secure-path-cache-bGAE1Q",
+      "stagedFiles": [
+        {
+          "path": "src/shared/secure-path-hardening-cache.test.ts",
+          "role": "test",
+          "sha256": "77500cf9cce9624f6a693ed2adf6d576fd222ab58cce2c08a97211d60a60057d"
+        },
+        {
+          "path": "src/shared/secure-path-hardening-cache.ts",
+          "role": "module",
+          "sha256": "06ce6342d4cacf1b436ccb0886506da1ae09ad4d7f91cc54233f9c005ff0be7d"
+        }
+      ],
+      "license": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "execution": {
+        "mode": "execute",
+        "ok": true,
+        "problems": [],
+        "approvedManifestSha256": "cfdbf6c8932516881dbd3838924813174a4a3524ff90bedd8f8011db3103a631",
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "timedOut": false,
+        "exitCode": 0,
+        "signal": null,
+        "testCounts": {
+          "numTotalTests": 4,
+          "numPassedTests": 4,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "expectedTestCounts": {
+          "files": 1,
+          "tests": 4
+        }
+      },
+      "root": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-e4-secure-path-cache-bGAE1Q",
+      "resultSha256": "ef4bbd5718ec8f2f7b866c8bd644e921ff9a404e48a1f92ced7f4c35c405e5f3",
+      "success": true,
+      "tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "pending": 0,
+      "todo": 0,
+      "assertions": [
+        {
+          "name": "SecurePathHardeningCache accepts a UTF-8 key at the exact per-key boundary",
+          "status": "passed"
+        },
+        {
+          "name": "SecurePathHardeningCache rejects one byte beyond the per-key boundary without evicting retained state",
+          "status": "passed"
+        },
+        {
+          "name": "SecurePathHardeningCache evicts the least-recently-used entry at the count boundary",
+          "status": "passed"
+        },
+        {
+          "name": "SecurePathHardeningCache evicts LRU entries until aggregate UTF-8 key bytes fit",
+          "status": "passed"
+        }
+      ],
+      "receiptSha256": "63a2b6b89c45e6d5607cc1d3fabd252f4931a23968e4a63383e4a0ef83893d80"
+    }
+  ]
+}
