@@ -8,7 +8,26 @@ The user's latest instruction before sleeping is explicit: **these five Astra ar
 
 This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoints below are not current state; consult audit-semantic-followups.md and audit-progress.md. No tool-supported objective rewrite was performed: the old Codex goal's flat-worker text is superseded by this later user direction, not a reason to complete or replace an unfinished goal.
 
-## Current checkpoint — E3 platform final local joins
+## Current checkpoint — finite E3 inputs and E5 publication review
+
+At the 2026-09-06 10:56 UTC checkpoint, four actual Astra audit assignments remain; no Sol implementation lead has launched. Earlier assignments below are historical. The phase transition above is unchanged.
+
+| Assignment | Task / Dispatch | Exclusive output below `audit-closure/` |
+| --- | --- | --- |
+| Integrations result contracts,264 methods | `task_48dd8de6cf99` / `ctx_006b14bc1968` | `e3-bridge/result-integrations/` |
+| Raw provider inputs | `task_ff8c47a44761` / `ctx_48840b69bf1e` | `e3-bridge/result-platform/provider-inputs-final.md/json` |
+| Account launch preparation | `task_823552276b48` / `ctx_dee67d480e3d` | `e3-bridge/result-platform/account-launch-final.md/json` |
+| Publication/provenance boundaries | `task_51aad0f813db` / `ctx_03e734b4369f` | `e5-platform/publication-boundaries-final.md/json` |
+
+The fresh publication Task reuses released Astra terminal `term_86e2b660-83d2-4440-811e-50467ae6fed8`; start receipt `9fa46552-3593-4cf3-abd7-c6e68a12d20b` reports ready/input accepted. It covers only AO-RIGHTS-01, AO-NOTICES-01, AO-RECORDINGS-01 and AO-SERVICE-01. Reuse the existing135-asset manifest and accepted client contracts; characterize actual source provenance and concrete implementation/acceptance requirements without inventing legal authorization. Proposed own-service interfaces and independent replacements are proposals, not deployment or asset removal. No children, source edits, network/provider actions, installs or Git are authorized by this Task. Generated/localization source acceptance remains03d2be8; this does not reopen that census.
+
+Integration reported two account-preparation joins still open. Repeated coordination inbox messages had not reached its active attention: the lead reports that its injected check resolves to settled child Run `run_ca699e02a7d1`, not the intended current inbox. Root sent a one-off terminal reminder (receipt `7d7d0d08-1e25-414b-8697-c2458dc4390f`, input accepted), and the lead explicitly confirmed stopping duplicated account-source reading in `msg_fbee31562138`. Root then supplied the exact separate account Task, Dispatch and output names through a second clarification, receipt `0e036c2f-cd10-4a4d-966d-37ce43b1d0ee`, input accepted. This does not repair or certify inbox routing, replace formal Task lifecycle, or authorize consuming another terminal's inbox. Integrations should deliver its bounded result with an explicit pending cross-owner join; root performs the later reconciliation.
+
+Provider artifacts are present and their Markdown narrative has been read by root, but no completed delivery or source acceptance is inferred from file existence. Account launch reports its local characterization complete and is writing its outputs. Existing original test allocations and behavioral/platform gates remain unchanged. No product tests, implementation, preview replacement or whole-area acceptance occurred at this coordination checkpoint.
+
+Subsequent10:57:58 UTC lifecycle update: provider Task delivered formal `worker_done` message `msg_2f9c9b99be77` with thirteen finite contracts and fifteen original assertion-body associations. Root immediately released Dispatch `ctx_48840b69bf1e`, receipt `769c05e4-9902-4d02-997a-7076f2b8bc9f`: retained/external_terminal/processAction none. The terminal was not stopped and has no new Task. Three audit assignments remain active; provider source review is now root-owned and still pending. Delivery is not acceptance.
+
+## Historical checkpoint — E3 platform final local joins
 
 Platform result Task `task_d472a9fbf442 / ctx_76d7be38749c` delivered126 method records and explicitly failed its full source-closure objective because eight finite local/cross-owner obligations remain. Root processed that actual outcome, not a synthetic success, and officially released it: receipt `0d8e3f09-d4ca-44e6-8de9-947c5bf2c513`, retained/external_terminal/processAction none. The delivered report and leaf artifacts stay frozen, pending full independent acceptance.
 
