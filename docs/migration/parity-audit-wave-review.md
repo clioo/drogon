@@ -1,5 +1,19 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
+## Mobile baseline follow-up after63c494f
+
+Accepted [bounded mobile request contracts](parity-mobile-request-contracts.md)
+MREQ-1–MREQ-5 and ten unchanged original cases across two capsules, all passing
+without skips. Execution reports, staged-source receipts and Vitest results
+are archived. Two original stale-session tests have weak temporal assertions;
+their green results are not comprehensive fence proof. Supplemental settled
+cases remain required during the port.
+
+Independently traced the single-flight home callers and worktree.ps parameter
+projection. This accepts two of the leaf's25 new method names, not its complete
+188-name semantic claim. Actual transport, mixed-version, mobile UI and candidate
+acceptance remain open. No product edits or preview installation in this slice.
+
 ## Latest review checkpoint after7070097
 
 Audit remains open. This is a source-review checkpoint, not an implementation

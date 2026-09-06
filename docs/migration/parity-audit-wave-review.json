@@ -2,6 +2,22 @@
   "schemaVersion": 1,
   "phase": "audit-only",
   "auditClosed": false,
+  "mobileRequestFollowup": {
+    "afterCommit": "63c494f",
+    "status": "bounded-coordinator-source-review-and-original-unit-baseline",
+    "contract": "parity-mobile-request-contracts.md",
+    "originalCases": 10,
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0,
+    "evidence": [
+      "reference-captures/c9790628-mobile-request-single-flight/runner-report.json",
+      "reference-captures/c9790628-mobile-runtime-capability-negotiation/runner-report.json"
+    ],
+    "verifiedNewLeafNames": ["stats.summary", "accounts.list"],
+    "parameterProjection": "worktree.ps adds supportsWorktreeVisibilitySourceDefaults=true; no new method name",
+    "limits": "Two original stale-session negatives may pass before settlement. Full 31-site semantics, actual transport, skew, mobile UI and candidate parity remain open. No product or installed-preview change."
+  },
   "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
   "reviewCommit": "7070097",
   "runId": "run_d97e86c69c2e",
