@@ -102,3 +102,47 @@ Root owns shared schema registration, Engine/RPC/CLI contracts, imports from the
 old profile, integration and installation. A future Sol-CAP dispatch must assign
 exclusive implementation/test paths to one approved non-OpenAI leaf and retain
 only direction/review work at Sol. Existing active parser ownership is unchanged.
+
+## Native store implementation placement
+
+Root inspected the candidate `db.rs`, `Engine` and Cargo manifests on September
+6: no automation tables or native automation subsystem exist yet. The existing
+connection uses WAL, a busy timeout, path/permission checks and restart recovery.
+Preserve all of those; do not introduce a second connection owner or replace
+existing tables. The source relationship field is `Automation.botId`, not an
+invented `botOwnerId` wire field.
+
+The next CAP leaf may own new `bots/records.rs`, `bots/storage.rs`,
+`automations/records.rs`, `automations/storage.rs`, and their scoped tests and
+source evidence. The automation files are the initial **global** native record
+authority, not an adapter or shadow table just for Bots. Root alone registers
+modules, migrations and Engine/RPC entry points in shared files. New storage
+operations must accept the existing connection/transaction; a migration function
+may be proposed in the new module but is not durable product integration until
+root calls it from `Engine::open` through `db.rs`.
+
+Preserve the complete source `Automation`/`AutomationRun` records from
+`src/shared/automations-types.ts`, including creation keys, host generation,
+scheduler owner, workspace mode, setup decision, reuse-session policy, source/run
+contexts, missed-run policy, run numbers, folded occurrences, output snapshots,
+precheck results and nullable usage measurements. Missing usage is not zero.
+Do not reduce these to ID/Bot-ID pairs to make ownership tests pass. Read the
+actual source definition/run operations and normalizers as well as their types.
+Keep absent optional fields distinct from explicit null where the source does.
+Versioned persisted payloads may retain fields not yet interpreted by a caller;
+that does not authorize ignoring required invariants or claiming their behavior
+implemented. Unknown versions must remain recoverable and unmodified.
+
+Use additive schema creation in an atomic migration with a namespaced version
+record. Reject a future version without modifying it. Preserve unrelated current
+Engine data and prove migration idempotence and SQLite reopen. Mutations joining
+Bot and automation state use one transaction, with stale ownership/updates
+revalidated inside it; a process-local mutex alone is not a cross-connection
+fence. Do not enable model calls, timers, imports of real profiles, or external
+services during this storage work.
+
+If faithful locale ordering or another required behavior needs an unavailable
+dependency, report the exact source semantics, candidate options and affected
+tests to root before installing anything. Continue independent record/transaction
+work; neither silently choose binary sorting nor substitute a fake comparator in
+production. The whole ordering requirement remains open until actually bound.

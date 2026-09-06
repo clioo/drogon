@@ -1,5 +1,42 @@
 # Root review: Bots test preparation and first Sol cycle
 
+## Native input acceptance: 2026-09-06, 17:16 UTC
+
+Root accepts the five native Bot input parsers and shared recognition catalog,
+after the settled Sol review and four completed Sonnet attempts. Registration
+uses the public core/harness APIs and the existing exact ECMAScript trim helper.
+This admits the input boundary only, not Bot persistence, RPC or execution.
+
+Root applied targeted rustfmt to the four settled Rust files, then independently
+ran `cargo test -p drogon-core --test bot_input --locked --offline` (9/9) and
+`cargo test -p drogon-harness --test known_tui_agents --locked --offline` (6/6).
+The pinned-source verifier again matched all 144 fixtures (102 accept, 42 reject),
+all ten source/license files, the pinned Zod tree and actual 36-ID catalog.
+Targeted rustfmt check passed. Final native file SHA256 values:
+
+| File | SHA256 |
+| --- | --- |
+| `bots/input.rs` | `3452777326521d4956e7847a5baafde3a5bbb966d3ef768cdd96352d23dfe39c` |
+| `tests/bot_input.rs` | `117db13229c68eb11405c220ab9ebf0d044e8dcac6f41ed2899ed1842509cbd8` |
+| `known_tui_agents.rs` | `583d0e2b3a56c72a8898afda71019c52d8d08c6d16012e2748abb132b2fdeeac` |
+| `tests/known_tui_agents.rs` | `e7aeb5fbfeb6efd797a2c90a9a52b11c1028b7f092b8f010d01a6c0959b54646` |
+
+Leaf historical RED captures remain leaf evidence. The deliberately incomplete
+stub capture is not proof that an earlier production revision had those bugs;
+the later stale-parser regressions address the three actual root findings.
+No source/implementation rerun was performed merely to attribute work to a child.
+The leaf's temporary Cargo fetch violated its assignment boundary; its disclosure
+and cleanup remain recorded, and neither ambient caches nor history were erased.
+Root verification used locked offline Cargo. Sol corrected its source-revision
+typo and the historical count to 69 existing + 9 Bot = 78; root's fresh execution
+claim is the focused 9 + 6, not an unfiltered whole-workspace run.
+
+Next task `task_3524e9092faf` assigns the durable Bot/global-automation storage
+block to the same Sol lead with mandatory Sonnet implementation. Shared module,
+database and protocol registration remain root-owned. Audit remains 11/12,
+91.7%, medium confidence, delta zero; full-fidelity 24-hour risk remains high.
+No new install or public feature-completion claim is made by this acceptance.
+
 ## Independent native follow-up: 2026-09-06, 17:04 UTC
 
 Root replayed all 144 fixtures through the actual pinned source parser: 102

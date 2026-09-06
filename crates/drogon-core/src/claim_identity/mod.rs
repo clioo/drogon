@@ -32,6 +32,7 @@ mod signer;
 #[cfg(windows)]
 mod windows_path;
 
+pub(crate) use resume::js_trim;
 pub use resume::{
     AgentProviderSessionKey, AgentProviderSessionMetadata, RESUMABLE_TUI_AGENTS, ResumableTuiAgent,
     get_agent_resume_argv, has_unsafe_provider_session_id_chars, is_resumable_tui_agent,
