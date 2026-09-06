@@ -1217,6 +1217,84 @@ fn delete_automation_everywhere_detects_ownership_changed_by_a_concurrent_connec
     );
 }
 
+/// Deterministic WAL-mode contention coverage for the owner fence (no
+/// threads, no sleeps): production `db::open` runs WAL, where a writer CAN
+/// commit between another connection's read snapshot and its write
+/// attempt. Sequenced explicitly: c2 takes the ownership snapshot the
+/// fence would use, c1 commits a reassignment while that snapshot is open
+/// (possible only in WAL), and c2's stale-snapshot write must FAIL CLOSED
+/// with a SQLite busy/snapshot error (full rollback, no partial state) --
+/// not proceed on the stale read. A change that lands BEFORE the caller's
+/// read, by contrast, gets the documented structured
+/// `AutomationOwnerConflict` through the real `delete_automation_everywhere`.
+#[test]
+fn wal_mode_ownership_change_during_a_stale_snapshot_fails_closed_not_with_a_structured_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.sqlite3");
+    let c1 = Connection::open(&path).unwrap();
+    // Match production's journal mode (see `db::open`).
+    c1.pragma_update(None, "journal_mode", "WAL").unwrap();
+    automations::storage::migrate(&c1).unwrap();
+    bstorage::migrate(&c1).unwrap();
+    bstorage::create_bot(&c1, HOST, FOLDER, &sample_bot("b1", "Alice", 0.0)).unwrap();
+    bstorage::create_bot(&c1, HOST, FOLDER, &sample_bot("b2", "Bob", 0.0)).unwrap();
+    automations::storage::insert_new_automation(&c1, &sample_automation("a1", "b1")).unwrap();
+
+    let c2 = Connection::open(&path).unwrap();
+    c2.pragma_update(None, "journal_mode", "WAL").unwrap();
+
+    // c2 opens a read transaction and takes the snapshot the fence reads.
+    let c2_tx = c2.unchecked_transaction().unwrap();
+    let snapshot = automations::storage::get_automation(&c2_tx, "a1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.bot_id.as_deref(), Some("b1"));
+
+    // c1 commits an ownership change while c2's read snapshot is still open.
+    let mut reassigned = automations::storage::get_automation(&c1, "a1")
+        .unwrap()
+        .unwrap();
+    reassigned.bot_id = Some("b2".to_string());
+    automations::storage::upsert_automation(&c1, &reassigned).unwrap();
+
+    // c2 writing through the now-stale snapshot must fail closed with a
+    // SQLite busy/snapshot error, never a silent overwrite of c1's change.
+    let mut stale = snapshot.clone();
+    stale.bot_id = None;
+    let err = automations::storage::upsert_automation(&c2_tx, &stale).unwrap_err();
+    match err {
+        automations::storage::StorageError::Sqlite(rusqlite::Error::SqliteFailure(e, _)) => {
+            assert_eq!(
+                e.code,
+                rusqlite::ErrorCode::DatabaseBusy,
+                "WAL snapshot invalidation must surface as a fail-closed busy error"
+            );
+        }
+        other => panic!("expected a fail-closed sqlite busy error, got: {other:?}"),
+    }
+    drop(c2_tx); // the failed attempt's transaction rolls back
+
+    // c1's committed change survived untouched.
+    let survivor = automations::storage::get_automation(&c1, "a1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(survivor.bot_id.as_deref(), Some("b2"));
+
+    // Once the change lands BEFORE the caller's read, the documented
+    // structured refusal applies through the real deletion entry point.
+    let believed_owner = AutomationOwnerPrecondition::Owned("b1".to_string());
+    let err = bstorage::delete_automation_everywhere(&c2, "a1", Some(believed_owner)).unwrap_err();
+    assert!(matches!(
+        err,
+        bstorage::StorageError::AutomationOwnerConflict
+    ));
+    assert!(
+        automations::storage::get_automation(&c1, "a1")
+            .unwrap()
+            .is_some()
+    );
+}
+
 // --- Cross-scope isolation: delete_automation_everywhere must clean every
 //     scope; migrate_ownership must never touch another scope's Bots. ----
 
@@ -1373,4 +1451,65 @@ fn migrate_ownership_drops_a_scheduled_responsibility_whose_automation_is_missin
     bstorage::migrate_ownership(&c, HOST, FOLDER).unwrap();
     let after = bstorage::get_bot(&c, HOST, FOLDER, "b1").unwrap().unwrap();
     assert!(after.responsibilities.is_empty());
+}
+
+/// A corrupt automation payload must fail the whole ownership repair and
+/// roll it back, never silently commit a Bot whose scheduled responsibility
+/// was dropped because an unreadable automation temporarily *looked*
+/// missing. (Review context: the old retain-closure coerced the lookup
+/// error into "missing", but within the same transaction the later
+/// `list_all_automations()?` repeats the failure, so the transaction is
+/// dropped and rolls back — this test pins that full-rollback guarantee as
+/// explicit coverage.)
+#[test]
+fn migrate_ownership_rolls_back_completely_when_an_automation_payload_is_corrupt() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.sqlite3");
+    {
+        let c = Connection::open(&path).unwrap();
+        automations::storage::migrate(&c).unwrap();
+        bstorage::migrate(&c).unwrap();
+        let mut bot = sample_bot("b1", "Alice", 0.0);
+        bot.responsibilities
+            .push(sample_scheduled_responsibility("r1", "a1"));
+        bstorage::create_bot(&c, HOST, FOLDER, &bot).unwrap();
+        // Hand-plant an automation row whose payload is not JSON at all.
+        c.execute(
+            "INSERT INTO automations (id, bot_id, payload_json) VALUES ('a1', 'b1', 'NOT JSON{')",
+            [],
+        )
+        .unwrap();
+    }
+    {
+        let c = Connection::open(&path).unwrap();
+        let err = bstorage::migrate_ownership(&c, HOST, FOLDER).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                bstorage::StorageError::Json(_) | bstorage::StorageError::Sqlite(_)
+            ),
+            "the corrupt payload must surface as an error, got: {err:?}"
+        );
+    }
+    {
+        // Genuine reopen: nothing the failed repair attempted may survive.
+        let c = Connection::open(&path).unwrap();
+        let bot = bstorage::get_bot(&c, HOST, FOLDER, "b1").unwrap().unwrap();
+        assert_eq!(
+            bot.responsibilities.len(),
+            1,
+            "the scheduled responsibility must NOT have been durably dropped by the failed repair"
+        );
+        let still_corrupt: String = c
+            .query_row(
+                "SELECT payload_json FROM automations WHERE id = 'a1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            still_corrupt, "NOT JSON{",
+            "the corrupt row itself is untouched"
+        );
+    }
 }

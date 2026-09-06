@@ -230,6 +230,78 @@ fn sequential_migrate_calls_without_the_aggregate_precheck_would_partially_alter
     assert!(bstorage::migrate(&conn).is_err());
 }
 
+/// Current POSIX mode bits of `path` (permission portion only).
+#[cfg(unix)]
+fn file_mode(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+// --- Startup permission hardening covers refusal AND success paths --------
+
+#[cfg(unix)]
+#[test]
+fn refused_startup_still_hardens_the_database_file_it_leaves_behind() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join(DB_FILE_NAME);
+    {
+        // A database this build refuses (future `bots` version), deliberately
+        // seeded 0644 so the test observes whether the failed startup still
+        // restricts the file the attempt leaves behind.
+        let c = Connection::open(&db_path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL);
+             INSERT INTO schema_versions(component, version) VALUES ('bots', 999);",
+        )
+        .unwrap();
+    }
+    std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(file_mode(&db_path), 0o644);
+
+    let result = Engine::open(dir.path());
+    assert!(
+        result.is_err(),
+        "a future-versioned bots schema must refuse Engine::open"
+    );
+
+    assert_eq!(
+        file_mode(&db_path),
+        0o600,
+        "a refused startup must still harden the database file the attempt leaves behind"
+    );
+    // Any WAL sidecars the refused attempt produced are protected too (they
+    // exist only when the failed attempt got far enough to write, so their
+    // presence is asserted conditionally, their mode unconditionally).
+    for name in ["drogon.sqlite3-wal", "drogon.sqlite3-shm"] {
+        let sidecar = dir.path().join(name);
+        if sidecar.exists() {
+            assert_eq!(
+                file_mode(&sidecar),
+                0o600,
+                "{name} must be owner-only after a refused startup"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn successful_startup_leaves_database_and_wal_sidecars_owner_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let _engine = Engine::open(dir.path()).unwrap();
+    // The engine still holds its connection open, so the WAL sidecars exist.
+    for name in [DB_FILE_NAME, "drogon.sqlite3-wal", "drogon.sqlite3-shm"] {
+        let path = dir.path().join(name);
+        assert!(path.exists(), "{name} must exist while the engine is open");
+        assert_eq!(
+            file_mode(&path),
+            0o600,
+            "{name} must be owner-only after a successful startup"
+        );
+    }
+}
+
 fn sample_bot(id: &str) -> drogon_core::bots::records::Bot {
     drogon_core::bots::records::Bot {
         id: id.to_string(),

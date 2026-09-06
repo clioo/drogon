@@ -119,6 +119,55 @@ fn sort_by_display_name_stable_preserves_insertion_order_for_equal_names() {
     assert_eq!(tags, vec!["first", "second", "third", "fourth-distinct"]);
 }
 
+/// Byte-distinct but canonically equivalent names (`"éclair"` precomposed
+/// NFC U+00E9 vs `"e"` + combining acute U+0301 NFD) must compare
+/// `Ordering::Equal` under every admitted locale and, fed from UNSORTED
+/// input, keep their insertion relative order through the stable sort.
+/// This is a stronger tie than the identical-byte `"dup"` case above: the
+/// collator must normalize before comparing, not just detect byte equality.
+#[test]
+fn canonical_equivalent_byte_distinct_names_compare_equal_and_stay_in_insertion_order() {
+    let nfc = "\u{00e9}clair";
+    let nfd = "e\u{0301}clair";
+    assert_ne!(
+        nfc.as_bytes(),
+        nfd.as_bytes(),
+        "the tie case must be byte-distinct, not merely identical"
+    );
+
+    for (label, tag) in LOCALE_TAGS {
+        let comparator = DisplayNameComparator::for_locale(tag)
+            .unwrap_or_else(|e| panic!("locale {tag} must build a collator: {e}"));
+        assert_eq!(
+            comparator.compare(nfd, nfc),
+            Ordering::Equal,
+            "NFD vs NFC must be Equal for {label} ({tag})"
+        );
+        assert_eq!(
+            comparator.compare(nfc, nfd),
+            Ordering::Equal,
+            "comparison must be symmetric for {label} ({tag})"
+        );
+    }
+
+    // Unsorted input: the tie pair appears out of order relative to distinct
+    // names, inserted NFD-first, NFC-second.
+    let mut items: Vec<(&str, &str)> = vec![
+        ("zzz-distinct", "zzz"),
+        ("eclair-nfd", nfd),
+        ("apple-distinct", "apple"),
+        ("eclair-nfc", nfc),
+    ];
+    locale_ordering::sort_by_display_name_stable(&mut items, "en-US", |i| i.1).unwrap();
+    let tags: Vec<&str> = items.iter().map(|i| i.0).collect();
+    assert_eq!(
+        tags,
+        vec!["apple-distinct", "eclair-nfd", "eclair-nfc", "zzz-distinct"],
+        "canonically equivalent ties must keep insertion order (NFD before NFC), \
+         with distinct names ordered around them"
+    );
+}
+
 /// Compares ICU4X whole-list ordering against every recorded source-executed
 /// case, for every required locale. Divergences are asserted (reported as
 /// hard test failures with the exact case/locale), not silently reconciled.

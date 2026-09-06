@@ -28,9 +28,9 @@ const CASES = {
   punctuation: ['A-B', 'AB', 'A B', 'A.B'],
   numeric_substring: ['item2', 'item10', 'item1'],
   non_latin: ['日本語', 'カタカナ', 'English', 'Анна', 'Борис'],
-  equal_name_ties: ['dup', 'DUP_MARKER_A', 'dup', 'DUP_MARKER_B', 'dup', 'DUP_MARKER_C'],
-  // ^ 'dup' repeated three times with distinct interleaved markers removed before compare;
-  //   see below: we actually sort objects {name, tag} so ties are distinguishable post-sort.
+  // equal_name_ties is NOT a CASES entry: that case needs distinguishable
+  // per-item identity while comparing a shared name field, so it is built
+  // from `tieItems` below, not from this string-only CASES map.
 };
 
 function sortNames(names, locale) {

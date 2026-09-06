@@ -3,9 +3,11 @@
 //! existing `&rusqlite::Connection` (or, for multi-step operations, is
 //! meant to be called inside a caller-owned `rusqlite::Transaction`
 //! borrowed `as_ref()` as a `Connection`) -- this module never opens its
-//! own database file. `migrate` is a proposed migration function: it is
-//! not durable product integration until root calls it from
-//! `Engine::open` through `db.rs` (see `docs/migration/native-bot-state-contract.md`).
+//! own database file. The standalone [`migrate`] keeps its
+//! per-step-committing behavior, while the aggregate `Engine::open`
+//! startup applies these same steps through `db::migrate_and_recover`'s
+//! single rollback-safe transaction (see
+//! `docs/migration/bot-state-admission.md`).
 //!
 //! Full records round-trip as a JSON payload column (`payload_json`), so
 //! every source field -- including ones this build's callers do not yet
@@ -153,15 +155,16 @@ fn migrate_v1_to_v2(tx: &rusqlite::Transaction) -> Result<()> {
     Ok(())
 }
 
-/// Read-only precondition, shared by [`migrate`] and by
-/// `db::migrate_capability_schemas` (the aggregate startup gate in
-/// `Engine::open`): refuses -- without creating or altering any
+/// Read-only precondition, called by [`migrate`] and by
+/// `apply_pending_steps_in_tx` (the single-transaction aggregate startup
+/// gate in `Engine::open`): refuses -- without creating or altering any
 /// `automations` table -- if this database already recorded a version
-/// newer than [`AUTOMATIONS_SCHEMA_VERSION`]. The aggregate gate calls this
-/// for every capability component before letting any of them apply a
-/// single migration step, so one component's later refusal can never
-/// follow another component's schema having already been durably advanced
-/// in the same startup attempt. `schema_versions` itself is shared,
+/// newer than [`AUTOMATIONS_SCHEMA_VERSION`]. Within the aggregate gate
+/// the components are applied sequentially in one transaction, so the
+/// no-partial-state property comes from that transaction's
+/// rollback-on-any-failure (a later component's refusal undoes an earlier
+/// component's already-applied steps), not from checking every component
+/// before any of them runs. `schema_versions` itself is shared,
 /// version-less tracking infrastructure, not a component's schema, so
 /// creating it here (idempotently) is not a side effect this precondition
 /// needs to protect against.
@@ -377,11 +380,14 @@ pub enum AutomationOwnerPrecondition {
 
 /// Refuses a mutation/deletion whose caller-stated expectation of which
 /// **Bot** owns `automation` does not match its actual current `bot_id` --
-/// including an expectation that has gone stale because a *different*
-/// connection changed ownership since the caller last read it (a real
-/// cross-connection fence, not merely a same-process check: see
-/// `delete_automation_everywhere_refuses_when_a_concurrent_connection_changed_ownership`
-/// in the tests). `expected = None` performs no check at all. Bot ownership
+/// covering an expectation that has gone stale because a *different*
+/// connection's ownership change committed **before the transaction's read**
+/// (see
+/// `delete_automation_everywhere_detects_ownership_changed_by_a_concurrent_connection`
+/// in the tests). The WAL companion test separately exercises stale-snapshot
+/// writes through the storage primitives, not a mid-call interleaving of
+/// this function; SQLite rejects those writes with a busy/snapshot error.
+/// `expected = None` performs no check at all. Bot ownership
 /// only -- see the module doc for why this is unrelated to the source's
 /// SSH host-authority fence.
 pub fn assert_owner_fence(

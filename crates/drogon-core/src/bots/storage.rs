@@ -1,9 +1,11 @@
 //! SQLite storage for native `Bot` records, their responsibilities and
 //! responsibility-run history, joining the same connection/transaction as
 //! `automations::storage` -- never a second database authority or a
-//! Bot-only shadow of the global automation records. `migrate` is
-//! proposed, not durable, until root calls it from `Engine::open` (see
-//! `docs/migration/native-bot-state-contract.md`).
+//! Bot-only shadow of the global automation records. The standalone
+//! [`migrate`] keeps its per-step-committing behavior, while the aggregate
+//! `Engine::open` startup applies these same steps through
+//! `db::migrate_and_recover`'s single rollback-safe transaction (see
+//! `docs/migration/bot-state-admission.md`).
 //!
 //! ## Host/folder scope
 //!
@@ -241,13 +243,15 @@ fn create_v2_tables(tx: &rusqlite::Transaction) -> Result<()> {
     Ok(())
 }
 
-/// Read-only precondition, shared by [`migrate`] and by
-/// `db::migrate_capability_schemas` (the aggregate startup gate in
-/// `Engine::open`): refuses -- without creating or altering any `bots`
-/// table -- if this database already recorded a version newer than
-/// [`BOTS_SCHEMA_VERSION`]. See `automations::storage::check_schema_not_ahead`
-/// for why the aggregate gate checks every component this way before
-/// letting any of them apply a single migration step.
+/// Read-only precondition, called by [`migrate`] and by
+/// `apply_pending_steps_in_tx` (the single-transaction aggregate startup
+/// gate in `Engine::open`): refuses -- without creating or altering any
+/// `bots` table -- if this database already recorded a version newer than
+/// [`BOTS_SCHEMA_VERSION`]. Within the aggregate gate the components are
+/// applied sequentially in one transaction, so the no-partial-state
+/// property comes from that transaction's rollback-on-any-failure (a
+/// later component's refusal undoes an earlier component's already-applied
+/// steps), not from checking every component before any of them runs.
 pub fn check_schema_not_ahead(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_versions (
@@ -864,10 +868,17 @@ pub fn history_for_bot(
 /// `automations::storage::delete_automation`) **before** anything is
 /// mutated: a missing automation is `StorageError::NotFound`, a
 /// present-but-differently-Bot-owned one is
-/// `StorageError::AutomationOwnerConflict` -- including a conflict
-/// introduced by a *different* connection changing ownership between the
-/// caller's read and this call (see the two-connection contention test).
-/// This is **not** the source's real `assertAutomationOwnerFence`, which
+/// `StorageError::AutomationOwnerConflict` -- covering an expectation
+/// made stale by a *different* connection's ownership change that
+/// committed **before this call** (see
+/// `delete_automation_everywhere_detects_ownership_changed_by_a_concurrent_connection`
+/// and the deterministic WAL-mode companion test). A change that lands
+/// *during* this call, after this transaction's read snapshot, cannot
+/// honor the fence against the stale read: in WAL mode the write attempt
+/// fails closed with a SQLite busy/snapshot error and full rollback --
+/// never a silent proceed, and never a synthesized mid-call
+/// `AutomationOwnerConflict`. This is **not** the source's real
+/// `assertAutomationOwnerFence`, which
 /// fences a completely different concept (which execution host --
 /// local/self or a specific SSH target at a specific registration
 /// generation -- has authority over the automation), requires a live
@@ -904,7 +915,10 @@ pub fn delete_automation_everywhere(
 /// `automation_id -> bot_id` owner map from each in-scope Bot's scheduled
 /// responsibilities whose automation actually exists, dropping (from the
 /// Bot's `responsibilities`) any scheduled responsibility whose automation
-/// is missing or already claimed by an earlier in-scope Bot.
+/// is missing or already claimed by an earlier in-scope Bot. A lookup
+/// *error* (e.g. an unreadable automation payload) is neither missing nor
+/// claimable: it propagates, rolling the whole repair back in one
+/// transaction instead of silently recording any partial drop.
 ///
 /// Unlike the source (which has exactly one `PersistedState`, i.e. one
 /// implicit "scope"), this SQLite schema holds every host/folder's Bots
@@ -928,20 +942,25 @@ pub fn migrate_ownership(conn: &Connection, host_id: &str, folder: &str) -> Resu
     let mut owners: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for (mut bot, expected_rev) in bots {
         let before = bot.responsibilities.len();
-        bot.responsibilities.retain(|r| {
-            let ResponsibilityTrigger::Scheduled { automation_id } = &r.trigger else {
-                return true;
+        let mut kept = Vec::with_capacity(before);
+        for responsibility in std::mem::take(&mut bot.responsibilities) {
+            let ResponsibilityTrigger::Scheduled { automation_id } = &responsibility.trigger else {
+                kept.push(responsibility);
+                continue;
             };
-            let Ok(Some(_)) = automations_storage::get_automation(&tx, automation_id) else {
-                return false;
-            };
-            if owners.contains_key(automation_id) {
-                false
-            } else {
-                owners.insert(automation_id.clone(), bot.id.clone());
-                true
+            // Unreadable is not missing: propagate errors to roll back the repair.
+            match automations_storage::get_automation(&tx, automation_id) {
+                Ok(Some(_)) => {}
+                Ok(None) => continue, // genuinely missing: drop this projection
+                Err(e) => return Err(e.into()),
             }
-        });
+            if owners.contains_key(automation_id) {
+                continue; // an earlier in-scope Bot already claimed it (first wins)
+            }
+            owners.insert(automation_id.clone(), bot.id.clone());
+            kept.push(responsibility);
+        }
+        bot.responsibilities = kept;
         if bot.responsibilities.len() != before {
             cas_write(&tx, host_id, folder, &bot, expected_rev)?;
         }

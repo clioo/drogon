@@ -113,12 +113,14 @@ impl Engine {
             .map_err(|e| error::io_error(format!("Unsafe database files: {e}")))?;
         let conn = db::open(data_dir).map_err(error::from_sqlite)?;
         // Migration refusal must roll back recovery and host identity too.
-        let host_id = db::migrate_and_recover(&conn)
-            .map_err(|e| error::internal_error(format!("startup schema/recovery gate: {e}")))?;
+        let gate = db::migrate_and_recover(&conn);
+        // Refusal can leave files behind; permission failures take precedence.
         #[cfg(unix)]
         db::harden_permissions(data_dir).map_err(|e| {
             error::io_error(format!("cannot restrict database file permissions: {e}"))
         })?;
+        let host_id =
+            gate.map_err(|e| error::internal_error(format!("startup schema/recovery gate: {e}")))?;
 
         Ok(Engine {
             data_dir: data_dir.to_path_buf(),
