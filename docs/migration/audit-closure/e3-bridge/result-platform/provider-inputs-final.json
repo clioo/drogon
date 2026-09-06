@@ -1,0 +1,2778 @@
+{
+  "schemaVersion": 1,
+  "taskId": "task_ff8c47a44761",
+  "dispatchId": "ctx_48840b69bf1e",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "auditOnly": true,
+  "testsExecutedHere": false,
+  "auditAccepted": false,
+  "wholeAreaSourceClosed": false,
+  "recommendation": "Submit finite raw-provider-input characterization for root acceptance of P-ACCOUNT-STATE exclusion; retain all independently owned joins, defects and execution gates. No new area or test parity claim.",
+  "progress": {
+    "accepted": 10,
+    "denominator": 12,
+    "percentage": 83.3,
+    "confidence": "medium-low",
+    "delta": 0,
+    "next": "root source review",
+    "deadlineRisk": "flexible24h high risk; no defensible ETA"
+  },
+  "provenance": {
+    "convention": "SHA256 whole files over read_bytes(); inclusive 1-based ranges over concatenation of bytes.splitlines(keepends=True)[first-1:last], retaining original line terminators and absent final newline; no newline/encoding normalization.",
+    "meaning": "Current-byte identity only; control flow was manually read. Root owns supplied-pin verification; no Git used."
+  },
+  "inputs": [
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.md",
+      "sha256": "47f3487021e354e0e61d82912dab5f4199dc86689e7ccc8ee5f796bf273267ee"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json",
+      "sha256": "e34195da3f1abcc56660c04388782a4396ad47ad6afc23a24979020ef899a861"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/contracts.json",
+      "sha256": "5269e951e15986e04f2ed0a2373b943d9c4a522389bcb308bf4d00d451cd9093"
+    },
+    {
+      "path": "docs/migration/rate-limit-source-review.md",
+      "sha256": "05e929f46d48183c763d12767730eab7919052c34f6364a76de217e6d9adb428"
+    },
+    {
+      "path": "docs/migration/rate-limit-source-review.json",
+      "sha256": "fbeb2fe37b2b58815459949e917937185e89cb09517a84b3fc1eb219f82f7b6a"
+    },
+    {
+      "path": "docs/migration/parity-test-work-packages.json",
+      "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/followup-cli-boundaries.json",
+      "sha256": "b1409e82899145b836d61be91c124e3632195f841bb592e4ca10fc2333b57911"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/followup-final-boundaries.json",
+      "sha256": "e73c63084d2c5899feebcee5eaba0d67ea7a42d1b5bea7e4f9abd816fcd387bf"
+    },
+    {
+      "path": "docs/migration/audit-closure/e5-platform/assets-observability-final.json",
+      "sha256": "08b4a58191b5f66229ee2334c99fcb1d0daa2f36b25e2723e3bba1c9e71f7d41"
+    }
+  ],
+  "reconciliation": {
+    "residualId": "P-ACCOUNT-STATE",
+    "frozenPlatformGroupAndMethodScope": "21 groups /126 methods unchanged; no census repeated",
+    "scope": "Nine explicitly assigned entry files and necessary provider-local contracts only",
+    "entrypoints": [
+      {
+        "path": "src/main/rate-limits/claude-fetcher.ts",
+        "contractIds": [
+          "PI-CLAUDE-AUTH"
+        ]
+      },
+      {
+        "path": "src/main/rate-limits/codex-fetcher.ts",
+        "contractIds": [
+          "PI-CODEX-AUTH"
+        ]
+      },
+      {
+        "path": "src/main/rate-limits/gemini-usage-fetcher.ts",
+        "contractIds": [
+          "PI-GEMINI"
+        ]
+      },
+      {
+        "path": "src/main/rate-limits/kimi-fetcher.ts",
+        "contractIds": [
+          "PI-KIMI"
+        ]
+      },
+      {
+        "path": "src/main/rate-limits/minimax-fetcher.ts",
+        "contractIds": [
+          "PI-MINIMAX"
+        ]
+      },
+      {
+        "path": "src/main/rate-limits/grok-fetcher.ts",
+        "contractIds": [
+          "PI-GROK"
+        ]
+      },
+      {
+        "path": "src/main/rate-limits/grok-auth.ts",
+        "contractIds": [
+          "PI-GROK"
+        ]
+      },
+      {
+        "path": "src/main/rate-limits/opencode-go-usage-fetcher.ts",
+        "contractIds": [
+          "PI-OPENCODE"
+        ]
+      },
+      {
+        "path": "src/main/minimax/minimax-cookie-store.ts",
+        "contractIds": [
+          "PI-MINIMAX-STORE"
+        ]
+      }
+    ],
+    "duplicateEntrypoints": [],
+    "omittedEntrypoints": [],
+    "newContractIds": [
+      "PI-CLAUDE-AUTH",
+      "PI-CLAUDE-WIRE",
+      "PI-PTY",
+      "PI-CODEX-AUTH",
+      "PI-CODEX-WIRE",
+      "PI-CODEX-RECOVERY",
+      "PI-GEMINI",
+      "PI-KIMI",
+      "PI-GROK",
+      "PI-MINIMAX",
+      "PI-MINIMAX-STORE",
+      "PI-OPENCODE",
+      "PI-TRANSPORT"
+    ]
+  },
+  "contracts": [
+    {
+      "id": "PI-CLAUDE-AUTH",
+      "title": "Claude active/inactive credential ownership",
+      "sourcePaths": [
+        "src/main/rate-limits/claude-fetcher.ts",
+        "src/main/rate-limits/claude-active-usage-fetch.ts",
+        "src/main/rate-limits/claude-oauth-credentials.ts",
+        "src/main/rate-limits/claude-managed-account-credentials.ts",
+        "src/main/rate-limits/claude-managed-account-usage.ts",
+        "src/main/rate-limits/claude-managed-usage-panel.ts",
+        "src/main/rate-limits/claude-oauth-recovery.ts",
+        "src/main/rate-limits/claude-usage-refresh-plan.ts",
+        "src/main/rate-limits/claude-usage-result.ts",
+        "src/main/claude-accounts/oauth-refresh.ts",
+        "src/main/claude-accounts/managed-auth-path.ts",
+        "src/main/claude-accounts/environment.ts",
+        "src/main/codex-accounts/fs-utils.ts"
+      ],
+      "resultContract": [
+        "Entry forwards active and inactive calls. Pre-aborted active call returns error/null windows. Runtime WSL with missing Linux config fails before host credential reads. Supplied runtime preparation is consumed here; its materialization is separately assigned, not certified.",
+        "Credential JSON accepts a truthy string accessToken without trimming; refreshability requires a nonblank trimmed refreshToken. Active usage ignores expiresAt. Malformed or absent OAuth object returns no token. On macOS an explicit config uses strict scoped Keychain then legacy; scoped token wins, legacy token beats scoped refresh-only, then refresh-only candidates. Available Keychain token/refreshability suppresses file fallback. Otherwise reads configDir or home/.claude credentials file; read/parse failures yield empty credentials, retaining Keychain-unavailable metadata if applicable. These local reads have no byte/deadline/caller-abort bound.",
+        "Active stale scoped host-system token can retry one DIFFERENT legacy token; managed provenance and WSL exclude that fallback. Live managed terminal ownership defers refresh-only/stale repair. CLI repair invokes CLI, rereads credentials, retries OAuth even if token unchanged, and fills missing OAuth windows from CLI; a failed repair can reach another CLI fallback. No generic exponential provider retry. Attempted sources are ordered/deduplicated; optional metadata fields may exist as undefined before serialization.",
+        "Inactive managed account resolves ownership and reads credentials, returning missing-credentials error if absent. Expired/missing/nonfinite expiry with a refresh token invokes app-owned refresh (five-minute margin); refresh uses a separate ten-second HTTP signal without caller cancellation. Successful provider rotation may precede abort or failed local persistence. Write failure is swallowed and the refreshed token is still used. Usage fetch rejection can propagate to the accepted cycle.",
+        "Host managed path must canonicalize below app userData/claude-accounts with exactly accountId/auth, rejecting candidate symlink and invalid marker. adoptLegacyMarker can CREATE mode0600 exclusive marker while resolving; mismatched existing marker cannot be overwritten and yields null. Child reads reject symlink/nonfile/outside canonical directory. WSL ownership uses Windows UNC distro, expected managed suffix and nonsymlink matching marker; it does not establish the same full ancestor-realpath proof.",
+        "Managed file refresh writes mode0600 temp PID+UUID then rename, with six Windows permission/busy attempts and 50..250ms synchronous delays. First failure removes temp, optionally repairs parent ACL and retries once; cleanup can mask the original error, no fsync or atomic compare-to-old guard. Reuse E4 keychain and ACL contracts for their actual OS implementation.",
+        "Managed preview on macOS stages scoped active Keychain credentials at the managed path, captures replacement credentials and deletes the scoped item in finally; deletion failure ignored, no restoration of a preexisting scoped value. Windows returns no panel supplement. macOS panel trust needs at least one shared OAuth/CLI window and all shared percentages within one point; it does not compare reset time/account identity. Active supplements fill only missing windows and preserve primary status/error/time; inactive supplement requires explicit opt-in.",
+        "OAuth refresh accepts nonblank access token, keeps old refresh token unless new nonblank token, merges old fields, finite expires_in including negative into now+seconds, and splits scope on literal spaces. Missing OAuth object is not expiring; absent/nonfinite expiry is. Direct malformed-root merge may throw but the refresh wrapper catches and returns null. HTTP failures return null; raw network error messages can reach console.",
+        "Environment patch mutates its supplied map: optional stripping removes four named auth variables and custom headers matching authorization/x-api-key/api-key/bearer; nonblank config replaces configDir, explicitly defined custom-header patch (including empty) replaces header. It is not an exhaustive secret scrubber or launch-ownership proof."
+      ],
+      "futureAcceptance": [
+        "Synthetic token/expiry scalar/null/whitespace matrix and exact credential precedence; no host read or legacy fallback for unresolved WSL/managed ownership.",
+        "Refresh rotation followed by caller abort, write/cleanup/ACL failure and competing write; distinguish provider success from durable local publication.",
+        "Preview preexisting scoped item, denied cleanup, mismatched resets but similar percentages, Windows omission; retain source behavior and separate intended restoration/security correction.",
+        "Assert active fallback request counts (429 zero CLI; stale legacy distinct; CLI repair+reread; repeated CLI on failed repair) and metadata own-property undefined versus JSON omission."
+      ],
+      "sourceFindings": [
+        "PI-DEF-ROTATION",
+        "PI-DEF-PREVIEW",
+        "PI-DEF-REDACTION"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/0",
+        "#/sourceEvidence/9",
+        "#/sourceEvidence/12",
+        "#/sourceEvidence/11",
+        "#/sourceEvidence/10",
+        "#/sourceEvidence/34",
+        "#/sourceEvidence/17",
+        "#/sourceEvidence/15",
+        "#/sourceEvidence/16",
+        "#/sourceEvidence/43",
+        "#/sourceEvidence/56",
+        "#/sourceEvidence/57",
+        "#/sourceEvidence/65"
+      ]
+    },
+    {
+      "id": "PI-CLAUDE-WIRE",
+      "title": "Claude OAuth HTTP schema, classification and retry metadata",
+      "sourcePaths": [
+        "src/main/rate-limits/claude-oauth-usage-request.ts",
+        "src/main/rate-limits/claude-oauth-usage-error.ts",
+        "src/main/rate-limits/claude-usage-error-classification.ts"
+      ],
+      "resultContract": [
+        "Electron net OAuth request awaits best-effort default-session proxy setup BEFORE its ten-second HTTP timeout, checks caller abort, sends bearer and fixed version/beta headers, and consumes response JSON without a root schema guard. No overall operation deadline follows from the HTTP timeout.",
+        "five_hour/seven_day use the unchanged root-reviewed window mapper (including its recorded NaN/reset limitations). Fable first searches limits for weekly_scoped with finite utilization and normalized display name Fable, ignoring is_active, then legacy Fable fields. Wrong display-name type/null response can throw. Successful response may return status ok with every usage window null.",
+        "429 yields fixed rate-limited text and optional retryAtMs: positive numeric seconds or future HTTP date, capped at 24 hours; zero/invalid/past => absent/undefined metadata. Non429 provider error.message is selected by truthy trimmed presence but original string retained. skipPtyFallback flag exists on the HTTP error; active decision is classification-driven.",
+        "401 and non-profile 403 classify stale-token; 403 containing case-sensitive user:profile is terminal missing-scope; 429 terminal rate-limited; >=500 CLI fallback server; other HTTP terminal usage-unavailable. SyntaxError is parse fallback, network/abort-pattern error is network fallback, unknown error also CLI fallback. Raw provider messages and several warning messages are not uniformly redacted."
+      ],
+      "futureAcceptance": [
+        "Null/array/scalar response, utilization NaN/string, malformed limits/display_name, inactive Fable and legacy precedence; explicit all-null ok result.",
+        "429 numeric/date boundary plus 401/403 substring case, 500, invalid JSON, abort before/after proxy; assert request count and no inference of wall deadline from timeout construction."
+      ],
+      "sourceFindings": [
+        "PI-DEF-PARSE",
+        "PI-DEF-REDACTION",
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/13",
+        "#/sourceEvidence/35",
+        "#/sourceEvidence/14"
+      ]
+    },
+    {
+      "id": "PI-PTY",
+      "title": "Claude/Codex CLI text input and termination",
+      "sourcePaths": [
+        "src/main/rate-limits/claude-pty.ts",
+        "src/main/rate-limits/claude-cli-usage-fetch.ts",
+        "src/main/rate-limits/claude-pty-usage-parser.ts",
+        "src/main/rate-limits/claude-pty-reset-parser.ts",
+        "src/main/rate-limits/claude-pty-stop-markers.ts",
+        "src/main/rate-limits/codex-pty-rate-limit-probe.ts",
+        "src/main/rate-limits/codex-pty-status-parser.ts",
+        "src/main/rate-limits/hidden-pty-cleanup.ts",
+        "src/main/rate-limits/hidden-rate-limit-pty-cwd.ts",
+        "src/main/rate-limits/hidden-rate-limit-shell.ts",
+        "src/main/rate-limits/time-zone-wall-clock.ts",
+        "src/main/rate-limits/codex-probe-termination.ts"
+      ],
+      "resultContract": [
+        "Host PTYs use tiny temp cwd, reject filesystem root after realpath, run resolved CLI through inherited/path-adjusted environment; WSL uses explicit login-shell config export and fixed temp cwd. Windows command quoting and WSL ownership are explicit. Executable/package resolution and node-pty import occur outside some probe timers; no platform execution performed.",
+        "Claude 120x40 PTY keeps last100000 characters, nudges /usage after two seconds and Enter every800ms, answers recognized trust prompt y (a possible CLI trust/config side effect), uses finite stop substrings and a two-second settling delay; Claude2.1 stats panel gets eight-second grace. Twenty-five-second timeout or exit can still yield ok when any window parses; no window yields error. No provider inference was launched in this audit.",
+        "Claude section labels bound percentage scan to12 lines and reset scan to14 until next section. Percent grammar consumes integer digits (fractional percentage is not preserved), used/consumed versus remaining orientation and clamp; one parsed window permits partial success. Reset parser accepts positive relative day/hour/minute sums, month/day with rollover and wall-clock zone validation, weekday/time with local rollover; timezone annotation is not used for weekday/time-only cases. Invalid reset => null timestamp while description remains provider text.",
+        "Codex PTY keeps last100000 characters; fifteen-second timeout, data/prompt-gated initial /status nudge, delayed Enter and retry, auth-error short-circuit, and500ms settle after quota. Exit may retain parsed partial success; timeout path is error. Parser takes first unscoped 5h/weekly label, excludes model-scoped adjacency through lookbehind, integer percent with explicit left inversion (otherwise used), clamps, canonical300/10080 windows, and shared reset parser. Wrong/missing labels give null windows.",
+        "PTY writes/disposer callbacks are not universally guarded. Shared cleanup disposes subscriptions first; a thrown disposer can prevent kill/settlement. Windows kill and POSIX kill/destroy differ. Codex child termination closes stdin, uses TERM or Windows tree helper, drains up to five seconds then waits one second; final exit-wait result is not a guarantee of exit. Preserve live/unverifiable/exited, not kill-request=exited.",
+        "PTY-created CLI authentication/refresh, native PTY behavior and Windows process tree destruction are externally owned CLI/native execution boundaries; this contract is its checked-in orchestration and parser, not provider/OS success."
+      ],
+      "futureAcceptance": [
+        "Recorded synthetic current/prior CLI transcripts: reordered/model-scoped labels, malformed/decimal/huge percentage, ANSI/OSC, partial windows, repeated reset labels, zero/overflow durations, DST/date rollover and timezone variants.",
+        "Fake event scheduler for timeout/exit/auth/late data/write/disposer throw; prove no second settlement and characterize possible leaked child. Later disposable per-OS PTY and WSL/profile fixtures with no real auth; assert actual descendant exit independently.",
+        "Characterize trust-prompt automatic answer and separately gate intended no-unrequested-config-effect behavior."
+      ],
+      "sourceFindings": [
+        "PI-DEF-PARSE",
+        "PI-BOUND-DEADLINE",
+        "PI-BOUND-LIVENESS"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/36",
+        "#/sourceEvidence/33",
+        "#/sourceEvidence/40",
+        "#/sourceEvidence/41",
+        "#/sourceEvidence/42",
+        "#/sourceEvidence/32",
+        "#/sourceEvidence/37",
+        "#/sourceEvidence/39",
+        "#/sourceEvidence/48",
+        "#/sourceEvidence/49",
+        "#/sourceEvidence/47",
+        "#/sourceEvidence/38"
+      ]
+    },
+    {
+      "id": "PI-CODEX-AUTH",
+      "title": "Codex auth-file admission, WSL I/O and probe ownership",
+      "sourcePaths": [
+        "src/main/rate-limits/codex-fetcher.ts",
+        "src/main/rate-limits/codex-auth-presence.ts",
+        "src/main/rate-limits/codex-backend-auth.ts",
+        "src/main/rate-limits/auth-filesystem-operation.ts",
+        "src/main/codex-cli/codex-home-process-lock.ts",
+        "src/main/codex-cli/codex-read-only-app-server-args.ts"
+      ],
+      "resultContract": [
+        "Home precedence is explicit option ?? host CODEX_HOME ?? default; blank explicit/env values are not trimmed away. File presence probes access, not token validity. Missing local auth => unavailable; WSL missing auth also probes home to distinguish signed out from unavailable home. Five-second waiter timeout/abort => error; it does not cancel running filesystem I/O.",
+        "Raw auth operations share in-flight work until actual settlement; WSL normalized distro aliases serialize one operation per distro, maximum two global, while other distros can pass blocked queued work. Last waiter abandonment can discard a queued operation; an already-running UNC operation retains its slot until native completion. Non-WSL paths bypass the queue. No credential bytes were read in this audit.",
+        "Backend credentials parse selected home's JSON tokens without validating token/account-id type or expiry; truthy access token is string-interpolated into bearer, truthy account ID forwarded. No app refresh. WSL backend-first failures fall through to RPC; backend native fetch differs from Electron net and has its own transport/proxy semantics.",
+        "In-process lock normalizes the selected home, queues through prior rejection, has no lock-wait deadline/cancel and does not serialize user terminals or separate processes. Spawn uses read-only sandbox and never approval overrides then app-server; those flags do not prove the CLI leaves its own auth/cache/index untouched.",
+        "RPC ok/unavailable gets backend metadata supplement; recognized auth error avoids PTY; disabled fallback retains RPC error or fixed probe failure. Otherwise PTY is selected. Explicit-home pending index backfill returns an error after scheduling recovery; PI-CODEX-RECOVERY describes that side effect. Launch materialization is a separate pending owner join, not filled from these received paths."
+      ],
+      "futureAcceptance": [
+        "Presence/malformed-token separation, explicit blank/null homes, WSL home inaccessible versus auth absent, alias and cross-distro queue saturation, aborted sole/shared waiter and late raw completion.",
+        "Host/home lock contention and abort while queued, RPC auth versus transport failure with fallback on/off, WSL backend failure routes, no real user process or account. Test late underlying operations independently from returned error."
+      ],
+      "sourceFindings": [
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/1",
+        "#/sourceEvidence/27",
+        "#/sourceEvidence/29",
+        "#/sourceEvidence/28",
+        "#/sourceEvidence/44",
+        "#/sourceEvidence/55"
+      ]
+    },
+    {
+      "id": "PI-CODEX-WIRE",
+      "title": "Codex RPC/backend windows, reset credits and partial results",
+      "sourcePaths": [
+        "src/main/rate-limits/codex-rpc-rate-limit-probe.ts",
+        "src/main/rate-limits/codex-backend-usage-client.ts",
+        "src/main/rate-limits/codex-rate-limit-window-mapper.ts",
+        "src/main/rate-limits/codex-rate-limit-window-classification.ts",
+        "src/main/rate-limits/codex-reset-credit-client.ts",
+        "src/main/rate-limits/codex-rate-limit-fetch-result.ts"
+      ],
+      "resultContract": [
+        "RPC init timeout30s (WSL40s), rate-limit read10s (WSL25s). JSON-line input buffer is unbounded; stderr tail100000 characters. Matching init response advances even with error, and repeated init reply can send duplicate reads/reset deadline. Unmatched/null IDs ignored. Missing read result maps ok/null windows. Parse and mapping exceptions share a catch that ignores the line, so malformed matched payload can become timeout rather than a parse error.",
+        "Classification accepts finite numeric usedPercent, recognizes300/10080-minute windows within one minute and picks first matching known type; unknown-duration primary/session and secondary/weekly are positional fallback only when type unclaimed. Missing windows null. RPC mapper uses canonical window duration; backend maps positive finite seconds with ceil to actual minutes. Percent clamped; backend requires string plan_type (empty accepted) and otherwise returns null. Non-ok backend cancels unread response body then null.",
+        "Backend ten-second signal includes auth read; bearer built from current file for each call. RPC and backend data can come from different credential reads. Metadata supplement fills missing session when weekly exists, may replace weekly/plan/update time, and preserves primary result if supplementary fetch throws; credit-only augmentation may occur without adding session.",
+        "Credit count finite number is floored and clamped nonnegative. Backend can infer count from available rows if explicit count invalid; RPC requires numeric count. Zero count is treated complete even absent expiry. Missing credits omitted; explicit null retained where mapped. Status lowercased without trim, default unknown; wrong types/nonarray/null entries can throw. Timestamp numeric/numeric-string <1e10 treated seconds, otherwise milliseconds, or parsed date string; negative/past allowed. Earliest available expiry may already be past.",
+        "Reset credit consumption validates idempotency key by trimmed nonemptiness but sends original, uses30-second signal including auth read and no caller abort or local retry. Maps reset/nothingToReset/noCredit/alreadyRedeemed; unknown outcome rejects. Non-ok cancels unread body. Provider may already have mutated before parse/timeout rejection; remote idempotency/rollback is not established locally.",
+        "RPC error.message and several exception paths retain provider/CLI text; generic close path excerpts then redactString/sanitizeAgentFailureDetail, while auth-pattern and normal error paths have different protection (PI-TRANSPORT). Aborted result differs from parse error and unavailable."
+      ],
+      "futureAcceptance": [
+        "Malformed JSON root/results/credits, wrong numeric/string/null status, repeated init/error-init, split/huge lines, ignored messages until timeout, ID type mismatch and late close.",
+        "Window permutation/duplicate/tolerance, NaN/Infinity/negative/clamp/reset units and known-versus-fallback; require full returned objects, not only classifier's usedPercent.",
+        "Missing/null/zero credits, invalid count fallback, oldest past expiry, supplement stale identity and failures preserving primary; reset unknown result and provider-success/local-parse-failure with synthetic idempotency service only."
+      ],
+      "sourceFindings": [
+        "PI-DEF-PARSE",
+        "PI-DEF-REDACTION",
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/31",
+        "#/sourceEvidence/24",
+        "#/sourceEvidence/26",
+        "#/sourceEvidence/30",
+        "#/sourceEvidence/25",
+        "#/sourceEvidence/50"
+      ]
+    },
+    {
+      "id": "PI-CODEX-RECOVERY",
+      "title": "Named backfill side effect reachable before Codex probe",
+      "sourcePaths": [
+        "src/main/codex/codex-state-db.ts",
+        "src/main/codex/codex-state-db-backfill-recovery.ts"
+      ],
+      "resultContract": [
+        "Admission finds highest numeric state_N.sqlite filename, opens read-only/fileMustExist, checks backfill_state table/id1 string status. Missing directory/error enumerating => missing; absent table/row/nonstring => not-tracked; status exactly complete => complete, any other string => incomplete; query/open failure => unreadable with raw error. Close errors ignored. Pending=true for incomplete or missing/not-tracked with at least100 recursively encountered regular .jsonl files; unreadable => false, symlink entries not followed.",
+        "Background coordinator normalized-home dedupe, rejects new work when stopping/not pending, own AbortController independent of fetch caller. Home-scoped lock uses hashed normalized home and host identity with WSL distro suffix; called managed-hook hardlink coordination belongs existing hook/runtime ownership, not a new raw-provider denominator.",
+        "Recovery initial complete/not-needed/unreadable returns zero spawns. Otherwise max five spawns, five-second polls, two-second restart delay and one-hour loop deadline, using host or WSL read-only app-server. Complete/unreadable terminates and returns summary; abort => stopped, budget => gave-up. A child error marks down like exit for restart logic, without proving OS exit. Native reads/spawn/termination can exceed loop wall deadline.",
+        "Coordinator catches/logs error and returns null; gave-up or fifth coordinator-null failure retains settled entry to suppress further starts. Success/ordinary failure clears entry for later reevaluation. Path/raw error logs are not a redaction guarantee. Provider usage fetch does not await index completion; provider-owned DB content and CLI backfill outcomes remain genuine native/CLI execution debt."
+      ],
+      "futureAcceptance": [
+        "Synthetic SQLite status/version/directory failures and 99/100 count, unreadable vs pending; preserve real SQLite wrapper allocation.",
+        "Fake coordinator identity/lock, five restart and five-null suppression, preabort, child error without exit, deadline while native read hangs; disposable CLI/index/native lock tests only in later phase."
+      ],
+      "sourceFindings": [
+        "PI-BOUND-LIVENESS",
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/64",
+        "#/sourceEvidence/58"
+      ]
+    },
+    {
+      "id": "PI-GEMINI",
+      "title": "Gemini auth-source selection, refresh and quota buckets",
+      "sourcePaths": [
+        "src/main/rate-limits/gemini-usage-fetcher.ts",
+        "src/main/rate-limits/gemini-oauth-sources.ts",
+        "src/main/rate-limits/gemini-cli-oauth-extractor.ts",
+        "src/main/rate-limits/gemini-bucket-formatting.ts"
+      ],
+      "resultContract": [
+        "Explicit opt-in false returns unavailable before OAuth file or network access. Candidate auth.json order is APPDATA, XDG, home Linux location, home macOS location across platforms; first parseable file wins, only ENOENT tries next. Malformed or access-denied first candidate stops fallback. google.type===oauth selects that path; subsequent failure does not switch to Gemini-owned credentials.",
+        "auth.json fields are cast, with JS coercion for expiry and token truthiness. Missing expiry with nonempty access avoids refresh. Pipe-split refresh first element supplies refresh token; project falls back to embedded elements only when loadProjectId throws, not when it successfully returns empty string.401 quota triggers one refresh/project reload then retry, retaining old project on failed reload. Rotated auth.json refresh/access credentials are not persisted.",
+        "Gemini own OAuth file requires string access/refresh and numeric expiry but allows blank/nonfinite. Strict expiry<now refreshes; equal does not. New access token persists before proceeding; refresh_token returned by provider is ignored. expires_in must be number but can nonfinite/negative; truthy determines expiry update. Temp PID file+rename has no private mode, lock, mkdir, stale-write guard or cleanup guarantee. A provider rotation can be followed by local persistence failure/error.",
+        "Extractor finds executable with which/where execFile without timeout, resolves links/fallback paths, walks at most nine parents and known global layouts, reads candidate JS bundle files in enumeration order, first matching client ID/secret constants wins. Reads have no byte cap and errors return null. Source discovery was read only; no bundle/profile/credential values were queried and no constants copied to this report.",
+        "Each token/project/quota request uses Electron net and its own10-second signal; there is no whole-flow deadline/caller abort. Missing client credentials/refresh failure yields error. HTTP/auth errors are status-based, exception strings can be returned raw; no429 retry loop. Project must be string; blank has different fallbacks as above.",
+        "Quota accepts array or buckets wrapper; finite numeric remainingFraction and string resetTime/modelId required, otherwise row skipped. Used percent rounded/clamped,60-minute window, invalid reset=>null. Dedup key is percent+reset (not model), prefers known model then shorter display name, stable ties. Highest-used bucket supplies session, weekly null. Empty/all-invalid buckets can return ok with [] and session null."
+      ],
+      "futureAcceptance": [
+        "Opt-in false zero I/O; candidate precedence, first malformed/EACCES versus later valid, OAuth absent/wrong type, blank/nonfinite/exact-expiry cases.",
+        "Both auth paths401 single retry, project thrown versus successful empty, refresh rotation/newRefreshToken loss, save/rename failure and concurrent refresh. Synthetic extractor layouts/which hang only; do not fetch or inspect installed credentials.",
+        "Bucket empty/all-invalid/scalar wrapper, dedup same percent/reset across models and stable tie; compare full omission/null/result metadata and invalid timestamp."
+      ],
+      "sourceFindings": [
+        "PI-DEF-ROTATION",
+        "PI-DEF-PARSE",
+        "PI-DEF-REDACTION",
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/2",
+        "#/sourceEvidence/18",
+        "#/sourceEvidence/19",
+        "#/sourceEvidence/20"
+      ]
+    },
+    {
+      "id": "PI-KIMI",
+      "title": "Kimi delegated refresh and permissive numeric quota input",
+      "sourcePaths": [
+        "src/main/rate-limits/kimi-fetcher.ts",
+        "src/main/kimi/kimi-runtime-home.ts"
+      ],
+      "resultContract": [
+        "Host home uses explicit option otherwise trimmed KIMI_CODE_HOME/default; missing WSL-resolved home is error. WSL runtime home/distro selection belongs caller runtime policy; no local host fallback is implied. Auth path uses Windows joining for UNC and shared five-second filesystem wait. ENOENT/ENOTDIR => unavailable; other errors preserve filesystem message with WSL context.",
+        "JSON object (including array object form) is sparsely read; truthy nonempty string token accepted without trim, expires_at numeric but not finite-checked. Infinity is fresh, NaN stale, threshold is greater than now+five seconds. Missing/expired token never triggers app OAuth rotation/write; explicit delegated CLI refresh failure metadata. HTTP request only for readable fresh token.",
+        "Electron net request has ten-second signal but no caller abort argument. Module-captured base URL override uses nullish fallback, does not trim or enforce HTTPS, removes one trailing slash. Only source selection reviewed, no environment values read.",
+        "toInt is finite Number conversion, not integer normalization: numeric strings including blank to0, fractional/negative allowed. Positive limit required; used supplied or limit-remaining fallback; percent clamped. Top usage maps weekly10080; limits nearest300-minute duration wins, first tie. Unit substring selection minute/hour/day/second; seconds round, missing/unknown unit effectively minute/default300 rules, negative durations can survive.",
+        "resetTime ?? resetAt means blank first value suppresses second; parsed epoch zero maps null. No valid windows=>error, either valid window=>ok partial. Missing/nonobject root is treated empty; malformed iterable limits/null entries may throw and become network error with raw text rather than parse classification."
+      ],
+      "futureAcceptance": [
+        "Blank/numeric-string/fraction/negative/Infinity/NaN inputs and mixed duration units/ties, absent/null/wrong-type limits, reset zero/blank precedence.",
+        "Expired/missing credentials zero provider calls and zero write; WSL read deadline versus native completion; HTTP response/network malformed distinction and override validation intended correction."
+      ],
+      "sourceFindings": [
+        "PI-DEF-PARSE",
+        "PI-DEF-REDACTION",
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/3",
+        "#/sourceEvidence/46"
+      ]
+    },
+    {
+      "id": "PI-GROK",
+      "title": "Grok issuer selection, weekly versus monthly and delegated auth",
+      "sourcePaths": [
+        "src/main/rate-limits/grok-fetcher.ts",
+        "src/main/rate-limits/grok-auth.ts",
+        "src/shared/grok-session-paths.ts"
+      ],
+      "resultContract": [
+        "Only getGrokHomePath is the reused scope of shared session-path module: trimmed GROK_HOME/default. Auth file existence check is outside read try. Read/JSON failure sanitized to fixed text, no raw path. Root object permits arrays; preferred exact issuer or issuer:: keys mark preferred-seen even if tokenless, suppressing alternate resurrection. First fresh preferred token wins, otherwise first expired preferred; only no preferred keys permits first tokenized fallback.",
+        "Token must nonempty string, whitespace allowed; optional strings can blank. Invalid/missing expiry becomes null and is treated fresh; otherwise strict >now+five minutes. Missing=>unavailable, expired=>delegated CLI error and no request. Injected authReadResult bypasses file read. No app login/refresh/write.",
+        "Base override trims/removes slash but no HTTPS restriction. Electron net sends bearer plus auth-source marker and truthy user ID, combines ten-second timeout with caller signal separately per request. File read is not abortable.",
+        "Credits config is truthy data.config or top-level only if creditUsagePercent has number type. Weekly requires finite numeric percent; undefined (not null) inferred0 only with confirmed weekly period and matching valid start/end billing bounds. Clamp percentage; invalid reset=>null. Explicit numeric weekly accepted regardless period label.",
+        "If config exists but weekly missing, one billing fallback parses monthly limit/used numbers or parseFloat strings (numeric prefix accepted), requires positive limit and builds43200-minute monthly. Empty/missing config is unavailable immediately, no fallback. Weekly success omits monthly, monthly success has weekly null; metadata tier/email/user from first credits config, even if billing fallback supplies windows. Wrong tier type can throw. HTTP errors fixed status messages; fetch/JSON exceptions raw message. No valid quotas=>unavailable; monthly request failure=>error, distinct downstream stale-cache policy remains root-owned."
+      ],
+      "futureAcceptance": [
+        "Issuer first/tokenless/expired ordering, blank token and invalid expiry; missing versus sanitized malformed read.",
+        "Undefined/null/NaN weekly, mismatched period bounds, top monthly-only response, numeric-prefix monthly values, wrong config/tier, first-config metadata; assert monthly property absent versus explicit null where relevant.",
+        "Abort in each request and no whole-flow guarantee; retain 401/403 delegated/no automatic refresh and synthetic error redaction regression."
+      ],
+      "sourceFindings": [
+        "PI-DEF-PARSE",
+        "PI-DEF-REDACTION"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/5",
+        "#/sourceEvidence/6",
+        "#/sourceEvidence/45"
+      ]
+    },
+    {
+      "id": "PI-MINIMAX",
+      "title": "MiniMax cookies, browser/manual transport and snapshot selection",
+      "sourcePaths": [
+        "src/main/rate-limits/minimax-fetcher.ts",
+        "src/main/rate-limits/minimax-request-context.ts"
+      ],
+      "resultContract": [
+        "Cookie trim occurs before main try; wrong runtime type can reject. Empty=>unavailable/missing-credentials web. Normalize Cookie prefix, semicolon pairs and quoted name:value syntax; first exact _token required. All parsed cookies forwarded (no allowlist/dedupe). groupId option trimmed or first matching cookie supplies header context.",
+        "Model options array members trimmed (wrong type throws into outer network classification), string CSV or default general; selection follows exact case-sensitive priority, then lone valid snapshot fallback even if model differs. Number helper accepts finite number or nonblank finite Number string, including fraction/negative. Truthy model string, remaining/start/end required; start is validated but not used for duration or ordering. Used=(100-remaining) rounded/clamped, fixed300-minute window, reset uses raw end_time units. Weekly null.",
+        "base_resp status code undefined or numeric0 means success; null/string0 means provider error. Invalid JSON=>parse error; null root/nonarray list/null element may throw later and classify network. Missing matching snapshot=>usage-unavailable,401/403=>stale-token,other HTTP=>server. Success source web; no automatic provider retry.",
+        "Fixed nonpersistent Electron partition is shared across calls. Clear cookies then Promise.all sets, request, finally clear. One rejected cookie set can trigger cleanup while other sets still pending; concurrent calls can overwrite/clear one another. Session failure falls back to manual Cookie header using SAME15-second signal, but HTTP non-ok does not fall back. Cookie/proxy setup/cleanup are not bounded by that fetch signal; cleanup occurs before response JSON parsing.",
+        "Manual fallback forwards cookie to optional unvalidated endpoint; source exposure is conditional on who can supply option, not proven reachable externally here. No provider endpoint values or credentials copied. Redactor removes Cookie header line plus eight named cookie keys in recognized case-sensitive assignment/quoted forms; no exhaustive secret grammar. Nonstring provider status message and raw cleanup error can be logged."
+      ],
+      "futureAcceptance": [
+        "Response scalar/null/nonarray/mixed entries; code undefined/null/0/string0, model priority/lone fallback and numeric strings/negative times/start>end; exact fixed300 result.",
+        "Deferred parallel cookie writes with first rejection then late success, two simultaneous calls, cleanup failure and session-to-manual fallback sharing timeout; verify no cookie remnants in synthetic session.",
+        "Uppercase/unknown cookie keys, nonstring status errors and raw cleanup error; preserve observed limitation and add separate intended privacy/allowlist/endpoint-validation RED."
+      ],
+      "sourceFindings": [
+        "PI-DEF-COOKIE-RACE",
+        "PI-DEF-REDACTION",
+        "PI-DEF-PARSE",
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/4",
+        "#/sourceEvidence/23"
+      ]
+    },
+    {
+      "id": "PI-MINIMAX-STORE",
+      "title": "MiniMax checked-in credential-store envelope and effects",
+      "sourcePaths": [
+        "src/main/minimax/minimax-cookie-store.ts"
+      ],
+      "resultContract": [
+        "Process-host user home/.orca file is separate from runtime-selected accounts. Cached cookie remains stale after external disk edit until clear; hasCookie checks file/hardens permissions but does not decrypt/validate and returns true even best-effort hardening failure. Warnings once, not proof of effective ACL.",
+        "Version1 encrypted/plaintext envelope accepts permissive Base64; unknown kind throws. Explicit plaintext decodes even if encryption now available; encrypted requires safeStorage available/decrypt success. Legacy data tries decrypt and then printable-cookie heuristic; unavailable encryption permits heuristic plaintext otherwise fails. safeStorage/OS cryptography remains native execution obligation.",
+        "Save trims and rejects empty; encrypts if available, otherwise warns and writes plaintext envelope; secure-file publication completes before in-memory cache. Read hardens best effort then decodes; failures produce generic error and raw console error. Clear cache occurs before remove, which can fail, leaving disk credential despite empty cache.",
+        "Reuse E4-F29 plus secure-file support: POSIX chmod failures and Windows best-effort ACL behavior, including ignored temporary sync ACL false before rename and optimistic async ACL cache, remain source defects/limitations. No assertion that every stored cookie is encrypted or private on every platform."
+      ],
+      "futureAcceptance": [
+        "Version/unknown envelope kind, corrupt Base64, plaintext with encryption available, legacy false positives, wrong decryptor and empty save.",
+        "Save failure before cache, clear rm failure after cache, stale external edit, hasCookie invalid contents/harden failure; isolated disposable per-OS ACL/safeStorage fixtures later."
+      ],
+      "sourceFindings": [
+        "PI-DEF-ACL",
+        "PI-DEF-REDACTION"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/8"
+      ]
+    },
+    {
+      "id": "PI-OPENCODE",
+      "title": "OpenCode Go workspace scrape, cookies and proxy partition",
+      "sourcePaths": [
+        "src/main/rate-limits/opencode-go-usage-fetcher.ts",
+        "src/main/rate-limits/opencode-go-request-session.ts",
+        "src/main/rate-limits/opencode-go-page-scraper.ts"
+      ],
+      "resultContract": [
+        "Bare recognized token wraps auth=; semicolon/header forms normalized but parsed allowlist is exact case-sensitive auth/__Host-auth, dropping unrelated cookies. Empty=>unavailable, invalid=>error; monthly explicitly null. Cookie/proxy setup happens before override workspace-ID validation, so invalid ID is not zero earlier local effects.",
+        "Fixed nonpersistent partition clears cookies then configures proxy then SEQUENTIALLY sets cookies; failed set cleans already-written cookies without own outstanding parallel sets. Concurrent fetches still share a partition with no operation lock. Explicit valid settings proxy wins, else preserve system non-DIRECT, else valid env; weak session memo and release-to-system/close-connections behavior. This custom helper differs from central proxy credential separation.",
+        "Workspace lookup parses fixed server-function response IDs or uses validated wrk/wk alphanumeric override; first unique ID order retained. Each workspace candidate is fetched until parsable quotas, returning first success or last error. Requests each15s, no total-candidate cap/whole deadline or caller abort. Provider server-function version constant is an external compatibility seam.",
+        "Scraper takes whole page text then rejects >10000000 characters, searches key and opening brace within30 characters, balances braces without quote/string grammar, regexes numbers at direct object depth. Numeric-prefix/scientific notation can be misread, negative reset seconds allowed. rolling and weekly required; monthly optional; percent clamp, fixed300/10080/43200 windows, reset now+seconds. Null placeholders skipped in search for later data.",
+        "Error status returns null windows and raw error.message; cleanup error warn is raw. Existing test named never logs cookie only injects an error that does not contain cookie and checks result text; it is not proof that arbitrary provider/transport errors are scrubbed."
+      ],
+      "futureAcceptance": [
+        "Sequential setup assertion retained plus simultaneous calls/late cleanup/failed proxy; invalid workspace ID after setup effects; exact cookie case allowlist.",
+        "Workspace multiple failures then success, duplicate/no IDs, fixed server version drift, per-request timeout versus unlimited aggregate, oversize body before parser cap.",
+        "Braces inside strings, nested properties, 1e3/NaN/Infinity/negative reset, duplicate null placeholders, missing required/optional usage; synthetic transport errors containing auth text to expose missing redaction."
+      ],
+      "sourceFindings": [
+        "PI-DEF-COOKIE-RACE",
+        "PI-DEF-PARSE",
+        "PI-DEF-REDACTION",
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/7",
+        "#/sourceEvidence/21",
+        "#/sourceEvidence/22"
+      ]
+    },
+    {
+      "id": "PI-TRANSPORT",
+      "title": "Shared proxy, diagnostic redaction and local/external ownership",
+      "sourcePaths": [
+        "src/shared/network-proxy.ts",
+        "src/main/network/proxy-settings.ts",
+        "src/main/network/bounded-proxy-application.ts",
+        "src/main/network/proxy-policy-resolution.ts",
+        "src/main/network/electron-proxy-credentials.ts",
+        "src/main/network/electron-default-proxy-session.ts",
+        "src/shared/codex-auth-errors.ts",
+        "src/shared/commit-message-agent-output.ts",
+        "src/main/network/macos-tailscale-dns-diagnostic.ts"
+      ],
+      "resultContract": [
+        "Proxy normalize accepts nonstring as empty, trims/max2048, allowlists http/https/socks variants, keeps URL userinfo+host and drops path/query; bypass first4096 chars split/trim. First truthy environment key wins, even if whitespace/invalid and later key valid. Configured child proxy writes six variables and explicitly empty NO_PROXY to remove inherited bypass.",
+        "Central default-session proxy queue serializes applications and memoizes settled policy/credentials; env fallback probes released system proxy first, preserves non-DIRECT. ensure without force reuses existing app pin. Credentials stripped from proxy rules and held by session WeakMap; proxy login supplies only matching normalized host/port and isProxy, scheme/realm not validated here.",
+        "runBoundedProxyApplication means at most THREE attempts with0/100ms delays, not a wall-clock timeout. Native setProxy/resolveProxy/close can hang. Failed policy readiness is false but caller Claude catches ensure failure and then attempts fetch; request-guard registration/native enforcement is a separately owned application/session boundary, not established by this raw-provider helper.",
+        "Codex recognized auth text strips basic ANSI and returns first matching line up to4000 characters (or bounded prefix), not credential redaction. Generic failure excerpt prefers stderr, scans8192-character ends, chooses two head lines/tail with100/130 budgets or single240; sanitizer removes Cc/Cf, whitespace, recognized filesystem paths and truncates240+ellipsis. It does not itself erase tokens.",
+        "Reuse OBS-COL-06/OBS-COL-INTEGRATION redactString source characterization: named/fingerprint/URL/env-shape rules, not universal PII/secret recognition. Its use in generic Codex close path does not protect every RPC/PTY/provider error path.",
+        "macOS DNS hint reads source-described scutil --dns synchronously at most1.5s, caches diagnostic/null five minutes, inspects global nameservers only, appends hint for matching network text when sole known resolver. It returns original message plus hint, not redacted text; reading host diagnostic precedes pattern decision. No diagnostic executed here.",
+        "Electron net/native fetch/session cookies/OS keychain/CLI auth are real external execution boundaries. Local source specifies request options and result parsing, not provider authorization, exact server schema, proxy DNS routing, encryption confidentiality, cookie isolation under runtime races or confirmed descendant exit. Account launch/home materialization and root cycle/cache acceptance stay explicit separate joins."
+      ],
+      "futureAcceptance": [
+        "Synthetic URL userinfo/case/bypass and invalid-first environment priority; same-session queue, late setProxy/close, three retry attempts and no total deadline; proxy login wrong host/port/session/scheme.",
+        "Error corpus including tokens inside recognized auth line, JSON nonstring errors, paths/ANSI/OSC/bidi, already-redacted and unknown secret forms; separately root-approved intended privacy correction.",
+        "Later disposable runtime routing and native OS fixtures; no real credentials, external provider requests or diagnostic uploads. Capture live/unverifiable/exited distinctly."
+      ],
+      "sourceFindings": [
+        "PI-DEF-REDACTION",
+        "PI-BOUND-DEADLINE"
+      ],
+      "execution": "not-run",
+      "sourceEvidenceRefs": [
+        "#/sourceEvidence/51",
+        "#/sourceEvidence/59",
+        "#/sourceEvidence/60",
+        "#/sourceEvidence/63",
+        "#/sourceEvidence/61",
+        "#/sourceEvidence/62",
+        "#/sourceEvidence/52",
+        "#/sourceEvidence/53",
+        "#/sourceEvidence/54"
+      ]
+    }
+  ],
+  "sourceResiduals": [
+    {
+      "id": "PI-SOURCE-OWNED",
+      "state": "no-unread-assigned-provider-parser-body",
+      "scope": "Named entrypoints and necessary local raw auth/parser/transport branches characterized; this is a bounded recommendation subject root review, not proof from counts."
+    },
+    {
+      "id": "PI-SOURCE-JOINS",
+      "state": "retained-separate-owner-local-boundaries",
+      "joinIds": [
+        "PI-JOIN-LAUNCH",
+        "PI-JOIN-RUNTIME",
+        "PI-JOIN-REQUEST-GUARD"
+      ],
+      "scope": "These local implementations are not externalized as an excuse for closure and are not certified by this report; preserve pending source ownership and root integration."
+    }
+  ],
+  "crossOwnerJoins": [
+    {
+      "id": "PI-JOIN-CYCLE",
+      "state": "reuse-accepted-unchanged",
+      "authority": "7e7544a",
+      "evidence": "docs/migration/rate-limit-source-review.json",
+      "scope": "Local policy/cycle/cache/publication only, original17 cases and separate RATE-QUEUE-001 evidence remain root-owned. No rerun here."
+    },
+    {
+      "id": "PI-JOIN-LAUNCH",
+      "state": "separately-assigned-pending",
+      "owner": "root-designated account launch materialization lead",
+      "localImplementations": [
+        "prepareCodexRuntimeHomeForLaunch",
+        "ClaudeRuntimeAuthService.prepareForClaudeLaunch"
+      ],
+      "scope": "Received runtime/home/auth preparation consumed here, not proof of ownership/materialization. No delivered artifact supplied in this Dispatch; do not certify from names."
+    },
+    {
+      "id": "PI-JOIN-KEYCHAIN",
+      "state": "reuse-source-body",
+      "evidence": "docs/migration/audit-closure/e4-cli/followup-cli-boundaries.json#/contracts/10",
+      "contractId": "S4-keychain",
+      "scope": "Current-user macOS scoped/legacy/managed keys, 3s command+settlement timeout, non-darwin no-op, partial writes and delete behavior; OS execution remains unrun."
+    },
+    {
+      "id": "PI-JOIN-ACL",
+      "state": "reuse-source-body",
+      "evidence": "docs/migration/audit-closure/e4-cli/followup-final-boundaries.json#/boundaries/28",
+      "contractId": "E4-F29",
+      "scope": "Secure-file and Windows ACL best effort/fail-open limitations; not encryption/confidentiality proof."
+    },
+    {
+      "id": "PI-JOIN-REDACTOR",
+      "state": "reuse-delivered-source-characterization-not-new-acceptance",
+      "evidence": "docs/migration/audit-closure/e5-platform/assets-observability-final.json#/contracts/16",
+      "contractIds": [
+        "OBS-COL-INTEGRATION",
+        "OBS-COL-06"
+      ],
+      "scope": "redactString named rules and recorded privacy limitations; no claim every caller uses it or root accepted whole E5."
+    },
+    {
+      "id": "PI-JOIN-RUNTIME",
+      "state": "retained-separate-owner-boundary",
+      "owner": "existing E3/E5 runtime/hook/native source allocation and root acceptance",
+      "localImplementations": [
+        "resolveClaudeCommand",
+        "resolveCodexCommand",
+        "withCliRuntimeOnPath",
+        "withManagedHookInstallLock",
+        "readManagedHookHostIdentity",
+        "SyncDatabase",
+        "Windows process-tree termination helper"
+      ],
+      "scope": "Raw-provider code and recovery caller behavior read. These are named LOCAL execution/coordination implementations, not renamed external provider internals; no new proof/acceptance of them claimed. Preserve prior runtime/hook/native test allocations and source residuals rather than recursively re-audit here."
+    },
+    {
+      "id": "PI-JOIN-REQUEST-GUARD",
+      "state": "separate-application-registration-boundary",
+      "localImplementations": [
+        "getProxySessionApplicationReadiness",
+        "Electron request-guard/login registration"
+      ],
+      "owner": "E2/E5 application/session networking",
+      "scope": "Proxy helper sets readiness/credential state; actual global request-guard and login installation/enforcement not re-audited. Cannot promise failed ensure prevents transport or proxy credentials work merely from helper existence."
+    }
+  ],
+  "sourceFindings": [
+    {
+      "id": "PI-DEF-ROTATION",
+      "kind": "source-risk/partial-success",
+      "contracts": [
+        "PI-CLAUDE-AUTH",
+        "PI-GEMINI"
+      ],
+      "observed": "Remote rotation can succeed before aborted or failed persistence; Gemini drops returned refresh-token rotation, auth.json rotation not persisted; inactive Claude swallows failed write.",
+      "intendedCorrection": "Separate root decision and synthetic durable-rotation/concurrency RED, not silently changed parity expectation."
+    },
+    {
+      "id": "PI-DEF-PREVIEW",
+      "kind": "source-risk",
+      "contracts": [
+        "PI-CLAUDE-AUTH"
+      ],
+      "observed": "Scoped preview overwrite followed by delete does not restore prior item; similarity trust only percentages.",
+      "intendedCorrection": "Root-approved credential restoration/account identity contract with failing regression first."
+    },
+    {
+      "id": "PI-DEF-COOKIE-RACE",
+      "kind": "source-defect-candidate",
+      "contracts": [
+        "PI-MINIMAX",
+        "PI-OPENCODE"
+      ],
+      "observed": "Fixed shared sessions race across invocations; MiniMax parallel failed setup may write after cleanup. OpenCode sequential setup fixes only intra-call race.",
+      "intendedCorrection": "Synthetic deferred cookie race must characterize source; separate desired isolation/settlement behavior."
+    },
+    {
+      "id": "PI-DEF-PARSE",
+      "kind": "source-characterization/validation-gap",
+      "contracts": [
+        "PI-CLAUDE-WIRE",
+        "PI-PTY",
+        "PI-CODEX-WIRE",
+        "PI-GEMINI",
+        "PI-KIMI",
+        "PI-GROK",
+        "PI-MINIMAX",
+        "PI-OPENCODE"
+      ],
+      "observed": "Loose casts/coercion permit blank/nonfinite/partial values and inconsistent parse/network/timeout classification; text scrape not full JSON/JS grammar.",
+      "intendedCorrection": "Preserve baseline inputs then root-approved strict normalization/error-shape RED; do not fill expected results from TS types."
+    },
+    {
+      "id": "PI-DEF-REDACTION",
+      "kind": "source-privacy-gap",
+      "contracts": [
+        "PI-CLAUDE-AUTH",
+        "PI-CLAUDE-WIRE",
+        "PI-CODEX-WIRE",
+        "PI-GEMINI",
+        "PI-KIMI",
+        "PI-GROK",
+        "PI-MINIMAX",
+        "PI-MINIMAX-STORE",
+        "PI-OPENCODE",
+        "PI-TRANSPORT"
+      ],
+      "observed": "Raw provider/transport/error paths bypass redaction or cover finite patterns only; privacy tests with nonsecret error cannot prove arbitrary secret removal.",
+      "intendedCorrection": "Synthetic tagged secret/error corpus only, desired exhaustive policy requires root decision; no real secret demonstration."
+    },
+    {
+      "id": "PI-DEF-ACL",
+      "kind": "inherited-source-defect",
+      "contracts": [
+        "PI-MINIMAX-STORE"
+      ],
+      "observed": "Secure-file Windows ACL return/cache limitations retained from E4-F29; plaintext fallback explicit.",
+      "intendedCorrection": "Preserve source fixtures and separately approved fail-closed/native confidentiality requirements."
+    },
+    {
+      "id": "PI-BOUND-DEADLINE",
+      "kind": "source-limit-plus-native-execution-debt",
+      "contracts": [
+        "PI-CLAUDE-WIRE",
+        "PI-PTY",
+        "PI-CODEX-AUTH",
+        "PI-CODEX-WIRE",
+        "PI-CODEX-RECOVERY",
+        "PI-GEMINI",
+        "PI-KIMI",
+        "PI-MINIMAX",
+        "PI-OPENCODE",
+        "PI-TRANSPORT"
+      ],
+      "observed": "HTTP signal duration excludes queue/setup/credential discovery or applies per request; native I/O can outlive waiter; bounded proxy retries have no time bound.",
+      "intendedCorrection": "Fake clock+deferred native boundaries then disposable OS checks; total deadline/cancellation policy is separate desired correction."
+    },
+    {
+      "id": "PI-BOUND-LIVENESS",
+      "kind": "native-execution-debt/source-limit",
+      "contracts": [
+        "PI-PTY",
+        "PI-CODEX-RECOVERY"
+      ],
+      "observed": "Kill request/error event/timeout is not confirmed exit; CLI trust/cache/backfill side effects can precede error.",
+      "intendedCorrection": "Observe actual child/descendant exit in disposable fixtures; loss of contact remains unverifiable."
+    }
+  ],
+  "originalAssertionBodiesRead": [
+    {
+      "path": "src/main/rate-limits/gemini-bucket-formatting.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/66",
+      "assertionBodies": "Naming/humanization, missing bucket and worst-bucket reset metadata; does not itself assert deduplication.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/kimi-fetcher.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/67",
+      "assertionBodies": "Missing/expired no fetch, session/week mapping and bearer, HTTP500, malformed/read denied, empty quota, delegated refresh, default/env/blank home.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/grok-fetcher.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/68",
+      "assertionBodies": "Missing/expired no fetch, weekly/config identity, confirmed zero, empty views, monthly fallback/failure, exact property omission and caller abort forwarding.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/codex-rate-limit-window-classification.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/69",
+      "assertionBodies": "Null/reordered/weekly-only/session-only, duplicate first, NaN rejection, duration tolerance and fallback; assertion helper checks percentages, not full mapped resets.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/claude-oauth-usage-error.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/70",
+      "assertionBodies": "Retry-After seconds/date/cap, zero/negative/invalid/missing and non429 behavior.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/minimax-fetcher.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/71",
+      "assertionBodies": "Cookie/model/HTTP/parse mapping, fixed300 window, headers/fallback and named redaction. Timeout case uses already-aborted signal mock, not elapsed deadline; unmatched-model example actually supplies empty array.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/minimax/minimax-cookie-store.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/72",
+      "assertionBodies": "Mock safeStorage/secure-file availability, envelope/legacy, cache, hardening and clear; no real encryption or ACL.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-backend.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/73",
+      "assertionBodies": "WSL backend without CLI, noncanonical window duration, weekly/credits, pending shared read abort, reset signal/outcome/payload, unread bad-response body cancellation.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/opencode-go-usage-fetcher.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/74",
+      "assertionBodies": "Token normalization/allowlist, server lookup and override, sequential cookies/cleanup, proxy setup failure, Flight/null-placeholder mapping, full windows/clamp, HTTP/parser failures. Cookie privacy case only uses innocuous network timeout.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/grok-auth.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/75",
+      "assertionBodies": "Fixed path-free error, malformed JSON, preferred issuer/tokenless suppression, first fallback and fresh-over-expired ordering.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/gemini-usage-fetcher.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/76",
+      "assertionBodies": "OAuth quota, dedup preference, empty/wrapped/NaN buckets, refresh failure and two quota calls on401; does not assert second bearer despite test comment.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/gemini-usage-fetcher.fallback.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/77",
+      "assertionBodies": "Own credential fallback/project payload, bundle refresh client fields, unavailable extractor/project failure, opt-out zero I/O; persistence stubs have no durable assertion.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/auth-filesystem-operation.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/78",
+      "assertionBodies": "WSL alias serial, two distros concurrent, global cap, queued abandonment and preabort raw operation suppression.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/claude-fetcher-cli-fallback.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/79",
+      "assertionBodies": "429 no PTY and Retry-After, repair reread and second bearer, managed live defer, disabled fallback, missing/keychain unavailable, CLI usage-unavailable metadata.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    },
+    {
+      "path": "src/main/rate-limits/claude-fetcher-keychain-credentials.test.ts",
+      "range": "full",
+      "execution": "not-run",
+      "evidenceRef": "#/sourceEvidence/80",
+      "assertionBodies": "WSL unresolved no host read; scoped/legacy/file precedence, distinct stale retry, managed/WSL/same-token exclusion, expired metadata still OAuth.",
+      "originalAllocations": [
+        {
+          "id": "WP-ENG-HARNESS",
+          "filesRef": "docs/migration/parity-test-work-packages.json#/packages/14/files"
+        }
+      ]
+    }
+  ],
+  "contractTestAssociations": [
+    {
+      "contractId": "PI-CLAUDE-AUTH",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/13",
+        "#/originalAssertionBodiesRead/14"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-CLAUDE-WIRE",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/4",
+        "#/originalAssertionBodiesRead/13"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-PTY",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/13"
+      ],
+      "qualification": "Mocked PTY routing only; direct PTY/parser source tests remain pointer-only here."
+    },
+    {
+      "contractId": "PI-CODEX-AUTH",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/7",
+        "#/originalAssertionBodiesRead/12"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-CODEX-WIRE",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/3",
+        "#/originalAssertionBodiesRead/7"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-CODEX-RECOVERY",
+      "assertionBodyRefs": [],
+      "qualification": "No new recovery test body read; inherited allocation and future acceptance retained."
+    },
+    {
+      "contractId": "PI-GEMINI",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/0",
+        "#/originalAssertionBodiesRead/10",
+        "#/originalAssertionBodiesRead/11"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-KIMI",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/1",
+        "#/originalAssertionBodiesRead/12"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-GROK",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/2",
+        "#/originalAssertionBodiesRead/9"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-MINIMAX",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/5"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-MINIMAX-STORE",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/6"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-OPENCODE",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/8"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    },
+    {
+      "contractId": "PI-TRANSPORT",
+      "assertionBodyRefs": [
+        "#/originalAssertionBodiesRead/8",
+        "#/originalAssertionBodiesRead/9",
+        "#/originalAssertionBodiesRead/13"
+      ],
+      "qualification": "Only stated assertion scope; full original allocation retained."
+    }
+  ],
+  "additionalOriginalPointers": [
+    {
+      "path": "src/main/rate-limits/codex-auth-presence.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/claude-pty.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/claude-fetcher-managed-account-usage.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/claude-fetcher-fable-usage.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-auth-errors.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-pty-settle.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-rpc-exit-diagnostics.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-session-supplement.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-runtime-pairing.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-process-contract.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-probe-shutdown.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/codex-cli/codex-home-process-lock.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/claude-accounts/oauth-refresh.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/network/proxy-settings.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    },
+    {
+      "path": "src/main/network/proxy-settings-session.test.ts",
+      "readStatus": "pointer-only-this-task; inherited prior associations unchanged",
+      "execution": "not-run"
+    }
+  ],
+  "originalTestAllocation": {
+    "authority": {
+      "path": "docs/migration/parity-test-work-packages.json",
+      "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+    },
+    "policy": "Exact original whole-file allocation retained by immutable JSON pointers below; no file removed/reassigned and no new smaller test denominator. These packages overlap broader capabilities; their full file sets remain the central owner obligation, not claimed exercised by this assignment.",
+    "packages": [
+      {
+        "i": 0,
+        "id": "WP-CAP-AUTO",
+        "fileCount": 24,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/0/files",
+        "runner": "vitest automations tests",
+        "platforms": "all"
+      },
+      {
+        "i": 2,
+        "id": "WP-CAP-DEVICE",
+        "fileCount": 62,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/2/files",
+        "runner": "vitest (per-OS gates)",
+        "platforms": "per-OS gates"
+      },
+      {
+        "i": 3,
+        "id": "WP-CAP-DIAG",
+        "fileCount": 57,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/3/files",
+        "runner": "vitest diag tests",
+        "platforms": "all"
+      },
+      {
+        "i": 7,
+        "id": "WP-CAP-MOBILE",
+        "fileCount": 532,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/7/files",
+        "runner": "vitest mobile + route-boundary",
+        "platforms": "iOS/Android"
+      },
+      {
+        "i": 8,
+        "id": "WP-ENG-AGENTSVC",
+        "fileCount": 166,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/8/files",
+        "runner": "vitest (fakes at boundary)",
+        "platforms": "all"
+      },
+      {
+        "i": 15,
+        "id": "WP-ENG-INSTALL",
+        "fileCount": 44,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/15/files",
+        "runner": "vitest fixture roots only",
+        "platforms": "macOS/Windows/Ubuntu"
+      },
+      {
+        "i": 17,
+        "id": "WP-ENG-NATIVE",
+        "fileCount": 33,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/17/files",
+        "runner": "swift test + smoke (OS-gated)",
+        "platforms": "per-OS; elsewhere unverified"
+      },
+      {
+        "i": 19,
+        "id": "WP-ENG-PLUGINS",
+        "fileCount": 132,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/19/files",
+        "runner": "vitest host-conformance",
+        "platforms": "all"
+      },
+      {
+        "i": 21,
+        "id": "WP-ENG-REMOTE",
+        "fileCount": 282,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/21/files",
+        "runner": "vitest fixture hosts only",
+        "platforms": "local/SSH/WSL; mixed versions"
+      },
+      {
+        "i": 22,
+        "id": "WP-ENG-RUNTIME",
+        "fileCount": 688,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/22/files",
+        "runner": "vitest incl. orca-runtime.test.ts gate",
+        "platforms": "local/SSH/WSL/relay"
+      },
+      {
+        "i": 24,
+        "id": "WP-ENG-SHELL",
+        "fileCount": 367,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/24/files",
+        "runner": "vitest background-launch only",
+        "platforms": "all"
+      },
+      {
+        "i": 29,
+        "id": "WP-UI-AUTO",
+        "fileCount": 100,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/29/files",
+        "runner": "vitest + automations specs",
+        "platforms": "all"
+      },
+      {
+        "i": 30,
+        "id": "WP-UI-AUX",
+        "fileCount": 160,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/30/files",
+        "runner": "vitest",
+        "platforms": "all"
+      },
+      {
+        "i": 32,
+        "id": "WP-UI-CORE",
+        "fileCount": 829,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/32/files",
+        "runner": "vitest app-shell tests",
+        "platforms": "all"
+      },
+      {
+        "i": 39,
+        "id": "WP-UI-SETTINGS",
+        "fileCount": 171,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/39/files",
+        "runner": "vitest settings tests",
+        "platforms": "all"
+      },
+      {
+        "i": 44,
+        "id": "WP-UI-WORK",
+        "fileCount": 262,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/44/files",
+        "runner": "vitest + source-control specs",
+        "platforms": "all"
+      }
+    ],
+    "receiverMapping": "Each of 126 methods preserves its exact originalTestsRef and directMethodAssertionRefs plus remainingAcceptance/receiverFixture refs.",
+    "sharedRouteAssertionFiles": [
+      "src/main/ipc/runtime.test.ts",
+      "src/main/ipc/runtime-subscribe-lifecycle.test.ts",
+      "src/main/runtime/rpc/dispatcher-request-parsing.test.ts",
+      "src/main/ipc/runtime-environments-call-routing.test.ts",
+      "src/renderer/src/runtime/runtime-rpc-client.test.ts"
+    ],
+    "sharedRouteReadStatus": "retained prior body associations and pointers, not newly read all five here; route assertions do not prove service outcomes",
+    "wholeOriginalQueueRef": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/originalTestQueue",
+    "wholeOriginalQueueCount": 33,
+    "inheritedExecutionQueueRef": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/inheritedExecutionQueue",
+    "inheritedExecutionQueueCount": 70,
+    "execution": "not-run"
+  },
+  "inheritedGates": [
+    {
+      "id": "BM-AUTH",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/0",
+      "obligation": "Exercise each real registered IPC callback with trusted, wrong-ID, destroyed/non-window and development-origin senders; verify exact argument arity/scalars/object roots, null/undefined/unknown keys, output serialization and invoke rejection. Mentu remove/re-register and Bots conditional/duplicate registration behavior must be characterized."
+    },
+    {
+      "id": "BM-BOT-WRITES",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/1",
+      "obligation": "Create/update/delete/first+second rotation through IPC and reload actual temp persistence. Include undefined patch values, field bounds/models/session IDs, retained enabled automation/history after Bot deletion, quit/frozen/error flush and disk failures. Decide durable acknowledgment and model/session validation intent before implementing correction."
+    },
+    {
+      "id": "BM-RESPONSIBILITY",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/2",
+      "obligation": "Create reactive and scheduled via IPC; prove no reactive adapter activates on creation; exact schedule/default/clamp/zone/recipe semantics; missing project and recurrence fail-before-write; second-write/compensation failures; runNow true dispatch/refusal/failure and completion/history joins; disabled responsibility versus automation; same-millisecond duplicates; Bot/history errors after launch and owner deletion races."
+    },
+    {
+      "id": "BM-HOST",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/3",
+      "obligation": "Owner/folder/worktree/SSH captured generation/paired runtime/WSL host-mirror contracts through boundary. Verify no local fallback, actual remote forwarding requirements and host loss unverifiable. Establish explicit Windows/Linux/WSL admitted-runtime support versus current local darwin-arm64 pin; source only gates those out."
+    },
+    {
+      "id": "BM-FILES",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/4",
+      "obligation": "Path/native+Win absolute/NUL/symlink/size/malformed matrix; row reorder and verify predicate unknown-field preservation policy; load-growth race. Guarded save crash at temp/held/compare/link/cleanup, concurrent target writer, filesystems without hardlink, Windows retries/ACL effects, fsync/durability decision and post-save reread race."
+    },
+    {
+      "id": "BM-PROBES",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/5",
+      "obligation": "Exact argv, no installation, late executable resolution, version/adapters malformed/nonzero/null exit/timeouts/truncation, strict doctor warning and recipe-name mismatch, unexpected report schemas and all host routes; available capability must not promise execution on unsupported pin/platform."
+    },
+    {
+      "id": "BM-ADMISSION",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/6",
+      "obligation": "Prove legacy routes launch zero commands; run/review/approval/request IDs distinct, unknown/wrong namespace/scalar/restart IDs fail, concurrent and repeated approval execution once per key. Validate complete request schema before launch; mutate every bound recipe/tree/prompt/skill/profile/model/provider/vars/policy/runner/Pi/node/lock/host/plan field, including during revalidation-to-spawn window."
+    },
+    {
+      "id": "BM-RECOVERY",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/7",
+      "obligation": "Actual admitted native resume and retry-step of failed/running/terminal targets, wrong recipe/ref/step, missing recipe_ref, foreign state/event IDs, outcomes/attempts/vars/state changes omitted from recovery digest; demonstrate native reservation/request conflicts across processes and restart rather than infer them from cached promises."
+    },
+    {
+      "id": "BM-RESULTS-CANCEL",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/8",
+      "obligation": "Native child/descendant cancellation during each review/launch stage, deferred capability probes, repeated cancel, confirmed exit versus unverified tree. Cross product current0/nonzero/null/timedOut and prior evidence statuses/missing run IDs/busy text/cancel; do not let loose busy-text matching or old terminal record mask current failure."
+    },
+    {
+      "id": "BM-EVIDENCE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/9",
+      "obligation": "Primary ID and optional cross-record identity/ordering/duplicate labels, permissive numerics/timestamps/nulls and future outcomes; unbounded primary file policy, 512KiB output limits and200 quarantine reporting; filesystem race/error matrix. Real restart/contact-loss liveness and formal Commitment Protocol records require separate authoritative evidence; a local run file never proves either."
+    },
+    {
+      "id": "R-TRUST",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/10",
+      "obligation": "Use real registration wrapper: exact trusted live WebContents vs foreign live object, missing trusted registration, destroyed sender, malformed/null/omitted/extra-key payload; verify rejection before archive/profile/network/process/file effects. Real Electron structured-clone of every payload/union; repeat registration/disposal ownership. Existing mocked trust tests do not substitute."
+    },
+    {
+      "id": "R-DISCOVERY",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/11",
+      "obligation": "Native vs Windows-host vs WSL resolved/repair target; falsy whole payload/nested null; cwd/repo/provideraccount roots; duplicate/remotehost IDs; WSL unavailable/timeouts/partial records/pluginenrichment; cache refreshstale completion/destroy/reload; actualdiscovery outputs and host-owned paths."
+    },
+    {
+      "id": "R-FRESHNESS",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/12",
+      "obligation": "Native home/provider/repo/plugin128 limits, inaccessiblepaths and positive lock/digestidentification; explicitWSL/SSH exclusion; brokenalias before/after convergence, snapshot/lock corruption andmax issues; real platform filesystem notjust injectedobservations."
+    },
+    {
+      "id": "R-UPDATE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/13",
+      "obligation": "CapturedIPC+realrunner: non-array, mixed non-strings, name bounds/eligibility, throwresolve/spawn after running state; zero exit+rescan rejection, nonzero+cleanconvergence, aliaslostfromtopology; ordered32koutput/throttle, cancelrunningbefore/afterspawn, late events/rescan, 12shung kill withunverifiable liveness; POSIX descendant/Windowsjob oridentity-safe tree termination; acklive/settled and getState acrossreload. Preserve existing fake child assertions andadd real disposable process acceptance."
+    },
+    {
+      "id": "R-PREPARE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/14",
+      "obligation": "Captured prepare distinct/missing/duplicate IDs, WSL/native pathhandoff andWindows receiptmode; source mutation/case collision/contentlimits; cap8includinginflight, lazyTTL/activepublish/no-op cancel/release, initretry andarchive cleanup failure; concurrentpublish, versioncached+lostshare response/reconnect, profilechangebetweenversion/share, unpinnedsharebehavior, progresssendthrows, restartaftercloud commit, abortbefore/duringupload/finalize/share withremote effects probed."
+    },
+    {
+      "id": "R-CLOUD",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/15",
+      "obligation": "Actual cloud service auth/errorclasses: absentconfig/session, dev-onlyoverride, expiryrefreshrotation/fencedprofile/orgswitch; SkillCloudRequestError401/403 vsOrcaCloudRequestError; malformed200JSON/null/204/200void/nestedversion/manifests, ID grammar mismatch, requests60s timeout/no redirects; all read/delete methods exact route/body/envelope. External managedservice fixtures needed forcanManage/ownedmembership/expiredrevokedshare/last pinned version/package cascade andidempotentmutation lostresponses; source backendpolicy remainsunverified."
+    },
+    {
+      "id": "R-INSTALL",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/16",
+      "obligation": "Each fourcaptured install callbacks: authorizingbeforecap,unsupportednogrant, versionmismatchnoinstall, packagevs publicshare auth, schemaunknown/omitted/null/provider[]/duplicate selections/conflictdecisions, localfull parse vsIPC shape; operation collision acrosssingle/bundle, cancelbefore grant/token/during download/between rename/after commit; 40MiB/hash/origin/expiry/redirect/archive identity/manifest guard fixtures; canonical receipt+journal states/recovery/stalecommit, unchangedrepair andcancelchoice, bundlekeep-local clean update, per-skill unknown error andouterpartial rejection; unowned provider/copyfailure/discoveryunavailable partialorfailedwithretaineddisk state. Preserve user-ownedfiles acrossall failurepoints."
+    },
+    {
+      "id": "R-REMOTE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/17",
+      "obligation": "Paired vs absent env SSHdestination vs explicit outerssh:, host/folder/worktree ownership andmixed versions; exactcapabilities/providers[]; install5min/status15s/progress2s andtransportloss, same operation retry<=3 andstaged upload resume/ack/cancelcleanup. Cancelstrict true OR, negative/unsupported/throw paths andlatercommit; real reconnect fixtures prove liveness unverifiable on loss. Full RPCconsumer/SSHproducer gap is separate andnotclosed here."
+    },
+    {
+      "id": "R-MANAGEMENT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/18",
+      "obligation": "Captured IPCsingle preview/remove/list/distro handlers missingdirect assertions; optionalenv/null/strictkeys/schemaresponsevalidation; WSLnonWindows/cache/execfail vs remoteinvalid/mixedarray; previewstates all seven andduplicatebundleIDs withbatch8failures; local receipt shallow/malformed/2048/traversalunavailable vsmissing, SSHhost/legacyambiguousfolder/worktree, selected account provider root changes; remove cancelclean/modified/discard andeveryjournalphase/recovery failure."
+    },
+    {
+      "id": "R-DELETE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/19",
+      "obligation": "Actualtrusted registered handlers (no direct sourcefile found), full nestedtarget/strictrequest, duplicateid/path, output>64placements vsannotation; native/WSL roots/pathsymlink/aliasfile/plugin/system/timestampnull, malicious self-declared directory, stale change between plan and lock/rename, busybatch/recoverypartial journals/files, crashreplay/stagedcleanupfailed/lockreleasefail after effects andexistingWindows skips. Execution only disposablefixtures."
+    },
+    {
+      "id": "R-TCC",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/20",
+      "obligation": "Exact live owner forfourcallbacks, captured dismiss invocation, claimID safe integer/null/foreign/stale/new registration/main frame/gone, best-efforttally save failure andrestart old/malformedcounts; atomicpersistence genuinefixture plusmacOSnotice lifecycle. Thisisnotice bookkeeping, notTCC permission acquisition."
+    },
+    {
+      "id": "R-WINDOW",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/21",
+      "obligation": "CapturedisMaximized/minimize/maximize/menu/confirm direct assertions absent; senderboundarydecision, destroyedwindow, platformzoomNaN/infinite, tray/latch/crash/gone/quit/watchdog/request ID matching anddrawn X without ID, beforeunload abort/dispose/reopen/old handler races. RealpackagedElectron macOS/Windows/Linux smoke; nativewindowdestroy isnotPTY exit."
+    },
+    {
+      "id": "R-FOCUS",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/22",
+      "obligation": "Everycallback wrong sender/true/false/null/object, floating panel/terminal all four truth-table combinations; recorderprecedence/terminal policy/markdownB/platformkeys andzoom; resetonmain framenavigation/gone/destroy/dispose withrealElectron focus, no effectonPTYliveness."
+    },
+    {
+      "id": "R-VIEWPORT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/23",
+      "obligation": "ActualreportIPC withtrusted ID andfallbackorigin, foreign page owner, malformed state/missing fields/NaN/infinity/negative/coercion nullfalseempty numericstrings, position>max, ownership dispose/reuse; managerwheel clampandpartialCDPfailure. Existingmanager direct tests do notcoverreportparser/trust."
+    },
+    {
+      "id": "F-PUSH-ADMISSION",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/24",
+      "obligation": "All96 exact rows: invoke real producer/preload/consumer with valid/omitted/null/wrong scalar/unknown fields, wrong window/frame/page/worktree/host, reload/dispose and throwing callback; assert exact state changes described per row and no wrong-owner effect. Run packaged Electron on supported macOS/Windows/Linux; absence of a push is not exit."
+    },
+    {
+      "id": "F-PUSH-ORDER",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/25",
+      "obligation": "Per-row push before/after snapshot, duplicate and out-of-order deliveries, queue overflow300, reconnect and late Promise completion; mobile relay must keep newer push, updater source currently permits late snapshot overwrite; require explicit intended-correction test if changing policy."
+    },
+    {
+      "id": "F-PUSH-RESOURCE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/26",
+      "obligation": "Streams: MJPEG owner-safe stop, JPEG buffer/Blob revoke, video stream+device collision/late-start/H264 config/decode/timeouts, preview Unicode byte ack/overflow/resync/disconnect/reconnect with disposable PTYs and real WebCodecs. Confirm no process exit inferred from unavailable snapshot."
+    },
+    {
+      "id": "F-PUSH-STATE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/27",
+      "obligation": "Dashboard omitted icon retention,250ms throttle1s topology cap and stale refresh; downloads nullable/omitted page IDs and duplicate finaltoasts; WebAuthn queue/cancel/teardown/reply rejection; cleanup/space scan collision, appendduplicate and supersession; native-chat initial/pending/replacement/reconnect; local log identity/rotation/partial bytes."
+    },
+    {
+      "id": "F-PUSH-COMMAND",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/28",
+      "obligation": "Exact app/guest commands across active/floating/pinned tabs, profile inheritance and stale source; createTerminal ack identity/partial failure, split legacy hint/ambiguous owners, close expiry and disposal, automation dispatch duplicate/token30min/reservation/refusal, notification-only sleep/wake versus durable host state."
+    },
+    {
+      "id": "F-RPC-SCHEMA",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/29",
+      "obligation": "Every615 exact rpcRows receiver: retained params expression plus namedSchemaRefs; valid fixture, omitted, explicit null, unknownkeys, scalar/array mismatch, min/max boundary, optional/default/nullable/refinement/transform and handler post-parse projection; keep source and intended-correction fixtures distinct. Explicitly test null-param methods ignoring arbitrary params and root request.params??{} behavior, including optional Mentu capability and scalar review/approval IDs."
+    },
+    {
+      "id": "F-RPC-ROUTE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/30",
+      "obligation": "For all615 registry rows prove exact method string through local unary or stream lane and supported/legacy remote routes; unknown method and wrong unary/stream lane; current main frame, sender document retirement, colliding subscription IDs, premature unsubscribe, malformed ACK, callback throw, binary ownership, close/setup races. Use 48 receiver groups plus actual dynamic namespace tests, no colon/dot alias assumption."
+    },
+    {
+      "id": "F-RPC-HOST",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/31",
+      "obligation": "Local/environment/explicit owner/null/SSH selector matrix; environment re-pair before enqueue/during probe/start/return, capability TTL60s/cache32, hotpath cached connection and snapshot one-shot exclusions; supported shared failure must not rerun mutation by fallback; timeout/cancel and loss contact ->unverifiable. Real disposable paired sockets/SSH required."
+    },
+    {
+      "id": "F-RPC-RESULT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/32",
+      "obligation": "No universal result validator: fixture each actual handler return projection, omitted result vsnull under JSON/structuredclone, BigInt/cycles/errors, optionalerror.data; apply actual browser/emulator/error allowlists, keepalive vsresult, parse-error mapping. Direct service result shapes that remain unknown are source exceptions, never filled from TResult annotations."
+    },
+    {
+      "id": "F-EXTERNAL",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/33",
+      "obligation": "Explicit fixture/platform contracts for Electron/WebContents/menu/native clipboard/WebCodecs, backend/cloud/provider schemas and policy, RPC remote transport auth/caps, Zod compiled/fallback/strip/refine semantics, persistence durability and host process execution. No real provider/account/profile execution in audit. Owner E1/E2/E4/E5 evidence remains separately accepted or pending."
+    },
+    {
+      "id": "F-LEGACY",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/34",
+      "obligation": "Preserve zeroarg export:requestPdf receiver and tabId/worktreeId ui:closeSessionTab receiver; producer provenance remains unknown. Test mixed-version receivers and concrete close behavior; no removal/alias inference, no additional history search authorized."
+    },
+    {
+      "id": "F-SUPPLEMENTAL",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/35",
+      "obligation": "Retain PBR001..012, E3-FACTORIES usage-store/results/UI and imported backend obligations from closure.json; current boundary pass joins dynamic local/remote/envelope only, does not certify every delegated OS/library effect. Preserve original futureAcceptanceCommands and sourceTestGroups whole-file queues."
+    },
+    {
+      "id": "D-USAGE-ADMISSION",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/36",
+      "obligation": "Exercise all24 real registered handlers with preload transport and disposable store: omitted/null/primitive/object arguments, unknown fields/scope/range/kind, nonboolean enabled, truthy force, nonfinite/negative/string limit; actual trusted/wrong/destroyed sender and Electron structured clone. Characterize raw acceptance first; intended validation/auth changes require explicit rejection/no-write tests. Do not replace current null semantics silently."
+    },
+    {
+      "id": "D-USAGE-LIFECYCLE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/37",
+      "obligation": "Whole lifecycle/writer suites plus disabled no-op, 299999/300000 freshness, changed metadata fingerprint, concurrent refresh, metadata failure before scan, scanner failure after start, write/rename/flush failure, disable during scan, restart after failed write, generation supersession, and schema6/5/2 mismatch preserving enabled only for Claude/Codex. Source defect fixture must show memory mutation survives failed setEnabled; intended durable acknowledgment/recovery gets separate regression."
+    },
+    {
+      "id": "D-USAGE-PROJECTION",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/38",
+      "obligation": "All24 result fixtures across3providers; complete named structures with null/zero/nonzero cost, top fields/sessions/events, scope/date/DST boundary, invalid range/scope/limit, multi-location/model sessions, inferred versus recorded prices, Claude tier aggregation versus daily sums, OpenCode primary-worktree and all-range invalid timestamp asymmetries. No new universal normalized billing record."
+    },
+    {
+      "id": "D-USAGE-INGEST",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/39",
+      "obligation": "Preserve original whole scanner/parser/path/dedup/model pricing tests listed in originalTestQueue. Three scanned entry bodies are characterized; validate actual local discovery/parser/attribution outputs on synthetic provider JSONL/SQLite versions, priority/reclaim/deferred claims, malformed/corrupt file/DB, permission/removal/race and WSL boundaries; do not relabel unread local helper bodies as external platform proof. No personal logs or live provider requests."
+    },
+    {
+      "id": "D-USAGE-UI",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/40",
+      "obligation": "Real slice+IPC+rendered panes: web undefined fallback, initial/off/loading/empty/error/stale/null/zero states, toggle and filter, share eligibility and provider swap/unmount. Deferred old filter response and disable while pending must first reproduce stale overwrite; intended request-generation/disabled-state fence and rejection reset require separate tests. Benchmark assertions do not prove interaction correctness."
+    },
+    {
+      "id": "D-GRAB-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/41",
+      "obligation": "D-GRAB-ACCEPT: real wired shortcut with wrong/reminted/destroyed page, payload clamp/URL userinfo and budget edges, selecting/cancel/navigation/timeout, clipboard rejection, screenshot null/failure, unmount during all awaits, serial-intent replacement; fixture Electron guest capture and intended state-reset/redaction fixes."
+    },
+    {
+      "id": "D-PR-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/42",
+      "obligation": "D-PR-ACCEPT: same/lower sequence, stale request timestamp and same-ms entry replacement, duplicate worktree IDs across hosts, fallback merged PR, provider-neutral/GitHub null distinctions, error retry, cache eviction and rejected metadata persist through real consumer; external provider fixtures separate."
+    },
+    {
+      "id": "D-MARKDOWN-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/43",
+      "obligation": "D-MARKDOWN-ACCEPT: whole real editor suites plus callback wiring/wrong coordinates/stale target/read-only/malformed command; ignored false command and thrown library errors; header/multicell/undo/serialization platform fixtures."
+    },
+    {
+      "id": "D-PREVIEW-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/44",
+      "obligation": "D-PREVIEW-ACCEPT: whole replay suite plus actual xterm asynchronous writes/resync/replacement and dispose during callbacks; malformed snapshot and thrown write; no loss-of-contact=>exit inference."
+    },
+    {
+      "id": "D-NUDGE-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/45",
+      "obligation": "D-NUDGE-ACCEPT: whole campaign/parser/updater suites plus malformed/null/boundary campaign, cooldown race, destroyed sender/send throw partial-state recovery, dismissal restart and packaged native updater fixture; intended failure recovery must have separate test."
+    },
+    {
+      "id": "D-PORT-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/46",
+      "obligation": "D-PORT-ACCEPT: whole parsing/cache/PID suites plus wired push after disposal/selection/host change, partial ANSI/URL chunk limits, LRU/ties/bind/unbind, ambiguous PID, failed kernel scan and real OS process-identity fixtures. Kernel scan/kill result remains DR-WORKSPACE_PORT_METHODS."
+    }
+  ],
+  "inheritedExecutionObligations": [
+    {
+      "id": "P-EXEC-BASELINE",
+      "status": "not-run",
+      "owner": "root-assigned Sol/test owners after full audit acceptance",
+      "obligation": "Run all original allocated whole files in a disposable source-derived baseline using original runner/platform config and assertions. Do not run in read-only source checkout. Record exact revision/command/environment and every parameter/platform/skip; setup failure is not behavioral RED, skip is not PASS."
+    },
+    {
+      "id": "P-EXEC-PORT",
+      "status": "not-run",
+      "obligation": "Port retained original assertion bodies/test membership to versioned Rust service/CLI and Electron boundary without weakening; prove candidate behavioral RED before feature changes and GREEN after. Separate baseline defect expectations from root-approved intended-correction tests."
+    },
+    {
+      "id": "P-EXEC-RESULT",
+      "status": "not-run",
+      "obligation": "For every method in methods, use its exact receiverFixture and resultContract plus group acceptance cases: success/null/undefined/omission/coercion, each pre/post-effect failure, partial success, retries, cancellation/cleanup, old/new host capability branches. Mocked provider admission alone cannot prove owning implementation outcome."
+    },
+    {
+      "id": "P-EXEC-HOST",
+      "status": "not-run",
+      "obligation": "Exercise Linux/macOS supported+unsupported versions/Windows/WSL native and packaged profiles plus SSH old/new mixed versions and folder/worktree ownership. Assert live/unverifiable/exited, never convert contact loss/timeout/unregister to exited. Use isolated app-owned fixtures, never personal profiles or live credentials."
+    },
+    {
+      "id": "P-EXEC-NATIVE",
+      "status": "not-run",
+      "obligation": "Real authorized native helper/SDK/speech worker/model/download and temporary filesystem tests after source obligations close. Preserve model/catalog/keychain/TCC/ADB/simctl provenance and consent; no inference tests or desktop actions during this audit."
+    },
+    {
+      "id": "P-EXEC-EXTERNAL",
+      "status": "not-run",
+      "obligation": "Reprovision authorized isolated cloud/provider test destinations. Fault response loss after commit, retry/idempotency scope, partial cleanup, stream end/disconnect, stale owner fencing and upload cancellation. Never copy source secrets or infer production operation from mocks."
+    }
+  ],
+  "executionObligations": [
+    {
+      "id": "PI-BASELINE",
+      "owner": "post-audit actual Sol/testing leads",
+      "requirement": "Keep complete original allocation/assertions and all inherited BM/R/F/D gates. Isolate pinned source in disposable fixture environment; no live profile/provider. Run original bodies unchanged and record true baseline, setup/compile errors separately; read pointer-only bodies before port."
+    },
+    {
+      "id": "PI-PORT",
+      "owner": "post-audit actual Sol implementation leads",
+      "requirement": "Port exact source-test-to-contract assertions, preserving missing/null/undefined/coercion and host/version branches. Candidate missing behavior must fail behavioral RED before implementation, then GREEN with integrated real boundary. Mocks of missing product behavior and compile failures are not RED proof."
+    },
+    {
+      "id": "PI-CORRECTIONS",
+      "owner": "root acceptance then Sol",
+      "requirement": "For each PI-DEF-* keep observed-source fixture separate from root-approved desired correction regression. Do not weaken original expected values to make desired behavior appear baseline parity."
+    },
+    {
+      "id": "PI-RUNTIME",
+      "owner": "E2/E3/E5 and testing leads",
+      "requirement": "Disposable per-platform net/session/proxy/Keychain/safeStorage/ACL/PTY/WSL/socket fixtures and fake provider protocol only initially; real provider schema/idempotency/auth remain externally unverifiable until separately authorized. Mixed-version/folder/SSH compatibility and live/unverifiable/exited remain inherited; no local fallback on lost remote ownership."
+    }
+  ],
+  "sourceEvidence": [
+    {
+      "path": "src/main/rate-limits/claude-fetcher.ts",
+      "sha256": "4c78c05e09531a165b96e6ab05d7291893ba37bf5f04bd8c67cefaf3e1941ba3",
+      "bytes": 1037,
+      "lines": 25,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 25,
+          "sha256": "4c78c05e09531a165b96e6ab05d7291893ba37bf5f04bd8c67cefaf3e1941ba3"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher.ts",
+      "sha256": "9c6f0a9f7f244478c55f41bbcb8dd65ea6ea380ef6317aec6cb6228a93fa5444",
+      "bytes": 10147,
+      "lines": 271,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 271,
+          "sha256": "9c6f0a9f7f244478c55f41bbcb8dd65ea6ea380ef6317aec6cb6228a93fa5444"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/gemini-usage-fetcher.ts",
+      "sha256": "1949bd3030b076024a532f0d4be90b8902e589fd66d8765d1510ab33cb6d9ead",
+      "bytes": 7454,
+      "lines": 248,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 248,
+          "sha256": "1949bd3030b076024a532f0d4be90b8902e589fd66d8765d1510ab33cb6d9ead"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/kimi-fetcher.ts",
+      "sha256": "b96a373e6a22155c8aee2e31d7cec5729620bbe7406fb258f340df9653576099",
+      "bytes": 12128,
+      "lines": 355,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 355,
+          "sha256": "b96a373e6a22155c8aee2e31d7cec5729620bbe7406fb258f340df9653576099"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/minimax-fetcher.ts",
+      "sha256": "a44e2ada134d3260e2bdf22aaff338ec29dae47c9edecc8b374659436c031d7c",
+      "bytes": 8489,
+      "lines": 279,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 279,
+          "sha256": "a44e2ada134d3260e2bdf22aaff338ec29dae47c9edecc8b374659436c031d7c"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/grok-fetcher.ts",
+      "sha256": "7b3e1af98f5c57ca62582608db2607c153203a2a04daab25c1bd457e0251c3e6",
+      "bytes": 10114,
+      "lines": 293,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 293,
+          "sha256": "7b3e1af98f5c57ca62582608db2607c153203a2a04daab25c1bd457e0251c3e6"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/grok-auth.ts",
+      "sha256": "c5f1f3cb79cba165a47f9ef9ac4176b777e6475f0d57ea4dc58d552495ed948d",
+      "bytes": 4538,
+      "lines": 141,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 141,
+          "sha256": "c5f1f3cb79cba165a47f9ef9ac4176b777e6475f0d57ea4dc58d552495ed948d"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/opencode-go-usage-fetcher.ts",
+      "sha256": "768e3258fa3ac07f7563fce9ce2e2bee108aede6c2ef919b77f7f1d1542ca25c",
+      "bytes": 9410,
+      "lines": 288,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 288,
+          "sha256": "768e3258fa3ac07f7563fce9ce2e2bee108aede6c2ef919b77f7f1d1542ca25c"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/minimax/minimax-cookie-store.ts",
+      "sha256": "a32478895adc2040c3446b886e590063f3d0e9ee8ce17eecbf3d9c439f3f7ec8",
+      "bytes": 5256,
+      "lines": 165,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 165,
+          "sha256": "a32478895adc2040c3446b886e590063f3d0e9ee8ce17eecbf3d9c439f3f7ec8"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-active-usage-fetch.ts",
+      "sha256": "b69e3009df7350bbe39b72b5baf02005ee430a4eb052c9e14a1a75369fdf9456",
+      "bytes": 8106,
+      "lines": 248,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 248,
+          "sha256": "b69e3009df7350bbe39b72b5baf02005ee430a4eb052c9e14a1a75369fdf9456"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-managed-account-usage.ts",
+      "sha256": "429f25d045fb480662976103710b1342dc67f6d81eba29db8091bd7ce9ef2cfa",
+      "bytes": 3217,
+      "lines": 104,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 104,
+          "sha256": "429f25d045fb480662976103710b1342dc67f6d81eba29db8091bd7ce9ef2cfa"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-managed-account-credentials.ts",
+      "sha256": "9fc3d6e4f2bf9c982cdb09317b7396972d7631c8935fd98a162bf9ee7294171c",
+      "bytes": 3998,
+      "lines": 127,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 127,
+          "sha256": "9fc3d6e4f2bf9c982cdb09317b7396972d7631c8935fd98a162bf9ee7294171c"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-oauth-credentials.ts",
+      "sha256": "1974c19c31fec20c7fee99917ac9523b19c18ba78d822213e75e32f9e97d96f4",
+      "bytes": 4840,
+      "lines": 160,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 160,
+          "sha256": "1974c19c31fec20c7fee99917ac9523b19c18ba78d822213e75e32f9e97d96f4"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-oauth-usage-request.ts",
+      "sha256": "61f3fa8b8b75d64bd00ccc66c1678649b49ee142c71afd27fe8d6a41cea5d1e3",
+      "bytes": 3174,
+      "lines": 103,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 103,
+          "sha256": "61f3fa8b8b75d64bd00ccc66c1678649b49ee142c71afd27fe8d6a41cea5d1e3"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-usage-error-classification.ts",
+      "sha256": "bde2bb7523e90f954007c0be09ec7e7ae4e5d12a178dffbdf9e27c16e347eadf",
+      "bytes": 2457,
+      "lines": 84,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 84,
+          "sha256": "bde2bb7523e90f954007c0be09ec7e7ae4e5d12a178dffbdf9e27c16e347eadf"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-usage-refresh-plan.ts",
+      "sha256": "a2a117424bf33016f25fe938bda7dce689c73198108d4613e3f382a70eda218e",
+      "bytes": 1256,
+      "lines": 47,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 47,
+          "sha256": "a2a117424bf33016f25fe938bda7dce689c73198108d4613e3f382a70eda218e"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-usage-result.ts",
+      "sha256": "56d0ad1136661ce1250d11ecb1e518188f2f1534db8144d305987396396e6076",
+      "bytes": 4125,
+      "lines": 136,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 136,
+          "sha256": "56d0ad1136661ce1250d11ecb1e518188f2f1534db8144d305987396396e6076"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-oauth-recovery.ts",
+      "sha256": "093612f036329263a8e7d8245513ed55436b5039e49051af3e22a956fafd63db",
+      "bytes": 6490,
+      "lines": 172,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 172,
+          "sha256": "093612f036329263a8e7d8245513ed55436b5039e49051af3e22a956fafd63db"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/gemini-oauth-sources.ts",
+      "sha256": "8f58442aab6a78248875a23fc4f3298d91e2bd518c7f25d05593b1686153af53",
+      "bytes": 5075,
+      "lines": 163,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 163,
+          "sha256": "8f58442aab6a78248875a23fc4f3298d91e2bd518c7f25d05593b1686153af53"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/gemini-cli-oauth-extractor.ts",
+      "sha256": "71ede319f6519f73d0c23a441812a3961818dca0047d70006e6cfdeb62cb5619",
+      "bytes": 7794,
+      "lines": 269,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 269,
+          "sha256": "71ede319f6519f73d0c23a441812a3961818dca0047d70006e6cfdeb62cb5619"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/gemini-bucket-formatting.ts",
+      "sha256": "1e37a55581bdfda102ba5ff258b8a334b8b9c48ad1f6b6e734130c381b8e0c6f",
+      "bytes": 2726,
+      "lines": 84,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 84,
+          "sha256": "1e37a55581bdfda102ba5ff258b8a334b8b9c48ad1f6b6e734130c381b8e0c6f"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/opencode-go-request-session.ts",
+      "sha256": "e1f6c91e244d23503fa75df5edbd0e17c5ece2ba80c65202ebd16db85659cf67",
+      "bytes": 3679,
+      "lines": 107,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 107,
+          "sha256": "e1f6c91e244d23503fa75df5edbd0e17c5ece2ba80c65202ebd16db85659cf67"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/opencode-go-page-scraper.ts",
+      "sha256": "f0657cfc3954a2e023f223029b679d0d74a2cd15581b19827f758548e1cf1c67",
+      "bytes": 6492,
+      "lines": 172,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 172,
+          "sha256": "f0657cfc3954a2e023f223029b679d0d74a2cd15581b19827f758548e1cf1c67"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/minimax-request-context.ts",
+      "sha256": "f5bda73d9bd822e989474e0edc32753d75a3ec8827fb5d3f68b39f4673fe143d",
+      "bytes": 6952,
+      "lines": 203,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 203,
+          "sha256": "f5bda73d9bd822e989474e0edc32753d75a3ec8827fb5d3f68b39f4673fe143d"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-backend-usage-client.ts",
+      "sha256": "5323d7dfd558bc73d7646036a9d979e6bdfebcdcf8061e32aa9d44480657b6c9",
+      "bytes": 4386,
+      "lines": 134,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 134,
+          "sha256": "5323d7dfd558bc73d7646036a9d979e6bdfebcdcf8061e32aa9d44480657b6c9"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-reset-credit-client.ts",
+      "sha256": "eead73daa496d55a5cb58d926319882ea68a669b68c9e66303aa486166a8330a",
+      "bytes": 7160,
+      "lines": 224,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 224,
+          "sha256": "eead73daa496d55a5cb58d926319882ea68a669b68c9e66303aa486166a8330a"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-rate-limit-window-mapper.ts",
+      "sha256": "18aa8e29122fa88b5295c16116e7753aeb7debb5d4c0da050f0cb922d0680261",
+      "bytes": 1407,
+      "lines": 38,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 38,
+          "sha256": "18aa8e29122fa88b5295c16116e7753aeb7debb5d4c0da050f0cb922d0680261"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-auth-presence.ts",
+      "sha256": "9d177b10510de0bf1956ed23f57ca67ba9cc2a791c084ebfec9a610ab56dd9f4",
+      "bytes": 3505,
+      "lines": 83,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 83,
+          "sha256": "9d177b10510de0bf1956ed23f57ca67ba9cc2a791c084ebfec9a610ab56dd9f4"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/auth-filesystem-operation.ts",
+      "sha256": "581d7045220e92602ca83ec335576889dcba5ada4a699e866ea1dba10afbecac",
+      "bytes": 5276,
+      "lines": 175,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 175,
+          "sha256": "581d7045220e92602ca83ec335576889dcba5ada4a699e866ea1dba10afbecac"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-backend-auth.ts",
+      "sha256": "1a6b4015abe81744686cc0fe3d84dcc1d833cda2d465845a5b07a6797c0daac5",
+      "bytes": 2912,
+      "lines": 98,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 98,
+          "sha256": "1a6b4015abe81744686cc0fe3d84dcc1d833cda2d465845a5b07a6797c0daac5"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-rate-limit-window-classification.ts",
+      "sha256": "5d90c65f6a092a25a2699624b5809c5d7ff5b2d2c9f34638196902a7068e12cb",
+      "bytes": 2539,
+      "lines": 75,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 75,
+          "sha256": "5d90c65f6a092a25a2699624b5809c5d7ff5b2d2c9f34638196902a7068e12cb"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-rpc-rate-limit-probe.ts",
+      "sha256": "c538a33de029dbbaeb471559ea88d82eaccd60b25915ea79acc8aee31fc912cd",
+      "bytes": 9604,
+      "lines": 301,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 301,
+          "sha256": "c538a33de029dbbaeb471559ea88d82eaccd60b25915ea79acc8aee31fc912cd"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-pty-rate-limit-probe.ts",
+      "sha256": "1289447982a6e091d2f9f6862bdfaa2c10a195c9ab0e76ad2cd9127e38c1e7f8",
+      "bytes": 7002,
+      "lines": 236,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 236,
+          "sha256": "1289447982a6e091d2f9f6862bdfaa2c10a195c9ab0e76ad2cd9127e38c1e7f8"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-cli-usage-fetch.ts",
+      "sha256": "6be322cafd8a521b2661c26724c4363f444d0b2ba255df83ec6806e29b218146",
+      "bytes": 4016,
+      "lines": 117,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 117,
+          "sha256": "6be322cafd8a521b2661c26724c4363f444d0b2ba255df83ec6806e29b218146"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-managed-usage-panel.ts",
+      "sha256": "a8633d36bd622636b43503b25d8a70538f6ec301d226a50f366a469fb41d3672",
+      "bytes": 3728,
+      "lines": 113,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 113,
+          "sha256": "a8633d36bd622636b43503b25d8a70538f6ec301d226a50f366a469fb41d3672"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-oauth-usage-error.ts",
+      "sha256": "2e1b7c0486e9e75f039f157195ce8fb7144acca1f9c2cbca7e3ed8fcc9a2b78e",
+      "bytes": 1831,
+      "lines": 56,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 56,
+          "sha256": "2e1b7c0486e9e75f039f157195ce8fb7144acca1f9c2cbca7e3ed8fcc9a2b78e"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-pty.ts",
+      "sha256": "558e497ae896a1fbf5f439bc838b9ded539f1c96b020af0eeb79456144135afd",
+      "bytes": 12823,
+      "lines": 354,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 354,
+          "sha256": "558e497ae896a1fbf5f439bc838b9ded539f1c96b020af0eeb79456144135afd"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-pty-status-parser.ts",
+      "sha256": "1a7e07757337e16d5908771b55e0f4d14a943b421b9beb8ae2dddfb2cc77b34e",
+      "bytes": 2139,
+      "lines": 62,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 62,
+          "sha256": "1a7e07757337e16d5908771b55e0f4d14a943b421b9beb8ae2dddfb2cc77b34e"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-probe-termination.ts",
+      "sha256": "2e20367628d35fa0fe4c3eddb6a7ae2f08fca508099319fbe2f836afa0f139c6",
+      "bytes": 3857,
+      "lines": 113,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 113,
+          "sha256": "2e20367628d35fa0fe4c3eddb6a7ae2f08fca508099319fbe2f836afa0f139c6"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/hidden-pty-cleanup.ts",
+      "sha256": "2acf09f0797fc7a9c1a0f1cd1402f75a6de4800c53da1c03d02d0d63df3c9234",
+      "bytes": 1299,
+      "lines": 58,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 58,
+          "sha256": "2acf09f0797fc7a9c1a0f1cd1402f75a6de4800c53da1c03d02d0d63df3c9234"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-pty-usage-parser.ts",
+      "sha256": "26d427c0f917d3acce4dcc07f50467eeca11ba3364baabdadf38637787a2ff19",
+      "bytes": 5920,
+      "lines": 166,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 166,
+          "sha256": "26d427c0f917d3acce4dcc07f50467eeca11ba3364baabdadf38637787a2ff19"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-pty-reset-parser.ts",
+      "sha256": "73c676a8aaaa1b5d3c476f29d6e58ea01e633a64facde17b483710add49fe8d8",
+      "bytes": 8875,
+      "lines": 307,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 307,
+          "sha256": "73c676a8aaaa1b5d3c476f29d6e58ea01e633a64facde17b483710add49fe8d8"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/claude-pty-stop-markers.ts",
+      "sha256": "0153c250590a1a452faac617c18f23c9b9b6691119eba60ec11748aeefb29a0b",
+      "bytes": 390,
+      "lines": 14,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 14,
+          "sha256": "0153c250590a1a452faac617c18f23c9b9b6691119eba60ec11748aeefb29a0b"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/claude-accounts/oauth-refresh.ts",
+      "sha256": "a8cef23e97800e3d1bc3a32a5833e6111e33528af1a2388c2f137b2b046db84e",
+      "bytes": 6289,
+      "lines": 170,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 170,
+          "sha256": "a8cef23e97800e3d1bc3a32a5833e6111e33528af1a2388c2f137b2b046db84e"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/codex-cli/codex-home-process-lock.ts",
+      "sha256": "a9430d5f18fb5f6c4e9f3725a7847873648ef3600ee80f208b200750378ff2b1",
+      "bytes": 2481,
+      "lines": 55,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 55,
+          "sha256": "a9430d5f18fb5f6c4e9f3725a7847873648ef3600ee80f208b200750378ff2b1"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/shared/grok-session-paths.ts",
+      "sha256": "dc74aed1007d725bebc33304d20b1e57f6b9abee4588e9fbaa5784413bfd0e45",
+      "bytes": 9232,
+      "lines": 294,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 294,
+          "sha256": "dc74aed1007d725bebc33304d20b1e57f6b9abee4588e9fbaa5784413bfd0e45"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/kimi/kimi-runtime-home.ts",
+      "sha256": "20bb98b6c295dc829a635a59b3e8f14b769c1059e665d4ed68c281ffaeba9be4",
+      "bytes": 2607,
+      "lines": 65,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 65,
+          "sha256": "20bb98b6c295dc829a635a59b3e8f14b769c1059e665d4ed68c281ffaeba9be4"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/time-zone-wall-clock.ts",
+      "sha256": "1049f23e11637c7e72aca4221b9a965f7daeb71f536a714eff92407a270f3b39",
+      "bytes": 2788,
+      "lines": 86,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 86,
+          "sha256": "1049f23e11637c7e72aca4221b9a965f7daeb71f536a714eff92407a270f3b39"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/hidden-rate-limit-pty-cwd.ts",
+      "sha256": "a91077ffe1b5d1ae7c95f0b22c43feb2e3f01cfa169bac909347c1a54d51bdda",
+      "bytes": 1489,
+      "lines": 37,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 37,
+          "sha256": "a91077ffe1b5d1ae7c95f0b22c43feb2e3f01cfa169bac909347c1a54d51bdda"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/hidden-rate-limit-shell.ts",
+      "sha256": "da30ef09aa5831b188eb4a6fc16f5397a8974dd450a97db86e5d9c3efde11a5e",
+      "bytes": 119,
+      "lines": 3,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 3,
+          "sha256": "da30ef09aa5831b188eb4a6fc16f5397a8974dd450a97db86e5d9c3efde11a5e"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/rate-limits/codex-rate-limit-fetch-result.ts",
+      "sha256": "662c0981e111188bc38c1320b82734f4bf58b8e39e2c6ef19cce81f2d3dbc8fc",
+      "bytes": 304,
+      "lines": 12,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 12,
+          "sha256": "662c0981e111188bc38c1320b82734f4bf58b8e39e2c6ef19cce81f2d3dbc8fc"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/shared/network-proxy.ts",
+      "sha256": "571b552e900ea306fe00eb6a4683bf5b77f260316d9ac3b3a3895fc1d02ea14a",
+      "bytes": 3672,
+      "lines": 130,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 130,
+          "sha256": "571b552e900ea306fe00eb6a4683bf5b77f260316d9ac3b3a3895fc1d02ea14a"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/shared/codex-auth-errors.ts",
+      "sha256": "7fbbbbbb12df653c5c01887b71397e44be575a3640f09bf89345031b2ec71214",
+      "bytes": 2146,
+      "lines": 69,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 69,
+          "sha256": "7fbbbbbb12df653c5c01887b71397e44be575a3640f09bf89345031b2ec71214"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/shared/commit-message-agent-output.ts",
+      "sha256": "e347990357f14bd1da881db72089117ed5059cf18857f6a182ab7de2ada313df",
+      "bytes": 7876,
+      "lines": 224,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 224,
+          "sha256": "e347990357f14bd1da881db72089117ed5059cf18857f6a182ab7de2ada313df"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/network/macos-tailscale-dns-diagnostic.ts",
+      "sha256": "ea7ab58154b9c73447ef52fcc82f02ad1ef477fec583a1bb238245f7adef5230",
+      "bytes": 2827,
+      "lines": 93,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 93,
+          "sha256": "ea7ab58154b9c73447ef52fcc82f02ad1ef477fec583a1bb238245f7adef5230"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/codex-cli/codex-read-only-app-server-args.ts",
+      "sha256": "73d767908e485987243b1e0b40c1c59abf27b69aaa60771246dc399c1a89de0b",
+      "bytes": 234,
+      "lines": 10,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 10,
+          "sha256": "73d767908e485987243b1e0b40c1c59abf27b69aaa60771246dc399c1a89de0b"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/claude-accounts/managed-auth-path.ts",
+      "sha256": "6bb814200e9d603110ec661cb8efe749f38b1e7df5aa6ea0b1759fd44cce11a6",
+      "bytes": 3497,
+      "lines": 112,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 112,
+          "sha256": "6bb814200e9d603110ec661cb8efe749f38b1e7df5aa6ea0b1759fd44cce11a6"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/claude-accounts/environment.ts",
+      "sha256": "0df693658dd17b43f71b9af9907b9890a07a2fdbbfd51466b019cacaa7c41eab",
+      "bytes": 1335,
+      "lines": 52,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 52,
+          "sha256": "0df693658dd17b43f71b9af9907b9890a07a2fdbbfd51466b019cacaa7c41eab"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/codex/codex-state-db-backfill-recovery.ts",
+      "sha256": "86eed7c76649cbdf22da6e2a413ff34f5ea32e674c6578cb8617ad3531eaf220",
+      "bytes": 10909,
+      "lines": 320,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 320,
+          "sha256": "86eed7c76649cbdf22da6e2a413ff34f5ea32e674c6578cb8617ad3531eaf220"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/network/proxy-settings.ts",
+      "sha256": "ca8355af218f3db372be3c80e077c902403ea6f9f4939df34402a92d27322ef5",
+      "bytes": 10673,
+      "lines": 325,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 325,
+          "sha256": "ca8355af218f3db372be3c80e077c902403ea6f9f4939df34402a92d27322ef5"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/network/bounded-proxy-application.ts",
+      "sha256": "1278a0176320fb01e98ac567b063960e6ff4950d964206e60c70631d9a715abf",
+      "bytes": 644,
+      "lines": 20,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 20,
+          "sha256": "1278a0176320fb01e98ac567b063960e6ff4950d964206e60c70631d9a715abf"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/network/electron-proxy-credentials.ts",
+      "sha256": "437af182cf304e7582a5ac35cb2eefa9fbe4abf73143545e877a0a9304523035",
+      "bytes": 3189,
+      "lines": 114,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 114,
+          "sha256": "437af182cf304e7582a5ac35cb2eefa9fbe4abf73143545e877a0a9304523035"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/network/electron-default-proxy-session.ts",
+      "sha256": "06f3e3a5d0e45ec44e1cc5983d3b39690efa20ad4106cf29dc6bcb6447fec6df",
+      "bytes": 582,
+      "lines": 19,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 19,
+          "sha256": "06f3e3a5d0e45ec44e1cc5983d3b39690efa20ad4106cf29dc6bcb6447fec6df"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/network/proxy-policy-resolution.ts",
+      "sha256": "37b4794c2ff751ad9d53f075f6f0d712fd3f4555539760f0abaa55c4b2d0a1f0",
+      "bytes": 1575,
+      "lines": 44,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 44,
+          "sha256": "37b4794c2ff751ad9d53f075f6f0d712fd3f4555539760f0abaa55c4b2d0a1f0"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/codex/codex-state-db.ts",
+      "sha256": "93e584314d9ec3e9f8ed131614c60a3b5ec90c7da75d228bdfc49ed6a069bf38",
+      "bytes": 3563,
+      "lines": 115,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 115,
+          "sha256": "93e584314d9ec3e9f8ed131614c60a3b5ec90c7da75d228bdfc49ed6a069bf38"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/codex-accounts/fs-utils.ts",
+      "sha256": "ea5d9302abdb02b48a09d204e3498edf2748aca508e2b0225f9a4995e1cb9cfe",
+      "bytes": 7652,
+      "lines": 230,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 41,
+          "sha256": "de45943b43cbf5710852ccb5d365780b64bde7edd8dca9e7ddc05c0e5e6a5aa8"
+        },
+        {
+          "first": 200,
+          "last": 230,
+          "sha256": "1d938410b79bd03ba3febf4a826ef72fbf9e57f109f6b1e95a3936129d829e5f"
+        }
+      ],
+      "readStatus": "specified-ranges-read"
+    },
+    {
+      "path": "src/main/rate-limits/gemini-bucket-formatting.test.ts",
+      "sha256": "d80006fdcaf0bda5d60df4f9c6cc6f4db8ba382857027f99f20ad3b13a45c685",
+      "bytes": 2274,
+      "lines": 65,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 65,
+          "sha256": "d80006fdcaf0bda5d60df4f9c6cc6f4db8ba382857027f99f20ad3b13a45c685"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/kimi-fetcher.test.ts",
+      "sha256": "32f0eea7770d5167f1f25da60aac80fe6c4b69cca488c08295979a44f497499c",
+      "bytes": 6494,
+      "lines": 193,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 193,
+          "sha256": "32f0eea7770d5167f1f25da60aac80fe6c4b69cca488c08295979a44f497499c"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/grok-fetcher.test.ts",
+      "sha256": "5414431d758a07532e070fec0b07211740157a204afa6a60e4dd3b966f37afe8",
+      "bytes": 9511,
+      "lines": 283,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 283,
+          "sha256": "5414431d758a07532e070fec0b07211740157a204afa6a60e4dd3b966f37afe8"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-rate-limit-window-classification.test.ts",
+      "sha256": "aae42d56a8093a3357b3e6173488e7125544ca3846107de99d29c1cdd4c20a05",
+      "bytes": 3997,
+      "lines": 132,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 132,
+          "sha256": "aae42d56a8093a3357b3e6173488e7125544ca3846107de99d29c1cdd4c20a05"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/claude-oauth-usage-error.test.ts",
+      "sha256": "44d876e96ea85ea407f6b7e21403b6d338015dcb333f7c4d594dc2a26abc7ffa",
+      "bytes": 1950,
+      "lines": 54,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 54,
+          "sha256": "44d876e96ea85ea407f6b7e21403b6d338015dcb333f7c4d594dc2a26abc7ffa"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/minimax-fetcher.test.ts",
+      "sha256": "64e93670d357f475cb8ec9ceb960ce8cbc139575083a96d2137591f81aacbe28",
+      "bytes": 18868,
+      "lines": 504,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 504,
+          "sha256": "64e93670d357f475cb8ec9ceb960ce8cbc139575083a96d2137591f81aacbe28"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/minimax/minimax-cookie-store.test.ts",
+      "sha256": "a6900bd71adfc257e29cee45d86ff326c1adb42bde321d70ef0e6b56143232f2",
+      "bytes": 8500,
+      "lines": 208,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 208,
+          "sha256": "a6900bd71adfc257e29cee45d86ff326c1adb42bde321d70ef0e6b56143232f2"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/codex-fetcher-backend.test.ts",
+      "sha256": "faced1d44caede3fddfced5251ee2c1bd77745b6fceccf6afdb2844c73da3404",
+      "bytes": 8393,
+      "lines": 260,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 260,
+          "sha256": "faced1d44caede3fddfced5251ee2c1bd77745b6fceccf6afdb2844c73da3404"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/opencode-go-usage-fetcher.test.ts",
+      "sha256": "e44c5c1bb83b81b64731a99ab739fe6295bea9c1bece1f9161116c1bd174499a",
+      "bytes": 17050,
+      "lines": 460,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 460,
+          "sha256": "e44c5c1bb83b81b64731a99ab739fe6295bea9c1bece1f9161116c1bd174499a"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/grok-auth.test.ts",
+      "sha256": "0e19f49ed5d309b44dd85b3ba554dfd0954f7862a5f3109b21eda84b44b9062c",
+      "bytes": 4817,
+      "lines": 156,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 156,
+          "sha256": "0e19f49ed5d309b44dd85b3ba554dfd0954f7862a5f3109b21eda84b44b9062c"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/gemini-usage-fetcher.test.ts",
+      "sha256": "9f2394d8b02bbec18c757513a600bf37b9a37c5658034c767885a209e8e4fc80",
+      "bytes": 7588,
+      "lines": 217,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 217,
+          "sha256": "9f2394d8b02bbec18c757513a600bf37b9a37c5658034c767885a209e8e4fc80"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/gemini-usage-fetcher.fallback.test.ts",
+      "sha256": "e664604b4913aa8714afa09493256453f0630ffde98635cda35af40c5a3dcaf4",
+      "bytes": 6937,
+      "lines": 187,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 187,
+          "sha256": "e664604b4913aa8714afa09493256453f0630ffde98635cda35af40c5a3dcaf4"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/auth-filesystem-operation.test.ts",
+      "sha256": "9b5bee48ae7bdc289d0e7fd33c66765295612790d22d0939f8639fe85fa30c35",
+      "bytes": 4520,
+      "lines": 119,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 119,
+          "sha256": "9b5bee48ae7bdc289d0e7fd33c66765295612790d22d0939f8639fe85fa30c35"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/claude-fetcher-cli-fallback.test.ts",
+      "sha256": "b5b0db65ed66e0b8dd750974cf1a0699c89f64e854600a9ab58b935aa50c615f",
+      "bytes": 14757,
+      "lines": 490,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 490,
+          "sha256": "b5b0db65ed66e0b8dd750974cf1a0699c89f64e854600a9ab58b935aa50c615f"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    },
+    {
+      "path": "src/main/rate-limits/claude-fetcher-keychain-credentials.test.ts",
+      "sha256": "4d8a7cf4ce6174d8bce2f0bd13c55e7c4e632880a122aa3b8be819aa8124a499",
+      "bytes": 16053,
+      "lines": 491,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 491,
+          "sha256": "4d8a7cf4ce6174d8bce2f0bd13c55e7c4e632880a122aa3b8be819aa8124a499"
+        }
+      ],
+      "readStatus": "assertion-bodies-read-not-run"
+    }
+  ],
+  "delegation": {
+    "allowed": false,
+    "children": [],
+    "lifecycle": "no child created or reused"
+  },
+  "attribution": "Source remains read-only; upstream MIT/copyright provenance and license notices retained by unchanged original allocation. No provider destinations, raw credentials, transcripts or private account data copied.",
+  "validation": {
+    "artifactOnly": true,
+    "noGit": true,
+    "noTests": true,
+    "noSourceEdits": true,
+    "noServices": true,
+    "noCredentialReads": true,
+    "frozenInputHashesPreserved": "all input hashes match frozen expected values at authoring; final artifact check records any drift separately"
+  }
+}

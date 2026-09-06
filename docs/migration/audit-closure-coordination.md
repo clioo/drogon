@@ -10,6 +10,8 @@ This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoi
 
 ## Current checkpoint — finite E3 inputs and E5 publication review
 
+Latest lifecycle supersession: integrations delivered `msg_61f887ddaf78` and was released with receipt `573137a7-220f-43b3-a1a7-caca5c2bbcc4`; account launch delivered `msg_5525e954a75a` and was released with receipt `9cd76071-b63b-454e-a7cd-d5e32c3a844b`. Both decisions are retained/external_terminal/processAction none, not stopped-process claims. Their source reports await root review and neither has a fresh Task. Provider's thirteen finite contracts are now accepted with explicit root qualifications in e3-provider-inputs-root-review.md/json;19 unchanged original cases passed, not candidate parity. **Publication/provenance is now the only active audit assignment.** The four-row table below is the preceding10:56 checkpoint, not a current active-worker count. Sol implementation still follows complete audit acceptance.
+
 At the 2026-09-06 10:56 UTC checkpoint, four actual Astra audit assignments remain; no Sol implementation lead has launched. Earlier assignments below are historical. The phase transition above is unchanged.
 
 | Assignment | Task / Dispatch | Exclusive output below `audit-closure/` |
