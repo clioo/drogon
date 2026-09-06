@@ -1,0 +1,32 @@
+{
+  "capsuleId": "wsl-distro-list-output",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/main/wsl-distro-list-output.test.ts",
+  "expectedTestCounts": { "files": 1, "tests": 2 },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "src/main/wsl-distro-list-output.test.ts",
+      "role": "test",
+      "sha256": "4c2eb30bba13c1f8ea3e46ae4c17c0fdb17372ec254ac463a839037b6f38c12d"
+    },
+    {
+      "path": "src/main/wsl-distro-list-output.ts",
+      "role": "module",
+      "sha256": "27f772c9dc451757f4397a4e47ca9c9e28c4067e50a41ceef846013ff43db7bc"
+    }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Only the two unchanged selected source files; original renderer/port setup, aliases, feature define and GC/WebStorage flags are omitted because these fully reviewed pure string helpers and assertions do not use them.",
+    "No WSL enumeration, process spawning, network, Electron, filesystem fixture or provider calls. These two parser/filter assertions do not prove native Windows/WSL discovery, cache/backoff, host liveness or candidate parity."
+  ],
+  "isolationRationale": "Root read the entire production and test bodies. Closed two-file dependency graph with Vitest only, staged into a fresh retained capsule with pinned MIT provenance; reference remains read-only.",
+  "contract": "E5 RP-W1 parser boundary; original two-case baseline only"
+}
