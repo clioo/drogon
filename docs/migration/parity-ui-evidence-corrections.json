@@ -1,0 +1,370 @@
+{
+  "schema": "drogon.parity-ui-evidence-corrections/1",
+  "status": "coordinator-reviewed-bounded-source-and-assertion-read",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "testExecution": "none; static contradictions are not executed failures",
+  "auditClosed": false,
+  "scope": "11 corrections to worker UI v2, not acceptance of its 45 states. Original source/test bytes remain unchanged. Prior required implemented behavior remains required.",
+  "files": {
+    "src/renderer/src/components/bots/BotCreationForm.tsx": {
+      "sha256": "01609c1a091ddbc9b89a259826530e24fd51c261ac964b54af990f30d6948c78",
+      "lines": 151
+    },
+    "src/renderer/src/components/bots/bots-page-model.ts": {
+      "sha256": "d9862fe13aff0de727c6267a94d9612a38ac2affafb96328544ea2435a836299",
+      "lines": 55
+    },
+    "src/renderer/src/components/bots/BotsPage.test.tsx": {
+      "sha256": "bd056caf58c50dc0f3f09ebc9729db05153bd15d48d5cc9a1481a544739d264f",
+      "lines": 139
+    },
+    "src/renderer/src/components/bots/BotCharacterPicker.tsx": {
+      "sha256": "2c1e7794026ace521465419198e85c4a72162770aaa7c9c6b762b9f726c23957",
+      "lines": 34
+    },
+    "src/shared/drogon-bot-characters.ts": {
+      "sha256": "1a5cd6034a639079878084de33f3c88b18c653d8d3c985f2e18565e4cb1aae87",
+      "lines": 25
+    },
+    "src/renderer/src/components/mentu/MentuPanel.tsx": {
+      "sha256": "fd6635259c793bb4f3059fe31a3d8b90f0b6c30323662db4eccde690cc608293",
+      "lines": 233
+    },
+    "src/renderer/src/components/mentu/session-mentu-surface.test.tsx": {
+      "sha256": "7041caac7fb4c7194353e901772d6ce78d6b3c10f127eaa909c025142c6aa509",
+      "lines": 329
+    },
+    "src/renderer/src/components/mentu/recipe-pane-run-controls.tsx": {
+      "sha256": "3acae331d023c6f697fedc3bd928d71403f026aa4ee54cdfc1ce99ac5899c072",
+      "lines": 297
+    },
+    "src/renderer/src/components/meetings/use-meetings-page-controller.ts": {
+      "sha256": "f1e8201c30b8cc7d81b013b72b82c8f6a1b8c8c14fe60ba84a848142a9203a5e",
+      "lines": 144
+    },
+    "src/renderer/src/components/meetings/MeetingTranscriptRow.tsx": {
+      "sha256": "cb53940b049d7b1442017cbe26e963dbf663fc7bb70b1a18d9d95dda9e1c0e39",
+      "lines": 78
+    },
+    "src/renderer/src/components/meetings/MeetingsPage.test.tsx": {
+      "sha256": "de38914e502523a5b4b3006359a155b9c159340f6a293a7b0d6a3a256304e256",
+      "lines": 216
+    },
+    "src/renderer/src/components/meetings/use-meetings-page-escape.ts": {
+      "sha256": "3b265f618a22fcadded60e4d918d4d183b09e8eca8d15555806bb3a25a27b548",
+      "lines": 23
+    }
+  },
+  "cases": [
+    {
+      "id": "UI-C01",
+      "states": [
+        "BOT-S-botform"
+      ],
+      "kind": "source-test-conflict",
+      "source": [
+        {
+          "path": "src/renderer/src/components/bots/BotCreationForm.tsx",
+          "start": 94,
+          "end": 107
+        },
+        {
+          "path": "src/renderer/src/components/bots/bots-page-model.ts",
+          "start": 28,
+          "end": 37
+        }
+      ],
+      "assertions": [
+        {
+          "path": "src/renderer/src/components/bots/BotsPage.test.tsx",
+          "start": 72,
+          "end": 86
+        }
+      ],
+      "contract": "Model starts empty; non-Pi input is disabled with Agent default placeholder. Pi allows an exact provider/model ID; blank uses Pi settings.",
+      "boundary": "The original test expects the input value Harness default. Placeholder is not value. This is a static contradiction, not an executed failure.",
+      "next": "Run unchanged original case in isolated baseline; preserve its receipt and map a separate current-form contract covering Pi/non-Pi, blank default and resetting model on agent change."
+    },
+    {
+      "id": "UI-C02",
+      "states": [
+        "BOT-S-charpicker",
+        "BOT-S-identity"
+      ],
+      "kind": "source-test-conflict",
+      "source": [
+        {
+          "path": "src/renderer/src/components/bots/BotCharacterPicker.tsx",
+          "start": 10,
+          "end": 31
+        },
+        {
+          "path": "src/renderer/src/components/bots/BotCreationForm.tsx",
+          "start": 43,
+          "end": 66
+        },
+        {
+          "path": "src/renderer/src/components/bots/bots-page-model.ts",
+          "start": 49,
+          "end": 55
+        },
+        {
+          "path": "src/shared/drogon-bot-characters.ts",
+          "start": 3,
+          "end": 25
+        }
+      ],
+      "assertions": [
+        {
+          "path": "src/renderer/src/components/bots/BotsPage.test.tsx",
+          "start": 82,
+          "end": 85
+        }
+      ],
+      "contract": "Radio picker initially shows six of seventeen characters; expand/collapse exposes the catalog. Choosing a character preserves written purpose. Name is optional and falls back to the selected character's label.",
+      "boundary": "Old test queries Character preset and Instructions and expects preset text to overwrite instructions. Current labels/behavior differ. Do not reinstate that overwrite to obtain green.",
+      "next": "Retain original assertions separately; characterize radio selection, 6/17 expansion, purpose preservation, whitespace/default/custom names and busy controls."
+    },
+    {
+      "id": "UI-C03",
+      "states": [
+        "BOT-S-noharness"
+      ],
+      "kind": "source-test-conflict",
+      "source": [
+        {
+          "path": "src/renderer/src/components/bots/BotCreationForm.tsx",
+          "start": 72,
+          "end": 92
+        },
+        {
+          "path": "src/renderer/src/components/bots/BotCreationForm.tsx",
+          "start": 136,
+          "end": 147
+        }
+      ],
+      "assertions": [
+        {
+          "path": "src/renderer/src/components/bots/BotsPage.test.tsx",
+          "start": 88,
+          "end": 99
+        }
+      ],
+      "contract": "Agent select is disabled when discovery is empty. Create Bot is disabled for busy, missing resolved name or a harness absent from the discovered list. Install/refresh hint refers to agent.",
+      "boundary": "Legacy test queries Display name, Default harness, Save Bot and supported harness. It does not establish coverage for the current Name (optional)/Agent/Create Bot controls.",
+      "next": "Keep no-invented-harness invariant while adding current-control assertions; record legacy baseline separately, never skip it silently."
+    },
+    {
+      "id": "UI-C04",
+      "states": [
+        "MEN-S-tabs",
+        "MEN-S-drafteditor"
+      ],
+      "kind": "narrowed-test-evidence",
+      "source": [
+        {
+          "path": "src/renderer/src/components/mentu/MentuPanel.tsx",
+          "start": 94,
+          "end": 117
+        },
+        {
+          "path": "src/renderer/src/components/mentu/MentuPanel.tsx",
+          "start": 196,
+          "end": 226
+        }
+      ],
+      "assertions": [
+        {
+          "path": "src/renderer/src/components/mentu/session-mentu-surface.test.tsx",
+          "start": 196,
+          "end": 280
+        }
+      ],
+      "contract": "Panel and native pane use per-session mode and draft state. Editor is disabled without a document or while busy; Apply also requires a draft.",
+      "boundary": "Assertions cover mock API calls, store isolation and cleanup/remount with retained test-store data. This is not disk persistence or a real process restart. Draft edit explicitly does not call api.run.",
+      "next": "Preserve original mocked tests; add isolated app restart and separate-session/workspace/host restoration journeys with real persisted state."
+    },
+    {
+      "id": "UI-C05",
+      "states": [
+        "MEN-S-scope",
+        "MEN-S-nativetab"
+      ],
+      "kind": "narrowed-test-evidence",
+      "source": [
+        {
+          "path": "src/renderer/src/components/mentu/MentuPanel.tsx",
+          "start": 20,
+          "end": 60
+        }
+      ],
+      "assertions": [
+        {
+          "path": "src/renderer/src/components/mentu/session-mentu-surface.test.tsx",
+          "start": 187,
+          "end": 194
+        },
+        {
+          "path": "src/renderer/src/components/mentu/session-mentu-surface.test.tsx",
+          "start": 282,
+          "end": 292
+        }
+      ],
+      "contract": "Open full tab is disabled without sessionKey; handler checks active workspace and navigation result and reports unavailable context.",
+      "boundary": "The identity test checks a helper return, not a click/navigation journey. Missing-context test checks text and disabled button; its title is not an explicit runner-spy assertion.",
+      "next": "Exercise actual panel-to-tab navigation and origin identity across session switches; verify no runner invocation for unavailable context."
+    },
+    {
+      "id": "UI-C06",
+      "states": [
+        "MEN-S-runtimemsg",
+        "MEN-S-evidence"
+      ],
+      "kind": "narrowed-test-evidence",
+      "source": [
+        {
+          "path": "src/renderer/src/components/mentu/MentuPanel.tsx",
+          "start": 121,
+          "end": 144
+        }
+      ],
+      "assertions": [
+        {
+          "path": "src/renderer/src/components/mentu/session-mentu-surface.test.tsx",
+          "start": 294,
+          "end": 328
+        }
+      ],
+      "contract": "Invalid/execution-failed messages use alert, other kinds status. Failed execution offers evidence access instead of claiming runtime unavailability.",
+      "boundary": "The test injects execution-failed runtime state, checks both surfaces, clicks View evidence and checks mode and no api.run. It does not execute a failing recipe or establish record parsing, stale-host discard or retry correctness.",
+      "next": "Keep mock assertions; exercise controlled real failure, record reading and recovery without duplicate execution."
+    },
+    {
+      "id": "UI-C07",
+      "states": [
+        "MEN-S-graph",
+        "MEN-S-blockednotes"
+      ],
+      "kind": "source-composition-correction",
+      "source": [
+        {
+          "path": "src/renderer/src/components/mentu/MentuPanel.tsx",
+          "start": 138,
+          "end": 192
+        },
+        {
+          "path": "src/renderer/src/components/mentu/recipe-pane-run-controls.tsx",
+          "start": 280,
+          "end": 294
+        }
+      ],
+      "assertions": [],
+      "contract": "Panel shows loading before evidence/plan; invalid graph shows the select-valid-recipe prompt. RunControls mounts only within valid graph and with document/catalog.",
+      "boundary": "An invalid-graph helper message exists in RunControls but this panel's parent branch cannot mount it with invalid graph. Do not assume that message is visible in every surface. Native pane composition remains separately owed.",
+      "next": "Test parent-level loading/evidence/invalid/valid branches, not only RunControls in isolation."
+    },
+    {
+      "id": "UI-C08",
+      "states": [
+        "MEN-S-review",
+        "MEN-S-execute",
+        "MEN-S-diagnostic",
+        "MEN-S-cancel",
+        "MEN-S-clearreview"
+      ],
+      "kind": "source-only-control-contract",
+      "source": [
+        {
+          "path": "src/renderer/src/components/mentu/recipe-pane-run-controls.tsx",
+          "start": 160,
+          "end": 278
+        }
+      ],
+      "assertions": [],
+      "contract": "Review switches to Approve for matching intent/step. Matching error findings and draft block execution; runtime, graph, running and diagnostic states share a disable gate. Resume needs runId; retry also needs a selected step. Doctor is strict. Cancel renders while running with approvalId; Dismiss requires review and is disabled while running.",
+      "boundary": "These are visible component branches/callbacks, not proof of host authorization or cancellation. Vague mentu-session-execution test pointers from leaf v2 are not accepted evidence here.",
+      "next": "Resolve exact admission/cancellation test bodies and independently prove host-owned scope/revalidation. Exercise Run/Resume/Retry, diagnostics, blocking, cancel and recovery paths."
+    },
+    {
+      "id": "UI-C09",
+      "states": [
+        "MEE-S-companionsetup",
+        "MEE-S-populated",
+        "MEE-S-askbox"
+      ],
+      "kind": "narrowed-test-evidence",
+      "source": [
+        {
+          "path": "src/renderer/src/components/meetings/use-meetings-page-controller.ts",
+          "start": 83,
+          "end": 131
+        },
+        {
+          "path": "src/renderer/src/components/meetings/MeetingTranscriptRow.tsx",
+          "start": 57,
+          "end": 71
+        }
+      ],
+      "assertions": [
+        {
+          "path": "src/renderer/src/components/meetings/MeetingsPage.test.tsx",
+          "start": 120,
+          "end": 135
+        },
+        {
+          "path": "src/renderer/src/components/meetings/MeetingsPage.test.tsx",
+          "start": 157,
+          "end": 204
+        }
+      ],
+      "contract": "Open mounts with selected policy and calls open callback; Ask trims the question, delegates via override or runtime, clears on success and retains on error. Ask is disabled for busy/blank/no-agent/failed; Open is disabled only while busy.",
+      "boundary": "Setup test checks copy/button, not real artifact discovery. Q&A test uses injected mount/open/ask callbacks, not the default real harness path. Failed artifacts may still be opened; do not disable both actions by assumption.",
+      "next": "Add runtime delegation and no-companion discovery journeys. Cover failure/success question retention and action-specific eligibility."
+    },
+    {
+      "id": "UI-C10",
+      "states": [
+        "MEE-S-escape"
+      ],
+      "kind": "narrowed-test-evidence",
+      "source": [
+        {
+          "path": "src/renderer/src/components/meetings/use-meetings-page-escape.ts",
+          "start": 4,
+          "end": 23
+        }
+      ],
+      "assertions": [
+        {
+          "path": "src/renderer/src/components/meetings/MeetingsPage.test.tsx",
+          "start": 206,
+          "end": 215
+        }
+      ],
+      "contract": "Escape closes from unprotected targets; visible overlay or input, textarea, select and contenteditable true/empty suppress close. Listener uses capture and is removed on cleanup.",
+      "boundary": "The original test only dispatches Escape on document.body and checks close once. Its title does not prove focused-field or overlay negative cases.",
+      "next": "Preserve body assertion and add each protected target, visible overlay and listener cleanup cases."
+    },
+    {
+      "id": "UI-C11",
+      "states": [
+        "MEE-S-loading",
+        "MEE-S-error",
+        "MEE-S-populated"
+      ],
+      "kind": "source-only-control-contract",
+      "source": [
+        {
+          "path": "src/renderer/src/components/meetings/use-meetings-page-controller.ts",
+          "start": 48,
+          "end": 131
+        }
+      ],
+      "assertions": [],
+      "contract": "Snapshot load uses a generation counter to ignore stale success/error/finally and increments it on effect cleanup. Open/Ask use busy state and finally clear it; those action callbacks do not use the generation guard.",
+      "boundary": "Load protection is not universal cancellation for every async operation, nor proof of an atomic single-flight mutex. Race behavior and post-unmount action completion are unexecuted.",
+      "next": "Characterize overlapping loads and unmount, rejected mount/ask, busy action gating and action completion separately."
+    }
+  ]
+}

@@ -852,6 +852,38 @@ remain owed. UI state artifacts are next for independent review; no audit
 worker is currently assigned. No feature wave, hierarchy, installation, push,
 PR change, personal setting or product-source edit occurred. Goal stays active.
 
+## UI source/assertion corrections and authorized isolation
+
+The preceding settings checkpoint made progress in21c8772. This turn found
+three source-contract conflicts in two original Bots test cases: the model
+and character-preset case still expects the old form, and the empty-discovery
+case queries old labels. The actual form uses an optional character-derived
+name, a radio picker, preserved user purpose and explicit Pi model support.
+No original assertion was changed and no original test was run. These are
+static contradictions, not observed failures or candidate behavioral RED.
+
+Accepted bounded evidence is in parity-ui-evidence-corrections.json/.md:
+11 corrections,12 source SHA256 fingerprints and29 file-bounded anchors.
+Independent assertion-body reads also narrow Mentu's mock store/remount,
+helper-identity and injected-failure tests; none proves real app restart or
+host execution. RunControls invalid-graph text cannot be assumed visible
+through a parent that mounts it only for a valid graph. Meetings' injected
+callbacks do not test real harness delegation; body Escape does not prove
+protected-field or overlay suppression. Snapshot generation guards do not
+automatically protect Open/Ask callbacks.
+
+The45-state leaf v2 remains unaccepted as a whole; remaining Bot backend,
+Mentu admission/retry/restore and Meetings discovery pointers still need
+exact reconciliation. E1 remains open, and the82-case executed original
+baseline is unchanged. The pinned original tracked tree remains clean.
+
+The user authorized worktrees/PRs. After audit closure, leads may receive
+isolated worktrees from an accepted common base and scoped PR ownership.
+This does not authorize moving active dirty writers or starting the Sol
+hierarchy before closure. No worker was launched, personal terminal touched,
+product implementation edited, installation replaced, push or PR changed.
+The goal remains active; no blocking condition occurred.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

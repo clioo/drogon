@@ -50,8 +50,8 @@
         "WP-UI-WORK",
         "WP-UI-AUX"
       ],
-      "evidence": "parity-ui-capability-cards.json remainingGapsNotCarded/testFilesVerifiedButNotCarded; parity-ui-remaining-surface-cards.json pending review",
-      "resolution": "Reconcile remaining named surfaces with source entrypoints, state/action/error/recovery and ownership. Correct unsupported original-behavior claims before freezing cards.",
+      "evidence": "parity-ui-capability-cards.json remainingGapsNotCarded/testFilesVerifiedButNotCarded; parity-ui-remaining-surface-cards.json pending review; parity-ui-evidence-corrections.json coordinator-reviewed bounded corrections",
+      "resolution": "Reconcile remaining named surfaces with source entrypoints, state/action/error/recovery and ownership. Eleven bounded UI corrections distinguish three source-contract conflicts in two original Bots tests, mocked Mentu restoration versus real restart, parent-level run-control visibility, and Meetings callback/escape/race limits. Preserve original assertions and separately map current implemented behavior; no tests executed for these corrections. The45-state leaf v2 is not accepted wholesale. Resolve its remaining backend and broad test pointers before freezing cards.",
       "proofStillOwed": "Rendered actions, screenshots and source tests belong execution waves."
     },
     {
