@@ -82,7 +82,7 @@ for (const defect of ["cyclic-link", "dangling-link", "desktop-file"]) {
   });
 }
 
-// Bind these invariants to the final receipt identity when that API is introduced.
+// Every executable resource participates in the final receipt identity.
 for (const relative of [
   "Contents/MacOS/Drogon",
   "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",

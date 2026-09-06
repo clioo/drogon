@@ -115,7 +115,8 @@ const [packagedDirectory] = await packager({
           identity: "-",
           // Ad-hoc signing has no keychain certificate to discover.
           identityValidation: false,
-          hardenedRuntime: false,
+          // osx-sign applies runtime policy per file, including helpers.
+          optionsForFile: () => ({ hardenedRuntime: false }),
         },
       }
     : {}),
