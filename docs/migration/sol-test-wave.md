@@ -29,6 +29,22 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+Current continuation: the first CAP Task is delivered and root-released.
+`sol-wave/cap-bots/root-review.md` accepts preservation/preparation and the real
+delegation cycle with explicit source-cache/retention deviations, not T2 or parity.
+Two fresh actual Sol high sessions have accepted independent assignments:
+
+| Lead | Task / Dispatch | Terminal |
+| --- | --- | --- |
+| Sol-UI | `task_bbff561b17bb / ctx_e58cb09f5a82` | `term_65eb1908-66e2-44ea-a35f-1e1bc82deebc` |
+| Sol-ENG | `task_3a25101232c0 / ctx_fbdc4abdbcad` | `term_e9f95e7e-d54c-4f1e-969b-db022a9eabda` |
+
+Both fresh command/TUI checks select `gpt-5.6-sol` high with the same scoped
+unattended flag; attachment receipts are ready/input_accepted, no setup or
+residual resources. These are four original preload suites and three original
+runtime-identity suites respectively, not all 9037 allocated files. Each may
+use one assigned child, with the corrected retention/source-read-only rules.
+
 Actual launch: Run `run_ddca7735397e`; Task `task_350af9155ddb`; Dispatch
 `ctx_fa4afa295bf9`; terminal `term_55775ffc-2e9f-4137-a49a-3168fb12a2c4`.
 The new terminal command selects `gpt-5.6-sol`, high effort and per-invocation
