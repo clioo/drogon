@@ -29,6 +29,34 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+### Native Bot input admitted: 17:17 UTC
+
+Commit `e34f6f0` integrates the five public native Bot input parsers and shared
+36-ID recognition catalog. Root post-format offline/locked tests pass 9/9 + 6/6;
+the actual pinned-source verifier again matches 144/144 fixtures. This is an
+input boundary, not persistence, RPC, Bot execution or installed capability.
+See the current CAP root review for exact hashes, source comparison and retained
+leaf Cargo-probe boundary deviation. Sol only directed and reviewed the work.
+
+The settled CAP parent transferred to Task `task_3524e9092faf`, Dispatch
+`ctx_fc8476745cba`, receipt `c7015fc6-36c8-45d8-9641-aa1a6299337b`, ready/input
+accepted, before acknowledging `delivery_2df98c77fb97`. This next task requires
+one Sonnet leaf for real native Bot/global-automation records and SQLite storage;
+the lead receipt alone is not proof that its new child has launched. Root owns
+shared migration/module/Engine/RPC integration. Existing partial foundation work
+and unrelated dirty files remain untouched by the input commit.
+
+UI's current child is now `task_e9fef7c6ca57 / ctx_fa1416f33b68`, not its settled
+predecessor `ctx_31520c45530a`. Root confirmed the live exact GLM worker and
+corrected its mistaken stale-attempt interpretation. Sol delegated the adapter
+classification/typecheck/source-case reconciliation correction; no duplicate
+worker or manual implementation was introduced. ENG remains on provider records
+with Kimi `ctx_ae31d647c99d`; its queued foundation follow-up is
+`task_3555b53c24b1`, not yet dispatched.
+
+Audit 11/12 = 91.7%, medium confidence, delta zero. Full-fidelity 24-hour risk
+remains high. No new app install, public push or full-parity acceptance occurred.
+
 ### Delegated integration checkpoint: 16:52 UTC
 
 Native claim identity is registered and committed at `8140c4f`: root verifies
