@@ -1,0 +1,2209 @@
+{
+  "schema": "drogon.parity-harness-catalog/1",
+  "status": "bounded-static-audit",
+  "generatedFrom": {
+    "sourcePath": "/Users/carlos/Documents/Drogon-mentu-session",
+    "sourceSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "readOnly": true,
+    "note": "Static source-text inspection only. No agent binary was invoked, no CLI was spawned, no network call was made, no app/daemon was launched. All 'presence' claims below are grep/Read confirmations of source TEXT (a registry object literal containing a key, a directory existing on disk), never a claim that the underlying integration currently works at runtime."
+  },
+  "methodology": "Reconciles the 36-entry TuiAgent/ALL_TUI_AGENTS census against src/renderer/src/lib/agent-catalog.tsx and five additional static registries: TUI_AGENT_CONFIG (detection+launch, exhaustive Record<TuiAgent,...> in tui-agent-config.ts, TypeScript-enforced complete), TUI_AGENT_AUTO_PICK_ORDER (selection.ts, independently verified to contain exactly the same 36 ids with zero duplicates), YOLO_TUI_AGENT_ARGS/ENV and UNSUPPORTED_TUI_AGENT_ARGS (permissions.ts/launch-defaults.ts, both explicitly Partial<Record<TuiAgent,...>>, so absence from these two is a real fact about the registry, not a read failure), RESUMABLE_TUI_AGENTS (agent-session-resume.ts, a literal array independently counted at 14), and AgentSessionOptionCatalogMap (agent-session-option-catalog.ts, keyed by AgentType not TuiAgent, populated for exactly 5 agent ids that also happen to be valid TuiAgent ids). Main-process directory presence (src/main/<id>/) was checked by listing src/main/'s top-level directories once and matching against all 36 ids plus normalized (dash-stripped, prefix-only) candidates \u2014 an EXACT match, an ALIASED match (different directory name), or NO match is recorded per agent; aliased/absent cases are listed as named, unresolved cross-registry mappings, never assumed equivalent. Dynamic model discovery is reconciled from the actual registry chain (src/shared/agent-model-probe-spec.ts -> commit-message-agent-spec.ts -> commit-message-agent-specs-{primary,secondary}.ts -> grok-model-list-probe.ts, consumed by commit-message-model-discovery.ts, plus codex-structured-session-options.ts's independent app-server path), not from a targeted rg alone \u2014 see the correction paragraph below and \u00a70 of the markdown companion for the full reconciliation and corrected counts. All file hashes below are literal sha256 over the exact bytes read this pass against the frozen SHA; a byte read from anywhere else (out/, node_modules, any other checkout) would fail this document's own claims and none was used. CORRECTION (this pass): see the markdown companion's \u00a70 Correction note for the full reconciliation and corrected per-bucket counts (dynamic-probe / static-catalog / probe-only / unresolved), derived directly from the registry chain above rather than a targeted grep.",
+  "counts": {
+    "canonicalAgentCount": 36,
+    "rowsProduced": 36,
+    "labelMismatchesDisplayNamesVsCatalog": 0,
+    "agentsWithDetectCmdAliases": 2,
+    "agentsWithLaunchCmdDifferentFromDetectCmd": 4,
+    "agentsWithPlatformSpecificLaunchCmd": 1,
+    "agentsWithDetectUnsupportedRuntimes": 1,
+    "agentsWithWindowsQuirkEncoding": 6,
+    "agentsWithPreflightTrust": 3,
+    "agentsWithYoloArgMechanism": 26,
+    "agentsWithYoloEnvMechanism": 1,
+    "agentsWithNoKnownPermissionBypass": 9,
+    "agentsResumable": 14,
+    "agentsNotResumable": 22,
+    "agentsWithSessionOptionCatalog": 5,
+    "agentsWithExactMainProcessDir": 16,
+    "agentsWithAliasedMainProcessDir": 1,
+    "agentsWithNoMainProcessDir": 19,
+    "agentsWithAccountSwitcherUi": 3,
+    "unresolvedCrossRegistryMappings": 7,
+    "filesRead": 22,
+    "agentsWithDynamicCommitMessageModelProbe": 6,
+    "agentsWithStaticCommitMessageModelCatalog": 3,
+    "agentsProbeOnlyNotCommitMessageAgent": 1,
+    "agentsUnresolvedModelProbeRegistry": 26,
+    "agentsWithCodexAppServerModelList": 1,
+    "agentsWithAnyConfirmedDynamicModelProbe": 7
+  },
+  "canonicalAgentIds": [
+    "claude",
+    "claude-agent-teams",
+    "openclaude",
+    "codex",
+    "devin",
+    "ante",
+    "trae",
+    "autohand",
+    "opencode",
+    "mimo-code",
+    "pi",
+    "omp",
+    "prime-agent",
+    "gemini",
+    "antigravity",
+    "aider",
+    "goose",
+    "amp",
+    "kilo",
+    "kiro",
+    "crush",
+    "aug",
+    "cline",
+    "codebuff",
+    "command-code",
+    "continue",
+    "cursor",
+    "droid",
+    "kimi",
+    "mistral-vibe",
+    "qwen-code",
+    "rovo",
+    "hermes",
+    "openclaw",
+    "copilot",
+    "grok"
+  ],
+  "rows": [
+    {
+      "id": "claude",
+      "displayName": "Claude",
+      "catalogLabel": "Claude",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:4",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:9",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:70",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:48"
+      },
+      "detection": {
+        "detectCmd": "claude",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "claude",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": "--prefill",
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": true,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "dynamic",
+        "commitMessageProbe": {
+          "binary": "claude",
+          "args": "CLAUDE_MODEL_LIST_ARGS (via claude-model-list-probe.ts) + stdin control-request payload",
+          "sourceAnchor": "src/shared/commit-message-agent-specs-primary.ts:31-58"
+        },
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS (commit-message-agent-spec.ts:90) with modelSource='dynamic'; getAgentModelProbeSpec() returns this spec, so both discoverModelsLocal/Remote spawn a real probe subprocess for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "claude"
+      },
+      "accountSwitcherUi": true,
+      "autoPickOrderIndex": 1,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "claude-agent-teams",
+      "displayName": "Claude Agent Teams",
+      "catalogLabel": "Claude Agent Teams",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:5",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:10",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:76",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:54"
+      },
+      "detection": {
+        "detectCmd": "orca",
+        "detectCmdAliases": [
+          "orca-dev",
+          "orca-ide"
+        ],
+        "detectRequiredCommands": [
+          "claude"
+        ],
+        "detectUnsupportedRuntimes": [
+          "win32",
+          "wsl"
+        ]
+      },
+      "launch": {
+        "launchCmd": "orca claude-teams",
+        "launchCmdDiffersFromDetectCmd": true,
+        "launchCmdByPlatform": {
+          "linux": "getOrcaCliCommandNameForPlatform('linux') + ' claude-teams'",
+          "win32": "getOrcaCliCommandNameForPlatform('win32') + ' claude-teams'"
+        },
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 2,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "openclaude",
+      "displayName": "OpenClaude",
+      "catalogLabel": "OpenClaude",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:6",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:11",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:92",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:60"
+      },
+      "detection": {
+        "detectCmd": "openclaude",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "openclaude",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": "--prefill",
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "openclaude"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 3,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "codex",
+      "displayName": "Codex",
+      "catalogLabel": "Codex",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:7",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:12",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:97",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:69"
+      },
+      "detection": {
+        "detectCmd": "codex",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "codex",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": "codex"
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": "alt-enter"
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": true,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "dynamic",
+        "commitMessageProbe": {
+          "binary": "codex",
+          "args": "['debug', 'models']",
+          "sourceAnchor": "src/shared/commit-message-agent-specs-primary.ts:80-153"
+        },
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": {
+          "present": true,
+          "note": "Codex has a SECOND, independent dynamic-model-discovery mechanism beyond the commit-message 'codex debug models' CLI probe above: readCodexStructuredSessionOptions (src/main/codex/codex-structured-session-options.ts:78-116) issues a live 'model/list' JSON request over the codex app-server connection, paginated up to MAX_MODEL_PAGES=20 pages of MODEL_PAGE_LIMIT=100 (codex-structured-session-options.ts:12-13), used to populate the INTERACTIVE native-chat session-option model switcher (distinct from the commit-message-generation feature). No sibling '*-structured-session-options.ts' file was found for any other agent this pass (targeted rg for 'structured-session-options' across src/main matched only src/main/codex/) \u2014 recorded as Codex-unique, not assumed absent for others beyond what was actually searched."
+        },
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS (commit-message-agent-spec.ts:90) with modelSource='dynamic'; getAgentModelProbeSpec() returns this spec, so both discoverModelsLocal/Remote spawn a real probe subprocess for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "codex"
+      },
+      "accountSwitcherUi": true,
+      "autoPickOrderIndex": 4,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "devin",
+      "displayName": "Devin",
+      "catalogLabel": "Devin",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:36",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:13",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:284",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:297"
+      },
+      "detection": {
+        "detectCmd": "devin",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "devin",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "devin"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 35,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "ante",
+      "displayName": "Ante",
+      "catalogLabel": "Ante",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:37",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:14",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:110",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:101"
+      },
+      "detection": {
+        "detectCmd": "ante",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "ante",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 9,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "trae",
+      "displayName": "Trae",
+      "catalogLabel": "Trae",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:38",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:15",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:115",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:108"
+      },
+      "detection": {
+        "detectCmd": "traecli",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "traecli",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": "--",
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 10,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "autohand",
+      "displayName": "Autohand Code",
+      "catalogLabel": "Autohand Code",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:8",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:16",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:106",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:203"
+      },
+      "detection": {
+        "detectCmd": "autohand",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "autohand",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 23,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "catalogLabel": "OpenCode",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:9",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:17",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:125",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:88"
+      },
+      "detection": {
+        "detectCmd": "opencode",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "opencode",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "flag-prompt",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": true
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "dynamic",
+        "commitMessageProbe": {
+          "binary": "opencode",
+          "args": "['models']",
+          "sourceAnchor": "src/shared/commit-message-agent-specs-primary.ts:155-189"
+        },
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS (commit-message-agent-spec.ts:90) with modelSource='dynamic'; getAgentModelProbeSpec() returns this spec, so both discoverModelsLocal/Remote spawn a real probe subprocess for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "opencode"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 7,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "mimo-code",
+      "displayName": "MiMo Code",
+      "catalogLabel": "MiMo Code",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:10",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:18",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:131",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:94"
+      },
+      "detection": {
+        "detectCmd": "mimo",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "mimo",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "flag-prompt",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "alias",
+        "dirName": "mimo"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 8,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "pi",
+      "displayName": "Pi",
+      "catalogLabel": "Pi",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:11",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:19",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:137",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:117"
+      },
+      "detection": {
+        "detectCmd": "pi",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "pi",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": "ORCA_PI_PREFILL",
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": "csi-u",
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "dynamic",
+        "commitMessageProbe": {
+          "binary": "pi",
+          "args": "['--list-models']",
+          "sourceAnchor": "src/shared/commit-message-agent-specs-primary.ts:191-223"
+        },
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS (commit-message-agent-spec.ts:90) with modelSource='dynamic'; getAgentModelProbeSpec() returns this spec, so both discoverModelsLocal/Remote spawn a real probe subprocess for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "pi"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 11,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "omp",
+      "displayName": "OMP",
+      "catalogLabel": "OMP",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:12",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:20",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:145",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:123"
+      },
+      "detection": {
+        "detectCmd": "omp",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "omp",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": "ORCA_OMP_PREFILL",
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": "csi-u",
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 12,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "prime-agent",
+      "displayName": "Prime Agent",
+      "catalogLabel": "Prime Agent",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:39",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:21",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:152",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:131"
+      },
+      "detection": {
+        "detectCmd": "prime-agent",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "prime-agent",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": "--",
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": "csi-u",
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 13,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "gemini",
+      "displayName": "Gemini",
+      "catalogLabel": "Gemini",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:13",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:22",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:162",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:138"
+      },
+      "detection": {
+        "detectCmd": "gemini",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "gemini",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "flag-prompt-interactive",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": true,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "gemini"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 14,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "antigravity",
+      "displayName": "Antigravity",
+      "catalogLabel": "Antigravity",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:14",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:23",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:166",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:145"
+      },
+      "detection": {
+        "detectCmd": "agy",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "agy",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "flag-prompt-interactive",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "dynamic",
+        "commitMessageProbe": {
+          "binary": "agy",
+          "args": "['models']",
+          "sourceAnchor": "src/shared/commit-message-agent-specs-secondary.ts:211-225"
+        },
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS (commit-message-agent-spec.ts:90) with modelSource='dynamic'; getAgentModelProbeSpec() returns this spec, so both discoverModelsLocal/Remote spawn a real probe subprocess for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "antigravity"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 15,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "aider",
+      "displayName": "Aider",
+      "catalogLabel": "Aider",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:15",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:24",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:170",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:152"
+      },
+      "detection": {
+        "detectCmd": "aider",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "aider",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 16,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "goose",
+      "displayName": "Goose",
+      "catalogLabel": "Goose",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:16",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:25",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:174",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:158"
+      },
+      "detection": {
+        "detectCmd": "goose",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "goose",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "env",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 17,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "amp",
+      "displayName": "Amp",
+      "catalogLabel": "Amp",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:17",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:26",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:178",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:165"
+      },
+      "detection": {
+        "detectCmd": "amp",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "amp",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "static-catalog",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": "src/shared/commit-message-agent-specs-secondary.ts:22-55",
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS with modelSource='static' \u2014 a maintained static model catalog exists and is used directly (staticModelDiscoveryResult), but NO live probe subprocess is spawned for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "amp"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 18,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "kilo",
+      "displayName": "Kilocode",
+      "catalogLabel": "Kilocode",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:18",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:27",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:182",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:172"
+      },
+      "detection": {
+        "detectCmd": "kilo",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "kilo",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": true
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 19,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "kiro",
+      "displayName": "Kiro",
+      "catalogLabel": "Kiro",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:19",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:28",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:186",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:178"
+      },
+      "detection": {
+        "detectCmd": "kiro-cli",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "kiro-cli chat --tui",
+        "launchCmdDiffersFromDetectCmd": true,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 20,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "crush",
+      "displayName": "Charm",
+      "catalogLabel": "Charm",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:20",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:29",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:193",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:189"
+      },
+      "detection": {
+        "detectCmd": "crush",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "crush",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 21,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "aug",
+      "displayName": "Auggie",
+      "catalogLabel": "Auggie",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:21",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:30",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:197",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:196"
+      },
+      "detection": {
+        "detectCmd": "auggie",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "auggie",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 22,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "cline",
+      "displayName": "Cline",
+      "catalogLabel": "Cline",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:22",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:31",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:202",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:210"
+      },
+      "detection": {
+        "detectCmd": "cline",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "cline",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 24,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "codebuff",
+      "displayName": "Codebuff",
+      "catalogLabel": "Codebuff",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:23",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:32",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:206",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:217"
+      },
+      "detection": {
+        "detectCmd": "codebuff",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "codebuff",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 25,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "command-code",
+      "displayName": "Command Code",
+      "catalogLabel": "Command Code",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:24",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:33",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:210",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:224"
+      },
+      "detection": {
+        "detectCmd": "command-code",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "command-code --trust",
+        "launchCmdDiffersFromDetectCmd": true,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "command-code"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 26,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "continue",
+      "displayName": "Continue",
+      "catalogLabel": "Continue",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:25",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:34",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:217",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:235"
+      },
+      "detection": {
+        "detectCmd": "cn",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "cn",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 27,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "cursor",
+      "displayName": "Cursor",
+      "catalogLabel": "Cursor",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:26",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:35",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:222",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:244"
+      },
+      "detection": {
+        "detectCmd": "cursor-agent",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "cursor-agent",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": "cursor"
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": true,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "dynamic",
+        "commitMessageProbe": {
+          "binary": "cursor-agent",
+          "args": "['--list-models']",
+          "sourceAnchor": "src/shared/commit-message-agent-specs-secondary.ts:57-76"
+        },
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS (commit-message-agent-spec.ts:90) with modelSource='dynamic'; getAgentModelProbeSpec() returns this spec, so both discoverModelsLocal/Remote spawn a real probe subprocess for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "cursor"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 28,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "droid",
+      "displayName": "Droid",
+      "catalogLabel": "Droid",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:27",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:36",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:228",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:251"
+      },
+      "detection": {
+        "detectCmd": "droid",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "droid",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": "csi-u",
+        "ctrlEnterEncoding": "csi-u",
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "droid"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 29,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "kimi",
+      "displayName": "Kimi",
+      "catalogLabel": "Kimi",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:28",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:37",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:235",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:257"
+      },
+      "detection": {
+        "detectCmd": "kimi",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "kimi",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "static-catalog",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": "src/shared/commit-message-agent-specs-secondary.ts:78-111",
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS with modelSource='static' \u2014 a maintained static model catalog exists and is used directly (staticModelDiscoveryResult), but NO live probe subprocess is spawned for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "kimi"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 30,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "mistral-vibe",
+      "displayName": "Mistral Vibe",
+      "catalogLabel": "Mistral Vibe",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:29",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:38",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:239",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:264"
+      },
+      "detection": {
+        "detectCmd": "vibe",
+        "detectCmdAliases": [
+          "mistral-vibe"
+        ],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "vibe",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 31,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "qwen-code",
+      "displayName": "Qwen Code",
+      "catalogLabel": "Qwen Code",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:30",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:39",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:245",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:273"
+      },
+      "detection": {
+        "detectCmd": "qwen",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "qwen",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 32,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "rovo",
+      "displayName": "Rovo Dev",
+      "catalogLabel": "Rovo Dev",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:31",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:40",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:250",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:282"
+      },
+      "detection": {
+        "detectCmd": "rovo",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "rovo",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 33,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "hermes",
+      "displayName": "Hermes",
+      "catalogLabel": "Hermes",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:32",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:41",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:254",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:290"
+      },
+      "detection": {
+        "detectCmd": "hermes",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "hermes --tui",
+        "launchCmdDiffersFromDetectCmd": true,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "hermes-query",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "hermes"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 34,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "openclaw",
+      "displayName": "OpenClaw",
+      "catalogLabel": "OpenClaw",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:33",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:42",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:261",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:304"
+      },
+      "detection": {
+        "detectCmd": "openclaw",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "openclaw",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "stdin-after-start",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "none-known",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": false,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "unresolved-not-registered",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": null,
+        "note": "getAgentModelProbeSpec(agentId) returns undefined for this agent \u2014 it is NOT registered in either COMMIT_MESSAGE_AGENT_SPECS or MODEL_DISCOVERY_ONLY_SPECS. This is recorded as UNRESOLVED, not as 'no dynamic model discovery exists': absence from this one registry (whose purpose is commit-message generation + a short probe-only allowlist) is not proof the agent's own CLI lacks a model-listing capability elsewhere, and no dedicated main-process directory was separately searched for a per-agent model-list mechanism for this agent this pass."
+      },
+      "mainProcessDir": {
+        "status": "none",
+        "dirName": null
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 36,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "copilot",
+      "displayName": "GitHub Copilot",
+      "catalogLabel": "GitHub Copilot",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:34",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:43",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:265",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:82"
+      },
+      "detection": {
+        "detectCmd": "copilot",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "copilot",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "flag-interactive",
+        "argvPromptSeparator": null,
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": "copilot"
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": null,
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": false,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "static-catalog",
+        "commitMessageProbe": null,
+        "commitMessageStaticCatalogAnchor": "src/shared/commit-message-agent-specs-secondary.ts:113-209",
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered in COMMIT_MESSAGE_AGENT_SPECS with modelSource='static' \u2014 a maintained static model catalog exists and is used directly (staticModelDiscoveryResult), but NO live probe subprocess is spawned for this agent."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "copilot"
+      },
+      "accountSwitcherUi": false,
+      "autoPickOrderIndex": 6,
+      "presentInAllRegistries": true
+    },
+    {
+      "id": "grok",
+      "displayName": "Grok",
+      "catalogLabel": "Grok",
+      "labelMismatch": false,
+      "sourceAnchors": {
+        "tuiAgentTypeUnion": "src/shared/tui-agent.ts:35",
+        "displayNamesDict": "src/shared/tui-agent-display-names.ts:44",
+        "tuiAgentConfigSource": "src/shared/tui-agent-config.ts:272",
+        "rendererAgentCatalog": "src/renderer/src/lib/agent-catalog.tsx:75"
+      },
+      "detection": {
+        "detectCmd": "grok",
+        "detectCmdAliases": [],
+        "detectRequiredCommands": [],
+        "detectUnsupportedRuntimes": []
+      },
+      "launch": {
+        "launchCmd": "grok",
+        "launchCmdDiffersFromDetectCmd": false,
+        "launchCmdByPlatform": {},
+        "promptInjectionMode": "argv",
+        "argvPromptSeparator": "--",
+        "draftPromptFlag": null,
+        "draftPromptEnvVar": null,
+        "preflightTrust": null
+      },
+      "platformQuirks": {
+        "windowsShiftEnterEncoding": null,
+        "ctrlEnterEncoding": "csi-u",
+        "windowsInputRecordPasteNewline": null
+      },
+      "permissionBypass": {
+        "mechanism": "arg",
+        "argsStrippedForThisAgent": false
+      },
+      "resumable": true,
+      "sessionOptionCatalog": true,
+      "dynamicModelDiscovery": {
+        "commitMessageModelSource": "dynamic-probe-only-not-commit-message-agent",
+        "commitMessageProbe": {
+          "binary": "grok",
+          "args": "GROK_MODEL_LIST_ARGS = ['models'] (src/shared/grok-model-list-probe.ts:6)",
+          "sourceAnchor": "src/shared/agent-model-probe-spec.ts:11-24"
+        },
+        "commitMessageStaticCatalogAnchor": null,
+        "codexAppServerModelList": null,
+        "localRemoteSymmetry": "discoverModelsLocal (commit-message-model-discovery.ts:33-113) and discoverModelsRemote (commit-message-model-discovery.ts:181-238) both call the SAME getAgentModelProbeSpec(agentId) and branch identically on modelSource === 'static' vs 'dynamic' \u2014 verified structurally, not guessed. The remote (SSH) path additionally distinguishes an unverifiable timeout from an unreachable PATH via isSshRequestOutcomeUnverifiable, consistent with the AGENTS.md live/unverifiable/exited liveness contract applied here to model discovery, not just PTY liveness.",
+        "note": "Registered ONLY in agent-model-probe-spec.ts's MODEL_DISCOVERY_ONLY_SPECS (not in COMMIT_MESSAGE_AGENT_SPECS) \u2014 Grok supports the model-discovery half of this contract (dynamic probe via grok-model-list-probe.ts) but has no promptDelivery/buildArgs, i.e. it is NOT wired as a commit-message-generation agent at all, only as a probe-only model source."
+      },
+      "mainProcessDir": {
+        "status": "exact",
+        "dirName": "grok"
+      },
+      "accountSwitcherUi": true,
+      "autoPickOrderIndex": 5,
+      "presentInAllRegistries": true
+    }
+  ],
+  "unresolvedCrossRegistryMappings": [
+    {
+      "agent": "mimo-code",
+      "issue": "TuiAgent id 'mimo-code' has detectCmd 'mimo' (tui-agent-config.ts:131) and its src/main/ deeper-integration directory is named 'mimo' (not 'mimo-code'). The id/detectCmd/directory-name triple is NOT a 1:1 string match across all three registries for this agent alone among the 16 agents with a dedicated main/ directory.",
+      "resolution": "unresolved \u2014 recorded as a naming divergence between the TuiAgent id and its main-process directory, not silently normalized or assumed equivalent."
+    },
+    {
+      "agent": "kiro",
+      "issue": "TuiAgent id 'kiro' has detectCmd 'kiro-cli' (tui-agent-config.ts:186-192, comment: 'the Kiro installer ships kiro-cli, not kiro; keep id kiro for stored prefs') and NO src/main/kiro or src/main/kiro-cli directory exists.",
+      "resolution": "unresolved \u2014 the id/detectCmd divergence is explicit and commented in source (stored-preference compatibility), but there is no dedicated main-process directory for kiro under any of the three candidate names checked (kiro, kiro-cli, kirocli)."
+    },
+    {
+      "agent": "aug",
+      "issue": "TuiAgent id 'aug' has detectCmd 'auggie' (tui-agent-config.ts:197-200, comment: '@augmentcode/auggie installs a binary named auggie, not aug; keep id aug for stored prefs') and NO src/main/aug or src/main/auggie directory exists.",
+      "resolution": "unresolved \u2014 same id/detectCmd divergence pattern as kiro, no dedicated main-process directory found under either candidate name."
+    },
+    {
+      "agent": "mistral-vibe",
+      "issue": "TuiAgent id 'mistral-vibe' has detectCmd 'vibe' with detectCmdAliases ['mistral-vibe'] (tui-agent-config.ts:239-244) \u2014 i.e. the id itself is ALSO registered as a detection alias of a differently-named primary command. No src/main/vibe or src/main/mistral-vibe directory exists.",
+      "resolution": "unresolved \u2014 no dedicated main-process directory found under either candidate name."
+    },
+    {
+      "agent": "qwen-code",
+      "issue": "TuiAgent id 'qwen-code' has detectCmd 'qwen' (tui-agent-config.ts:245-248) and NO src/main/qwen or src/main/qwen-code directory exists.",
+      "resolution": "unresolved \u2014 no dedicated main-process directory found under either candidate name."
+    },
+    {
+      "agent": "continue",
+      "issue": "TuiAgent id 'continue' has detectCmd 'cn' (tui-agent-config.ts:217-221, comment: shell builtin collision) and NO src/main/continue or src/main/cn directory exists.",
+      "resolution": "unresolved \u2014 no dedicated main-process directory found under either candidate name."
+    },
+    {
+      "agent": "claude-agent-teams",
+      "issue": "TuiAgent id 'claude-agent-teams' has detectCmd 'orca' (the Orca CLI itself, not a separate agent binary) and its own main-process directory does not exist as 'claude-agent-teams' \u2014 its detection/launch is layered on top of the 'claude' main-process integration plus the Orca CLI, per tui-agent-config.ts:76-91's comment ('an Orca-provided launch mode, not a separate binary').",
+      "resolution": "unresolved as a distinct main-process directory question \u2014 by design this agent shares claude's main-process integration rather than having its own, per the source comment; recorded as a rule (explicit design choice), not a gap."
+    }
+  ],
+  "mainDirsUnmappedToTuiAgent": {
+    "dirs": [
+      "minimax",
+      "computer",
+      "gitea",
+      "azure-devops"
+    ],
+    "note": "src/main/ also contains directories minimax/, computer/, gitea/, azure-devops/ that do NOT correspond to any of the 36 TuiAgent ids. These are NOT flagged as missing TuiAgent coverage \u2014 'computer' backs the Computer-Use feature (a distinct capability, not a TUI coding agent) and 'gitea'/'azure-devops' back Git-hosting-provider integrations (like github/gitlab), not launchable TUI agents. 'minimax' has no corresponding TuiAgent id anywhere in the 4 primary registries checked this pass and its relationship to the TUI agent system (if any) is unresolved \u2014 recorded here rather than silently omitted, per the instruction to preserve all original agents/integrations found."
+  },
+  "observedVsProposed": {
+    "observed": "Every field in 'rows' above is observed source-text evidence (a registry entry, a directory listing, a line-anchored source location) from the frozen legacy checkout \u2014 none of it is this document's own proposal for how the rewrite should behave.",
+    "proposed": "This document makes NO migration-strategy recommendation (no REUSE/REWRITE verdict per agent) \u2014 that is explicitly out of scope for a 'bounded static audit follow-up' whose sole deliverable is the reconciled catalog. Any future migration-planning document that cites this catalog must treat every row as 'observed legacy behavior to preserve', not as a design decision already made here."
+  },
+  "migrationPreservationNote": "All 36 agents in CANONICAL are recorded as present, regardless of which ones are exercised by the current active worker/agent pool in this rewrite effort \u2014 per instruction, this catalog does not assume only the currently-used subset matters. Removing any agent row from a future migrated registry is a product decision this document does not make and does not imply.",
+  "fileHashesSha256": {
+    "src/shared/tui-agent.ts": {
+      "sha256": "7c470c858ddc10988ea2b7e230d127a8d9bc70acf03e8dc8226d799749ce023b",
+      "lines": 40
+    },
+    "src/shared/tui-agent-display-names.ts": {
+      "sha256": "1a4b102bb7e8c13a48344c6da22f531e1ebf77329bd868f2580b7729684c7296",
+      "lines": 50
+    },
+    "src/shared/tui-agent-config.ts": {
+      "sha256": "192226db679f6241bc68a3093b4aac2e8922d11079beeb16cddc26698b4f1b7f",
+      "lines": 317
+    },
+    "src/shared/tui-agent-detection-commands.ts": {
+      "sha256": "bd2f0e30b5911190f8660fafaeea823c3e48f2b656b87d334f04f4dfc2f6d33f",
+      "lines": 78
+    },
+    "src/shared/tui-agent-launch-command.ts": {
+      "sha256": "2865ca6c69ac58c10259f8b66a91e85f9fd7f801ef0fcb936e493bbd84d38788",
+      "lines": 110
+    },
+    "src/shared/tui-agent-resume-startup.ts": {
+      "sha256": "932908c5b5861516d825cbd74bc3e37fce5394cc8a454cb01ee815cb785d4a88",
+      "lines": 72
+    },
+    "src/shared/tui-agent-startup.ts": {
+      "sha256": "a0f5d1bf9fbff7ca4eac9c12fce9131753d29abe949712cfd89755203c900521",
+      "lines": 271
+    },
+    "src/shared/tui-agent-permissions.ts": {
+      "sha256": "7f151a5401daa5a9794e632764be6018db46cbe717d63d467b08b0e1283ba853",
+      "lines": 168
+    },
+    "src/shared/tui-agent-launch-defaults.ts": {
+      "sha256": "99de3fd1f2b2ecee749244f6ebc3dbf7f77b417645c4ceec9b31550e35b1b6e8",
+      "lines": 105
+    },
+    "src/shared/tui-agent-selection.ts": {
+      "sha256": "5cd27d5e949957989d45d986f6682304b9abb86d4a891fd05ff5d737e8ef2501",
+      "lines": 100
+    },
+    "src/shared/agent-session-resume.ts": {
+      "sha256": "ebd386d6613f3d6251817039eff56c18e3bc4496dd6bd7cbc74322b9212442ae",
+      "lines": 296
+    },
+    "src/shared/agent-session-option-catalog.ts": {
+      "sha256": "5f70bcd92353fbce4e742a19b35eab340ecfb5a4d9f73918431ea76ff4023956",
+      "lines": 96
+    },
+    "src/shared/agent-session-option-catalog-types.ts": {
+      "sha256": "35703d295be6db560e244cc76bef5116aaacc450d983969df56d32aa34ccffa3",
+      "lines": 85
+    },
+    "src/shared/claude-model-list-probe.ts": {
+      "sha256": "df75b839e486193dd1ef0c20e3d581e057de8b7ad5a56be186ee81a22042ac6c",
+      "lines": 125
+    },
+    "src/renderer/src/lib/agent-catalog.tsx": {
+      "sha256": "671d1dc8a4c4af6370b7954f594f0dbc7e7e5a3b78fffa0e9de8d594303bfcb7",
+      "lines": 398
+    },
+    "src/shared/agent-model-probe-spec.ts": {
+      "sha256": "5019f6fd14d9d660f16241ab802f2e171592db0c8da6964e7f9b52687526ef1c",
+      "lines": 31
+    },
+    "src/shared/commit-message-agent-spec.ts": {
+      "sha256": "cbfdc45a83aeb8bba58ffc089cb1a4b109248b6f13c7feca735d94a5cb54464b",
+      "lines": 210
+    },
+    "src/shared/commit-message-agent-specs-primary.ts": {
+      "sha256": "2187dcce69b191810ac924fe4acb74650981b804959280b0acc8e203a6faf41d",
+      "lines": 224
+    },
+    "src/shared/commit-message-agent-specs-secondary.ts": {
+      "sha256": "ccef1ca470c68f9c5de3b07bc21a019a3c8aa76f5830dfa40ebe1b39861029e9",
+      "lines": 228
+    },
+    "src/shared/grok-model-list-probe.ts": {
+      "sha256": "2e60fca4e03914f0f97732e971e99a6f2c122554be37b6bcfd1aef492b5c993b",
+      "lines": 45
+    },
+    "src/main/text-generation/commit-message-model-discovery.ts": {
+      "sha256": "8b15eb7791dece1bfa6682a321e4cc1c58731f123b1b4d58f9668fd84f2922da",
+      "lines": 241
+    },
+    "src/main/codex/codex-structured-session-options.ts": {
+      "sha256": "4d5608a335a589261d0e96c1449889f185943af3aa14758e5f482d06fac66742",
+      "lines": 204
+    }
+  }
+}

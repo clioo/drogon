@@ -477,6 +477,14 @@ probe registry (including Grok) and Codex `model/list` flow. Correction Task
 The prior property, CLI and harness deliveries were settled/released; no
 active worker was stopped or relocated. Full audit closure is still pending.
 
+The model-probe correction then completed and was released. Coordinator
+rehashed its 22 source files and independently parsed the nine commit-message
+spec declarations: six dynamic and three static, plus the separate Grok
+probe-only registry and Codex app-server `model/list` path reviewed in source.
+The other 26 agents are not registered in this specific probe registry; that
+does not prove they lack model discovery elsewhere. No model/agent was run.
+All audit dispatches from this wave are now settled; no nested wave started.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
