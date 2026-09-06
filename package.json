@@ -13,10 +13,15 @@
     "test": "cargo test --workspace --locked && pnpm --filter @drogon/desktop test",
     "accept:core-cli": "node scripts/accept-core-cli.mjs",
     "accept:desktop": "node scripts/accept-desktop.mjs",
+    "test:packaging": "node --test scripts/acceptance-bridge-observation.test.mjs scripts/acceptance-process.test.mjs scripts/desktop-artifacts.test.mjs scripts/packaged-runtime-admission.test.mjs tests/parity/ports/WP-ENG-RUNTIME/package-admission/sealed-bundle-identity.test.mjs",
+    "package:desktop": "node scripts/package-desktop.mjs",
+    "accept:packaged": "node scripts/accept-desktop.mjs",
+    "install:preview": "node scripts/install-preview.mjs",
     "test:renderer-contracts": "node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-UI-PRELOAD/implementation-checks tests/parity/ports/WP-UI-PRELOAD/authority-recovery/browser-window-close tests/parity/ports/WP-UI-PRELOAD/authority-recovery/close-active-tab tests/parity/ports/WP-UI-PRELOAD/authority-recovery/renderer-restart tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts tests/parity/ports/WP-UI-PRELOAD/shutdown-checkpoint",
     "typecheck:renderer-contracts": "node apps/desktop/node_modules/typescript/bin/tsc --noEmit --skipLibCheck false -p tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts/tsconfig.json"
   },
   "devDependencies": {
+    "@electron/packager": "20.0.4",
     "playwright": "1.63.0",
     "prettier": "3.9.6"
   }

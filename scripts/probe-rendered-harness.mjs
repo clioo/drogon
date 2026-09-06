@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import { rename } from "node:fs/promises";
+import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 
-export async function probeRenderedHarness({ page, workspaceId, output }) {
+export async function probeRenderedHarness({
+  page,
+  workspaceId,
+  output,
+  dataDir,
+}) {
   await page.setViewportSize({ width: 1280, height: 850 });
   await page
     .getByRole("button", { name: "New terminal", exact: true })
@@ -74,14 +81,18 @@ export async function probeRenderedHarness({ page, workspaceId, output }) {
     sessionId: launched.id,
     incarnation: launched.incarnation,
   };
-  await page.waitForFunction(async (identity) => {
-    const read = await window.drogon.read({ ...identity, cursor: 0 });
-    return (
-      read.ok &&
-      read.result.session.verdict === "live" &&
-      read.result.nextCursor > 40
-    );
-  }, identity);
+  await waitForBridgeObservation(
+    page,
+    async (identity) => {
+      const read = await window.drogon.read({ ...identity, cursor: 0 });
+      return (
+        read.ok &&
+        read.result.session.verdict === "live" &&
+        read.result.nextCursor > 40
+      );
+    },
+    identity,
+  );
   await page.waitForFunction(() =>
     /pi|ctrl|model/i.test(
       document.querySelector(".xterm-screen")?.textContent ?? "",
@@ -94,30 +105,60 @@ export async function probeRenderedHarness({ page, workspaceId, output }) {
   await page.reload();
   await page.getByText("Service 0.1.0", { exact: true }).waitFor();
   await page.getByRole("tab", { name: "Pi live", exact: true }).waitFor();
-  await page.waitForFunction(async (identity) => {
-    const result = await window.drogon.read({ ...identity, cursor: 0 });
-    return (
-      result.ok &&
-      result.result.session.id === identity.sessionId &&
-      result.result.session.verdict === "live"
-    );
-  }, identity);
+  const socket = path.join(dataDir, "runtime-v1.sock");
+  const interrupted = path.join(dataDir, "acceptance-unreachable.sock");
+  await rename(socket, interrupted);
+  try {
+    await page
+      .getByRole("tab", { name: "Pi unverifiable", exact: true })
+      .waitFor();
+    await page.screenshot({
+      path: path.join(output, "pi-unverifiable.png"),
+      animations: "disabled",
+    });
+  } finally {
+    await rename(interrupted, socket);
+  }
+  await page
+    .getByRole("button", { name: "Refresh connection", exact: true })
+    .click();
+  await page.getByRole("tab", { name: "Pi live", exact: true }).waitFor();
+  await waitForBridgeObservation(
+    page,
+    async (identity) => {
+      const result = await window.drogon.read({ ...identity, cursor: 0 });
+      return (
+        result.ok &&
+        result.result.session.id === identity.sessionId &&
+        result.result.session.verdict === "live"
+      );
+    },
+    identity,
+  );
   await page
     .getByRole("button", { name: /Close .* session/ })
     .last()
     .click();
-  await page.waitForFunction(async (identity) => {
-    const result = await window.drogon.read({ ...identity, cursor: 0 });
-    return result.ok && result.result.session.verdict === "exited";
-  }, identity);
+  await waitForBridgeObservation(
+    page,
+    async (identity) => {
+      const result = await window.drogon.read({ ...identity, cursor: 0 });
+      return result.ok && result.result.session.verdict === "exited";
+    },
+    identity,
+  );
   const stopped = await page.evaluate(async (identity) => {
     const result = await window.drogon.read({ ...identity, cursor: 0 });
     return result.ok ? result.result.session : null;
   }, identity);
   assert.equal(stopped?.verdict, "exited");
+  await page.reload();
+  await page.getByRole("heading", { name: "Start a session" }).waitFor();
+  assert.equal(await page.getByRole("tab").count(), 0);
   return [
     "rendered-native-pi-launch-without-inference",
     "harness-form-anchor-light-dark-narrow-escape-and-reload-exact-identity",
     "exact-pi-stop-through-ui",
+    "transport-loss-is-unverifiable-and-reconnects-the-same-pi-session",
   ];
 }

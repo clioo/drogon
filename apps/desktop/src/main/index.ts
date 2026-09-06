@@ -1,11 +1,31 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, session } from "electron";
+import { existsSync } from "node:fs";
+import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { bridgeSchemas } from "../shared/bridge-validation";
+import type { Result, Status } from "../shared/session-contract";
+import { readBuildInfo } from "./build-info";
 import {
   readCursorMismatches,
   writeByteCountMismatches,
 } from "./byte-consistency";
-import { callNative } from "./native-client";
+import { buildDaemonPath } from "./daemon-path";
+import {
+  callNative,
+  dataDirectory,
+  observeLocalEndpoint,
+  type LocalEndpointObservation,
+} from "./native-client";
+import {
+  bootstrapNativeRuntime,
+  spawnDetachedDaemon,
+} from "./native-runtime-bootstrap";
+
+// Bounds one probe connection attempt within the overall bootstrap budget
+// below; not a substitute for it (the overall budget is what actually
+// prevents the whole bootstrap from hanging).
+const LOCAL_ENDPOINT_PROBE_TIMEOUT_MS = 2_000;
 
 app.setName("Drogon");
 if (process.env.DROGON_ELECTRON_PROFILE)
@@ -116,6 +136,8 @@ function registerBridge() {
           } & Record<string, unknown>;
           return callNative("harness.start", params, requestId);
         }
+        case "buildInfo":
+          return readBuildInfo(process.resourcesPath);
         default:
           return invalid;
       }
@@ -153,25 +175,116 @@ function createWindow() {
   else void window.loadFile(path.join(__dirname, "../renderer/index.html"));
 }
 
-void app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler(
-    (_webContents, _permission, callback) => callback(false),
-  );
-  session.defaultSession.setPermissionCheckHandler(() => false);
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
-      { role: "editMenu" },
-      { role: "viewMenu" },
-      { role: "windowMenu" },
-    ]),
-  );
-  registerBridge();
-  createWindow();
-  app.on("activate", () => {
-    if (!window) createWindow();
+/**
+ * Attaches to a healthy existing service, or spawns the packaged `drogond`
+ * exactly once, before the window (and therefore the renderer's first
+ * `status` call) is created. Never removes a socket or force-kills an
+ * incumbent — `drogond`'s own endpoint lock decides ownership; this only
+ * decides whether *this* process tries starting one candidate.
+ */
+async function bootstrapDaemon(): Promise<void> {
+  // A window must open even if the runtime's own path resolution throws
+  // (e.g. an unset `APPDATA`); an unreachable service is still an honest,
+  // recoverable state the renderer already reports, never a blank app.
+  let dataDir: string;
+  try {
+    dataDir = dataDirectory();
+  } catch (error) {
+    console.error(
+      `[drogon] native runtime bootstrap: cannot resolve the data directory: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return;
+  }
+  const binaryName = process.platform === "win32" ? "drogond.exe" : "drogond";
+  const binaryPath = path.join(process.resourcesPath, "bin", binaryName);
+  const outcome = await bootstrapNativeRuntime({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    binaryExists: () => existsSync(binaryPath),
+    checkStatus: (signal) =>
+      callNative("status", {}, undefined, signal) as Promise<Result<Status>>,
+    observeLocalEndpoint: async (signal): Promise<LocalEndpointObservation> => {
+      // A data directory that doesn't exist yet (fresh install: `drogond`
+      // has never run here) is absence, same as the probe connection
+      // itself refusing/not-existing. Any other resolution failure (e.g. a
+      // permissions error on a parent directory) is left ambiguous rather
+      // than assumed absent.
+      let resolvedDataDir: string;
+      try {
+        resolvedDataDir = await realpath(dataDir);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        return code === "ENOENT"
+          ? { kind: "absent" }
+          : { kind: "ambiguous", reason: code ?? "data-directory-unreadable" };
+      }
+      return observeLocalEndpoint(
+        resolvedDataDir,
+        process.platform,
+        LOCAL_ENDPOINT_PROBE_TIMEOUT_MS,
+        signal,
+      );
+    },
+    spawnDaemon: () =>
+      spawnDetachedDaemon(binaryPath, ["--data-dir", dataDir], {
+        ...process.env,
+        PATH: buildDaemonPath(process.env.PATH, process.platform, homedir()),
+      }),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    pollIntervalMs: 250,
+    deadlineMs: 10_000,
   });
-});
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+  if (outcome.kind !== "already-healthy" && outcome.kind !== "not-packaged")
+    // Honest, observable failure reporting: the renderer's own "Connect to
+    // Drogon" state already surfaces an unreachable service; this is the
+    // operator-facing record of *why*, without inventing new UI for it.
+    console.error(
+      `[drogon] native runtime bootstrap: ${JSON.stringify(outcome)}`,
+    );
+}
+
+// Isolated acceptance profiles intentionally run multiple instances side by
+// side (each with its own userData/data directory); the OS-level
+// single-instance lock must not treat those as duplicates of each other.
+const isolatedProfile = Boolean(process.env.DROGON_ELECTRON_PROFILE);
+const holdsSingleInstanceLock =
+  isolatedProfile || app.requestSingleInstanceLock();
+if (!holdsSingleInstanceLock) {
+  app.quit();
+} else {
+  if (!isolatedProfile) {
+    app.on("second-instance", () => {
+      if (window) {
+        if (window.isMinimized()) window.restore();
+        window.focus();
+      }
+    });
+  }
+  void app.whenReady().then(async () => {
+    session.defaultSession.setPermissionRequestHandler(
+      (_webContents, _permission, callback) => callback(false),
+    );
+    session.defaultSession.setPermissionCheckHandler(() => false);
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        ...(process.platform === "darwin"
+          ? [{ role: "appMenu" as const }]
+          : []),
+        { role: "editMenu" },
+        { role: "viewMenu" },
+        { role: "windowMenu" },
+      ]),
+    );
+    registerBridge();
+    await bootstrapDaemon();
+    createWindow();
+    app.on("activate", () => {
+      if (!window) createWindow();
+    });
+  });
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Folder,
   FolderPlus,
@@ -19,11 +19,94 @@ import type {
 } from "../../shared/session-contract";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
+import {
+  isSessionDismissed,
+  loadDismissedSessions,
+  markSessionDismissed,
+} from "./dismissed-sessions";
 import { HarnessLaunchMenu } from "./HarnessLaunchMenu";
 import { supportsHarnessLaunch } from "./harness-capability";
 import { TerminalPane } from "./TerminalPane";
 import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
+
+/**
+ * Replaces an already-listed entry only on an exact host+id+incarnation
+ * match (a retry recovering the same session); a coincident id from a
+ * different host is appended, not overwritten, and a same-id/different-
+ * incarnation match (the entry has since moved on, e.g. a restart) is
+ * dropped as a stale receipt rather than clobbering the newer one.
+ */
+export function appendOrReplaceSession(
+  items: Session[],
+  result: Session,
+): Session[] {
+  const existing = items.find(
+    (item) => item.id === result.id && item.hostId === result.hostId,
+  );
+  if (!existing) return [...items, result];
+  if (existing.incarnation !== result.incarnation) return items;
+  return items.map((item) => (item === existing ? result : item));
+}
+
+/**
+ * Removes a session only on an exact host+id+incarnation match — a
+ * coincident id from a different host, or a stale reply for an incarnation
+ * that has since moved on, must never remove the actual current entry.
+ */
+export function removeSessionExact(
+  items: Session[],
+  target: { hostId: string; id: string; incarnation: string },
+): Session[] {
+  return items.filter(
+    (item) =>
+      !(
+        item.id === target.id &&
+        item.hostId === target.hostId &&
+        item.incarnation === target.incarnation
+      ),
+  );
+}
+
+/** A late response is only ever applied against the host+workspace it was requested for, not whatever is current now. */
+export function contextMatches(
+  captured: { hostId: string | null; workspaceId: string },
+  current: { hostId: string | null; workspaceId: string },
+): boolean {
+  return (
+    captured.hostId === current.hostId &&
+    captured.workspaceId === current.workspaceId
+  );
+}
+
+/**
+ * A confirmed close only ever removes/reselects the exact target
+ * (host+id+incarnation) if it is still listed unchanged — a reply for an
+ * incarnation since superseded (e.g. a restart raced the close) is a no-op,
+ * never removing the newer entry. Callers pass an up-to-date snapshot
+ * (e.g. a ref), not a stale closure.
+ */
+export function applyConfirmedClose(
+  items: Session[],
+  target: { hostId: string; id: string; incarnation: string },
+  active: string,
+): { sessions: Session[]; active: string } | null {
+  const stillPresent = items.some(
+    (item) =>
+      item.hostId === target.hostId &&
+      item.id === target.id &&
+      item.incarnation === target.incarnation,
+  );
+  if (!stillPresent) return null;
+  const sessions = removeSessionExact(items, target);
+  const nextActive =
+    active === target.id
+      ? (sessions.find(
+          (item) => !(item.id === target.id && item.hostId === target.hostId),
+        )?.id ?? "")
+      : active;
+  return { sessions, active: nextActive };
+}
 
 export function IconButton({
   label,
@@ -52,6 +135,21 @@ export function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [active, setActive] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
+  // Read inside in-flight `create`/`launchHarness`/`close` callbacks so a
+  // late response is checked against what's current *now*, not a stale
+  // value closed over when the call started.
+  const contextRef = useRef({
+    hostId: status?.hostId ?? null,
+    workspaceId: selected,
+  });
+  contextRef.current = {
+    hostId: status?.hostId ?? null,
+    workspaceId: selected,
+  };
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -63,6 +161,22 @@ export function App() {
   const [revision, setRevision] = useState(0);
   const [harnessCapability, setHarnessCapability] = useState(false);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
+  const [buildInfo, setBuildInfo] = useState<{
+    revision: string;
+    builtAt: string;
+    version: string;
+  } | null>(null);
+  useEffect(() => {
+    // A local file read, not an RPC — available even while disconnected,
+    // and simply absent (never fabricated) outside a packaged build. A
+    // rejection (rather than the resolved `null` this bridge method
+    // otherwise uses for "no build info") is still just "no build info",
+    // not an unhandled promise.
+    void window.drogon
+      .buildInfo()
+      .then(setBuildInfo)
+      .catch(() => setBuildInfo(null));
+  }, []);
   const current = workspaces.find((item) => item.id === selected);
   const terminal = sessions.find((item) => item.id === active);
   const checked = <T,>(value: Result<T>): T => {
@@ -143,11 +257,20 @@ export function App() {
           setError(response.error.message);
           return;
         }
-        setSessions(response.result.sessions);
+        const dismissed = loadDismissedSessions();
+        // Each session's own recorded host is what a dismissal is checked
+        // against — not this connection's current `status.hostId` — and
+        // `isSessionDismissed` itself refuses to hide anything but a
+        // positively `exited` session, so tampered storage can never mask
+        // a `live`/`unverifiable` one.
+        const visible = response.result.sessions.filter(
+          (item) => !isSessionDismissed(dismissed, item.hostId, item),
+        );
+        setSessions(visible);
         setActive((value) =>
-          response.result.sessions.some((item) => item.id === value)
+          visible.some((item) => item.id === value)
             ? value
-            : (response.result.sessions.at(-1)?.id ?? ""),
+            : (visible.at(-1)?.id ?? ""),
         );
       })
       .catch(() => {
@@ -163,17 +286,26 @@ export function App() {
   }, [selected, status, revision]);
   const create = () =>
     action(async () => {
-      const result = checked(await window.drogon.start(selected));
-      setSessions((items) => [...items, result]);
+      const captured = contextRef.current;
+      const result = checked(await window.drogon.start(captured.workspaceId));
+      // A late reply for a host/workspace no longer current is skipped —
+      // it's already covered by that workspace's next natural reload.
+      if (!contextMatches(captured, contextRef.current)) return;
+      setSessions((items) => appendOrReplaceSession(items, result));
       setActive(result.id);
     });
   const launchHarness = (input: HarnessLaunchInput) => {
+    const captured = {
+      hostId: contextRef.current.hostId,
+      workspaceId: input.workspaceId,
+    };
     let launched = false;
     return action(async () => {
       const result = checked(await window.drogon.startHarness(input));
-      setSessions((items) => [...items, result]);
-      setActive(result.id);
       launched = true;
+      if (!contextMatches(captured, contextRef.current)) return;
+      setSessions((items) => appendOrReplaceSession(items, result));
+      setActive(result.id);
     }).then(() => launched);
   };
   const close = (session: Session) =>
@@ -184,11 +316,40 @@ export function App() {
           incarnation: session.incarnation,
         }),
       );
+      // The service's own identity checks already reject a mismatched
+      // reply at the IPC boundary; this is defense-in-depth so a confirmed
+      // dismissal is never recorded against the wrong session if that
+      // boundary were ever bypassed.
+      if (
+        result.id !== session.id ||
+        result.incarnation !== session.incarnation ||
+        result.hostId !== session.hostId
+      )
+        throw new Error("The service's response was not for this session.");
       if (result.verdict !== "exited")
         throw new Error("Session exit is not confirmed. The tab remains open.");
-      setSessions((items) => items.filter((item) => item.id !== session.id));
-      if (active === session.id)
-        setActive(sessions.find((item) => item.id !== session.id)?.id ?? "");
+      // Only an explicit, confirmed close hides the tab going forward — a
+      // session that merely exited on its own must keep reappearing.
+      // Dismissal keys off the session's own recorded host, not this
+      // connection's current (mutable) belief about which host it's on.
+      markSessionDismissed(session.hostId, session.id, session.incarnation);
+      const target = {
+        hostId: session.hostId,
+        id: session.id,
+        incarnation: session.incarnation,
+      };
+      // Read from refs (not the closure's stale `sessions`/`active`) and
+      // apply both via one pure function — never nests a `setState` call
+      // inside another's updater. A no-op result means the exact
+      // incarnation was already superseded; nothing to remove or reselect.
+      const applied = applyConfirmedClose(
+        sessionsRef.current,
+        target,
+        activeRef.current,
+      );
+      if (!applied) return;
+      setSessions(applied.sessions);
+      setActive(applied.active);
     });
   const add = () =>
     action(async () => {
@@ -307,7 +468,17 @@ export function App() {
             </p>
           )}
           <footer className="sidebar-footer">
-            {status ? `Service ${status.version}` : "Service unavailable"}
+            <span>
+              {status ? `Service ${status.version}` : "Service unavailable"}
+            </span>
+            {buildInfo && (
+              <span
+                className="build-revision"
+                title={`Built ${buildInfo.builtAt}`}
+              >
+                {buildInfo.version} · {buildInfo.revision.slice(0, 7)}
+              </span>
+            )}
           </footer>
         </aside>
         <main className="session-area">
@@ -403,6 +574,7 @@ export function App() {
                 {harnessCapability ? (
                   <HarnessLaunchMenu
                     workspaceId={selected}
+                    hostId={status?.hostId ?? null}
                     harnesses={harnesses}
                     disabled={!selected || !status || busy || loadingSessions}
                     onCreateTerminal={() => void create()}

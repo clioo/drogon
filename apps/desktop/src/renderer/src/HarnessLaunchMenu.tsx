@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { DropdownMenu, Popover, Tooltip } from "radix-ui";
 import type {
@@ -12,6 +12,11 @@ import {
   normalizeHarnessLaunchInput,
   type HarnessLaunchFormValues,
 } from "./harness-launch-form";
+import {
+  clearPendingHarnessLaunch,
+  loadPendingHarnessLaunch,
+  savePendingHarnessLaunch,
+} from "./harness-launch-recovery";
 
 const unavailableHint: Record<
   Exclude<Harness["availability"], "available">,
@@ -24,12 +29,15 @@ const unavailableHint: Record<
 // Action selection and launch settings use distinct, trigger-anchored surfaces.
 export function HarnessLaunchMenu({
   workspaceId,
+  hostId,
   harnesses,
   disabled,
   onCreateTerminal,
   onLaunch,
 }: {
   workspaceId: string;
+  /** The execution host this recovery record is scoped to; `null` while disconnected — recovery is a no-op without it. */
+  hostId: string | null;
   harnesses: Harness[];
   disabled: boolean;
   onCreateTerminal(): void;
@@ -41,8 +49,22 @@ export function HarnessLaunchMenu({
     emptyHarnessLaunchForm(),
   );
   const [submitting, setSubmitting] = useState(false);
+  // Synchronous guard against a rapid double-invoke (e.g. two fast
+  // keyboard-driven `onSelect`s) that `submitting` state alone might not
+  // catch before its next render commits.
+  const inFlight = useRef(false);
   // An unchanged retry must recover the original admission, not spawn twice.
   const lastAttempt = useRef<{ key: string; requestId: string } | null>(null);
+  // Bumped after a save/clear to force the memo below to re-read storage.
+  const [recoveryVersion, setRecoveryVersion] = useState(0);
+  // Derived at render time from the *current* props, not effect-set state —
+  // avoids a stale-workspace/host value ever being visible in the gap
+  // between a prop change committing and an effect running.
+  const recoverable = useMemo(
+    () =>
+      menuOpen && hostId ? loadPendingHarnessLaunch(hostId, workspaceId) : null,
+    [menuOpen, hostId, workspaceId, recoveryVersion],
+  );
 
   const closeForm = () => {
     setSelected(null);
@@ -50,8 +72,31 @@ export function HarnessLaunchMenu({
     lastAttempt.current = null;
   };
 
+  const launch = async (input: HarnessLaunchInput) => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    if (hostId) savePendingHarnessLaunch(hostId, input);
+    setSubmitting(true);
+    try {
+      const launched = await onLaunch(input);
+      // Only a *confirmed* launch clears the recovery record — an ambiguous
+      // or refused attempt leaves the exact requestId+params recoverable.
+      if (launched && hostId) {
+        clearPendingHarnessLaunch(hostId, input);
+        setRecoveryVersion((v) => v + 1);
+      }
+      return launched;
+    } finally {
+      setSubmitting(false);
+      inFlight.current = false;
+    }
+  };
+
   const submit = async () => {
-    if (!selected) return;
+    // A form's `onSubmit` fires on an Enter-key implicit submission
+    // regardless of the (disabled) submit button's own attribute — this
+    // must reject that path too, not just the visible button click.
+    if (!selected || disabled || !hostId) return;
     const params = normalizeHarnessLaunchInput(
       workspaceId,
       selected.harnessId,
@@ -63,14 +108,22 @@ export function HarnessLaunchMenu({
         ? lastAttempt.current.requestId
         : crypto.randomUUID();
     lastAttempt.current = { key, requestId };
-    setSubmitting(true);
-    try {
-      const launched = await onLaunch({ ...params, requestId });
-      // Keep the request identity available after an ambiguous failure.
-      if (launched) closeForm();
-    } finally {
-      setSubmitting(false);
-    }
+    const launched = await launch({ ...params, requestId });
+    if (launched) closeForm();
+  };
+
+  const recover = async () => {
+    // Re-validated at invocation, not just trusted from the memo above —
+    // a recoverable intent for a workspace/host this menu is no longer
+    // showing must never be replayed.
+    if (
+      !recoverable ||
+      disabled ||
+      !hostId ||
+      recoverable.workspaceId !== workspaceId
+    )
+      return;
+    await launch(recoverable);
   };
 
   return (
@@ -110,6 +163,24 @@ export function HarnessLaunchMenu({
                 if (selected) event.preventDefault();
               }}
             >
+              {recoverable && (
+                <>
+                  <DropdownMenu.Item
+                    className="harness-menu-item"
+                    disabled={submitting || disabled}
+                    onSelect={() => void recover()}
+                  >
+                    <span>
+                      Retry interrupted{" "}
+                      {harnesses.find(
+                        (item) => item.harnessId === recoverable.harnessId,
+                      )?.displayName ?? recoverable.harnessId}{" "}
+                      launch
+                    </span>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator className="harness-menu-separator" />
+                </>
+              )}
               <DropdownMenu.Item
                 className="harness-menu-item"
                 onSelect={onCreateTerminal}

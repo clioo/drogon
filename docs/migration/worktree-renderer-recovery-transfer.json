@@ -1,0 +1,55 @@
+{
+  "sourceCheckout": "/Users/carlos/Documents/Drogon-rewrite",
+  "sourceHead": "0f915cf26c6121fe4cd85ad902e9dbb7f0de7709",
+  "status": "preserved draft/base capsule, not production admission",
+  "files": [
+    {
+      "path": "apps/desktop/src/renderer/src/App.tsx",
+      "draftSha256": "92ba078276c89130a5105e610d3ce86af642ab49d33505fd7afa2a459ace0214",
+      "baseSha256": "656663d0889b53fc804b3d309ff54ab95d1a24740e0ab6df9903c9957878a28d",
+      "targetMatchesBase": true
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/HarnessLaunchMenu.tsx",
+      "draftSha256": "ff9be16468d36d59bb5465d9aaedfd9bb1f0447b679bc51c419c27a865dfd5ef",
+      "baseSha256": "57b878325da477a31cea7dcfe5a84ef45ddc2fb90ca83ae5a32bdf1fa1bab5ff",
+      "targetMatchesBase": true
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/TerminalPane.tsx",
+      "draftSha256": "dad1d51c9cd7a9807909b7ad507cf7458ba85a07a62d8740950cba3167c85293",
+      "baseSha256": "f2e87abc54c7051c07c1acd443beac6b19f2d4e3b877ec4cf3ee674b456721a6",
+      "targetMatchesBase": true
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/main.css",
+      "draftSha256": "a62e183e3d89c83e350a5a3576158fa39c8828818407cd6fdd723d54d2b0e5fc",
+      "baseSha256": "d5dc2c7e68c8bff2f2e84ea596a0afa98400ae0aed8e4ffcf29fe0c7debdf278",
+      "targetMatchesBase": true
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/dismissed-sessions.ts",
+      "draftSha256": "86e1d56622669254a3aec82bdeb56da87d37fc611da1f60a15ab9162e757351a",
+      "baseSha256": null,
+      "targetMatchesBase": true
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/dismissed-sessions.test.ts",
+      "draftSha256": "66ff1fb6441433fe5450a9ec5bc43f85d3487a064b29e148c2e4b877689da56d",
+      "baseSha256": null,
+      "targetMatchesBase": true
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/harness-launch-recovery.ts",
+      "draftSha256": "e3a0184ea38b22dfadcaed3448002abac722c225bb394da02e1bbe73a860c7f9",
+      "baseSha256": null,
+      "targetMatchesBase": true
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/harness-launch-recovery.test.ts",
+      "draftSha256": "74b1f7fd9ad472b90e8ec24324fb458f9044f77c198df46cf8e1e938941b3f47",
+      "baseSha256": null,
+      "targetMatchesBase": true
+    }
+  ]
+}

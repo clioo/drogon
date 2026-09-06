@@ -52,4 +52,5 @@ export const bridgeSchemas = {
   stop: identity,
   harnesses: z.undefined(),
   startHarness: harnessLaunch,
+  buildInfo: z.undefined(),
 } as const;

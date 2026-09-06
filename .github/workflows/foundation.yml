@@ -39,6 +39,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm typecheck:renderer-contracts
       - run: pnpm test:renderer-contracts
+      - run: pnpm test:packaging
       - run: pnpm --filter @drogon/desktop test
       - run: pnpm --filter @drogon/desktop build
       - run: pnpm accept:core-cli

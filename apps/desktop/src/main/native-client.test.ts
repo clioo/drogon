@@ -1,5 +1,12 @@
-import { describe, expect, test } from "vitest";
-import { identityMismatch, validateEnvelope } from "./native-client";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
+import {
+  callNative,
+  identityMismatch,
+  validateEnvelope,
+} from "./native-client";
 import { bridgeSchemas } from "../shared/bridge-validation";
 import { resultSchemas } from "../shared/result-validation";
 
@@ -138,5 +145,126 @@ describe("desktop trust boundary", () => {
         "known-host",
       ),
     ).toBeNull();
+  });
+  test("session.read/resize/stop must match the requested session id and incarnation", () => {
+    const params = { sessionId: "s1", incarnation: "inc-1" };
+    expect(
+      identityMismatch(
+        "session.resize",
+        params,
+        { id: "s2", incarnation: "inc-1", hostId: "h1" },
+        null,
+      )?.ok,
+    ).toBe(false);
+    expect(
+      identityMismatch(
+        "session.stop",
+        params,
+        { id: "s1", incarnation: "stale-inc", hostId: "h1" },
+        null,
+      )?.ok,
+    ).toBe(false);
+    expect(
+      identityMismatch(
+        "session.read",
+        params,
+        { session: { id: "s1", incarnation: "inc-1", hostId: "h1" } },
+        "h1",
+      ),
+    ).toBeNull();
+    expect(
+      identityMismatch(
+        "session.read",
+        params,
+        { session: { id: "s1", incarnation: "inc-1", hostId: "other-host" } },
+        "h1",
+      )?.ok,
+    ).toBe(false);
+  });
+  test("session.list rejects any returned session outside the requested workspace or known host", () => {
+    expect(
+      identityMismatch(
+        "session.list",
+        { workspaceId: "w1" },
+        { sessions: [{ id: "s1", workspaceId: "w2", hostId: "h1" }] },
+        null,
+      )?.ok,
+    ).toBe(false);
+    expect(
+      identityMismatch(
+        "session.list",
+        {},
+        { sessions: [{ id: "s1", workspaceId: "w2", hostId: "other" }] },
+        "h1",
+      )?.ok,
+    ).toBe(false);
+    expect(
+      identityMismatch(
+        "session.list",
+        { workspaceId: "w1" },
+        { sessions: [{ id: "s1", workspaceId: "w1", hostId: "h1" }] },
+        "h1",
+      ),
+    ).toBeNull();
+  });
+  test("harness.list must be for this client's known execution host", () => {
+    expect(
+      identityMismatch("harness.list", {}, { hostId: "other" }, "h1")?.ok,
+    ).toBe(false);
+    expect(
+      identityMismatch("harness.list", {}, { hostId: "h1" }, "h1"),
+    ).toBeNull();
+    expect(
+      identityMismatch("harness.list", {}, { hostId: "anything" }, null),
+    ).toBeNull();
+  });
+});
+
+describe("callNative abort handling", () => {
+  let scratchDir: string;
+  let originalDataDir: string | undefined;
+
+  afterEach(async () => {
+    if (originalDataDir === undefined) delete process.env.DROGON_DATA_DIR;
+    else process.env.DROGON_DATA_DIR = originalDataDir;
+    if (scratchDir) await rm(scratchDir, { recursive: true, force: true });
+  });
+
+  async function ownedDataDir(): Promise<string> {
+    scratchDir = await mkdtemp(
+      path.join(tmpdir(), "drogon-native-client-test-"),
+    );
+    await writeFile(
+      path.join(scratchDir, "auth.token"),
+      "test-token\n",
+      "utf8",
+    );
+    originalDataDir = process.env.DROGON_DATA_DIR;
+    process.env.DROGON_DATA_DIR = scratchDir;
+    return scratchDir;
+  }
+
+  // Reproduces the reported gap: aborting during the async directory/token
+  // read (before any socket exists) must reject as a cancellation, not
+  // fall through to opening a socket and registering a listener on a
+  // signal whose "abort" event already fired (which never replays). The
+  // synchronous `controller.abort()` right after invocation lands while
+  // `callNative` is suspended at its very first `await` (real disk I/O
+  // always yields at least one tick), which is exactly the gap reported.
+  test("aborting during the async directory/token read rejects, never opens a socket", async () => {
+    await ownedDataDir();
+    const controller = new AbortController();
+    const promise = callNative("status", {}, "req-1", controller.signal);
+    controller.abort();
+    await expect(promise).rejects.toThrow("aborted");
+  });
+
+  test("an already-aborted signal is rejected immediately, before any filesystem work", async () => {
+    await ownedDataDir();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      callNative("status", {}, "req-2", controller.signal),
+    ).rejects.toThrow("aborted");
   });
 });
