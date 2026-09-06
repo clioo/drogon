@@ -265,6 +265,10 @@ fn known_optional_null_and_absent_states_roundtrip_faithfully() {
         Some(&Value::Null),
         "source-written null must not collapse to absent"
     );
+    // Admit-serialize-admit stability for the null state.
+    let re_admitted = admit_persisted_record(&serialized).expect("null state re-admits");
+    assert_eq!(re_admitted.to_json(), serialized);
+    assert_eq!(re_admitted.lease.processless_at, Some(None));
     // Absent stays absent through a new-owner-proving transition, and the
     // proving stage must not rewrite the unproven provenHandleLinkId.
     let mut proving_raw = extended_record_json(json!({
@@ -421,8 +425,16 @@ fn typed_known_keys_in_extensions_never_override_serialization() {
     record.provider_handle_chain[0]
         .extensions
         .insert("origin".into(), shadow());
+    record.provider_handle_chain[0]
+        .extensions
+        .insert("forkedFromKey".into(), shadow());
+    record.provider_handle_chain[0]
+        .extensions
+        .insert("mintedAtFence".into(), json!(999));
     if let ProviderHandle::Claude { extensions, .. } = &mut record.provider_handle_chain[0].handle {
         extensions.insert("sessionId".into(), shadow());
+        extensions.insert("leafUuid".into(), shadow());
+        extensions.insert("provider".into(), json!("codex"));
     }
     let serialized = record.to_json();
     assert_eq!(serialized["updatedAt"], json!(2_000));
@@ -448,9 +460,26 @@ fn typed_known_keys_in_extensions_never_override_serialization() {
         serialized["providerHandleChain"][0]["origin"],
         json!("created")
     );
+    assert!(
+        serialized["providerHandleChain"][0]
+            .get("forkedFromKey")
+            .is_none()
+    );
+    assert_eq!(
+        serialized["providerHandleChain"][0]["mintedAtFence"],
+        json!(7)
+    );
     assert_eq!(
         serialized["providerHandleChain"][0]["handle"]["sessionId"],
         json!("provider-session-alpha-1")
+    );
+    assert_eq!(
+        serialized["providerHandleChain"][0]["handle"]["provider"],
+        json!("claude")
+    );
+    assert_eq!(
+        serialized["providerHandleChain"][0]["handle"]["leafUuid"],
+        Value::Null
     );
 }
 
@@ -519,4 +548,27 @@ fn death_evidence_extension_survives_admission_and_repeat_roundtrip() {
             .get("autopsyId"),
         Some(&json!("auto-9"))
     );
+}
+
+#[test]
+fn source_refused_launch_env_never_persists_through_extensions_smuggling() {
+    let mut record =
+        admit_persisted_record(&extended_record_json(json!({}))).expect("fixture admits");
+    record
+        .extensions
+        .insert("launchEnv".into(), json!({"INERT": "dummy"}));
+    let serialized = record.to_json();
+    assert!(
+        serialized.get("launchEnv").is_none(),
+        "the source refuses launchEnv on a schema-v2 record; it must not serialize"
+    );
+    assert!(
+        is_agent_session_record(&serialized),
+        "serialization must still validate after dropping the smuggled key"
+    );
+    // Other unknown members keep their verbatim values, and the record
+    // re-admits.
+    assert_eq!(serialized["vendorTelemetry"], json!({"lane": "native"}));
+    let re_admitted = admit_persisted_record(&serialized).expect("serialized output must re-admit");
+    assert_eq!(re_admitted.to_json(), serialized);
 }

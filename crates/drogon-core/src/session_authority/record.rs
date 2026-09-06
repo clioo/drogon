@@ -43,6 +43,9 @@ const RECORD_KNOWN_KEYS: &[&str] = &[
     "lease",
     "createdAt",
     "updatedAt",
+    // Source-refused key: the validator rejects its presence on a schema-v2
+    // record, so it must never survive extensions serialization either.
+    "launchEnv",
 ];
 const LOCATION_KNOWN_KEYS: &[&str] = &[
     "executionHostId",

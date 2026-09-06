@@ -1,15 +1,27 @@
 # Provider-record extension roundtripping — admission report
 
+## Root correction verification — 2026-09-06 21:29 UTC
+
+Three independent read-only reviews of clean `3c91fff` completed through
+Orca (Muse, Sonnet, Kimi); root triage is PR #5 comment 5562259983. The
+launchEnv finding is addressed below. Root read the entire follow-up diff,
+checked the three published correction hashes, and independently reran the
+locked/offline workspace tests, all-target Clippy and fmt: all passed.
+The extra fourth file is the retained behavioral-RED log; it is explicitly
+admitted here as evidence, correcting the worker summary's three-file claim.
+No source matrix or historical receipt was modified. Aggregate extension
+resource policy remains open; no arbitrary limit was substituted for parity.
+
 ## Root integration verification — 2026-09-06 21:05 UTC
 
-After worker settlement, root fast-forwarded this worktree to main7269184
+After worker settlement, root fast-forwarded this worktree to main 7269184
 without conflicts or lost drafts. Independent full workspace tests passed
 378/0, with one marker-only probe ignored in ordinary enumeration and run
 by its owning test. Strict all-target Clippy (`-D warnings`), cargo fmt and
 source/doc diff checks passed, locked/offline throughout. The raw GREEN logs
 retain their captured trailing blank line and published hashes unchanged.
-The10 new extension tests,
-51 authority tests and6 matrix tests ran against the combined main changes.
+The 10 new extension tests,
+51 authority tests and 6 matrix tests ran against the combined main changes.
 The frozen source oracle file still hashes to
 `948778eb0b27dfe203a19a9ec4e6b56ccac5eaa7a6ed52bfe353856f9812ae3c`.
 Root reviewed known-key filtering, nested serialization, handle identity,
@@ -172,3 +184,46 @@ for the record slice, not a claim of complete durable authority. Lease
 transitions that intentionally clear fields (reservation writing
 `settlementRetryRequired: undefined`, wholesale options replacement) belong to
 later root-owned slices and must preserve this extension contract when ported.
+
+Extension allocation cost: the source sets no per-extension size or entry
+bound (only the known fields are bounded), so this slice introduces none —
+preserving verbatim values is parity, and any aggregate byte/entry budget for
+persisted extensions belongs to the future root-owned durable-store policy,
+not to an arbitrary parity reduction here.
+
+## Round-3 correction — source-refused `launchEnv` reserved key (2026-09-06)
+
+Root review found the one reserved key missing from the serialization filter:
+`RECORD_KNOWN_KEYS` lacked `launchEnv`, which the source refuses outright on a
+schema-v2 record (`!Object.hasOwn`, `agent-session-record.ts`), so a typed
+caller could insert it into the public record extensions map and `to_json`
+would persist it — producing output that no longer validates or re-admits.
+Fix: `launchEnv` added to `RECORD_KNOWN_KEYS`; validation, guards, and the
+frozen oracle are untouched. Round-3 checks (same owned files only): the new
+`source_refused_launch_env_never_persists_through_extensions_smuggling` test,
+extended link (`forkedFromKey`, `mintedAtFence`) and Claude-handle
+(`leafUuid`, `provider`) reserved-key smuggling assertions, and
+`processlessAt: null` admit-serialize-admit stability.
+
+Actual evidence (all `CARGO_BUILD_JOBS=2 --locked --offline`, base
+`3c91fff`, no Git actions):
+
+```text
+cargo test -p drogon-core --test provider_extension_roundtrip --locked --offline
+  pre-fix RED:  10 passed; 1 failed (exit 101; sha256 of log
+                102850a402873e29f449779788d323dd46a7915a830d80ff676c51b8957a056f,
+                tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/red-round-launchenv.txt)
+  post-fix:     11 passed; 0 failed
+cargo test -p drogon-core --locked --offline      PASS (exit 0): 227 passed; 0 failed
+cargo test --workspace --locked --offline         PASS (exit 0): 379 passed; 0 failed
+cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+                                                  PASS (exit 0)
+rustfmt --edition 2024 --check (changed .rs)      PASS (exit 0, after formatting)
+```
+
+Round-3 file hashes (historical sections above keep their published hashes):
+
+```text
+1dd021e9ef06f7cb88fa5c6e59f4f5da7f99a8a5047678c24ae70956e038af11  crates/drogon-core/src/session_authority/record.rs
+f63ecbebd565c156b235f8c57fb6672d323269b0a9fe96805b2c32a4039bb594  crates/drogon-core/tests/provider_extension_roundtrip.rs
+```
