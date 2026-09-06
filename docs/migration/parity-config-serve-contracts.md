@@ -84,7 +84,7 @@ leaf-reported, hash-verified pointers, not independently reviewed assertions.
 
 ## 8. Unknowns (owned followups, not absence claims)
 
-- U1 / WP-ENG-CLI: full update/foreground supervisor state machine and its tests; coordinator accepts the call boundary only.
+- U1 / WP-ENG-CLI + WP-ENG-INSTALL: supervisor body/closure now independently reviewed in `parity-serve-supervisor-contracts.json`;12 unchanged original signal/late-write cases passed. Four replacement assertions read, not executed. Full launch baseline, updater producer/readiness sender, installed/launchd/real-signal and candidate/skew tests remain.
 - U2 / WP-SUP-CONFIG + WP-UI-SETTINGS: trust persistence/restart and execution caller authorization, including host/cancellation boundaries.
 - U3 / WP-SUP-CONFIG + WP-ENG-CLI: setup env/worktree consumption and the getSetupCommandSource discrepancy above.
 - U4 / WP-SUP-CONFIG coordinated with G8: build-time config entrypoints remain required. No user clarification or scope reduction is needed.

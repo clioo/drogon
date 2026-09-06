@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "status": "coordinator-bounded-source-review",
+  "auditClosed": false,
+  "candidateParity": "unproven",
+  "gap": "G7-U1",
+  "owner": "WP-ENG-CLI",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "reviewBase": "0204b8a",
+  "sourceFingerprints": [
+    {
+      "path": "src/cli/runtime/serve-signal-exit-diagnostic.test.ts",
+      "role": "test",
+      "sha256": "c7ca934c0a85a35859b876546a61dea1e4a12b46cdaabdd4f18e7afe61705c3b",
+      "readTier": "full-body"
+    },
+    {
+      "path": "src/cli/runtime/serve-signal-exit-diagnostic.ts",
+      "role": "module",
+      "sha256": "7dcc3238d2f2eb57fbcf90899fb77eec43df3d9aad659c5cc3a5615dc5d5ac20",
+      "readTier": "full-body"
+    },
+    {
+      "path": "src/cli/runtime/serve-update-supervisor.ts",
+      "role": "module",
+      "sha256": "3cd094753949093437e00688f2b2289813c2e6a8e85a41be50e46d2156d7de15",
+      "readTier": "full-body"
+    },
+    {
+      "path": "src/cli/runtime/mac-app-update-bundle.ts",
+      "role": "module",
+      "sha256": "ba270a94a7fc01d8614d036820967eaaf50869817b1cac76a49e877fb0277ca3",
+      "readTier": "full-body"
+    },
+    {
+      "path": "src/cli/runtime/types.ts",
+      "role": "module",
+      "sha256": "6c6c7bc9eb6c934cc06517026d54321a0abc9a5b6ee759d96cdeb243d8dcee70",
+      "readTier": "full-body"
+    },
+    {
+      "path": "src/shared/serve-update-handoff.ts",
+      "role": "module",
+      "sha256": "b7f2c4a93a7ce10890f948cbd549d9cc0f50b2ea11f4fcd7550652e66bae39d6",
+      "readTier": "full-body"
+    },
+    {
+      "path": "src/shared/quit-teardown-deadline.ts",
+      "role": "module",
+      "sha256": "55f56117cc92be5d660fa748733bfaade1dffe3c958009a999cf7fb97e20eb48",
+      "readTier": "full-body"
+    },
+    {
+      "path": "src/shared/orchestration-compatibility-evidence.ts",
+      "role": "module",
+      "sha256": "a1ebea9d09839845e279ce9e62a81985f5af9c58f3ea004556ec5bc9374bc0ef",
+      "readTier": "full-body"
+    },
+    {
+      "path": "src/cli/runtime/launch.ts",
+      "sha256": "90db4d11f26034cda4019d433335773c57906544c261659b2e4691f398176771",
+      "readTier": "full-body; dependencies outside supervisor boundary not reviewed for execution"
+    },
+    {
+      "path": "src/cli/runtime/launch.test.ts",
+      "sha256": "e9e9a5ec06dc6ca373c7603fe0787dfb3f9cc40561fcade81ab0607eed56d87d",
+      "readTier": "lines1-520 only; four update assertions fully read; none executed"
+    },
+    {
+      "path": "src/shared/runtime-rpc-envelope.ts",
+      "sha256": "a46eba9fcef5a7490b9717059357cd2d0dcabe6472ba630c316ac5280edd4f83",
+      "readTier": "full-body; type-only import/export from types.ts erased in executed capsule"
+    }
+  ],
+  "fingerprintVerification": "All11 files checked byte-equal to pinned Git blob and current read-only source; hash equality alone not body-review evidence.",
+  "contracts": [
+    {
+      "id": "SUP01",
+      "anchors": [
+        "src/cli/runtime/launch.ts:123",
+        "src/cli/runtime/launch.ts:144"
+      ],
+      "contract": "Foreground mac app-bundle launch only gets handoff path and IPC stdio; recipe JSON bypasses supervisor handoff. Existing install-requested file resumes via bundle version wait, without comparing stale servingPid to a new child."
+    },
+    {
+      "id": "SUP02",
+      "anchors": [
+        "src/cli/runtime/mac-app-update-bundle.ts:7",
+        "src/cli/runtime/mac-app-update-bundle.ts:17"
+      ],
+      "contract": "Darwin-only .app inference from executable ancestors. Info.plist short version regex, exact string target;120s wait,250ms polling plus stable-parent watcher; watcher failure retains polling. No signature/actual executable version proof in this function."
+    },
+    {
+      "id": "SUP03",
+      "anchors": [
+        "src/cli/runtime/serve-update-supervisor.ts:34",
+        "src/cli/runtime/serve-update-supervisor.ts:84"
+      ],
+      "contract": "After normal child exit, only install-requested matching its pid (if pid defined) enters replacement. Bundle timeout records failed but still spawns current executable with expectedHandoff=null. Matching installed version requires replacement runtime readiness. No generic child-crash retry policy; unrelated/missing handoff returns numeric exit or signal diagnostic."
+    },
+    {
+      "id": "SUP04",
+      "anchors": [
+        "src/cli/runtime/serve-update-supervisor.ts:167",
+        "src/cli/runtime/serve-update-supervisor.ts:216"
+      ],
+      "contract": "Expected replacement has60s readiness deadline. Only parsed orca:serve-ready with exact targetVersion and nonempty runtimeId is accepted. Mismatch/deadline mark failed, persist, SIGTERM then35s SIGKILL fallback. Early exit without verified readiness records failed and returns1; invalid/unexpected/duplicate messages ignored."
+    },
+    {
+      "id": "SUP05",
+      "anchors": [
+        "src/cli/runtime/serve-update-supervisor.ts:177",
+        "src/cli/runtime/serve-update-supervisor.ts:224"
+      ],
+      "contract": "Ready message sets verified then starts completion write; exit waits stateWrite. Completion write rejection changes failed and terminates only if child not settled. It does not kill an already-exited child. Error event attempts failure recording before rejection and removes exit listener."
+    },
+    {
+      "id": "SUP06",
+      "anchors": [
+        "src/cli/runtime/serve-update-supervisor.ts:158",
+        "src/cli/runtime/serve-update-supervisor.ts:208",
+        "src/shared/quit-teardown-deadline.ts:1"
+      ],
+      "contract": "POSIX SIGINT/SIGTERM forwarded and remembered; Linux alone registers SIGHUP. Windows console branch does not child.kill initial signal or add forwarded signal, relying on shared-console delivery. First signal starts one35s kill timer (10s renderer+20s teardown+5s margin); repeated signals do not reset it. Exit cleanup removes handlers/timers."
+    },
+    {
+      "id": "SUP07",
+      "anchors": [
+        "src/cli/runtime/serve-update-supervisor.ts:89",
+        "src/cli/runtime/serve-signal-exit-diagnostic.ts:5"
+      ],
+      "contract": "Numeric child exit code preserved, including nonzero. Exit signal matching caller-forwarded set with null code returns0. Unforwarded/no-code/no-signal throws runtime_serve_failed. Darwin SIGABRT explains window-server issue as likely, never proven; other platforms/signals plain diagnostic."
+    },
+    {
+      "id": "SUP08",
+      "anchors": [
+        "src/shared/serve-update-handoff.ts:41",
+        "src/shared/serve-update-handoff.ts:64"
+      ],
+      "contract": "Handoff schema1, phase membership, nonempty from/target, positive integer servingPid, string reason forfailed, nonempty runtimeId forcompleted. Supervisor IPC exacttype andnonemptyversion/runtimeId. Extra fields retained, no semver/signature/host identity validation. State phase membership uses String(value.phase) then returns original object; do not upgrade this to strict runtime schema evidence."
+    },
+    {
+      "id": "SUP09",
+      "anchors": [
+        "src/cli/runtime/serve-update-supervisor.ts:241",
+        "src/cli/runtime/serve-update-supervisor.ts:259",
+        "src/cli/runtime/serve-update-supervisor.ts:286"
+      ],
+      "contract": "Read/parse errors become null. Writes JSON to handoffPath.pid.tmp mode0600 then rename. No fsync/directory-sync or symlink/lock protocol here; mode not enforcement on preexisting temporary file. Complete writes completed then unlink; unlink errors swallowed and completedfile may remain. Never call this durability equivalent to reviewed durable-write contract."
+    }
+  ],
+  "originalEvidence": {
+    "capsule": "tests/parity/baseline-capsules/serve-signal-exit-diagnostic.json",
+    "receipt": "docs/migration/reference-captures/c9790628-serve-signal-exit-diagnostic/stage-receipt.json",
+    "results": "docs/migration/reference-captures/c9790628-serve-signal-exit-diagnostic/vitest-results.json",
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0,
+    "platform": "macOS arm64; Linux/Windows property simulated only",
+    "node": "24.19.0",
+    "vitest": "4.1.11",
+    "manifestSha256": "d574a091ef2105a1f4b0c4eea1f4217429b454045845fdacdec24c2372b186d7",
+    "testsReadNotRun": [
+      {
+        "path": "src/cli/runtime/launch.test.ts",
+        "lines": "106-329",
+        "cases": 4,
+        "covers": [
+          "bundle swap retains supervisor then verified child owns serving",
+          "replacement version mismatch no retry loop",
+          "spawn error recorded before rejection",
+          "readiness timeout no retry"
+        ]
+      }
+    ]
+  },
+  "remaining": [
+    {
+      "owner": "WP-ENG-CLI + WP-ENG-INSTALL",
+      "scope": "Launch.test full closure/remaining assertions, bundle updater producer and main readiness sender. Full install/launchd and real signal delivery, replacement persistence failure, native Win/Linux and both version skews still require baseline/candidate execution."
+    },
+    {
+      "owner": "WP-ENG-CLI + WP-ENG-SHARED",
+      "scope": "Preserve observed acceptance/error semantics with intentional policy for parser coercion, handoff temp-file safety and durability. Report any proposed hardening separately; do not silently replace contract or claim source secure."
+    },
+    {
+      "owner": "WP-SUP-CONFIG + WP-UI-SETTINGS",
+      "scope": "G7-U2/U3 trust persistence, caller authorization and setup environment remain separate."
+    }
+  ]
+}

@@ -285,8 +285,8 @@
   "unknowns": [
     {
       "id": "U1",
-      "scope": "serve-update-supervisor full supervision/handoff state machine (293 lines) was read only at export boundaries",
-      "followup": "WP-ENG-CLI: inspect foreground/update supervisor bodies and original tests before porting; current coordinator accepts only the launch call boundary, not leaf timeout constants."
+      "scope": "Supervisor body and imported runtime closure now independently reviewed in parity-serve-supervisor-contracts.json;12 unchanged original signal/late-write cases pass. Four launch replacement assertions read, not executed.",
+      "followup": "WP-ENG-CLI + WP-ENG-INSTALL: update producer/main readiness sender, full launch baseline, real bundle/launchd/signals and candidate/skew tests remain. Exact35s kill grace and60s replacement readiness characterized; no durability or native Windows/Linux proof from fake-child tests."
     },
     {
       "id": "U2",

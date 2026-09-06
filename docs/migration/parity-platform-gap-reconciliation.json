@@ -115,9 +115,11 @@
         "parity-config-serve-contracts.json",
         "parity-config-serve-contracts.md",
         "reference-captures/c9790628-serve-mode-argv/README.md",
-        "reference-captures/c9790628-serve-options/README.md"
+        "reference-captures/c9790628-serve-options/README.md",
+        "parity-serve-supervisor-contracts.json",
+        "reference-captures/c9790628-serve-signal-exit-diagnostic/README.md"
       ],
-      "enumerationDisposition": "G7 v2 characterizes YAML shape/limits, per-hook precedence, trust inspection versus executor, SSH method distinctions and serve argv/launch/readiness.23 direct reads and28 fingerprints verified.33 unchanged original parser cases pass; no candidate parity. U1-U4 retain full supervisor, trust persistence/callers, setup-env consumption and config build-entrypoint work with existing owners. Do not repeat accepted source contracts; orcad cannot substitute for serve.",
+      "enumerationDisposition": "G7 v2 characterizes YAML shape/limits, per-hook precedence, trust inspection versus executor, SSH method distinctions and serve argv/launch/readiness.23 direct reads and28 fingerprints verified.33 original parser cases pass; separate supervisor review adds12 unchanged signal/late-write cases and11 source fingerprints with explicit read tiers. No candidate parity. U1 retains updater sender/producer, full launch/installed/real-signal tests; U2-U4 trust persistence/callers, setup-env consumption and build-entrypoints remain owned. Do not repeat accepted contracts; orcad cannot substitute for serve.",
       "acceptance": "Produce config-schema/precedence/error and serve handler contracts, then source/candidate tests using isolated profiles and explicit network exposure."
     },
     {
