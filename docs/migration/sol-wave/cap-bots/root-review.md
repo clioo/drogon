@@ -1,5 +1,8 @@
 # Root review: Bots test preparation and first Sol cycle
 
+Latest blocking native review is the final section, **Native parser review**.
+It supersedes runner-only acceptance for native implementation decisions.
+
 ## Final runner acceptance: 2026-09-06, 16:29 UTC
 
 Root accepts the bounded baseline runner after independent 91/91 regression

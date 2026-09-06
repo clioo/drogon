@@ -29,6 +29,34 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+### Delegated integration checkpoint: 16:52 UTC
+
+Native claim identity is registered and committed at `8140c4f`: root verifies
+39/39 tests through the actual public core library, workspace compilation and
+20/20 actual-source signing vectors. Windows filesystem execution remains open.
+ENG's next Kimi worker is live under Run `run_5ef473a02da0`, Task
+`task_1cddc148cebf`, Dispatch `ctx_ae31d647c99d`, implementing complete provider
+records and handle transitions under the existing native authority contract.
+
+UI's actual GLM child is Dispatch `ctx_31520c45530a`, Run `run_94251496baee`.
+Sol received its source-baseline evidence and delivered the root-approved opaque
+payload/required diagnostic-sink contract through an answered child question.
+The reported 45 source cases still need independent final evidence review; they
+are not candidate checkpoint/restart acceptance.
+
+CAP remains unaccepted after root identified ECMAScript trim, numeric timestamp
+conversion and unknown-key diagnostic privacy gaps. Sol transferred the same
+Sonnet terminal to correction Task `task_0cc6cb6e246e`, Dispatch
+`ctx_aa41ae7449a9`, before acknowledging its prior completion. Root provisionally
+registered the public Bot input module and shared known-agent exports so tests
+can exercise the real crate; these edits are not yet admitted as finished code.
+The next persistence/ownership boundary is `native-bot-state-contract.md` at
+`e381562`, not an extra launched task. All implementation stays delegated.
+
+No new installation or public push occurred. Audit remains 11/12 (91.7%, +0),
+with medium source-characterization confidence and high full-fidelity deadline
+risk. Three active leaf lanes continue; no quota fallback was introduced.
+
 ### Active follow-on work: 16:30 UTC
 
 CAP native input has a verified actual Sonnet child `ctx_0ff3cf03977e` under
