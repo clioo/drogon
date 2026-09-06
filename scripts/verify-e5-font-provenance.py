@@ -142,6 +142,33 @@ def verify_font_logos_component():
     }
 
 
+def verify_component_notices():
+    catalog_path = Path(__file__).resolve().parent.parent / "docs/migration/e5-nerd-component-notices.json"
+    catalog_bytes = catalog_path.read_bytes()
+    catalog = json.loads(catalog_bytes)
+    if catalog["schemaVersion"] != 1 or catalog["upstreamRevision"] != NERD_REVISION:
+        raise ValueError("Unexpected component notice catalog revision")
+    entries = catalog["files"]
+    if len(entries) != 15 or len({entry["path"] for entry in entries}) != 15:
+        raise ValueError("Unexpected/duplicate component notice entries")
+    verified = []
+    for entry in entries:
+        relative = entry["path"]
+        if not re.fullmatch(r"src/glyphs/[a-z-]+/(?:README\.md|LICENSE(?:\.txt)?|OFL\.txt)", relative):
+            raise ValueError("Unexpected component notice path")
+        if not isinstance(entry["bytes"], int) or not 0 < entry["bytes"] <= 64 * 1024:
+            raise ValueError("Invalid component notice size")
+        url = f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_REVISION}/{relative}"
+        data = fetch_pinned(url, entry["sha256"], entry["bytes"])
+        if len(data) != entry["bytes"]:
+            raise ValueError("Component notice length mismatch")
+        verified.append({**entry, "url": url})
+    return {
+        "catalogSha256": digest(catalog_bytes), "files": verified,
+        "limits": catalog["scope"], "remaining": catalog["remaining"],
+    }
+
+
 def verify(source):
     versions = {name: importlib.metadata.version(name) for name in ["fonttools", "brotli", "zopfli"]}
     if versions != {"fonttools": "4.64.0", "brotli": "1.2.0", "zopfli": "0.4.3"}:
@@ -193,6 +220,7 @@ def verify(source):
             "byteEqual": True, "metadata": metadata(files[NERD]),
             "declarations": declarations,
             "fontLogos": verify_font_logos_component(),
+            "componentNotices": verify_component_notices(),
             "finding": "Exact pinned TTF-to-WOFF2 reproduction; adjacent source OFL notice differs from upstream SymbolsOnly MIT declaration. Upstream root license/audit explicitly retains multiple glyph-source licenses; a single MIT or OFL label is not complete component notice accounting.",
         },
         "geist": {

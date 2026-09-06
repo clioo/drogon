@@ -34,6 +34,115 @@
     }
   ],
   "nerd": {
+    "componentNotices": {
+      "catalogSha256": "d15d7c942ed499f53472d92fad034add73c6a7bf17d28b66834fc47518b599e2",
+      "files": [
+        {
+          "path": "src/glyphs/codicons/LICENSE.txt",
+          "bytes": 19047,
+          "sha256": "d6239afa918961b465b07bf7411cbe34ff6685854f58553db7966f4881a0211f",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/codicons/LICENSE.txt"
+        },
+        {
+          "path": "src/glyphs/codicons/README.md",
+          "bytes": 239,
+          "sha256": "86fd7d1b3b215633d6a8457fe0dbf561bda25af01c5c1ca4a4c53ec4e7c9ffea",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/codicons/README.md"
+        },
+        {
+          "path": "src/glyphs/devicons/README.md",
+          "bytes": 480,
+          "sha256": "4d5547fb89112b934f117d1688872dc29389f1ac1cd7e831fc938561a1023aea",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/README.md"
+        },
+        {
+          "path": "src/glyphs/font-awesome/LICENSE.txt",
+          "bytes": 7427,
+          "sha256": "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/font-awesome/LICENSE.txt"
+        },
+        {
+          "path": "src/glyphs/font-awesome/README.md",
+          "bytes": 419,
+          "sha256": "83a5c255a5c182d1697086313265bf83788c22fe9f2c160777ecda3e32d8d76c",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/font-awesome/README.md"
+        },
+        {
+          "path": "src/glyphs/materialdesign/LICENSE",
+          "bytes": 992,
+          "sha256": "3bae6305bcaa6d10219b999f65c342034c2d40b1c0e8567fa08605e73ccba829",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/materialdesign/LICENSE"
+        },
+        {
+          "path": "src/glyphs/materialdesign/README.md",
+          "bytes": 1212,
+          "sha256": "7afc59be7303f6877297db80c1ea8f506bcf4e18290ff85e1bba1584ffa0555b",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/materialdesign/README.md"
+        },
+        {
+          "path": "src/glyphs/octicons/LICENSE",
+          "bytes": 1068,
+          "sha256": "4f886642f9e8d99eeadd484acdac011c3fde8a338faf52f5ca1408c13b9a9b63",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/octicons/LICENSE"
+        },
+        {
+          "path": "src/glyphs/pomicons/LICENSE",
+          "bytes": 4395,
+          "sha256": "cb4797a9745683f287c28833db596e9d68ec43082d59359b3a49c504f0f610ce",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/pomicons/LICENSE"
+        },
+        {
+          "path": "src/glyphs/pomicons/README.md",
+          "bytes": 127,
+          "sha256": "c0de5db022d38bc135ceb3d1d0c892b2a36a0deb2d4df5e728c964e952edeacd",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/pomicons/README.md"
+        },
+        {
+          "path": "src/glyphs/powerline-extra/LICENSE",
+          "bytes": 1072,
+          "sha256": "544307a58e6826c24145b2af1c3578b53e2e21ae0e6c67ab4c6abd544304d26a",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/powerline-extra/LICENSE"
+        },
+        {
+          "path": "src/glyphs/powerline-extra/README.md",
+          "bytes": 674,
+          "sha256": "5c79ad0af0366752aac6a0887126554e74c84cecff9b56e1e411758000d3e8cc",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/powerline-extra/README.md"
+        },
+        {
+          "path": "src/glyphs/powerline-symbols/LICENSE.txt",
+          "bytes": 1132,
+          "sha256": "46d5355e4734468135d8e4a30d0916292cc4df2b3ec30aa68c866f82497933be",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/powerline-symbols/LICENSE.txt"
+        },
+        {
+          "path": "src/glyphs/powerline-symbols/README.md",
+          "bytes": 250,
+          "sha256": "c6cde819271276da3f8faa35a1163d902f2a903e9eb375646dd473c0c582cdef",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/powerline-symbols/README.md"
+        },
+        {
+          "path": "src/glyphs/weather-icons/OFL.txt",
+          "bytes": 4692,
+          "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790",
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/weather-icons/OFL.txt"
+        }
+      ],
+      "limits": "Exact declarations and modification records adjacent to glyph components; not aggregate-font reconstruction or legal clearance.",
+      "remaining": [
+        "Devicons exact derived-source notice",
+        "Font Awesome Extension exact notice",
+        "IEC Power Symbols exact notice",
+        "Seti-derived original-source exact notice",
+        "Weather Icons complete upstream attribution",
+        "Aggregate glyph transformation and final bundled notice verification"
+      ],
+      "verification": {
+        "liveCheck": "passed with pinned sizes and SHA256; complete existing font verifier also passed",
+        "offlineFixtures": 6,
+        "fixtureScope": "catalog revision, duplicate entries, literal/path boundaries, size cap, short payload and valid complete traversal; mocked fetch is not a network check"
+      }
+    },
     "upstreamRevision": "fa7b859994228a9c8759f99c55a8d31ee92a1b5e",
     "fontLogos": {
       "componentUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/font-logos.ttf",

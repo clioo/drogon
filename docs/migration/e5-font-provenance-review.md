@@ -31,6 +31,21 @@ The npm package with the same1.3.0 label is **not** a matching binary: its TTF r
 
 This source-component/release/notice join does not reproduce the entire aggregate Nerd font build from all glyph sources. Other glyph-family notices and final package inspection remain required. The extended verifier passed exact component,141-entry release, tag license and README checks with pinned hashes, entirely in memory. Four separate mocked-fetch ZIP fixtures passed (valid, duplicate member, wrong font, wrong license); those are audit-tool checks, not product tests.
 
+### Component notice checkpoint
+
+The exact Nerd3.4.0 revision now has15 checked declaration/modification files across nine glyph families in `e5-nerd-component-notices.json`. The extended verifier downloaded all15 and matched exact sizes/SHA256; the existing Nerd/Geist binary joins also still passed. Six separate offline rejection/traversal fixtures passed via `uv run --no-project --with 'fonttools[woff]==4.64.0' --with 'brotli==1.2.0' --with 'zopfli==0.4.3' python scripts/verify-e5-font-provenance.test.py`. These fixtures test the audit tool, not Drogon.
+
+Concrete distinctions for the eventual package:
+
+- Codicons declares CC-BY4.0; its README records manual repairs to two glyphs. Retain the modification record.
+- Font Awesome's supplied notice distinguishes SVG/JS icons, fonts and code. Nerd's README explicitly describes a6.5.1.custom font assembled from SVGs; preserve that route and the complete notice rather than choosing a license from the output extension alone.
+- Pictogrammers references Apache2.0 for fonts, MIT for code and respective licenses for some icons. Its supplied notice is not the full Apache text; the README also records a repaired glyph and a dormant older font.
+- Octicons and Powerline Extra supply concrete MIT notices. Powerline Symbols supplies MIT-form permission text despite the aggregate audit's generic Free License label.
+- Pomicons explicitly declares its Reserved Font Name. Weather Icons' supplied OFL header still contains unfilled dates, holder and reserved-name placeholders: obtain exact upstream attribution, do not invent it.
+- Devicons is documented as2.16.0.custom. No standalone notice exists at the immediate directory level inspected; deeper generated-source attribution must be resolved, not substituted with the older Vorillaz family automatically.
+
+The catalog retains six finite follow-ups: Devicons, Font Awesome Extension, IEC and Seti-derived source notices; complete Weather attribution; aggregate transformation/final package verification. This checkpoint preserves exact source statements, not a legal clearance or completed build. No product asset, packaged notice or global environment was changed.
+
 ## Geist
 
 Renderer and site files are byte-identical:69,436 bytes, SHA256 `e24cec106619c03f0b3519e31b9bc55e0d5e926b6a95b8d798cd8cef215b1505`. Their internal name table reports version1.800,973 glyphs and2024 Geist Project Authors; the checked-in site notice names2023 Vercel/basement.studio.
