@@ -1,0 +1,56 @@
+{
+  "capsuleId": "relay-protocol-backpressure",
+  "description": "Unchanged original relay framing tests; complete executed import closure independently read.",
+  "entryTestFile": "src/relay/protocol-backpressure.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 9
+  },
+  "files": [
+    {
+      "path": "src/relay/protocol-backpressure.test.ts",
+      "role": "test",
+      "sha256": "1173eb455d8645e0e4ccac2b30bb063ff94654b19dfec6976ed68169481319ae"
+    },
+    {
+      "path": "src/relay/protocol.ts",
+      "role": "module",
+      "sha256": "678f9d6dac998385ca10e94da9864fe3451c82fcc88b9c28490dfb42e99606a4"
+    },
+    {
+      "path": "src/relay/relay-frame-decoder.ts",
+      "role": "module",
+      "sha256": "7044cd142b21f847ee0dc4aee085fe18434b4bcb34ba1eb8bc1fb48a0ed7919e"
+    },
+    {
+      "path": "src/shared/relay-frame-decoder.ts",
+      "role": "module",
+      "sha256": "88c0ecbc06b93efe6733094b8c9e4509ab1cbd139f8cb3257e9fb74a0ed39194"
+    },
+    {
+      "path": "src/shared/relay-frame-decoder-contract.ts",
+      "role": "module",
+      "sha256": "f58279099fe4dbbdfde9e3e038a916ae077e71d8ac6aa871b59a64c6fbaeaad8"
+    },
+    {
+      "path": "src/shared/relay-frame-buffer.ts",
+      "role": "module",
+      "sha256": "b372b7d78caf9596b7c404da9175486572c668ef667cddc5d61082b052c23d64"
+    }
+  ],
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "isolationRationale": "Complete runtime imports are Vitest, staged Buffer-based codecs and in-memory frame buffer. Tests use existing fake scheduler and callbacks; no source assertions/imports/mocks changed. No socket, Electron, files, processes, services, network, models or user profiles accessed by tested code. Decoder may use a cancellable setImmediate continuation. Bounded maximum-frame fixtures allocate tens of MiB. Minimal config is not a general sandbox.",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 with Node24.19.0/macOS arm64. Minimal node config omits original aliases/setupFiles/feature-wall define/GC-webstorage/platform-worker settings unused by reviewed closure; no full-config/typecheck equivalence claim.",
+    "Default unit timeout instead of original30s/60s; outer timeout30s. No installs, only a fresh owned stage."
+  ],
+  "testEvidenceBoundary": "Framing round trips, payload size/byte equality or in-memory decoder backpressure only, according to entry test. No live daemon handshake, SSH connection, full dispatcher, mobile, candidate, rendered, persistence or cross-version acceptance."
+}

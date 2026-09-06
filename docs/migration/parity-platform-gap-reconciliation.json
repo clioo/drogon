@@ -209,9 +209,11 @@
       "state": "partially-located",
       "evidence": [
         "parity-source-bridges.json",
-        "parity-remote-enoent-contract.md"
+        "parity-remote-enoent-contract.md",
+        "parity-relay-mobile-wire-contracts.json",
+        "parity-relay-mobile-wire-contracts.md"
       ],
-      "enumerationDisposition": "615 runtime RPC names and a bounded relay error path are accepted; they do not establish the separate relay dispatcher method/notification/stream surface.",
+      "enumerationDisposition": "parity-relay-mobile-wire-contracts.json/.md v2 independently reviews actual relay framing/routing plus16 original isolated protocol cases. It corrects the false terminal-stream opcode equivalence.133 request/12 inbound/12 outbound dictionary counts remain leaf registration/composition claims pending independent reconciliation, not namespace completeness.",
       "acceptance": "Enumerate actual relay dispatch composition, auth, stream opcodes and parameter/error handling; preserve SSH ownership and both client/host version skews."
     },
     {
@@ -306,12 +308,14 @@
         "WP-ENG-CLI",
         "WP-ENG-IPC"
       ],
-      "state": "partially-located",
+      "state": "source-contract-characterized",
       "evidence": [
         "parity-cli-terminal-contracts.json",
-        "parity-cli-terminal-contracts.md"
+        "parity-cli-terminal-contracts.md",
+        "parity-relay-mobile-wire-contracts.json",
+        "parity-relay-mobile-wire-contracts.md"
       ],
-      "enumerationDisposition": "CLI show preserves undefined as unknown/not evaluated and null as none. Producer/transport/consumer plumbing beyond this formatter remains owed.",
+      "enumerationDisposition": "G19 v2 coordinator read traces producer, shared probe, both showTerminal projections, exact identity-gated worker/context-only/federation observations and peer direction. Internal undefined-valued properties differ from public conditional omission. Four original worker wait assertion bodies read, not run; CLI contract reused and UI literal scan empty. Actual runtime/skew execution remains owed.",
       "acceptance": "Trace all transformations and assert missing, null and populated states through host RPC to CLI/UI, including older peers; never collapse unknown into none."
     },
     {

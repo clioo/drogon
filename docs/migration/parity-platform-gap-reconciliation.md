@@ -17,8 +17,8 @@ untracked file. Its old partial-reading counts are not current totals.
 | --- | --- | --- |
 | Bounded registry already present | G1–G4, G11, G15, G16 | Do not repeat censuses; carry semantic and execution obligations into owned contracts/test ports. |
 | Enumerated with explicit attribution unknowns | G5, G6 | Keep factories/dynamic paths and legacy producer unknowns explicit; complete payload/state contracts under E3. |
-| Bounded source contract characterized, owned followups remain | G7, G9, G10, G12, G17, G18, G20 | Preserve config/trust/serve, upload/consent, OS tray, window/lease and parser/error distinctions; not live runtime acceptance. G7 U1–U4 and G17/G18 owned followups remain. |
-| Partial pointers, missing bounded contract reconciliation | G13, G14, G19 | Read the specific dispatcher/client/state-machine bodies; unrelated registry counts cannot close these. |
+| Bounded source contract characterized, owned followups remain | G7, G9, G10, G12, G17, G18, G19, G20 | Preserve config/trust/serve, upload/consent, OS tray, window/lease, interactive-wait and parser/error distinctions; not live runtime acceptance. Owned execution followups remain. |
+| Partial contract review; enumeration/composition pending | G13, G14 | G13 framing/routing reviewed with16 original cases; method composition still pending. G14 mobile literal census/adapters require independent reconciliation. |
 | Source review still needed for this register | G8 | Resolve deployment/assets from actual entrypoints and packaging. No feature-absence inference. |
 
 These categories total 20 IDs, not 20 product defects. E1–E4 still own their
@@ -47,6 +47,13 @@ reads and43 fingerprints verified against checkout and pinned blobs.
 Main/popout minimums differ; lease capabilities compare in order; reattach
 refreshes inventory; adoption does not promise DOM continuity. Full
 rendered/registry/recovery/skew obligations remain owned, audit still open.
+
+Wire review at2cc40e3 adds16 original protocol cases in three capsules,
+total214 cases/23 capsules. G19 source transformations are bounded reviewed;
+four integration assertion bodies are read, not run. G13 actual13-byte relay
+framing differs from runtime terminal-stream opcodes. Its registration census
+and G14 mobile census remain pending.61 source fingerprints match frozen
+checkout/pinned Git; only22 files have coordinator full/partial body review.
 
 ## G16 source cross-check: management is not the stream bridge
 

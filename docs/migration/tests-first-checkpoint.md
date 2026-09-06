@@ -1173,6 +1173,38 @@ PR or push this turn; unaccepted product changes remain intact. Audit/goal
 remain open. Next: wire draft review plus already-owned G7/G8 followups and
 remaining E1–E4/journey obligations, without repeating completed censuses.
 
+## Relay framing baseline and agentWait source review
+
+The preceding acknowledgement-only turn made no technical progress; this turn
+revalidated the source and advanced the existing wire draft at base2cc40e3.
+Mentu Navigator status1.1.1 succeeded; known paths were directly read. Both
+remote-boundary references were read fully.22 full/partial source/test reads
+and61 hashes verified against checkout AND pinned Git blobs are recorded in
+parity-relay-mobile-wire-contracts.json/.md v2, with leaf tiers kept separate.
+
+G19 source review now covers coalesced probes, missing versus null versus
+populated values, both terminal projections, exact-worker identity, context
+and federation transformations. Probe unknown is not timeout-only; internal
+undefined-valued properties differ from public omitted fields. Corrected the
+old/new peer direction. Four original integration assertion bodies read,
+NOT RUN; wider runtime/native DB closure and actual skews remain owed.
+
+G13 framing/routing review rejects the leaf's category error equating relay
+with runtime terminal-stream opcodes. Full Buffer/decoder dependency closure
+was read before three unchanged original suites ran on Vitest4.1.11/Node24.19.0:
+5 handshake+2 JSON payload+9 backpressure cases passed, zero failure/skip/todo.
+One actual file per capsule. Baseline now214 distinct cases across23 capsules.
+No actual socket/daemon handshake or candidate code exercised. Archived stdout,
+receipts/results preserve observed values and source/license provenance.
+
+G13 registration/dynamic/publication composition and G14 mobile census remain
+explicitly pending, not accepted on dictionary arithmetic. fs25/git43 request
+prefix counts correct the draft's29/41. No original source edits, product
+integration, recipe edits, worker launches, personal session operations,
+installation, models, push or PR in this pass. Existing dirty product work
+preserved. Audit/goal remain open; next is independent bounded composition
+and mobile adapter review plus already-owned G7/G8/E1–E4/journey followups.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

@@ -1,6 +1,21 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
-## Current review disposition at8cf48eb
+## Current review disposition at2cc40e3
+
+Wire v2 now has partial coordinator review: G19 host/worker/federation source
+transformations, G13 actual relay framing/routing,22 direct full/partial
+reads and61 verified frozen-source hashes.16 unchanged original protocol
+cases pass in three isolated capsules (5 handshake,2 JSON payload,9 decoder
+backpressure). Baseline214 cases/23 capsules, not candidate or live transport.
+
+G13 registration/outbound composition and dynamic methods remain leaf claims;
+G14 mobile literal census, adapters, pairing/reconnect/skews remain pending.
+Do not repeat the accepted G19 source chain or framing closure. Next reads:
+independent callsite provenance/composition and mobile adapter boundaries,
+then existing G7/G8/E1–E4/journey obligations. Four worker-wait integration
+test bodies were read, not executed. No active audit writers or new hierarchy.
+
+## Historical review disposition at8cf48eb
 
 Window/browser G17/G18 v2 has bounded coordinator acceptance:39 direct
 source/test reads,43 verified source/docs hashes,47 unchanged original cases
