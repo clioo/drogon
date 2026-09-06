@@ -14,6 +14,7 @@
 use serde_json::Value;
 
 use super::error::SessionAuthorityError;
+use super::{Extensions, serialized_extensions, split_extensions};
 
 /// Bounded so one session cannot grow an unbounded persisted record.
 pub(crate) const MAX_PROVIDER_HANDLE_LINKS: usize = 256;
@@ -45,6 +46,18 @@ impl HandleProvider {
     }
 }
 
+/// Known members per handle shape; everything else is preserved verbatim.
+const HANDLE_CLAUDE_KNOWN_KEYS: &[&str] = &["provider", "sessionId", "leafUuid"];
+const HANDLE_CODEX_KNOWN_KEYS: &[&str] = &["provider", "threadId"];
+const LINK_KNOWN_KEYS: &[&str] = &[
+    "linkId",
+    "handle",
+    "origin",
+    "mintedAtFence",
+    "observedAt",
+    "forkedFromKey",
+];
+
 /// Runtime guard for persisted/remote provider metadata. Unknown values must
 /// not impersonate Codex (`isAgentSessionHandleProvider`).
 pub fn is_handle_provider_value(value: &Value) -> bool {
@@ -55,14 +68,19 @@ pub fn is_handle_provider_value(value: &Value) -> bool {
 }
 
 /// One provider conversation handle (discriminated union in the source).
+/// The source carries handle objects by reference through every transition
+/// and persists them verbatim, so members beyond the known fields travel in
+/// `extensions`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderHandle {
     Claude {
         session_id: String,
         leaf_uuid: Option<String>,
+        extensions: Extensions,
     },
     Codex {
         thread_id: String,
+        extensions: Extensions,
     },
 }
 
@@ -75,10 +93,11 @@ impl ProviderHandle {
     }
 
     pub fn to_json(&self) -> Value {
-        match self {
+        let (mut object, extensions, known_keys) = match self {
             Self::Claude {
                 session_id,
                 leaf_uuid,
+                extensions,
             } => {
                 let mut object = serde_json::Map::new();
                 object.insert("provider".to_string(), Value::from("claude"));
@@ -87,15 +106,22 @@ impl ProviderHandle {
                     "leafUuid".to_string(),
                     leaf_uuid.clone().map(Value::from).unwrap_or(Value::Null),
                 );
-                Value::Object(object)
+                (object, extensions, HANDLE_CLAUDE_KNOWN_KEYS)
             }
-            Self::Codex { thread_id } => {
+            Self::Codex {
+                thread_id,
+                extensions,
+            } => {
                 let mut object = serde_json::Map::new();
                 object.insert("provider".to_string(), Value::from("codex"));
                 object.insert("threadId".to_string(), Value::from(thread_id.clone()));
-                Value::Object(object)
+                (object, extensions, HANDLE_CODEX_KNOWN_KEYS)
             }
+        };
+        for (key, value) in serialized_extensions(extensions, known_keys) {
+            object.insert(key, value);
         }
+        Value::Object(object)
     }
 
     /// `isAgentSessionProviderHandle` + conversion. A null leaf is valid; an
@@ -118,6 +144,7 @@ impl ProviderHandle {
                 Some(Self::Claude {
                     session_id,
                     leaf_uuid,
+                    extensions: split_extensions(object, HANDLE_CLAUDE_KNOWN_KEYS),
                 })
             }
             Some("codex") => {
@@ -126,7 +153,10 @@ impl ProviderHandle {
                     .and_then(Value::as_str)
                     .filter(|field| is_handle_field(field))?
                     .to_string();
-                Some(Self::Codex { thread_id })
+                Some(Self::Codex {
+                    thread_id,
+                    extensions: split_extensions(object, HANDLE_CODEX_KNOWN_KEYS),
+                })
             }
             _ => None,
         }
@@ -165,7 +195,9 @@ impl HandleOrigin {
 
 /// One durable link in the provider handle chain. `forked_from_key` is
 /// `Some` only for forked links (the source requires `undefined`, not null,
-/// for every other origin).
+/// for every other origin). The source never rebuilds a stored link
+/// (`append` returns `[...chain, link]`), so unknown members travel in
+/// `extensions`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderHandleLink {
     pub link_id: String,
@@ -176,6 +208,7 @@ pub struct ProviderHandleLink {
     pub observed_at: i64,
     /// Key of the link a fork was seeded from; only set for forks.
     pub forked_from_key: Option<String>,
+    pub extensions: Extensions,
 }
 
 /// `LINK_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/`, applied to chars (every
@@ -226,6 +259,9 @@ impl ProviderHandleLink {
                 Value::from(forked_from_key.clone()),
             );
         }
+        for (key, value) in serialized_extensions(&self.extensions, LINK_KNOWN_KEYS) {
+            object.insert(key, value);
+        }
         Value::Object(object)
     }
 
@@ -260,6 +296,7 @@ impl ProviderHandleLink {
             minted_at_fence,
             observed_at,
             forked_from_key,
+            extensions: split_extensions(object, LINK_KNOWN_KEYS),
         })
     }
 
@@ -272,11 +309,12 @@ impl ProviderHandleLink {
             ProviderHandle::Claude {
                 session_id,
                 leaf_uuid,
+                ..
             } => {
                 is_handle_field(session_id)
                     && leaf_uuid.as_deref().map(is_handle_field).unwrap_or(true)
             }
-            ProviderHandle::Codex { thread_id } => is_handle_field(thread_id),
+            ProviderHandle::Codex { thread_id, .. } => is_handle_field(thread_id),
         };
         if !handle_valid {
             return false;
@@ -371,12 +409,13 @@ pub fn handle_key(handle: &ProviderHandle) -> String {
         ProviderHandle::Claude {
             session_id,
             leaf_uuid,
+            ..
         } => format!(
             "claude:[{},{}]",
             js_json_quote(session_id),
             js_json_string_or_null(leaf_uuid)
         ),
-        ProviderHandle::Codex { thread_id } => {
+        ProviderHandle::Codex { thread_id, .. } => {
             format!("codex:{}", js_json_quote(thread_id))
         }
     }
@@ -389,7 +428,7 @@ pub fn handle_root(handle: &ProviderHandle) -> String {
         ProviderHandle::Claude { session_id, .. } => {
             format!("claude:{}", js_json_quote(session_id))
         }
-        ProviderHandle::Codex { thread_id } => {
+        ProviderHandle::Codex { thread_id, .. } => {
             format!("codex:{}", js_json_quote(thread_id))
         }
     }

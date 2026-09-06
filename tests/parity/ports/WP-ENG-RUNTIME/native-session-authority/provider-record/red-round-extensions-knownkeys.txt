@@ -1,0 +1,41 @@
+   Compiling drogon-core v0.1.0 (/Users/carlos/orca/workspaces/Drogon-rewrite/codex-provider-extension-roundtrip/crates/drogon-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.11s
+     Running tests/provider_extension_roundtrip.rs (target/debug/deps/provider_extension_roundtrip-2b3014961cfb3432)
+
+running 10 tests
+test future_version_quarantine_preserves_extensions_raw ... ok
+test codex_handle_and_link_extensions_reject_known_smuggling_and_roundtrip ... FAILED
+test raw_unknown_values_and_minimum_next_fence_survive_roundtrip ... ok
+test retry_append_dedupe_preserves_head_link_extensions ... ok
+test transition_known_field_updates_never_resurrect_stale_values ... ok
+test death_evidence_extension_survives_admission_and_repeat_roundtrip ... ok
+test extensions_survive_live_transition_and_appended_link_known_fields_win ... ok
+test typed_known_keys_in_extensions_never_override_serialization ... FAILED
+test admitted_extensions_survive_admission_serialization_and_repeat ... ok
+test known_optional_null_and_absent_states_roundtrip_faithfully ... ok
+
+failures:
+
+---- codex_handle_and_link_extensions_reject_known_smuggling_and_roundtrip stdout ----
+
+thread 'codex_handle_and_link_extensions_reject_known_smuggling_and_roundtrip' (12066802) panicked at crates/drogon-core/tests/provider_extension_roundtrip.rs:465:5:
+assertion `left == right` failed
+  left: String("shadow")
+ right: String("thread-1")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- typed_known_keys_in_extensions_never_override_serialization stdout ----
+
+thread 'typed_known_keys_in_extensions_never_override_serialization' (12066810) panicked at crates/drogon-core/tests/provider_extension_roundtrip.rs:413:5:
+assertion `left == right` failed
+  left: Number(999)
+ right: Number(2000)
+
+
+failures:
+    codex_handle_and_link_extensions_reject_known_smuggling_and_roundtrip
+    typed_known_keys_in_extensions_never_override_serialization
+
+test result: FAILED. 8 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p drogon-core --test provider_extension_roundtrip`

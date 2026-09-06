@@ -43,6 +43,10 @@ jobs:
       - run: pnpm --filter @drogon/desktop test
       - run: pnpm --filter @drogon/desktop build
       - run: pnpm accept:core-cli
+      - name: Verify real live-child service-crash recovery
+        run: |
+          node --test scripts/live-child-crash-fixture.test.mjs
+          node scripts/accept-live-child-crash.mjs
 
   windows-compilation:
     runs-on: windows-2022
