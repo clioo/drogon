@@ -118,9 +118,83 @@ assert.equal(correctedAnchors, 2)
 const packages = readJson('docs/migration/parity-test-work-packages.json').packages
 assert.equal(packages.length, 46)
 assert.equal(packages.reduce((sum, p) => sum + p.files.length, 0), 9037)
+let correctionOverlay = null
+if (process.argv.includes('--corrections')) {
+  const overlayPath = 'docs/migration/audit-closure/e3-bridge/result-integrations/source-fidelity-corrections.json'
+  const overlay = readJson(overlayPath)
+  assert.equal(overlay.sourceRevision, pin)
+  const base = path.dirname(overlayPath)
+  for (const [file, digest] of Object.entries(overlay.frozenSnapshots)) {
+    // Resolve only the four known snapshot basenames within this checkout.
+    const relative = file.split('/result-integrations/')[1]
+    assert(['contracts.json', 'report.md', 'leaf/contracts.json', 'leaf/report.md'].includes(relative))
+    assert.equal(sha(fs.readFileSync(path.join(base, relative))), digest)
+  }
+  assert.equal(Object.keys(overlay.frozenSnapshots).length, 4)
+  const overlayRanges = Object.values(overlay.sourceEvidence)
+  for (const e of overlayRanges) {
+    rangeCheck(e)
+    if (e.ref) {
+      const prefix = 'contracts.json#/sourceEvidence/'
+      assert(e.ref.startsWith(prefix))
+      const inherited = report.sourceEvidence[e.ref.slice(prefix.length)]
+      assert(inherited, e.ref)
+      for (const key of ['path', 'start', 'end', 'sha256', 'fileSha256']) assert.equal(e[key], inherited[key])
+    }
+  }
+  const methods = overlay.methods
+  assert.equal(methods.length, 95)
+  assert.deepEqual(methods.map((m) => m.id).sort(), leaf.methods.map((m) => `${m.groupId}::${m.method}`).sort())
+  const coverage = {}
+  for (const m of methods) {
+    const prior = leaf.methods[m.frozenLeafIndex]
+    const owning = report.methods.find((r) => r.id === m.id)
+    assert.equal(prior.method, m.method)
+    assert.equal(prior.groupId, m.groupId)
+    assert.deepEqual(m.previousOwnerAnchor, prior.sourceEvidence[2])
+    assert.equal(m.previousResultContract, prior.resultContract)
+    assert.equal(m.previousStateEffects, prior.stateEffects)
+    assert.equal(m.previousFailureAndPartial, prior.failureAndPartialSuccess)
+    assert(['full body', 'partial', 'wrong symbol'].includes(m.previousCoverage))
+    coverage[m.previousCoverage] = (coverage[m.previousCoverage] ?? 0) + 1
+    const b = m.actualBinding
+    for (const ref of [b.rpc, b.runtime, b.runtimeImports, b.ownerBody, ...b.reexportBindings, ...b.supplementalBodies, ...m.borrowedCompleteBodyEvidence]) {
+      assert(overlay.sourceEvidence[ref], `${m.method}:${ref}`)
+    }
+    const runtime = overlay.sourceEvidence[b.runtime]
+    assert.equal(source(runtime.path).lines.slice(runtime.start - 1, runtime.end).join('').trim(), b.runtimeBody.trim())
+    for (const key of ['path', 'start', 'end', 'sha256', 'fileSha256']) assert.equal(overlay.sourceEvidence[b.rpc][key], prior.sourceEvidence[0][key])
+    assert.equal(owning.rpcBoundary.definition.file, overlay.sourceEvidence[b.rpc].path)
+    assert.equal(m.borrowedBehaviorContractRef, `contracts.json#/methods/${report.methods.indexOf(owning)}/resultContract`)
+    assert.deepEqual(m.testObligations.originalSourceTestAllocation, owning.originalSourceTestAllocation)
+    assert.deepEqual(m.testObligations.retainedAssertionBodies.lead, owning.leadAssertionBodyRefs)
+    assert.deepEqual(m.testObligations.retainedAssertionBodies.leaf, prior.assertionBodyRefs)
+    assert.deepEqual(m.testObligations.inheritedRemainingExecutionTests, owning.remainingExecutionTests)
+    assert.equal(m.testObligations.execution, 'not-run')
+    assert(m.resultAndFailureCorrection.length > 0 && m.verifiedContract.length > 0)
+  }
+  assert.deepEqual(coverage, overlay.reconciliation.previousOwnerCoverage)
+  assert.equal(overlay.nullHashOverlays.length, 2)
+  for (const e of overlay.nullHashOverlays) {
+    const prior = correctedRangeHashes.find((r) => r.method === e.method)
+    assert(prior)
+    assert.equal(overlay.sourceEvidence[e.corrected].sha256, prior.sha256)
+    assert.equal(e.rootSuppliedSha256, prior.sha256)
+    const row = report.methods.find((m) => m.method === e.method)
+    const oldNull = row.leafSourceEvidence.find((r) => r.sha256 === null)
+    assert(oldNull)
+    assert.equal(`${oldNull.path}:${oldNull.start}-${oldNull.end}`, e.corrected)
+    // The frozen overlay's previousLedger points to an already hashed aggregate record.
+    assert.equal(report.sourceEvidence[e.corrected].sha256, prior.sha256)
+  }
+  correctionOverlay = { path: overlayPath, sha256: sha(fs.readFileSync(overlayPath)), methods: methods.length,
+    ranges: overlayRanges.length, borrowedRanges: overlayRanges.filter((e) => e.provenance.startsWith('borrowed')).length,
+    explicitBorrowedRefs: overlayRanges.filter((e) => e.ref).length, coverage,
+    testsRun: 0, semanticAcceptance: false }
+}
 console.log(JSON.stringify({ reportPath, reportSha256: sha(fs.readFileSync(reportPath)), pin,
   assignedGroups: 10, methods: 264, sourceRanges: ranges.length, pinnedFiles: sourceFiles.size,
   leafMethods: 95, leafRanges, correctedAnchors, correctedRangeHashes, reusedContracts: report.reusedEvidenceReviewed.length,
   inheritedContracts: 10, concurrentSnapshots: Object.keys(report.reviewedConcurrentReuseSnapshots).length,
   allocationRefs: allocationRefs.size, packages: 46, allocatedFiles: 9037,
-  testsRun: 0, semanticAcceptance: false, sourceComplete: false }, null, 2))
+  correctionOverlay, testsRun: 0, semanticAcceptance: false, sourceComplete: false }, null, 2))
