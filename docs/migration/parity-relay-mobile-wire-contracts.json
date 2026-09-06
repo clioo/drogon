@@ -238,7 +238,7 @@
     ]
   },
   "g14_mobileOutgoingSurface": {
-    "note": "Coordinator Babel AST census independently matches156 direct literal names at278 mobile callsites, but finds35 nonliteral candidates the leaf did not expose.313 mobile candidates across956 source files; count includes member-name lookalikes without type resolution. Four conditional RPC callsites explicitly resolve to8 possible names,7 absent from direct-literal list; other31 nonliteral sites retain caller-flow/receiver attribution debt.",
+    "note": "Coordinator Babel AST census independently matches156 direct literal names at278 mobile callsites, with35 nonliteral candidates.313 mobile candidates across956 source files; count includes member-name lookalikes. Four conditional sites add7 names. After b09e289, parity-mobile-method-review.json attributes the other31 sites, adds45 names and corrects20 leaf omissions. This closes bounded site attribution, not all computed call paths or runtime acceptance.",
     "distinctMethodOrSubscriptionCount": 156,
     "methodsListed": [
       "accounts.consumeCodexResetCredit",
@@ -443,8 +443,9 @@
         ]
       }
     ],
-    "namedSurfaceLowerBound": 163,
-    "lowerBoundNote": "156 direct literal names plus7 new conditional alternatives, not complete reachable mobile RPC surface. Four conditional call bodies read fully; no execution or server-shape verification.",
+    "namedSurfaceLowerBound": 209,
+    "lowerBoundNote": "156 direct literals +7 prior conditional additions +45 wrapper-derived additions=208; separately traced bare runtime.clientCapabilities.update adds1=209. methodsListed remains the original156 direct names, not the combined set. Full source/schema/runtime acceptance remains unproven.",
+    "coordinatorMethodFlowReview": "parity-mobile-method-review.json",
     "originalTestsReadNotRun": {
       "file": "mobile/src/transport/rpc-client-terminal-binary-frame.test.ts",
       "cases": 1,

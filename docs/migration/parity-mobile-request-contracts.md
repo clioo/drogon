@@ -1,5 +1,9 @@
 # Mobile request ownership: bounded coordinator review
 
+Later attribution follow-up: [parity-mobile-method-review.md](parity-mobile-method-review.md)
+corrects and completes the31-site source map. The execution evidence and its
+limits below remain unchanged; the pending-name counts describe this earlier slice.
+
 Source `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, read-only. Reviewed
 2026-09-06 after `63c494f`. This accepts the contracts below, not the entire
 31-site mobile leaf report, a mobile runtime, or candidate parity.

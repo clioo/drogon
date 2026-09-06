@@ -1,5 +1,15 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
+## Mobile caller attribution afterb09e289
+
+The [coordinator method-flow review](parity-mobile-method-review.md) completes
+the31-site attribution slice and corrects20 omissions in the leaf report.
+The corrected union is209 known names, not188:156 direct +7 conditional +45
+wrapper additions +1 separate bare capability advisory. Full/partial read tiers
+and40 pinned source fingerprints are recorded. Actual mobile/host behavior,
+computed paths beyond this census, test ports and overall audit remain open.
+Next coordinator work: remaining relay composition and distribution review.
+
 ## Mobile baseline follow-up after63c494f
 
 Accepted [bounded mobile request contracts](parity-mobile-request-contracts.md)

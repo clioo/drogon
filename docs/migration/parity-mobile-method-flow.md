@@ -1,5 +1,11 @@
 # Mobile nonliteral wire-call flow — 31 remaining candidates resolved
 
+> Historical leaf report. Coordinator review after `b09e289` found twenty
+> omitted methods and corrected the188-name calculation. Use
+> [parity-mobile-method-review.md](parity-mobile-method-review.md) and its JSON
+> for the accepted31-site attribution and209-name combined lower bound. This
+> leaf JSON is retained unchanged for provenance, not current acceptance.
+
 Companion machine record: `docs/migration/parity-mobile-method-flow.json`
 (schema `drogon.parity-mobile-method-flow/1`, sha256
 `ffc11cda4171d99836c1c54929c7aea2e10f661c2ec5f267299bb57e65f2e91d`).

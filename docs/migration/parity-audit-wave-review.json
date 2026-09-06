@@ -2,6 +2,15 @@
   "schemaVersion": 1,
   "phase": "audit-only",
   "auditClosed": false,
+  "mobileMethodFlowFollowup": {
+    "afterCommit": "b09e289",
+    "status": "31-site-attribution-reviewed-not-full-mobile-acceptance",
+    "contract": "parity-mobile-method-review.json",
+    "verifiedSourceFingerprints": 40,
+    "additionalNamesMissedByLeaf": 20,
+    "combinedKnownLowerBound": 209,
+    "limits": "Static name/receiver attribution only; no new original product test execution. Host schemas, transport, computed paths outside census and full audit remain open."
+  },
   "mobileRequestFollowup": {
     "afterCommit": "63c494f",
     "status": "bounded-coordinator-source-review-and-original-unit-baseline",

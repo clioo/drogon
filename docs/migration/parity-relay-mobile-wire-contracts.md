@@ -7,6 +7,11 @@ Coordinator follow-up baseb909fa0. **Partial coordinator review; runtime accepta
 G19's bounded host/worker/federation source transformations are reviewed.
 G13 framing/routing is reviewed with16 original isolated protocol cases.
 G13 method composition and G14 full mobile RPC resolution remain pending.
+The later [mobile call-flow review](parity-mobile-method-review.md) closes
+the31 remaining syntax-site attributions, not the full computed call graph.
+It corrects the leaf's omitted20 names: the known lower bound is now209,
+including the separately traced bare capability advisory. Runtime remains
+unproven; the156-name direct-literal list below is preserved as its own set.
 The follow-up AST census now covers1140 tracked TS/TSX files (956 mobile,
 184 relay), binding bytes to pinned Git blobs. This is syntax evidence,
 not body review or runtime reachability. The earlier22 full/partial reads
