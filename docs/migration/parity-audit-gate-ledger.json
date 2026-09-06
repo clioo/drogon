@@ -69,8 +69,8 @@
       "owner": [
         "WP-ENG-IPC"
       ],
-      "evidence": "parity-source-bridges.json and parity-bridge-enumeration.md; parity-bridge-delegated-resolution.json coordinator-reviewed v2",
-      "resolution": "The11delegated+1dynamic+1disposer facts are source-resolved across12distinct methods; do not repeat that slice. Trace54invoke/12send/96push main-side attribution gaps in disjoint new artifacts. Source linkage is not execution proof or universal lifecycle correctness.",
+      "evidence": "parity-source-bridges.json and parity-bridge-enumeration.md; parity-bridge-delegated-resolution.json; parity-bridge-main-request-send-resolution.json; parity-bridge-main-push-resolution.json; check-parity-main-bridge-traces.mjs",
+      "resolution": "Delegated12 and main54invoke/12send are source-linked;94 of96 push channels have verified send-call syntax. Do not repeat those censuses. Two push producer identities remain unknown after bounded exact-literal search (ui:closeSessionTab, export:requestPdf); retain them explicitly rather than infer absence. Complete relevant payload/state contract enumeration. Source linkage, guard/disposer arithmetic and file presence are not runtime proof.",
       "proofStillOwed": "Actual request/response/error/subscription contracts and mixed-version behavior."
     },
     {

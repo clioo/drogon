@@ -628,6 +628,47 @@ read-only/stdout or verification, MD must be compact. No original source tests
 or product changes are authorized by that correction. Other workers are idle
 pending result review. Audit remains open and the goal remains active.
 
+## Main bridge linkage accepted; settings correction awaiting review
+
+The coordinator accepted the corrected request/send linkage and a narrowed,
+corrected push linkage. `scripts/check-parity-main-bridge-traces.mjs` passed
+under Node24.19.0 against the unchanged pinned source:66 exact request/send
+census pairs with registration anchors,15 source hashes and16 existing test
+pointers;96 exact push records,94 source-linked channels across112 send calls,
+52 source hashes and2 unresolved producer identities. These are metadata and
+source-syntax checks, not executed product tests or delivered events.
+
+Independent body reads corrected the TCC lifecycle: all4 handlers have both
+a re-registration guard and token-fenced teardown on their owning window's
+close; exact sender identity and destroyed checks separately govern calls.
+Main request/send totals are19 guards,16 runtime disposers,4 both,35 neither.
+The optional browser listener depends on `ipcMain.on` presence. Test-pointer
+presence is not assertion coverage; registration anchors can denote a call
+start or its channel argument, now distinguished in checker output.
+
+Push corrections moved a mock test out of producers, linked3 channel constants
+to real imported-constant sends, separated emulator callers from send helpers,
+and removed blanket destroyed-guard and forced-only updater claims. The two
+unknown producer rows remain unknown; different relay/invoke channel names
+do not establish replacement or absence. Per-row worker sender/caller prose
+outside the explicitly reviewed bodies is not behavioral acceptance.
+
+Correction task `task_19dd6662226d` / `ctx_e8df99e4b09c` settled and was released.
+Settings correction `task_89d5b858d6b5` / `ctx_2fcc54929a3e` also delivered and
+was released, but its1261-line scanner and328-line fixture suite have **not yet
+received complete coordinator review or an independent test run**. The worker
+reports26 passing fixtures and deterministic output; do not promote those
+reports to accepted proof. Latest MD has79 lines; scope remains472 raw-token
+prefiltered files,1093 references and896 unresolved candidate accesses, not
+full E2 consumer routing. All deliveries through `delivery_3c0dd18e7125` were
+processed and acknowledged. No worker assignment remains active at this
+checkpoint; keep the current flat audit policy until its gate closes.
+
+No feature wave, hierarchy, installation, personal-session changes, source
+test baseline extension, push or PR change occurred in this audit block.
+Next: finish independent settings scanner/fixtures review, then the remaining
+E1–E5 enumeration obligations without repeating already accepted metadata.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
