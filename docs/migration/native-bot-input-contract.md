@@ -15,6 +15,12 @@ The worker owns `crates/drogon-core/src/bots/input.rs`,
 shared manifests, protocol, caller wiring, persistence, Git and installation.
 Tests may temporarily include the actual production input module by path.
 
+Root clarification, 2026-09-06 16:36 UTC: the same leaf also owns the new
+`crates/drogon-harness/src/known_tui_agents.rs` recognition table and
+`crates/drogon-harness/tests/known_tui_agents.rs`. Expose `KNOWN_TUI_AGENT_IDS`
+and `is_known_tui_agent(&str) -> bool`; root alone registers the module in lib.rs.
+No second private Bot table or changes to launch/discovery are authorized.
+
 Use existing serde/serde_json; no new validation framework or dependency changes.
 Expose pure native equivalents of all five source parsers: create, update,
 session, responsibility create and ID. Normalized JSON values are acceptable at
@@ -25,7 +31,8 @@ Do not create a TypeScript backend to satisfy the old candidate-binding import.
 ## Compatibility requirements
 
 - Preserve strict unknown-field rejection at every source strict-object boundary,
-  nullable versus absent fields, array/string bounds, trim and JS UTF-16 lengths,
+  nullable versus absent fields, array/string bounds, JavaScript trim and the
+  actual pinned Zod string-length semantics (Unicode code points, not UTF-16),
   finite nonnegative timestamps, precheck integer/time bounds and all enums.
   Do not add defaults the source parser does not insert.
 - Cover all fields/branches of `bot-schemas.ts`, including partial updates,
@@ -35,9 +42,8 @@ Do not create a TypeScript backend to satisfy the old candidate-binding import.
   narrower parser's null-only model policy at this migration boundary.
 - The source knows 36 TUI agent IDs. Keep known-ID validation separate from
   installed/supported-launcher discovery, and from the 14 resumable identities.
-  Consult existing `drogon-harness` definitions before introducing constants;
-  ask root for any shared-catalog change instead of silently duplicating an
-  inconsistent registry. Recognizing an ID never authorizes or proves a launch.
+  Use the root-approved shared recognition table and prove exact source-set
+  equality. Recognizing an ID never authorizes or proves a launch.
 - Character IDs are plain identifiers here; do not copy or publish images while
   E5 resource provenance is held. The user's optional name UX resolves a selected
   character's default name before this strict payload boundary; do not invent a
