@@ -2,6 +2,12 @@
 
 ## PR review correction: unwind cleanup
 
+After the correction, root integrated main2b6b163 (provider records) without
+conflicts and verified the combined workspace: **289 passed, 0 failed, 1 ignored
+marker-gated probe**. Strict workspace/all-target Clippy, format and diff checks
+passed. These combined counts supersede the earlier macOS-only candidate counts
+below; new-head CI and installed acceptance are separate gates.
+
 Three independent read-only reviews completed on clean candidate 7844fb3
 (https://github.com/clioo/drogon/pull/4#issuecomment-5561787356). Muse found
 that the guard claim below was inaccurate: only the large-write test created

@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "taskId": "task_496eabe1ef0c",
+  "priorTaskIds": ["task_1cddc148cebf", "task_409e1056b0a9", "task_0970a0550c79"],
+  "dispatchId": "ctx_16049bee8b80",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "candidateTestFile": "crates/drogon-core/tests/session_authority.rs",
+  "candidateModule": "crates/drogon-core/src/session_authority/",
+  "totals": {
+    "sourceCases": 19,
+    "sourceExpectSites": 49,
+    "sourceExpectSitesMeaning": "static it/expect counts at the pinned source, NOT claimed dynamic assertion evaluations (per root review)",
+    "candidateTests": 51,
+    "breakdown": {
+      "agent-session-provider-handle.test.ts": { "cases": 17, "expectSites": 45 },
+      "agent-session-provider-handle-transition.test.ts": { "cases": 2, "expectSites": 4 }
+    }
+  },
+  "statusMeaning": {
+    "ported_green": "source assertions are preserved verbatim (values and error codes) in the named candidate tests and pass against the production module; this claim covers ONLY the suites listed under this status",
+    "ported_semantics_green": "source validator/transition behavior ported and covered by candidate boundary tests written from the pinned source; not a completion claim for any source test file",
+    "pending_slice2_or_later": "source suite exercises lease acquisition/adjudication policy, the durable store, RPC, or caller integration that this slice deliberately does not build; kept in the map, no claim that pure coverage completed it"
+  },
+  "suites": [
+    {
+      "sourcePath": "src/shared/agent-session-provider-handle.test.ts",
+      "sourceSha256": "98c3ffdbfd7be3f447748a92cc8d6394094a92059b04886e1c4a3db55f955d75",
+      "sourceCases": 17,
+      "sourceExpectSites": 45,
+      "status": "ported_green",
+      "candidateTests": [
+        "source_case_handle_identity_rejects_unknown_provider_names",
+        "source_case_handle_identity_claude_key_uses_session_and_leaf",
+        "source_case_handle_identity_codex_key_uses_thread_alone",
+        "source_case_handle_identity_null_leaf_vs_empty_and_malformed",
+        "source_case_handle_identity_collision_free_keys_with_delimiters",
+        "source_case_chain_append_starts_only_created_or_adopted",
+        "source_case_chain_append_refuses_fork_recorded_as_resume",
+        "source_case_chain_append_records_fork_only_with_new_root_and_seed",
+        "source_case_chain_append_rejects_link_minted_under_older_fence",
+        "source_case_chain_append_rejects_provider_change_mid_chain",
+        "source_case_chain_append_same_handle_same_fence_is_retry_not_new_link",
+        "source_case_chain_append_rejects_stable_link_id_reuse",
+        "source_case_chain_append_refuses_growth_past_cap",
+        "source_case_chain_append_never_mutates_input_chain",
+        "source_case_chain_validation_finds_link_and_reports_head",
+        "source_case_chain_validation_rejects_over_cap_or_malformed_persisted_chain",
+        "source_case_chain_validation_rejects_persisted_chains_bypassing_append"
+      ],
+      "expectGroupMapping": "all 45 expect sites are covered by the 17 candidate tests above: provider guard (4), claude key+root (2), codex key/root/equality (3), null-vs-empty leaf and malformed handles (5), delimiter collision (2), created/adopted/resumed first link (3), fork-as-resume (1), fork seed ok + 2 rejections (3), stale fence (1), provider change (1), retry elision + later-fence append (3), link-id reuse (1), cap build + overflow + persisted validity + head (4), input immutability (1), find/head lookups (4), over-cap/malformed persisted chains (4), three persisted-bypass rejections (3)"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-provider-handle-transition.test.ts",
+      "sourceSha256": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1",
+      "sourceCases": 2,
+      "sourceExpectSites": 4,
+      "status": "ported_green",
+      "candidateTests": [
+        "source_case_transition_advances_live_claude_chain_head_and_proof",
+        "source_case_transition_records_leaf_during_proof_without_granting_ownership"
+      ],
+      "expectGroupMapping": "all 4 expects covered: head handle leafUuid match + proven link id on live (2); head handle match + reserved/unproven lease preserved during new-owner-proving (2). Source fixture (agent-session-record.test-fixture.ts sha256 1cb2523a…) reproduced verbatim as JSON",
+      "additionalCoverage": "record_handle_stale_fence_uses_distinct_transition_code, record_handle_rejects_provider_and_fence_mismatched_links, record_handle_unknown_ownership_is_distinct_from_stale_fence, record_handle_retry_updates_renewal_without_duplicating_chain"
+    },
+    {
+      "sourcePath": "src/shared/agent-session-record.ts (validators) + agent-session-record.test-fixture.ts",
+      "sourceSha256": "c1b9ebaaa37c0263e72fb5aa3657015b645367901073f3cd349cad8983d2293c",
+      "status": "ported_semantics_green",
+      "candidateTests": [
+        "agent_session_id_pattern_matches_source",
+        "scope_key_joins_host_distro_workspace_with_nul_separator",
+        "execution_location_equality_includes_workspace_kind",
+        "execution_location_validator_enforces_shape",
+        "process_identity_validator_enforces_pid_and_spawn_token",
+        "launch_env_bounds_match_source",
+        "launch_args_bounds_match_source_json_byte_length",
+        "lease_validator_enforces_null_vs_absent_matrix",
+        "record_validator_enforces_live_invariants_and_field_matrix",
+        "record_validator_live_claim_requires_owner_proof_at_current_fence",
+        "account_home_variable_discriminant_is_exact",
+        "admit_persisted_record_rejects_unknown_version_without_rewriting",
+        "admit_persisted_record_rejects_invalid_v2_without_rewriting",
+        "admit_persisted_record_non_record_values_are_invalid_not_unsupported",
+        "admitted_record_round_trips_to_equal_json",
+        "admitted_record_preserves_optional_recovery_and_settlement_fields",
+        "minimum_next_fence_raw_value_is_preserved_verbatim"
+      ],
+      "notes": "every modeled field mapped, including minimumNextFence raw-value preservation; this is validator/model coverage, not a completion claim for any source test file"
+    },
+    {
+      "sourcePath": "captured Node 24 runtime vectors",
+      "status": "ported_green",
+      "candidateTests": [
+        "js_json_quote_matches_pinned_node_escaping",
+        "handle_keys_embed_exact_node_json_for_tricky_ids",
+        "js_utf16_len_counts_code_units_like_javascript",
+        "handle_field_bounds_are_utf16_and_trim_checked",
+        "handle_field_trim_matches_javascript_whitespace_set",
+        "handle_field_trim_set_is_exact_ecmascript_allowlist",
+        "numeric_extraction_accepts_integral_float_spellings_from_raw_json",
+        "numeric_extraction_accepts_exponent_spelling_from_raw_json",
+        "numeric_extraction_rejects_fractions_unsafe_integers_and_i64_min_from_raw_json",
+        "numeric_extraction_accepts_exact_safe_integer_boundaries_from_raw_json",
+        "typed_link_validation_rejects_i64_min_without_panic"
+      ],
+      "generator": "node-vectors/generate-vectors.mjs (owned subtree, exact command/runtime/hash in its header and report.json; pure ASCII verified — one literal NUL byte found by the acceptance correction and re-spelled as \\u0000; output captured at generate-vectors.out.json)",
+      "trimPin": "node-vectors/trim-vectors.mjs + trim-vectors.out.json pin the exact ECMAScript trim set on the pinned Node 24 runtime (U+0085/U+180E/U+200B/U+2060 negative; U+000B/U+FEFF/U+2009/U+2028/U+2029 positive); handle validation reuses crate::claim_identity::js_trim (no local trim table remains); the test harness path-includes the existing claim_identity module (permitted, unedited)",
+      "numericPin": "single json_safe_integer path = Number.isSafeInteger(JSON.parse(raw)) over the parsed double; accepts 1.0/1e0/exact ±(2^53-1) spellings, rejects fractions and -9223372036854775808 without panic (is_safe_integer range comparison, never i64::abs); pre-fix failures preserved in red-round-numeric.txt"
+    }
+  ],
+  "pending": [
+    {
+      "sourcePath": "src/shared/agent-session-lease-adjudication.ts + agent-session-lease-adjudication.test.ts + agent-session-next-fence.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "lease acquisition/adjudication policy (writer admission, CAS fence acquisition, restart adjudication, process probes, spawn-token orphan classification, next-fence policy) was removed from the candidate as out of scope for slice 1; the first delivery's pure coverage of these semantics is retracted as a completion claim"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-lease-transitions.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "reserve/commit/prove/renew/evict/set-handoff-stage/set-journal-checkpoint removed from the candidate as out of scope; pure-transition coverage in the first delivery is retracted as a completion claim"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-lease-renewal.test.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "durable store batch atomicity; its two transition cases are ported purely via record_agent_session_provider_handle only where they overlap, which they do not — the renewal suite awaits the store slice"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-record-store.test.ts (+ store-file, store-security, store-serialization, store-transaction-queue, store-transaction-lock)",
+      "disposition": "pending_slice2_or_later",
+      "reason": "durable SQLite store explicitly out of this slice"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-record-unsupported-schema.test.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "record-level version quarantine is ported (admit_persisted_record); store-level reserve-refusal and persisted quarantine require the store"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-unreadable-record-salvage.test.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "store salvage behavior"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-handoff-lease-transitions.test.ts / handoff-record-transitions.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "store-driven handoff sequences"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-restart-lease-transitions.ts / restart-reconciliation.ts / restart-handoff-adjudication.test.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "restart integration atop the store and adjudication policy"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-backup-recovery.test.ts / backup-recovery-fence.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "recovery fence persistence; raw minimumNextFence preservation is already in the record model"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-record-options.test.ts / record-options.ts",
+      "disposition": "pending_slice2_or_later",
+      "reason": "options mutation transition; options model and validation already ported"
+    },
+    {
+      "sourcePath": "operation ledger / mutation envelope / journal schemas / refusal-retry / reconciliation-target / surface-release-transition suites",
+      "disposition": "pending_slice2_or_later",
+      "reason": "dedup, journal, settlement, and reconciliation integration"
+    },
+    {
+      "sourcePath": "src/shared/agent-session-resume.test.ts, pty-write-*, reservation-admission, operation-admission, launch-env-admission, spawn-token process-scan/readback, process-identity-probe, orphan-child-reaper",
+      "disposition": "pending_slice2_or_later",
+      "reason": "caller/runtime integration beyond the pure record slice"
+    }
+  ]
+}

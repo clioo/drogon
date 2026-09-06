@@ -5,6 +5,7 @@
 
 pub mod bots;
 pub mod claim_identity;
+pub mod session_authority;
 
 mod db;
 mod error;
