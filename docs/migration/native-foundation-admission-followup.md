@@ -6,6 +6,13 @@ leaf. Source review found two concrete blockers before admitting that complete
 diff. This is a queued follow-up after the active provider-record task, not a
 fourth concurrent lane or permission to edit that task's files.
 
+Queued Orca Task: `task_3555b53c24b1`, dependency `task_3e6a87184b23`.
+Root independently ran the current working-tree native-release (1),
+exit-observation (2) and session-persistence (2) tests at 16:54 UTC: all five
+passed using actual owned PTYs and temporary stores. This verifies those narrow
+resource/observation/persistence regressions, not the pending error-classification
+or environment-test corrections, and not Windows/Linux execution.
+
 ## Host-specific accept errors
 
 `drogond/src/server.rs::is_fatal_accept_error` currently matches numeric errno
