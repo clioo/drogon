@@ -599,6 +599,35 @@ Current flat assignments remain disjoint: settings consumers
 none has delivered an accepted result at this checkpoint. No hierarchy or
 feature wave started, and no installed build or personal session was changed.
 
+## Speech registry and returned follow-up reviews
+
+Coordinator located the source speech catalog through Mentu Navigator, then
+read model/download catalogs, five catalog test bodies, speech types, mobile
+catalog service and speech model selector. `parity-speech-catalog.json/.md`
+records12 built-in models (10local/2cloud;5streaming;1recommended) and35 declared
+download files at immutable revisions. Eight source hashes were compared to
+pinned Git blobs, license checked and WP-CAP-DEVICE allocation confirmed.
+No download, credential access, microphone, model inference or original test
+execution occurred. `model-manager.ts` was read only through105; local readiness,
+download recovery and native/audio integration remain outside this slice.
+This resolves G15 built-in registry metadata, not full voice behavior.
+
+The three previously listed follow-up tasks then delivered and were released;
+delivery `delivery_03b006c8a402` was acknowledged after all release decisions.
+Main request/send and push artifacts are **received but not coordinator-accepted**.
+Workers claim66 mapped request/send entries and94 of96 push producers; those
+numbers and semantics await independent source checks, not product execution.
+
+Settings census is **not accepted**. Coordinator inspected script lines1-200
+and280-600 and found unsafe evidence assumptions: unproven type-name identity,
+arbitrary unions treated as definite settings, and non-lexical shadow handling.
+It also added file-writing/SHA-bypass machinery outside the stdout-only brief.
+Correction `task_89d5b858d6b5` / `ctx_2fcc54929a3e` is active on the same four
+owned paths; fixtures must cover those false positives, output must remain
+read-only/stdout or verification, MD must be compact. No original source tests
+or product changes are authorized by that correction. Other workers are idle
+pending result review. Audit remains open and the goal remains active.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
