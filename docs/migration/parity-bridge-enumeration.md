@@ -5,20 +5,21 @@ Planning-only, source-AST enumeration closing the "known omission" flagged in `p
 - **Source:** `/Users/carlos/Documents/Drogon-mentu-session` at `c97906287bb7a390b25e2025b600d9fb3c25d9c3` (frozen; tracked dirty: false).
 - **Provenance:** source-only Babel AST enumeration; no eval, no import of source app/config, no test execution.
 
-## Denominator counts (exact, not estimated)
+## Extracted counts (bounded; unresolved surfaces are not zero)
 
 - `bridgeFiles`: **83**
 - `apiTypeFiles`: **53**
 - `domainsAssembledInIndex`: **87**
 - `domainsInPreloadApiType`: **87**
 - `domainSourceMismatches`: **0**
-- `preloadChannelsDistinct`: **947**
-- `reachableBridgeMethodsDeduped`: **953**
-- `allBridgeExportMethodsDeduped`: **953**
-- `bridgeExportedObjectsTotal`: **79**
+- `unresolvedAssemblyExports`: **3**
+- `preloadChannelsDistinct`: **975**
+- `reachableBridgeMethodsDeduped`: **981**
+- `allBridgeExportMethodsDeduped`: **981**
+- `bridgeExportedObjectsTotal`: **80**
 - `bridgeExportedObjectsOrphan`: **0**
-- `syntaxIpcCallOccurrences`: **1132**
-- `ipcInvokeCalls`: **714**
+- `syntaxIpcCallOccurrences`: **1160**
+- `ipcInvokeCalls`: **742**
 - `ipcSendCalls`: **51**
 - `ipcSendSyncCalls`: **4**
 - `ipcOnSubscriptions`: **181**
@@ -37,8 +38,8 @@ Planning-only, source-AST enumeration closing the "known omission" flagged in `p
 - `mainFilesScanned`: **4579**
 - `mainRegistrationsTotal`: **1135**
 - `mainTeardownRegistrations`: **257**
-- `requestChannelsTotal`: **712**
-- `requestChannelsMatchedToHandler`: **658**
+- `requestChannelsTotal`: **740**
+- `requestChannelsMatchedToHandler`: **686**
 - `requestChannelsUnresolvedAgainstHandler`: **54**
 - `fireAndForgetChannelsTotal`: **55**
 - `fireAndForgetChannelsMatchedToListener`: **43**
@@ -46,7 +47,7 @@ Planning-only, source-AST enumeration closing the "known omission" flagged in `p
 - `pushEventChannelsTotal`: **180**
 - `pushEventChannelsMatchedToProducer`: **84**
 - `pushEventChannelsUnresolvedAgainstProducer`: **96**
-- `filesHashed`: **4734**
+- `filesHashed`: **4735**
 
 ## Named-domain explicit checks (never "deprecated by omission")
 
@@ -98,6 +99,7 @@ Planning-only, source-AST enumeration closing the "known omission" flagged in `p
 | `src/preload/api/gh-bridge.ts:5` | `ghApi` | `gh` (assembly-and-satisfies-agree) | 59 | ✅ |
 | `src/preload/api/git-bash-bridge.ts:4` | `gitBashApi` | `gitBash` (assembly-and-satisfies-agree) | 1 | ✅ |
 | `src/preload/api/git-bridge.ts:8` | `gitApi` | `git` (assembly-and-satisfies-agree) | 37 | ✅ |
+| `src/preload/api/gl-bridge.ts:4` | `glApiBridge` | `gl` (assembly-and-satisfies-agree) | 28 | ✅ |
 | `src/preload/api/grok-accounts-bridge.ts:5` | `grokAccountsApi` | `grokAccounts` (assembly-and-satisfies-agree) | 1 | ✅ |
 | `src/preload/api/hooks-bridge.ts:6` | `hooksApi` | `hooks` (assembly-and-satisfies-agree) | 5 | ✅ |
 | `src/preload/api/hosted-review-bridge.ts:5` | `hostedReviewApi` | `hostedReview` (assembly-and-satisfies-agree) | 4 | ✅ |
@@ -210,7 +212,7 @@ Scanned 4579/4579 `src/main/**/*.ts` files; found 1135 registration call sites (
 
 Matching is **direction-specific** — a preload `on`/`once` (push-event) channel is never matched against an `ipcMain.on` registration (the opposite direction: main RECEIVING from renderer), only against a `webContents.send` producer call site:
 
-- `invoke` → `ipcMain.handle` (request-handler): 658/712 matched
+- `invoke` → `ipcMain.handle` (request-handler): 686/740 matched
 - `send`/`sendSync` → `ipcMain.on`/`once` (fire-and-forget-listener): 43/55 matched
 - `on`/`once` → `<expr>.webContents.send` (push-producer): 84/180 matched
 
@@ -511,6 +513,34 @@ Matching is **direction-specific** — a preload `on`/`once` (push-event) channe
 | `git:unstage` | request-handler-matched | `src/main/ipc/filesystem/filesystem-git-index-handlers.ts:45` (ipcMain.handle) |
 | `git:upstreamStatus` | request-handler-matched | `src/main/ipc/filesystem/git-remote/sync-handlers.ts:29` (ipcMain.handle) |
 | `gitBash:isAvailable` | request-handler-matched | `src/main/ipc/app.ts:271` (ipcMain.handle) |
+| `gitlab:addIssueComment` | request-handler-matched | `src/main/ipc/gitlab-issue-handlers.ts:122` (ipcMain.handle) |
+| `gitlab:addMRComment` | request-handler-matched | `src/main/ipc/gitlab-merge-request-mutation-handlers.ts:111` (ipcMain.handle) |
+| `gitlab:addMRInlineComment` | request-handler-matched | `src/main/ipc/gitlab-merge-request-mutation-handlers.ts:127` (ipcMain.handle) |
+| `gitlab:closeMR` | request-handler-matched | `src/main/ipc/gitlab-merge-request-mutation-handlers.ts:20` (ipcMain.handle) |
+| `gitlab:createIssue` | request-handler-matched | `src/main/ipc/gitlab-issue-handlers.ts:88` (ipcMain.handle) |
+| `gitlab:diagnoseAuth` | request-handler-matched | `src/main/ipc/gitlab.ts:28` (ipcMain.handle) |
+| `gitlab:issue` | request-handler-matched | `src/main/ipc/gitlab-issue-handlers.ts:23` (ipcMain.handle) |
+| `gitlab:jobTrace` | request-handler-matched | `src/main/ipc/gitlab-ci-job-handlers.ts:10` (ipcMain.handle) |
+| `gitlab:listAssignableUsers` | request-handler-matched | `src/main/ipc/gitlab-issue-handlers.ts:148` (ipcMain.handle) |
+| `gitlab:listIssues` | request-handler-matched | `src/main/ipc/gitlab-issue-handlers.ts:36` (ipcMain.handle) |
+| `gitlab:listLabels` | request-handler-matched | `src/main/ipc/gitlab-issue-handlers.ts:138` (ipcMain.handle) |
+| `gitlab:listMRs` | request-handler-matched | `src/main/ipc/gitlab-merge-request-query-handlers.ts:46` (ipcMain.handle) |
+| `gitlab:listWorkItems` | request-handler-matched | `src/main/ipc/gitlab-work-item-handlers.ts:20` (ipcMain.handle) |
+| `gitlab:mergeMR` | request-handler-matched | `src/main/ipc/gitlab-merge-request-mutation-handlers.ts:50` (ipcMain.handle) |
+| `gitlab:mr` | request-handler-matched | `src/main/ipc/gitlab-merge-request-query-handlers.ts:36` (ipcMain.handle) |
+| `gitlab:mrForBranch` | request-handler-matched | `src/main/ipc/gitlab-merge-request-query-handlers.ts:19` (ipcMain.handle) |
+| `gitlab:projectSlug` | request-handler-matched | `src/main/ipc/gitlab.ts:36` (ipcMain.handle) |
+| `gitlab:rateLimit` | request-handler-matched | `src/main/ipc/gitlab.ts:30` (ipcMain.handle) |
+| `gitlab:reopenMR` | request-handler-matched | `src/main/ipc/gitlab-merge-request-mutation-handlers.ts:35` (ipcMain.handle) |
+| `gitlab:resolveMRDiscussion` | request-handler-matched | `src/main/ipc/gitlab-merge-request-mutation-handlers.ts:153` (ipcMain.handle) |
+| `gitlab:retryJob` | request-handler-matched | `src/main/ipc/gitlab-ci-job-handlers.ts:33` (ipcMain.handle) |
+| `gitlab:todos` | request-handler-matched | `src/main/ipc/gitlab.ts:50` (ipcMain.handle) |
+| `gitlab:updateIssue` | request-handler-matched | `src/main/ipc/gitlab-issue-handlers.ts:103` (ipcMain.handle) |
+| `gitlab:updateMR` | request-handler-matched | `src/main/ipc/gitlab-merge-request-mutation-handlers.ts:69` (ipcMain.handle) |
+| `gitlab:updateMRReviewers` | request-handler-matched | `src/main/ipc/gitlab-merge-request-mutation-handlers.ts:85` (ipcMain.handle) |
+| `gitlab:viewer` | request-handler-matched | `src/main/ipc/gitlab.ts:24` (ipcMain.handle) |
+| `gitlab:workItemByPath` | request-handler-matched | `src/main/ipc/gitlab-work-item-handlers.ts:70` (ipcMain.handle) |
+| `gitlab:workItemDetails` | request-handler-matched | `src/main/ipc/gitlab-work-item-handlers.ts:50` (ipcMain.handle) |
 | `grokAccounts:getStatus` | request-handler-matched | `src/main/ipc/grok-accounts.ts:5` (ipcMain.handle) |
 | `hooks:check` | request-handler-matched | `src/main/ipc/hooks/register-worktree-hook-check-handler.ts:14` (ipcMain.handle) |
 | `hooks:createIssueCommandRunner` | request-handler-matched | `src/main/ipc/hooks/register-worktree-hook-runner-handler.ts:12` (ipcMain.handle) |
@@ -1178,9 +1208,10 @@ Matching is **direction-specific** — a preload `on`/`once` (push-event) channe
 
 ## Gaps register (explicit, not deferred)
 
+- 3 imported assembly export(s) remain unwalked or have unresolved object aliases (see unresolvedAssemblyExports): claudeUsage, codexUsage, openCodeUsage. Their method/channel counts are unknown, NOT zero. Reachable-method and channel totals are bounded extracted subsets, not a complete API denominator.
 - RPC method keys (e.g. "status.get") and preload IPC channels (e.g. "settings:get") are separate identifiers, not a literal-equality coverage join. This pass records dynamic-dispatch channels ["runtime:call","runtime:subscribe","runtimeEnvironments:call"] but does not resolve their method arguments or trace all main-handler-to-RPC calls. Such links may be statically resolvable by a more complete analysis; they remain unknown here, not absent or inherently unresolvable.
 - 0 RPC method-array element(s) out of 615 total occurrences could not be statically resolved to a literal defineMethod/defineStreamingMethod name (factory calls with no discoverable return array, non-identifier spread targets, a "name" field that is neither a string literal nor a statically-resolvable member-constant reference, etc.) — see rpcMethodGroups[].methods entries whose name is wrapped in parentheses (e.g. starts with "(non-" or "(unresolved"); these NEVER count toward rpcMethodNamesResolvedUnique or the zero-resolved guard.
-- main-side census scanned 4579/4579 src/main/**/*.ts files for ipcMain.handle/on/once/removeHandler/removeAllListeners AND <expr>.webContents.send(...) call sites (read-only evidence; this script's WRITE ownership remains the four docs/scripts paths only), found 1135 registrations (257 of them teardown-only, excluded from matching). Matching is DIRECTION-SPECIFIC, never pooled: invoke channels vs. ipcMain.handle (658/712 matched); send/sendSync channels vs. ipcMain.on/once (43/55 matched); on/once (push-event) channels vs. <expr>.webContents.send(...) producer call sites (84/180 matched, a syntactic heuristic on the literal ".webContents.send(" shape — a producer reached through other indirection is invisible to this pass, not proof no producer exists). Unresolved entries in any direction are explicit, never treated as coverage or as proof of a missing implementation — see requestChannelToHandlerMapping / fireAndForgetChannelToListenerMapping / pushEventChannelToProducerMapping.
+- main-side census scanned 4579/4579 src/main/**/*.ts files for ipcMain.handle/on/once/removeHandler/removeAllListeners AND <expr>.webContents.send(...) call sites (read-only evidence; this script's WRITE ownership remains the four docs/scripts paths only), found 1135 registrations (257 of them teardown-only, excluded from matching). Matching is DIRECTION-SPECIFIC, never pooled: invoke channels vs. ipcMain.handle (686/740 matched); send/sendSync channels vs. ipcMain.on/once (43/55 matched); on/once (push-event) channels vs. <expr>.webContents.send(...) producer call sites (84/180 matched, a syntactic heuristic on the literal ".webContents.send(" shape — a producer reached through other indirection is invisible to this pass, not proof no producer exists). Unresolved entries in any direction are explicit, never treated as coverage or as proof of a missing implementation — see requestChannelToHandlerMapping / fireAndForgetChannelToListenerMapping / pushEventChannelToProducerMapping.
 - *-api.ts member extraction records signature NAMES only (no full type resolution of parameter/return shapes); full structural typing remains unresolved by this pass.
 - channel identifiers and computed object keys are resolved against same-file AND cross-file imported string constants up to depth 6 (re-export chains beyond that depth, or non-string-literal computed expressions, are recorded unresolved-identifier-ref / unresolved-computed-*-key, not chased further). RPC "name" member-constant references (e.g. MENTU_RPC_METHODS.capability) are resolved the same way, additionally following `export * from` re-export chains up to depth 8.
 - counts distinguish "syntaxIpcCallOccurrences" (every ipcRenderer.* call site parsed, including any duplicate composition paths before dedup) from "reachableBridgeMethodsDeduped" (the (file,anchor,name)-deduped method list belonging ONLY to exported objects index.ts's `api` assembly directly references) from "allBridgeExportMethodsDeduped" (the same dedup over EVERY exported bridge object regardless of reachability — an all-export inventory count that is NEVER proof of the public API surface). 0 exported bridge object(s) are not referenced by the index.ts assembly at all (see orphanBridgeExports) — their own export is dead from index.ts's perspective even where their content happens to also be reachable via a spread into another, reachable export.

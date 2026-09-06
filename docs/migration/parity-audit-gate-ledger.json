@@ -13,7 +13,7 @@
     {
       "id": "M2",
       "evidence": "parity-source-bridges.json",
-      "scope": "87 domains,947 channels,953 reachable methods,615 RPC names; unresolved attribution explicitly retained"
+      "scope": "87 domains,975 extracted channels,981 extracted reachable methods,615 RPC names. Corrected GitLab imported alias adds28 methods/channels. Three usage factory exports remain explicit scanner unknowns, with24 source-characterized channels in parity-bridge-import-factory-correction.md. Counts are bounded subsets, not full denominator or execution proof."
     },
     {
       "id": "M3",
@@ -69,7 +69,7 @@
       "owner": [
         "WP-ENG-IPC"
       ],
-      "evidence": "parity-source-bridges.json and parity-bridge-enumeration.md; parity-bridge-delegated-resolution.json; parity-bridge-main-request-send-resolution.json; parity-bridge-main-push-resolution.json; check-parity-main-bridge-traces.mjs; parity-close-export-current-paths.md; reference-captures/c9790628-close-relay/README.md",
+      "evidence": "parity-source-bridges.json and parity-bridge-enumeration.md; parity-bridge-import-factory-correction.md; reference-captures/c9790628-usage-provider-api/README.md; reference-captures/c9790628-usage-provider-handlers/README.md; parity-bridge-delegated-resolution.json; parity-bridge-main-request-send-resolution.json; parity-bridge-main-push-resolution.json; check-parity-main-bridge-traces.mjs; parity-close-export-current-paths.md; reference-captures/c9790628-close-relay/README.md",
       "resolution": "Delegated12 and main54invoke/12send are source-linked;94 of96 push channels have verified send-call syntax. Do not repeat those censuses. Two legacy push producer identities remain unknown (ui:closeSessionTab, export:requestPdf). Current close acknowledgement and editor PDF invoke paths are separately characterized; these are not producers for the old channels and do not raise94/96. Preserve legacy receivers and optional close expiry/intent compatibility. Seven original mocked relay cases pass, not actual renderer/RPC/PDF execution. Complete remaining relevant payload/state contracts; linkage is not runtime proof.",
       "proofStillOwed": "Actual request/response/error/subscription contracts and mixed-version behavior."
     },

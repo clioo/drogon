@@ -1007,6 +1007,37 @@ launch, push or PR action. E2 and the broader audit remain open; accepted
 common base and closed audit still gate hierarchical implementation.
 Goal remains active; this turn produced source contracts and executed evidence.
 
+## Imported GitLab alias, usage factories and settled flat audit wave
+
+Previous turn made progress in c2cb4d2. Three fresh flat workers completed
+settings214, workspace CLI13 and remaining UI14 reports. All three completion
+receipts were released and acknowledged; terminal ownership guards retained
+their external terminals without process action. Independent review has NOT
+accepted these drafts: see parity-audit-wave-review.md for exact task IDs,
+checked fingerprints and concrete citation/count/tier corrections. No nested
+lead, implementation ownership or runtime setting was changed.
+
+Coordinator found and reproduced a real scanner omission: glApiBridge aliases
+the object in preload/gitlab.ts, which was silently skipped. Alias/cycle
+regressions failed before correction; a third regression reproduced missing
+factory-assembly visibility. The final scanner suite passed37/37 with no
+skips/todos. Frozen-source generation and byte-identical verify passed. All
+953 prior reachable method identities remain among the new981; all prior
+channel entries survive, with28 GitLab channels added (975 total extracted).
+The three usage factories remain explicit unwalked exports, not empty APIs.
+
+Their full preload/main wrapper bodies were read and the24 source channel
+shapes documented separately. Two unchanged original tests passed1/1 each in
+fresh pinned2-file capsules plus license, Node24.19.0/Vitest4.1.11. The original
+baseline total is now116 distinct cases across12 capsules. These are mocked
+call/registration tests, not real IPC, model consumption, token correctness,
+UI or candidate parity. Raw/archived evidence is retained under the two
+c9790628-usage-provider capture directories.
+
+No product edits, personal sessions, installation, push or PR changes in this
+turn. Source remained frozen. Audit remains open; the active goal continues.
+Worktrees/PRs and the post-audit Sol hierarchy remain authorized, not launched.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

@@ -1,0 +1,61 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned pure-function capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "usage-provider-api",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-usage-api-r5B13q",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/preload/usage-provider-api.test.ts",
+        "role": "test",
+        "sha256": "f8ddeb999a1ea5d1092060fcf776f7881dba6b6a720521c24b3d481c79ea1683",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-usage-api-r5B13q/src/preload/usage-provider-api.test.ts"
+      },
+      {
+        "path": "src/preload/usage-provider-api.ts",
+        "role": "module",
+        "sha256": "1376070698ca3cf469d2134a6dc40ae8544af1ed8f339b683b74fcbbcf08526f",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-usage-api-r5B13q/src/preload/usage-provider-api.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-usage-api-r5B13q/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Original installed Vitest4.1.11 with Node24.19.0 on macOS. Minimal node config omits root aliases/setup, feature-wall define, GC/webstorage and platform worker settings; these two runtime bodies do not use them. No full-config equivalence or typecheck claim.",
+    "Default unit timeout instead of source30s/60s limits; outer timeout30s. No install or source execution outside fresh capsule."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "7dd506fb7c9055a4650e4a739f2714ca418a1cdc235494ac25c3ee2d0f50dac4",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 1,
+      "numPassedTests": 1,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 1
+    }
+  }
+}

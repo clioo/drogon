@@ -15,13 +15,14 @@
     "domainsAssembledInIndex": 87,
     "domainsInPreloadApiType": 87,
     "domainSourceMismatches": 0,
-    "preloadChannelsDistinct": 947,
-    "reachableBridgeMethodsDeduped": 953,
-    "allBridgeExportMethodsDeduped": 953,
-    "bridgeExportedObjectsTotal": 79,
+    "unresolvedAssemblyExports": 3,
+    "preloadChannelsDistinct": 975,
+    "reachableBridgeMethodsDeduped": 981,
+    "allBridgeExportMethodsDeduped": 981,
+    "bridgeExportedObjectsTotal": 80,
     "bridgeExportedObjectsOrphan": 0,
-    "syntaxIpcCallOccurrences": 1132,
-    "ipcInvokeCalls": 714,
+    "syntaxIpcCallOccurrences": 1160,
+    "ipcInvokeCalls": 742,
     "ipcSendCalls": 51,
     "ipcSendSyncCalls": 4,
     "ipcOnSubscriptions": 181,
@@ -40,8 +41,8 @@
     "mainFilesScanned": 4579,
     "mainRegistrationsTotal": 1135,
     "mainTeardownRegistrations": 257,
-    "requestChannelsTotal": 712,
-    "requestChannelsMatchedToHandler": 658,
+    "requestChannelsTotal": 740,
+    "requestChannelsMatchedToHandler": 686,
     "requestChannelsUnresolvedAgainstHandler": 54,
     "fireAndForgetChannelsTotal": 55,
     "fireAndForgetChannelsMatchedToListener": 43,
@@ -49,13 +50,36 @@
     "pushEventChannelsTotal": 180,
     "pushEventChannelsMatchedToProducer": 84,
     "pushEventChannelsUnresolvedAgainstProducer": 96,
-    "filesHashed": 4734
+    "filesHashed": 4735
   },
   "domainCrossCheck": {
     "inAssemblyOnly": [],
     "inPreloadApiOnly": []
   },
   "domainSourceMismatches": [],
+  "unresolvedAssemblyExports": [
+    {
+      "domain": "claudeUsage",
+      "file": "src/preload/api/claude-usage-bridge.ts",
+      "exportName": "claudeUsageApi",
+      "assemblyAnchor": 176,
+      "resolution": "export-not-extracted"
+    },
+    {
+      "domain": "codexUsage",
+      "file": "src/preload/api/codex-usage-bridge.ts",
+      "exportName": "codexUsageApi",
+      "assemblyAnchor": 177,
+      "resolution": "export-not-extracted"
+    },
+    {
+      "domain": "openCodeUsage",
+      "file": "src/preload/api/open-code-usage-bridge.ts",
+      "exportName": "openCodeUsageApi",
+      "assemblyAnchor": 178,
+      "resolution": "export-not-extracted"
+    }
+  ],
   "namedDomainChecks": [
     {
       "name": "mentu",
@@ -9959,7 +9983,691 @@
     },
     {
       "file": "src/preload/api/gl-bridge.ts",
-      "exported": []
+      "exported": [
+        {
+          "exportName": "glApiBridge",
+          "domainFromSatisfies": "gl",
+          "anchor": 4,
+          "methods": [
+            {
+              "name": "viewer",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 15,
+              "anchor": 15,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:viewer"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 15
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "diagnoseAuth",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 16,
+              "anchor": 16,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:diagnoseAuth"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 16
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "rateLimit",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 17,
+              "anchor": 17,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:rateLimit"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 18
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "projectSlug",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 20,
+              "anchor": 20,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:projectSlug"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 20
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "mrForBranch",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 22,
+              "anchor": 22,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:mrForBranch"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 27
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "mr",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 29,
+              "anchor": 29,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:mr"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 29
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "listMRs",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 31,
+              "anchor": 31,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:listMRs"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 38
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "listWorkItems",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 40,
+              "anchor": 40,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:listWorkItems"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 47
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "issue",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 49,
+              "anchor": 49,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:issue"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 50
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "listIssues",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 52,
+              "anchor": 52,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:listIssues"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 59
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "createIssue",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 61,
+              "anchor": 61,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:createIssue"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 67
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "updateIssue",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 69,
+              "anchor": 69,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:updateIssue"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 75
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "addIssueComment",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 77,
+              "anchor": 77,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:addIssueComment"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 78
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "listLabels",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 80,
+              "anchor": 80,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:listLabels"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 81
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "listAssignableUsers",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 83,
+              "anchor": 83,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:listAssignableUsers"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 84
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "todos",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 86,
+              "anchor": 86,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:todos"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 86
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "workItemDetails",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 88,
+              "anchor": 88,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:workItemDetails"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 93
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "closeMR",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 95,
+              "anchor": 95,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:closeMR"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 100
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "reopenMR",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 102,
+              "anchor": 102,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:reopenMR"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 107
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "mergeMR",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 109,
+              "anchor": 109,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:mergeMR"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 115
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "updateMR",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 117,
+              "anchor": 117,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:updateMR"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 123
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "updateMRReviewers",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 125,
+              "anchor": 125,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:updateMRReviewers"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 131
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "addMRComment",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 133,
+              "anchor": 133,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:addMRComment"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 134
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "addMRInlineComment",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 136,
+              "anchor": 136,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:addMRInlineComment"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 142
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "resolveMRDiscussion",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 144,
+              "anchor": 144,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:resolveMRDiscussion"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 150
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "jobTrace",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 152,
+              "anchor": 152,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:jobTrace"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 154
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "retryJob",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 156,
+              "anchor": 156,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:retryJob"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 157
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            },
+            {
+              "name": "workItemByPath",
+              "keyResolution": "literal",
+              "originFile": "src/preload/gitlab.ts",
+              "originAnchor": 159,
+              "anchor": 159,
+              "resolution": "resolved",
+              "ipcCalls": [
+                {
+                  "kind": "invoke",
+                  "direction": "request-response (renderer->main, awaits reply)",
+                  "channel": {
+                    "kind": "literal",
+                    "value": "gitlab:workItemByPath"
+                  },
+                  "listenerRef": null,
+                  "conditionSnippet": null,
+                  "anchor": 166
+                }
+              ],
+              "disposerPairing": {
+                "status": "no-subscription-calls"
+              }
+            }
+          ],
+          "domainFromAssembly": "gl",
+          "domain": "gl",
+          "domainSource": "assembly-and-satisfies-agree",
+          "reachableFromIndexAssembly": true
+        }
+      ]
     },
     {
       "file": "src/preload/api/grok-accounts-bridge.ts",
@@ -55348,6 +56056,342 @@
       ]
     },
     {
+      "channel": "gitlab:addIssueComment",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-issue-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 122
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:addMRComment",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-mutation-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 111
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:addMRInlineComment",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-mutation-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 127
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:closeMR",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-mutation-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 20
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:createIssue",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-issue-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 88
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:diagnoseAuth",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 28
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:issue",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-issue-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 23
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:jobTrace",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-ci-job-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 10
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:listAssignableUsers",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-issue-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 148
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:listIssues",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-issue-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 36
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:listLabels",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-issue-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 138
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:listMRs",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-query-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 46
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:listWorkItems",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-work-item-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 20
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:mergeMR",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-mutation-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 50
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:mr",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-query-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 36
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:mrForBranch",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-query-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 19
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:projectSlug",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 36
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:rateLimit",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 30
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:reopenMR",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-mutation-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 35
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:resolveMRDiscussion",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-mutation-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 153
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:retryJob",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-ci-job-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 33
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:todos",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 50
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:updateIssue",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-issue-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 103
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:updateMR",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-mutation-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 69
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:updateMRReviewers",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-merge-request-mutation-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 85
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:viewer",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 24
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:workItemByPath",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-work-item-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 70
+        }
+      ]
+    },
+    {
+      "channel": "gitlab:workItemDetails",
+      "status": "request-handler-matched",
+      "mainRegistrations": [
+        {
+          "file": "src/main/ipc/gitlab-work-item-handlers.ts",
+          "kind": "handle",
+          "apiSource": "ipcMain",
+          "anchor": 50
+        }
+      ]
+    },
+    {
       "channel": "grokAccounts:getStatus",
       "status": "request-handler-matched",
       "mainRegistrations": [
@@ -62092,9 +63136,10 @@
     "runtimeEnvironments:call"
   ],
   "gapsRegister": [
+    "3 imported assembly export(s) remain unwalked or have unresolved object aliases (see unresolvedAssemblyExports): claudeUsage, codexUsage, openCodeUsage. Their method/channel counts are unknown, NOT zero. Reachable-method and channel totals are bounded extracted subsets, not a complete API denominator.",
     "RPC method keys (e.g. \"status.get\") and preload IPC channels (e.g. \"settings:get\") are separate identifiers, not a literal-equality coverage join. This pass records dynamic-dispatch channels [\"runtime:call\",\"runtime:subscribe\",\"runtimeEnvironments:call\"] but does not resolve their method arguments or trace all main-handler-to-RPC calls. Such links may be statically resolvable by a more complete analysis; they remain unknown here, not absent or inherently unresolvable.",
     "0 RPC method-array element(s) out of 615 total occurrences could not be statically resolved to a literal defineMethod/defineStreamingMethod name (factory calls with no discoverable return array, non-identifier spread targets, a \"name\" field that is neither a string literal nor a statically-resolvable member-constant reference, etc.) — see rpcMethodGroups[].methods entries whose name is wrapped in parentheses (e.g. starts with \"(non-\" or \"(unresolved\"); these NEVER count toward rpcMethodNamesResolvedUnique or the zero-resolved guard.",
-    "main-side census scanned 4579/4579 src/main/**/*.ts files for ipcMain.handle/on/once/removeHandler/removeAllListeners AND <expr>.webContents.send(...) call sites (read-only evidence; this script's WRITE ownership remains the four docs/scripts paths only), found 1135 registrations (257 of them teardown-only, excluded from matching). Matching is DIRECTION-SPECIFIC, never pooled: invoke channels vs. ipcMain.handle (658/712 matched); send/sendSync channels vs. ipcMain.on/once (43/55 matched); on/once (push-event) channels vs. <expr>.webContents.send(...) producer call sites (84/180 matched, a syntactic heuristic on the literal \".webContents.send(\" shape — a producer reached through other indirection is invisible to this pass, not proof no producer exists). Unresolved entries in any direction are explicit, never treated as coverage or as proof of a missing implementation — see requestChannelToHandlerMapping / fireAndForgetChannelToListenerMapping / pushEventChannelToProducerMapping.",
+    "main-side census scanned 4579/4579 src/main/**/*.ts files for ipcMain.handle/on/once/removeHandler/removeAllListeners AND <expr>.webContents.send(...) call sites (read-only evidence; this script's WRITE ownership remains the four docs/scripts paths only), found 1135 registrations (257 of them teardown-only, excluded from matching). Matching is DIRECTION-SPECIFIC, never pooled: invoke channels vs. ipcMain.handle (686/740 matched); send/sendSync channels vs. ipcMain.on/once (43/55 matched); on/once (push-event) channels vs. <expr>.webContents.send(...) producer call sites (84/180 matched, a syntactic heuristic on the literal \".webContents.send(\" shape — a producer reached through other indirection is invisible to this pass, not proof no producer exists). Unresolved entries in any direction are explicit, never treated as coverage or as proof of a missing implementation — see requestChannelToHandlerMapping / fireAndForgetChannelToListenerMapping / pushEventChannelToProducerMapping.",
     "*-api.ts member extraction records signature NAMES only (no full type resolution of parameter/return shapes); full structural typing remains unresolved by this pass.",
     "channel identifiers and computed object keys are resolved against same-file AND cross-file imported string constants up to depth 6 (re-export chains beyond that depth, or non-string-literal computed expressions, are recorded unresolved-identifier-ref / unresolved-computed-*-key, not chased further). RPC \"name\" member-constant references (e.g. MENTU_RPC_METHODS.capability) are resolved the same way, additionally following `export * from` re-export chains up to depth 8.",
     "counts distinguish \"syntaxIpcCallOccurrences\" (every ipcRenderer.* call site parsed, including any duplicate composition paths before dedup) from \"reachableBridgeMethodsDeduped\" (the (file,anchor,name)-deduped method list belonging ONLY to exported objects index.ts's `api` assembly directly references) from \"allBridgeExportMethodsDeduped\" (the same dedup over EVERY exported bridge object regardless of reachability — an all-export inventory count that is NEVER proof of the public API surface). 0 exported bridge object(s) are not referenced by the index.ts assembly at all (see orphanBridgeExports) — their own export is dead from index.ts's perspective even where their content happens to also be reachable via a spread into another, reachable export."
@@ -62140,6 +63185,7 @@
     "src/preload/api/git-bash-bridge.ts": "d62a88b23623fc1400c138716fb2b99fabc26990b738bc26b06f1278241e5073",
     "src/preload/api/git-bridge.ts": "8b607c69d58a87440ce58b241c65009be3c82f1e0a5218b589d1d57fe376a418",
     "src/preload/api/gl-bridge.ts": "153bd5e1cc9260087d27cbfd5d7201bca355b543274683d2f2013f71606af7d6",
+    "src/preload/gitlab.ts": "e1c2ee188d38c82325e5cabf0f1f8a454aa080afbd321d96e445f81be8e380ef",
     "src/preload/api/grok-accounts-bridge.ts": "94f37aa5420391ec0da78de80f847a464424ce15d258b016b023a01dc7d08f35",
     "src/preload/api/hooks-bridge.ts": "e5a14a8b2f272c84cc14f04b0eaa93062536125e8f48e5ff3934c967d56b5f5a",
     "src/preload/api/hosted-review-bridge.ts": "7f2ba71300af081c049d7d6dc8e4304e0d58e4ede9f295cce2e264be0fd7430a",

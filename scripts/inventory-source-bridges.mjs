@@ -906,7 +906,42 @@ function extractObjectMethods({ source, relPath, text, init, objPath, importMap,
   return methods
 }
 
-function extractBridgeFile(source, relPath, text, fileHashes) {
+function extractImportedBridgeAlias({ source, relPath, text, declarator, init, importMap, fileHashes, depth, visiting }) {
+  const unresolved = (reason, targetFile) => [{
+    name: '(unresolved-object-alias)',
+    resolution: `unresolved-object-alias-${reason}`,
+    aliasOf: init.name,
+    ...(targetFile ? { targetFile } : {}),
+    originFile: relPath,
+    originAnchor: declarator.loc?.start.line ?? null,
+    anchor: declarator.loc?.start.line ?? null,
+    raw: snippet(init, text),
+    ipcCalls: [],
+  }]
+  const visitKey = `${relPath}::${declarator.id.name}`
+  if (depth >= MAX_SPREAD_DEPTH || visiting.has(visitKey)) {
+    return unresolved('depth-or-cycle')
+  }
+  const imported = importMap.get(init.name)
+  if (!imported) return unresolved('non-imported-identifier')
+  const targetFile = moduleToRelPath(path.posix.dirname(relPath), imported.module)
+  if (!targetFile) return unresolved('non-relative-import')
+  let targetRead
+  try {
+    targetRead = readSourceFile(source, targetFile, fileHashes)
+  } catch {
+    return unresolved('read-failure', targetFile)
+  }
+  const exports = extractBridgeFile(source, targetFile, targetRead.text, fileHashes, {
+    depth: depth + 1,
+    visiting: new Set([...visiting, visitKey]),
+    exportFilter: imported.importedName,
+  })
+  const target = exports.find((entry) => entry.exportName === imported.importedName)
+  return target?.methods ?? unresolved('export-not-found', targetFile)
+}
+
+function extractBridgeFile(source, relPath, text, fileHashes, { depth = 0, visiting = new Set(), exportFilter = null } = {}) {
   const ast = parseTs(text, relPath)
   const localConstMap = collectLocalStringConsts(ast)
   const importMap = collectImportMap(ast)
@@ -916,13 +951,16 @@ function extractBridgeFile(source, relPath, text, fileHashes) {
       const decl = exportPath.node.declaration
       if (!decl || decl.type !== 'VariableDeclaration') return
       for (const [idx, declarator] of decl.declarations.entries()) {
+        if (exportFilter && (declarator.id.type !== 'Identifier' || declarator.id.name !== exportFilter)) continue
         let init = declarator.init
         if (init && init.type === 'TSSatisfiesExpression') init = init.expression
-        if (!init || init.type !== 'ObjectExpression') continue
+        if (!init || (init.type !== 'ObjectExpression' && init.type !== 'Identifier')) continue
         const declaratorPath = exportPath.get(`declaration.declarations.${idx}`)
         const domainFromSatisfies = findSatisfiesDomain(declaratorPath)
         const objPath = declaratorPath.get('init.expression').node ? declaratorPath.get('init.expression') : declaratorPath.get('init')
-        const methods = extractObjectMethods({
+        const methods = init.type === 'Identifier'
+          ? extractImportedBridgeAlias({ source, relPath, text, declarator, init, importMap, fileHashes, depth, visiting })
+          : extractObjectMethods({
           source,
           relPath,
           text,
@@ -930,8 +968,8 @@ function extractBridgeFile(source, relPath, text, fileHashes) {
           objPath,
           importMap,
           localConstMap,
-          depth: 0,
-          visiting: new Set(),
+          depth,
+          visiting,
           fileHashes,
         })
         exported.push({
@@ -1743,6 +1781,24 @@ function run(args) {
     }
   }
 
+  const unresolvedAssemblyExports = assembledDomains.flatMap((domain) => {
+    if (!domain.module || !domain.localRef) return []
+    const file = moduleToRelPath('src/preload', domain.module)
+    const exportName = domain.importedName || domain.localRef
+    const exported = bridges.find((bridge) => bridge.file === file)?.exported
+      .find((entry) => entry.exportName === exportName)
+    const unresolvedAlias = exported?.methods.find((method) =>
+      method.resolution?.startsWith('unresolved-object-alias-'))
+    if (exported && !unresolvedAlias) return []
+    return [{
+      domain: domain.name,
+      file,
+      exportName,
+      assemblyAnchor: domain.anchor,
+      resolution: unresolvedAlias?.resolution ?? 'export-not-extracted',
+    }]
+  })
+
   const assembledNames = new Set(assembledDomains.map((d) => d.name))
   const preloadApiNames = new Set(preloadApiDomains.map((d) => d.name))
   const domainCrossCheck = {
@@ -2087,6 +2143,7 @@ function run(args) {
     domainsAssembledInIndex: assembledDomains.length,
     domainsInPreloadApiType: preloadApiDomains.length,
     domainSourceMismatches: domainSourceMismatches.length,
+    unresolvedAssemblyExports: unresolvedAssemblyExports.length,
     preloadChannelsDistinct: preloadChannels.size,
     reachableBridgeMethodsDeduped: dedupedBridgeMethods.length,
     allBridgeExportMethodsDeduped: allBridgeExportMethods.length,
@@ -2125,6 +2182,9 @@ function run(args) {
   }
 
   const gapsRegister = [
+    ...(unresolvedAssemblyExports.length
+      ? [`${unresolvedAssemblyExports.length} imported assembly export(s) remain unwalked or have unresolved object aliases (see unresolvedAssemblyExports): ${unresolvedAssemblyExports.map((entry) => entry.domain).join(', ')}. Their method/channel counts are unknown, NOT zero. Reachable-method and channel totals are bounded extracted subsets, not a complete API denominator.`]
+      : []),
     ...(domainCrossCheck.inAssemblyOnly.length
       ? [`domains in index.ts assembly but absent from PreloadApi type: ${domainCrossCheck.inAssemblyOnly.join(', ')}`]
       : []),
@@ -2157,6 +2217,7 @@ function run(args) {
     counts,
     domainCrossCheck,
     domainSourceMismatches,
+    unresolvedAssemblyExports,
     namedDomainChecks,
     bridges,
     apiTypes,
@@ -2195,7 +2256,7 @@ function renderMarkdown(artifact) {
   lines.push(`- **Source:** \`${artifact.source.path}\` at \`${artifact.source.fullSha}\` (frozen; tracked dirty: ${artifact.source.trackedDirty}).`)
   lines.push(`- **Provenance:** ${artifact.provenance}.`)
   lines.push('')
-  lines.push('## Denominator counts (exact, not estimated)')
+  lines.push('## Extracted counts (bounded; unresolved surfaces are not zero)')
   lines.push('')
   for (const [key, value] of Object.entries(c)) {
     lines.push(`- \`${key}\`: **${value}**`)

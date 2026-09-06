@@ -452,6 +452,84 @@ function defaultInvocationArgs({ fixture, sha, outDir }) {
 }
 
 describe('inventory-source-bridges', () => {
+  it('follows imported object aliases outside bridge-named files and preserves origin', () => {
+    const { fixture } = makeFixture()
+    write('src/preload/api/mentu-bridge.ts', [
+      "import { originalApi as renamed } from '../alias-hop'",
+      "export const mentuApi = renamed satisfies PreloadApi['mentu']",
+    ].join('\n'), fixture)
+    write('src/preload/alias-hop.ts', [
+      "import { originalApi as implementation } from './plain-api-object'",
+      "export const originalApi = implementation",
+    ].join('\n'), fixture)
+    write('src/preload/plain-api-object.ts', [
+      "import { ipcRenderer } from 'electron'",
+      "export const originalApi = { run: () => ipcRenderer.invoke('mentu:aliased') }",
+    ].join('\n'), fixture)
+    git(fixture, 'add', '-A')
+    git(fixture, 'commit', '-qm', 'fixture imported object alias', '-m',
+      'Co-authored-by: Codex <noreply@openai.com>')
+    const sha = git(fixture, 'rev-parse', 'HEAD').trim()
+    const outDir = realpathSync(mkdtempSync(join(tmpdir(), 'inventory-alias-out-')))
+    const result = runScript(defaultInvocationArgs({ fixture, sha, outDir }))
+    assert.equal(result.status, 0, result.stderr)
+    const artifact = JSON.parse(readFileSync(join(outDir, 'parity-source-bridges.json'), 'utf8'))
+    const bridge = artifact.bridges.find((b) => b.file.endsWith('/mentu-bridge.ts'))
+    const exported = bridge.exported.find((e) => e.exportName === 'mentuApi')
+    assert.ok(exported, 'imported object alias must not silently disappear')
+    assert.equal(exported.domain, 'mentu')
+    assert.deepEqual(exported.methods.map((m) => m.name), ['run'])
+    assert.equal(exported.methods[0].originFile, 'src/preload/plain-api-object.ts')
+    assert.ok(artifact.fileHashesSha256['src/preload/alias-hop.ts'])
+    assert.ok(artifact.fileHashesSha256['src/preload/plain-api-object.ts'])
+    assert.ok(artifact.requestChannelToHandlerMapping.some((m) => m.channel === 'mentu:aliased'))
+  })
+
+  it('retains cyclic imported object aliases as explicit unresolved exports', () => {
+    const { fixture } = makeFixture()
+    write('src/preload/api/mentu-bridge.ts', [
+      "import { cyclicApi } from '../cyclic-api'",
+      "export const mentuApi = cyclicApi satisfies PreloadApi['mentu']",
+    ].join('\n'), fixture)
+    write('src/preload/cyclic-api.ts', [
+      "import { mentuApi } from './api/mentu-bridge'",
+      'export const cyclicApi = mentuApi',
+    ].join('\n'), fixture)
+    git(fixture, 'add', '-A')
+    git(fixture, 'commit', '-qm', 'fixture cyclic object alias', '-m',
+      'Co-authored-by: Codex <noreply@openai.com>')
+    const sha = git(fixture, 'rev-parse', 'HEAD').trim()
+    const outDir = realpathSync(mkdtempSync(join(tmpdir(), 'inventory-alias-cycle-out-')))
+    const result = runScript(defaultInvocationArgs({ fixture, sha, outDir }))
+    assert.equal(result.status, 0, result.stderr)
+    const artifact = JSON.parse(readFileSync(join(outDir, 'parity-source-bridges.json'), 'utf8'))
+    const bridge = artifact.bridges.find((b) => b.file.endsWith('/mentu-bridge.ts'))
+    const exported = bridge.exported.find((e) => e.exportName === 'mentuApi')
+    assert.ok(exported, 'cyclic alias must remain visible as unresolved')
+    assert.ok(exported.methods.some((m) => /unresolved.*alias/.test(m.resolution)))
+    assert.ok(exported.methods.every((m) => !m.ipcCalls?.length))
+  })
+
+  it('exposes factory-backed assembly exports not resolved by the object walker', () => {
+    const { fixture } = makeFixture()
+    write('src/preload/api/mentu-bridge.ts', [
+      "import { createApi } from '../factory-api'",
+      "export const mentuApi = createApi('mentu') satisfies PreloadApi['mentu']",
+    ].join('\n'), fixture)
+    git(fixture, 'add', '-A')
+    git(fixture, 'commit', '-qm', 'fixture unwalked factory export', '-m',
+      'Co-authored-by: Codex <noreply@openai.com>')
+    const sha = git(fixture, 'rev-parse', 'HEAD').trim()
+    const outDir = realpathSync(mkdtempSync(join(tmpdir(), 'inventory-factory-out-')))
+    const result = runScript(defaultInvocationArgs({ fixture, sha, outDir }))
+    assert.equal(result.status, 0, result.stderr)
+    const artifact = JSON.parse(readFileSync(join(outDir, 'parity-source-bridges.json'), 'utf8'))
+    assert.ok(artifact.unresolvedAssemblyExports?.some((e) => e.domain === 'mentu'),
+      'unwalked factory must not appear as a fully enumerated empty domain')
+    assert.equal(artifact.counts.unresolvedAssemblyExports, 1)
+    assert.ok(artifact.gapsRegister.some((gap) => gap.includes('unresolvedAssemblyExports')))
+  })
+
   it('produces a non-zero, source-only census with explicit unresolved entries', () => {
     const { fixture, sha } = makeFixture()
     const outDir = realpathSync(mkdtempSync(join(tmpdir(), 'inventory-bridges-out-')))
