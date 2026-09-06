@@ -433,6 +433,50 @@ Worktree/PR isolation remains approved for subsequent coherent blocks. No
 active writer was relocated, no Sol hierarchy enabled, and no feature wave
 or preview installation was accepted in this checkpoint.
 
+## CLI census accepted as static evidence; original CLI compilation
+
+The corrected CLI generator passed all 15 fixture tests independently on
+Node 24.19.0 (zero skipped), then regenerated 234 canonical command records
+and passed byte-identical `--verify`. There are zero unresolved canonical
+registry members and zero unmatched handler-group keys; the worker's earlier
+report of one unmatched key was stale and incorrect. Coordinator rehashed all
+234 spec-source citations across 22 distinct spec files. These are registry
+and group-membership facts, not executed command contracts or RPC coverage.
+
+Review corrected another overclaim: `CommandSpec` has only flat allowed flag
+names, but parsing rules DO exist in `src/cli/args.ts` and
+`src/shared/cli-argument-boundary.ts` (boolean/value and repeatable flags).
+Those rules remain explicit census work; they are not absent functionality.
+Evidence files now use exclusive creation instead of replacing a nonce path.
+
+A new unmodified source clone at `.preflight/reference-cli-cRLmbn/source`
+compiled the original CLI using Node 24.19.0 / TypeScript 7.0.2. Exit 0,
+2,239 emitted files, empty log, clean source. All 2,239 hashes were checked
+independently. No CLI invocation, app launch, global installation or package
+fixer ran. The exact runner and receipt are retained under
+`reference-captures/c9790628-cli-build/`. This is build evidence, not RED/GREEN
+for product behavior. The frozen original checkout stayed tracked-clean.
+
+Settings-property review confirmed 214 declaration names/optional flags and
+187 own builder keys by parsing source AST without evaluation. It caught
+and corrected 401 off-by-one declaration/default anchors plus incorrect
+default first-line extraction/counts. Exact source expressions now replace
+those summaries: 143 direct literals, including 46 false and 12 null, and
+44 unresolved member/object/array/identifier/call/binary expressions. All five cited
+file hashes matched. The builder has zero top-level spreads; imported spreads
+occur in nested property values. All 214 UI mappings remain unverified;
+83 name-prefix suggestions are now explicitly `targetHypothesis`, not mapped
+behavior. `scripts/check-parity-settings-properties.mjs` reproduces the
+checks and passed on Node 24.19.0. No field's persistence/normalization
+behavior was executed here.
+
+The harness catalog's initial 15 hashes, 36 IDs and 144 source anchors matched.
+Its model-discovery inspection was too narrow: coordinator found the shared
+probe registry (including Grok) and Codex `model/list` flow. Correction Task
+`task_f2ac9117e812` / `ctx_72d43d49f9c2` owns only the two harness documents.
+The prior property, CLI and harness deliveries were settled/released; no
+active worker was stopped or relocated. Full audit closure is still pending.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
