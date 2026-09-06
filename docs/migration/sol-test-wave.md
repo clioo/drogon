@@ -119,6 +119,13 @@ Sonnet remains subject to the bounded fork-provenance gate: its internal fork
 completed but was not Orca-orchestrated, and the lead is gathering the final
 effect inventory before resuming. No completed work is rerun solely for attribution.
 
+Subsequent delivery `msg_ea04013b927e` reports that the completed internal fork
+performed 13 read-only source-inspection commands and no writes, tests, network,
+installation or service actions. Sol resumed the same Sonnet Dispatch under the
+root's conditional gate, requiring direct source re-verification and disclosure.
+The fork's exact model metadata is not independently attested; it remains an
+explicit orchestration deviation, not an additional approved worker.
+
 Carlos clarified that Sol must conserve OpenAI usage by directing non-OpenAI
 workers, rather than manually implementing or running extended preparation/debug
 loops. Root sent high-priority guidance to all three live leads. The earlier
