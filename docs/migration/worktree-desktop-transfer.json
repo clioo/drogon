@@ -1,0 +1,48 @@
+{
+  "date": "2026-09-06",
+  "base": "14cfc74dd674b016328efba54c7236769326667e",
+  "sourceCheckout": "/Users/carlos/Documents/Drogon-rewrite",
+  "sourceHead": "0f915cf26c6121fe4cd85ad902e9dbb7f0de7709",
+  "destination": "/Users/carlos/orca/workspaces/Drogon-rewrite/codex-desktop-lifecycle-packaging",
+  "scope": "desktop",
+  "status": "preserved unaccepted drafts; root transferred before a new direct-worker dispatch; not validation",
+  "files": [
+    {
+      "path": "crates/drogon-core/src/lib.rs",
+      "sourceSha256": "d2f517cb04f48783dea07b275e91ee129c75bbffd5397a1fce60207465d431a1"
+    },
+    {
+      "path": "crates/drogon-core/src/session.rs",
+      "sourceSha256": "481c0b3551f89ba2f369bab844ca51893d916c21712a067526b3e8afb8f60c2d"
+    },
+    {
+      "path": "crates/drogon-core/tests/engine.rs",
+      "sourceSha256": "27def11a560356bce73437b83940987f7158e95c86d90ed3b20796d119bba4ef"
+    },
+    {
+      "path": "crates/drogon-core/tests/native-release.rs",
+      "sourceSha256": "a321100129371e7614cad52c31c6ed08c1a967f7c8837a4b2d8b6f2bbcb831a0"
+    },
+    {
+      "path": "crates/drogond/src/lib.rs",
+      "sourceSha256": "a5dd69c44c2d328df9bf423f09c6d52de6571a4ac69367518610c2810130799b"
+    },
+    {
+      "path": "crates/drogond/src/server.rs",
+      "sourceSha256": "70a56b071d0630db9694d339bff58456efa03288b1d0dbac573d1bafdae3a833"
+    },
+    {
+      "path": "docs/migration/core-review-corrections.md",
+      "sourceSha256": "4ecff93e59f7e9ea47c102d578c81e3002fc76e93993e2477c62d961c52926b6"
+    },
+    {
+      "path": "docs/migration/foundation-review.md",
+      "sourceSha256": "9e450413d68f28c43163dc07f4ed8a3cc985992c012e325b1476cbb2bf0e8895"
+    }
+  ],
+  "notes": [
+    "core/lib.rs excludes unrelated Bot/Automation module registrations.",
+    "server.rs tests merged as an additive delta, retaining main's socket deadlines, explicit closure assertion, and timeout sensitivity test.",
+    "Packaging/UI drafts remain in source checkout; this dispatch is native lifecycle only."
+  ]
+}
