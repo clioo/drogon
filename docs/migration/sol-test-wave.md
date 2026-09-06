@@ -43,7 +43,33 @@ CAP's already-completed baseline runs are not repeated merely to attach a worker
 its next execution work follows this same delegation policy. Runtime child receipts
 remain required before describing the transfers as launched.
 
-### Current checkpoint: 15:05 UTC
+### Verified delegation checkpoint: 15:11 UTC
+
+UI transferred its nine partial product modules and supplemental tests to GLM
+child Task `task_4743cedc95e9`, Dispatch `ctx_8e15a02ca424`, terminal
+`term_1a7ca3a1-3710-4f61-b349-1da5b738d37f`, under child Run `run_2e9a25ad3dfd`.
+Root independently verified depth 2, ready/input_accepted and exact-worker live;
+the lead's launch/TUI record selects `zai-coding-plan/glm-5.3-flash --auto`.
+Sol retains focused direction/review and does not concurrently edit leaf-owned files.
+
+The first policy message did not reach UI's usable inbox: checking the root Run
+returned `consumer_fenced` because its terminal retained its child-Run binding.
+A one-off terminal nudge led to active-Dispatch question `msg_0c26c2d8954f`;
+root reply `msg_c557c0aee3d4` delivered the correction successfully. No Run reset,
+identity bypass or worker restart was used. This delivery limitation needs later
+orchestration parity coverage; a sent message alone does not prove receipt.
+
+ENG finished its baseline execution before the transfer was confirmed; no Kimi
+ENG child was launched, and completed work will not be rerun solely to delegate it.
+Its source result is pending root review. Release `9788249d-ccdf-447b-bf26-506180f8049c`
+preceded acknowledgment of `delivery_3c3bbe962f35`, retained/external/no process action.
+CAP likewise completed, reported 3/3 schema PASS and two original UI failures
+(6/8 PASS, correcting the old static 9-case UI count), pending root admission.
+Release `fabe9ac7-4c07-49c0-a325-2d627840457b` preceded acknowledgment of
+`delivery_4d5e6f86fef0`, retained/external/no process action. Future Sol assignments
+delegate execution from their first step under the latest user policy.
+
+### Earlier checkpoint: 15:05 UTC
 
 UI and ENG first-cycle deliveries are settled and root-reviewed. The automated
 frozen-body check passes 11/11 complete source suites; it proves no execution or
