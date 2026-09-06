@@ -1,4 +1,35 @@
-# Flat audit wave: coordinator review queue
+# Flat audit wave: bounded reviews accepted, execution open
+
+## Current result after d0ec650
+
+The six formerly uncommitted drafts below now have bounded coordinator
+acceptance, with corrected evidence tiers; the historical queue below is
+retained for provenance, not as current assignments or unresolved corrections.
+
+- Settings:214 exact rows,26 direct citation neighborhoods and22 fingerprints
+  independently checked. Corrected keybindings name collision and comment-only
+  defaultRepoSelection citation. Counts185 UI/29 internal;180 inherited rows
+  are lower-confidence routing evidence, not independently proven semantics.
+- UI:14 unique existing-ID mappings,72 structured source paths,30 source
+  fingerprints,187 named declaration anchors and41 line-only entries checked.
+  Pointer reconciliation accepted; zero assertion-body/runtime closure claims.
+- CLI:13 requested handler bodies and relevant helpers independently read;
+  31 structured fingerprints checked. Corrected no-parent/cwd precondition,
+  empty prompt, whitespace/numeric/null rules, JSON and lineage output detail.
+  Original test-body review is bounded and explicitly listed, not full execution.
+
+Correction dispatches: settings task_e28c47dd5157 / ctx_67827d54cc3f and UI
+task_4e726286cc0c / ctx_48a5ca4ab482. Both reused their existing exact workers,
+reported succeeded, then were released; runtime retained external terminals
+without process action. Deliveries6bbec72594a4 andf67cbd20d4b5 acknowledged.
+No active correction writer or nested worker remains from this wave.
+
+Next: reconcile E5 existing G1–G20 identifiers against accepted artifacts and
+assign explicit remaining execution/contract ownership. Do not repeat these
+three bounded reviews. Audit closure and a common accepted implementation base
+still precede the authorized Sol-lead hierarchy and feature worktree/PR wave.
+
+## Historical initial review queue (superseded by results above)
 
 Base c2cb4d2; source c97906287bb7a390b25e2025b600d9fb3c25d9c3.
 Audit remains open. Worker completion is not coordinator acceptance.

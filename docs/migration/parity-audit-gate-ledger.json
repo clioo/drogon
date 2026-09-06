@@ -50,9 +50,9 @@
         "WP-UI-WORK",
         "WP-UI-AUX"
       ],
-      "evidence": "parity-ui-capability-cards.json remainingGapsNotCarded/testFilesVerifiedButNotCarded; parity-ui-remaining-surface-cards.json pending review; parity-ui-evidence-corrections.json; parity-drogon-ui-state-contracts.json coordinator-reviewed v3",
-      "resolution": "The45-state Bots/Mentu/Meetings set is now bounded source/assertion-characterized with42 fingerprints, replacing inaccurate leaf v2. Keep original Bot drift assertions separate from current-form obligations. Backend pointers now distinguish flush spies from disk persistence, resume argv from executed retry, record-derived status from live process proof, and temporary-file meeting discovery from UI copy. No tests executed for this review. Do not repeat these bounded contracts; reconcile remaining E1 named surfaces and ownership using existing card gaps.",
-      "proofStillOwed": "Rendered actions, screenshots and source tests belong execution waves."
+      "evidence": "parity-ui-capability-cards.json remainingGapsNotCarded/testFilesVerifiedButNotCarded; parity-ui-remaining-surface-cards.json; parity-ui-surface-reconciliation.json corrected pointers-only review (14 existing IDs,6gap/5test pointers); parity-ui-evidence-corrections.json; parity-drogon-ui-state-contracts.json coordinator-reviewed v3",
+      "resolution": "The45-state Bots/Mentu/Meetings set is now bounded source/assertion-characterized with42 fingerprints, replacing inaccurate leaf v2. Keep original Bot drift assertions separate from current-form obligations. Backend pointers now distinguish flush spies from disk persistence, resume argv from executed retry, record-derived status from live process proof, and temporary-file meeting discovery from UI copy. No tests executed for this review. Do not repeat these bounded contracts; the remaining14 existing surfaces now have a corrected6-gap/5-test pointer map. Preserve per-state body/execution obligations and assign ownership, without repeating named discovery.",
+      "proofStillOwed": "Remaining14 surface pointers reconciled without blanket state closure:187 named declarations plus41 line-only entries are not assertion bodies. Rendered actions, screenshots and source tests belong execution waves."
     },
     {
       "id": "E2",
@@ -61,8 +61,8 @@
         "WP-ENG-SHARED"
       ],
       "evidence": "parity-settings-properties.json fields; parity-settings-keybindings.json; parity-settings-consumers.json bounded routing census (39 scanner fixtures, independently reviewed); parity-settings-unobserved-contracts.json coordinator-reviewed v2; parity-settings-persistence-contracts.json (SP01-SP13,15 hashes); reference-captures/c9790628-durable-file-write/README.md; reference-captures/c9790628-durable-file-write-syscall-proof/README.md",
-      "resolution": "The472-file census and10 no-observed-field traces remain accepted bounded evidence, not unused-field or full type-checker claims. Central profile-preparation, mutation/authority, owner routing and write lifecycle now characterized separately in SP01-SP13. Generic settings acknowledgement is not durability; remote visibility is not client state or an atomic multi-host transaction.14 original filesystem cases pass, not Store lifecycle or candidate parity. Complete remaining214-field routing/internal-storage classification without repeating accepted censuses or central traces.",
-      "proofStillOwed": "Persistence, override/migration and OS shortcut execution."
+      "resolution": "The472-file census and10 no-observed-field traces remain accepted bounded evidence, not unused-field or full type-checker claims. Central profile-preparation, mutation/authority, owner routing and write lifecycle now characterized separately in SP01-SP13. Generic settings acknowledgement is not durability; remote visibility is not client state or an atomic multi-host transaction.14 original filesystem cases pass, not Store lifecycle or candidate parity. The214-field routing/internal-storage classification is now mapped with explicit evidence tiers in parity-settings-field-routing.json;180 inherited rows still require semantic validation in their owned test-port work. Do not repeat accepted censuses or central traces.",
+      "proofStillOwed": "parity-settings-field-routing.json supplies all214 bounded routing classifications:26 direct rows,8 reused narrative,180 inherited census. Corrected dedicated keybinding authority must not be mistaken for GlobalSettings persistence. Inherited rows retain semantic uncertainty; persistence, override/migration and OS shortcut execution remain."
     },
     {
       "id": "E3",
@@ -78,9 +78,9 @@
       "owner": [
         "WP-ENG-CLI"
       ],
-      "evidence": "parity-cli-argument-contract.json + parity-source-contracts.json + parity-cli-skills-contracts.json coordinator-reviewed v2 + parity-cli-terminal-contracts.json coordinator-reviewed v2",
-      "resolution": "Six skills and11 terminal handlers characterized. Terminal review preserves distinct single/bulk close errors, list host-scope annotation, focus-versus-renderer fields, catch-all cwd fallback, actual timeout defaults and unknown-versus-null agentWait. These are CLI-side source contracts, not runtime acceptance. Continue remaining command value/default/required/output/error contracts and passthrough dispatch; do not repeat accepted parser/skills/terminal metadata.",
-      "proofStillOwed": "Original CLI commands and candidate dual-target results with no assertion weakening."
+      "evidence": "parity-cli-argument-contract.json + parity-source-contracts.json + parity-cli-skills-contracts.json coordinator-reviewed v2 + parity-cli-terminal-contracts.json coordinator-reviewed v2 + parity-cli-workspace-contracts.json coordinator-reviewed v2 (13 repo/worktree/folder-setup commands)",
+      "resolution": "Six skills,11 terminal and13 workspace/repo handlers characterized. Terminal review preserves distinct single/bulk close errors, list host-scope annotation, focus-versus-renderer fields, catch-all cwd fallback, actual timeout defaults and unknown-versus-null agentWait. These are CLI-side source contracts, not runtime acceptance. Continue remaining command value/default/required/output/error contracts and passthrough dispatch; do not repeat accepted parser/skills/terminal metadata.",
+      "proofStillOwed": "Remaining command families, passthrough and host-routing dispatch; original CLI commands and candidate dual-target results with no assertion weakening. Do not repeat the13 workspace source contracts or promote their located test summaries to runtime proof."
     },
     {
       "id": "E5",

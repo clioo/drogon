@@ -1038,6 +1038,29 @@ No product edits, personal sessions, installation, push or PR changes in this
 turn. Source remained frozen. Audit remains open; the active goal continues.
 Worktrees/PRs and the post-audit Sol hierarchy remain authorized, not launched.
 
+## Bounded field, UI-pointer and workspace-CLI reviews accepted
+
+Previous turn made progress in d0ec650. Two exact retained leaf workers were
+reused with fresh Orca dispatches for their own two-file corrections, while
+coordinator reviewed CLI source. Both completions were released/acknowledged;
+external terminal guards performed no process action. Details/current ownership
+are in parity-audit-wave-review.md; old queue entries there are historical.
+
+Accepted:214 exact settings routing rows with26 direct citation checks and22
+fingerprints (180 inherited rows retain lower confidence);14 existing UI-ID
+pointer mappings with72 paths/30 fingerprints/187 named declarations verified;
+and13 CLI handler contracts with31 fingerprints and explicit bounded test-body
+review. The coordinator corrected keybindings field/service confusion,
+comment-only citation, inconsistent counters, test declaration-vs-body claims,
+no-parent repo-inference precondition, prompt/null/string/numeric distinctions
+and warning/JSON output behavior. No original test executed this turn; previous
+116-case/12-capsule baseline count is unchanged.
+
+These accept source-routing metadata, not all behavior or the overall audit.
+Next is the existing E5/G1–G20 reconciliation; do not endlessly re-audit these
+same accepted subsets. No product/installation/user-session/PR/push action.
+Goal remains active; this turn materially corrected and accepted deliverables.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

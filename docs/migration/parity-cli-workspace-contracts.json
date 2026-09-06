@@ -1,0 +1,350 @@
+{
+  "schema": "drogon.audit.cli-workspace-contracts.v2",
+  "generatedBy": "Leaf source report followed by bounded coordinator review/corrections. Handler semantics are source-backed; test-case summaries remain leaf-reported except the explicit coordinatorTestBodyReads. No module import/eval or create/rm/setup execution; no original tests executed in this review.",
+  "task": { "taskId": "task_a3b252be24ff", "dispatchId": "ctx_7ff13cf9a6a1", "mode": "audit-only leaf" },
+  "coordinatorReview": {
+    "status": "bounded-source-contracts-reviewed; runtime-and-full-test-acceptance-open",
+    "baseRevision": "d0ec650",
+    "sourceReadScope": "All13 requested handler bodies, their flag helpers, selectors and parent/project resolution; relevant host routing, scope annotation, formatting and registry bodies. Not every imported implementation or cited original test body.",
+    "coordinatorTestBodyReads": [
+      "src/cli/index-worktree-create-parent.test.ts:555-588 explicit-repo no-parent case",
+      "src/cli/index-worktree-create-agent.test.ts:57-192 run-hooks, background agent, cwd repo inference",
+      "src/cli/index.test.ts:91-136 remove/delete aliases and missing-host fail-closed",
+      "src/cli/index-project-setup.test.ts:389-452 local folder setup payload"
+    ],
+    "corrections": [
+      "no-parent blocks inferred lineage but still permits cwd lookup when repo inference is needed; failed lookup is caught. Test title alone hid its explicit-repo precondition.",
+      "Required/optional string helpers do not trim; finite issue numbers need not be positive integers; positive-integer limit validation is separate.",
+      "Empty prompt with valid startup agent is allowed. Bare prompt is not the same input. Create/set parent-conflict strings differ.",
+      "Linear null accepts trim/lowercase normalization; numeric issue null requires exact lowercase null.",
+      "repo list calls client.call with method only, not an explicit empty params object.",
+      "JSON formatting passes through a computer-screenshot transformer; ordinary repo/workspace envelopes remain unchanged.",
+      "Create prints scalar hook warning, then all result.warnings and workspaceLineage preferred over lineage, then formatted result. JSON suppresses these stderr summaries.",
+      "Output/request descriptions do not prove Git mutation, host execution, actual terminal launch or durable persistence. Server-side actions remain downstream obligations."
+    ],
+    "testsExecuted": false,
+    "auditClosed": false
+  },
+  "source": {
+    "root": "/Users/carlos/Documents/Drogon-mentu-session",
+    "pinnedSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "verifiedHeadShaMatchesPinned": true,
+    "testsExecuted": false
+  },
+  "canonicalNamesReconciledAgainst": {
+    "file": "docs/migration/parity-source-contracts.json",
+    "mutated": false,
+    "matchedRows": 13,
+    "parserContractReusedFrom": "docs/migration/parity-cli-argument-contract.json"
+  },
+  "scope": {
+    "commands": [
+      "repo list", "repo add", "repo show", "repo set-base-ref", "repo search-refs",
+      "worktree list", "worktree show", "worktree current", "worktree create", "worktree set", "worktree rm", "worktree ps",
+      "project setup-existing-folder"
+    ],
+    "outOfScope": [
+      "terminal/skills census (accepted separately)",
+      "runtime-side RPC implementation bodies beyond the pointers cited (e.g. src/main/runtime/rpc/methods/repo.ts)",
+      "project list/setups/setup-clone/setup-create/setup-update/setup-delete handlers (only their shared helpers were read where setup-existing-folder depends on them)"
+    ]
+  },
+  "sharedContracts": {
+    "dispatch": {
+      "handlerContext": "src/cli/dispatch.ts (CommandHandler receives { flags: Map<string,string|boolean>, client, cwd, json })",
+      "registration": {
+        "file": "src/cli/handler-group-manifest.ts",
+        "sha256": "20e59466659605fbef372631e465a70e810e1a3e42f4a233ef1662500cbb2a77",
+        "groups": {
+          "repo": { "lines": "62-66", "keys": ["repo list", "repo add", "repo show", "repo set-base-ref", "repo search-refs"] },
+          "worktree": { "lines": "67-79", "keys": ["worktree ps", "worktree list", "worktree show", "worktree current", "worktree create", "worktree set", "worktree rm"] },
+          "project": { "lines": "49-61", "keys": ["project list", "project setups", "project setup-existing-folder", "project setup-clone", "project setup-create", "project setup-update", "project setup-delete"] }
+        }
+      },
+      "flagValidation": {
+        "file": "src/cli/args.ts",
+        "sha256": "3d6362e8910aa57796a0d2bdce2acd7cdf8e3bb69a710235c7364158381e8e77",
+        "validateCommandAndFlags": "L230-262: unknown command -> invalid_argument 'Unknown command: <path>'; unknown non-global flag -> invalid_argument \"Unknown flag --<f> for command: <path>\"; global value flags (--environment, --pairing-code) require a value",
+        "effectiveAllowedFlags": "L135-146: GLOBAL_FLAGS + spec.allowedFlags (+page where applicable)",
+        "parseArgs": "L36-79; equals-form splits on first '=' (L52-55); non-boolean flag followed by a non-'--' token consumes it as value (L68-75), so a bare non-boolean flag becomes boolean true"
+      },
+      "globalFlags": {
+        "file": "src/shared/cli-argument-boundary.ts",
+        "sha256": "ea0e0bd3c21b26c6506ee8b9d636874cd329783275d3139a50fe3bc7a7fcea01",
+        "CLI_GLOBAL_FLAGS": ["help", "json", "pairing-code", "environment"],
+        "booleanAmongScopeFlags": ["force", "run-hooks", "json", "help"],
+        "notBooleanParserNote": "--no-parent and --activate are NOT in CLI_BOOLEAN_FLAGS: bare '--no-parent --json' parses to true (next token starts with '--', args.ts:70-72), but '--no-parent id:x' would store the string 'id:x' and the handler's === true check would treat it as false (worktree.ts:221, worktree.ts:292)"
+      }
+    },
+    "flagHelpers": {
+      "file": "src/cli/flags.ts",
+      "sha256": "c7bf17b2fafbd379b4de4a1353b2ed934eb3ef0482df14a3ad25e11afbabcb83",
+      "getRequiredStringFlag": "L5-11: string && length>0 else RuntimeClientError('invalid_argument', `Missing required --<name>`)",
+      "getOptionalStringFlag": "L24-30: non-string or zero-length string -> undefined; whitespace-only strings are preserved (no trim)",
+      "getOptionalNumberFlag": "L62-75: non-string/empty -> undefined; Number(value) accepts finite zero/negative/fraction values, whitespace becomes zero; non-finite -> invalid_argument `Invalid numeric value for --<name>`",
+      "getOptionalPositiveIntegerFlag": "L77-89: rejects non-integer or <=0 with invalid_argument `Invalid positive integer for --<name>`",
+      "getOptionalNullableNumberFlag": "L129-138: literal string 'null' -> null (clears); otherwise numeric"
+    },
+    "worktreeSelectors": {
+      "file": "src/cli/selectors.ts",
+      "sha256": "c3627f26f9bb2c2ed21ca7854869517ecc4c113e6f7ecea3e34888461c1a0cc5",
+      "buildCurrentWorktreeSelector": "L28-30: `path:<resolve(cwd)>`",
+      "normalizeWorktreeSelector": "L32-37: 'active'/'current' -> cwd path selector; others verbatim (identity:, id:<repo>::<path>, name:, branch:, issue:, path:, folder:, worktree:)",
+      "resolveCallerDistroPathSelector": "L46-78: WSL-only rewrite of a typed Linux path to the stored UNC spelling; requires cwd that parses as a WSL UNC path OR a /mnt/<drive> path; skipped when client.isRemote; unmatched selectors pass through verbatim (never guessed)",
+      "assertLocalCwdWorktreeSelector": "L92-102: cwd-derived shortcuts ('current'/'active') are invalid_argument against a remote runtime, message enumerates explicit server-side selector spellings",
+      "resolveCurrentWorktreeSelector": "L104-140: local only; calls worktree.list {limit:10000}; picks the DEEPEST managed worktree containing cwd (isPathInsideOrEqual, longest path wins); none -> selector_not_found; returns concrete `id:<worktree.id>` to survive duplicate repo registrations",
+      "getRequiredWorktreeSelector": "L159-171; getOptionalWorktreeSelector L142-157"
+    },
+    "remotePathResolution": {
+      "file": "src/cli/repo-path-arguments.ts",
+      "sha256": "93d99e96e0d22c0b33af715f96c8a16369b3066193c4818fa0c504de64106f96",
+      "resolveRepoPathArgument": "L13-31: local -> path.resolve(cwd, input); remote (isRemote=true) -> input must be an absolute SERVER path (isAbsoluteServerPath L4-11 accepts leading '/', [A-Za-z]:[\\/], '\\\\', '//) else invalid_argument `<subject> requires --path to be an absolute path on the remote server.`; subject is per-call ('Remote repo add' from repo add L15, 'Remote project setup' from setup-existing-folder L121)"
+    },
+    "hostFlag": {
+      "file": "src/cli/execution-host-flag.ts",
+      "sha256": "0c000c1bbb42a8e174f52d400ca88630db8a4960e6983fa0203aa6d47168eb9e",
+      "parseHostFlag": "L28-46: --host absent -> undefined; empty -> 'Missing value for --host'; unparseable -> invalid_argument `Invalid --host value: <raw>. Expected local, ssh:<target-id>, or runtime:<environment-id>.`",
+      "resolveHostFlagTarget": "L130-148: ssh: ids are resolved against the connected runtime's target list (label -> id) before use; runtime:/local pass through",
+      "hostFilterMatchesHostId": "L115-124: a runtime: filter also matches 'local'-stamped rows (both spellings name the machine the command reached)"
+    },
+    "listingHostScope": {
+      "file": "src/cli/omitted-host-scope-selectors.ts",
+      "sha256": "f7ff764140a9c2a21b3641765ea5f49a1d774303cb8f80402b2aa06a89555ec3",
+      "annotateOmittedHostScope": "L117-126: mutates result.hostScope.omittedHostSelectors in place; no-op when scope absent or nothing omitted (no extra RPC)",
+      "resolveOmittedHostScopeSelectors": "L44-63: local pairing store + runtime SSH-target registry only; answers 'can I select it', never liveness (live/unverifiable/exited discipline)",
+      "formatListingHostScope": "L95-114: absent scope -> 'scope: unverifiable — this host does not report which hosts it lists'; omitted unselectable -> '<id> (not selectable from this machine)'",
+      "boundaryDoc": "docs/reference/ssh-execution-boundary.md sha256 eb661689226400969cfa8e2418de3acc171cbb5f66ce7fbabf92aec8539938b2 L96-97: a listing is only evidence about the hosts it covered; listings must name their gaps"
+    },
+    "output": {
+      "file": "src/cli/format.ts",
+      "sha256": "a4ba264d88340fc580c35c691f7f04ffdc7a72e1a3095432340aa49745d9fe43",
+      "printResult": "L74-84: --json serializes prepareComputerCliJsonResult(response); for ordinary workspace/repo envelopes without screenshotStatus this returns the unchanged envelope. Else console.log(formatter(response.result)). Do not generalize no-transform to computer responses.",
+      "workspaceFormatFile": { "file": "src/cli/workspace-format.ts", "sha256": "ac51e8742a71a8a6b77641f57f278a289d7ce2cb9669f255c17faea4254fef42" }
+    }
+  },
+  "commandContracts": [
+    {
+      "name": "repo list",
+      "registry": { "spec": "src/cli/specs/core.ts:35-40", "specSha256": "597b60b31db62ddb83358059e76f8abc43b0c9faacb97ed9ab9c13565c25dacf", "usage": "orca repo list [--json]", "allowedFlags": ["GLOBAL_FLAGS"], "destructive": false, "aliases": [] },
+      "handler": { "file": "src/cli/handlers/repo.ts", "sha256": "9e494ddc7acba5a16656dd229e3f1845039389432a601fdc1a86be94ecf700da", "lines": "8-11", "rpc": "repo.list (no params)" },
+      "requiredArgs": [], "optionalArgs": ["--json"],
+      "validation": "none beyond registry flag check",
+      "branching": "none",
+      "output": "json: full envelope; text: formatRepoList (workspace-format.ts:151-156) -> 'No repos found.' or '<id>  <displayName>  <path>' per line",
+      "sideEffects": "none (read)",
+      "remoteSemantics": "runs against the connected runtime; no local path logic",
+      "tests": [],
+      "remainingGaps": [
+        "no CLI-level test asserts the repo.list call, flag parsing, or formatter output (searched src/cli for repo list handler usage; only runtime-layer src/main/runtime/rpc/methods/repo.test.ts:48-61 covers repo.list visibility projection server-side)",
+        "next source pointer: handlers/repo.ts:8-11 + workspace-format.ts:151-156 need index-harness/format.test.ts coverage when ported"
+      ]
+    },
+    {
+      "name": "repo add",
+      "registry": { "spec": "src/cli/specs/core.ts:41-46", "usage": "orca repo add --path <path> [--json]", "allowedFlags": ["GLOBAL_FLAGS", "path"] },
+      "handler": { "file": "src/cli/handlers/repo.ts", "lines": "12-18", "rpc": "repo.add {path}" },
+      "requiredArgs": ["--path (string, non-empty)"],
+      "validation": "getRequiredStringFlag('path') -> 'Missing required --path'; resolveRepoPathArgument with isRemote=client.isRemote, subject 'Remote repo add'",
+      "branching": "local: resolve(cwd, path); remote: absolute-server-path check (POSIX '/', 'C:\\', UNC)",
+      "output": "formatRepoShow (workspace-format.ts:158-165): 'key: value' lines, objects JSON.stringify'd",
+      "sideEffects": "registers a repo record in the runtime (mutation; not executed in this audit)",
+      "remoteSemantics": "remote relative paths are rejected BEFORE any RPC (client cwd names the wrong machine)",
+      "tests": [
+        { "file": "src/cli/index-project-setup.test.ts", "sha256": "44f8250493762d3449578907d12e824ad07070d0c930beedb23fd1797b4ab0fd", "cases": ["L58-76 local './apps/web' resolved to resolve('/tmp/repo/apps/web') in repo.add params", "L515-532 remote relative path rejected pre-RPC with 'Remote repo add requires --path to be an absolute path on the remote server.' + exit 1", "L534-555 remote POSIX absolute passed unchanged", "L557-581 it.each 'C:\\repo','C:/repo','\\\\server\\share\\repo','//server/share/repo' all passed unchanged"] }
+      ],
+      "remainingGaps": ["missing --path error path untested", "formatRepoShow text shape untested"]
+    },
+    {
+      "name": "repo show",
+      "registry": { "spec": "src/cli/specs/core.ts:47-52", "usage": "orca repo show --repo <selector> [--json]", "allowedFlags": ["GLOBAL_FLAGS", "repo"] },
+      "handler": { "file": "src/cli/handlers/repo.ts", "lines": "19-24", "rpc": "repo.show {repo}" },
+      "requiredArgs": ["--repo (string, non-empty)"],
+      "validation": "getRequiredStringFlag('repo'); selector value is NOT validated client-side (no repo-selector normalizer exists in handlers/repo.ts)",
+      "output": "formatRepoShow",
+      "sideEffects": "none (read)",
+      "tests": [],
+      "remainingGaps": ["no CLI test asserts repo.show params/output; runtime shape covered at src/main/runtime/rpc/methods/repo.test.ts:200-211 ('shows a repo with the CLI-compatible response shape')", "missing --repo error untested at CLI level"]
+    },
+    {
+      "name": "repo set-base-ref",
+      "registry": { "spec": "src/cli/specs/core.ts:53-58", "usage": "orca repo set-base-ref --repo <selector> --ref <ref> [--json]", "allowedFlags": ["GLOBAL_FLAGS", "repo", "ref"] },
+      "handler": { "file": "src/cli/handlers/repo.ts", "lines": "25-31", "rpc": "repo.setBaseRef {repo, ref}" },
+      "requiredArgs": ["--repo", "--ref (both non-empty strings)"],
+      "validation": "two getRequiredStringFlag calls -> 'Missing required --repo' / 'Missing required --ref'",
+      "output": "formatRepoShow (returns the updated repo)",
+      "sideEffects": "persists the repo's default base ref used by future worktree create (mutation; not executed)",
+      "lineageDistinction": "this sets the repo DEFAULT base ref; it is not a per-worktree base (--base-branch on worktree create) and not lineage",
+      "tests": [],
+      "remainingGaps": ["no CLI-level test found for setBaseRef in src/cli (grep over *.test.ts for set-base-ref/setBaseRef matched only src/main/runtime/rpc/methods/repo.test.ts server-side rows)", "ref value validation (e.g. empty vs unknown ref) is runtime-owned; CLI passes through"]
+    },
+    {
+      "name": "repo search-refs",
+      "registry": { "spec": "src/cli/specs/core.ts:59-64", "usage": "orca repo search-refs --repo <selector> --query <text> [--limit <n>] [--json]", "allowedFlags": ["GLOBAL_FLAGS", "repo", "query", "limit"] },
+      "handler": { "file": "src/cli/handlers/repo.ts", "lines": "32-39", "rpc": "repo.searchRefs {repo, query, limit?}" },
+      "requiredArgs": ["--repo", "--query"],
+      "optionalArgs": ["--limit (positive integer; getOptionalPositiveIntegerFlag flags.ts:77-89)"],
+      "output": "formatRepoRefs (workspace-format.ts:167-172): 'No refs found.' | refs joined by newline | + '\\n\\ntruncated: yes' when result.truncated",
+      "sideEffects": "none (read; runtime executes Git ref search)",
+      "tests": [
+        { "file": "src/main/runtime/rpc/methods/repo.test.ts", "sha256": "722633e45a699f5e9b902bfe5c04ef29e9a0773880e4ac412f7350e4de4b46e1", "cases": ["L14+ 'passes oversized safe ref-search limits to the runtime clamp' (server-side limit clamping)"], "note": "runtime-layer evidence only, cited as pointer not as CLI parity" }
+      ],
+      "remainingGaps": ["no CLI-level test asserts the 3-param searchRefs payload, --limit validation error, or formatRepoRefs output"]
+    },
+    {
+      "name": "worktree list",
+      "registry": { "spec": "src/cli/specs/core.ts:65-71", "usage": "orca worktree list [--repo <selector>] [--limit <n>] [--json]", "allowedFlags": ["GLOBAL_FLAGS", "repo", "limit"], "notes": "WORKTREE_LISTING_SCOPE_NOTES (specs/worktree-listing-scope-notes.ts)" },
+      "handler": { "file": "src/cli/handlers/worktree.ts", "sha256": "d0156b1fefbb43ec6f66de6ee1ce51652af17351c2bfdf4dd041ab27f7bb0c74", "lines": "185-195", "rpc": "worktree.list {repo?, limit?}" },
+      "requiredArgs": [], "optionalArgs": ["--repo (string)", "--limit (positive integer)"],
+      "branching": "after RPC: annotateOmittedHostScope(client, result.result) mutates hostScope.omittedHostSelectors (no-op when nothing omitted)",
+      "output": "formatWorktreeList (workspace-format.ts:174-191): empty -> 'No worktrees found.' + scope line; rows '<id>  <branch>  host=<hostId|unverifiable>  <path>\\ndisplayName/parentWorktreeId/childWorktreeIds/linkedIssue/comment'; ends with scope line; truncated -> 'truncated: showing N of M'",
+      "sideEffects": "none (read); plus local-only selector resolution RPCs when scope has omitted hosts",
+      "remoteSemantics": "hostScope gap-naming is required by ssh-execution-boundary.md L96-97; selectors for omitted hosts resolve from LOCAL pairing/SSH registries only, never claimed live",
+      "tests": [
+        { "file": "src/cli/index-omitted-host-scope-selectors.test.ts", "sha256": "f884fcbe4fd33e4cf77cc06f5eb758ce451214c6f538d9f0acfba89221d34cc2", "cases": ["L200-232 'worktree list' prints host=ssh:box-1 column, 'scope: ssh:box-1', omitted host '(not selectable from this machine)', 'truncated: showing 1 of 521'", "L73-187 (shared annotate logic via terminal list) stale runtime -> selector '--environment m4air' or null; ssh target -> '--host ssh:box-1' or null; omittedHostIds never filtered; no extra RPC when nothing omitted"] },
+        { "file": "src/cli/format.test.ts", "sha256": "08051f144d39aa4c0a56fe2fba3952b256f4b6943026453c0ea7454b3a7a6700", "cases": ["L154-177 formatWorktreeList prints parentWorktreeId null/explicit and childWorktreeIds list/[] in text output"] },
+        { "file": "src/cli/index.test.ts", "sha256": "8f26914ea7a83cf930051c55dda96f5679c67ba5d6c91d79f8e9c3e829d6d8db", "cases": ["L222-229 unknown pre-command flag '--jso worktree list' errors with 'Unknown flag --jso for command: worktree list' + did-you-mean --json"] }
+      ],
+      "remainingGaps": ["--repo and --limit pass-through to worktree.list params is not asserted by any CLI test", "no explicit empty-listing test at CLI level (formatter empty branch via formatWorktreeList only)"]
+    },
+    {
+      "name": "worktree show",
+      "registry": { "spec": "src/cli/specs/core.ts:72-77", "usage": "orca worktree show --worktree <selector> [--json]", "allowedFlags": ["GLOBAL_FLAGS", "worktree"] },
+      "handler": { "file": "src/cli/handlers/worktree.ts", "lines": "196-201", "rpc": "worktree.show {worktree}" },
+      "requiredArgs": ["--worktree (selector; 'active'/'current' resolve from cwd locally)"],
+      "validation": "getRequiredWorktreeSelector (selectors.ts:159-171): active/current -> assertLocalCwdWorktreeSelector then resolveCurrentWorktreeSelector; else normalizeWorktreeSelectorForCaller (WSL path translation)",
+      "output": "formatWorktreeShow (workspace-format.ts:193-201): 'key: value' per worktree field",
+      "sideEffects": "none (read)",
+      "tests": [
+        { "file": "src/cli/index-worktree-selector-resolution.test.ts", "sha256": "34ac5a1cd5031da2b88c6714f749107f70e3081dbe179bea33377705d4531bd9", "cases": ["L257-276 'worktree show --worktree current' resolves enclosing worktree then worktree.show {worktree:'id:repo::/tmp/repo/feature'}"] },
+        { "file": "src/cli/worktree-selector-wsl-posix-path.test.ts", "sha256": "659581f53b712f6ea1111567489cdaf2c5b00e3f01b52ac4bdbc928db32c92c0", "cases": ["L40-129 normalizeWorktreeSelectorForCaller (shared by show/rm): /mnt paths resolve without distro; UNC/wsl$ spellings resolved from caller distro; other-distro paths untouched; non-WSL cwd never lists worktrees; branch:/relative:/UNC:/backslash selectors untranslated; remote runtime untouched"] }
+      ],
+      "remainingGaps": ["missing --worktree error path and formatWorktreeShow output untested at CLI level"]
+    },
+    {
+      "name": "worktree current",
+      "registry": { "spec": "src/cli/specs/core.ts:78-87", "usage": "orca worktree current [--json]", "allowedFlags": ["GLOBAL_FLAGS"] },
+      "handler": { "file": "src/cli/handlers/worktree.ts", "lines": "202-207", "rpc": "worktree.show {worktree: await resolveCurrentWorktreeSelector(cwd, client)}" },
+      "requiredArgs": [], "flags": "no command-specific flags",
+      "branching": "two-phase: worktree.list {limit:10000} -> deepest enclosing managed worktree -> concrete id selector; remote runtime -> invalid_argument before any RPC; cwd from ORCA_CLI_CWD when passed",
+      "output": "formatWorktreeShow",
+      "remoteSemantics": "cwd belongs to the client machine, so the whole command is local-only; error message enumerates server-side selector spellings (selectors.ts:98-101)",
+      "tests": [
+        { "file": "src/cli/index-worktree-selector-resolution.test.ts", "sha256": "34ac5a1cd5031da2b88c6714f749107f70e3081dbe179bea33377705d4531bd9", "cases": ["L58-62 buildCurrentWorktreeSelector path: prefix", "L64-71 active/current normalized, branch: untouched", "L73-100 nested cwd picks deepest enclosing among 3 (incl. duplicate repo id) and calls worktree.list {limit:10000} then worktree.show {worktree:'id:repo::/tmp/repo/feature'}", "L102-132 ORCA_CLI_CWD drives cwd resolution (SSH relay #7716)", "L235-255 remote 'worktree current' rejected pre-RPC: message contains 'current is a local cwd shortcut...' and 'id:<repo-id>::<path>', exit 1"] }
+      ],
+      "remainingGaps": ["selector_not_found when cwd is outside any managed worktree not asserted at CLI level (logic selectors.ts:128-133)"]
+    },
+    {
+      "name": "worktree create",
+      "registry": { "spec": "src/cli/specs/core.ts:88-138", "usage": "see spec (long); allowedFlags GLOBAL_FLAGS + repo, project, host, project-host-setup, name, agent, prompt, base-branch, issue, linear-issue, comment, setup, parent-worktree, no-parent, run-hooks, activate" },
+      "handler": { "file": "src/cli/handlers/worktree.ts", "lines": "208-278", "rpc": "worktree.create {repo, name, displayName(=name), displayNameKind:'user', baseBranch?, linkedIssue?, ...linearIssueLink, comment?, runHooks, activate, navigation?='all' when activate, setupDecision?, parentWorktree?, parentWorkspace?, envParentWorkspace?, cwdParentWorktree?, noParent, callerTerminalHandle?, cliProvenanceRequest, startupAgent?, startupPrompt?}" },
+      "requiredArgs": ["--name (getRequiredStringFlag L243)"],
+      "repoTargetResolution": "getCreateRepoSelector (L153-174): (1) project target (resolveProjectCreateRepoSelector, worktree-project-target.ts:46-51) -> 'id:<setup.repoId>' from a READY setup matched by --project-host-setup id, or --project [+--host] via findReadySetupOnHost (exact runtime:<id> match wins, then hostFilterMatchesHostId, then first candidate when no host); missing -> invalid_argument 'Project host setup is not ready or was not found: <id>' / 'Project is not set up on the selected host: <project>[ on <host>]'; projectHostSetup.list method_not_found -> incompatible_runtime; (2) else --repo verbatim; (3) else repo inferred from cwd parent worktree id: prefix (L141-151); else invalid_argument 'Missing repo selector. Pass --repo or run from inside an Orca-managed worktree.'",
+      "conflicts": [
+        "assertCreateParentFlagsCompatible (worktree-create-parent-selector.ts:13-24): --parent-worktree + --no-parent -> 'Choose either one parent selector or --no-parent.'; bare --parent-worktree -> 'Missing required --parent-worktree'",
+        "assertWorkspaceTargetFlagsCompatible (worktree-project-target.ts:30-44): --repo + any of --project/--host/--project-host-setup -> 'Choose either --repo or project target flags, not both.'; --host without --project/--project-host-setup -> '--host requires --project unless --project-host-setup is provided.'",
+        "getOptionalStartupAgent (L108-120): --prompt without --agent -> '--prompt requires --agent'; unknown agent -> 'Unknown TUI agent \"<id>\"'; bare --agent/--prompt/--setup (boolean true) -> 'Missing value for --<f>'; empty-string agent/setup reject but empty-string prompt with a valid agent is accepted (getPresentStringFlag L93-106)",
+        "getOptionalSetupDecision (L122-139): --setup must be run|skip|inherit; --run-hooks with --setup != run -> 'Choose either --run-hooks or --setup run, not contradictory setup flags.'"
+      ],
+      "branching": [
+        "lineage: explicitParent = resolveCreateParentSelector (worktree-create-parent-selector.ts:31-60): workspace keys (folder:<id>, worktree:<repo-id>::<path>, optionally id:-prefixed) -> parentWorkspace; active/current resolved via getOptionalWorktreeSelector, and if the resolution yields a workspace key -> parentWorkspace; else parentWorktree",
+        "envParentWorkspace (L81-91, used only when no explicit parent and not --no-parent): ORCA_WORKSPACE_ID workspace key, or ORCA_WORKTREE_ID (wrapped via worktreeWorkspaceKey when not already a workspace key)",
+        "cwdParentWorktree: resolved when (no explicit parent and not --no-parent) OR repo inference still needed (needsCwdRepoInference = no --repo and no project target, L227); failure swallowed -> undefined",
+        "activate = --activate OR --run-hooks (L242); when active sends navigation:'all' (L255-257: CLI pairs as device, not viewer — caller-scoped delivery would make --activate a no-op against a remote runtime)",
+        "--run-hooks is legacy alias: implies activate AND --setup run semantics (tested)",
+        "callerTerminalHandle from ORCA_TERMINAL_HANDLE; cliProvenanceRequest always sent ({callerTerminalHandle} or {}) so sidebar badges CLI-created worktrees",
+        "startupAgent sends startupPrompt via getPresentStringFlag(--prompt, allowEmpty:true) ?? ''"
+      ],
+      "semanticDistinctions": [
+        "--base-branch = Git ref for the new checkout; --no-parent only affects Orca lineage, not the base ref (spec note L120)",
+        "--parent-worktree/--no-parent = lineage metadata only",
+        "--setup run|skip|inherit = repo-defined setup-hook decision (setupDecision); separate from --run-hooks legacy alias"
+      ],
+      "postOutput": "printHookWarning (L51-55: stderr 'warning: <w>', suppressed under --json), printLineageSummary (worktree-lineage-summary.ts:22-44: stderr 'parent: <key> (<confidence> from <source-label>)' or 'parent: none'; source labels terminal/cwd/orchestration/environment/explicit flag/active context/manual action), then printResult formatWorktreeShow",
+      "sideEffects": "creates a Git checkout + first terminal on the targeted host (MUTATION — not executed in this audit)",
+      "tests": [
+        { "file": "src/cli/index-worktree-create-parent.test.ts", "sha256": "08ed55c850e1c2065ebb40d88cda30776041115f1f5dd1c7c6da96a15025d855", "cases": ["L58-121 explicit parent: exactly 1 RPC, full create payload incl. cliProvenanceRequest:{}", "L123-169 branch: parent routes through parentWorktree", "L171-240 folder:/worktree:/id:-prefixed workspace keys route through parentWorkspace", "L242-286 ORCA_WORKSPACE_ID -> envParentWorkspace + cwdParentWorktree together", "L288-331 --parent-worktree current resolved to concrete id", "L333-396 active/current inside folder workspace -> parentWorkspace", "L398-426 conflict error pre-RPC", "L428-461 removed --parent-workspace flag -> 'Unknown flag --parent-workspace for command: worktree create' both text and --json", "L463-489 bare --parent-worktree error", "L491-553 runtime LINEAGE_PARENT_NOT_FOUND passes nextSteps through JSON without inventing flag guidance (no --parent-workspace in output)", "L555-588 --no-parent WITH explicit --repo skips cwd inference (exactly1 RPC); does not prove the repo-omitted path"] },
+        { "file": "src/cli/index-worktree-create-target.test.ts", "sha256": "9aca03e9dc5ce790c724b98ad868ac349c3df526512e5e676e50ee52acf910df", "cases": ["L57-89 --activate sends activate:true + navigation:'all' + cwdParentWorktree", "L91-164 --project+--host runtime:gpu routes client to gpu (constructor(null,'gpu')), calls projectHostSetup.list first, repo:'id:repo-gpu'", "L166-212 --project-host-setup setup-gpu -> repo:'id:repo-gpu'", "L214-241 --repo+--project conflict pre-RPC", "L243-279 ORCA_TERMINAL_HANDLE -> callerTerminalHandle + cliProvenanceRequest{callerTerminalHandle}", "L281-305 external shell still sends cliProvenanceRequest:{}"] },
+        { "file": "src/cli/index-worktree-create-agent.test.ts", "sha256": "80b64e3308698afb8b3930e5f8169ce4b7289b76bac39670d4fbdd8cb5fc2a5f", "cases": ["L57-91 --run-hooks -> runHooks:true + activate:true + navigation:'all'", "L93-143 --agent codex --prompt hi --setup run -> startupAgent/startupPrompt/setupDecision:'run', activate:false (background)", "L145-192 repo inferred from cwd when --repo omitted", "L194-211 --prompt without --agent rejected", "L213-233 unknown agent JSON error {ok:false,error:{code:'invalid_argument',message:'Unknown TUI agent \"wat\"'}}", "L235-288 bare --agent/--prompt/--setup -> 'Missing value for --<f>'", "L290-318 --run-hooks + --setup skip -> contradictory error"] },
+        { "file": "src/cli/index-worktree-create-linear.test.ts", "sha256": "7594703fefc29be7b0e98bdb8e53aefff8b1a10e626bcd10bf465856c7a35363", "cases": ["L57-106 Linear URL -> linkedLinearIssue 'STA-335' + workspaceId null + orgUrlKey 'stably'", "L108-160 bare 'sta-335' normalized uppercase, orgUrlKey null (no stale org inheritance)", "L162-190 --linear-issue null on create rejected ('Omit --linear-issue on create...')", "L192-220 invalid value rejected pre-RPC", "L222-249 missing value rejected pre-RPC"] }
+      ],
+      "remainingGaps": [
+        "--base-branch pass-through never asserted with a non-undefined value in any cited test",
+        "--issue (linkedIssue numeric via getOptionalNumberFlag) not asserted at CLI level",
+        "--comment pass-through on create not asserted (asserted on set)",
+        "getEnvParentWorkspace ORCA_WORKTREE_ID branch (worktree.ts:86-89) not directly asserted (only ORCA_WORKSPACE_ID)",
+        "--setup skip/inherit accepted values not asserted (only --setup run and the contradiction error)",
+        "startupPrompt allowEmpty path (worktree.ts:271) not asserted"
+      ]
+    },
+    {
+      "name": "worktree set",
+      "registry": { "spec": "src/cli/specs/core.ts:139-163", "usage": "orca worktree set --worktree <selector> [--display-name <name>] [--issue <number|null>] [--linear-issue <identifier-or-url|null>] [--comment <text>] [--workspace-status <id>] [--parent-worktree <selector>|--no-parent] [--json]", "allowedFlags": ["GLOBAL_FLAGS", "worktree", "display-name", "issue", "linear-issue", "comment", "workspace-status", "parent-worktree", "no-parent"] },
+      "handler": { "file": "src/cli/handlers/worktree.ts", "lines": "279-295", "rpc": "worktree.set {worktree, displayName?, linkedIssue? (null clears), ...linearIssueLink, comment?, workspaceStatus?, parentWorktree?, noParent}" },
+      "requiredArgs": ["--worktree"],
+      "validation": "assertParentWorktreeFlagsCompatible (L65-79: bare-flag error matches create; conflict text differs: Choose either --parent-worktree or --no-parent, not both.); --linear-issue supports trim/case-insensitive 'null' to CLEAR (getOptionalLinearIssueLinkFlag allowNull:true, worktree-linear-issue-link.ts:8-41); workspace-status passes through as string (ids are board column ids)",
+      "output": "formatWorktreeShow",
+      "sideEffects": "updates Orca metadata only (no Git changes; mutation of records — not executed)",
+      "tests": [
+        { "file": "src/cli/index-worktree-set.test.ts", "sha256": "19749559f8560e7212b90b57d695acfa427c901e897456f060423855f7abb694", "cases": ["L57-88 --worktree active + --comment -> full payload with displayName/linkedIssue/parentWorktree undefined, noParent:false", "L90-133 explicit --parent-worktree id: passthrough", "L135-171 --parent-worktree current resolved via cwd", "L173-199 contradictory parent flags pre-RPC", "L201-218 bare --parent-worktree pre-RPC", "L220-248 --no-parent -> noParent:true", "L250-289 Linear URL metadata payload", "L291-330 --linear-issue null -> all three linear fields null", "L332-357 invalid linear value pre-RPC", "L359-393 --workspace-status in-review passthrough"] }
+      ],
+      "remainingGaps": ["--display-name and --issue (incl. --issue null via getOptionalNullableNumberFlag, flags.ts:129-138) not asserted by any cited test"]
+    },
+    {
+      "name": "worktree rm",
+      "registry": { "spec": "src/cli/specs/core.ts:164-180", "aliases": [["worktree", "remove"], ["worktree", "delete"]], "destructive": true, "usage": "orca worktree rm --worktree <selector> [--force] [--run-hooks] [--json]", "allowedFlags": ["GLOBAL_FLAGS", "worktree", "force", "run-hooks"] },
+      "handler": { "file": "src/cli/handlers/worktree.ts", "lines": "296-319", "rpc": "two-phase: worktree.show {worktree} (host resolution) then worktree.rm {worktree, hostId, force, allowUnverifiedPtyStop:<force>, runHooks}" },
+      "requiredArgs": ["--worktree"],
+      "optionalArgs": ["--force (boolean flag)", "--run-hooks (boolean flag)"],
+      "branching": "hostId from worktree.show; absent -> RuntimeClientError('worktree_host_unresolved', 'Orca cannot tell which host owns this workspace...') BEFORE rm; allowUnverifiedPtyStop is set to the SAME explicit --force value (#11960: explicit force may waive PTY-stop proof)",
+      "output": "text: 'removed: <bool>' via inline formatter (L318); stderr warnings: hook warning (L51-55) and preserved-branch warning 'local branch \"<name>\" was kept because Git could not safely delete it' (L57-63), both suppressed under --json; json: full envelope",
+      "sideEffects": "DESTRUCTIVE: removes the worktree from Orca and Git, attempts local-branch deletion, skips archive hooks unless --run-hooks (spec notes L176-179) — NOT executed in this audit",
+      "livenessDiscipline": "allowUnverifiedPtyStop wording matches AGENTS liveness rules: --force waives unverified-PTY-stop proof rather than claiming a process exited",
+      "tests": [
+        { "file": "src/cli/index.test.ts", "sha256": "8f26914ea7a83cf930051c55dda96f5679c67ba5d6c91d79f8e9c3e829d6d8db", "cases": ["L91-105 alias 'worktree remove' + --force -> worktree.rm with hostId 'local', force:true", "L107-121 alias 'worktree delete' -> hostId 'runtime:env-1' from show", "L123-136 unresolved hostId fails closed: exit 1, exactly 1 RPC (worktree.show only)", "L149-162 agent-context schema exposes worktree rm aliases"] },
+        { "file": "src/cli/worktree-selector-wsl-posix-path.test.ts", "sha256": "659581f53b712f6ea1111567489cdaf2c5b00e3f01b52ac4bdbc928db32c92c0", "cases": ["L1-5 header: same selector reaches worktree rm; unprovable distro leaves path untouched"] }
+      ],
+      "remainingGaps": ["--run-hooks passthrough, hook/preserved-branch warning printing, and the 'removed:' text line are not asserted by any cited test"]
+    },
+    {
+      "name": "worktree ps",
+      "registry": { "spec": "src/cli/specs/core.ts:181-187", "usage": "orca worktree ps [--limit <n>] [--json]", "allowedFlags": ["GLOBAL_FLAGS", "limit"], "notes": "WORKTREE_LISTING_SCOPE_NOTES" },
+      "handler": { "file": "src/cli/handlers/worktree.ts", "lines": "177-184", "rpc": "worktree.ps {limit?}" },
+      "requiredArgs": [], "optionalArgs": ["--limit (positive integer)"],
+      "branching": "annotateOmittedHostScope after RPC (same as list)",
+      "output": "formatWorktreePs (workspace-format.ts:134-149): rows '<repo> <branch>  host=<hostId|unverifiable>  live:<n>  pty:yes|no  unread:yes|no\\n<path>[\\npreview: ...]'; empty -> 'No worktrees found.' + scope line; truncated suffix like list",
+      "remoteSemantics": "host=<unverifiable> spelling for missing hostId aligns with the live/unverifiable/exited vocabulary",
+      "tests": [
+        { "file": "src/cli/index-omitted-host-scope-selectors.test.ts", "sha256": "f884fcbe4fd33e4cf77cc06f5eb758ce451214c6f538d9f0acfba89221d34cc2", "cases": ["L234-245 ps without hostScope prints 'scope: unverifiable'"] }
+      ],
+      "remainingGaps": ["--limit passthrough, row shape, and truncated output for ps are untested at CLI level"]
+    },
+    {
+      "name": "project setup-existing-folder",
+      "registry": { "spec": "src/cli/specs/project.ts:30-45", "specSha256": "3d62e0568b61626f90e6f6544768b7cc3ab97842382792e250d4025c6d34dd23", "usage": "orca project setup-existing-folder --project <id> --host <host-id> --path <path> [--kind git|folder] [--display-name <name>] [--json]", "allowedFlags": ["GLOBAL_FLAGS", "project", "host", "path", "kind", "display-name"] },
+      "handler": { "file": "src/cli/handlers/project.ts", "sha256": "21f4b3b37faebba32500a61183b88d682d90cd9abedeec9111d8d12b486ea057", "lines": "112-131", "rpc": "projectHostSetup.setupExistingFolder {projectId, hostId, path, kind?, displayName?}" },
+      "requiredArgs": ["--project (projectId)", "--host (execution host id)", "--path (folder path)"],
+      "optionalArgs": ["--kind git|folder (getOptionalRepoKind L82-91: other values -> invalid_argument '--kind must be git or folder')", "--display-name (string)"],
+      "hostHandling": "getRequiredHostId (L74-80): parseHostFlag only — the UNRESOLVED id is kept on purpose (comment L71-73): the runtime rejects every ssh: host for setup operations, so resolving first would answer 'no such target' and imply the command would have worked with the right id; 'Missing required --host' when absent",
+      "pathSemantics": "pathIsOffClient = client.isRemote OR hostId is ssh:* (L117): an SSH host's filesystem is not the CLI's even when the client itself is local; off-client -> resolveRepoPathArgument(..., 'Remote project setup') demands an absolute server path; local -> resolve(cwd, path)",
+      "versionGate": "callProjectHostSetup (L38-58): runtime method_not_found -> RuntimeClientError('incompatible_runtime', 'This Orca server does not support project host setup yet...'); forwards exact arity",
+      "output": "formatProjectHostSetupResult (project-format.ts:36-38, project/setup/repo fields)",
+      "sideEffects": "imports an existing folder: registers project host setup + repo record on the host (MUTATION — not executed)",
+      "distinctions": "import-and-manage-now (vs project setup-create which only records independent metadata, spec note L83); NOT the default-base-ref path and NOT lineage",
+      "tests": [
+        { "file": "src/cli/index-project-setup.test.ts", "sha256": "44f8250493762d3449578907d12e824ad07070d0c930beedb23fd1797b4ab0fd", "cases": ["L389-452 local: cwd '/tmp/orca/worktrees/feature', --path '..', --kind git, --display-name Orca -> setupExistingFolder payload {projectId, hostId:'local', path:resolve('/tmp/orca/worktrees'), kind:'git', displayName:'Orca'}", "L454-482 remote runtime:gpu + relative './orca' -> rejected pre-RPC 'Remote project setup requires --path to be an absolute path on the remote server.' exit 1", "L484-513 ssh:openclaw + relative path -> same rejection (off-client because host is ssh:)"] },
+        { "file": "src/cli/index-project-setup.test.ts", "sha256": "44f8250493762d3449578907d12e824ad07070d0c930beedb23fd1797b4ab0fd", "cases": ["L196-214 (shared callProjectHostSetup gate, exercised via project setups) method_not_found printed as 'does not support project host setup yet', never 'Unknown method', exit 1", "L353-367 malformed --host runtime: rejected pre-contact 'Invalid --host value: runtime:'"] }
+      ],
+      "remainingGaps": [
+        "invalid --kind value error and missing --project/--path/--host errors untested for this exact command",
+        "incompatible_runtime mapping is asserted via project setups (same helper), not via setupExistingFolder itself",
+        "formatter output (project-format.ts) untested for this command"
+      ]
+    }
+  ],
+  "coverageSummary": {
+    "commandsWithLeafReportedCliTests": ["repo add", "worktree list (scope+format)", "worktree show (selector)", "worktree current", "worktree create", "worktree set", "worktree rm (alias/host-fail-closed)", "worktree ps (scope)", "project setup-existing-folder (path semantics)"],
+    "commandsWithoutLeafLocatedCliTests": ["repo list", "repo show", "repo set-base-ref", "repo search-refs"],
+    "note": "Leaf search/read scope only, not exhaustive absence or independent assertion acceptance. Server-side tests are separate evidence. Current coordinator test-body review is enumerated explicitly; no tests executed.",
+    "testsExecuted": false
+  }
+}
