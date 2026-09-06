@@ -748,6 +748,62 @@ release decisions. No nested agents, feature wave, installation, push or PR
 change occurred. Existing product edits remain untouched. Audit and goal stay
 open; next is independent terminal/settings review and UI correction review.
 
+## Terminal CLI contracts independently corrected
+
+Previous goal turn made concrete progress in `dd0a099`: seven original error
+classification tests executed unchanged and bounded G20 source evidence was
+committed. No blocked condition occurred. Live runtime remains the same Orca
+instance, and both binary-served skill guides were verified byte-identical to
+the fully read guides before further coordination.
+
+The coordinator read all terminal CLI handler and formatter bodies, flags,
+omitted-host selectors and close spec, plus the relevant selector/client/error
+formatting/spec sections. Worker v1 incorrectly generalized multiple contracts:
+
+- Close uses three RPC names, not two. Single and bulk failure guards differ;
+  bulk has no ptyKilled shortcut and reports text failures on stderr. Tab-mode
+  single-close text returns before PTY warning formatting. Missing legacy
+  verdict can be non-failing without proving process death.
+- List annotates omittedHostSelectors in place, so printed JSON is not always
+  verbatim server output. Empty list text skips topology/truncation formatting.
+- Create's focused presentation is independent of the local renderer-backed
+  classifier. Its remote omitted-worktree rejection runs before the selector;
+  an empty value or all can still become undefined.
+- Cwd fallback catches every error, not just no-workspace. Required stop/bulk
+  selectors have no omitted-value fallback. The current RuntimeClient default
+  is60s, despite terminal-wait's historical15s comment; terminal-wait itself
+  uses300s or requested+5s explicitly.
+
+Corrected v2 JSON and97-line Markdown are accepted as bounded CLI-side source
+contracts. Independent AST/hash checks found11 exact handler/spec/cohort keys,
+matching aliases and flag sets,22 unchanged source hashes, and53 static cases
+(50 direct +3 literal table rows) in7 original files. **Zero of those53 cases
+ran**; these checks are not product tests or runtime/host parity. G19's
+undefined-versus-null agentWait presentation is characterized, not exercised.
+
+UI correction still awaits independent review. Its worker twice submitted
+completion using the revoked original Dispatch, so Orca rejected both; those
+messages are not accepted task completions. The current correction Dispatch
+was verified live as `ctx_c389d8d0a9e2`; coordinator sent a structured identity
+correction and one accepted terminal follow-up to read it. No worker was
+restarted, impersonated or duplicated. Rejected delivery `delivery_a8e6e3afc269`
+was acknowledged after corrective action. Settings10-field artifacts still
+await complete body review; no acceptance inferred from their prose.
+
+The worker then settled the current Dispatch, but its final body/file list
+described an unrelated old ledger task, not its UI correction. This is an
+unreliable completion report, not accepted evidence. Coordinator released it
+and acknowledged `delivery_960f500b1b23`. Direct working-tree checks confirmed
+neither coordinator ledger file changed; the actual UI v2 artifact lists24
+hashes and the expected3 cards, still unreviewed. No audit worker remains
+active. Do not reuse that stale-context terminal for another assignment;
+review the files directly, and use a fresh scoped worker if correction is
+needed. No user terminal was killed and no artifact was deleted.
+
+No implementation wave, Sol hierarchy, original terminal test execution,
+installation, push or PR mutation occurred. Existing product changes stay
+unaccepted and untouched. Audit/goal remain active.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

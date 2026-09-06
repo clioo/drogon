@@ -78,8 +78,8 @@
       "owner": [
         "WP-ENG-CLI"
       ],
-      "evidence": "parity-cli-argument-contract.json + parity-source-contracts.json + parity-cli-skills-contracts.json coordinator-reviewed v2",
-      "resolution": "Six skills handlers characterized, including RPC-vs-local JSON, host checks, update --project and permission layers. Continue remaining command value/default/required/output/error contracts and passthrough dispatch. Accepted shared parser and skill guide/placement metadata need not be repeated.",
+      "evidence": "parity-cli-argument-contract.json + parity-source-contracts.json + parity-cli-skills-contracts.json coordinator-reviewed v2 + parity-cli-terminal-contracts.json coordinator-reviewed v2",
+      "resolution": "Six skills and11 terminal handlers characterized. Terminal review preserves distinct single/bulk close errors, list host-scope annotation, focus-versus-renderer fields, catch-all cwd fallback, actual timeout defaults and unknown-versus-null agentWait. These are CLI-side source contracts, not runtime acceptance. Continue remaining command value/default/required/output/error contracts and passthrough dispatch; do not repeat accepted parser/skills/terminal metadata.",
       "proofStillOwed": "Original CLI commands and candidate dual-target results with no assertion weakening."
     },
     {
