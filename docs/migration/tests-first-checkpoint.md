@@ -884,6 +884,47 @@ hierarchy before closure. No worker was launched, personal terminal touched,
 product implementation edited, installation replaced, push or PR changed.
 The goal remains active; no blocking condition occurred.
 
+## UI state v3: backend/assertion reconciliation accepted
+
+Previous turn made progress in0cfc6ea with source/test-drift corrections.
+This turn independently replaced the unaccepted leaf v2 with coordinator v3:
+45 stable state IDs (19Bots,16Mentu,10Meetings),42 source fingerprints and
+structured exact file/range citations. UI-C01-C11 remain applicable.
+Source tracked tree remains unchanged at c9790628.
+
+Mentu Navigator1.1.1 was available and used read-only. The broad query ranked
+unrelated session pointers, so bounded known-domain path searches located the
+actual session execution tests. No title or navigator ranking was accepted as
+proof. Fully read assertion bodies in Bot owner, retry view, restore hook and
+session execution files contain43 direct cases plus2 literal table cases by
+AST count. The45-case number is coincidentally equal to state count, not a
+mapping, execution result or increase to the82-case original baseline.
+
+Material corrections: Bot mutation/rotation test has a flush spy, not disk
+restart; owner migration does not rewrite run arrays; scheduled RRULE is input,
+not a directly asserted field. Retry records sort by lifetime count then array
+position, not generic recorded order. Metrics sum every record and preserve
+unknown tokens. The resume test asserts exact argv but does not execute retry.
+Cancellation tests stub the process and test AbortSignal, not OS termination.
+Backend restart-titled test prepares a running run.json, instantiates runtime
+and reads it; no real app/process restart occurs. Run reader derives its
+hostObservation from stored outcome; that is not authoritative process proof.
+Remote fixture checks unavailable/ssh transport without asserting a separate
+unverifiable property or observing network loss.
+
+Meeting bridge assertions do use temporary files for convention/status,
+missing-install discovery and malformed/oversized configuration. Its folder
+store and platform are injected; read-only ownership metadata is not filesystem
+write enforcement. Unknown recipe fields have a separate save assertion, not
+retry-view coverage or a demonstrated interrupted-write test.
+
+Eight coordinator-authored line endpoints initially exceeded actual file
+length and were corrected using the read source EOFs before acceptance.
+Full metadata/hash/anchor checks run before commit. E1-E5 remain broader than
+this bounded slice. No active assignment, new worker, hierarchy, implementation,
+test process, model inference, installation, push or PR action occurred.
+Goal remains active with progress; no blocking condition occurred.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

@@ -150,11 +150,12 @@ No assertion-body coverage accepted for this correction.
 
 ## Remaining scope and dispatch
 
-The leaf's backend Bot ownership/migration/hydration claims, broad Mentu
-retry/admission/restore pointers and Meetings discovery/root contracts still
-need exact source/assertion reconciliation. Claims based only on a test title,
-fixture, helper or callback override are not end-to-end proof. No claim here
-establishes that matching tests do not exist elsewhere.
+The subsequent [coordinator v3 state contracts](parity-drogon-ui-state-contracts.md)
+reconcile the leaf's backend ownership, retry/admission/restore and meeting
+discovery pointers. That is bounded enumeration, not execution acceptance.
+Claims based only on a test title, fixture, helper or callback override are not
+end-to-end proof. No claim here establishes that matching tests do not exist
+elsewhere.
 
 E1 remains open. All previously required Orca and implemented Drogon behavior
 is retained; missing proof is recorded rather than scoped out.
