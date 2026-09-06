@@ -1,0 +1,308 @@
+{
+  "schemaVersion": 1,
+  "status": "legacy-source-correspondence-verified-not-aggregate-build-or-publication-clearance",
+  "nerdRevision": "fa7b859994228a9c8759f99c55a8d31ee92a1b5e",
+  "legacyRevision": "ba75593fdf8d66496676a90cbf127d721f73e961",
+  "sourceScope": "Complete18-svg Vorillaz subtree in pinned Nerd3.4.0, not every Devicons glyph",
+  "observed": {
+    "svgFiles": 18,
+    "byteIdentical": 17,
+    "documentedModified": 1
+  },
+  "matches": [
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/clojure_alt.svg",
+      "targetPath": "!SVG/clojure_alt.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/clojure_alt.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/clojure_alt.svg",
+      "bytes": 6241,
+      "sha256": "0d1a909cc50d4464d7de406f6581656186a93ae150fbe66b649899b7b5a32646",
+      "targetSha256": "0d1a909cc50d4464d7de406f6581656186a93ae150fbe66b649899b7b5a32646",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/database.svg",
+      "targetPath": "!SVG/database.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/database.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/database.svg",
+      "bytes": 1259,
+      "sha256": "8c6044bdb759c0a9786d8642a1d82e1fe66f23b170a8493b715254119ab51789",
+      "targetSha256": "8c6044bdb759c0a9786d8642a1d82e1fe66f23b170a8493b715254119ab51789",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/dlang.svg",
+      "targetPath": "!SVG/dlang.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/dlang.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/dlang.svg",
+      "bytes": 2448,
+      "sha256": "97d3674e99d7a76d35ae0d3093efe3e537d7d21cc7be1669a3ecd8c95860c8b9",
+      "targetSha256": "97d3674e99d7a76d35ae0d3093efe3e537d7d21cc7be1669a3ecd8c95860c8b9",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/dropbox.svg",
+      "targetPath": "!SVG/dropbox.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/dropbox.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/dropbox.svg",
+      "bytes": 383,
+      "sha256": "46c895788014622d021c4ee4ec370ba559355429a1ba5892432f10f9bc8b969a",
+      "targetSha256": "4c01716a3bce5b47ff91dc2e34d3f76251057d493399b2ed1e6af004e405f9c1",
+      "byteEqual": false,
+      "gitBlobEqual": false
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/git_branch.svg",
+      "targetPath": "!SVG/git_branch.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/git_branch.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/git_branch.svg",
+      "bytes": 1279,
+      "sha256": "f8a4cdfecb5a07f1dabe370af5cddfc7eafe78b56564e5b699164f9c80e8eabb",
+      "targetSha256": "f8a4cdfecb5a07f1dabe370af5cddfc7eafe78b56564e5b699164f9c80e8eabb",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/git_commit.svg",
+      "targetPath": "!SVG/git_commit.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/git_commit.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/git_commit.svg",
+      "bytes": 650,
+      "sha256": "49d287ed51c86d1d3e9a6e13c4ef70ab1becc7488c26fd926f2234516590d1d3",
+      "targetSha256": "49d287ed51c86d1d3e9a6e13c4ef70ab1becc7488c26fd926f2234516590d1d3",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/git_compare.svg",
+      "targetPath": "!SVG/git_compare.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/git_compare.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/git_compare.svg",
+      "bytes": 1199,
+      "sha256": "8d2794a2308a6e4576b3802f028ca48fdf628463e11cd6650f2b051a49788794",
+      "targetSha256": "8d2794a2308a6e4576b3802f028ca48fdf628463e11cd6650f2b051a49788794",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/git_merge.svg",
+      "targetPath": "!SVG/git_merge.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/git_merge.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/git_merge.svg",
+      "bytes": 1285,
+      "sha256": "6ed8038e10029e36df5a39a410850a8f03868de1c3e767c30ecb11c696452b71",
+      "targetSha256": "6ed8038e10029e36df5a39a410850a8f03868de1c3e767c30ecb11c696452b71",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/git_pull_request.svg",
+      "targetPath": "!SVG/git_pull_request.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/git_pull_request.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/git_pull_request.svg",
+      "bytes": 1330,
+      "sha256": "1364308223b211f20bf0fb041d03652bd366e6228bc444eb0572147175226d1f",
+      "targetSha256": "1364308223b211f20bf0fb041d03652bd366e6228bc444eb0572147175226d1f",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/gnu.svg",
+      "targetPath": "!SVG/gnu.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/gnu.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/gnu.svg",
+      "bytes": 19108,
+      "sha256": "d12205b7a864d046d0e5c4a054b68c4371a62f3aa54b350a94ca69b7470f4f00",
+      "targetSha256": "d12205b7a864d046d0e5c4a054b68c4371a62f3aa54b350a94ca69b7470f4f00",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/javascript_1.svg",
+      "targetPath": "!SVG/javascript_1.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/javascript_1.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/javascript_1.svg",
+      "bytes": 958,
+      "sha256": "8129d4aeb6e7c1fa9f11a212365944268c0d7ce389753412e5aa18d8396f4380",
+      "targetSha256": "8129d4aeb6e7c1fa9f11a212365944268c0d7ce389753412e5aa18d8396f4380",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/mootools_badge.svg",
+      "targetPath": "!SVG/mootools_badge.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/mootools_badge.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/mootools_badge.svg",
+      "bytes": 1120,
+      "sha256": "fef42180d9837b9333fe0491fed8ff79c4d8a470dad6d0b050f725a8fb7cedac",
+      "targetSha256": "fef42180d9837b9333fe0491fed8ff79c4d8a470dad6d0b050f725a8fb7cedac",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/mozilla.svg",
+      "targetPath": "!SVG/mozilla.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/mozilla.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/mozilla.svg",
+      "bytes": 5619,
+      "sha256": "1bc86719285ab8cc87e6d999b3da28cead312f0ca220912b3a295a60885b9720",
+      "targetSha256": "1bc86719285ab8cc87e6d999b3da28cead312f0ca220912b3a295a60885b9720",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/requirejs.svg",
+      "targetPath": "!SVG/requirejs.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/requirejs.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/requirejs.svg",
+      "bytes": 1773,
+      "sha256": "8b9687fc001d29e08a141237e7358cb3e52a44fb89b20b1cbf63e5613076b734",
+      "targetSha256": "8b9687fc001d29e08a141237e7358cb3e52a44fb89b20b1cbf63e5613076b734",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/ruby_rough.svg",
+      "targetPath": "!SVG/ruby_rough.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/ruby_rough.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/ruby_rough.svg",
+      "bytes": 1806,
+      "sha256": "04d0089da5e82adf3c8ce8a626e82909771fa4921aba0e0f9f95623affab2907",
+      "targetSha256": "04d0089da5e82adf3c8ce8a626e82909771fa4921aba0e0f9f95623affab2907",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/smashing_magazine.svg",
+      "targetPath": "!SVG/smashing_magazine.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/smashing_magazine.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/smashing_magazine.svg",
+      "bytes": 1773,
+      "sha256": "c5acce5bf5c715e9ed75be714476f39be894beebfb2360d5fb58be91b87ab622",
+      "targetSha256": "c5acce5bf5c715e9ed75be714476f39be894beebfb2360d5fb58be91b87ab622",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/sublime.svg",
+      "targetPath": "!SVG/sublime.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/sublime.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/sublime.svg",
+      "bytes": 1251,
+      "sha256": "d9826509bac1a6ab11e95e4235a846f445b85ad6d32186e00207647c3f454bca",
+      "targetSha256": "d9826509bac1a6ab11e95e4235a846f445b85ad6d32186e00207647c3f454bca",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    },
+    {
+      "sourcePath": "src/glyphs/devicons/vorillaz/terminal.svg",
+      "targetPath": "!SVG/terminal.svg",
+      "sourceUrl": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/terminal.svg",
+      "targetUrl": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/!SVG/terminal.svg",
+      "bytes": 648,
+      "sha256": "bad262c93ae0c0eeec775958ff2e4f509b9f4405d0058dca3f40d099b484929b",
+      "targetSha256": "bad262c93ae0c0eeec775958ff2e4f509b9f4405d0058dca3f40d099b484929b",
+      "byteEqual": true,
+      "gitBlobEqual": true
+    }
+  ],
+  "legacyNotice": {
+    "url": "https://raw.githubusercontent.com/vorillaz/devicons/ba75593fdf8d66496676a90cbf127d721f73e961/README.md",
+    "bytes": 3527,
+    "sha256": "d0c1eccf6379e2d4a702d15c8ab1bca43320edc63126ebd51f3907b8e879ee29",
+    "declaration": "README expressly identifies Theodore Vorillas and licenses the iconic font under MIT; retain its brand/trademark disclaimer.",
+    "noticeTextNotInlined": true
+  },
+  "documentedModification": {
+    "revision": "1b34bab199aace815e9d23ddda01fd84bb6ff201",
+    "url": "https://github.com/ryanoasis/nerd-fonts/commit/1b34bab199aace815e9d23ddda01fd84bb6ff201",
+    "path": "src/glyphs/devicons/vorillaz/dropbox.svg",
+    "gitBlob": "7a11c06d60e97fb21951c8ac3657d17c7457c88b",
+    "observation": "Commit records icons taken from vorillaz/devicons !SVG and Dropbox hand-modified from its original logo. The commit's added blob equals the pinned Nerd directory's blob; the source SVG's raw bytes were inspected and differ from the older upstream shape.",
+    "originalComparison": "Do not label Dropbox byte-identical or normalize away its geometry difference."
+  },
+  "references": [
+    {
+      "path": "src/glyphs/devicons/generate",
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/generate",
+      "bytes": 5078,
+      "sha256": "d72d40bbe1f8be67c0a383280103945a53b625ff214d7aff07891472f1921911"
+    },
+    {
+      "path": "src/glyphs/devicons/fixed/README.md",
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/fixed/README.md",
+      "bytes": 218,
+      "sha256": "35b5b8e221383cc1bf87e37d4298b37a05f1395e43edd452c7a79c8225e9e788"
+    },
+    {
+      "path": "src/glyphs/devicons/vorillaz/README.md",
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/vorillaz/README.md",
+      "bytes": 620,
+      "sha256": "4772f570f66011a1f0d2b1358f48809c472cea8439cfca54f66a9ed9ad34c828"
+    },
+    {
+      "path": "src/glyphs/devicons/mapping",
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/devicons/mapping",
+      "bytes": 22569,
+      "sha256": "ee793c60b3d85f1d1926a9ebe971b12154d344008ce4dcd96a9862d99e88026c"
+    },
+    {
+      "path": "src/svgs/README.md",
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/svgs/README.md",
+      "bytes": 583,
+      "sha256": "9dec4f69fe88de80eacd07aca4f9a626ef066707be52660d5a38647f3c9948fc"
+    },
+    {
+      "path": "bin/scripts/generate-original-source.py",
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/bin/scripts/generate-original-source.py",
+      "bytes": 6960,
+      "sha256": "a74f9540711da606166efd35bbdc534efcd40eb1ea365818fca051257a40b6a0"
+    },
+    {
+      "path": "src/svgs/icons.tsv",
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/svgs/icons.tsv",
+      "bytes": 7423,
+      "sha256": "e30d7f6ed933b21cb59226676a6885fc53f64a14754b3db1f033e008e930b267"
+    }
+  ],
+  "modernNotice": {
+    "url": "https://raw.githubusercontent.com/devicons/devicon/6910f0503efdd315c8f9b858234310c06e04d9c0/LICENSE",
+    "bytes": 1072,
+    "sha256": "121194741d4a915b9f5890fdd6dd95121f9b1f816517c792358d72d7c838d664"
+  },
+  "modernBoundary": "The reviewed generator imports devicons/devicon v2.16.0, then overlays Vorillaz and fixed SVGs. The fixed README documents modifications for2.16.0 import problems. Preserve the primary konpa MIT notice, legacy Vorillas attribution and Nerd Fonts modification notice together; no generator or optimization script was executed.",
+  "seti": {
+    "candidateNotice": {
+      "url": "https://raw.githubusercontent.com/jesseweed/seti-ui/6c358eb9ce5cc20bccd72cc4d7179fd485cd8fe7/LICENSE.md",
+      "bytes": 1054,
+      "sha256": "d4d2d888c6a0a220a7b0e2d6013cf37539b0e05ef937002b3b33bdb364575b88"
+    },
+    "candidateRevision": "6c358eb9ce5cc20bccd72cc4d7179fd485cd8fe7",
+    "candidateLabel": "Seti v0.8.1",
+    "comparison": {
+      "revision": "6c358eb9ce5cc20bccd72cc4d7179fd485cd8fe7",
+      "targetSvgCount": 1,
+      "sourceSvgCount": 191,
+      "exact": [],
+      "targetSample": [
+        "styles/_fonts/icomoon.svg"
+      ]
+    },
+    "finding": "Candidate release has one aggregate SVG font, not the191 standalone source SVG files inspected in Nerd. No exact byte-origin join was established. Preserve Jesse Weed MIT attribution as identified source-family notice, but do not call this candidate the exact origin of every Seti/Original glyph. Source generator and README explicitly combine Seti with custom Original SVGs; they remain a separate lineage boundary."
+  },
+  "verification": {
+    "method": "HTTPS at fixed revisions, three concurrent pair fetches, SHA256 and direct Buffer.equals; independent Git tree identities compared. Full18-source scope required before traversal.",
+    "apiDiscoveryFailures": "A first historical lookup used SVG instead of actual !SVG and returned no commits; no absence conclusion was drawn. A bounded pre2025 historical snapshot supplied exact candidate paths. Current default-branch releases were not substituted for the legacy files.",
+    "productTests": 0,
+    "installedAssetsChanged": false,
+    "signatureVerified": false
+  },
+  "remaining": [
+    "Seti/Original transformation lineage",
+    "Aggregate font and installed notice inspection",
+    "Unrelated asset/recording authorization and service decisions"
+  ]
+}
