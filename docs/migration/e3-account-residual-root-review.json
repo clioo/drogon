@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "scope": "Finite AL-SR02/03/04 account source joins only",
+  "disposition": "accepted-source-characterization-with-root-qualifications",
+  "wholeE3Accepted": false,
+  "wholeE5Accepted": false,
+  "candidateParity": false,
+  "sourceReport": {
+    "path": "docs/migration/audit-closure/e3-bridge/result-platform/account-residual-joins.json",
+    "sha256": "18d7871d1c0df9e6c1cd59ba228c76b43aa93054733152ad1f843bb690473f0e"
+  },
+  "markdownReport": {
+    "path": "docs/migration/audit-closure/e3-bridge/result-platform/account-residual-joins.md",
+    "sha256": "2a1cc6a0d6e5d44f2bbfae2eaf7e88ca126ff78ee3fd7833342a905bcd70cefb"
+  },
+  "verification": {
+    "command": "node scripts/verify-e3-account-residual-source.mjs /Users/carlos/Documents/Drogon-mentu-session",
+    "sourceRanges": 35,
+    "pinnedFiles": 33,
+    "contracts": 9,
+    "hashedPointers": 27,
+    "reuseCatalogEntries": 12,
+    "assertionGroups": 10,
+    "additiveTestObligations": 7,
+    "packages": 46,
+    "fileAllocations": 9037
+  },
+  "rootReview": {
+    "read": "Complete candidate narrative and nine contracts; independently read parser, sections, path rewrite, shell hint, constructor/auth/state/path migrations, native/WSL bridge entry bodies, backfill/marker/audit/date owners. Original shell test read completely; selected original backfill/marker assertions reopened. Other original body associations are worker-reviewed, hash-verified pointers, not a root execution claim.",
+    "qualifications": [
+      {
+        "id": "AR-ROOT-DATES",
+        "contract": "AR-C05",
+        "finding": "Date validity is enforced by resolveCodexSessionBackfillDateRoots, but that function filters/maps without sorting or deduplicating. mergeCodexSessionBackfillDates sorts/deduplicates on the existing-baseline path; a no-baseline requested scanDates array can retain duplicates/order. The candidate's broad date-dedup wording is qualified accordingly.",
+        "source": "src/main/codex/codex-session-backfill-date.ts:35",
+        "tests": "AR-T03/04 must characterize duplicate and reordered requested roots with and without a baseline; no correction implemented."
+      },
+      {
+        "id": "AR-ROOT-TRUST",
+        "contract": "AR-C02",
+        "finding": "Raw trust regex can classify text inside multiline strings. Untrusted project blocks survive extractOrdinaryCodexSettings despite its comment; project Unicode decoding differs from scalar parser. Accepted as source characterization, not intended trust policy.",
+        "tests": "AR-T01 preserves baseline and separately names parser/trust correction assertions."
+      },
+      {
+        "id": "AR-ROOT-PARTIAL",
+        "contracts": [
+          "AR-C04",
+          "AR-C05",
+          "AR-C06",
+          "AR-C08",
+          "AR-C09"
+        ],
+        "finding": "Launch return is not history completion. Unsupported hardlinks can coexist with a marker. MCP/auth/history changes can precede later errors or marker failure; pointer fallback can remove the old link before a second rename fails. No cross-operation rollback, durable flush, provider resume or multi-process CAS is proved."
+      },
+      {
+        "id": "AR-ROOT-SHELL",
+        "contract": "AR-C07",
+        "finding": "Actual product reads only a cached static hint, not evaluated shell state. All-three-bash-file scan, ignored empty/unset/conditional semantics and process-lifetime caching need actual-shell differential tests. The original fish unsupported-shell title only demonstrates no zsh/bash fallback."
+      },
+      {
+        "id": "AR-ROOT-INHERITANCE",
+        "finding": "The report's inherited testPreservation prose says thirteen body groups; the new report has ten and inherits thirteen from account-launch-final. Both associations remain. AL-SR01 is outside this report and is reconciled by the separately accepted provider source review, not silently closed here. The pending 95-provider owning-body corrections are outside these native/WSL bridge bodies and remain open."
+      }
+    ]
+  },
+  "sourceTests": {
+    "manifest": "tests/parity/baseline-capsules/shell-startup-env.json",
+    "manifestSha256": "d5afd73eb2c8aeb2d84ac52176ea55710f47f275ea0135dcb927e5361d93290b",
+    "environment": "Node24.19.0; original installed Vitest4.1.11; minimal isolated node configuration with differences recorded in manifest",
+    "root": ".preflight/parity-baseline/shell-startup-env-asNQ98",
+    "resultSha256": "8b3b6aa3471d9eca6aa5401d94a325770819c347ad0390bf5e956e29293dd490",
+    "receiptSha256": "bfb2074cd3d41e1102d8f4d5f1c1efd0fc4377fcf631ac47136c1a75bf0c2989",
+    "passed": 50,
+    "failed": 0,
+    "pending": 0,
+    "todo": 0,
+    "hashesRechecked": 3,
+    "assertions": [
+      "readShellStartupEnvVar mirrors the user scenario: GUI-launched Orca discovers .zshrc-only export",
+      "readShellStartupEnvVar returns undefined when HOME is unset",
+      "readShellStartupEnvVar returns undefined on Windows",
+      "readShellStartupEnvVar reports startup-env probing as supported on macOS and Linux",
+      "readShellStartupEnvVar returns undefined when no startup file matches",
+      "readShellStartupEnvVar returns the LAST assignment when multiple files re-export",
+      "readShellStartupEnvVar uses ZDOTDIR exported from .zshenv for later zsh startup files",
+      "readShellStartupEnvVar handles double-quoted values",
+      "readShellStartupEnvVar handles single-quoted values",
+      "readShellStartupEnvVar handles unquoted values",
+      "readShellStartupEnvVar expands $HOME in values",
+      "readShellStartupEnvVar expands ${HOME} in values",
+      "readShellStartupEnvVar expands leading ~ in values",
+      "readShellStartupEnvVar ignores bare assignments without the export keyword",
+      "readShellStartupEnvVar preserves a # inside a double-quoted value",
+      "readShellStartupEnvVar preserves a # inside a single-quoted value",
+      "readShellStartupEnvVar strips a trailing # comment from an unquoted value",
+      "readShellStartupEnvVar strips a trailing # comment after a double-quoted value",
+      "readShellStartupEnvVar strips a trailing # comment after a single-quoted value",
+      "readShellStartupEnvVar does not expand $HOME inside single quotes",
+      "readShellStartupEnvVar does not partially expand $HOMER / $HOMEPATH",
+      "readShellStartupEnvVar only scans zsh startup files when SHELL is zsh",
+      "readShellStartupEnvVar only scans bash startup files when SHELL is bash",
+      "readShellStartupEnvVar defaults to zsh startup files when SHELL is unset",
+      "readShellStartupEnvVar does not scan .bashrc for bash shells",
+      "readShellStartupEnvVar does not scan zsh or bash files for an explicit unsupported shell",
+      "readShellStartupEnvVar honors an explicit shell argument over process.env.SHELL",
+      "readShellStartupEnvVar memoizes results across calls within the same process",
+      "readShellStartupEnvVar rejects names with regex metacharacters",
+      "readShellStartupEnvVar does not match other variable names",
+      "readShellStartupEnvVar survives a readFileSync error on one file and continues",
+      "readShellStartupEnvVar handles CRLF line endings",
+      "readShellStartupEnvVar does not match an OPENCODE_CONFIG_DIR mention in a comment",
+      "readShellStartupEnvVar fish reads an exported set from config.fish",
+      "readShellStartupEnvVar fish lets config.fish win over a conf.d snippet, matching fish source order",
+      "readShellStartupEnvVar fish sources conf.d snippets in filename order",
+      "readShellStartupEnvVar fish honors XDG_CONFIG_HOME",
+      "readShellStartupEnvVar fish defaults configHome to XDG_CONFIG_HOME from the environment",
+      "readShellStartupEnvVar fish ignores sets that are not exported",
+      "readShellStartupEnvVar fish accepts every fish export spelling",
+      "readShellStartupEnvVar fish expands $HOME in double quotes and keeps single quotes literal",
+      "readShellStartupEnvVar fish does not read zsh or bash startup files for a fish user",
+      "readShellStartupEnvVar fish ignores a commented assignment",
+      "readShellStartupEnvVar fish does not match a different variable with the same prefix",
+      "readShellStartupEnvVar readSessionShellStartupEnvVar prefers the session env's XDG_CONFIG_HOME over the main process's",
+      "readShellStartupEnvVar readSessionShellStartupEnvVar falls back to the main process XDG_CONFIG_HOME when the session env lacks one",
+      "readShellStartupEnvVar readSessionShellStartupEnvVar falls back to fish's own ~/.config default when neither env has one",
+      "readShellStartupEnvVar readSessionShellStartupEnvVar resolves against the session HOME, not the main process HOME",
+      "readShellStartupEnvVar readSessionShellStartupEnvVar lets an explicit shell override beat the session SHELL",
+      "readShellStartupEnvVar readSessionShellStartupEnvVar falls back to the main process HOME and SHELL with no session env at all"
+    ],
+    "reportMdSha256": "2a1cc6a0d6e5d44f2bbfae2eaf7e88ca126ff78ee3fd7833342a905bcd70cefb",
+    "evidenceBoundary": "50 unchanged original static parsing/routing tests passed with fs mocked and simulated platforms; not native shell/Windows execution or candidate behavioral GREEN. Both staged source files and MIT license rehashed after execution."
+  },
+  "lifecycle": {
+    "task": "task_5154c82cf9ce",
+    "dispatch": "ctx_30884f2404e3",
+    "deliveredMessage": "msg_2ef35dd1bdda",
+    "releaseReceipt": "3d050f9d-f687-465d-b6ba-be9d781f42b9",
+    "state": "released; external terminal retained without process action"
+  },
+  "progress": {
+    "accepted": 10,
+    "total": 12,
+    "percent": 83.3,
+    "delta": 0,
+    "confidence": "medium-low",
+    "next": "Whole E3/E5 source acceptance; provider/runtime join and integration correction root review",
+    "deadlineRisk": "high; no defensible ETA",
+    "implementation": "Actual Sol leads plus approved workers only after full audit acceptance"
+  }
+}
