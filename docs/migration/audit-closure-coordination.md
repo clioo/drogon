@@ -1,6 +1,12 @@
 # Five-lead audit closure assignment
 
-User-approved direction, 2026-09-06. Supersedes older three-worker flat audit and post-audit-only Sol hierarchy scheduling. It does not change the scope or claim the Codex goal text was programmatically replaced. The24-hour target is flexible; preserve full fidelity.
+User-approved direction, 2026-09-06. Supersedes the older three-worker flat audit scheduling, not the Sol implementation phase. It does not change the scope or claim the Codex goal text was programmatically replaced. The24-hour target is flexible; preserve full fidelity.
+
+## Mandatory phase transition
+
+The user's latest instruction before sleeping is explicit: **these five Astra area leads are temporary, audit-only accelerators**. After root accepts the complete source-audit gate, implementation uses **root Astra → Sol area leads → approved disjoint leaf workers**. A completed report is not the full gate. Finish review, preserve evidence and officially release each audit Dispatch and its owned children before transferring responsibilities. Do not reuse an Astra process while labeling it Sol; verify the actual Sol launch and its new Task/Dispatch. Root retains architecture, integration, independent testing and acceptance. Pi + DGX Spark stays the test-inference path, separate from development-worker selection.
+
+This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoints below are not current state; consult audit-semantic-followups.md and audit-progress.md. No tool-supported objective rewrite was performed: the old Codex goal's flat-worker text is superseded by this later user direction, not a reason to complete or replace an unfinished goal.
 
 ## Ownership and bounded deliverables
 
