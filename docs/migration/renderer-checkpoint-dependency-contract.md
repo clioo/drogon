@@ -58,3 +58,24 @@ real durability and refuse restart on failure; do not wire a resolved-promise
 checkpoint merely to make the accepted preparation module callable. Preserve
 mixed-host scope and prior durable state on restore/checkpoint failure. These
 obligations remain open until actual integrated failure/restart/recovery tests pass.
+
+## Review gate: test adapters are not product failures
+
+At 16:58 UTC root observed the GLM worker labeling 6 failures / 23 passes from
+unbound diagnostic sinks and a misbound abandon argument as genuine behavioral
+RED. These are candidate-harness signature/admission errors caused by the approved
+dependency change, not evidence of wrong checkpoint policy in a correctly bound
+production module. Retain them as adapter failures. Signature-only test adaptation
+is permitted with all original assertions intact, but changing the adapter to make
+those failures disappear does not prove a production behavioral correction.
+
+The unchanged correctly bound regression suite must demonstrate a real policy
+failure before its production fix to claim RED/GREEN; otherwise report the missing
+historical behavioral RED honestly. Do not fabricate a defect or weaken assertions
+to fill an evidence field. Typecheck the adapted tests as well as product code so
+missing required sinks/generic arguments cannot be hidden by transpile-only tests.
+The three source renderer manifests declare 12 + 15 + 4 = 31 cases; reconcile any
+29-case execution with exact original test names/parameter rows and setup failures.
+The source preload/main baselines add 6 + 8 = 14 separate cases, not renderer
+candidate coverage. Root verified all 149 manifest source/license entries across
+135 unique paths; this proves bytes/provenance only, not execution or closure.
