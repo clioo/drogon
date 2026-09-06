@@ -1,0 +1,51 @@
+{
+  "capsuleId": "session-tab-close-relay",
+  "description": "Original renderer close acknowledgement relay with its existing Electron/EventEmitter mocks; no real window, app or tab is touched.",
+  "entryTestFile": "src/main/window/session-tab-close-request-relay.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 7,
+    "plainIt": 4,
+    "tableRows": 3
+  },
+  "files": [
+    {
+      "path": "src/main/window/session-tab-close-request-relay.test.ts",
+      "role": "test",
+      "sha256": "3053304c2b73b4e9bb932d3328219a48954147ac6d7afa4fc78fec0e8da65614"
+    },
+    {
+      "path": "src/main/window/session-tab-close-request-relay.ts",
+      "role": "module",
+      "sha256": "4a86342ebbb3ac06e7feccd556ab377143daaec67a8e8931267eb8891001ff3d"
+    },
+    {
+      "path": "src/shared/session-tab-close.ts",
+      "role": "module",
+      "sha256": "9d975e0ef5e7501ade215ed954c86230316aa6db48ebf7b28de94db65327239d"
+    }
+  ],
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "isolationRationale": "Coordinator read the complete3-file runtime closure. Original test vi.mock('electron') provides ipcMain functions over an EventEmitter. BrowserWindow/webContents are test EventEmitter objects. Module uses randomUUID, timeout and listener functions only. Real short-lived timers are cleared on settlement; the5min lease test uses original fake timers. No Electron process, user window/tab, filesystem, network or provider action is executed. Do not change the mocks or assertions. This is not a security sandbox.",
+  "runtimeImports": [
+    "vitest original installed4.1.11",
+    "node:crypto",
+    "node:events",
+    "electron replaced by original inline mock factory",
+    "relative source session-tab-close contract and dynamic import of relay"
+  ],
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Both configs use node. Execute with Node24.19.0 and original installed Vitest4.1.11; no package install.",
+    "Minimal config omits feature-wall define, renderer aliases and DOM/host-port setup, unused by this closure.",
+    "Root GC/webstorage flags, Windows worker override and30s/60s per-test/hook limits are omitted. Test-owned fake timers drive lease expiry; default unit timeouts and30s outer bound remain. No platform or full-config equivalence claim."
+  ],
+  "testEvidenceBoundary": "Four direct tests plus3 literal table rows. Only wrong sender is exercised in acknowledgement test, not wrong requestId; source has both guards. Missing/destroyed-window preflight, send throw, multiple concurrent requests and real renderer IPC are not covered by this7-case file."
+}

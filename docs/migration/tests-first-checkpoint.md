@@ -954,6 +954,28 @@ launched. E1-E5 enumeration and T1-T5 execution obligations remain open; this
 is concrete test evidence rather than an audit closure. Goal stays active;
 no blocked condition occurred.
 
+## Close relay baseline and legacy push reconciliation
+
+Previous turn made progress in77038f3 (Bot ownership11). The current source
+trace distinguishes two unresolved legacy push names from the actual current
+actions: acknowledged session-close request/response and editor PDF invoke.
+parity-close-export-current-paths.md preserves their different identities,
+optional expiry and intent capability compatibility. Producer count remains
+94/96; absence of exact literals does not authorize removing legacy receivers.
+
+The unchanged original close-relay capsule passed7/7 under Node24.19.0 and
+original Vitest4.1.11, no skips/todos/timeout. Three source files plus license
+were verified and staged fresh; receipt/archive hashes and config differences
+are retained under reference-captures/c9790628-close-relay. Original Electron
+mocks and fake expiry timers do not exercise actual UI, SSH or PDF generation.
+The distinct original baseline is now100 cases across8 capsules, not a
+full-suite or rewrite acceptance result.
+
+No product edits, source assertion changes, personal-session actions, model
+invocations, installations, worker launches, push or PR changes. Audit remains
+open; hierarchy/worktrees/feature PRs remain gated on accepted common contracts
+and audit closure. Goal remains active with concrete progress.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
