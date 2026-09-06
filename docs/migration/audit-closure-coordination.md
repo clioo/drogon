@@ -10,6 +10,8 @@ This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoi
 
 ## Current checkpoint — finite E3 inputs and E5 publication review
 
+Root subsequently accepted the publication report's finite source/provenance characterization in e5-publication-root-review.md/json. No publication rights, service design/policy, original private backend or full E5 closure is approved by that acceptance. The unchanged original feature-wall integrity checker passed; no new publication worker or product implementation started. Exact observations922b26c4-6091-4d66-832c-d049ba12f8d5 and0dcad036-1bb9-4b44-9f4c-0d1b09f46ea0 confirm both bounded E3 Dispatches below are live/ready/input_accepted. Integration review is still root-owned; source gate and actual Sol transition unchanged.
+
 Latest supersession2026-09-06 11:14 UTC: publication Task delivered `msg_0ece9799da41` and was officially released, receipt `c7354ed1-d7cc-49d2-93f2-8ba5d2877d12`, retained/external_terminal/processAction none. It has no fresh Task; root reviews its evidence alongside integrations. Ten account-launch contracts are independently accepted with source-only qualifications in e3-account-launch-root-review.md/json; no tests or account effects were executed.
 
 Two fresh Tasks were created after revalidating the exact released Astra terminals as live/connected/writable. Both returned ready/input_accepted, no setup/residual resources and no new model process; null model fields do not relabel them Sol. These are direct audit-only Tasks with no children, source edits, tests, Git, credentials/provider operations or installations:
