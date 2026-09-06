@@ -29,6 +29,31 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+### Root review and delegated correction: 17:43 UTC
+
+ENG's current correction is `task_0970a0550c79 / ctx_afada235a4cc`, verified
+depth 2 and exact-worker live. Both root and Sol independently found the NEL
+trim discrepancy; root additionally identified overflowing signed-integer
+validation and integral float JSON admission differences. Root recorded the
+reference checks and sent them to Sol for correction by that same Kimi leaf;
+see `sol-wave/eng-identity/root-provider-record-boundaries.md`. No native record
+integration is accepted yet, and prior compiling-stub failures are sensitivity
+evidence rather than a historical production defect.
+
+CAP confirmed resumed direct source/API verification and implementation on
+the same Sonnet leaf in `msg_0749feb058be`; root observed the lead's actual
+terminal evidence after the stale transcript tail. The internal fork violation
+remains disclosed; no replacement, duplicate or further descendant was launched.
+
+Root's two package-artifact fixture tests passed but do not verify the complete
+Electron runtime identity. The bounded packaging follow-up `task_f97178f8b8fa`
+is queued after the existing native foundation and persisted-renderer model
+tasks, not an additional active leaf. Its explicit ownership and admission
+contract is `packaged-artifact-admission-followup.md`. No install occurred.
+
+Audit remains 11/12 (91.7%, medium confidence, delta 0), next closure E5
+resources/publication; full-fidelity 24-hour delivery risk remains high.
+
 ### Current integration checkpoint: 17:36 UTC
 
 Commit `2ecb23d` admits the two renderer checkpoint policy modules and their
