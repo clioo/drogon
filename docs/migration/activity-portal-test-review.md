@@ -35,3 +35,27 @@ This proves extension-specific staging/config behavior and existing refusal regr
 The original installed source dependencies resolve to React **19.2.8**, React DOM **19.2.8**, happy-dom **20.11.8**. None of those packages resolves from the rewrite root used as the capsule ancestor. A valid renderer capsule needs explicit reviewed source-compatible dependency resolution and JSX/environment configuration; do not silently use a different React, mutate the frozen source, or count module-resolution failure as behavioral RED. No renderer capsule was executed or claimed ready in this checkpoint.
 
 Next: reuse the accepted isolated runner, add the smallest reviewed dependency/config contract with regression tests, preserve original assertion bytes and run both exact source files. Then port the full relevant renderer suite and execute real product journeys. These three tests supplement, never replace, the complete source-test inventory.
+
+## Executed follow-up — 2026-09-06 06:29 UTC
+
+The preparation above is superseded for these **three exact original tests only**. Both source files executed successfully, with assertions and production module byte-for-byte preserved. Root inspected retained JSON assertion results, not just exit status.
+
+| Retained capsule under `.preflight/parity-baseline/` | Original cases | Result |
+| --- | --- | --- |
+| `audit-activity-publication-QWdNFk` | Identical descriptors do not rerender; changed pane key rerenders once | 2 passed |
+| `audit-activity-feedback-uOSGIu` | Publisher/subscriber feedback settles without throwing, fewer than ten renders | 1 passed |
+
+Both: exit 0, no skipped/pending/todo/failed tests, Node 24.19.0, **Vitest 4.1.11**, React/React DOM 19.2.8, happy-dom 20.11.8, macOS arm64. The filename containing `react185` does not mean the executed React version was 18.5. No Electron window or terminal was rendered. No candidate product RED/GREEN or E1 closure is claimed.
+
+Manifests in `tests/parity/baseline-capsules/`:
+
+- `activity-terminal-publication.json`: SHA256 `0849331966bd8787eb18152a8345dcf92113ce01e99b173c6035ec75d5dfc7db`.
+- `activity-terminal-publication-loop.json`: SHA256 `96943dc91106156833970f0f5c8b703181a19d11ca2b03347bc67e77fd66045f`.
+
+Each capsule retains `stage-receipt.json`, exact source/license bytes, config and `vitest-results.json`. Reproduce using the existing runner and appropriate manifest with `--source-root /Users/carlos/Documents/Drogon-mentu-session --vitest-entry /Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs --execute --approved-manifest-sha256 <digest>`, using the bundled Node above. Each invocation creates a fresh evidence directory.
+
+The optional `rendererRuntime` manifest contract pins exactly three package names/versions. Installed source dependencies resolve into capsule-local links, with package metadata hashes/targets bound into the stage receipt and rechecked before execution. Nothing installs dependencies or writes the source checkout. Automatic JSX follows the independently read `config/tsconfig.web.json`; test-local happy-dom annotations remain unchanged. Original global setup hooks and application aliases are not loaded for this reviewed dependency-small slice.
+
+**Limits:** not a hermetic sandbox or complete dependency-integrity check. Package metadata is hashed, not every dependency byte; transitive dependencies resolve through the existing installation. Links expose those package directories to executed code; source tests must still be reviewed for effects. General source-suite configuration compatibility remains unproven.
+
+Test-first infrastructure check: new declaration-refusal assertion failed before integration (1 failed, 69 filtered). After integration and additional binding/redirect regressions, **78 infrastructure tests pass, none skipped**, on Vitest 5.0.0. This is separate from the original Vitest 4.1.11 tests above. Root notified E1 via `msg_cbac666240d7`. Audit remains ~60% (7/12 accepted groups, medium-low confidence); next milestone is acceptance of finite area follow-ups, not more passing isolated cases. The 24-hour implementation target remains at risk while audit gates are open.

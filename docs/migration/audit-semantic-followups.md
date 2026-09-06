@@ -40,7 +40,15 @@ No app build/install, source edit, deployment, provider experiment, Git push or 
 
 E1 created child Run `run_3d1c0573e82c`, Task `task_9cfdb3d5d545`, Dispatch `ctx_840482929375`, terminal `term_5d791978-1eeb-4b4e-be79-8dc4e9fc3bc8`, from its own active lead identity. Root independently inspected `worker-show`: depth **2**, `ready` / `input_accepted`, exact worker **live**. Root also read the Orca-resolved Claude transcript and observed actual source-read/tool actions. This proves launched execution, not just accepted input. E1 reported launch argv `claude --model claude-sonnet-5 --effort medium --dangerously-skip-permissions`; attached custom-terminal model fields remain null, not authenticated model proof.
 
-Root message `msg_1a8527912dcf` confirms launch/inference acceptance and requests reviewed delivery plus child release before authorizing the remaining four leaves. Child completion and cleanup are still pending at this checkpoint; the root does not take over E1's child lifecycle.
+Root message `msg_1a8527912dcf` confirms launch/inference acceptance and requests reviewed delivery plus child release before authorizing the remaining four leaves. Child completion and cleanup were pending at this checkpoint; the root does not take over E1's child lifecycle.
+
+### 06:31 UTC follow-up
+
+E1 reported child completion, source corrections and a release receipt retaining the external terminal (`processAction: none`). Root independently verifies completed depth-2 dispatch, but worker-show still says releaseState `not_requested`. Requested the compact exact release receipt in `msg_f5bd3a1ce0b1`; no manual terminal close or lifecycle impersonation. Other leaves remain pending this receipt verification.
+
+E4 delivered its 204-command S1 candidate in `msg_2068f05b9416`, not yet root-accepted. Its exact terminal was immediately reused for **task_b9fa5d3075c4 / ctx_4f079b6cf63c**, ready/input accepted, auditing S2–S5 in `followup-cli-boundaries.md/json`. Earlier candidate files are frozen. Root owns independent S1 review. No feature implementation or audit percentage increase follows from delivery alone.
+
+Root executed three unchanged original Activity React assertions with source-compatible dependencies; see `activity-portal-test-review.md` for retained results and limits. They correct the leaf's missing-test claim, not full renderer parity.
 
 ## Additional root source finding for E2-O01
 

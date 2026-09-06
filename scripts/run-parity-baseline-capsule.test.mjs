@@ -259,6 +259,28 @@ describe("loadManifest", () => {
 });
 
 describe("stageCapsule", () => {
+  it("binds renderer runtime to the receipt and automatic JSX config", () => {
+    const manifest = buildManifest(fixture.root, fixture.revision);
+    manifest.rendererRuntime = { react: '19.2.8', 'react-dom': '19.2.8', 'happy-dom': '20.11.8' };
+    for (const [name, version] of Object.entries(manifest.rendererRuntime)) {
+      const directory = path.join(fixture.root, 'node_modules', name);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name, version }));
+    }
+    const manifestPath = writeManifest(workDir, manifest);
+    const receipt = stageCapsule({ manifestPath, sourceRoot: fixture.root, repoRoot: fakeRepoRoot });
+    expect(receipt.rendererRuntime).toHaveLength(3);
+    expect(readFileSync(receipt.configPath, 'utf8')).toContain('jsx: "automatic"');
+    expect(() => executeCapsule({ receipt: { ...receipt, rendererRuntime: null }, repoRoot: fakeRepoRoot })).toThrow('rendererRuntime');
+  });
+
+  it("refuses an unpinned renderer runtime instead of silently using host dependencies", () => {
+    const manifest = buildManifest(fixture.root, fixture.revision);
+    manifest.rendererRuntime = {};
+    const manifestPath = writeManifest(workDir, manifest);
+    expect(() => stageCapsule({ manifestPath, sourceRoot: fixture.root, repoRoot: fakeRepoRoot })).toThrow(/Renderer runtime/);
+  });
+
   it("stages exact bytes matching the pinned digests under the canonical parent", () => {
     const manifest = buildManifest(fixture.root, fixture.revision);
     const manifestPath = writeManifest(workDir, manifest);
