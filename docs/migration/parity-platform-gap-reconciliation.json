@@ -213,7 +213,7 @@
         "parity-relay-mobile-wire-contracts.json",
         "parity-relay-mobile-wire-contracts.md"
       ],
-      "enumerationDisposition": "parity-relay-mobile-wire-contracts.json/.md v2 independently reviews actual relay framing/routing plus16 original isolated protocol cases. It corrects the false terminal-stream opcode equivalence.133 request/12 inbound/12 outbound dictionary counts remain leaf registration/composition claims pending independent reconciliation, not namespace completeness.",
+      "enumerationDisposition": "Wire v3 corrects two fixed plugin methods and workspace.stale:135 request/13 outbound dictionary names, not complete composition.147 AST registration candidates retained with symbolic/support-context debt. Actual framing/routing and resync constructors source-reviewed; prior16 original protocol cases. Variant/auth/runtime followups remain.",
       "acceptance": "Enumerate actual relay dispatch composition, auth, stream opcodes and parameter/error handling; preserve SSH ownership and both client/host version skews."
     },
     {
@@ -227,9 +227,12 @@
       "evidence": [
         "parity-source-bridges.json",
         "parity-skill-provider-catalog.json",
-        "parity-work-packages.md"
+        "parity-work-packages.md",
+        "parity-relay-mobile-wire-contracts.json",
+        "parity-relay-mobile-wire-contracts.md",
+        "parity-wire-call-sites.json"
       ],
-      "enumerationDisposition": "Desktop mobile bridge (15 methods), wire constants and 532 allocated mobile test/support files are not the mobile client's outgoing RPC/subscription census.",
+      "enumerationDisposition": "Wire v3 and parity-wire-call-sites.json independently fingerprint956 mobile source files:313 syntax candidates,278 direct literals/156 names,35 nonliteral. Four conditional bodies add7 names (163 lower bound);31 candidates still need receiver/caller-flow. Binary adapters read, not negotiated runtime or complete outgoing surface.",
       "acceptance": "Reconcile mobile client adapters, methods/streams, capability gates, pairing/revocation and reconnect; port tests and verify against old/new host combinations."
     },
     {

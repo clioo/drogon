@@ -1,22 +1,25 @@
 # G13/G14/G19 — relay, mobile and agentWait review
 
-Machine record: `parity-relay-mobile-wire-contracts.json` v2.
+Machine record: `parity-relay-mobile-wire-contracts.json` v3.
 Source c97906287bb7a390b25e2025b600d9fb3c25d9c3, read-only.
-Coordinator base2cc40e3. **Partial coordinator review; runtime acceptance unproven.**
+Coordinator follow-up baseb909fa0. **Partial coordinator review; runtime acceptance unproven.**
 
 G19's bounded host/worker/federation source transformations are reviewed.
 G13 framing/routing is reviewed with16 original isolated protocol cases.
-G13 method composition and G14 mobile census remain pending independent
-acceptance. This distinction supersedes the original leaf's broad read-tier
-label. All61 fingerprints match both checkout bytes and pinned Git blobs;
-21 full-body reads plus one partial type read are identified in JSON.
-Hashing the other files is not reading their behavior.
+G13 method composition and G14 full mobile RPC resolution remain pending.
+The follow-up AST census now covers1140 tracked TS/TSX files (956 mobile,
+184 relay), binding bytes to pinned Git blobs. This is syntax evidence,
+not body review or runtime reachability. The earlier22 full/partial reads
+and61 fingerprints remain separate from13 additional full source body reads
+and the partial workspace.stale constant read. Exact tiers are in JSON.
 
 ## G13 — separate relay namespace and framing
 
 The615 runtime RPC names and975 preload channels are different surfaces.
-The leaf's relay dictionary has133 request keys,12 inbound and12 outbound
-notification keys. Arithmetic verified, not registration completeness.
+The leaf's relay dictionary had133 request keys,12 inbound and12 outbound
+notification keys. It missed two fixed plugin requests and workspace.stale:
+the corrected dictionary has135 request,12 inbound and13 outbound keys,
+still not a proven complete registration/composition census.
 Request prefixes are fs25 and git43 (correcting leaf29/41), pty21,skills11,
 workspace3,wslfs9, plus the other groups retained in JSON.
 
@@ -66,11 +69,28 @@ substitutes -33008 for that request, not a successful original result; rejecting
 the substitute leaves the client connected and lets the request time out.
 These dispatcher bodies were read, not executed.
 
-Still pending: independently reconcile registration/constructor composition,
-dynamic plugin-manifest names and resync marker state.method origins, outbound
-publication paths, client parameter/error pairing and auth/lifecycle journeys.
-The leaf lists remain available as pointers; diffing unrelated method names
-would not discharge these obligations.
+Resolved follow-up: registeredMethod is a local closure argument, not a
+plugin-manifest-supplied name. Its two fixed calls register plugins.hostCall.panel
+and plugins.hostCall.worker. RelayRuntimeServices actually invokes that setup,
+but supplies a null identity resolver and unavailable policy: registered does
+not mean usable plugin authority. The helper rejects unavailable identity
+before panel admission/request validation/host execution. Those imported
+admission/executor implementations remain outside this new body review.
+
+The two resync marker constructors pass fs.changed and workspace.stale,
+not the earlier candidate git.responseChunk/fs.streamChunk. Workspace stale
+carries namespace only after per-client snapshot refusal; watcher overflow
+uses fs.changed with an overflow event/root path. The marker publisher uses
+control-lane admission, per-client/key coalescing, latest pending params and
+capacity-triggered retry. Failed settlements retain; a real detach forgets;
+an invalidated but still attached primary keeps state for reconnect.
+Full runtime and mixed-version marker behavior still require tests.
+
+Full RelayRuntimeServices constructor read also preserves one shared response
+stream registry for fs/git and exclusion of the requesting client from remote
+CLI forwarding. The AST records147 onRequest/onNotification candidate sites;
+symbolic arguments/support harnesses and variant-specific composition still
+need reconciliation. Do not equate callsite count with method-name count.
 
 ## Original protocol baseline executed
 
@@ -93,19 +113,52 @@ failure, oversized-body resynchronization and reset/drain cancellation.
 No real socket, SSH, daemon, mobile, models or user profiles used by tested code.
 These are not full-dispatcher, candidate or mixed-version results.
 
-## G14 — leaf mobile census still pending
+## G14 — syntax census verified; full RPC surface remains pending
 
-The156 distinct mobile outgoing sendRequest/subscribe literal names and seven
-subscription names remain leaf scan results. They do not supersede the15-method
-desktop mobile bridge, which is a different hop. The original regex and full
-lists remain in JSON, including limitations: single quotes and restricted
-characters, no type-checked receiver/constant/template resolution, no individual
-mobile callsite fingerprints. Name uniqueness is not file count or completeness.
+scripts/inventory-wire-call-sites.mjs reuses the installed Babel parser7.29.8
+and stdout-only census pattern. It parses pinned tracked TS/TSX, rejects source
+drift/symlinks and never executes source modules. Five Node24 fixture tests pass:
+generic/optional/computed literal calls, dynamic arguments, JSX/line anchors,
+comments/strings/nonmember exclusions and parse-failure rejection. No original
+product test is represented by those five cases. Fresh output deep-equals the
+saved parity-wire-call-sites.json, including1140 file hashes and461 callsites.
 
-Next: independently enumerate actual calls (including generics/nonliteral args),
-bind file/line/hash evidence, then read mobile binary adapters and pairing,
-capability/revocation/reconnect paths in both version directions. No mobile
-acceptance or execution is claimed by the relay tests.
+Mobile has313 syntax candidates:278 literal callsites with156 unique names,
+matching the leaf list exactly, plus35 nonliteral candidates the leaf missed.
+The scanner does not type-check receivers; subscribe can be an unrelated local
+subscription. Dynamic computed callees and destructured aliases are excluded
+explicitly. Caller-flow resolution cannot be inferred from syntax matches.
+
+Four conditional RPC call bodies were read fully and add seven names:
+
+| Source action | Additional names beyond156 direct literals |
+| --- | --- |
+| Hosted comments | gitlab.addMRComment, gitlab.addIssueComment |
+| Project field editing | github.project.clearItemField, github.project.updateItemField |
+| Project issue/PR editing | github.project.updatePullRequestBySlug |
+| Task creation | github.createIssue, gitlab.createIssue |
+
+The named lower bound is163, not the complete client surface. The other31
+nonliteral syntax candidates still need receiver/caller-flow review. Exact
+file/line/argument shapes remain in the census. No need to rerun a regex or
+recreate the156-name list. Desktop mobile bridge15 is still a different hop.
+
+Full mobile binary adapter bodies were read. Terminal frames use16bytes,
+kind0x74/version1, little-endian stream ID and split high/low sequence. Decoder
+recognizes Output1/SnapshotStart2/Chunk3/End4/Resized5/Error6/Metadata12; other
+opcodes drop, byte3 is not checked. Handler ignores absent listeners, buffers
+snapshot chunks by stream ID and publishes resized/default scrollback after
+end. It does not itself enforce sequence order or snapshot size. Those duties
+must be traced at the transport/session boundary, not invented in the audit.
+
+Browser screencast decoder is separate: kind0x62/version1/Frame1,16byte header,
+jpeg/png, zero reserved uint32, metadata length within packet, finite-number
+metadata allowlist and image byte view. It is not the relay13byte framing.
+One original terminal metadata-routing test body was read, not executed.
+
+Next: remaining method flows, full adapter ownership/sequence/backpressure,
+capability negotiation, pairing/revocation/reconnect and both version skews.
+Relay's16 passing tests do not establish any of those mobile behaviors.
 
 ## G19 — reviewed three-state transformation
 

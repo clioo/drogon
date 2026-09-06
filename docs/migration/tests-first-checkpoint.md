@@ -1205,6 +1205,32 @@ installation, models, push or PR in this pass. Existing dirty product work
 preserved. Audit/goal remain open; next is independent bounded composition
 and mobile adapter review plus already-owned G7/G8/E1–E4/journey followups.
 
+## Mobile syntax census and corrected relay wrapper origins
+
+Previous goal turn made progress inb909fa0. A bounded Babel AST census now
+records1140 pinned tracked TS/TSX files and461 syntax candidates, with raw
+file hashes/line/receiver/nonliteral-argument evidence. Five new scanner tests
+pass on Node24.19.0; a fresh census deep-equals parity-wire-call-sites.json.
+Two attempts to bring oversized raw output into the tool context were truncated;
+neither was accepted as evidence. Bounded slices were assembled and independently
+compared against a full fresh in-memory regeneration. No source file written.
+
+The156 direct mobile names are confirmed, but35 nonliteral callsites were
+missing from the leaf's account. Four conditional source call bodies add7
+names, establishing163 named lower bound, not complete API reachability.
+The remaining31 candidates require receiver/caller tracing. Source review also
+resolved two fixed plugin relay methods wrongly called manifest-dynamic, and
+workspace.stale previously absent from outbound notifications. Constructor
+currently denies plugin identity; registration is not usable authority.
+
+Thirteen additional complete source bodies and one partial constant read are
+identified in wire v3, including mobile binary adapters and both resync callers.
+One original mobile metadata test body read, not executed. No original test
+run in this turn; baseline214 cases/23 capsules unchanged. This source audit
+does not exercise real pairing/transport, models, UI, app install or candidate.
+No product changes integrated, personal sessions changed, worker launches,
+recipe changes, upstream PRs or push. Goal/audit remain active/open.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

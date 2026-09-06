@@ -1,10 +1,10 @@
 {
-  "schema": "drogon.parity-relay-mobile-wire-contracts/2",
+  "schema": "drogon.parity-relay-mobile-wire-contracts/3",
   "status": "coordinator-partial-review-enumeration-pending",
   "runtimeAcceptance": "unproven",
   "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
   "checkoutBase": "6339736",
-  "scope": "G13 relay framing/routing and G19 agentWait host/worker/federation transformations are coordinator source-reviewed, with explicit execution boundaries. G13 registration/outbound census and G14 mobile literal census remain leaf reports pending independent review. No live relay, IPC, SSH multiplexer, mobile client, candidate or mixed-version execution. Three unchanged original protocol suites executed in isolated capsules:16 cases.",
+  "scope": "G13 relay framing/routing plus fixed plugin/resync origins, G19 agentWait transformations and G14 syntax census/mobile binary adapter source bodies reviewed within explicit bounds. Full mobile method flow, relay variant composition, auth/transport/skew execution remain pending. Prior16 original relay protocol cases retained;5 new scanner tests are not product cases.",
   "ownership": {
     "G13": {
       "owners": [
@@ -47,7 +47,7 @@
   ],
   "g13_relayDispatcherSurface": {
     "note": "LEAF ENUMERATION CLAIM, not coordinator-accepted coverage: Every relay method/notification is registered by string name through exactly two generic entry points, dispatcher-client-state.ts:59 onRequest(method,handler) and :68 onNotification(method,handler) (the latter throws on duplicate registration, see :62-64 comment re STA-4571) into two Maps consumed by dispatcher-rpc-routing.ts:71 (handleRequest) and :177 (handleNotification). rpc.cancel is a third, hard-coded special case at :171-175, never through the map. Enumeration below is every non-test onRequest/onNotification call site under src/relay/*.ts found by `grep -rn '\\.onRequest(\\|\\.onNotification(' src/relay/*.ts` excluding *.test.ts and the three test-harness/test-setup/test-dispatcher files that reimplement the same two methods for unit tests. Handler BODIES were read only where cited in evidence tiers below (registration-site-only citations were not opened past the onRequest/onNotification call itself).",
-    "requestMethodCount": 133,
+    "requestMethodCount": 135,
     "requestMethods": {
       "agent.execNonInteractive": "src/relay/agent-exec-handler.ts:120",
       "agent.cancelExec": "src/relay/agent-exec-handler.ts:123",
@@ -181,7 +181,9 @@
       "wslfs.unlink": "src/relay/wsl-hook-fs-bridge.ts:115",
       "wslfs.chmod": "src/relay/wsl-hook-fs-bridge.ts:124",
       "wslfs.readdir": "src/relay/wsl-hook-fs-bridge.ts:133",
-      "wslfs.mkdir": "src/relay/wsl-hook-fs-bridge.ts:145"
+      "wslfs.mkdir": "src/relay/wsl-hook-fs-bridge.ts:145",
+      "plugins.hostCall.panel": "src/relay/plugin-host-call-handler.ts:14,76; registration invoked src/relay/relay-runtime-services.ts:93",
+      "plugins.hostCall.worker": "src/relay/plugin-host-call-handler.ts:15,77; registration invoked src/relay/relay-runtime-services.ts:93"
     },
     "notificationMethodsInboundCount": 12,
     "notificationMethodsInbound": {
@@ -198,8 +200,8 @@
       "relay.configureGraceTime": "src/relay/relay-grace-lifecycle.ts:33 (dual-registered as both onNotification and onRequest for the same method name)",
       "session.registerRoot": "src/relay/relay-runtime-services.ts:121 (dual-registered as both onNotification and onRequest)"
     },
-    "notificationMethodsOutboundNote": "Outbound (host-publishes-to-client) pushes go through dispatcher.notify / notifyClient / tryNotifyClient / publishProducerNotification (dispatcher-notification-publication.ts), a SEPARATE code path from the inbound onNotification map — the same method name can appear on both sides (pty.data is both an inbound client->host input notification and an outbound host->client output push). Enumerated by grepping literal `method: '...'` object keys and `.notify(/.notifyClient(/.tryNotifyClient(/.publishProducerNotification('...'` call sites; two call sites pass a constant (AGENT_HOOK_NOTIFICATION_METHOD, REMOTE_WORKSPACE_CHANGED_NOTIFICATION) and one passes a caller-parameterized `state.method` (relay-client-resync-marker.ts:87,92) whose concrete values were not traced to every call site — recorded as a dynamic unknown below.",
-    "notificationMethodsOutboundCount": 12,
+    "notificationMethodsOutboundNote": "Prior leaf literal/constant list corrected with actual resync marker constructor flow; retained13 named methods are not proof of full outbound publication/composition coverage. workspace.stale is omitted by the old leaf's12-key list.",
+    "notificationMethodsOutboundCount": 13,
     "notificationMethodsOutbound": {
       "pty.data": "src/relay/pty-handler.ts:1422 (dispatcher.notify) — host->client terminal output push, admission-gated by admitsPtyDataPublication",
       "pty.exit": "src/relay/pty-handler.ts:1485 (dispatcher.notify)",
@@ -212,7 +214,8 @@
       "git.cloneProgress": "src/relay/git-handler.ts:231 (dispatcher.notify)",
       "git.responseChunk": "src/relay/git-response-stream.ts:132,195 (bulk-lane push for large git responses over GIT_RESPONSE_STREAM_THRESHOLD, src/relay/protocol.ts:88-98)",
       "agent.hook": "src/relay/agent-hook-envelope-publication.ts:127 (const AGENT_HOOK_NOTIFICATION_METHOD, src/shared/agent-hook-relay.ts:120; publishProducerNotification)",
-      "workspace.changed": "src/relay/workspace-snapshot-publication.ts:39 (const REMOTE_WORKSPACE_CHANGED_NOTIFICATION, src/shared/remote-workspace-types.ts:62; publishProducerNotification)"
+      "workspace.changed": "src/relay/workspace-snapshot-publication.ts:39 (const REMOTE_WORKSPACE_CHANGED_NOTIFICATION, src/shared/remote-workspace-types.ts:62; publishProducerNotification)",
+      "workspace.stale": "src/relay/workspace-snapshot-publication.ts:18-21; src/shared/remote-workspace-types.ts:73; parameterized resync publisher"
     },
     "streamOpcodes": [
       "The relay DOES NOT implement shared/terminal-stream-protocol.ts opcodes. Relay framing is13 bytes: one type byte, uint32BE id at1, ack at5, payload length at9. Relay protocol types Regular1, Handshake2, KeepAlive9; desktop main protocol lists Regular1/KeepAlive9. Framing accepts numeric types; dispatcher handles Regular and KeepAlive only after updating contact/highest-sequence metadata. Unknown types are not terminal-stream negotiation.",
@@ -221,20 +224,21 @@
       "The mixed-runtime terminal-stream outputPause negotiation example belongs to a different protocol. Relay bundle/version lock and runtime semantic compatibility must not be merged or silently substituted."
     ],
     "dynamicUnknowns": [
-      "plugin-host-call-handler.ts:33-34 registers `registeredMethod` — a plugin-manifest-supplied method name string, resolved at plugin-load time, not enumerable from static source alone. Genuinely dynamic; owner WP-ENG-RELAY should trace the plugin manifest schema separately.",
-      "relay-client-resync-marker.ts:87,92 passes `state.method`, a caller-supplied field on a MarkerState object; which concrete method strings flow through it (candidates include git.responseChunk/fs.streamChunk resync markers per the surrounding stream-chunk documentation in protocol.ts) was not traced to every constructor call site in this bounded pass.",
-      "aiVault.* handler (ai-vault-handler.ts) forwards to a separate ai-vault-service-* subprocess protocol (ai-vault-service-protocol.ts, not opened this pass) whose own wire methods are out of scope here — only the two relay-facing method names were confirmed."
+      "RESOLVED: registeredMethod is a local closure parameter called exactly with fixed plugins.hostCall.panel and plugins.hostCall.worker, NOT plugin-manifest-supplied names. RelayRuntimeServices installs both with identity resolver returning null and unavailable policy. Registration is real, but deployed plugin host authority is intentionally unavailable at this callsite.",
+      "RESOLVED bounded constructor search: marker state.method comes from fs.changed (relay-watcher-event-emitter.ts:168) and workspace.stale (workspace-snapshot-publication.ts:18). It is NOT the proposed git.responseChunk/fs.streamChunk mapping. Per-client/key control-lane marker retry preserves pending latest params, in-flight coalescing, capacity callbacks and disconnect cleanup; actual runtime tests remain owed.",
+      "aiVault relay handler's separate service subprocess protocol remains unreviewed beyond earlier relay-facing names."
     ],
-    "enumerationStatus": "133 request dictionary keys;12 inbound/12 outbound keys arithmetically checked, registration sites/composition not independently reconciled. Request prefixes actually fs25/git43, correcting leaf MD29/41. Dynamic method closure pending.",
+    "enumerationStatus": "135 named request keys and13 outbound keys after two fixed plugin methods and workspace.stale corrected; prior133 request/12 outbound list was incomplete.147 AST registration candidate callsites include symbolic args and test-support sites; full runtime variant/composition still not accepted.",
     "coordinatorRoutingReview": [
       "Request registration uses Map.set and can replace prior handler; notification registration rejects duplicates. rpc.cancel is client-ID/request-ID scoped and special-cased outside the notification map. Dual request/notification names are two inbound message kinds, not opposite directions.",
       "Missing request method answers -32601; missing notification handler is ignored. Request context snapshots client generation, membership and abort signal. Stale completion does not publish a response; response settlement callbacks are one-shot and exceptions contained.",
       "Request errors carry numeric code or -32000; data only for validated skill-install/terminal-unavailable shapes. Node string error codes still lost (accepted ENOENT register). Response capacity rejection substitutes -33008 for that request, not success of original result; if substitute is rejected client remains connected and request can time out.",
-      "requestAnyClient prefers a nonsynthetic client and fails without one; pending response correlation/timer cleanup read. This is source body evidence only; full auth/construction/composition and dispatcher execution remain owed."
+      "requestAnyClient prefers a nonsynthetic client and fails without one; pending response correlation/timer cleanup read. This is source body evidence only; full auth/construction/composition and dispatcher execution remain owed.",
+      "Full RelayRuntimeServices constructor read: one shared GitResponseStreamRegistry for fs/git prevents stream ID collision; watcher/PTY removal ownership wired together; remote CLI forwarding excludes requesting client. Constructor invocation is not execution. Plugin callbacks here return no authority, so registered methods fail unavailable before executing a plugin call."
     ]
   },
   "g14_mobileOutgoingSurface": {
-    "note": "Enumerated by a Python regex over every non-test file under mobile/src/**/*.ts(x) (tolerant of the call spanning multiple lines, since ~110 of 156 call sites are single-line and the rest wrap the method literal onto its own line): \\.(sendRequest|subscribe)\\(\\s*\\n?\\s*'([a-zA-Z_.]+)'. This is a call-site literal scan, not a type-checked resolution — it will miss any call whose method is built from a template string, a shared constant, or string concatenation; none were observed in a follow-up grep for non-literal-first-argument `.sendRequest(`/`.subscribe(` calls, but that follow-up grep was pattern-based, not AST-verified, so a residual undercount is possible and is recorded as a gap, not asserted absent.",
+    "note": "Coordinator Babel AST census independently matches156 direct literal names at278 mobile callsites, but finds35 nonliteral candidates the leaf did not expose.313 mobile candidates across956 source files; count includes member-name lookalikes without type resolution. Four conditional RPC callsites explicitly resolve to8 possible names,7 absent from direct-literal list; other31 nonliteral sites retain caller-flow/receiver attribution debt.",
     "distinctMethodOrSubscriptionCount": 156,
     "methodsListed": [
       "accounts.consumeCodexResetCredit",
@@ -404,7 +408,48 @@
       "terminal.subscribe"
     ],
     "priorEvidenceRelationship": "This 156-name list is the mobile CLIENT's outgoing sendRequest/subscribe surface. It is not the same surface as the desktop mobile bridge's 15 methods cited in parity-work-packages.md (that bridge mediates a different hop — desktop main process to a paired mobile-pairing transport). A name appearing in both is not verified here to share params/response shape; cross-matching those two surfaces method-by-method is an open follow-up, not performed in this pass.",
-    "binaryStreamAdapters": "rpc-client-terminal-binary-frame.ts and browser-screencast-protocol.ts (referenced by SubscribeOptions.onBinaryFrame in mobile/src/transport/rpc-client.ts:18,32) indicate a binary frame channel parallel to JSON-RPC subscriptions for terminal and browser-screencast data; neither file's opcode/frame layout was opened this pass — recorded as a gap, next pointer below."
+    "binaryStreamAdapters": "Full mobile terminal-stream-protocol.ts, rpc-client-terminal-binary-frame.ts and browser-screencast-protocol.ts read. Terminal16byte little-endian header kind0x74/version1; decoder recognizes Output1/SnapshotStart2/Chunk3/End4/Resized5/Error6/Metadata12, ignores unknown opcodes, does not validate reserved byte3. Seq is high/low uint32 reconstruction. Handler ignores unknown streams; snapshots assembled per stream, metadata supplies resized vs default scrollback, explicit type/id/serialized override conflicting metadata. No seq reorder/drop handling in this adapter alone. Browser screencast kind0x62/version1/Frame1,16byte header, jpeg/png only, validates reserved uint32 at12 and metadata boundary; copies only finite numeric allowed metadata, returns image view. Separate decode contracts; actual negotiation/transport/pairing remains owed.",
+    "coordinatorConditionalResolutions": [
+      {
+        "file": "mobile/src/tasks/use-mobile-tasks-hosted-comment-review-actions.tsx",
+        "line": 60,
+        "possibleNames": [
+          "gitlab.addMRComment",
+          "gitlab.addIssueComment"
+        ]
+      },
+      {
+        "file": "mobile/src/tasks/use-mobile-tasks-project-metadata-actions.tsx",
+        "line": 150,
+        "possibleNames": [
+          "github.project.clearItemField",
+          "github.project.updateItemField"
+        ]
+      },
+      {
+        "file": "mobile/src/tasks/use-mobile-tasks-project-workspace-comment-actions.tsx",
+        "line": 104,
+        "possibleNames": [
+          "github.project.updateIssueBySlug",
+          "github.project.updatePullRequestBySlug"
+        ]
+      },
+      {
+        "file": "mobile/src/tasks/use-mobile-tasks-task-create-actions.tsx",
+        "line": 53,
+        "possibleNames": [
+          "github.createIssue",
+          "gitlab.createIssue"
+        ]
+      }
+    ],
+    "namedSurfaceLowerBound": 163,
+    "lowerBoundNote": "156 direct literal names plus7 new conditional alternatives, not complete reachable mobile RPC surface. Four conditional call bodies read fully; no execution or server-shape verification.",
+    "originalTestsReadNotRun": {
+      "file": "mobile/src/transport/rpc-client-terminal-binary-frame.test.ts",
+      "cases": 1,
+      "scope": "Metadata routing to matching stream listener only; not full snapshot/opcode behavior. Original mobile runner not invoked."
+    }
   },
   "g19_agentWaitTrace": {
     "producer": {
@@ -552,7 +597,27 @@
       "pattern-scanned-call-site-only": "mobile/src/**/*.ts(x) (156 files' worth of call sites via regex; individual file hashes not computed for this bulk tier — see g14_mobileOutgoingSurface.note for the exact pattern used)",
       "note": "'declaration-only-constant-lookup' means only the exported const's string literal was read to resolve a symbolic method name used elsewhere (e.g. AGENT_HOOK_REQUEST_REPLAY_METHOD); the surrounding file's other exports were not reviewed. 'directly-read-full-or-substantial' means the cited function/class body containing the registration or trace point was read, not merely grepped."
     },
-    "note": "61 frozen-source hashes verified against working bytes AND pinned Git blobs; hashing is not semantic review. Only coordinator lists are accepted direct reads. Leaf registration/mobile counts remain pending. No title count promoted to executed tests."
+    "note": "Previous61 hashes still retained; additional direct source paths bind to the1140-file syntax census. Syntax parse/fingerprint is not body review. Only explicit coordinator lists are semantic reads. Original mobile one-case body read but not run; five scanner tests are independent infrastructure tests.",
+    "additionalCoordinatorFullBodyReadsAtB909fa0": [
+      "mobile/src/transport/rpc-client.ts",
+      "mobile/src/transport/rpc-client-terminal-binary-frame.ts",
+      "mobile/src/transport/terminal-stream-protocol.ts",
+      "mobile/src/transport/browser-screencast-protocol.ts",
+      "src/relay/plugin-host-call-handler.ts",
+      "src/relay/relay-client-resync-marker.ts",
+      "src/relay/relay-runtime-services.ts",
+      "src/relay/workspace-snapshot-publication.ts",
+      "src/relay/relay-watcher-event-emitter.ts",
+      "mobile/src/tasks/use-mobile-tasks-hosted-comment-review-actions.tsx",
+      "mobile/src/tasks/use-mobile-tasks-project-metadata-actions.tsx",
+      "mobile/src/tasks/use-mobile-tasks-project-workspace-comment-actions.tsx",
+      "mobile/src/tasks/use-mobile-tasks-task-create-actions.tsx"
+    ],
+    "additionalPartialReadAtB909fa0": {
+      "file": "src/shared/remote-workspace-types.ts",
+      "lines": "55-75",
+      "scope": "workspace.stale constant and documented notification evolution"
+    }
   },
   "sourceFingerprints": {
     "src/relay/dispatcher-contract.ts": "7c397f9d51c0e3eca604e9075cddb6609a5e114284999009e8a86146e766c081",
@@ -615,7 +680,14 @@
     "src/relay/protocol-handshake.test.ts": "048813d0e41473479760c19b09d332304a7ecb754a6752c51ebc541ed53d54bd",
     "src/relay/protocol-json-payload.test.ts": "8d007b6aa48cc531f4c3468fd040b8a3b9e026d3b49491314da5cd90db70cae7",
     "src/relay/protocol-backpressure.test.ts": "1173eb455d8645e0e4ccac2b30bb063ff94654b19dfec6976ed68169481319ae",
-    "src/main/runtime/rpc/methods/orchestration-worker-interactive-wait.test.ts": "6f6aaac05d28754be502e6a55ea494ffac00fabe50724f7a8474f2a0b4fbee92"
+    "src/main/runtime/rpc/methods/orchestration-worker-interactive-wait.test.ts": "6f6aaac05d28754be502e6a55ea494ffac00fabe50724f7a8474f2a0b4fbee92",
+    "mobile/src/transport/rpc-client-terminal-binary-frame.ts": "ebefb4a8dfb8c077d6c8c3998574cfd23a663e305dab1b3f42f5d83be4bfa214",
+    "mobile/src/transport/terminal-stream-protocol.ts": "4798024edb670617d9603e5468859a45392158fdab76a27d6929563ef33e06ad",
+    "mobile/src/transport/browser-screencast-protocol.ts": "a46ddb6091b401eb4b7999c665a4e88bffebf43869cafe2eaf0b8a38057ca66d",
+    "mobile/src/tasks/use-mobile-tasks-hosted-comment-review-actions.tsx": "699f3669806a7d3020d72c71bbaa58119d38856100c0e8ecd12506062ed70eb5",
+    "mobile/src/tasks/use-mobile-tasks-project-metadata-actions.tsx": "3d0a552f57f7d57a06647da8015041ad7da18e168befa7d5a4a484c107bb54c5",
+    "mobile/src/tasks/use-mobile-tasks-project-workspace-comment-actions.tsx": "5f13cc6e20d3e41f538fce38573b74e8b1f095e2c3d44a1dad036a61726e4bdb",
+    "mobile/src/tasks/use-mobile-tasks-task-create-actions.tsx": "ee4cb13611e00325c9af5cabfeda02ac4b56d0ecf1e49edc87cdc0ae31df7051"
   },
   "gaps": [
     {
@@ -625,7 +697,7 @@
     },
     {
       "id": "G13-gap-2",
-      "text": "plugin-host-call-handler.ts dynamic method registration and relay-client-resync-marker.ts's parameterized state.method are not enumerable from static source; plugin manifest schema and marker constructor call sites are the next read.",
+      "text": "Plugin fixed methods and both resync marker constructors are now resolved and corrected. Full variant-specific registration/auth/composition and runtime tests remain owed; do not repeat those resolved literal origins.",
       "owner": "WP-ENG-RELAY"
     },
     {
@@ -635,12 +707,12 @@
     },
     {
       "id": "G14-gap-1",
-      "text": "156-name mobile outgoing surface is a literal-string regex scan; template-string/constant-built method names, if any, are undercounted. A follow-up AST-based scan (matching the methodology of parity-settings-consumers.json) is the next step.",
+      "text": "AST callsite census now frozen with file hashes/lines.156 direct names plus7 conditional names form163 lower bound.35 nonliteral candidates, four conditional calls resolved,31 candidates still require receiver/caller-flow review; computed dynamic/destructured callees remain outside scanner scope.",
       "owner": "WP-CAP-MOBILE"
     },
     {
       "id": "G14-gap-2",
-      "text": "Binary frame adapters (rpc-client-terminal-binary-frame.ts, browser-screencast-protocol.ts) referenced but not opened; their opcode/frame layout vs the desktop terminal-stream-protocol.ts is unverified.",
+      "text": "Mobile binary adapter bodies now read with bounded contracts; full desktop/candidate codec comparison, seq/backpressure/session ownership and actual negotiated transport tests remain owed.",
       "owner": "WP-CAP-MOBILE"
     },
     {
@@ -659,10 +731,10 @@
       "owner": "WP-ENG-IPC"
     }
   ],
-  "closureClaim": "G19 bounded source transformation review accepted with test execution/version-skew owed. G13 framing/routing reviewed and original16case baseline passed; registration census/composition pending. G14 remains leaf-only pending independent census/adapters/negotiation. No audit, runtime or full migration closure.",
+  "closureClaim": "G19 source review and prior16 original relay protocol cases retained. G13 two plugin methods/one missing outbound stale method corrected; full registration/composition pending. G14 independent syntax census plus binary/conditional body review is partial, not complete RPC closure. Original baseline remains214 cases/23capsules; no new original tests executed this pass.",
   "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
   "sourceReadOnly": true,
-  "coordinatorReviewBase": "2cc40e3",
+  "coordinatorReviewBase": "b909fa0",
   "leafProvenance": {
     "taskId": "task_7142d62b0cd4",
     "dispatchId": "ctx_d7ab44926c56",
@@ -703,5 +775,22 @@
       }
     ],
     "totalPassed": 16
+  },
+  "syntaxCensus": {
+    "artifact": "docs/migration/parity-wire-call-sites.json",
+    "scanner": "scripts/inventory-wire-call-sites.mjs",
+    "fixtureTests": 5,
+    "files": 1140,
+    "mobileFiles": 956,
+    "relayFiles": 184,
+    "calls": 461,
+    "mobileCallsites": 313,
+    "mobileLiteralCallsites": 278,
+    "mobileLiteralNames": 156,
+    "mobileNonliteralCallsites": 35,
+    "relayCallsites": 148,
+    "relayRegistrationCandidates": 147,
+    "scope": "All tracked non-test/non-fixture TS/TSX under mobile/src and src/relay, including support harness files; syntax candidates, not typed RPC authority. No source code executed. Destructured or computed-nonliteral callees are outside this scan; nonliteral first arguments retained unresolved. No live registration/composition completeness claim.",
+    "evidence": "All1140 files SHA256 fingerprinted and compared via Git blob SHA1 against pinned tree; parser7.29.8. Fresh regeneration deep-equals saved JSON. No receiver typing or callback/constant flow resolution; five new scanner tests are not original product cases."
   }
 }

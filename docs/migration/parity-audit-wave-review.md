@@ -1,6 +1,24 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
-## Current review disposition at2cc40e3
+## Current review disposition atb909fa0
+
+Wire v3 independently scans1140 pinned TS/TSX files with461 syntax candidates.
+Five new parser fixture tests pass; fresh census deep-equals the committed
+candidate artifact. Mobile has278 direct literal callsites/156 names plus35
+nonliteral candidates. Four fully read conditional call bodies add7 names,
+giving163 named lower bound;31 nonliteral candidates still need source flow
+and receiver attribution. Full binary adapter bodies now read, not executed.
+
+G13 two allegedly dynamic plugin request names are fixed and registered but
+default unavailable; workspace.stale was also omitted. Corrected dictionary
+counts135 requests/13 outbound do not prove complete variant composition.
+Resync constructor flow resolved to fs.changed/workspace.stale. Next is the
+remaining31 mobile candidates,147 relay registration candidates/variants,
+transport/session negotiation and previously-owned audit followups. No active
+worker writers, hierarchy or product installation. Original baseline remains
+214 cases/23 capsules; five scanner tests are not added to that total.
+
+## Historical review disposition at2cc40e3
 
 Wire v2 now has partial coordinator review: G19 host/worker/federation source
 transformations, G13 actual relay framing/routing,22 direct full/partial
