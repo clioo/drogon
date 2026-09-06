@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { snapshotTransportPackage } from './transport-capsule-runtime.mjs';
 import {
   CapsuleRefusal,
   assertNoOverlap,
@@ -259,6 +260,41 @@ describe("loadManifest", () => {
 });
 
 describe("stageCapsule", () => {
+  it("binds transport package trees into the receipt without renderer JSX configuration", () => {
+    const manifest = buildManifest(fixture.root, fixture.revision);
+    manifest.transportRuntime = {};
+    for (const [name, version] of [['ws', '8.21.3'], ['tweetnacl', '1.0.3']]) {
+      const directory = path.join(fixture.root, 'node_modules', name);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name, version }));
+      manifest.transportRuntime[name] = { version, treeSha256: snapshotTransportPackage(directory).treeSha256 };
+    }
+    const manifestPath = writeManifest(workDir, manifest);
+    const receipt = stageCapsule({ manifestPath, sourceRoot: fixture.root, repoRoot: fakeRepoRoot });
+    expect(receipt.transportRuntime).toHaveLength(2);
+    expect(readFileSync(receipt.configPath, 'utf8')).not.toContain('jsx:');
+    expect(() => executeCapsule({ receipt: { ...receipt, transportRuntime: null }, repoRoot: fakeRepoRoot })).toThrow('transportRuntime');
+    const vitestEntry = path.join(workDir, 'transport-env-fixture.mjs');
+    writeFileSync(vitestEntry, `import { writeFileSync } from 'node:fs';
+if (process.env.WS_NO_BUFFER_UTIL !== '1' || process.env.WS_NO_UTF_8_VALIDATE !== '1') process.exit(9);
+if (process.argv.includes('--version')) console.log('transport-env-fixture');
+else writeFileSync(process.argv.find(arg => arg.startsWith('--outputFile=')).slice('--outputFile='.length), JSON.stringify({ fixtureEnvironmentVerified: true }));
+`);
+    const executed = executeCapsule({ receipt, approvedManifestSha256: readManifestDigest(manifestPath), nodeBin: process.execPath, vitestEntry, timeoutMs: 5000, repoRoot: fakeRepoRoot });
+    expect(executed.exitCode).toBe(0);
+    expect(executed.vitestVersion).toBe('transport-env-fixture');
+    expect(executed.results).toEqual({ fixtureEnvironmentVerified: true });
+  });
+
+  it("refuses combined renderer/transport declarations before creating a capsule", () => {
+    const manifest = buildManifest(fixture.root, fixture.revision);
+    manifest.rendererRuntime = {};
+    manifest.transportRuntime = {};
+    const manifestPath = writeManifest(workDir, manifest);
+    expect(() => stageCapsule({ manifestPath, sourceRoot: fixture.root, repoRoot: fakeRepoRoot })).toThrow('Combined');
+    expect(existsSync(resolveCanonicalCapsuleParent(fakeRepoRoot))).toBe(false);
+  });
+
   it("binds renderer runtime to the receipt and automatic JSX config", () => {
     const manifest = buildManifest(fixture.root, fixture.revision);
     manifest.rendererRuntime = { react: '19.2.8', 'react-dom': '19.2.8', 'happy-dom': '20.11.8' };

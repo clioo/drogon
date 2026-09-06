@@ -27,6 +27,7 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRendererRuntime, stageRendererRuntime, verifyRendererRuntime } from './renderer-capsule-runtime.mjs';
+import { resolveTransportRuntime, stageTransportRuntime, verifyTransportRuntime, transportTestEnvironment } from './transport-capsule-runtime.mjs';
 
 const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -409,9 +410,13 @@ export function stageCapsule({ manifestPath, sourceRoot, repoRoot = REPO_ROOT, l
   assertSafeSingleComponentId(idForDirName, "label/capsuleId");
   const manifestSha256 = sha256(readFileSync(manifestPath));
   const revision = verifySourceRevision(sourceRoot, manifest.sourceRevision);
+  if (manifest.rendererRuntime !== undefined && manifest.transportRuntime !== undefined) {
+    throw new CapsuleRefusal('Combined renderer and transport runtimes require a separate equivalence review.');
+  }
   const rendererRuntime = resolveRendererRuntime(manifest.rendererRuntime, sourceRoot);
-  if (rendererRuntime && [...manifest.files, manifest.license].some((entry) => entry.path.split('/').includes('node_modules'))) {
-    throw new CapsuleRefusal('Renderer runtime reserves node_modules for explicit dependency links.');
+  const transportRuntime = resolveTransportRuntime(manifest.transportRuntime, sourceRoot);
+  if ((rendererRuntime || transportRuntime) && [...manifest.files, manifest.license].some((entry) => entry.path.split('/').includes('node_modules'))) {
+    throw new CapsuleRefusal('Package runtime reserves node_modules for explicit dependency links.');
   }
 
   // First filesystem-mutating call: only reached once the id above is safe.
@@ -455,6 +460,7 @@ export function stageCapsule({ manifestPath, sourceRoot, repoRoot = REPO_ROOT, l
   const configPath = path.join(capsuleRoot, "vitest.config.mjs");
   writeFileSync(configPath, generatedVitestConfig(manifest.entryTestFile, rendererRuntime), { flag: "wx" });
   stageRendererRuntime(rendererRuntime, capsuleRoot);
+  stageTransportRuntime(transportRuntime, capsuleRoot);
 
   const licenseStaged = staged.find((s) => s.role === "license");
   const license = {
@@ -473,6 +479,7 @@ export function stageCapsule({ manifestPath, sourceRoot, repoRoot = REPO_ROOT, l
     entryTestFile: manifest.entryTestFile,
     expectedTestCounts: manifest.expectedTestCounts ?? null,
     rendererRuntime,
+    transportRuntime,
     capsuleRoot,
     staged: nonLicenseStaged,
     license,
@@ -527,7 +534,7 @@ function assertOwnedStageReceipt(receipt, repoRoot) {
       `Cannot read the owned stage receipt for this capsule: ${error.message}`,
     );
   }
-  for (const field of ["capsuleId", "sourceRevision", "manifestSha256", "entryTestFile", "capsuleRoot", "staged", "license", "expectedTestCounts", "rendererRuntime"]) {
+  for (const field of ["capsuleId", "sourceRevision", "manifestSha256", "entryTestFile", "capsuleRoot", "staged", "license", "expectedTestCounts", "rendererRuntime", "transportRuntime"]) {
     if (JSON.stringify(onDisk[field]) !== JSON.stringify(receipt[field])) {
       throw new CapsuleRefusal(
         `Stage receipt field "${field}" does not match the on-disk record for this capsule.`,
@@ -609,6 +616,7 @@ export function executeCapsule({
   }
 
   verifyRendererRuntime(receipt.rendererRuntime, resolvedRoot);
+  verifyTransportRuntime(receipt.transportRuntime, resolvedRoot);
 
   const resultsPath = path.join(resolvedRoot, "vitest-results.json");
   if (lstatSync(resultsPath, { throwIfNoEntry: false })) {
@@ -623,6 +631,7 @@ export function executeCapsule({
     args: ["--version"],
     cwd: resolvedRoot,
     timeoutMs,
+    env: transportTestEnvironment(receipt.transportRuntime),
   });
   const vitestVersion = (versionResult.stdout || "").trim();
 
@@ -641,6 +650,7 @@ export function executeCapsule({
     ],
     cwd: resolvedRoot,
     timeoutMs,
+    env: transportTestEnvironment(receipt.transportRuntime),
   });
 
   if (runResult.error) {

@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "mode": "execute",
+  "concurrency": 3,
+  "ok": true,
+  "outcomes": [
+    {
+      "capsuleId": "runtime-rpc-call-queue",
+      "ok": true,
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/runtime-rpc-call-queue-MbJfbu",
+      "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+      "manifestSha256": "4b3ba55956294532ebb030c40b304436bb80c179ec4aa89dc8e1f78e8b126f46",
+      "mode": "execute",
+      "execution": {
+        "ok": true,
+        "problems": [],
+        "counts": {
+          "numTotalTests": 8,
+          "numPassedTests": 8,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "vitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "exitCode": 0,
+        "timedOut": false,
+        "signal": null
+      }
+    },
+    {
+      "capsuleId": "shared-control-retired-request-ids",
+      "ok": true,
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/shared-control-retired-request-ids-VNhe0C",
+      "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+      "manifestSha256": "75649d3382b35e0c1a85f1b22ba47d264b2f6aa1d9e4022ba529b88888eab21b",
+      "mode": "execute",
+      "execution": {
+        "ok": true,
+        "problems": [],
+        "counts": {
+          "numTotalTests": 4,
+          "numPassedTests": 4,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "vitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "exitCode": 0,
+        "timedOut": false,
+        "signal": null
+      }
+    },
+    {
+      "capsuleId": "promise-settlement-waiters",
+      "ok": true,
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/promise-settlement-waiters-aZATwt",
+      "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+      "manifestSha256": "2310a9e84f3009456e7b9af5259be6d3a5e5f7b2b9a7e0200cf116fa4519216c",
+      "mode": "execute",
+      "execution": {
+        "ok": true,
+        "problems": [],
+        "counts": {
+          "numTotalTests": 3,
+          "numPassedTests": 3,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "vitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "exitCode": 0,
+        "timedOut": false,
+        "signal": null
+      }
+    },
+    {
+      "capsuleId": "remote-runtime-memory-limits",
+      "ok": true,
+      "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/remote-runtime-memory-limits-i3f1i8",
+      "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+      "manifestSha256": "dc59ad1909c8b6fe2621787dc7261d4f75eb0a28694027527c7220c9b9687c65",
+      "mode": "execute",
+      "execution": {
+        "ok": true,
+        "problems": [],
+        "counts": {
+          "numTotalTests": 3,
+          "numPassedTests": 3,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "numFailedTestSuites": 0,
+          "success": true
+        },
+        "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+        "vitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+        "exitCode": 0,
+        "timedOut": false,
+        "signal": null
+      }
+    }
+  ],
+  "scope": "Reviewed source capsules only; neither a security sandbox nor candidate parity."
+}
