@@ -669,6 +669,40 @@ test baseline extension, push or PR change occurred in this audit block.
 Next: finish independent settings scanner/fixtures review, then the remaining
 E1–E5 enumeration obligations without repeating already accepted metadata.
 
+## Settings scanner independently corrected and accepted for routing only
+
+The prior goal turn made progress with committed bridge linkage (`bf9256f`).
+This turn completed the pending scanner and fixture source reads. The worker's
+26 fixtures passed independently, but13 added coordinator regressions all
+failed on reference-count assertions, not imports/setup. Those covered exact
+relative import identity versus a shared basename, bare re-exports, Pick/Omit
+and union field restrictions, generic/local/utility type shadowing, getter
+shadowing, destructured/catch bindings and subset literal writes.
+
+Coordinator corrected those paths; all39 fixtures now pass on Node24.19.0,
+zero skipped. This is RED→GREEN for audit tooling only, not a candidate
+product feature. Importing the scanner from stdin no longer attempts to
+resolve a nonexistent `-` file. The source-read-only/stdout-only interface and
+strict original SHA requirement remain; no source module was imported.
+
+The corrected scanner regenerated the same real-corpus reference counts:
+472 tracked prefiltered files parsed, zero parse failures,214 fields,
+204 with observed references,10 without,1093 references (583 reads/510 writes),
+896 unknown-receiver candidates,1 alias,2 computed accesses and2 rest patterns.
+Metadata wording now states exact scope rather than claiming a count reduction.
+JSON and Markdown verification both pass byte-for-byte against fresh runs.
+
+The four scanner/artifact files are accepted as **bounded routing evidence**,
+not type-checker proof or E2 closure. Counts include test/default construction
+sites; they are not numbers of observable settings consumers. Raw-token file
+prefiltering, untraced cross-module/store methods and closure/type resolution
+limits remain. The next step is consumer/observable-state characterization,
+using these pointers rather than repeating the field/default census.
+
+No worker is active, no nested hierarchy launched, no original product tests
+were executed, and no preview was installed during this tooling checkpoint.
+All preexisting product edits remain untouched; the goal and audit stay open.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
