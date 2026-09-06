@@ -1,5 +1,40 @@
 # Root acceptance — identity/lease test preparation
 
+## Native module review: 2026-09-06, 15:58 UTC
+
+Root independently ran `cargo test -p drogon-core --test claim_identity --locked`:
+32 passed, zero failed/ignored, on this macOS working tree. This is the actual
+production module included by the test path, not yet a public core export or RPC
+integration. The prior fixture leak has been removed in the delivered test file.
+
+Root's `scripts/verify-native-claim-source-vectors.mjs` additionally executes the
+actual pinned original signer, bundled in memory from the admitted isolated source
+closure. All 20 vectors match key ID, identity digest and worktree digest. The
+manifest digest and ten source files are verified, nine bundle inputs are confined
+to that manifest, external imports are Node built-ins, and bundle writes are off.
+Vector SHA256 remains
+`5c7c6df9ffa53f0b63a1d65dd299f91e404da26c326f197aa0f62c474d73c949`.
+This local verifier needs the retained source capsule/dependencies; it is not a
+portable CI runner. It proves signing compatibility for these inputs, not every
+canonicalization or platform case. Historical behavioral RED remains worker/lead
+reported evidence; root did not recreate the earlier stub run.
+
+Integration is held for a concrete Windows path-representation review. Rust's
+official `std::fs::canonicalize` documentation specifies extended-length Windows
+output; source uses Node `realpathSync`, normalize and en-US lowercase. Blindly
+lowercasing Rust output is not sufficient evidence of identical signed bytes.
+Sol-ENG Task `task_d89e59c757b6` must delegate source-backed investigation,
+regressions and any required correction to Kimi, including normal drive, UNC,
+explicit namespace and symlink distinctions. Do not claim Windows execution from
+macOS string tests. Also correct the source-race commentary: separate Node
+processes can race despite synchronous calls within each process.
+
+Primary references: https://doc.rust-lang.org/std/fs/fn.canonicalize.html and
+https://raw.githubusercontent.com/nodejs/node/v24.19.0/lib/fs.js.
+The original parent settled; root release returned retained/external with no
+process action before acknowledging its completion. No registration, new
+capability advertisement, packaged installation or whole-session parity follows.
+
 ## Follow-up admission: 2026-09-06, 15:23 UTC
 
 The earlier zero-baseline checkpoint below is superseded for source execution.

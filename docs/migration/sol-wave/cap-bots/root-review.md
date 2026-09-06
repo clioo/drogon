@@ -1,5 +1,27 @@
 # Root review: Bots test preparation and first Sol cycle
 
+## Runner acceptance checkpoint: 2026-09-06, 15:58 UTC
+
+Root independently ran the delivered focused Vitest 5 suite with Node24:
+60/60 passed, zero failures. Signal, missing exit, timeout, pending/todo and
+incoherent count regressions now reject incomplete runs; this supersedes those
+specific earlier rejections below. Root recomputed the manifest, historical
+evidence and all three stand-in hashes; all five match the lead's preserved
+digests. No real source `--execute` replay or candidate Bot test was performed.
+
+One remaining report-boundary gap is not covered by these passing tests:
+`runExecute` maps parsed `testResults`/`assertionResults` without checking their
+shape before recording process evidence. Valid JSON with object-valued arrays or
+null entries can throw; unreadable result paths also escape the parse helper.
+This fails closed, but loses the structured diagnostics the runner promises.
+Sol-CAP follow-up Task `task_7f202b64e510` delegates the narrow normalization and
+regression fix to Sonnet; root/Sol do not edit the worker-owned runner. Historical
+6/2 source results remain untouched and are not candidate GREEN.
+
+The completed parent was released before acknowledgment; Orca returned
+retained/external with no process action. Runner safety acceptance is partial,
+not full source-environment equivalence or a product fidelity milestone.
+
 ## Follow-up source evidence: 2026-09-06, 15:23 UTC
 
 Root recomputed both source-baseline manifest and raw-result hashes, every staged

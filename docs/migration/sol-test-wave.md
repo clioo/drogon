@@ -43,7 +43,26 @@ CAP's already-completed baseline runs are not repeated merely to attach a worker
 its next execution work follows this same delegation policy. Runtime child receipts
 remain required before describing the transfers as launched.
 
-### Current integration checkpoint: 15:35 UTC
+### Current integration checkpoint: 15:58 UTC
+
+Root independently reproduced the Kimi native claim suite (32/32) and Sonnet
+runner regression suite (60/60). Twenty signer vectors additionally match the
+actual pinned original source, not just the worker's reference generator.
+No full integration or new installed preview is implied. Original CAP manifest,
+evidence and three stand-in digests remain unchanged.
+
+The previous ENG/CAP parents completed and were released before acknowledgment
+(retained external terminals, no force-close). Fresh narrow follow-ups are
+`task_d89e59c757b6` (Sol-ENG delegates Windows claim representation to Kimi) and
+`task_7f202b64e510` (Sol-CAP delegates malformed-result diagnostics to Sonnet).
+UI's existing GLM Electron acceptance assignment remains active. See area root
+reviews for remaining gates; new Task creation is not proof of leaf launch.
+Audit remains 11/12 = 91.7%, medium confidence, delta zero; E5 remains held and
+full-fidelity deadline risk remains high. Next milestone is actual Electron
+behavioral RED, root wiring and unchanged-test GREEN, plus corrected native
+claim acceptance before registration.
+
+### Earlier integration checkpoint: 15:35 UTC
 
 Root regression follow-up (15:40 UTC): `cargo test -p drogon-core --lib --locked`
 passes 4/4; `cargo test -p drogon-core --locked --test engine --test session-persistence
