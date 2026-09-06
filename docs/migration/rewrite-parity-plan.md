@@ -9,13 +9,22 @@ la preparación de fixtures/adaptadores de pruebas no cuenta como una feature.
 
 ## Actualización de coordinación — 6 de septiembre
 
-La última instrucción de Carlos sustituye las restricciones históricas de
-auditoría plana y jerarquía Sol posterior descritas abajo: cinco responsables
-Astra pueden trabajar ya sobre E1–E5 y delegar a un worker hoja cada uno si
-el runtime lo permite. La asignación vigente y sus límites están en
+La instrucción de Carlos sustituye la restricción histórica de auditoría plana:
+cinco responsables Astra pueden trabajar sobre E1–E5 y delegar a un worker
+hoja cada uno si el runtime lo permite. La asignación vigente y sus límites están en
 `audit-closure-coordination.md`. Los gates de fidelidad/tests no cambian.
 Las 24 horas son una referencia flexible; excederlas unas horas es aceptable.
 No modificar ajustes globales ni eludir límites de anidamiento.
+
+**Aclaración posterior del usuario, 6 de septiembre:** estos cinco Astra son
+exclusivamente para acelerar el audit. Una vez que el coordinador acepte su
+cierre completo, la implementación se organiza como **Astra coordinador →
+responsables Sol → workers de los modelos aprobados**. El cambio se realiza
+con entregas revisadas, hijos liquidados y nuevas asignaciones identificadas;
+no se cambia el modelo de una sesión activa ni se da por aceptado el audit
+porque haya terminado un informe. Astra conserva arquitectura, integración,
+pruebas independientes y aceptación. Pi + DGX sigue destinado a las pruebas
+reales y la comparación controlada, independientemente del modelo que desarrolle.
 
 ## 1. Qué significa terminar
 

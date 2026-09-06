@@ -35,8 +35,12 @@ the user's running Orca version. Do not substitute a reduced MVP for parity.
   per-invocation permission flags; do not alter global permissions or bypass denies.
 - Coordinator owns architecture, shared contracts, task dependencies, review,
   integrated testing, Git and release. The latest user-approved organization is
-  root Astra → five Astra area leads for E1–E5 → approved disjoint leaf workers,
-  including during audit. Initially at most one leaf per lead; verify the actual
+  root Astra → five temporary Astra area leads for E1–E5 → approved disjoint leaf
+  workers during audit only. The user's subsequent clarification requires
+  root Astra → Sol area leads → approved leaf workers for implementation after
+  root accepts the complete audit gate. Finish and review audit deliveries,
+  settle/release children, and transfer through fresh identified assignments;
+  never relabel an existing Astra process as Sol. Initially at most one leaf per lead; verify the actual
   runtime depth and a small nested lifecycle before activating child delegation.
   A depth denial means the lead continues its own assignment, not an alternate
   identity/Run bypass. Leaves never delegate. No conflicting writers or unreviewed
