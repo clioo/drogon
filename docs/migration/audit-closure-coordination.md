@@ -8,7 +8,19 @@ The user's latest instruction before sleeping is explicit: **these five Astra ar
 
 This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoints below are not current state; consult audit-semantic-followups.md and audit-progress.md. No tool-supported objective rewrite was performed: the old Codex goal's flat-worker text is superseded by this later user direction, not a reason to complete or replace an unfinished goal.
 
-## Ownership and bounded deliverables
+## Current residual ownership — 2026-09-06 08:00 UTC
+
+The initial directory assignments below are historical. E2/E4 source gates remain accepted and their evidence frozen. Their exact idle Astra terminals have been revalidated and officially reused for disjoint E5 residual audit work; this is not a sixth lead, a reopened E2/E4 gate, or implementation authority. All three Tasks were created before their parallel worker-start calls, which returned ready/input_accepted, exact existing-terminal reuse, no setup and no residual resources.
+
+| Current assignment | Task / Dispatch | Owned outputs under `audit-closure/e5-platform/` | Approved maximum one leaf |
+| --- | --- | --- | --- |
+| Configuration/CI/infra, former E2 Astra | `task_1d3b1e3e1892` / `ctx_91c132297b2d` | `config-ci-final.md/json`, `config-ci-leaf/` | OpenCode `alibaba-token-plan/deepseek-v4-flash-0731 --auto` |
+| Assets/observability, former E4 Astra | `task_421ba7560bf2` / `ctx_e269f89983b0` | `assets-observability-final.md/json`, `assets-observability-leaf/` | Claude `claude-sonnet-5`, medium, `--dangerously-skip-permissions` |
+| Cloud/relay/mobile services, E5 Astra | `task_c9a70c79101f` / `ctx_7549d47e0bcf` | `services-final.md/json`, `services-leaf/` | Claude `claude-sonnet-5`, medium, `--dangerously-skip-permissions` |
+
+E1 retains `task_544ba69fa3ba / ctx_d78d71a450c6` for final UI source gaps. E3 retains `task_89c732c9e750 / ctx_b0d85751e42b` for usage24 and downstream owner joins. No lead may edit another output or central ledger. E5 CI owns workflows/IAM/ops entrypoints; E5 services owns deployment-operation/state/transport bodies; E5 assets owns provenance and diagnostic submission. Cross-links must name actual contracts, not replace missing source evidence with an owner label. Lead-owned children still require independent review and official release before completion. Source fixture debt and unresolved external asset authorization remain visible; no silent scope reduction.
+
+## Initial ownership and bounded deliverables
 
 Root Astra owns acceptance, shared contracts, progress ledger, Git, integration and installation. Five fresh Codex `gpt-6-astra` leads own only the corresponding new directory under `docs/migration/audit-closure/`. They read the current evidence and pinned original source; no product edits, dependency installs, personal profile changes or background services in this audit wave. Reports must correct evidence rather than re-enumerate accepted M1–M7.
 
