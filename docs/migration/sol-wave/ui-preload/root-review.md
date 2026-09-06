@@ -16,6 +16,26 @@ partial implementation before the delegation-policy correction. Root sent
 
 ## Earlier preparation checkpoint
 
+### Settled delivery and bounded source reuse acceptance, 15:29 UTC
+
+Root read the final lead report, verified all nine final candidate/source digest
+pairs, and accepts the modules as source-reused, independently tested code, not
+as integrated product parity. There is no recorded behavioral RED before this
+implementation; earlier missing imports were setup errors. This tests-first
+process gap remains disclosed, not retroactively manufactured with throwaway
+stubs. Subsequent integration must exercise genuine failure paths first.
+
+Both GLM child tasks are settled. Root release of parent `ctx_a7868ff3b05d`,
+receipt `7e4eb19b-1fc2-4278-8907-b99b75730438`, retained the external terminal with
+no process action before acknowledgment of `delivery_262eeae5754d`. The final
+lead report correctly attributes the initial implementation to Sol. The leaf's
+out-of-scope read-only Git checks remain disclosed; they are not acceptance proof.
+
+Inspection of the actual candidate preload entry confirms no restart/checkpoint/
+close IPC wiring yet. Do not attach a no-op persistence callback or invent main
+handlers merely to claim live integration. Checkpoint ownership/persistence and
+real renderer/main lifecycle tests remain prerequisite integration work.
+
 2026-09-06. Task `task_bbff561b17bb`, Dispatch `ctx_e58cb09f5a82` completed.
 Root read the full report, mapping and execution evidence. Independent frozen
 test checking confirms all four complete bodies and source hashes; SSH remains

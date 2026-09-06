@@ -1,0 +1,18 @@
+{
+  "extends": "../../../../../apps/desktop/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "electron": ["../../../../../apps/desktop/node_modules/electron/electron.d.ts"],
+      "vitest": ["../../../../../apps/desktop/node_modules/vitest/dist/index.d.ts"]
+    },
+    "typeRoots": ["../../../../../apps/desktop/node_modules/@types"],
+    "types": ["node"]
+  },
+  "include": [
+    "*.test.ts",
+    "../authority-recovery/close-active-tab/close-active-tab-payload-admission.contract.test.ts",
+    "../authority-recovery/browser-window-close/browser-window-close.contract.test.ts",
+    "../authority-recovery/renderer-restart/renderer-restart-wiring.contract.test.ts"
+  ]
+}
