@@ -1,6 +1,21 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
-## Current review disposition at129598f
+## Current review disposition at8cf48eb
+
+Window/browser G17/G18 v2 has bounded coordinator acceptance:39 direct
+source/test reads,43 verified source/docs hashes,47 unchanged original cases
+passed (identity6,argument7,adoption14,grants8,placement12). Corrected lease
+inventory refresh, ordered capabilities, popout/main bounds, permission and
+mirror identity, restart-versus-DOM guarantees and helper/caller boundaries.
+19 popout and4 registry assertion bodies read but not executed; real
+window/recovery/skew gates remain open. Baseline198 cases/20 capsules.
+
+Only parity-relay-mobile-wire-contracts.json/.md from this wave remain
+unaccepted drafts. No new worker or hierarchy launched; no product install.
+Next is independent bounded wire review and remaining owned G7/G8 work,
+not rediscovery of accepted inventories or implicit runtime acceptance.
+
+## Historical review disposition at129598f
 
 G7 config/serve v2 now has bounded coordinator source acceptance:23 direct
 reads,28 source hashes verified against checkout and pinned blobs,33 unchanged

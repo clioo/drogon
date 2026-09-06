@@ -1,0 +1,56 @@
+{
+  "capsuleId": "browser-client-host-placement-preparation",
+  "description": "Unchanged original browser ownership tests; full executed dependency closure independently read.",
+  "entryTestFile": "src/main/browser/browser-client-host-placement-preparation.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 12
+  },
+  "files": [
+    {
+      "path": "src/main/browser/browser-client-host-placement-preparation.test.ts",
+      "role": "test",
+      "sha256": "d6c8c370f21756169cb933dc1ad10cdfeba24b901e76d8bf82cace32ab44d743"
+    },
+    {
+      "path": "src/main/browser/browser-client-host-placement-preparation.ts",
+      "role": "module",
+      "sha256": "d015f71b9a1d407263f2369623c4cd4a9dd659a67423efb3b443bb26257d6f20"
+    },
+    {
+      "path": "src/shared/browser-client-hosting-eligibility.ts",
+      "role": "module",
+      "sha256": "2ce030bff76cae04665294ea7672c8954185c4e5aa8535919e7e9f5374846b9a"
+    },
+    {
+      "path": "src/shared/protocol-version.ts",
+      "role": "module",
+      "sha256": "e21f10647fe18df2b31e84c2a8d596c083e8ae52714829890969a1b65286803a"
+    },
+    {
+      "path": "src/shared/remote-server-update.ts",
+      "role": "module",
+      "sha256": "c7384b964a0bfaa1573cd00761c5e2d29143c591cb1b4cd6ee1b0db464110d12"
+    },
+    {
+      "path": "src/shared/skill-install-capability.ts",
+      "role": "module",
+      "sha256": "4dae209e014524ad9bd1f72f8366a78f80720546d36e19adbc299d3d7da1ff19"
+    }
+  ],
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "isolationRationale": "Complete runtime imports are Vitest and staged reviewed functions/constants. Type-only imports are erased. Tests use in-memory data and existing mocks; no source assertions/imports/mocks changed. No Electron, files, processes, network, services, models or user profiles accessed by tested code. Minimal config is not a general sandbox.",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 with Node24.19.0/macOS arm64. Minimal node config omits original aliases/setupFiles/feature-wall define/GC-webstorage/platform-worker settings unused by reviewed closure; no full-config/typecheck equivalence claim.",
+    "Default unit timeout instead of original30s/60s; outer timeout30s. No installs, only a fresh owned stage."
+  ],
+  "testEvidenceBoundary": "Injected mocked environment/status/start/close operations, including pairing drift and capability fallback. No real RPC or host connection; missing-capability case is a single selected subset, not every subset. No candidate, rendered, persistence, OS/SSH or actual version-skew acceptance."
+}

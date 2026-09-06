@@ -270,12 +270,14 @@
         "WP-UI-SHELL-WIN",
         "WP-UI-STATE"
       ],
-      "state": "partially-located",
+      "state": "bounded-source-reviewed-followups-owned",
       "evidence": [
         "parity-source-bridges.json",
-        "parity-settings-persistence-contracts.json"
+        "parity-settings-persistence-contracts.json",
+        "parity-window-browser-authority.json",
+        "parity-window-browser-authority.md"
       ],
-      "enumerationDisposition": "Dashboard bridge (16 methods) and general settings persistence do not prove placement ownership, monitor reconciliation or popout lifecycle.",
+      "enumerationDisposition": "Coordinator source-characterized main/popout geometry, reveal/freeze lifecycle, permission deny, snapshot authority/cache and zoom.19 popout assertion bodies read, none rendered/executed. Main >600x400 versus popout >=480x360 restore rules differ. Full monitor/DPI/store journeys remain owned; no repeated bridge census.",
       "acceptance": "Trace geometry/state persistence and cross-window identity; verify reopen, monitor loss/DPI, main/popout transitions and restart with rendered evidence."
     },
     {
@@ -286,12 +288,14 @@
         "WP-UI-BROWSER",
         "WP-ENG-REMOTE"
       ],
-      "state": "partially-located",
+      "state": "bounded-source-reviewed-followups-owned",
       "evidence": [
         "parity-bridge-delegated-resolution.json",
-        "parity-bridge-main-push-resolution.json"
+        "parity-bridge-main-push-resolution.json",
+        "parity-window-browser-authority.json",
+        "parity-window-browser-authority.md"
       ],
-      "enumerationDisposition": "browser.readClientHostId argument reader and push producer linkage do not establish client-host lease acquisition, renewal, expiry or reassignment.",
+      "enumerationDisposition": "Coordinator source-characterized lease attach/reconnect/fencing, ordered capability matching, refreshed inventory, identity stamping, placement/adoption and page-scoped recovery.47 unchanged original cases pass in five isolated capsules. Full registry/recovery, real guest restore, caller expiry/cleanup and wire skews remain owned, not accepted by pure/mocked evidence.",
       "acceptance": "Trace lease state/authority transitions across runtime and UI, then test disconnect/reconnect, expiry, concurrent ownership and stale-client refusal with both version skews."
     },
     {

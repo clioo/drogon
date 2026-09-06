@@ -1,0 +1,32 @@
+{
+  "capsuleId": "browser-client-host-identity",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "manifestSha256": "21e43d1debbd1fe9942c4ae1a4b4be880cab4a25461b4f2ab9ccb42edc982db1",
+  "entryTestFile": "src/renderer/src/runtime/browser-client-host-identity.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 6
+  },
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-browser-client-host-identity-4RnfUi",
+  "staged": [
+    {
+      "path": "src/renderer/src/runtime/browser-client-host-identity.test.ts",
+      "role": "test",
+      "sha256": "b5cc055e5b2062574f56c148ec4545fd9932fd05ed9a507a88fd3bcca13fa354",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-browser-client-host-identity-4RnfUi/src/renderer/src/runtime/browser-client-host-identity.test.ts"
+    },
+    {
+      "path": "src/renderer/src/runtime/browser-client-host-identity.ts",
+      "role": "module",
+      "sha256": "1aaea803fa2975c33879d17fd861f75e90a97be624f31dbc636a278f7950bf87",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-browser-client-host-identity-4RnfUi/src/renderer/src/runtime/browser-client-host-identity.ts"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-browser-client-host-identity-4RnfUi/LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  }
+}

@@ -1142,6 +1142,37 @@ installation, push or PR in this pass. Audit/goal remain open. Next: bounded
 review of those two existing drafts and G7 U1–U4/G8 remaining entrypoints,
 not another census of completed inventories.
 
+## Window/browser authority review and original adoption baseline
+
+Previous turn made progress in8cf48eb. This turn accepted corrected G17/G18
+bounded source contracts, not runtime parity:39 direct source/test reads and
+43 hashes checked against frozen checkout AND pinned Git blobs. Read three
+execution/wire/reconnect references fully. Main/popout size/equality and
+permission/identity rules are distinct; reconnect refreshes inventory and
+requires ordered capability equality. Restart adoption is not DOM survival.
+Runtime recovery is now a full body read with page-scoped failures and
+in-flight cancellation limits, not grep-only stale-error pointers.
+
+Five new exact-source capsules ran original Vitest4.1.11/Node24.19.0:
+identity6,argument7,adoption14,grants8,placement12.47 pass, zero failure/skip;
+total baseline198 distinct cases/20 capsules. Full runtime import closures
+reviewed before executing unchanged assertions/mocks; no server/Electron,
+network, profile or model invoked by tested code. Stage receipts/results
+archived and independently compared, newline-only normalization. Source
+checkout remains c97906287bb7a390b25e2025b600d9fb3c25d9c3 and tracked-clean.
+
+19 mocked popout,4 registry and14 authority-replacement classifier/timer
+assertion bodies read, not executed. Their larger dependencies were not
+silently staged or substituted. Full runtime recovery, native geometry,
+preload/guest/mirror behavior, partial failures and both version skews remain
+owned by existing UI/BROWSER/REMOTE packages. No missing functionality was
+scoped out. Only the two wire draft files from this wave await acceptance.
+
+No product edits/integration, recipe edits, worker launch, hierarchy, install,
+PR or push this turn; unaccepted product changes remain intact. Audit/goal
+remain open. Next: wire draft review plus already-owned G7/G8 followups and
+remaining E1–E4/journey obligations, without repeating completed censuses.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,
