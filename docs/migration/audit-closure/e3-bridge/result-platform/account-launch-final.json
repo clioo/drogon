@@ -1,0 +1,1427 @@
+{
+  "schemaVersion": 1,
+  "id": "E3-ACCOUNT-LAUNCH-FINAL",
+  "taskId": "task_823552276b48",
+  "dispatchId": "ctx_dee67d480e3d",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "provenance": {
+    "pin": "User-supplied frozen source pin; no Git operations performed. SHA256 records the actual source bytes read, not independent commit authentication.",
+    "hashConvention": "Whole SHA256 over raw file bytes. Inclusive 1-based ranges select bytes.splitlines(keepends=True)[start-1:end], retaining original CR/LF and final newline; no newline normalization. Canonical JSON value digests use Python json.dumps(sort_keys=True,separators=(',',':'),ensure_ascii=False).encode('utf-8').",
+    "realCredentialsRead": false
+  },
+  "auditOnly": true,
+  "testsExecutedHere": 0,
+  "childrenStarted": 0,
+  "sourceAccepted": false,
+  "wholeE3Accepted": false,
+  "recommendation": "The two assigned immediate account-launch result joins are characterized and ready for independent root review, with source defects retained and all inherited broader seams/tests preserved. This does not accept the entire account subsystem, E3, E5, raw providers or implementation.",
+  "progress": {
+    "acceptedGroups": 10,
+    "totalGroups": 12,
+    "percent": 83.3,
+    "delta": 0,
+    "confidence": "medium-low",
+    "nextMilestone": "Root reviews this finite account join, then remaining E3/E5 source gates",
+    "deadline24hRisk": "high; no defensible completion ETA",
+    "implementationGate": "Sol implementation remains blocked on whole audit acceptance"
+  },
+  "reconciliation": {
+    "assignedCount": 2,
+    "deliveredCount": 2,
+    "duplicates": [],
+    "omissions": [],
+    "entries": [
+      {
+        "path": "src/main/startup/codex-launch-preparation.ts",
+        "symbol": "prepareCodexRuntimeHomeForLaunch",
+        "sourceEvidenceRef": "AL-S001",
+        "contracts": [
+          "AL-C01",
+          "AL-C02",
+          "AL-C03",
+          "AL-C04",
+          "AL-C05",
+          "AL-C09"
+        ],
+        "disposition": "immediate source result join characterized; root review pending"
+      },
+      {
+        "path": "src/main/claude-accounts/runtime-auth-service.ts",
+        "symbol": "ClaudeRuntimeAuthService.prepareForClaudeLaunch",
+        "sourceEvidenceRef": "AL-S002",
+        "contracts": [
+          "AL-C06",
+          "AL-C07",
+          "AL-C08",
+          "AL-C09",
+          "AL-C10"
+        ],
+        "disposition": "immediate source result join characterized, including actual persistence selection defect; root review pending"
+      }
+    ]
+  },
+  "contracts": [
+    {
+      "id": "AL-C01",
+      "title": "Codex startup orchestration and hook fallback",
+      "sourceEvidenceRefs": [
+        "AL-S001",
+        "AL-S003",
+        "AL-S044"
+      ],
+      "result": "Promise<string|null>; null in the non-WSL real-home lane means no managed CODEX_HOME injection, not credential absence. A nonnull string is the selected home, not proof of ready credentials, completed history or accepted provider hooks.",
+      "stateTransitionsAndEffects": "Uninitialized runtime service throws. Recognized non-WSL Codex workspace pre-trust is awaited but caught/logged. Real-home selection first awaits serialized hook ensure; unavailable hook lane selects managed fallback. If preparation clears an untrusted account and returns null, establish real-home hooks and re-resolve once. WSL hook target trims distro then uses default. Managed hook preparation is awaited; status.error or rejection only warns and selected path still returns. Hook ensure internally catches install/rollback failures and sets unavailable; pending/installed/removed lanes remain usable. Unsupported/unsupported-cached/disabled grant fallback caches no retry until process reset; transient failures use cooldown.",
+      "errorAndPartialSuccess": "Temporary managed ownership failure must escape rather than becoming system-default null. app.getPath/settings/selection evaluation before hook ensure's internal catch can still reject. Real-home script/hook/config writes and provider trust can precede fallback, rollback can fail, and a warning is not rollback proof. No cancellation parameter or common transaction wraps this function.",
+      "owedTests": [
+        "Wire actual startup callback: missing service, pre-trust rejection, real-home pending/installed/unavailable/removed, opted-out hooks, managed selection cleared then second resolution, managed hook error/reject, app path/settings failure and concurrent ensures.",
+        "Preserve original real-home hook suites and assert exact rollback bytes/mode plus rollback failure; provider old/current capability and supported OS fixture after audit. Treat managed fallback after partial rollback as a distinct recovery obligation."
+      ],
+      "reuse": [
+        "E4-F13",
+        "C-CODEX",
+        "RRT-J01"
+      ]
+    },
+    {
+      "id": "AL-C02",
+      "title": "Codex managed ownership and readiness",
+      "sourceEvidenceRefs": [
+        "AL-S008",
+        "AL-S024",
+        "AL-S027",
+        "AL-S028",
+        "AL-S034",
+        "AL-S053"
+      ],
+      "result": "Trusted selected host account returns its persisted self-contained home spelling. Proven untrusted home clears only still-selected host ID (legacy and runtime map) and returns null to default routing; indeterminate ownership throws ManagedCodexHomeTemporarilyUnavailableError and retains selection.",
+      "stateTransitionsAndEffects": "Canonical expected account-root/id/home, lexical containment, canonical root containment, non-system-home and regular account marker with exact trimmed ID establish host ownership. Read failures except ENOENT/ENOTDIR are indeterminate. Auth content is assessed only when caller's unavailableManagedHomePath matches normalized selected home. Missing/unreadable/torn JSON gets 5000ms grace; missing directory is immediately durable. Present resets grace; incomplete/no-credential immediately durable and can deselect. State/provenance updates precede resource/config materialization and unawaited session bridge; canonical per-account auth is not copied to shared auth.",
+      "errorAndPartialSuccess": "Readiness is intentionally permissive for unknown nonblank auth_mode, unknown credential records and unknown agentIdentity object shape. Known ChatGPT modes require access/id/refresh nonblank strings; API/PAT/Bedrock have their concrete fields. JSON primitives/empty object are no-credential; partial known tokens incomplete. Separate readiness helper returns undefined when ready or Promise<boolean> polling every25ms up to1500ms; this entry's path alone does not prove readiness. Marker/read races after validation and side-effect failure are not rolled back as a group.",
+      "owedTests": [
+        "Ownership marker missing/wrong/symlink/outside root/system alias, Windows case and locked root/marker; retain identity on indeterminate and permit exact still-selected compare before clearing.",
+        "Grace at0/4999/5000ms, torn JSON healed, directory missing, incomplete known credentials, null/array/unknown auth modes; assert no shared-auth resurrection and WSL selections retained.",
+        "Use actual upstream RRT-J01 account-switch gates and readiness false/refusal before spawn; account swap during preflight must not launch under wrong home."
+      ],
+      "reuse": [
+        "RRT-J01"
+      ]
+    },
+    {
+      "id": "AL-C03",
+      "title": "Codex system-default sync, deselection and provenance",
+      "sourceEvidenceRefs": [
+        "AL-S007",
+        "AL-S009",
+        "AL-S010",
+        "AL-S011",
+        "AL-S029",
+        "AL-S035",
+        "AL-S037",
+        "AL-S038",
+        "AL-S040",
+        "AL-S043"
+      ],
+      "result": "Host default returns null only when shell-probe support, no custom override and hook gate allow real home; otherwise returns shared managed home. Windows does not use the POSIX real-home lane. Sync/restore are void; some helpers swallow errors while launch can still return a home.",
+      "stateTransitionsAndEffects": "Custom CODEX_HOME is distinguished from inherited Orca shadow and real home; launchEnv own property takes precedence over process env. Enter/leave per-account lane prevents old shared managed bytes becoming default. Shared system auth sync captures default snapshot and honors external logout. Existing real-home auth wins restore; detectExternalLogin plus absent real-home auth preserves logout rather than resurrecting a stale snapshot. Retained legacy panes only reconcile positively owned shared bytes; pending/fenced/managed provenance blocks refresh. Positive identity and freshness allow owned refresh back to real home. Auth writes persist pending provenance before guarded write then commit provenance after success; same-byte writes can repair mode/provenance.",
+      "errorAndPartialSuccess": "Normal legacy restore can remove/rewrite shared auth without a multi-file transaction. Compare-guard false leaves pending recovery evidence; read-for-provenance catches unreadability as null, so pending null requires a separate indeterminate-read characterization. Some capture/sync/config errors warn and return, while direct restore/read errors propagate. Guarded filesystem helpers use rescue inode plus no-overwrite hardlink publication; other-writer wins return false; atomic normal writes are not cross-file transactions. Windows rename retries six attempts with incremental50ms delay, optional ACL repair; chmod is best-effort for Codex.",
+      "owedTests": [
+        "Whole snapshot/mirror-readback/retained-provenance/real-home-lane suites, external login/logout during selection, stale/malformed/fenced/pending snapshot and retained pane attribution failure.",
+        "Fault each snapshot/provenance/auth write and restore; competing inode/byte writer before and after guard; unreadable auth with pending nextAuth:null, retry/restart and Windows ACL/rename faults.",
+        "Custom env and POSIX startup-shell override, Windows native versus WSL, per-account-to-default transition and source/destination identity freshness contradictions."
+      ],
+      "reuse": [
+        "C-CODEX",
+        "RRT-J01"
+      ]
+    },
+    {
+      "id": "AL-C04",
+      "title": "Codex resources and settings materialization",
+      "sourceEvidenceRefs": [
+        "AL-S041",
+        "AL-S042",
+        "AL-S054",
+        "AL-S055",
+        "AL-S061",
+        "AL-S062",
+        "AL-S063",
+        "AL-S064",
+        "AL-S065"
+      ],
+      "result": "Materializers return void; successful preparation can coexist with a stalled promotion or skipped unowned resource. Eight resource names remain: skills/hooks/plugins/plugin-state/profile-v2/themes/prompts/AGENTS.md.",
+      "stateTransitionsAndEffects": "Resource observation distinguishes absent/indeterminate; indeterminate preserves target, absence removes owned copies/links only, unowned target is retained. Owned copy marker records exact sourcePath; it does not hash current copied content. Symlink/junction is preferred; fallback copy plus marker is best-effort; WSL AGENTS is dereferenced copy. Config promotion runs before mirror and returns null on caught failure so mirror does not erase pending runtime change. Promotes four top-level settings and four tui settings only. Baseline missing/malformed/known-capacity error is rebuildable; unreadable is stalled. Known ancestor: changed runtime promotes only if system stayed at baseline; deletions do not promote; both changed uses system. Untracked/conflicted divergent values preserve both until one side changes; runtime-only new value promotes; runtime deletion uses system. Multiline values excluded. System missing seeds ordinary runtime settings, realpath/dangling symlink target and mode preserved; existing WSL UNC writes in place. Baseline snapshot advances after mirror, excluding conflicts; identical bytes no-op.",
+      "errorAndPartialSuccess": "Ordinary promotion/mirror is not generation-CAS across reads/writes: concurrent system edit can be lost. Existing WSL write can fail partially; baseline write itself is direct write and snapshot catches error. Promotion symlink-cycle throw is caught by outer target resolver's broad catch and can fall back to original link path; subsequent indeterminate observation should stall the write, so destructive cycle replacement is not established by this read. Upsert skips conflicting scalar/table shapes; selects last matching preamble or first tui-body key, preserves CRLF and adds trailing newline. Full lexical TOML/path-parser correctness stays with named E4/account-settings owner, not recertified by these immediate result reads.",
+      "owedTests": [
+        "Whole original resource materialization/config mirror/promotion/baseline/upsert suites and E4 C-CODEX obligations.",
+        "Disposable real-home fixture: ordinary+runtime-owned trust, exact-case revoke/regrant, absent/indeterminate source, marker-owned copy changed by user, copy/marker cleanup failure, concurrent config change and baseline write failure.",
+        "Characterize cyclic/dangling dotfile symlink plus read errors through the complete observer/write path; preserve mode and assert no replacement of a cycle. WSL UNC in-place partial write, first tui/dotted/inline/array/multiline/CRLF and missing system seed."
+      ],
+      "reuse": [
+        "C-CODEX"
+      ]
+    },
+    {
+      "id": "AL-C05",
+      "title": "Codex WSL selection, auth drain and recovery",
+      "sourceEvidenceRefs": [
+        "AL-S003",
+        "AL-S012",
+        "AL-S013",
+        "AL-S033",
+        "AL-S036",
+        "AL-S039",
+        "AL-S046",
+        "AL-S047",
+        "AL-S066"
+      ],
+      "result": "Async WSL preparation captures selected home, awaits legacy drain with throwOnFailure:true, then syncs config/AGENTS and requests background bridge before returning captured string|null. Drain resolves void for both completed and pending states; it is not a mandatory migration-complete barrier.",
+      "stateTransitionsAndEffects": "WSL account identity uses explicit distro plus absolute guest home or legacy UNC; distro matching case-insensitive after selection lookup, while persisted map keys are trimmed but case-sensitive. Default resolves OS distro; invalid/mismatched metadata chooses system guest home. Mounted-drive homes use guest/host path conversion. This path does not repeat host marker ownership checks. Per-normalized-distro drain coalesces in-flight work and caches completion. Unknown pane attribution means legacyPanePresent:true. Auth batch failures are unreadable, not absent. Only unique positive account/system identity with no possible unreadable competing owner yields destination. Freshness absent/ambiguous prevents destructive drain. Apply revalidates source/target hashes and inode identity, promotes verified auth, may copy MCP credentials only if destination absent, stages session links, commits marker only after guarded source retirement. No source removal while attributed legacy pane is present.",
+      "errorAndPartialSuccess": "Inspect timeout/nonzero can reject; apply failure re-inspection can instead resolve pending, so throwOnFailure does not imply every unsuccessful apply rejects. Promotion can commit before later bridge/retirement failure; copied MCP credentials can survive a later failure. Recovery restores verified source only into absent path, preserves a late writer and retained recovery copies, restores mode600, rolls back only same-inode session links; durable commit marker chooses cleanup. Missing auth in an existing legacy home remains pending. Session bridge skips existing targets, missing source reports zeros; other files can link before a failure. Recent scan checks start/end shape and scans dates >=start (no upper end filter in normal branch); retain characterization test. No caller abort signal or post-drain selection generation check.",
+      "owedTests": [
+        "Whole WSL managed/default/session bridge and legacy drain/apply/rollback suites unchanged; assert awaiting the actual drain, not only a stub Promise.",
+        "Wrong distro/case/default/mounted-drive, ambiguous identity and unreadable competitor, fresh/older/unknown timestamps; pending versus complete and apply failure recovered-to-pending.",
+        "Timeout with guest process still writing, every hash/inode cutover race, abrupt interruption at source/destination/session marker steps, retained pane, MCP copy surviving later failure, concurrent account selection during await and restart with completion marker.",
+        "Recent-window files before/start/after-end, cross-filesystem fallback copies, existing target, partial bridge rollback and external late writers; do not infer full history availability from returned home."
+      ],
+      "reuse": []
+    },
+    {
+      "id": "AL-C06",
+      "title": "Claude target selection and exact preparation projection",
+      "sourceEvidenceRefs": [
+        "AL-S002",
+        "AL-S005",
+        "AL-S026",
+        "AL-S027",
+        "AL-S028",
+        "AL-S045"
+      ],
+      "result": "prepareForClaudeLaunch awaits serialized sync then computes a fresh projection. Host returns configDir,runtime:'host',wslDistro:null,wslLinuxConfigDir:null,envPatch,stripAuthEnv,managedRefreshDeferredByLivePty,provenance. Host provenance is managed:<id> for selected non-WSL account, otherwise system. WSL managed returns stored host configDir plus guest path, CLAUDE_CONFIG_DIR patch, stripAuthEnv:true and managed:<id>:wsl:<distro-or-empty>; deferred flag is omitted. WSL system returns envPatch:{}, strip:true, wsl:<distro>:system; when guest home is not parseable UNC, configDir falls back to host path, wslLinuxConfigDir:null rather than rejecting.",
+      "stateTransitionsAndEffects": "Untargeted Claude follows local account runtime only on Windows, not stale terminal WSL settings; non-Windows resolves host even with persisted WSL pin. Explicit target is honored. WSL default resolves OS distro. Host selector uses runtimeMap.host ?? legacy active ID; unspecified WSL selects __default__ ?? unique nonempty ID. getPreparation always gets host runtime paths first, so even a WSL projection can mkdir host config directory. CLAUDE_CONFIG_DIR override is trimmed; config .claude.json is colocated when override or colocated file exists, else real home. No SSH target is supported by these local account services.",
+      "errorAndPartialSuccess": "Mutation queue survives predecessor rejection via then(fn,fn), but selection reads across awaits and projection after the queue settles are not a captured generation. Rejection refuses that preparation after any completed side effects. Missing account referenced by a surviving host-map ID can produce managed provenance/stripAuthEnv via optional-field comparison. Upstream account-switch gates remain necessary; local result is not remote readiness or provider login proof.",
+      "owedTests": [
+        "Exact host/WSL object shape including omitted deferred flag, null guest path, blank/default distro, default auto/runtime policy, malformed/legacy map and stale host-map ID.",
+        "Concurrent preparation/switch/deselect/rollback and queue recovery; fence account used for bytes against returned provenance.",
+        "Upstream RRT-J01 and integrations environment handling must preserve local/SSH/WSL/folder owner and refuse cross-host home injection; caller cancellation must not silently imply auth rollback."
+      ],
+      "reuse": [
+        "RRT-J01"
+      ]
+    },
+    {
+      "id": "AL-C07",
+      "title": "Claude owned credential sync and refresh",
+      "sourceEvidenceRefs": [
+        "AL-S004",
+        "AL-S016",
+        "AL-S017",
+        "AL-S020",
+        "AL-S022",
+        "AL-S023",
+        "AL-S025",
+        "AL-S031",
+        "AL-S032"
+      ],
+      "result": "Sync returns void after materializing selected host credentials or deliberately retaining eligible changed live credentials. Selected WSL account validates owned storage and credential shape but does not materialize selected WSL bytes into Windows shared runtime. Earlier outgoing-host readback may still run before the WSL branch.",
+      "stateTransitionsAndEffects": "Host ownership requires canonical account-root/id/auth, regular non-symlink child and marker; canonical legacy marker can be adopted using wx. WSL UNC ownership on Windows runs bounded bash realpath/root/marker probe; timeout is typed refusal, other probe failures become unowned/null. Managed credentials prefer Darwin managed Keychain then file; valid Claude OAuth requires nonblank access token. Readback considers unique deduped scoped/legacy/file candidates with account identity/org/email evidence and freshness/refresh rotation; ambiguous or wrong-owner bytes are not persisted. Selected live runtime can be retained without overwrite when identity remains unverified; verified refreshed bytes persist to managed storage first. Non-live expiring credentials refresh before materialization; live/seeded-live PTY gate defers refresh, not proof of OS liveness. Refresh uses local proxy setup then bounded Electron fetch; failed response/parse/invalid access returns null, merge preserves other fields and prior refresh token unless rotated.",
+      "errorAndPartialSuccess": "Outgoing readback can partially persist before later error; readback catches and returns rejected even after some writes. Provider rotation may succeed before managed persistence fails; helper catches and returns null, allowing later materialization of previous bytes. Keychain/file writes are not a transaction. Non-timeout WSL ownership failures and host ownership read errors can be treated as unowned and deselect; retain exact source versus intended conservative refusal. Missing/invalid host account branches clear legacy active ID without explicitly clearing runtime host map, unlike absent-account/WSL branches: AL-C10 follows the real settings writer and confirms that the stale runtime host-map ID survives this update; getPreparation can therefore still report managed provenance after legacy deselection (source-inferred defect, not executed). No actual provider or Keychain call was made.",
+      "owedTests": [
+        "Preserve entire launch-refresh/materialization/account-switching/readback-identity suites, including actual prepareForRateLimitFetch body exercising shared refresh gate without auditing raw rate-limit providers.",
+        "Valid/invalid/null/array credentials, contradictory/missing identity and org, rotated refresh token older/equal expiry, multiple candidate ambiguity, reauth skip only intended account, live/seeded-unconfirmed/no-live.",
+        "Provider rotated token then managed persistence failure, outgoing readback partial failure, WSL timeout versus non-timeout/EACCES and host ownership read error; verify selection/map/provenance under actual store normalization.",
+        "Separate intended correction tests for synchronized host-map deselection, conservative ownership refusal and durable token rotation recovery; don't silently treat fixes as current behavior."
+      ],
+      "reuse": [
+        "S4-keychain"
+      ]
+    },
+    {
+      "id": "AL-C08",
+      "title": "Claude snapshot restore, deselect and partial materialization",
+      "sourceEvidenceRefs": [
+        "AL-S002",
+        "AL-S004",
+        "AL-S014",
+        "AL-S015",
+        "AL-S018",
+        "AL-S020",
+        "AL-S021"
+      ],
+      "result": "Restore is void and ownership-conditional. It can preserve existing runtime bytes even when preparation returns provenance:system. Missing snapshot authorizes clearing only positively owned artifacts, not arbitrary auth. A title claiming restore is not evidence restoration happened.",
+      "stateTransitionsAndEffects": "Entering host managed state captures baseline credentials/OAuth and separate strict scoped/legacy Keychain snapshots with captured-versus-unknown flags. When runtime already equals managed, reuse prior baseline rather than recapture managed as default. Invalid snapshot is discarded. Restore computes per-file and per-Keychain ownership using exact last-written/baseline bytes or qualified identity; external login/logout is preserved. OAuth metadata restores first, file next, independently owned Keychains afterward. Malformed runtime config preserves file; metadata writes preserve unrelated fields, null/undefined removes oauthAccount. Materialization writes runtime credential file then Darwin scoped and legacy Keychain, then OAuth metadata; clears/updates in-memory state after those stages. forceMaterializeCurrentSelectionForRollback serializes but keys its initial branch on legacy active ID.",
+      "errorAndPartialSuccess": "Failure after an earlier restore step leaves partial effects; flags reset only at successful end so a retry can be attempted. Keychain materialization rejection invokes ownership-aware restore then rethrows; restore rejection can replace initial error. False OAuth write on malformed config does not reject preparation. Ordinary unchanged-check read failure proceeds to atomic replacement, unlike Codex tri-state guarded writes. File write and snapshot/Keychain/OAuth operations are not a single transaction; successful local rollback does not prove provider tokens were rolled back.",
+      "owedTests": [
+        "Whole deselect/snapshot-validation/keychain-snapshots/materialization suites plus actual native Keychain fixture after audit; preserve unknown versus captured null and independently changed scoped/legacy/file artifacts.",
+        "Inject failures at snapshot strict reads, runtime file, scoped success/legacy failure, OAuth write, restore OAuth/file/keychain and retry; assert exact surviving bytes/state/provenance and preserved external logout.",
+        "Explicitly retain the original misleading-title bodies (AL-A04): missing-managed fixtures preserve stale bytes and clear selection; add separately named intended restore/retain tests where required.",
+        "Map-only host ID versus legacy ID rollback, malformed config metadata false, empty snapshot, invalid record and concurrent external auth write; use disposable profiles only."
+      ],
+      "reuse": [
+        "S4-keychain"
+      ]
+    },
+    {
+      "id": "AL-C09",
+      "title": "WSL execution result boundary used by account preparation",
+      "sourceEvidenceRefs": [
+        "AL-S017",
+        "AL-S033",
+        "AL-S067",
+        "AL-S068"
+      ],
+      "result": "runWslProcess projects {environmentResolved,code:number|null,stdout,stderr,timedOut}; it drops runProcess signal/outputTruncated. These account calls use loginPath:none, so environmentResolved is true without a login-PATH probe. Nonzero process exit is result data; spawn/error rejects.",
+      "stateTransitionsAndEffects": "Validate guest cwd and binary form; script explicitly uses bash when required. Build shell-free wsl.exe --exec argv and host-local interop cwd, WSL_UTF8 plus explicit env-key propagation; oversized script uses stdin. One deadline includes optional probe, minimum remaining1ms. runProcess starts child, bounds output, swallows stream errors, settles close result; timeout signals root then after2s force-attempts and resolves null code even without verified tree termination. These WSL callers provide no termination barrier or abort signal.",
+      "errorAndPartialSuccess": "Timeout is not guest process-exit proof; drain may start recovery inspection while guest mutation outcome remains uncertain. Truncated output flag is lost in WSL projection, though malformed/base64/missing rows are conservatively rejected or unreadable by account wrappers. Native wsl.exe, bash/filesystem and Electron Keychain/provider execution remain genuine external effects, not exercised by reading this local wrapper.",
+      "owedTests": [
+        "Whole original WSL runner/invocation/W1-W3/real-distro and runProcess suites retained; fixture spawn rejection, timeout without close, EPIPE, exact byte budget and UTF8 truncation.",
+        "Authorized Windows+real WSL guest fixture with delayed writer surviving timeout: preserve uncertain auth outcome, recovery artifacts and selected ownership; SSH contact loss remains unverifiable, not exited.",
+        "Validate stdin-versus-argv for long scripts, distro/default and mounted-drive paths, Unicode and native interop cwd; no personal profiles."
+      ],
+      "reuse": []
+    },
+    {
+      "id": "AL-C10",
+      "title": "Actual settings write preserves stale Claude host selection",
+      "sourceEvidenceRefs": [
+        "AL-S004",
+        "AL-S005",
+        "AL-S027",
+        "AL-S028",
+        "AL-S072",
+        "AL-S073",
+        "AL-S074",
+        "AL-S075"
+      ],
+      "result": "For a still-listed invalid/unowned host Claude account selected by activeClaudeManagedAccountIdsByRuntime.host, the auth service clears only activeClaudeManagedAccountId. Real Store updateSettings shallow-merges this field and does not synchronize account runtime selection; getSettings returns that same state. normalizeClaudeRuntimeSelection prefers surviving map.host, so returned preparation can still be managed:<id>, stripAuthEnv:true despite refusal to materialize the account.",
+      "stateTransitionsAndEffects": "ProfilePreferences forwards update to settings-update. stripRetiredGlobalSettings removes only three retired unrelated fields. Whole settings object is replaced with shallow merge, scheduleSave is called afterward, listeners notify only when explicitly requested. Auth service uses default notifyListeners false. This is the exact two-field join, not another E2 settings census.",
+      "errorAndPartialSuccess": "State mutation precedes scheduleSave; throw can follow changed in-memory state. Nulling legacy ID does not remove valid map ID; no read-time pruning in getSettings/normalize selection. forceMaterializeCurrentSelectionForRollback's legacy-only branch can disagree with map-based launch selection. Absence of listed account uses separate path clearing both fields, so the defect requires an existing account whose storage/credentials fail validation.",
+      "owedTests": [
+        "Use actual ProfilePreferences/settings-update plus real Claude service with disposable state and existing host account: both selection fields set, unowned path or invalid/missing credentials; characterize legacy:null while runtimeMap.host remains ID and preparation managed/strip:true.",
+        "Root-approved correction separately asserts host map and legacy ID clear together, preserves WSL selections, emits intended notifications only, and distinguishes restore failure from successful deselection.",
+        "Map-only rollback, concurrent store update during awaited readback, scheduleSave throw and restart; preserve all original account/store source allocation."
+      ]
+    }
+  ],
+  "sourceDefects": [
+    {
+      "id": "AL-D01",
+      "contract": "AL-C10",
+      "status": "source-inferred, not executed",
+      "finding": "Existing invalid/unowned Claude host account can retain runtime-map host ID after legacy deselection and return managed provenance/stripAuthEnv:true.",
+      "characterization": "Real store plus account with both IDs selected, missing/invalid or unowned credentials; assert legacy null, map ID retained and returned provenance. Preserve source fixture separately from correction.",
+      "intendedCorrection": "After root ratification, atomically reconcile both host selection fields while preserving WSL selections and retaining ownership-aware restore/refusal."
+    },
+    {
+      "id": "AL-D02",
+      "contract": "AL-C06",
+      "status": "source-inferred race exposure, not reproduced",
+      "finding": "Serialized Claude mutation is followed by fresh projection outside queue; selection may change across awaited reads/refresh or between sync and projection. Codex captures WSL home before awaiting drain.",
+      "characterization": "Hold managed read/refresh or drain, change selection and settle; assert actual bytes/home/provenance then compare upstream account-switch gates.",
+      "intendedCorrection": "Root-approved generation/pinned-account guard must retain original gates and cancellation semantics."
+    },
+    {
+      "id": "AL-D03",
+      "contract": "AL-C07",
+      "status": "source-characterized partial success; desired recovery requires ratification",
+      "finding": "Provider token rotation may precede failed managed persistence; catch returns null and stale managed credentials may materialize afterward.",
+      "characterization": "Stub only provider boundary with successful rotation, fault managed write, assert exact runtime/storage result and later retry; authorized provider fixture separately.",
+      "intendedCorrection": "Durable rotation recovery/refusal policy, not silent reuse of stale refresh token."
+    },
+    {
+      "id": "AL-D04",
+      "contract": "AL-C09",
+      "status": "source-characterized uncertainty",
+      "finding": "WSL timeout can settle without verified guest-tree exit; auth drain reinspection may race a surviving writer.",
+      "characterization": "Authorized disposable WSL late-writer fixture after deadline; retain recovery artifacts and never infer exited.",
+      "intendedCorrection": "Host-authoritative mutation/termination fencing if root requires stronger guarantees."
+    }
+  ],
+  "originalAssertionBodiesRead": [
+    {
+      "id": "AL-A01",
+      "path": "src/main/claude-accounts/runtime-auth-service-launch-refresh.test.ts",
+      "start": 71,
+      "end": 208,
+      "sourceEvidenceRefs": [
+        "AL-S048"
+      ],
+      "discriminates": "System default remains untouched and no refresh helper called; managed refresh persisted before runtime; live PTY shared preparation flag true and no refresh.",
+      "limitations": "Live-PTY case invokes prepareForRateLimitFetch, which shares sync/projection; it is not raw provider coverage or direct launch execution. Mocked refresh cannot prove provider rotation.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A02",
+      "path": "src/main/claude-accounts/runtime-auth-service-materialization.test.ts",
+      "start": 56,
+      "end": 213,
+      "sourceEvidenceRefs": [
+        "AL-S049"
+      ],
+      "discriminates": "Missing runtime file is rematerialized by prepareForClaudeLaunch; corrupt/wrong-shaped/unowned storage clears legacy selection and preserves system bytes; canonical legacy marker adopted; symlinked credential child rejected.",
+      "limitations": "Existing invalid-account cases configure legacy selection only; they do not cover AL-C10 surviving runtime-map host ID.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A03",
+      "path": "src/main/claude-accounts/runtime-auth-service-materialization.test.ts",
+      "start": 395,
+      "end": 487,
+      "sourceEvidenceRefs": [
+        "AL-S050"
+      ],
+      "discriminates": "Missing snapshot clears owned runtime; unreadable unchanged-check falls through to atomic write; unchanged credentials mode becomes0600.",
+      "limitations": "Permission cases return early on Windows; that is not cross-platform PASS. Native Keychain is substituted by harness.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A04",
+      "path": "src/main/claude-accounts/runtime-auth-service-deselect-restore.test.ts",
+      "start": 331,
+      "end": 610,
+      "sourceEvidenceRefs": [
+        "AL-S051"
+      ],
+      "discriminates": "External logout preserved; unknown ownership preserves stale file/metadata/Keychains. The 'restores system snapshot' body417–469 asserts provenance system but stale bytes unchanged. 'keeps missing-managed selection'471–532 asserts legacy selection null, not retained. 'restores missing-managed oauth metadata'534–582 actually asserts unchanged metadata.",
+      "limitations": "Titles are not the behavior oracle. Preserve these exact bodies; no claim they prove owned restoration or retry-on-Keychain-failure. Add separately named intended behavior tests.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A05",
+      "path": "src/main/claude-accounts/runtime-auth-service-wsl-runtime.test.ts",
+      "start": 42,
+      "end": 274,
+      "sourceEvidenceRefs": [
+        "AL-S052"
+      ],
+      "discriminates": "Windows local-account policy outranks stale terminal policy; auto follows global runtime; non-Windows ignores persisted WSL pin; missing managed credentials clears distro map; default distro picks correct account and guest config path.",
+      "limitations": "Wsl/Keychain/homes mocked; many managed fixtures are host directories annotated WSL, so not proof of real UNC/bash marker validation.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A06",
+      "path": "src/main/codex-accounts/runtime-home-real-home-lane-routing.test.ts",
+      "start": 57,
+      "end": 223,
+      "sourceEvidenceRefs": [
+        "AL-S056"
+      ],
+      "discriminates": "Managed default path versus real-home null, unavailable gate routes back managed, launchEnv and POSIX shell override, migration marker eligibility.",
+      "limitations": "Rate-limit preparation assertions only characterize shared home choice; raw provider not covered. Scope is service, not wired startup helper.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A07",
+      "path": "src/main/codex-accounts/runtime-home-per-account-homes.test.ts",
+      "start": 42,
+      "end": 197,
+      "sourceEvidenceRefs": [
+        "AL-S057"
+      ],
+      "discriminates": "Selected accounts return distinct homes; shared auth absent; resources/config materialize in selected home while system auth unchanged.",
+      "limitations": "Two launches are sequential in test body despite concurrent wording; requires actual interleaving fixture. System auth unchanged does not prove config never promoted.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A08",
+      "path": "src/main/codex-accounts/runtime-home-managed-auth-recovery.test.ts",
+      "start": 39,
+      "end": 213,
+      "sourceEvidenceRefs": [
+        "AL-S058"
+      ],
+      "discriminates": "Missing auth preserves selected identity and does not resurrect shared bytes; matching unavailable-home grace then6000ms clears host map only; healed torn JSON preserves selection.",
+      "limitations": "No real OS lock or concurrent writer; retain exact body and add4999/5000ms edges.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A09",
+      "path": "src/main/codex-accounts/runtime-home-resume-selection-gate.test.ts",
+      "start": 135,
+      "end": 175,
+      "sourceEvidenceRefs": [
+        "AL-S059"
+      ],
+      "discriminates": "Held marker causes typed refusal and retains ID; read-only resolver null is distinguished; released marker recovers; wrong marker clears both host selections.",
+      "limitations": "Resume service direct boundary, not end-to-end PTY refusal.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A10",
+      "path": "src/main/codex-accounts/runtime-home-wsl-managed-accounts.test.ts",
+      "start": 317,
+      "end": 433,
+      "sourceEvidenceRefs": [
+        "AL-S060"
+      ],
+      "discriminates": "Async preparation waits mocked drain with throwOnFailure:true before bridge; unknown pane attribution becomes legacyPanePresent:true.",
+      "limitations": "Drain is a stub: proves ordering and conservative flag, not actual drain completion/failure or live guest ownership.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A11",
+      "path": "src/main/codex-accounts/legacy-wsl-runtime-auth-drain-apply-script.test.ts",
+      "start": 65,
+      "end": 145,
+      "sourceEvidenceRefs": [
+        "AL-S069"
+      ],
+      "discriminates": "Auth promotion, source retention, torn bytes exit42, symlink source46, changed MCP43, changed destination39/45 and marker absent.",
+      "limitations": "Bodies invoke harness with fault controls; read only, not executed here.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A12",
+      "path": "src/main/codex-accounts/legacy-wsl-runtime-auth-drain-apply-script.test.ts",
+      "start": 163,
+      "end": 226,
+      "sourceEvidenceRefs": [
+        "AL-S070"
+      ],
+      "discriminates": "Interrupted promotion leaves nonzero status but promoted destination; source restored, mode600, marker absent; late target replacement preserved with destination recovery retained.",
+      "limitations": "These assertions themselves establish intended partial effects, not full transaction rollback; execution still owed.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    },
+    {
+      "id": "AL-A13",
+      "path": "src/main/codex/codex-real-home-hook-install.test.ts",
+      "start": 281,
+      "end": 339,
+      "sourceEvidenceRefs": [
+        "AL-S071"
+      ],
+      "discriminates": "Unavailable grant restores old bytes or removes newly created hooks; rollback failure becomes unavailable warning; repeated unsupported attempts skip grant.",
+      "limitations": "Provider grant mocked; rollback-failure title does not mean launch rejects. No direct startup helper assertion found by scoped reference search.",
+      "execution": "not-run; original assertion bodies read unchanged; whole source file remains allocated"
+    }
+  ],
+  "testPreservation": {
+    "policy": "All original allocations, ordered files, assertion bodies, platform gates and BM/R/F obligations remain unchanged. These13 body groups are discriminating links, not a replacement test denominator. Preserve every original test in the six named whole work packages and all inherited immutable pointers, including broader packages not exercised by this join.",
+    "wholePackages": [
+      {
+        "id": "WP-ENG-HARNESS",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/14/files",
+        "count": 290,
+        "canonicalValueSha256": "39b238afc14e2e8580d0182283f1d529e011c34f7dadfeaf7049abe29c00c56b"
+      },
+      {
+        "id": "WP-ENG-RUNTIME",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/22/files",
+        "count": 688,
+        "canonicalValueSha256": "3f4ce5ba58fd983bf906dea4fc674fad0e19f065df52260f4484aada9e913591"
+      },
+      {
+        "id": "WP-ENG-SHELL",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/24/files",
+        "count": 367,
+        "canonicalValueSha256": "1ef5f19acc50d7e67df5df38a4570cf5cbbfe3b5e806309aea043a8428222f0e"
+      },
+      {
+        "id": "WP-UI-SETTINGS",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/39/files",
+        "count": 171,
+        "canonicalValueSha256": "a8a64820874d837d7b41f3e6a04e18da0253e943d42f6d798e19bd1c32906b15"
+      },
+      {
+        "id": "WP-ENG-REMOTE",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/21/files",
+        "count": 282,
+        "canonicalValueSha256": "70e6e6b08844d861eefe5a99be847b165e759ada8e59d2374fedce2779cddc17"
+      },
+      {
+        "id": "WP-ENG-AGENTSVC",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/8/files",
+        "count": 166,
+        "canonicalValueSha256": "d9dfca9f53eb10eb40a8775b0afce8b5552159fc9c6c610b0c5dc6c5f5aeffa3"
+      }
+    ],
+    "inheritedRefs": [
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json#/originalTestAllocation",
+        "canonicalValueSha256": "3befb78f34d70aeadf55ecc8472a4902cfea35ccec0f707eff4822c60e08115e",
+        "count": null
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json#/inheritedGates",
+        "canonicalValueSha256": "982b097af84b72989de56756339a775f17e4fa9e910819b375e01184075f96f0",
+        "count": 47
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json#/inheritedExecutionObligations",
+        "canonicalValueSha256": "8d07cb49e8895b40bd4c47b418ed67180ab5f76b17bc62210246197149c48c39",
+        "count": 6
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json#/priorAssertionBodiesRef",
+        "canonicalValueSha256": "58732e686c4a78ba3f1531d03bea10962f2ecfe0fcc83ec2497a69068eb2f67f",
+        "count": null
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json#/sourceResiduals",
+        "canonicalValueSha256": "29027271f3213f10443670aa8daff57a64d7f81e54583213d1ec2dd2f1aa350d",
+        "count": 3
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-runtime/contracts.json#/originalSourceTestAllocation",
+        "canonicalValueSha256": "701d2010ff8b60d741a530cea40d910846c736cd598f40a9e6f16059a420972c",
+        "count": null
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-runtime/contracts.json#/inheritedExecutionQueue",
+        "canonicalValueSha256": "6423a4fd7059d78d9b62677460ccd99cc75e27392f1eb984862a494c80c42cf9",
+        "count": 70
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-runtime/contracts.json#/originalTestQueue",
+        "canonicalValueSha256": "cd738c3760913a20c229405a74ffdc246eebcefb8bbe447c5055ebe89bf81adb",
+        "count": 33
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/result-runtime/contracts.json#/inheritedRemainingAcceptance",
+        "canonicalValueSha256": "56f17623c8ae5bfeabd87c61b285a1087045f19674cc5bce18f701dd31ffdbde",
+        "count": 47
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/originalTestQueue",
+        "canonicalValueSha256": "cd738c3760913a20c229405a74ffdc246eebcefb8bbe447c5055ebe89bf81adb",
+        "count": 33
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/inheritedExecutionQueue",
+        "canonicalValueSha256": "6423a4fd7059d78d9b62677460ccd99cc75e27392f1eb984862a494c80c42cf9",
+        "count": 70
+      },
+      {
+        "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance",
+        "canonicalValueSha256": "56f17623c8ae5bfeabd87c61b285a1087045f19674cc5bce18f701dd31ffdbde",
+        "count": 47
+      }
+    ],
+    "baseline": "Not run; original whole suite in disposable source-derived baseline after authorization, unchanged runner/config/assertions and exact platform/skip accounting.",
+    "port": "Port original assertions unchanged; prove candidate behavioral RED before implementation and GREEN afterward. Setup/compile failures are not behavioral RED; skipped or mocked missing product behavior is not PASS.",
+    "implementation": "No implementation or test execution authorized here."
+  },
+  "sourceResiduals": [
+    {
+      "id": "AL-SR01",
+      "kind": "inherited-out-of-scope-source-gap",
+      "owner": "Root plus separate raw-rate-limit provider lead",
+      "boundary": "result-platform/final-local.json#/sourceResiduals, especially P-ACCOUNT-STATE; raw provider API result semantics",
+      "disposition": "Unchanged and open under its owner. Account launch/token-refresh wrapper characterization here does not close raw rate-limit providers."
+    },
+    {
+      "id": "AL-SR02",
+      "kind": "bounded-local-dependency-not-recertified",
+      "owner": "E4/account-settings owner; root ratifies exact existing C-CODEX scope",
+      "boundary": "src/main/codex/config-toml-line-scan.ts, config-toml-key-path.ts, config-toml-runtime-owned-sections.ts and codex-config-path-reference-rewrite.ts",
+      "disposition": "Immediate promotion/mirror/upsert return, write ordering and refusal/partial effects characterized here; full lexical/parser/path corpus remains the existing named C-CODEX local seam, not relabeled external or claimed closed. Full original codec suites/source qualifications retained."
+    },
+    {
+      "id": "AL-SR03",
+      "kind": "unawaited-local-downstream-scope",
+      "owner": "Runtime/history account migration owner, with root/E5 integration",
+      "boundary": "src/main/codex/codex-account-session-bridge.ts, wsl-codex-session-bridge.ts and codex-session-backfill.ts",
+      "disposition": "Preparation's call/arguments and lack of completion barrier characterized; WSL destructive drain's actual staged session script read here. Broader background discovery/backfill contents are not independently recertified and no full history completion is claimed."
+    },
+    {
+      "id": "AL-SR04",
+      "kind": "existing-local-policy-dependency",
+      "owner": "E2/E4 launch environment and account initialization owners",
+      "boundary": "readShellStartupEnvVar used by codex-real-home-path.ts; runtime-home-service constructor legacy migration helpers",
+      "disposition": "Exact routing use of shell-probe support/override and best-effort constructor sync is recorded; no new global migration or shell parser certification. Preserve existing whole shell/account migration tests and source qualifications."
+    }
+  ],
+  "externalExecutionBoundaries": [
+    {
+      "owner": "E4/native account owner",
+      "boundary": "macOS security/Keychain under process OS user",
+      "contract": "S4-keychain",
+      "tests": "Scoped/canonical/legacy/managed services, timeout, missing versus locked, first-success/second-failure and restore permissions in isolated OS profile."
+    },
+    {
+      "owner": "Runtime/WSL host owner",
+      "boundary": "wsl.exe, guest bash/filesystem, native child process",
+      "contract": "AL-C05/09",
+      "tests": "Windows guest/local path and distro matrix, surviving timeout writer, ownership/rename/inode/hash/durability and installed mixed versions."
+    },
+    {
+      "owner": "Account OAuth provider owner",
+      "boundary": "Electron net.fetch token endpoint and proxy setup",
+      "contract": "AL-C07",
+      "tests": "Authorized synthetic/isolated provider, successful rotation with lost reply or persist failure; no raw rate-limit coverage inferred."
+    },
+    {
+      "owner": "Runtime/SSH integration owner",
+      "boundary": "Owning SSH host preflight/spawn and account environment injection",
+      "contract": "RRT-J01",
+      "tests": "Local/folder/SSH same IDs, old/new capabilities, incompatible WSL host home, owner change during await and live/unverifiable/exited."
+    }
+  ],
+  "reusedAcceptedEvidence": [
+    {
+      "ref": "docs/migration/audit-closure/e3-bridge/result-runtime/contracts.json#/supplementalResultContracts/0",
+      "canonicalValueSha256": "8af61440fb738222e092a5af4e18afbb05d2193d11feb9fd07d29334dab351b7",
+      "id": "RRT-J01",
+      "scope": "Concrete local/daemon/SSH spawn, restore and ownership"
+    },
+    {
+      "ref": "docs/migration/audit-closure/e4-cli/followup-cli-boundaries.json#/contracts/10",
+      "canonicalValueSha256": "b4e519a5d27b595ff83c76eccd0f6a1df8057af18bc61c0f2ffdde2acefd924d",
+      "id": "S4-keychain",
+      "scope": "Claude macOS Keychain effects"
+    },
+    {
+      "ref": "docs/migration/audit-closure/e4-cli/followup-final-boundaries.json#/boundaries/12",
+      "canonicalValueSha256": "6621bd4d8eabe4a2128699a3337b33ec36e65a016d2fd125a0c7075486287a97",
+      "id": "E4-F13",
+      "scope": "Local managed runtime CODEX_HOME plus system ~/.codex user settings; SSH supplied POSIX runtime home; WSL selected distro runtime"
+    },
+    {
+      "ref": "docs/migration/audit-closure/e4-cli/followup-final-boundaries.json#/sharedContracts/1",
+      "canonicalValueSha256": "10fc07d2d6602eb351952addf6e0c8e571997770e1a6509ed057ddb91c7a7960",
+      "id": "C-CODEX",
+      "scope": "E4 hook install/source characterization; invoking local managed and system homes; provider Codex app-server and WSL guest are explicit execution owners. Full account settings promotion implementation belongs shared account/settings capability, not a second E4 command inventory."
+    }
+  ],
+  "inputEvidence": [
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json",
+      "sha256": "e34195da3f1abcc56660c04388782a4396ad47ad6afc23a24979020ef899a861"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.md",
+      "sha256": "47f3487021e354e0e61d82912dab5f4199dc86689e7ccc8ee5f796bf273267ee"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/contracts.json",
+      "sha256": "5269e951e15986e04f2ed0a2373b943d9c4a522389bcb308bf4d00d451cd9093"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-runtime/contracts.json",
+      "sha256": "8f4aab64a07aaf2c013543d3e65c9f8142037526deec8ee148b938ae834e86d3"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/followup-cli-boundaries.json",
+      "sha256": "b1409e82899145b836d61be91c124e3632195f841bb592e4ca10fc2333b57911"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/followup-final-boundaries.json",
+      "sha256": "e73c63084d2c5899feebcee5eaba0d67ea7a42d1b5bea7e4f9abd816fcd387bf"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json",
+      "sha256": "61c72df0ea371dacdce020b9c3d8b0e54a42b1bf38d96af5d24777da1ef2b167"
+    },
+    {
+      "path": "docs/migration/parity-test-work-packages.json",
+      "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+    },
+    {
+      "path": "docs/migration/e3-runtime-root-review.json",
+      "sha256": "c63e02ecb91d57e13e62051867f4444b0135d7848fc8af7387a1510210d3fa95"
+    }
+  ],
+  "sourceEvidence": [
+    {
+      "id": "AL-S001",
+      "path": "src/main/startup/codex-launch-preparation.ts",
+      "start": 1,
+      "end": 95,
+      "sha256": "dd10935c1064ca855fa5b622095da213cf6330952ea3cb3ed64ebcc3cbaa5ae7",
+      "rangeSha256": "dd10935c1064ca855fa5b622095da213cf6330952ea3cb3ed64ebcc3cbaa5ae7",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S002",
+      "path": "src/main/claude-accounts/runtime-auth-service.ts",
+      "start": 1,
+      "end": 91,
+      "sha256": "ab8308d1b540f2a8e2667d63118e61aa9a17f36d65b6528773e925264afe1214",
+      "rangeSha256": "ab8308d1b540f2a8e2667d63118e61aa9a17f36d65b6528773e925264afe1214",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S003",
+      "path": "src/main/codex-accounts/runtime-home-service-launch.ts",
+      "start": 1,
+      "end": 154,
+      "sha256": "6624e8a2b608871322ba48c7b0c7a922cee1296a5eb7997b33a2fe975b5ffeab",
+      "rangeSha256": "6624e8a2b608871322ba48c7b0c7a922cee1296a5eb7997b33a2fe975b5ffeab",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S004",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-sync.ts",
+      "start": 1,
+      "end": 284,
+      "sha256": "2a2d1515c26869cbc5d718ffa3ec30812246572eac18f1547512590faa113bee",
+      "rangeSha256": "2a2d1515c26869cbc5d718ffa3ec30812246572eac18f1547512590faa113bee",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S005",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-preparation.ts",
+      "start": 1,
+      "end": 115,
+      "sha256": "ce974336006d7bed19f68f8b15517b751017862e6d1619fe2319d8ad03b243d5",
+      "rangeSha256": "ce974336006d7bed19f68f8b15517b751017862e6d1619fe2319d8ad03b243d5",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S006",
+      "path": "src/main/codex-accounts/runtime-home-service.ts",
+      "start": 1,
+      "end": 19,
+      "sha256": "bf8edfcf12d30a561e26dea6d113755e254579b412793ed9653ef9a5f7aa2acb",
+      "rangeSha256": "bf8edfcf12d30a561e26dea6d113755e254579b412793ed9653ef9a5f7aa2acb",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S007",
+      "path": "src/main/codex-accounts/runtime-home-service-home-routing.ts",
+      "start": 1,
+      "end": 297,
+      "sha256": "f68b98025b68115121d112419e702fd7fb3f924045b00adf9cbc87539bb46ffc",
+      "rangeSha256": "f68b98025b68115121d112419e702fd7fb3f924045b00adf9cbc87539bb46ffc",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S008",
+      "path": "src/main/codex-accounts/runtime-home-service-managed-home.ts",
+      "start": 1,
+      "end": 278,
+      "sha256": "b9c530c802f0275909e50abf558289b26f467c2a0707f988530800789cf2d425",
+      "rangeSha256": "b9c530c802f0275909e50abf558289b26f467c2a0707f988530800789cf2d425",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S009",
+      "path": "src/main/codex-accounts/runtime-home-service-sync.ts",
+      "start": 1,
+      "end": 154,
+      "sha256": "28198d223202fd8e918ae021334bb2513057b32a333aecffd05d1c8ec97af29a",
+      "rangeSha256": "28198d223202fd8e918ae021334bb2513057b32a333aecffd05d1c8ec97af29a",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S010",
+      "path": "src/main/codex-accounts/runtime-home-service-auth-sync.ts",
+      "start": 1,
+      "end": 292,
+      "sha256": "71fe91412d78387d4ebd49c81758aaf784c4b369bd8d579f7fb1ef938387d30d",
+      "rangeSha256": "71fe91412d78387d4ebd49c81758aaf784c4b369bd8d579f7fb1ef938387d30d",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S011",
+      "path": "src/main/codex-accounts/runtime-home-service-auth-core.ts",
+      "start": 1,
+      "end": 174,
+      "sha256": "99a3e2688c0c4b5fc6f889e9c0ffa8756ff2ec3413a408298935ace3cc269dc5",
+      "rangeSha256": "99a3e2688c0c4b5fc6f889e9c0ffa8756ff2ec3413a408298935ace3cc269dc5",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S012",
+      "path": "src/main/codex-accounts/runtime-home-service-wsl.ts",
+      "start": 1,
+      "end": 166,
+      "sha256": "e7571fc34cca567a030263afd8241de7b57998aace3952e1f41bd17cd44cb1e3",
+      "rangeSha256": "e7571fc34cca567a030263afd8241de7b57998aace3952e1f41bd17cd44cb1e3",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S013",
+      "path": "src/main/codex-accounts/runtime-home-service-wsl-core.ts",
+      "start": 1,
+      "end": 119,
+      "sha256": "c3355382847651e76161faedff0a55bd3b27ce82bff3c699f2ad56c9e40813df",
+      "rangeSha256": "c3355382847651e76161faedff0a55bd3b27ce82bff3c699f2ad56c9e40813df",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S014",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-snapshot-restore.ts",
+      "start": 1,
+      "end": 185,
+      "sha256": "c70f3b85f9cc05e439116191ea45b8ef3ab78c72a5ac3a36a74c909062647d30",
+      "rangeSha256": "c70f3b85f9cc05e439116191ea45b8ef3ab78c72a5ac3a36a74c909062647d30",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S015",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-snapshot-capture.ts",
+      "start": 1,
+      "end": 119,
+      "sha256": "218443abea28a94c5be56745effcf99c9dc5d7397ceba16b85006f11ddda1331",
+      "rangeSha256": "218443abea28a94c5be56745effcf99c9dc5d7397ceba16b85006f11ddda1331",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S016",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-readback.ts",
+      "start": 1,
+      "end": 157,
+      "sha256": "c5c5b77d36927d0fd1804c479cf49fe33c30d02f5d38fbf654834c90675b0b62",
+      "rangeSha256": "c5c5b77d36927d0fd1804c479cf49fe33c30d02f5d38fbf654834c90675b0b62",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S017",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-managed-credentials.ts",
+      "start": 1,
+      "end": 144,
+      "sha256": "c2465f014065f3cab915a80717404b8ba960149c49a53cff3216e42b4faf97a8",
+      "rangeSha256": "c2465f014065f3cab915a80717404b8ba960149c49a53cff3216e42b4faf97a8",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S018",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-runtime-state.ts",
+      "start": 1,
+      "end": 194,
+      "sha256": "bbfc23fd7c803497f86c08519ceb4e5b5b888fa4349d2ba0b4c0f1de95d627c7",
+      "rangeSha256": "bbfc23fd7c803497f86c08519ceb4e5b5b888fa4349d2ba0b4c0f1de95d627c7",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S019",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-state.ts",
+      "start": 1,
+      "end": 17,
+      "sha256": "ba8d7ff3e178bb988f128943f252a7496f97984c1895cd88e48729f45a23cf21",
+      "rangeSha256": "ba8d7ff3e178bb988f128943f252a7496f97984c1895cd88e48729f45a23cf21",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S020",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-file-storage.ts",
+      "start": 1,
+      "end": 82,
+      "sha256": "6b6cc2fc24c5c21c7fc57ba431585350f9853eb7b32d3c1e78a106b521534cd3",
+      "rangeSha256": "6b6cc2fc24c5c21c7fc57ba431585350f9853eb7b32d3c1e78a106b521534cd3",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S021",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-keychain-snapshots.ts",
+      "start": 1,
+      "end": 131,
+      "sha256": "3daea45a6e5fb17721cf92e40113977f8a83c14c1b5737f69c3b8c5bc241c228",
+      "rangeSha256": "3daea45a6e5fb17721cf92e40113977f8a83c14c1b5737f69c3b8c5bc241c228",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S022",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-credential-matching.ts",
+      "start": 1,
+      "end": 152,
+      "sha256": "06f025a75db7e77b6d8d60e63cc793e453fd5129523e13f057929855b1b4535d",
+      "rangeSha256": "06f025a75db7e77b6d8d60e63cc793e453fd5129523e13f057929855b1b4535d",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S023",
+      "path": "src/main/claude-accounts/runtime-auth/runtime-auth-credential-identity.ts",
+      "start": 1,
+      "end": 188,
+      "sha256": "c0f7554fad91e238612a4b5932f617c336f8f60119fbd0ad93fe8a0f89483320",
+      "rangeSha256": "c0f7554fad91e238612a4b5932f617c336f8f60119fbd0ad93fe8a0f89483320",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S024",
+      "path": "src/main/codex-accounts/host-codex-managed-home-ownership.ts",
+      "start": 1,
+      "end": 204,
+      "sha256": "2cdbea302e234f904f99842624307715a041838dd4c1b71ff7d7b0ba110671e1",
+      "rangeSha256": "2cdbea302e234f904f99842624307715a041838dd4c1b71ff7d7b0ba110671e1",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S025",
+      "path": "src/main/claude-accounts/managed-auth-path.ts",
+      "start": 1,
+      "end": 112,
+      "sha256": "6bb814200e9d603110ec661cb8efe749f38b1e7df5aa6ea0b1759fd44cce11a6",
+      "rangeSha256": "6bb814200e9d603110ec661cb8efe749f38b1e7df5aa6ea0b1759fd44cce11a6",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S026",
+      "path": "src/main/claude-accounts/runtime-paths.ts",
+      "start": 1,
+      "end": 34,
+      "sha256": "6ee93eff3a7c8ebf2c4b4dadee4ee7ed874c477a9da505a66b7a9cab047d5c1a",
+      "rangeSha256": "6ee93eff3a7c8ebf2c4b4dadee4ee7ed874c477a9da505a66b7a9cab047d5c1a",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S027",
+      "path": "src/main/claude-accounts/runtime-selection.ts",
+      "start": 1,
+      "end": 147,
+      "sha256": "fed23a04cf160d0c8eb73e417babd43cc72923bbdd7116ef45c6c59945e62c61",
+      "rangeSha256": "fed23a04cf160d0c8eb73e417babd43cc72923bbdd7116ef45c6c59945e62c61",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S028",
+      "path": "src/main/codex-accounts/runtime-selection.ts",
+      "start": 1,
+      "end": 132,
+      "sha256": "370be038141ec7fffed7cdc8907fe6890edc41d8935d1cf1f1971068633be889",
+      "rangeSha256": "370be038141ec7fffed7cdc8907fe6890edc41d8935d1cf1f1971068633be889",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S029",
+      "path": "src/main/codex-accounts/runtime-home-service-auth-provenance.ts",
+      "start": 1,
+      "end": 224,
+      "sha256": "17ff734fee8ec96652170d4cc7c5c4df2d80eb70b1f8399729becc8bc278aa19",
+      "rangeSha256": "17ff734fee8ec96652170d4cc7c5c4df2d80eb70b1f8399729becc8bc278aa19",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S030",
+      "path": "src/main/codex-accounts/runtime-home-service-paths.ts",
+      "start": 1,
+      "end": 187,
+      "sha256": "ebf966b1ba9b4380150d409b9e4af8350cd6bfe88ee99f0694cfac04057b7576",
+      "rangeSha256": "ebf966b1ba9b4380150d409b9e4af8350cd6bfe88ee99f0694cfac04057b7576",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S031",
+      "path": "src/main/claude-accounts/oauth-refresh.ts",
+      "start": 1,
+      "end": 170,
+      "sha256": "a8cef23e97800e3d1bc3a32a5833e6111e33528af1a2388c2f137b2b046db84e",
+      "rangeSha256": "a8cef23e97800e3d1bc3a32a5833e6111e33528af1a2388c2f137b2b046db84e",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S032",
+      "path": "src/main/claude-accounts/live-pty-gate.ts",
+      "start": 1,
+      "end": 101,
+      "sha256": "44ff86207806ef83d96169cff1fc3400b63623bdf72599695dc5a7dbb3ed43c9",
+      "rangeSha256": "44ff86207806ef83d96169cff1fc3400b63623bdf72599695dc5a7dbb3ed43c9",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S033",
+      "path": "src/main/codex-accounts/legacy-wsl-runtime-auth-drain.ts",
+      "start": 1,
+      "end": 269,
+      "sha256": "c9b28cccb6bae163d2940100c194495d9851d20aa0a03267ed6eea3652d59530",
+      "rangeSha256": "c9b28cccb6bae163d2940100c194495d9851d20aa0a03267ed6eea3652d59530",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S034",
+      "path": "src/main/codex-accounts/codex-credential-absence-grace.ts",
+      "start": 1,
+      "end": 46,
+      "sha256": "144651d59e75e13c884f91d4fb451c3d7997cd8574ebdfb3520672f5bb08317f",
+      "rangeSha256": "144651d59e75e13c884f91d4fb451c3d7997cd8574ebdfb3520672f5bb08317f",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S035",
+      "path": "src/main/codex-accounts/fs-utils.ts",
+      "start": 1,
+      "end": 230,
+      "sha256": "ea5d9302abdb02b48a09d204e3498edf2748aca508e2b0225f9a4995e1cb9cfe",
+      "rangeSha256": "ea5d9302abdb02b48a09d204e3498edf2748aca508e2b0225f9a4995e1cb9cfe",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S036",
+      "path": "src/main/codex-accounts/legacy-wsl-runtime-auth-drain-scripts.ts",
+      "start": 1,
+      "end": 300,
+      "sha256": "83904ccd854eb992078104467f39d9bd94ae689581e48229d3bdb05647e9be84",
+      "rangeSha256": "83904ccd854eb992078104467f39d9bd94ae689581e48229d3bdb05647e9be84",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S037",
+      "path": "src/main/codex-accounts/codex-auth-identity.ts",
+      "start": 1,
+      "end": 309,
+      "sha256": "cfb3f470ef64c21cd5d44a40e4b96df449ad9db5c8755b5455c3475d53c20d59",
+      "rangeSha256": "cfb3f470ef64c21cd5d44a40e4b96df449ad9db5c8755b5455c3475d53c20d59",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S038",
+      "path": "src/main/codex-accounts/runtime-home-service-auth-sync-identity.ts",
+      "start": 1,
+      "end": 37,
+      "sha256": "5349004a61e0de1e1d9a2cb2769d1030e121cbd9d7c8fb6f3726d9c91bc31a94",
+      "rangeSha256": "5349004a61e0de1e1d9a2cb2769d1030e121cbd9d7c8fb6f3726d9c91bc31a94",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S039",
+      "path": "src/main/codex-accounts/wsl-codex-auth-batch-reader.ts",
+      "start": 1,
+      "end": 70,
+      "sha256": "7c0b9ca26c1d6c0562219a07c81fafccdd11d3d3848404335f8062f71c513771",
+      "rangeSha256": "7c0b9ca26c1d6c0562219a07c81fafccdd11d3d3848404335f8062f71c513771",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S040",
+      "path": "src/main/codex/codex-real-home-path.ts",
+      "start": 1,
+      "end": 126,
+      "sha256": "5759c6937f3de2d2e00df5cb418d273b001fb886ca727a090c952c723872c0b8",
+      "rangeSha256": "5759c6937f3de2d2e00df5cb418d273b001fb886ca727a090c952c723872c0b8",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S041",
+      "path": "src/main/codex/codex-home-paths.ts",
+      "start": 1,
+      "end": 309,
+      "sha256": "5428ab8e50b0519de1d15bcc58ab0e2ee2b52d15f5accba8b561a3cb4f0ed57b",
+      "rangeSha256": "5428ab8e50b0519de1d15bcc58ab0e2ee2b52d15f5accba8b561a3cb4f0ed57b",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S042",
+      "path": "src/main/codex/codex-config-mirror.ts",
+      "start": 1,
+      "end": 278,
+      "sha256": "7c245889d7852e39023d7a5ae96a0143bb063463f127506b0139ba75ce555b1b",
+      "rangeSha256": "7c245889d7852e39023d7a5ae96a0143bb063463f127506b0139ba75ce555b1b",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S043",
+      "path": "src/main/codex-accounts/legacy-shared-config-compatibility.ts",
+      "start": 1,
+      "end": 25,
+      "sha256": "8c713bd30ac046d55db331bec50b3b416eb4df012733e0a851a214ea01e3a6e5",
+      "rangeSha256": "8c713bd30ac046d55db331bec50b3b416eb4df012733e0a851a214ea01e3a6e5",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S044",
+      "path": "src/main/codex/codex-real-home-hook-install.ts",
+      "start": 1,
+      "end": 312,
+      "sha256": "32c0c2f87092b9e64df2ee1df9d1b6b190d8a873ca8a0008e3da84032a1c15d3",
+      "rangeSha256": "32c0c2f87092b9e64df2ee1df9d1b6b190d8a873ca8a0008e3da84032a1c15d3",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S045",
+      "path": "src/shared/local-account-runtime.ts",
+      "start": 1,
+      "end": 40,
+      "sha256": "fdf88df252ce66af47e521659d55cded8ea268f8ac2a74780da67e235ad2a9eb",
+      "rangeSha256": "fdf88df252ce66af47e521659d55cded8ea268f8ac2a74780da67e235ad2a9eb",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S046",
+      "path": "src/main/codex-accounts/legacy-wsl-runtime-auth-drain-shell-commands.ts",
+      "start": 1,
+      "end": 90,
+      "sha256": "91b042fad0b08e1e0823245038f9af421177c67d85a0addb16adb374dd429862",
+      "rangeSha256": "91b042fad0b08e1e0823245038f9af421177c67d85a0addb16adb374dd429862",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S047",
+      "path": "src/main/codex-accounts/legacy-wsl-runtime-auth-finalize-script.ts",
+      "start": 1,
+      "end": 71,
+      "sha256": "9000a20449315c48854a80c046956abc9933f4cd1fecf30e4dfa0b2b1e9e2285",
+      "rangeSha256": "9000a20449315c48854a80c046956abc9933f4cd1fecf30e4dfa0b2b1e9e2285",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S048",
+      "path": "src/main/claude-accounts/runtime-auth-service-launch-refresh.test.ts",
+      "start": 43,
+      "end": 209,
+      "sha256": "147eee2ef8943f82120ac32ac8006f79aef27fcfdbd7ea21a8a62eec44371079",
+      "rangeSha256": "b82a7a043a57bb532bb307fc51cdf59589a2d7dbed1042adcd63f6a6587628c9",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S049",
+      "path": "src/main/claude-accounts/runtime-auth-service-materialization.test.ts",
+      "start": 56,
+      "end": 214,
+      "sha256": "391cb6aba48c2e11820fe3368cbdf39bd7b96f22b13ad79e1e1b199881fb7a7e",
+      "rangeSha256": "e043697f1b9310aa3aa1e8cd785f2a43fac18e0daa6895f71a7951348d5d5c6e",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S050",
+      "path": "src/main/claude-accounts/runtime-auth-service-materialization.test.ts",
+      "start": 395,
+      "end": 488,
+      "sha256": "391cb6aba48c2e11820fe3368cbdf39bd7b96f22b13ad79e1e1b199881fb7a7e",
+      "rangeSha256": "cf1dbdee4f67b7a1e773e40e0b52d269b054d31349bed518265523d9a1ac82a5",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S051",
+      "path": "src/main/claude-accounts/runtime-auth-service-deselect-restore.test.ts",
+      "start": 331,
+      "end": 611,
+      "sha256": "474742246a55212f2fc671f72bb6ce7dd305340f5f3259f3c57647a2be551b0d",
+      "rangeSha256": "0b19f757d3dcb01c5fabbb100757a09eec3a9055e481c5e2454bb6c4a99b5aef",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S052",
+      "path": "src/main/claude-accounts/runtime-auth-service-wsl-runtime.test.ts",
+      "start": 42,
+      "end": 275,
+      "sha256": "f6226d6042bc8680e5aa3d3bc33edb2cb701880c55674ef78576eb5dcd1d1b6c",
+      "rangeSha256": "064a21825d36bbe199c3dd5c1146183db3e124eef9918eb2ff6037bc32c46ccb",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S053",
+      "path": "src/main/codex-accounts/managed-codex-auth-readiness.ts",
+      "start": 1,
+      "end": 219,
+      "sha256": "e038820512f6b4b38b1c440d47a3ce7733af80d0914746451fa572a82632450e",
+      "rangeSha256": "e038820512f6b4b38b1c440d47a3ce7733af80d0914746451fa572a82632450e",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S054",
+      "path": "src/main/codex/codex-managed-home-resource-copy-marker.ts",
+      "start": 1,
+      "end": 68,
+      "sha256": "a4dba441c0c843cd16a99a23e45d63fddeb1860d2d53c8a4193a8eed6181d950",
+      "rangeSha256": "a4dba441c0c843cd16a99a23e45d63fddeb1860d2d53c8a4193a8eed6181d950",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S055",
+      "path": "src/main/codex/codex-path-observation.ts",
+      "start": 1,
+      "end": 43,
+      "sha256": "83ccb7988d1dd5e7de5d60f83b11d18c453d16b0b49559bc1997973afcd625fc",
+      "rangeSha256": "83ccb7988d1dd5e7de5d60f83b11d18c453d16b0b49559bc1997973afcd625fc",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S056",
+      "path": "src/main/codex-accounts/runtime-home-real-home-lane-routing.test.ts",
+      "start": 57,
+      "end": 224,
+      "sha256": "30e892c8c72ee04e36c6e7b74254cff284073a6609c2afd93b55964d283f234c",
+      "rangeSha256": "0507b8214ad275a4e5b6276791477eb3859dac21d0af8ef0cbd0072567c11a3d",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S057",
+      "path": "src/main/codex-accounts/runtime-home-per-account-homes.test.ts",
+      "start": 42,
+      "end": 198,
+      "sha256": "6a7cecd507e40a9a6c9ab1a653d6f869436648d11a3c5ecaaedf9971f0efae12",
+      "rangeSha256": "58b8dd5b4152bde28604e0493c0f77bcbdad860a6799f963000cc86b2e0205ea",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S058",
+      "path": "src/main/codex-accounts/runtime-home-managed-auth-recovery.test.ts",
+      "start": 39,
+      "end": 214,
+      "sha256": "b90da79519be89460e6fe93ff49c9ba8e9998a09c68dde9ba4a46dff2e1d7f24",
+      "rangeSha256": "623fa62d25facf40e90d1d268833baa59eb95efd20e1a6cc188fc23c4770567d",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S059",
+      "path": "src/main/codex-accounts/runtime-home-resume-selection-gate.test.ts",
+      "start": 135,
+      "end": 176,
+      "sha256": "4411314414c97a5c5b0a1038664e19d210f38f542ca4ac7d38ece21613651ad8",
+      "rangeSha256": "fb56c576676ac3b08a6fe763f7fa267f0a75ad77861330f5c9dc47820a73a2a3",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S060",
+      "path": "src/main/codex-accounts/runtime-home-wsl-managed-accounts.test.ts",
+      "start": 317,
+      "end": 434,
+      "sha256": "45e4b78c3690340195b5267afa4ab95408e393c9bbdfceb66812cbcafdb7e36b",
+      "rangeSha256": "2d2e1bfab6eaea3893adf20bf9913be8cd0dddc8a36df0e5f5004fbce1769487",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S061",
+      "path": "src/main/codex/config-settings-promotion.ts",
+      "start": 1,
+      "end": 360,
+      "sha256": "d3ea1b1541db1c9da70d2403eaafa6075013b00a239b37ea016d26dc88f98eba",
+      "rangeSha256": "d3ea1b1541db1c9da70d2403eaafa6075013b00a239b37ea016d26dc88f98eba",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S062",
+      "path": "src/main/codex/config-settings-baseline.ts",
+      "start": 1,
+      "end": 138,
+      "sha256": "4cc35b869aa6e8daef81a9fdd396b2c1d90751c2f02b0b1c9ae317ffcb96ef13",
+      "rangeSha256": "4cc35b869aa6e8daef81a9fdd396b2c1d90751c2f02b0b1c9ae317ffcb96ef13",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S063",
+      "path": "src/main/codex/config-settings-promotion-write-target.ts",
+      "start": 1,
+      "end": 46,
+      "sha256": "602eac12872585652acdff04cafa855624cd4140fe74d5c4c4fbf137ff4574a9",
+      "rangeSha256": "602eac12872585652acdff04cafa855624cd4140fe74d5c4c4fbf137ff4574a9",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S064",
+      "path": "src/main/codex/config-settings-conflict-resolution.ts",
+      "start": 1,
+      "end": 35,
+      "sha256": "5ea77720f0c5e7553d2de26d2338f8eac859121b03fee137419af94c9f6584df",
+      "rangeSha256": "5ea77720f0c5e7553d2de26d2338f8eac859121b03fee137419af94c9f6584df",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S065",
+      "path": "src/main/codex/codex-config-settings-upsert.ts",
+      "start": 1,
+      "end": 322,
+      "sha256": "9745af11453f7c6494c8503110d1daebf8cf9aedaea0958348b14bf0c8dfcc59",
+      "rangeSha256": "9745af11453f7c6494c8503110d1daebf8cf9aedaea0958348b14bf0c8dfcc59",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S066",
+      "path": "src/main/codex/wsl-codex-session-bridge-script.ts",
+      "start": 1,
+      "end": 122,
+      "sha256": "b991bd765747217ec5d910a67910858fed87867945257863619fc84370e2256d",
+      "rangeSha256": "b991bd765747217ec5d910a67910858fed87867945257863619fc84370e2256d",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S067",
+      "path": "src/main/wsl/wsl-runner.ts",
+      "start": 1,
+      "end": 260,
+      "sha256": "20eff47546edf3bab30aae2c930c72876a5586172a86a2d38bb1b48c424e7309",
+      "rangeSha256": "20eff47546edf3bab30aae2c930c72876a5586172a86a2d38bb1b48c424e7309",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S068",
+      "path": "src/shared/child-process/run-process.ts",
+      "start": 1,
+      "end": 400,
+      "sha256": "4ddddae3012551a036a30634dc60b87746a1d1136ca40af16236875b55359f86",
+      "rangeSha256": "4ddddae3012551a036a30634dc60b87746a1d1136ca40af16236875b55359f86",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S069",
+      "path": "src/main/codex-accounts/legacy-wsl-runtime-auth-drain-apply-script.test.ts",
+      "start": 65,
+      "end": 146,
+      "sha256": "09a3db8c03034e2a619ac1d19f1f25584b709e9b8733ce0278e8ea1903e788ed",
+      "rangeSha256": "293491ab0532afa82c916579458c8497909d828cf54483de59773c7cf757bd02",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S070",
+      "path": "src/main/codex-accounts/legacy-wsl-runtime-auth-drain-apply-script.test.ts",
+      "start": 163,
+      "end": 227,
+      "sha256": "09a3db8c03034e2a619ac1d19f1f25584b709e9b8733ce0278e8ea1903e788ed",
+      "rangeSha256": "ae52ea13e0a7aa0ae4464387b68e90afade237c16940f0024776b88dc6a36603",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S071",
+      "path": "src/main/codex/codex-real-home-hook-install.test.ts",
+      "start": 281,
+      "end": 340,
+      "sha256": "6e8453e77af8da97bd306a0d1af7510205364651caeba780adb6da65300ead30",
+      "rangeSha256": "360d7fe889287be3fcb8b1bf0cba6617d5487fb68c50c5b6d819faabe43ac150",
+      "role": "original-assertion-body-read"
+    },
+    {
+      "id": "AL-S072",
+      "path": "src/main/persistence/applying-settings/settings-update.ts",
+      "start": 1,
+      "end": 267,
+      "sha256": "c69c90ef1ae327d0afa9aee1e45ee9eef601814564334b44b8b89a705396fbc8",
+      "rangeSha256": "c69c90ef1ae327d0afa9aee1e45ee9eef601814564334b44b8b89a705396fbc8",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S073",
+      "path": "src/main/persistence/loading-store/profile-preferences.ts",
+      "start": 50,
+      "end": 100,
+      "sha256": "1baa1dbcdff7ac3f2085b02e2c15fe29216169369ba56ec84f1b3e6e2b49b77d",
+      "rangeSha256": "01e16767f496622ca4b8d2313859609135b9696bf2d0913a36a54c343eeb54cf",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S074",
+      "path": "src/main/persistence/loading-store/profile-preferences.ts",
+      "start": 1,
+      "end": 49,
+      "sha256": "1baa1dbcdff7ac3f2085b02e2c15fe29216169369ba56ec84f1b3e6e2b49b77d",
+      "rangeSha256": "41cc98544126a2d7bcfc0ad65a5fb605583cf55c23ba6c5ce8964201af73c869",
+      "role": "source-body-read"
+    },
+    {
+      "id": "AL-S075",
+      "path": "src/main/persistence/applying-settings/terminal-settings-migrations.ts",
+      "start": 1,
+      "end": 90,
+      "sha256": "7c555e2016d43d06c6f47ef10f8a1a4fd6d511f5fa328d188cf77243740450dc",
+      "rangeSha256": "3bb2bd0616188df6105061d94fdefc1e1dbbd1ad91c37df0fd8fbca2bbdd5a4f",
+      "role": "source-body-read"
+    }
+  ],
+  "actualRunEvidence": {
+    "operations": [
+      "Read-only source/assertion/document reads and SHA256 computation",
+      "mentu-nav status (read-only)",
+      "Official Orca status, heartbeat and inbox CLI",
+      "apply_patch restricted to the two assigned new artifacts",
+      "Artifact-only JSON/hash/ref validation"
+    ],
+    "tests": [],
+    "builds": [],
+    "providerCalls": [],
+    "runtimeMutations": [],
+    "gitCommands": [],
+    "delegation": [],
+    "note": "No source baseline, test, build, inference, native helper or account operation executed. Tooling discovery output is not source/test acceptance."
+  },
+  "handoff": {
+    "dependentDispatch": "ctx_006b14bc1968",
+    "owner": "Root integrations lead",
+    "instruction": "Join AL-C01..10 to the two actual startup resolver callbacks. Preserve integrations' own outer error/result handling, source residuals and full execution obligations; no circular wait or edits to its artifacts.",
+    "preservedFiles": [
+      "docs/migration/audit-closure/e3-bridge/result-platform/final-local.md",
+      "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json"
+    ],
+    "completion": "candidate-only source handoff; root owns acceptance"
+  }
+}
+

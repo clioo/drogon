@@ -10,6 +10,17 @@ This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoi
 
 ## Current checkpoint — finite E3 inputs and E5 publication review
 
+Latest supersession2026-09-06 11:14 UTC: publication Task delivered `msg_0ece9799da41` and was officially released, receipt `c7354ed1-d7cc-49d2-93f2-8ba5d2877d12`, retained/external_terminal/processAction none. It has no fresh Task; root reviews its evidence alongside integrations. Ten account-launch contracts are independently accepted with source-only qualifications in e3-account-launch-root-review.md/json; no tests or account effects were executed.
+
+Two fresh Tasks were created after revalidating the exact released Astra terminals as live/connected/writable. Both returned ready/input_accepted, no setup/residual resources and no new model process; null model fields do not relabel them Sol. These are direct audit-only Tasks with no children, source edits, tests, Git, credentials/provider operations or installations:
+
+| Finite remaining join | Task / Dispatch | Reused terminal | Exclusive output under `e3-bridge/result-platform/` | Start receipt |
+| --- | --- | --- | --- | --- |
+| AL-SR02/03/04 parser/history/initialization | `task_5154c82cf9ce` / `ctx_30884f2404e3` | `term_c317aa5c-b92d-4338-a888-e88676e58fde` | `account-residual-joins.md/json` | `bf9fc90c-d507-4dcb-93f2-364362bc0ad3` |
+| PI runtime and actual request-guard registration | `task_de63b4c76c91` / `ctx_72c23d4df328` | `term_628055f8-e9bc-4f00-995c-0f119af80751` | `provider-runtime-joins.md/json` | `69cebe75-e2f9-4b4a-b72d-b38607e7c61c` |
+
+Reuse concrete accepted contracts before reading uncovered bodies. Do not repeat the accepted ten account/thirteen provider contracts or expand into a recursive history/application/network census. Local dependencies are not dismissed as external merely because they have an owner. Root retains global joining, source acceptance and original test/platform obligations. Two audit Tasks are active; the following checkpoints are historical.
+
 Latest lifecycle supersession: integrations delivered `msg_61f887ddaf78` and was released with receipt `573137a7-220f-43b3-a1a7-caca5c2bbcc4`; account launch delivered `msg_5525e954a75a` and was released with receipt `9cd76071-b63b-454e-a7cd-d5e32c3a844b`. Both decisions are retained/external_terminal/processAction none, not stopped-process claims. Their source reports await root review and neither has a fresh Task. Provider's thirteen finite contracts are now accepted with explicit root qualifications in e3-provider-inputs-root-review.md/json;19 unchanged original cases passed, not candidate parity. **Publication/provenance is now the only active audit assignment.** The four-row table below is the preceding10:56 checkpoint, not a current active-worker count. Sol implementation still follows complete audit acceptance.
 
 At the 2026-09-06 10:56 UTC checkpoint, four actual Astra audit assignments remain; no Sol implementation lead has launched. Earlier assignments below are historical. The phase transition above is unchanged.
