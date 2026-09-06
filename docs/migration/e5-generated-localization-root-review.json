@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-06",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "status": "accepted-finite-FG-UN1-FG-UN2-source-characterization",
+  "fullE5Closure": false,
+  "implementationParity": false,
+  "artifacts": [
+    {
+      "path": "docs/migration/audit-closure/e5-platform/generated-localization-final.md",
+      "sha256": "13f61918477157f9428917e092d36dc96deb983e73dd493b3a3027182376d538"
+    },
+    {
+      "path": "docs/migration/audit-closure/e5-platform/generated-localization-final.json",
+      "sha256": "798af4f1a7dd036e423214f9d7f8af7b406d0ddf1c3879022a4ea89ca69d5969"
+    },
+    {
+      "path": "scripts/verify-e5-generated-localization-source.mjs",
+      "sha256": "ce371afabaff231bed356922dacecfae53019af371b779d616ce41412e8b3fd1"
+    }
+  ],
+  "verification": {
+    "reportPath": "docs/migration/audit-closure/e5-platform/generated-localization-final.json",
+    "reportSha256": "798af4f1a7dd036e423214f9d7f8af7b406d0ddf1c3879022a4ea89ca69d5969",
+    "trackedFiles": 41,
+    "installedDependencyFiles": 1,
+    "sourceRanges": 45,
+    "documentHashes": 4,
+    "catalogResources": 7,
+    "strings": 78204,
+    "canonicalEnglishKeys": 14003,
+    "mapJoins": 20,
+    "generatedSpans": 100,
+    "decodedSegments": 186122,
+    "unrepresentedSegments": 68,
+    "reorderedMaps": [
+      "lib/xterm.mjs.map"
+    ],
+    "originalPackages": 46,
+    "originalFiles": 9037,
+    "testsExecuted": 0,
+    "limitations": [
+      "No compiler/package authenticity or reproducible-build proof.",
+      "No linguistic or rendered/native parity proof.",
+      "JSON.parse is not an independent duplicate-object-name detector."
+    ]
+  },
+  "independentSourceReads": [
+    {
+      "path": "src/renderer/src/i18n/i18n.ts",
+      "sha256": "c3f84e3239f2417b73463649331445feb555256feef3d9bbcff8692bc95f693f",
+      "bytes": 5902,
+      "lineCount": 151,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 151,
+          "bytes": 5902,
+          "sha256": "c3f84e3239f2417b73463649331445feb555256feef3d9bbcff8692bc95f693f"
+        }
+      ]
+    },
+    {
+      "path": "src/renderer/src/i18n/localized-catalog.ts",
+      "sha256": "b21d4b3c0a5cbd0644fc7a732b17c76835f0fc2947b54ca094a9ef6333f58e88",
+      "bytes": 527,
+      "lineCount": 16,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 16,
+          "bytes": 527,
+          "sha256": "b21d4b3c0a5cbd0644fc7a732b17c76835f0fc2947b54ca094a9ef6333f58e88"
+        }
+      ]
+    },
+    {
+      "path": "src/renderer/src/i18n/I18nProvider.tsx",
+      "sha256": "5fc98f8088fbd88fe5cd51389abe23a424386dac7eaf4e58f29040c8af272648",
+      "bytes": 1887,
+      "lineCount": 42,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 42,
+          "bytes": 1887,
+          "sha256": "5fc98f8088fbd88fe5cd51389abe23a424386dac7eaf4e58f29040c8af272648"
+        }
+      ]
+    },
+    {
+      "path": "src/shared/ui-locale.ts",
+      "sha256": "8b1c7d8ebe1993a3ad9c4b1f860b6c1063f364ac702ce53d5892fdb22257ef5f",
+      "bytes": 2072,
+      "lineCount": 76,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 76,
+          "bytes": 2072,
+          "sha256": "8b1c7d8ebe1993a3ad9c4b1f860b6c1063f364ac702ce53d5892fdb22257ef5f"
+        }
+      ]
+    },
+    {
+      "path": "src/shared/ui-language.ts",
+      "sha256": "0e050e617565f9c8db651d042576fda2157974a4b7e2d648c1ca7a26a7c3358c",
+      "bytes": 1388,
+      "lineCount": 45,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 45,
+          "bytes": 1388,
+          "sha256": "0e050e617565f9c8db651d042576fda2157974a4b7e2d648c1ca7a26a7c3358c"
+        }
+      ]
+    },
+    {
+      "path": "src/main/i18n/main-i18n.ts",
+      "sha256": "221362b31babb86a8467a33541d08f08bc38f2d027f708572a3f10cf7bbc7022",
+      "bytes": 5167,
+      "lineCount": 145,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 145,
+          "bytes": 5167,
+          "sha256": "221362b31babb86a8467a33541d08f08bc38f2d027f708572a3f10cf7bbc7022"
+        }
+      ]
+    },
+    {
+      "path": "src/shared/ui-locale.test.ts",
+      "sha256": "511eb33944f9290db9ea22d4dfe42aca52df2d8ebf813a5b4e24472f601abb60",
+      "bytes": 3892,
+      "lineCount": 101,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 101,
+          "bytes": 3892,
+          "sha256": "511eb33944f9290db9ea22d4dfe42aca52df2d8ebf813a5b4e24472f601abb60"
+        }
+      ]
+    },
+    {
+      "path": "src/shared/ui-language.test.ts",
+      "sha256": "dafbd2d0c9320cdbdccf9803d11c84518cfda507166f4bd4d03d4d5498452fe8",
+      "bytes": 975,
+      "lineCount": 29,
+      "ranges": [
+        {
+          "start": 1,
+          "end": 29,
+          "bytes": 975,
+          "sha256": "dafbd2d0c9320cdbdccf9803d11c84518cfda507166f4bd4d03d4d5498452fe8"
+        }
+      ]
+    }
+  ],
+  "generatedSampleScope": "Root read six bounded ESM spans for GlyphRenderer transparent fallback, TextureAtlas clear guard, SearchEngine covered-row traversal, SearchLineCache bounds, SerializeAddon hyperlink formatting, CoreBrowserTerminal composition blur. Not a complete minified-program reread.",
+  "qualifications": [
+    "Xterm ESM source map changes source index ordering. Match old/new embedded source by full source identity, not array offset. Exact20 authored-hunk reconstruction remains valid.",
+    "Map bounds and100 span hashes prove internal correspondence, not trusted compiler output or native behavior.68 segments lack generated-column proof because unchanged WebGL ESM lines are absent from diff; GL-T1 remains release-blocking.",
+    "Seven resource key/content hashes and presence/equality masks are verified. Root placeholder comparison does not independently detect duplicate JSON names or assess linguistic quality. Lead duplicate-name analysis remains reported, not falsely reenacted.",
+    "Installed i18next26.3.1 text hash matches but is not Git-pinned dependency authentication. Do not claim lockfile-reproducible runtime semantics from this evidence.",
+    "Main preinitialization returns branded default without interpolation; initialized empty/non-string guard differs from renderer. No shared initialization Promise or local language-effect settlement fence is present.",
+    "Same-language plugin updates can preserve defined localized-catalog cache values because cache identity is only i18n.language. This remains source behavior; no actual UI race reproduction or product fix."
+  ],
+  "baseline": {
+    "runtime": "Node24.19.0, original Vitest4.1.11",
+    "cases": 18,
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0,
+    "results": [
+      {
+        "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/ui-locale-selection-qdvh1g",
+        "manifestSha256": "cd5faf16f83233e5d8d68051d8bfb273fb713fbfd7bdcd9a683b2a8f087f3e03",
+        "stageReceiptSha256": "f5a9bd6a948d4ece26fba85c6e58a4a2020d0a16dabd25752786e29610cfa2f5",
+        "resultsSha256": "ea0a1a5e33a882091e6ef2335eee7af02c2e1b9b7d97659c1df87b6d6ff8fa54",
+        "stagedSourceFiles": 3,
+        "licenseVerified": true,
+        "tests": 16,
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/ui-language-normalization-7yV2a1",
+        "manifestSha256": "da093b07be54c6a5d00dc41e1f24a00d2ebcec301685680ee8bd9b6092c940d8",
+        "stageReceiptSha256": "dfa510c1b634c0468cf8199891e1d2cf11973ae4fd22d34c68bf017a6fad3577",
+        "resultsSha256": "d0cef692ca6362033401f9a24fccf8561811af37604481a4956a0951dc9fb68c",
+        "stagedSourceFiles": 2,
+        "licenseVerified": true,
+        "tests": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      }
+    ],
+    "evidenceBoundary": "Two unchanged pure locale/language original suites only. Root reopened results and all five staged source copies plus both license copies. No actual catalog loading, IPC, permissions, screenshot, model or rewritten behavior tested.",
+    "capsuleConfig": "Minimal node config. Original renderer/DOM/host-port setup, feature define, GC/WebStorage flags and extended timeout omitted after complete imports read. Directory isolation is not OS sandboxing."
+  },
+  "remaining": [
+    "FG-UN4 E3 owner joins, pending exact root acceptance.",
+    "AO-RIGHTS/NOTICES/RECORDINGS/SERVICE and all publication/licensing/provenance obligations retained.",
+    "GL-T1 full authenticated package/toolchain rebuild and artifacts; GL-T2 native/package xterm behavior; GL-T3 original localization/caller-subset baseline and port; GL-T4 async/plugin/loader/correction cases; GL-T5 all languages/native ICU/linguistic/rendered checks; GL-T6 global compatibility.",
+    "All9037 original test-file allocations/46 packages and T1–T4 remain; compile/setup is not RED, skip not PASS, mocks not parity."
+  ],
+  "coordination": {
+    "task": "task_84e717dbf44a",
+    "dispatch": "ctx_cf902d1e6447",
+    "done": "msg_54c340febd56",
+    "release": "8861ca05-fa91-4186-ac32-10d745d01b51",
+    "releaseState": "retained/external_terminal/processAction:none",
+    "children": 0,
+    "phase": "Astra audit-only; actual Sol implementation after full source audit acceptance."
+  },
+  "progress": {
+    "accepted": 10,
+    "total": 12,
+    "percent": 83.3,
+    "delta": 0,
+    "confidence": "medium-low",
+    "next": "complete E3 owner joins and E5 reconciliation",
+    "deadlineRisk": "high flexible24h target, no defensible ETA"
+  }
+}
