@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge } from "../shared/session-contract";
+import { installBrowserWindowCloseGuard } from "./browser-window-close-installation";
+
+contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
 const bridge: DesktopBridge = {
   status: () => ipcRenderer.invoke("drogon:status"),

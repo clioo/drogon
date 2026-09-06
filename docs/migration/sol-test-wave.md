@@ -43,7 +43,29 @@ CAP's already-completed baseline runs are not repeated merely to attach a worker
 its next execution work follows this same delegation policy. Runtime child receipts
 remain required before describing the transfers as launched.
 
-### Current integration checkpoint: 15:58 UTC
+### Current integration checkpoint: 16:23 UTC
+
+Root reproduced genuine Electron descriptor RED with the final delegated harness,
+wired the accepted close guard into the production preload, rebuilt, and reproduced
+GREEN with the unchanged harness. Window survival, immutable descriptor, replacement
+resistance, renderer isolation, screenshots and owned-process cleanup all passed.
+The focused runner suite passes 19/19 and desktop typecheck/build pass. This is one
+real production boundary, not full UI parity or a newly installed package. Evidence:
+`sol-wave/ui-preload/root-close-guard-integration.md`.
+
+CAP's final delegated runner now passes 91/91 root-verified regressions with the
+historical manifest/evidence/stand-in hashes preserved. Its parent completed;
+the same Sol terminal accepted native Bot input Task `task_d43ff0348684`, Dispatch
+`ctx_6fafe36da2ca`, with mandatory Sonnet delegation and exclusive ownership.
+UI's completed parent was released as external/retained without process action.
+ENG remains under Sol/Kimi direction for its Windows-path correction review.
+
+Audit remains 11/12 = 91.7%, medium confidence, +0; E5 remains held and full-fidelity
+deadline risk high. Next gates are native claim acceptance/registration, native
+Bot validation and real checkpoint/restart integration; package installation still
+requires the complete packaging and live-session safety gates.
+
+### Earlier integration checkpoint: 15:58 UTC
 
 Root independently reproduced the Kimi native claim suite (32/32) and Sonnet
 runner regression suite (60/60). Twenty signer vectors additionally match the
