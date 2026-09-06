@@ -8,7 +8,15 @@ The user's latest instruction before sleeping is explicit: **these five Astra ar
 
 This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoints below are not current state; consult audit-semantic-followups.md and audit-progress.md. No tool-supported objective rewrite was performed: the old Codex goal's flat-worker text is superseded by this later user direction, not a reason to complete or replace an unfinished goal.
 
-## Current checkpoint — finite E3 inputs and E5 publication review
+## Current checkpoint — bounded Seti/Original provenance audit
+
+2026-09-06: the user's audit-only Astra / implementation Sol policy above remains in force. Source audit is11/12 (91.7%, medium confidence); E5 remains open. Product parity and test migration are separate, unfinished gates. No Sol phase transition or publication approval is inferred from the pending questions.
+
+Fresh Task `task_6404c5c78cb5` / Dispatch `ctx_a9bdf7c77130` reuses the verified idle E5 Astra terminal `term_86e2b660-83d2-4440-811e-50467ae6fed8`. Start receipt `82ec50b7-a1f9-4ba2-81a9-a6a7a7b58439` confirms ready/input_accepted, existing worktree, no setup or residual resources. This is accepted task input, not task completion. Null model fields on an existing-terminal receipt do not establish a new model launch; the retained TUI was independently observed as gpt-6-astra high.
+
+The sole assignment is Seti/Original source-notice reconciliation, writing only `audit-closure/e5-platform/seti-notice-reconciliation.md/json`. Reuse the accepted Nerd Fonts, Geist, Font Logos and Devicons evidence; do not repeat their audits. No children, product/source edits, Git operations, installations, publication, services or inference tests are authorized by this finite Task. Root owns independent review and official release. Rights and service-policy choices remain pending; implementation still transfers to actual Sol leads only after the applicable audit gate is accepted.
+
+## Historical checkpoint — finite E3 inputs and E5 publication review
 
 Latest supersession2026-09-06 11:38 UTC: provider/runtime joined Task delivered `msg_6a85716b6625`, released receipt `a28f0dd3-613a-48d0-ad5e-3615213ccae0`; account residual Task delivered `msg_2ef35dd1bdda`, released receipt `3d050f9d-f687-465d-b6ba-be9d781f42b9`. Both retained external terminals without process action; delivery2cd1147177ab was acknowledged afterwards. Their source reports await root review, with no fresh work assigned to those terminals.
 
