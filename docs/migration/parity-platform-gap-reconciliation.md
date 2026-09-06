@@ -17,9 +17,9 @@ untracked file. Its old partial-reading counts are not current totals.
 | --- | --- | --- |
 | Bounded registry already present | G1–G4, G11, G15, G16 | Do not repeat censuses; carry semantic and execution obligations into owned contracts/test ports. |
 | Enumerated with explicit attribution unknowns | G5, G6 | Keep factories/dynamic paths and legacy producer unknowns explicit; complete payload/state contracts under E3. |
-| Bounded source contract characterized | G12, G20 | Preserve parser/error distinctions and test them; not a live runtime acceptance. |
-| Partial pointers, missing bounded contract reconciliation | G7, G9, G13, G14, G17–G19 | Read the specific config/endpoint/dispatcher/client/state-machine bodies; unrelated registry counts cannot close these. |
-| Source review still needed for this register | G8, G10 | Resolve deployment/assets and OS tray selection from actual entrypoints and packaging. No feature-absence inference. |
+| Bounded source contract characterized | G9, G10, G12, G20 | Preserve upload/consent, OS tray and parser/error distinctions; not a live runtime acceptance. |
+| Partial pointers, missing bounded contract reconciliation | G7, G13, G14, G17–G19 | Read the specific config/dispatcher/client/state-machine bodies; unrelated registry counts cannot close these. |
+| Source review still needed for this register | G8 | Resolve deployment/assets from actual entrypoints and packaging. No feature-absence inference. |
 
 These categories total 20 IDs, not 20 product defects. E1–E4 still own their
 broader contracts, and journey/capture reconciliation remains outside this
@@ -30,6 +30,12 @@ G12 now has a separate complete parser review in
 `parity-orcad-launch-contract.md`: five ordinary options and one executable
 smoke probe. The historical data-root flag premise was false; environment
 selection and the distinct `orca serve` parser must remain separate.
+
+Follow-up at6339736: G9/G10 source review accepted separately in
+parity-diagnostic-tray-contracts.json/.md. The two diagnostic upload lanes
+are distinct; the tray explicitly does nothing on Linux. Two unchanged mocked
+HTTP cases pass; full redaction, server and native tray/package proof remain.
+The baseline below is historical; current total is118 cases/13 capsules.
 
 ## G16 source cross-check: management is not the stream bridge
 

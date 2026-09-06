@@ -1,5 +1,47 @@
 # Flat audit wave: bounded reviews accepted, execution open
 
+## Current review queue after6339736
+
+Three new flat tasks reused exact, live, settled external worker terminals.
+All reported succeeded; each was released with retained/external_terminal,
+processAction:none, and its completion Delivery acknowledged. No current
+worker remains assigned from this wave; retained terminals are not writers.
+
+| Scope / two-file draft under docs/migration | Task / dispatch | Worker |
+| --- | --- | --- |
+| G7 parity-config-serve-contracts.json/.md | task_1c98dab16afa / ctx_6ad197577366 | GLM5.3Flash |
+| G13/G14/G19 parity-relay-mobile-wire-contracts.json/.md | task_7142d62b0cd4 / ctx_d7ab44926c56 | Sonnet5 medium |
+| G17/G18 parity-window-browser-authority.json/.md | task_d474323a72d6 / ctx_bf30aa048ee3 | MuseSpark1.3Contributor |
+
+Deliveries62753e3358e0,89729bf7b39f,a26d0a480473 are acknowledged. The first
+release invocation included unsupported run/from flags and was rejected;
+correct dispatch-only release succeeded without a process action. No stop or
+replacement followed the two45s observation timeouts; the same live worker
+continued and then reported completion.
+
+These six files remain unaccepted drafts; coordinator owns further edits.
+Read all three markdown reports, not all JSON/body claims. Verified26 structured
+window/browser path hashes and20 config path hashes against source bytes;
+these are not semantic acceptance. Initial independent body checks corrected:
+
+- Window/browser: placement's non-ok status response can fall back; pairing,
+  runtime identity and graph-not-ready errors throw. Thrown getStatus errors
+  are not caught by that fallback. Near-min main-window writes preserve old
+  bounds and update only the maximized flag; no default reset or disk-atomicity
+  guarantee. Corrected the two draft files, still pending full review.
+- Wire:615 is runtime RPC method names, not preload IPC channels. Corrected
+  both drafts and removed their stale JSON fingerprint. Review the claimed
+  133 relay/156 mobile counts against actual scanner limitations and source;
+  mobile regex lacks per-file provenance and is not a complete AST census.
+- Config: inspect actual parser/launch/assertion bodies before accepting
+  summaries; config/ build-directory scope remains explicitly outside the
+  worker's product-config interpretation and belongs G8/coordinator follow-up.
+
+Independently accepted coordinator work: G9/G10 diagnostic/tray contracts,
+19 pinned source fingerprints with explicit read bounds, and2 unchanged original
+mocked HTTP cases. Baseline now118 distinct cases/13 capsules. This does not
+accept the six drafts, close audit, change product code or install a build.
+
 ## Current result after d0ec650
 
 The six formerly uncommitted drafts below now have bounded coordinator

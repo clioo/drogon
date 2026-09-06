@@ -1,0 +1,61 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned pure-function capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "diagnostic-upload-http",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-diagnostic-http-1ZeZNG",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/main/observability/diagnostic-upload-http.test.ts",
+        "role": "test",
+        "sha256": "90ed3e2574ba0bce86162ebd920eeb8a0174b9894c48f728bc3428146c0651d8",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-diagnostic-http-1ZeZNG/src/main/observability/diagnostic-upload-http.test.ts"
+      },
+      {
+        "path": "src/main/observability/diagnostic-upload-http.ts",
+        "role": "module",
+        "sha256": "8dcbcee71286553344268088001b632eb46e45faa50f7fee69a3efdfadca572d",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-diagnostic-http-1ZeZNG/src/main/observability/diagnostic-upload-http.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-diagnostic-http-1ZeZNG/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Original installed Vitest4.1.11 with Node24.19.0 on macOS. Minimal node config omits original aliases/setup, feature-wall define, GC/webstorage and platform worker settings; these two files do not depend on them. No full-config equivalence/typecheck claim.",
+    "Default unit timeout rather than original30s/60s; outer timeout30s. Fresh pinned capsule only; no installs."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "9d56177e8056583f253b40a17e831a51afe4fbe361ec2d4dd4127bce317645c5",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 2,
+      "numPassedTests": 2,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 2
+    }
+  }
+}

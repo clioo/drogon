@@ -1086,6 +1086,31 @@ for implementation, including local pinned-PR testing without waiting for merge.
 Audit and goal remain open; the next action is bounded source review of the
 named remaining scopes, not another full census of already accepted material.
 
+## Diagnostic/tray review and next flat audit wave
+
+Previous goal turn made concrete progress in6339736. The coordinator then
+source-characterized G9/G10 in parity-diagnostic-tray-contracts.json/.md:
+two diagnostic upload lanes, fixed/build/runtime destination authority,
+cached-consent boundaries, attachment retries, source HTTP lifecycle and
+explicit macOS/Windows tray selection (Linux returns null).19 source files
+are fingerprinted with full/partial/binary-only read bounds; no destination
+was contacted and no personal data collected. Full redaction/confirmation,
+server, native tray/package and candidate proof remain owed.
+
+The new diagnostic-upload-http capsule preserves two exact original files
+and MIT license. Original Vitest4.1.11/Node24.19.0 passed2 cases, no skips,
+using fake request/response EventEmitters with both transports mocked.
+Original baseline now118 distinct cases across13 capsules. Archived stage
+receipt/results are JSON-equivalent to originals; staged bytes equal source.
+This is listener-cleanup/response-cap proof, not upload/consent/UI parity.
+
+Three disjoint audit workers settled and were released/acknowledged; exact
+tasks, dispatches and initial corrections are in parity-audit-wave-review.md.
+Their six JSON/MD deliverables remain unaccepted; next is independent bounded
+review of config/serve, relay/mobile/agentWait and window/browser authority.
+Do not rerun accepted censuses or infer a live writer from retained terminals.
+Product changes, profiles and installed app remain untouched by this wave.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

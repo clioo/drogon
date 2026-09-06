@@ -87,8 +87,8 @@
       "owner": [
         "Coordinator"
       ],
-      "evidence": "parity-platform-gap-reconciliation.json/.md (all20 original IDs with existing package owners and acceptance); parity-orcad-launch-contract.md (G12 complete five-option parser plus executable smoke probe); rewrite-parity-plan.md section3; parity-work-packages.md; parity-ui-journeys.md; parity-speech-catalog.json; parity-remote-enoent-contract.md",
-      "resolution": "G1-G20 dispositions reconciled without declaring runtime closure. Do not repeat accepted settings/provider/channel/catalog censuses. G12 source parser and G16 management RPC table read; keep orcad separate from serve, and emulator streams separate from management. Remaining bounded source reviews: G7/G8/G9/G10/G13/G14/G17/G18/G19, plus E1-E4 obligations and journey reconciliation. Each original ID has concrete ownership and acceptance; these are not live dispatches or twenty product defects. No speculative registry count is a blocker count.",
+      "evidence": "parity-platform-gap-reconciliation.json/.md (all20 original IDs); parity-orcad-launch-contract.md; parity-diagnostic-tray-contracts.json/.md (G9/G10 source review, two original mocked HTTP cases); rewrite-parity-plan.md section3; parity-work-packages.md; parity-ui-journeys.md; parity-speech-catalog.json; parity-remote-enoent-contract.md",
+      "resolution": "G1-G20 dispositions reconciled without runtime closure. Do not repeat accepted censuses. G9/G10 two diagnostic upload lanes and explicit per-OS tray behavior are bounded source-characterized. G12 parser and G16 management table are also reviewed. Remaining source-review acceptance: G7/G8/G13/G14/G17/G18/G19 plus E1-E4 and journey obligations. Worker drafts are not accepted merely because completed. Each ID has concrete responsibility and acceptance; no speculative registry count is a blocker count.",
       "proofStillOwed": "Full functional/visual/platform/performance acceptance; file allocation alone cannot close this audit."
     }
   ],

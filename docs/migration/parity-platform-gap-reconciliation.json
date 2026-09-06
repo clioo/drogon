@@ -138,12 +138,14 @@
       "owners": [
         "WP-CAP-DIAG"
       ],
-      "state": "partially-located",
+      "state": "source-contract-characterized",
       "evidence": [
         "parity-source-bridges.json",
-        "parity-bridge-delegated-resolution.json"
+        "parity-bridge-delegated-resolution.json",
+        "parity-diagnostic-tray-contracts.json",
+        "parity-diagnostic-tray-contracts.md"
       ],
-      "enumerationDisposition": "Nine crash bridge methods and local heap/process readers are known; this does not identify submission destinations, redaction or consent authority.",
+      "enumerationDisposition": "Two upload lanes now source-characterized: crash feedback destination/attachment retry and support-bundle build/runtime token routing, cached-consent checks, host pin and HTTP lifecycle.19 source fingerprints reviewed with exact bounds; two unchanged mocked HTTP cases pass. Full collector redaction/server behavior is not proven.",
       "acceptance": "Trace submission client/config/server and consent/redaction/retry contracts; test with fixture destinations, never send diagnostic data to upstream as an audit side effect."
     },
     {
@@ -153,11 +155,13 @@
         "WP-UI-SHELL-WIN",
         "WP-ENG-INSTALL"
       ],
-      "state": "open-review",
+      "state": "source-contract-characterized",
       "evidence": [
-        "parity-work-packages.md"
+        "parity-work-packages.md",
+        "parity-diagnostic-tray-contracts.json",
+        "parity-diagnostic-tray-contracts.md"
       ],
-      "enumerationDisposition": "Reconcile actual asset selection and packaging branches per OS. Finding macOS template files is not evidence of Linux/Windows absence or parity.",
+      "enumerationDisposition": "Complete tray source and app-icon selection reviewed: macOS1x/2x templates, Windows selected16px app icon, Linux explicit null/no-op. Four original assertion bodies read, other22 declaration pointers only; none executed. Imports imply intended packaging, not actual package inspection. Preserve branded/localized fallback review separately.",
       "acceptance": "Record OS-specific icon selection, template/density/theme behavior and menu actions; validate packaged rendered tray on each supported OS."
     },
     {
