@@ -48,9 +48,11 @@ The JSON references the concrete source inventories and unresolved entries.
   wave; behavioral RED then GREEN. Import/build failures are not behavioral RED.
 - Source/candidate comparisons, both remote version skews, OS/SSH/folder
   boundaries, rendered journeys, screenshots, recovery and performance.
-- After audit closure, Sol leads may plan bounded test-port leaf tasks. Each
-  dispatch needs finite ownership and acceptance; requiring all leaves before
-  leads exist would create a circular prerequisite.
+- Latest scheduling instruction permits five Astra area leads during audit,
+  with bounded leaves only when runtime depth permits; this supersedes the old
+  post-audit Sol hierarchy. Each dispatch needs finite ownership and acceptance.
+  See `audit-closure-coordination.md`; actual child lifecycle is still required
+  before reporting full hierarchy activation. Product/test gates do not change.
 - Final product acceptance requires the full original experience and existing
   Drogon changes, a verified installed Electron app, own CLI/core/service,
   reversible migration, and real Drogon orchestration without orca-cli underneath.

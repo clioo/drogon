@@ -1,6 +1,6 @@
 # Proposed Codex goal — test-first full-fidelity Drogon rewrite
 
-Status: proposed text, 2026-09-05. This file does not change the active Codex
+Status: proposed text, updated2026-09-06 for the five-Astra hierarchy and flexible target. This file does not change the active Codex
 goal and does not assert that the migration, planning gate or tests are complete.
 
 ## Objective
@@ -34,12 +34,14 @@ the user's running Orca version. Do not substitute a reduced MVP for parity.
   multiple workers per available model. Observe actual provider availability and
   per-invocation permission flags; do not alter global permissions or bypass denies.
 - Coordinator owns architecture, shared contracts, task dependencies, review,
-  integrated testing, Git and release. After the current audit is complete and
-  accepted, introduce the user-authorized three-level hierarchy: Astra → Sol
-  area leads → disjoint leaf workers. Verify runtime support and a small nested
-  lifecycle before expanding; no nesting during the current audit and no leaf
-  delegation. No conflicting writers or unreviewed worker self-acceptance.
-  Maintain durable provenance and settle existing assignments before transfer.
+  integrated testing, Git and release. The latest user-approved organization is
+  root Astra → five Astra area leads for E1–E5 → approved disjoint leaf workers,
+  including during audit. Initially at most one leaf per lead; verify the actual
+  runtime depth and a small nested lifecycle before activating child delegation.
+  A depth denial means the lead continues its own assignment, not an alternate
+  identity/Run bypass. Leaves never delegate. No conflicting writers or unreviewed
+  worker self-acceptance. Maintain durable provenance and settle existing
+  assignments before transfer. See audit-closure-coordination.md for live IDs.
 - Use the user-authorized separate worktrees and reviewable PRs for cohesive
   independent feature blocks after the audit gate. Base them on reviewed shared
   contracts, declare real stacked dependencies, centralize shared-file changes,
@@ -49,6 +51,9 @@ the user's running Orca version. Do not substitute a reduced MVP for parity.
   compatibility, folder workspaces, platform behavior, persistence, recovery and
   all other enumerated contracts. Unreachable execution is `unverifiable`, not
   proof of exit. Protect user sessions, credentials, data and external systems.
+- Preserve clioo/drogon-orca and its history. Resolve pending privacy through
+  supported fork-network separation, never deletion or destructive replacement;
+  keep clioo/drogon independent and public, with upstream licenses preserved.
 - After each accepted implementation block, verify the actual package and keep
   an identified, versioned Drogon preview installed with rollback and previous
   data preserved. Never force-close user sessions to replace a build or daemon.
@@ -77,6 +82,7 @@ verified release is installed, source and PR state are reconciled, and recipes,
 handoff and evidence identify exactly what was executed. Do not call an unexecuted
 recipe or worker report proof of completion.
 
-Target roughly 24 hours for the rewrite and the September 14 hackathon deadline,
-but surface schedule risk honestly: neither deadline authorizes feature removal,
+The user clarified that roughly24 hours is a flexible rewrite target; a few hours
+over is acceptable. Keep the September14 hackathon deadline visible and surface
+schedule risk honestly: neither target authorizes feature removal,
 weaker acceptance or a false completion claim.

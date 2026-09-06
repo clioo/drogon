@@ -116,7 +116,7 @@
     {
       "id": "T5",
       "owner": "Coordinator",
-      "evidenceNeeded": "Finite ownership/acceptance for each future dispatch. Audit closes before Sol hierarchy; not every leaf must exist before leads can plan test ports."
+      "evidenceNeeded": "Finite ownership/acceptance per Dispatch. Latest user direction permits five Astra E1-E5 leads during audit, superseding post-audit-only Sol scheduling. See audit-closure-coordination.md for actual Task/Dispatch IDs and depth prerequisite. Verify a real child lifecycle before calling the three-level hierarchy active; never bypass runtime nesting guards. Test-first/product acceptance gates remain unchanged."
     }
   ],
   "finalAcceptance": {
