@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "scope": [
+    "PI-JOIN-RUNTIME",
+    "PI-JOIN-REQUEST-GUARD"
+  ],
+  "disposition": "accepted-finite-source-characterization-with-root-corrections",
+  "wholeE3Accepted": false,
+  "wholeE5Accepted": false,
+  "candidateParity": false,
+  "verification": {
+    "reportPath": "docs/migration/audit-closure/e3-bridge/result-platform/provider-runtime-joins.json",
+    "reportSha256": "06d25e2080e022fcffdf5543d3c948c7c74a127a6246c02003af68b00c853545",
+    "pin": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "pinnedFiles": 42,
+    "ranges": 46,
+    "inputHashes": 8,
+    "contracts": 8,
+    "reusedPointers": 4,
+    "gates": 47,
+    "allocationPointers": 16,
+    "packages": 46,
+    "fileAllocations": 9037,
+    "testsRun": 0,
+    "semanticAcceptance": false,
+    "wholeAreaAccepted": false
+  },
+  "reportMarkdown": {
+    "path": "docs/migration/audit-closure/e3-bridge/result-platform/provider-runtime-joins.md",
+    "sha256": "eb7519b417a90ed518100f3a77466f1654959d20181e6fd81da2797795d2e7a5"
+  },
+  "review": {
+    "method": "Complete candidate narrative and eight result contracts read. Independently inspected command resolver, complete hook identity/lock/claim/record bodies, Windows kill/metrics/guard/breadcrumb bodies, proxy state/credential owners, default guard/startup binding and browser install/remove/retirement seams. SQLite reuses the existing accepted concrete Database contract. Other suite-body associations remain worker-reviewed and hash-verified unless named in executed baseline.",
+    "corrections": [
+      {
+        "id": "PJ-ROOT-ABORT-ORDER",
+        "contract": "PJ-LOCK-PROTOCOL",
+        "finding": "First signal.throwIfAborted occurs inside acquisition loop, after mkdir, host identity, orphan cleanup, self identity and deadline construction. Already-aborted calls can perform setup IO before observing cancellation. Candidate prose ordering that checks cancellation before host setup is inaccurate.",
+        "source": "src/main/agent-hooks/managed-hook-install-lock.ts:48",
+        "acceptance": "PJ-T-LOCK must preserve this source characterization and separately test intended abort-before-effects behavior if corrected."
+      },
+      {
+        "id": "PJ-ROOT-METRICS-INTERVAL",
+        "contract": "PJ-WINDOWS-KILL",
+        "finding": "Unreadable Chromium metrics breadcrumb coalesces for 60000ms, not five seconds. Five seconds is SELF_TREE_KILL_LOOKBACK_MS used for PID-addressed attempt/refusal records; group kill coalescing also uses60000ms. The function name is readOrcaChromiumProcessPids, not getOrcaChromiumProcessPids.",
+        "source": "src/main/orca-chromium-process-pids.ts:47",
+        "acceptance": "Retain exact timers and distinct record types in baseline and port."
+      },
+      {
+        "id": "PJ-ROOT-CLAIM-ORDER",
+        "contract": "PJ-LOCK-PROTOCOL",
+        "finding": "Recovery writes its wx/0600 claimant record BEFORE renaming the owner witness, then marks the in-process claim active. Keep this ordering explicit for crash injection rather than interpreting narrative as rename-before-metadata.",
+        "source": "src/main/agent-hooks/managed-hook-lock-claims.ts:133"
+      },
+      {
+        "id": "PJ-ROOT-LIFETIME",
+        "contracts": [
+          "PJ-GUARD-BINDING",
+          "PJ-GUARD-STATE-AUTH",
+          "PJ-GUARD-PARTITION-LIFETIME"
+        ],
+        "finding": "Default registration without state permits requests, startup barrier can fulfill on apply failure, and credential matching does not consult readiness. Normal profile deletion retains guards while failed-profile/route cleanup removes them. These are source-composed effects, not reproduced native races or global network-enforcement proof."
+      },
+      {
+        "id": "PJ-ROOT-EXECUTION",
+        "finding": "Promise settlement is not target exit; retries are attempt-bounded rather than deadline-bounded; source mock/lexical assertions do not prove native Windows, Electron listeners, process-incarnation or filesystem durability. Existing47 gates and all original allocations remain."
+      }
+    ]
+  },
+  "sourceTests": {
+    "manifest": "tests/parity/baseline-capsules/electron-proxy-request-guard.json",
+    "manifestSha256": "8a635ae1ce2e4aaca8488e37dd7e1d5835df28c5c0501e8d7ff36b1be1834e10",
+    "environment": "Node24.19.0, original Vitest4.1.11, isolated minimal node config with differences listed in manifest",
+    "root": ".preflight/parity-baseline/electron-proxy-request-guard-JC7cxM",
+    "resultSha256": "f46121433c53f47eb291333aa80d428f1b72b90c50f9cf8272652852fbbc7789",
+    "receiptSha256": "ebb76d30f709a57f430e79ece10469e2d284bcf5476fa70276307a65713a4638",
+    "passed": 5,
+    "failed": 0,
+    "pending": 0,
+    "todo": 0,
+    "hashesRechecked": 9,
+    "assertions": [
+      "default-session proxy request guard holds renderer requests until a delayed proxy transition settles",
+      "default-session proxy request guard keeps renderer requests blocked across a transient retry",
+      "default-session proxy request guard recovers after two transient failures without another settings transition",
+      "default-session proxy request guard cancels renderer requests after proxy application fails",
+      "default-session proxy request guard cancels session requests after permanent retirement without a WebContents"
+    ],
+    "reportMdSha256": "eb7519b417a90ed518100f3a77466f1654959d20181e6fd81da2797795d2e7a5",
+    "evidenceBoundary": "Five complete unchanged original cases use synthetic Session methods and listener. Actual queue/readiness/retry code runs, without network/provider/native Electron. Reopened all results and rehashed eight staged files and LICENSE. No candidate GREEN."
+  },
+  "lifecycle": {
+    "task": "task_de63b4c76c91",
+    "dispatch": "ctx_72c23d4df328",
+    "completion": "msg_6a85716b6625",
+    "release": "a28f0dd3-613a-48d0-ad5e-3615213ccae0",
+    "state": "released; external terminal retained with no process action"
+  },
+  "remaining": {
+    "source": "Root must reconcile the95-method owning-body correction and E3/E5 whole-area gate; account joins independently accepted in3c65796.",
+    "execution": "All PJ-T, inherited BM/R/F, native/remote/version/folder/render, test-port RED-GREEN and full product criteria remain."
+  },
+  "progress": {
+    "accepted": 10,
+    "total": 12,
+    "percent": 83.3,
+    "delta": 0,
+    "confidence": "medium-low",
+    "deadlineRisk": "high/no defensible ETA",
+    "next": "Integrations correction then whole E3/E5 source reconciliation; actual Sol leads with workers after full source acceptance"
+  }
+}
