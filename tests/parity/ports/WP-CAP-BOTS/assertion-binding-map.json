@@ -9,7 +9,7 @@
   "totals": {
     "originalSuites": 4,
     "portedSuites": 4,
-    "originalTestCases": 52,
+    "originalTestCases": 51,
     "originalExpectCallSites": 100,
     "originalAssertionEvaluations": 138,
     "candidateBoundSuites": 0,
@@ -87,7 +87,7 @@
     {
       "sourcePath": "src/renderer/src/components/bots/BotsPage.test.tsx",
       "sourceSha256": "bd056caf58c50dc0f3f09ebc9729db05153bd15d48d5cc9a1481a544739d264f",
-      "cases": 9,
+      "cases": 8,
       "expectCallSites": 13,
       "assertionEvaluations": 15,
       "portPath": "tests/parity/ports/WP-CAP-BOTS/bots-page/BotsPage.contract.test.tsx",

@@ -43,7 +43,34 @@ CAP's already-completed baseline runs are not repeated merely to attach a worker
 its next execution work follows this same delegation policy. Runtime child receipts
 remain required before describing the transfers as launched.
 
-### Verified delegation checkpoint: 15:11 UTC
+### Current delegation checkpoint: 15:23 UTC
+
+All three engineering leads have actual depth-two non-OpenAI workers; root
+verified their Dispatch state rather than inferring delegation from a prompt.
+
+| Lead assignment | Parent Task / Dispatch | Leaf Task / Dispatch | Provider |
+| --- | --- | --- | --- |
+| UI close/restart modules | `task_6358fe800fdb / ctx_a7868ff3b05d` | `task_4743cedc95e9 / ctx_8e15a02ca424` | GLM-5.3-Flash |
+| Native claim identity | `task_d33287427f1c / ctx_058365fe2290` | `task_e34dcfe25a76 / ctx_3bfc08a56fa1` | Kimi For Coding |
+| Baseline CLI safety | `task_808e81dd90df / ctx_1c486a157ca2` | `task_20f54b0c0cc0 / ctx_962337f3057b` | Claude Sonnet 5 medium |
+
+UI's leaf is completed and awaits lead/root acceptance; no caller wiring or
+packaged acceptance is implied. Kimi is exact-worker live, but its low-level
+Dispatch is `unsupervised/injected`, not an owned supervised worker; do not claim
+managed cleanup for that process. CAP's Sonnet is exact-worker live with a real
+owned worker launch. Per-invocation permissions and exclusive file ownership remain.
+Root prepared only shared HMAC/OS-entropy dependencies and the native contract;
+workers own implementation and tests. No provider quota fallback was introduced.
+
+Root admitted the ENG original baselines (7/7), independently confirmed schema
+3/3 and qualified BotsPage 6/8 with two preserved original assertion failures.
+See the area root-review records. The Bots case denominator is corrected from
+52 to 51, without changing any tests. Candidate parity is not inferred from these
+source results. Audit remains 11/12 (91.7%, medium confidence, +0); next milestone
+is independent module acceptance and native claim integration. Full-fidelity
+24-hour deadline risk remains high. No new preview has passed installation gates.
+
+### Earlier verified delegation checkpoint: 15:11 UTC
 
 UI transferred its nine partial product modules and supplemental tests to GLM
 child Task `task_4743cedc95e9`, Dispatch `ctx_8e15a02ca424`, terminal

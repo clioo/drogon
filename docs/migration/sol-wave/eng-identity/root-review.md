@@ -1,5 +1,23 @@
 # Root acceptance — identity/lease test preparation
 
+## Follow-up admission: 2026-09-06, 15:23 UTC
+
+The earlier zero-baseline checkpoint below is superseded for source execution.
+Root verified the three manifest/receipt/result digests and reran the read-only
+`identity-leases/source-baselines/verify-source-baselines.mjs`: 3 admitted suites,
+7 passed cases, 18 statically mapped assertion evaluations, one retained setup
+failure with zero collected cases. Staged source and the four lease dependency
+trees match. This does not make the candidate bindings valid or implement leases.
+The launcher `run-lease-baseline.mjs` executes on import/no arguments and has no
+dry-check mode; do not use it for verification. The separate verifier is read-only.
+Its CLI safety should follow the CAP runner's explicit-execution contract later.
+
+The completed follow-up was manual before the user correction reached the lead;
+do not describe it as Kimi work. The next native claim Task delegates from the
+outset to Kimi at depth two, under `native-claim-identity-contract.md`.
+
+## Earlier preparation checkpoint
+
 2026-09-06. Task `task_3a25101232c0`, Dispatch `ctx_fbdc4abdbcad` settled.
 Root read the complete lead report and execution evidence, then independently
 checked every original source hash and literal test body with

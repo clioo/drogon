@@ -1,0 +1,59 @@
+{
+  "capsuleId": "eng-identity-source-provider",
+  "description": "Original provider-handle-transition suite with both tests and unchanged assertions.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRevisionNote": "The reviewed capsule runner verifies source HEAD and both working-tree and pinned-revision bytes before every stage; mismatch refuses execution.",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "entryTestFile": "src/main/runtime/agent-session-provider-handle-transition.test.ts",
+  "files": [
+    {
+      "path": "src/main/runtime/agent-session-provider-handle-transition.test.ts",
+      "role": "test",
+      "sha256": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1"
+    },
+    {
+      "path": "src/main/runtime/agent-session-provider-handle-transition.ts",
+      "role": "module",
+      "sha256": "eccbcb776b492ec18d81ea93b5e9f0e4b4b5d30e3439637ecfc78c73ab8a0317"
+    },
+    {
+      "path": "src/shared/agent-session-provider-handle.ts",
+      "role": "module",
+      "sha256": "418c5dfd36702716c26421b3b82e45903d98a00de683c0282304ad8d58cbb18b"
+    },
+    {
+      "path": "src/shared/agent-session-record.test-fixture.ts",
+      "role": "module",
+      "sha256": "1cb2523a8971eca7a90e10358e58fb1c5933d7c36f5c7e814a53ef08230a8f9c"
+    },
+    {
+      "path": "src/shared/agent-session-record.ts",
+      "role": "module",
+      "sha256": "c1b9ebaaa37c0263e72fb5aa3657015b645367901073f3cd349cad8983d2293c"
+    }
+  ],
+  "runtimeExternalImports": [
+    "vitest"
+  ],
+  "dependencyClosureNote": "Runtime closure computed from the entry with source esbuild using bundle/write:false/platform:node/packages:external, then manually reviewed. It includes the test fixture and every first-party runtime-loaded module; type-only imports are intentionally absent because Vitest/esbuild erases them.",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 2
+  },
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigSha256": "19d14b8f028a84ff3401534c22f3241d4ed5695fea5c5df3a140ba2c9f3c0880",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "The capsule retains Node environment but intentionally omits the source-wide ORCA_FEATURE_WALL_ENABLED define because this closure does not reference it.",
+    "The capsule omits the source-wide happy-dom canvas, MutationObserver-retention, and host-port setup files because these runtime suites use no DOM, canvas, MutationObserver, or host ports.",
+    "The capsule omits source-wide --no-experimental-webstorage and --expose-gc worker flags because these suites observe neither Web Storage nor GC timing.",
+    "The capsule uses Vitest defaults instead of source-wide 60000ms hook and 30000ms test timeouts; execution remains bounded externally by the reviewed runner.",
+    "Execution explicitly uses the source-installed Vitest 4.1.11 entry module; no version substitution is admitted."
+  ],
+  "isolationRationale": "Pure in-memory record/lease/handle construction and transition. No filesystem, timers, network, process launch, credentials, provider/session contact, global mutation, or service effects."
+}

@@ -1,5 +1,28 @@
 # Root review: Bots test preparation and first Sol cycle
 
+## Follow-up source evidence: 2026-09-06, 15:23 UTC
+
+Root recomputed both source-baseline manifest and raw-result hashes, every staged
+source/license hash and the corresponding read-only source bytes: schema 9 files,
+BotsPage 25 files. Raw results confirm schema 3/3 and BotsPage 6 passed / 2 failed
+out of 8. The old static 52-case package count is corrected to 51 in the binding
+maps; original test bytes and assertion requirements are unchanged. The 138 count
+remains a potential assertion enumeration, not assertions executed by failing cases.
+
+Schema PASS establishes the pure parsing baseline only. BotsPage is qualified
+fixture evidence, not full source-environment equivalence: the called Codex label
+stand-in and deterministic asset URLs remain explicit limitations. Its first
+failures concern model value versus placeholder and Display name versus Name
+(optional); later assertions in those cases did not execute. Do not weaken the
+frozen tests or regress the user's optional-name UX merely to turn this green.
+
+The old BotsPage launcher ignored `--check` and ran another isolated test stage.
+Sol-CAP now directs Sonnet to require explicit execution and test side-effect-free
+validation/import plus truthful failure classification. That work is not accepted
+yet. Baseline records are source-only; no candidate Bot implementation is admitted.
+
+## Earlier preparation checkpoint
+
 2026-09-06. Accept the four files as **preserved test preparation**, not four
 completed candidate ports. E5 remains open; technical work is authorized by the
 separate user exception. T1–T4 and full fidelity remain required.

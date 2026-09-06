@@ -4,7 +4,7 @@
   "sourceSha256": "bd056caf58c50dc0f3f09ebc9729db05153bd15d48d5cc9a1481a544739d264f",
   "portPath": "tests/parity/ports/WP-CAP-BOTS/bots-page/BotsPage.contract.test.tsx",
   "portMethod": "literal assertions; provenance header and import-only binding seam",
-  "sourceCases": 9,
+  "sourceCases": 8,
   "sourceExpectCallSites": 13,
   "sourceAssertionEvaluations": 15,
   "binding": {
