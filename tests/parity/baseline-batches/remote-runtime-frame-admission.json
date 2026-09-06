@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "capsules": [
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-outbound-admission.json",
+      "approvedManifestSha256": "b6c23c0053e2ef6fc6d27640cfe6fdfdf5ccf18afd6b85a0c9fa858d570e1188"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-client-error-classification.json",
+      "approvedManifestSha256": "08fd11da954e2cb2df156f088cd52dc49d6b6ce95aa901ecca7eaf2e4d2cb3ac"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-request-frames.json",
+      "approvedManifestSha256": "34d123779db819eb094ebc9714a760b27ae186dca75d085ac34964738770ac61"
+    }
+  ]
+}
