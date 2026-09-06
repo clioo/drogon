@@ -1,0 +1,41 @@
+{
+  "capsuleId": "remote-terminal-layout-resolution",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "description": "Ten unchanged original terminal layout selection cases; actual pure source module.",
+  "entryTestFile": "src/renderer/src/runtime/remote-terminal-layout-resolution.test.ts",
+  "files": [
+    {
+      "path": "src/renderer/src/runtime/remote-terminal-layout-resolution.test.ts",
+      "role": "test",
+      "sha256": "cca5605b31ee05fda5348feb91a92595df72cb73fd70837bd15cf0f5462c3b2a"
+    },
+    {
+      "path": "src/renderer/src/runtime/remote-terminal-layout-resolution.ts",
+      "role": "module",
+      "sha256": "9f3844971f182057a260b463cc22023b4871a7444077bda7e397e2f5602e4321"
+    },
+    {
+      "path": "src/shared/terminal-tab-types.ts",
+      "role": "module",
+      "sha256": "8d57d32c4e18382e0fc355941d1f3460849799b0aabac0bce06bea6f0954d751"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use original installed Vitest4.1.11 with Node24.19.0; no installation or original-tree writes.",
+    "Minimal node config: no renderer aliases/DOM/host-port setup, feature-wall define, execArgv or extended timeout. Entry and implementation have only Vitest, a relative pure module and erased type imports. Type-only transitive imports are not resolved or typechecked. No full renderer configuration equivalence claimed."
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 10
+  },
+  "isolationRationale": "Pure in-memory layout fixtures, original vi.fn callback only; no Electron/store/PTY/cloud/filesystem imports or provider inference. Runner stages licensed pinned bytes in its isolated preflight directory.",
+  "testEvidenceBoundary": "Tests leaf-set coverage, authoritative/prior tree precedence, single/empty fallback and synthesis notification. The case titled never invents a split direction only asserts callback invocation; it does not reject the horizontal fallback implemented by source. No integrated mirror, render, split ownership or host execution parity claim."
+}
