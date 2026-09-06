@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "workPackage": "WP-UI-PRELOAD",
+  "finiteAssignment": "authority-recovery",
+  "allocationManifest": {
+    "path": "docs/migration/parity-test-work-packages.json",
+    "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+  },
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "totals": {
+    "originalSuites": 4,
+    "portedSuites": 4,
+    "originalTestCases": 18,
+    "originalRuntimeExpectCallSites": 25,
+    "originalTypeProbeCallSites": 1,
+    "originalAssertionEvaluations": 31,
+    "sourceBaselinedSuites": 3,
+    "sourceBaselinedCases": 12,
+    "candidateBoundSuites": 0,
+    "candidateProductAssertionsExecuted": 0,
+    "candidateBehavioralRedSuites": 0,
+    "candidateGreenSuites": 0,
+    "skippedSuites": 0
+  },
+  "statusMeaning": {
+    "ported": "Every allocated source case and assertion is present in a frozen port without skips or weakened expectations.",
+    "source_baseline": "An unchanged, pinned source closure executed in an isolated capsule; this is source behavior only, never candidate parity.",
+    "blocked_binding": "The port cannot collect against a genuine candidate interface; this is setup failure, not behavioral RED.",
+    "type_probe_runtime_noop": "The source expectTypeOf call preserves a compile-time contract but executes no product assertion at runtime."
+  },
+  "suites": [
+    {
+      "sourcePath": "src/preload/close-active-tab-payload-admission.test.ts",
+      "sourceSha256": "e42939244be46cea70ac2a0164114b70e1d127e6853b7dec9a418e75039f3708",
+      "cases": 8,
+      "runtimeExpectCallSites": 3,
+      "typeProbeCallSites": 0,
+      "assertionEvaluations": 8,
+      "portPath": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/close-active-tab/close-active-tab-payload-admission.contract.test.ts",
+      "detailMap": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/close-active-tab/assertion-map.json",
+      "preservation": "literal_source_body_after_provenance_and_import_only_normalization",
+      "architectureDisposition": "portable payload admission behavior; only the source type/module name is architecture-specific",
+      "sourceBaseline": {
+        "manifest": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/close-active-tab/source-baseline-capsule.json",
+        "manifestSha256": "ced5cb976bb5d5a17f2ee0e9e86a5a50904c79df035b595d8e25a478dbd3dfdd",
+        "capsuleRoot": ".preflight/parity-baseline/ui-preload-close-active-tab-B4tTCk",
+        "result": "8 passed, 0 failed, 0 pending",
+        "runner": "Vitest 4.1.11 / Node 24.19.0",
+        "scope": "source_only"
+      },
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePath": "apps/desktop/src/preload/close-active-tab-payload-admission.ts",
+      "candidateExecution": "exit_1_collection_error_no_tests_not_behavioral_red"
+    },
+    {
+      "sourcePath": "src/preload/browser-window-close.test.ts",
+      "sourceSha256": "845030ace67f72f009ddda1ff89365075c2506c4fd5588d629e233a06dcfc59d",
+      "cases": 1,
+      "runtimeExpectCallSites": 3,
+      "typeProbeCallSites": 0,
+      "assertionEvaluations": 3,
+      "portPath": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/browser-window-close/browser-window-close.contract.test.ts",
+      "detailMap": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/browser-window-close/assertion-map.json",
+      "preservation": "literal_source_body_after_provenance_and_import_only_normalization",
+      "architectureDisposition": "page-world installation is Electron-preload-coupled; the non-callable and non-replaceable close guard is a portable browser safety obligation when an equivalent page surface exists",
+      "sourceBaseline": {
+        "manifest": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/browser-window-close/source-baseline-capsule.json",
+        "manifestSha256": "c8ea2cfbb763461f557884b46363e025bff4690088baaea3d27b41e835e6caee",
+        "capsuleRoot": ".preflight/parity-baseline/ui-preload-browser-window-close-CPcnPC",
+        "result": "1 passed, 0 failed, 0 pending",
+        "runner": "Vitest 4.1.11 / Node 24.19.0",
+        "scope": "source_only"
+      },
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePath": "apps/desktop/src/preload/browser-window-close-installation.ts",
+      "candidateExecution": "exit_1_collection_error_no_tests_not_behavioral_red"
+    },
+    {
+      "sourcePath": "src/preload/renderer-restart-wiring.test.ts",
+      "sourceSha256": "1f09c2e6e60a5449ae9d332d9b24b0c331e1f9c01409753d2368e1d357f482fe",
+      "cases": 3,
+      "runtimeExpectCallSites": 10,
+      "typeProbeCallSites": 0,
+      "assertionEvaluations": 10,
+      "portPath": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/renderer-restart/renderer-restart-wiring.contract.test.ts",
+      "detailMap": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/renderer-restart/assertion-map.json",
+      "preservation": "literal_source_body_after_provenance_and_import_only_normalization",
+      "architectureDisposition": "Electron IPC registration and DOM event names are current-architecture-coupled; relay effects and checkpoint-before-install ordering are portable lifecycle invariants",
+      "sourceBaseline": {
+        "manifest": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/renderer-restart/source-baseline-capsule.json",
+        "manifestSha256": "09a79916e730b925d9c27ed277e6dff4d532da22785d4171002056771cac2495",
+        "capsuleRoot": ".preflight/parity-baseline/ui-preload-renderer-restart-fdBaVE",
+        "result": "3 passed, 0 failed, 0 pending",
+        "runner": "Vitest 4.1.11 / Node 24.19.0",
+        "scope": "source_only"
+      },
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePaths": [
+        "apps/desktop/src/preload/renderer-restart-wiring.ts",
+        "apps/desktop/src/shared/renderer-shutdown-events.ts",
+        "apps/desktop/src/shared/updater-renderer-events.ts"
+      ],
+      "candidateExecution": "exit_1_collection_error_no_tests_not_behavioral_red"
+    },
+    {
+      "sourcePath": "src/preload/ssh-authority-forwarding.test.ts",
+      "sourceSha256": "f404e56769d4ebd209972af64e5f263a5f4062bc2e3ca9fe7a60d573ea34da5a",
+      "cases": 6,
+      "runtimeExpectCallSites": 9,
+      "typeProbeCallSites": 1,
+      "assertionEvaluations": 10,
+      "portPath": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/ssh-forwarding/src/preload/ssh-authority-forwarding.test.ts",
+      "detailMap": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/ssh-forwarding/assertion-map.json",
+      "preservation": "byte_identical",
+      "architectureDisposition": "contextBridge/ipcRenderer and source API type names are architecture-coupled; verbatim channel arguments, full-pair authority identity, partial-pair normalization, malformed-pair rejection, and the listDetected result union are portable obligations",
+      "sourceBaseline": {
+        "status": "not_established",
+        "plan": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/ssh-forwarding/source-baseline-plan.json",
+        "reason": "the source preload index fan-in closure is incomplete; the non-executable plan must not be submitted to the capsule runner"
+      },
+      "bindingStatus": "blocked_binding",
+      "missingCandidateInterfaces": [
+        "api global with ssh and worktrees members",
+        "SSH authority admission and state-change bridge",
+        "host-qualified worktree read and retirement bridge",
+        "shared SSH and detected-worktree type contracts"
+      ],
+      "candidateExecution": "exit_1_setup_error_with_5_import_failures_and_1_type_probe_runtime_noop; zero_product_assertions; not_behavioral_red_or_green"
+    }
+  ],
+  "verdict": "All four original suites are frozen and mapped. Three source suites have isolated passing baselines; SSH source baseline remains explicitly unestablished, and all four candidate bindings are absent, so this wave proves no candidate behavior or product fidelity."
+}

@@ -1,0 +1,32 @@
+{
+  "planId": "ui-preload-ssh-authority-forwarding",
+  "executable": false,
+  "description": "Unchanged original SSH authority forwarding preload tests against the pinned source preload entry, ssh/worktrees bridges, and authority admission contracts.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/preload/ssh-authority-forwarding.test.ts",
+  "expectedTestCounts": { "files": 1, "tests": 6 },
+  "files": [
+    { "path": "src/preload/ssh-authority-forwarding.test.ts", "role": "test", "sha256": "f404e56769d4ebd209972af64e5f263a5f4062bc2e3ca9fe7a60d573ea34da5a" },
+    { "path": "src/preload/index.ts", "role": "module", "sha256": "bda759d24c26339f6cd28cc282f639b3ad4c7754d9316458ae60c2a242141960" },
+    { "path": "src/preload/api/ssh-bridge.ts", "role": "module", "sha256": "5d2ad37f82a459b0f5f1e01f199a0f8bd076dbbf52550eb661f073ce680c24fc" },
+    { "path": "src/preload/api/worktrees-bridge.ts", "role": "module", "sha256": "98b347e57880d1726e238701e91cd2edeaddad8bdc97e3732b9b9f1bf60e59ff" },
+    { "path": "src/preload/api/ssh-api.ts", "role": "module", "sha256": "8758d4818c5c75751ba48042b3967a91458ab92cc9aacd4f000edf3334061511" },
+    { "path": "src/preload/api/worktree-api.ts", "role": "module", "sha256": "f1e65adc46eb52d939399ba76faa981f59f03b6bf6c203dbb5c0903f1c35a2d7" },
+    { "path": "src/preload/api-types.ts", "role": "module", "sha256": "f2b124d6551e4ecaae91072964b2f9adcd1cd3faa1b0117da9d068f72aa17b6e" },
+    { "path": "src/preload/preload-runtime-support.ts", "role": "module", "sha256": "af169b11746f5a5f30de11e8a0c6c1826a93d7ef2823c90d075614ec6141583c" },
+    { "path": "src/shared/ssh-types.ts", "role": "module", "sha256": "8c93a968578a8eaa0c1541b936cc8f5ae00dac5e522e24b6b282215ad911f18a" },
+    { "path": "src/shared/ssh-retained-payload-admission.ts", "role": "module", "sha256": "6b0bb638ab0c68b177604d005ea825671af90408f1ef357fb99858b32f2bf43f" },
+    { "path": "src/shared/detected-worktree-provider-contract.ts", "role": "module", "sha256": "936982bb799ae43c5092944b50e20c0ac83cc38b636af445220dad2db70b15b7" },
+    { "path": "src/shared/worktree/types.ts", "role": "module", "sha256": "97a7d676f27eb18f5be3a82deb930c407f492b2de1134d0e7d3564d1f40b764d" },
+    { "path": "src/shared/utf8-byte-limits.ts", "role": "module", "sha256": "07427f715975095184f81bcd1677808da82a6734e02cedc86c5b8fdee053ace3" },
+    { "path": "src/shared/execution-host.ts", "role": "module", "sha256": "b50beb1c179026e1457e490455fdcad1ebfa500b714635b598aa52dd6e55247a" }
+  ],
+  "closureExpansionRule": "src/preload/index.ts (205 lines) composes the full api global from every module under src/preload/api/ plus preload-runtime-support, so staging for execution must additionally pin the complete src/preload/api/ tree and any src/shared/ contracts it transitively imports, each verified by exact path+sha256 through the existing capsule tooling. The listed files are the directly exercised subset, not the whole fan-in.",
+  "license": { "path": "LICENSE", "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3", "spdxId": "MIT", "copyright": "Copyright (c) 2026 Lovecast Inc." },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": ["Pinned source config uses node env with happy-dom setup files, GC/webstorage exec flags, and extended timeouts; the capsule needs at minimum the electron/@electron-toolkit/preload mock aliases the test file itself installs via vi.mock, since this closure imports electron."],
+  "dependencyClosureNote": "The test file mocks electron and @electron-toolkit/preload in-test via vi.mock with factories; all other runtime imports are the pinned sibling preload/bridge modules and Vitest. Type-only imports are erased at transform time.",
+  "isolationRationale": "No filesystem, network, credentials, services, timers, or real Electron runtime; the test stubs window/document/process.contextIsolated and mocks all IPC. Staging and execution must go through the existing capsule tooling into a fresh nonce capsule under .preflight/parity-baseline (a lead/coordinator step; this leaf performed no staging and ran nothing with the read-only reference as cwd).",
+  "baselineStatus": "NOT_EXECUTABLE_PLAN_ONLY; not_executed_by_this_leaf; no admitted receipt covers this suite in docs/migration/source-regression-node-20260906.json (41 outcomes, none for ssh-authority-forwarding). This file was renamed from source-baseline-capsule.json precisely because its closureExpansionRule admits the file list lacks the full src/preload/index.ts fan-in, so it is NOT a complete capsule manifest and MUST NOT be fed to capsule staging/execution tooling without lead completion of the closure. It is a plan for lead/coordinator follow-up, not a runnable capsule."
+}

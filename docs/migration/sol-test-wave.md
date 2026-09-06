@@ -29,15 +29,66 @@ protocols, lockfiles, Git, integration and installation remain root-owned.
 
 ## First bounded cycle
 
+### User correction: leads delegate execution
+
+Carlos clarified that Sol must conserve OpenAI usage by directing non-OpenAI
+workers, rather than manually implementing or running extended preparation/debug
+loops. Root sent high-priority guidance to all three live leads. The earlier
+UI/ENG follow-up instructions forbidding children are superseded, without widening
+the assigned file or feature scope. UI transfers its implementation to one GLM
+`zai-coding-plan/glm-5.3-flash` leaf; ENG transfers remaining isolated baselines to
+one Kimi `kimi-for-coding/kimi-for-coding` leaf. Both use OpenCode `--auto`, scoped
+ownership and depth 2. Sol retains direction and focused evidence review.
+CAP's already-completed baseline runs are not repeated merely to attach a worker;
+its next execution work follows this same delegation policy. Runtime child receipts
+remain required before describing the transfers as launched.
+
+### Current checkpoint: 15:05 UTC
+
+UI and ENG first-cycle deliveries are settled and root-reviewed. The automated
+frozen-body check passes 11/11 complete source suites; it proves no execution or
+binding equivalence. Its own 24 tests pass; the allocation and batch checks bring
+the Node test run to 47/47. The capsule runner separately passes 73/73 under
+Vitest5. An initial mixed-runner invocation failed to load Vitest under Node's
+test runner; the corrected separate runs are the accepted tool results.
+
+Root verified the three UI source capsule records and every manifest/receipt/result
+digest (12/12 original cases passed). UI now owns implementation of the baselined
+close/restart modules under Task `task_6358fe800fdb`, Dispatch `ctx_a7868ff3b05d`.
+ENG owns isolated original identity/lease baselines under Task
+`task_89679cbd932d`, Dispatch `ctx_170956f4bd2f`. Both accepted fresh input with no
+residual resources, on the same exact Sol sessions after prior release/ack.
+CAP continues its schema/UI baseline Task with its one Kimi child. These follow-ups
+preserve old evidence and dirty product files. UI may write only its named new
+module closure; root integration and packaged acceptance remain outstanding.
+
+The literal checker and accepted preparation do not close additional audit groups:
+still 11/12 = 91.7%, medium confidence (+0), with high full-fidelity deadline risk.
+
+### Earlier dispatch history
+
 Current continuation: the first CAP Task is delivered and root-released.
 `sol-wave/cap-bots/root-review.md` accepts preservation/preparation and the real
 delegation cycle with explicit source-cache/retention deviations, not T2 or parity.
-Two fresh actual Sol high sessions have accepted independent assignments:
+Two fresh actual Sol high sessions have accepted independent assignments; the
+settled CAP lead has accepted a new, separate source-baseline Task:
 
 | Lead | Task / Dispatch | Terminal |
 | --- | --- | --- |
 | Sol-UI | `task_bbff561b17bb / ctx_e58cb09f5a82` | `term_65eb1908-66e2-44ea-a35f-1e1bc82deebc` |
 | Sol-ENG | `task_3a25101232c0 / ctx_fbdc4abdbcad` | `term_e9f95e7e-d54c-4f1e-969b-db022a9eabda` |
+| Sol-CAP baseline follow-up | `task_200fda6b511e / ctx_a7241fb2a210` | `term_55775ffc-2e9f-4137-a49a-3168fb12a2c4` |
+
+At 14:54 UTC, all three Tasks remain dispatched. CAP's follow-up prepares
+isolated original schema/UI baselines, not product implementation. Its sole
+Kimi child is Task `task_ece5c72ecad1`, Dispatch `ctx_4bc2e9601d41`, Run
+`run_d5e814165307`, terminal `term_38970397-a36b-4553-8633-e451a069ebc5`.
+Root independently checked the runtime: depth 2, ready/input_accepted, exact
+worker live, OpenCode identity, no residual resources. The lead reports the
+exact invocation `opencode --model kimi-for-coding/kimi-for-coding --auto`;
+the earlier provider smoke is separate evidence. This child is still working,
+not an accepted baseline. All three leads received the verified Kimi/Qwen-hold
+update without changing active child ownership or concurrency.
 
 Both fresh command/TUI checks select `gpt-5.6-sol` high with the same scoped
 unattended flag; attachment receipts are ready/input_accepted, no setup or

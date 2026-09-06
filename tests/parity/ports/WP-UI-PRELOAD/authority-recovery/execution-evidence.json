@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06",
+  "workPackage": "WP-UI-PRELOAD",
+  "finiteAssignment": "authority-recovery",
+  "candidateRunner": {
+    "node": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "nodeVersion": "v24.19.0",
+    "vitestEntry": "apps/desktop/node_modules/vitest/vitest.mjs",
+    "vitestVersion": "5.0.0",
+    "platform": "darwin-arm64"
+  },
+  "sourceRunner": {
+    "node": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "nodeVersion": "v24.19.0",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "vitestVersion": "4.1.11",
+    "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+    "method": "scripts/run-parity-baseline-capsule.mjs staged exact pinned bytes into fresh nonce directories under .preflight/parity-baseline and executed there; the source checkout was not used as cwd"
+  },
+  "sourceBaselines": [
+    {
+      "suite": "close-active-tab-payload-admission",
+      "manifest": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/close-active-tab/source-baseline-capsule.json",
+      "approvedManifestSha256": "ced5cb976bb5d5a17f2ee0e9e86a5a50904c79df035b595d8e25a478dbd3dfdd",
+      "capsuleRoot": ".preflight/parity-baseline/ui-preload-close-active-tab-B4tTCk",
+      "stageReceiptSha256": "255f38db501131be7b2c4498551dcc94b701abe5c9fedcc6c85d2b87bdf1f7d4",
+      "resultSha256": "8d7ab341da3a607bcdfb469f593b5915f6541e2f400a8ce73b2487d94a74c92d",
+      "exitCode": 0,
+      "tests": "8 passed, 0 failed, 0 pending",
+      "classification": "source_baseline_pass_only"
+    },
+    {
+      "suite": "browser-window-close",
+      "manifest": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/browser-window-close/source-baseline-capsule.json",
+      "approvedManifestSha256": "c8ea2cfbb763461f557884b46363e025bff4690088baaea3d27b41e835e6caee",
+      "capsuleRoot": ".preflight/parity-baseline/ui-preload-browser-window-close-CPcnPC",
+      "stageReceiptSha256": "e6a91c089ce4dd588cffc9d0396ab6931a3971659ff797727001ed7bb6db6efb",
+      "resultSha256": "89e01737166e4675f1a22a696eef246e4b8dd2e82a39c4f106195c5069bcb631",
+      "exitCode": 0,
+      "tests": "1 passed, 0 failed, 0 pending",
+      "classification": "source_baseline_pass_only"
+    },
+    {
+      "suite": "renderer-restart-wiring",
+      "manifest": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/renderer-restart/source-baseline-capsule.json",
+      "approvedManifestSha256": "09a79916e730b925d9c27ed277e6dff4d532da22785d4171002056771cac2495",
+      "capsuleRoot": ".preflight/parity-baseline/ui-preload-renderer-restart-fdBaVE",
+      "stageReceiptSha256": "f89640e6d6cef2aff85f81774c5e0d298105926771c5fa0d2c318cc3e001ee2a",
+      "resultSha256": "8c1eb679c75efc6d00d5241153fd355184802ad7b1b3d4623b1c5a3f6fbc1251",
+      "exitCode": 0,
+      "tests": "3 passed, 0 failed, 0 pending",
+      "classification": "source_baseline_pass_only"
+    },
+    {
+      "suite": "ssh-authority-forwarding",
+      "plan": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/ssh-forwarding/source-baseline-plan.json",
+      "exitCode": null,
+      "tests": "not executed",
+      "classification": "source_baseline_not_established",
+      "reason": "the plan declares executable:false because its preload-index dependency closure is incomplete"
+    }
+  ],
+  "candidateCommands": [
+    {
+      "suite": "close-active-tab-payload-admission",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-UI-PRELOAD/authority-recovery/close-active-tab/close-active-tab-payload-admission.contract.test.ts --environment node --reporter dot",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "ERR_MODULE_NOT_FOUND: apps/desktop/src/preload/close-active-tab-payload-admission",
+      "productAssertionsExecuted": 0,
+      "classification": "blocked_binding_not_behavioral_red"
+    },
+    {
+      "suite": "browser-window-close",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-UI-PRELOAD/authority-recovery/browser-window-close/browser-window-close.contract.test.ts --environment node --reporter dot",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "ERR_MODULE_NOT_FOUND: apps/desktop/src/preload/browser-window-close-installation",
+      "productAssertionsExecuted": 0,
+      "classification": "blocked_binding_not_behavioral_red"
+    },
+    {
+      "suite": "renderer-restart-wiring",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-UI-PRELOAD/authority-recovery/renderer-restart/renderer-restart-wiring.contract.test.ts --environment node --reporter dot",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "ERR_MODULE_NOT_FOUND: apps/desktop/src/shared/renderer-shutdown-events (the preload wiring and updater event modules are also absent)",
+      "productAssertionsExecuted": 0,
+      "classification": "blocked_binding_not_behavioral_red"
+    },
+    {
+      "suite": "ssh-authority-forwarding",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run --root tests/parity/ports/WP-UI-PRELOAD/authority-recovery/ssh-forwarding src/preload/ssh-authority-forwarding.test.ts --reporter dot",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "5 failed, 1 passed",
+      "error": "ERR_MODULE_NOT_FOUND: ./index for all five runtime cases; the one reported pass is only the expectTypeOf runtime no-op",
+      "productAssertionsExecuted": 0,
+      "classification": "blocked_binding_not_behavioral_red_or_green"
+    }
+  ],
+  "preservationVerification": [
+    {
+      "suite": "close-active-tab-payload-admission",
+      "method": "normalized literal comparison allowing only the two-line provenance header and direct candidate import rewrite",
+      "result": "equal"
+    },
+    {
+      "suite": "browser-window-close",
+      "method": "normalized literal comparison allowing only the two-line provenance header and direct candidate import rewrite",
+      "result": "equal"
+    },
+    {
+      "suite": "renderer-restart-wiring",
+      "method": "normalized literal comparison allowing only the two-line provenance header and three direct candidate import rewrites",
+      "result": "equal"
+    },
+    {
+      "suite": "ssh-authority-forwarding",
+      "method": "byte comparison and SHA256 against the pinned source file",
+      "sourceSha256": "f404e56769d4ebd209972af64e5f263a5f4062bc2e3ca9fe7a60d573ea34da5a",
+      "portSha256": "f404e56769d4ebd209972af64e5f263a5f4062bc2e3ca9fe7a60d573ea34da5a",
+      "result": "byte_identical"
+    }
+  ],
+  "limitations": [
+    "Source baseline passing results cover only the three complete reviewed capsules and do not prove candidate parity.",
+    "The SSH source plan is incomplete and non-executable; no source result is claimed for that suite.",
+    "Every candidate run stopped before a product assertion executed; import/setup failures are not behavioral RED, GREEN, PASS, or parity.",
+    "The SSH expectTypeOf case is preserved but is a runtime no-op and its Vitest-reported pass is not product evidence."
+  ],
+  "verdict": "Four complete suites are frozen; 3/4 have passing source-only baselines, 0/4 have genuine candidate bindings, and product fidelity remains unproven."
+}

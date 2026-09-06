@@ -1,0 +1,28 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/preload/browser-window-close.test.ts",
+  "sourceSha256": "845030ace67f72f009ddda1ff89365075c2506c4fd5588d629e233a06dcfc59d",
+  "portPath": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/browser-window-close/browser-window-close.contract.test.ts",
+  "portMethod": "literal test body with provenance header and import-only candidate path rewrite",
+  "sourceCases": 1,
+  "sourceExpectCallSites": 3,
+  "sourceAssertionEvaluations": 3,
+  "architectureDisposition": "Electron-preload/page-world installation mechanism is current-architecture-coupled; the observable non-callable and non-replaceable close guard remains a portable browser safety obligation if the candidate exposes an equivalent page surface",
+  "binding": {
+    "status": "blocked_missing_candidate_interface",
+    "expectedPath": "apps/desktop/src/preload/browser-window-close-installation.ts",
+    "candidateBindingCreated": false,
+    "runnerClassification": "collection_failure_not_behavioral_red"
+  },
+  "cases": [
+    {
+      "id": "nonreplaceable-page-close-guard",
+      "title": "installs a non-replaceable window.close no-op in the page world",
+      "sourceLines": "10-19",
+      "assertionLines": [16, 17, 18],
+      "assertionEvaluations": 3,
+      "obligations": ["guarded close returns undefined", "guard replaces native close", "guard cannot be replaced through Reflect.set"],
+      "portStatus": "preserved_blocked_binding"
+    }
+  ]
+}

@@ -11,3 +11,14 @@ integrated product acceptance are distinct. Missing modules or test environments
 must not be called behavioral RED. Never replace missing behavior with a fake
 adapter that produces expected results, or claim a frozen source suite ran
 against Drogon when it did not.
+
+## Literal-preservation check
+
+Run `node scripts/check-frozen-test-ports.mjs --source-root <read-only-source>`
+from the rewrite checkout. Its reviewed manifest is `tests/parity/frozen-test-ports.json`.
+It checks pinned file hashes and exact bodies after the leading static-import
+region; provenance comments may be added, other leading comments/directives must
+match. It reads only and never executes the reference. Unsupported syntax fails
+closed as a body difference; do not loosen it to accept changed assertions.
+Import binding equivalence, source execution, native translations and actual
+candidate parity need separate evidence. Do not call a frozen body a completed port.

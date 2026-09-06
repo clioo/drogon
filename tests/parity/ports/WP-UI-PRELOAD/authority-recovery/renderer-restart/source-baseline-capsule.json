@@ -1,0 +1,21 @@
+{
+  "capsuleId": "ui-preload-renderer-restart",
+  "description": "Unchanged original renderer restart relay and checkpoint ordering tests with the complete pinned runtime import closure.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/preload/renderer-restart-wiring.test.ts",
+  "expectedTestCounts": { "files": 1, "tests": 3 },
+  "files": [
+    { "path": "src/preload/renderer-restart-wiring.test.ts", "role": "test", "sha256": "1f09c2e6e60a5449ae9d332d9b24b0c331e1f9c01409753d2368e1d357f482fe" },
+    { "path": "src/preload/renderer-restart-wiring.ts", "role": "module", "sha256": "dc1d269077b4e863076ff7271a5a57738bc8a490f078cbf8ff3b07f5d09636b1" },
+    { "path": "src/shared/renderer-restart-preparation.ts", "role": "module", "sha256": "ccbe3af4bd913cd6699f03693f05f364ce7253ae8b3f27d62b39ba8844be5b24" },
+    { "path": "src/shared/renderer-shutdown-events.ts", "role": "module", "sha256": "bdd87131e559f09a968a947cbc6099c2b640dc460bed0f4d3ed7c391f75f5362" },
+    { "path": "src/shared/updater-renderer-events.ts", "role": "module", "sha256": "e9f7f159c92a1d0a8350fd0ca8351b9c5b2064a8deceff177fd879d765aefba0" },
+    { "path": "src/shared/editor-save-events.ts", "role": "module", "sha256": "2fb1adac742aa3795ad7ef0d9ae4982da9c30134be5059ee6a0d3cd9d22bacf2" }
+  ],
+  "license": { "path": "LICENSE", "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3", "spdxId": "MIT", "copyright": "Copyright (c) 2026 Lovecast Inc." },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": ["Minimal Node 24 environment; source renderer aliases/setup, feature-wall define, GC/webstorage flags and extended timeouts are omitted because this closure uses built-in Event/EventTarget/CustomEvent and in-memory spies only."],
+  "dependencyClosureNote": "All runtime imports are pinned except electron and update/release types, which are type-only and erased. Node 24 supplies Event, EventTarget and CustomEvent.",
+  "isolationRationale": "Only in-memory EventTargets, listeners, promises and Vitest spies execute. IPC is a caller-owned object double; no Electron process, filesystem, network, child process, updater, credential, service or user state is reached."
+}

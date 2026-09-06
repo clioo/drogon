@@ -1,0 +1,49 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/main/runtime/agent-session-provider-handle-transition.test.ts",
+  "sourceSha256": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1",
+  "portPath": "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/provider-transition/src/main/runtime/agent-session-provider-handle-transition.test.ts",
+  "portMethod": "byte-identical frozen copy, original relative import specifiers unchanged (per docs/migration/parity-test-porting.md §3), no candidate-binding seam created because no candidate interface exists anywhere in the rewrite",
+  "sourceCases": 2,
+  "sourceExpectCallSites": 4,
+  "sourceAssertionEvaluations": 4,
+  "binding": {
+    "status": "blocked_missing_candidate_interface",
+    "expectedPaths": {
+      "functionUnderTest": "recordAgentSessionProviderHandle (no candidate at apps/desktop/src/main/runtime/agent-session-provider-handle-transition.ts or elsewhere)",
+      "transitiveDependencies": [
+        "appendAgentSessionProviderHandleLink, AgentSessionProviderHandleLink (no candidate at apps/desktop/src/shared/agent-session-provider-handle.ts)",
+        "AgentSessionRecord, AgentSessionLease (no candidate at apps/desktop/src/shared/agent-session-record.ts)",
+        "agentSessionLeaseFixture, agentSessionRecordFixture (no candidate at apps/desktop/src/shared/agent-session-record.test-fixture.ts)"
+      ]
+    },
+    "seam": "none created — no genuine interface exists to bind to; AGENTS.md and sol-test-wave.md prohibit fake adapters",
+    "runnerResult": "setup_failed_not_behavioral_red"
+  },
+  "cases": [
+    {
+      "id": "advances-live-claude-chain-head",
+      "title": "advances a live Claude chain head and its proof",
+      "sourceLines": "20-30",
+      "assertionLines": [28, 29],
+      "assertionEvaluations": 2,
+      "obligations": [
+        "resumed link with matching leafUuid becomes the new chain head (providerHandleChain.at(-1)?.handle toMatchObject leafUuid: 'leaf-2')",
+        "a live lease's provenHandleLinkId advances to the new head link id (lease.provenHandleLinkId toBe 'link-2')"
+      ],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "records-leaf-during-proof-without-ownership",
+      "title": "records a leaf during proof without granting ownership",
+      "sourceLines": "32-47",
+      "assertionLines": [45, 46],
+      "assertionEvaluations": 2,
+      "obligations": [
+        "a lease in new-owner-proving/reserved state still appends the resumed link as chain head (providerHandleChain.at(-1)?.handle toMatchObject leafUuid: 'leaf-2')",
+        "that same lease's claimStatus stays 'reserved' and provenHandleLinkId stays null — proof of a handle must not itself grant ownership (lease toMatchObject { claimStatus: 'reserved', provenHandleLinkId: null })"
+      ],
+      "portStatus": "preserved_blocked_binding"
+    }
+  ]
+}

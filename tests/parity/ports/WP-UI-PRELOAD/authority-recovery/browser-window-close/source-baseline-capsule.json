@@ -1,0 +1,17 @@
+{
+  "capsuleId": "ui-preload-browser-window-close",
+  "description": "Unchanged original page-world window.close guard test against the pinned source module.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/preload/browser-window-close.test.ts",
+  "expectedTestCounts": { "files": 1, "tests": 1 },
+  "files": [
+    { "path": "src/preload/browser-window-close.test.ts", "role": "test", "sha256": "845030ace67f72f009ddda1ff89365075c2506c4fd5588d629e233a06dcfc59d" },
+    { "path": "src/preload/browser-window-close-installation.ts", "role": "module", "sha256": "fdd0ce5f4416d1d9d8e517ae33b7bc6b429479e851ec70c9f87c66c8f2b53720" }
+  ],
+  "license": { "path": "LICENSE", "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3", "spdxId": "MIT", "copyright": "Copyright (c) 2026 Lovecast Inc." },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": ["Minimal node environment; the original test stubs its own window global and needs none of the source renderer setup, aliases, feature-wall define, GC/webstorage flags or extended timeouts."],
+  "dependencyClosureNote": "The unchanged test imports Vitest and one import-free sibling module.",
+  "isolationRationale": "The test owns a stub window object and Vitest restores the global after the single synchronous case. It launches no Electron process and reaches no filesystem, network, child process, credentials or service."
+}

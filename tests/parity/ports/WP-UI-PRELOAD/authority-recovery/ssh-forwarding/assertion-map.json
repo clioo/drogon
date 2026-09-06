@@ -1,0 +1,100 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/preload/ssh-authority-forwarding.test.ts",
+  "sourceSha256": "f404e56769d4ebd209972af64e5f263a5f4062bc2e3ca9fe7a60d573ea34da5a",
+  "portPath": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/ssh-forwarding/src/preload/ssh-authority-forwarding.test.ts",
+  "portMethod": "byte_identical frozen port at the source-relative path; zero import rewrites, zero body changes; port sha256 equals source sha256",
+  "portSha256": "f404e56769d4ebd209972af64e5f263a5f4062bc2e3ca9fe7a60d573ea34da5a",
+  "portIsByteIdentical": true,
+  "correctionNote": "Replaces the prior-dispatch hybrid contract test (verbatim runtime bodies but test-local redeclared structural types plus 5 rewritten entry specifiers), which is deleted. The hybrid's local type scaffold could drift from the source contract and its expectTypeOf no-op was miscounted alongside candidate results; the frozen port preserves the original type imports and body exactly.",
+  "sourceCases": 6,
+  "sourceExpectCallSites": 9,
+  "sourceTypeProbes": 1,
+  "sourceAssertionEvaluations": 10,
+  "evaluationCounting": "established one-expect/one-evaluation convention: each expect() call site counts 1 including await expect().resolves.toEqual; the single expectTypeOf probe counts 1 type-level evaluation and is a runtime no-op",
+  "architectureDisposition": "Electron contextBridge/ipcRenderer/api-global composition and PreloadApi/WorktreeApi/SshApi type names are current-architecture-coupled; the IPC channel names with verbatim args, the full-authority-pair identity rule, the partial-authority-to-null reconciliation rule, the malformed-authority drop rule, and the variable-form listDetected union are portable observable obligations for any candidate exposing an equivalent preload surface",
+  "expectedCandidatePaths": [
+    "src/preload/index.ts (relative to the frozen file; the composed api global)",
+    "src/preload/api-types.ts (PreloadApi)",
+    "src/preload/api/ssh-bridge.ts and src/preload/api/ssh-api.ts (getState, onStateChanged, ssh:getState, ssh:state-changed)",
+    "src/preload/api/worktrees-bridge.ts and src/preload/api/worktree-api.ts (listDetected, listKnownForExecutionHost, forgetRemovedForExecutionHost)",
+    "src/shared/ssh-types.ts, src/shared/ssh-retained-payload-admission.ts, src/shared/detected-worktree-provider-contract.ts, src/shared/worktree/types.ts (authority and worktree contracts)"
+  ],
+  "binding": {
+    "status": "blocked_missing_candidate_interface",
+    "candidateBindingCreated": false,
+    "candidateSearch": "bounded grep over apps/, crates/, tests/ for providerEpoch|admitSsh|PreloadApi|ssh-bridge|worktrees-bridge|listKnownForExecutionHost|detected-worktree-provider-contract|ssh:getState: zero hits; the only contextBridge hit is apps/desktop/src/preload/index.ts, which exposes only drogon: DesktopBridge with no api global and no ssh/worktrees members",
+    "runnerClassification": "setup_failure_not_behavioral_red_not_green",
+    "productAssertionsExecuted": 0,
+    "runnerEvidence": "Vitest 5.0.0 via installed apps/desktop/node_modules/.bin/vitest.mjs on Node v24.19.0 (/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node), cwd /Users/carlos/Documents/Drogon-rewrite, --root the ssh-forwarding subtree: 5 failed with Error: Cannot find module '/src/preload/index' (code ERR_MODULE_NOT_FOUND) at the frozen await import('./index') before any expect executes; 1 passed is solely the expectTypeOf variable-form union probe, which is a runtime no-op and is NOT counted as a product assertion, pass, or coverage. No assertion passed or failed on product behavior; zero candidate coverage. This failure is import/binding absence, never behavioral RED or GREEN."
+  },
+  "cases": [
+    {
+      "id": "variable-form-listDetected-union",
+      "title": "retains host-qualified outcomes for variable-form detected-worktree requests",
+      "sourceLines": "65-69",
+      "assertionLines": [66],
+      "assertionEvaluations": 1,
+      "kind": "type-level only; runtime no-op; not a product assertion execution",
+      "obligations": ["listDetected overloads return Promise<HostQualifiedDetectedWorktreeResult | DetectedWorktreeListResult> for variable-form args"],
+      "coupling": "coupled to source WorktreeApi/PreloadApi type names; the union contract itself is portable",
+      "portStatus": "preserved_verbatim_unbound_no_candidate_type"
+    },
+    {
+      "id": "metadata-only-worktree-reads",
+      "title": "forwards host-qualified metadata-only worktree reads",
+      "sourceLines": "71-79",
+      "assertionLines": [78],
+      "assertionEvaluations": 1,
+      "obligations": ["api.worktrees.listKnownForExecutionHost forwards channel 'worktrees:listKnownForExecutionHost' with verbatim args {repoId, executionHostId 'ssh:ssh-1'}"],
+      "coupling": "portable channel+args forwarding; coupled to the api-global composition",
+      "portStatus": "preserved_verbatim_blocked_binding"
+    },
+    {
+      "id": "metadata-retirement",
+      "title": "forwards metadata retirement for authoritatively removed worktrees",
+      "sourceLines": "81-93",
+      "assertionLines": [92],
+      "assertionEvaluations": 1,
+      "obligations": ["api.worktrees.forgetRemovedForExecutionHost forwards channel 'worktrees:forgetRemovedForExecutionHost' with verbatim args including worktreeIds ['repo-1::/remote/deleted']"],
+      "coupling": "portable channel+args forwarding; coupled to the api-global composition",
+      "portStatus": "preserved_verbatim_blocked_binding"
+    },
+    {
+      "id": "full-pair-get-and-push",
+      "title": "forwards full-pair get and push states without cloning away authority",
+      "sourceLines": "95-121",
+      "assertionLines": [108, 109, 119, 120],
+      "assertionEvaluations": 4,
+      "obligations": ["getState resolves to the identical full state (providerEpoch 'native-provider-epoch' + connectionGeneration 29)", "invoke called with 'ssh:getState' and verbatim args", "ssh:state-changed push delivers the identical pair object to the subscriber"],
+      "coupling": "portable full-pair identity rule; coupled to the ssh bridge and api-global composition",
+      "portStatus": "preserved_verbatim_blocked_binding"
+    },
+    {
+      "id": "partial-authority-normalization",
+      "title": "normalizes partial compatibility authority to unknown for reconciliation",
+      "sourceLines": "123-159",
+      "assertionLines": [136, 152],
+      "assertionEvaluations": 2,
+      "obligations": ["epoch-without-generation state reconciles to providerEpoch null on get", "same normalization applies to pushed ssh:state-changed states"],
+      "coupling": "portable reconciliation rule (source: admitSshConnectionStateForAuthorityReconciliation); coupled to the admission module and bridge",
+      "portStatus": "preserved_verbatim_blocked_binding"
+    },
+    {
+      "id": "malformed-authority-drop",
+      "title": "drops malformed full authority before it reaches the renderer",
+      "sourceLines": "161-187",
+      "assertionLines": [186],
+      "assertionEvaluations": 1,
+      "obligations": ["pushed state with empty providerEpoch but present connectionGeneration never reaches the subscriber"],
+      "coupling": "portable drop rule; coupled to the admission module and bridge",
+      "portStatus": "preserved_verbatim_blocked_binding"
+    }
+  ],
+  "processDeviations": [
+    "Prior dispatch used manual git show/status/check-ignore commands despite the no-Git instruction; no Git commands were used in this correction dispatch (pin/sha reuse admitted values, file staging via cp/rm/mv only, verification via sha256sum and direct reads).",
+    "An automatic same-model rate-limit retry occurred during the prior dispatch with no provider fallback and no model switch.",
+    "Each candidate Vitest run created an ignored node_modules/.vite cache inside the owned subtree; the cache was removed after each run so the subtree holds only the three deliverable artifacts.",
+    "Parent review independently re-ran the exact Node24/Vitest command and confirmed the same result plus byte-identical SHA/JSON validity, which recreated tests/parity/ports/WP-UI-PRELOAD/authority-recovery/ssh-forwarding/node_modules/.vite; this final cleanup dispatch removed exactly that regenerated cache and performed no new Vitest run and no Git commands."
+  ]
+}

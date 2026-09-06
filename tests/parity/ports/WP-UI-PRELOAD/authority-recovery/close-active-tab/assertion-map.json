@@ -1,0 +1,47 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/preload/close-active-tab-payload-admission.test.ts",
+  "sourceSha256": "e42939244be46cea70ac2a0164114b70e1d127e6853b7dec9a418e75039f3708",
+  "portPath": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/close-active-tab/close-active-tab-payload-admission.contract.test.ts",
+  "portMethod": "literal test body with provenance header and import-only candidate path rewrite",
+  "sourceCases": 8,
+  "sourceExpectCallSites": 3,
+  "sourceAssertionEvaluations": 8,
+  "architectureDisposition": "portable admission behavior; source type name is architecture-specific, but omitted/source/invalid outcomes are candidate-neutral",
+  "binding": {
+    "status": "blocked_missing_candidate_interface",
+    "expectedPath": "apps/desktop/src/preload/close-active-tab-payload-admission.ts",
+    "candidateBindingCreated": false,
+    "runnerClassification": "collection_failure_not_behavioral_red"
+  },
+  "cases": [
+    {
+      "id": "legacy-omission",
+      "title": "preserves the legacy omitted payload",
+      "sourceLines": "5-7",
+      "assertionLines": [6],
+      "assertionEvaluations": 1,
+      "obligations": ["undefined is admitted as the legacy form"],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "nonempty-source-id",
+      "title": "admits a nonempty source id",
+      "sourceLines": "9-14",
+      "assertionLines": [10],
+      "assertionEvaluations": 1,
+      "obligations": ["a nonempty string sourceId is preserved exactly in a source payload"],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "malformed-payload-table",
+      "title": "rejects malformed payload %#",
+      "sourceLines": "16-21",
+      "dataRows": 6,
+      "assertionLines": [19],
+      "assertionEvaluations": 6,
+      "obligations": ["reject null", "reject empty object", "reject array", "reject empty sourceId", "reject numeric sourceId", "reject bare string"],
+      "portStatus": "preserved_blocked_binding"
+    }
+  ]
+}
