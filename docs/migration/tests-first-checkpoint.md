@@ -976,6 +976,37 @@ invocations, installations, worker launches, push or PR changes. Audit remains
 open; hierarchy/worktrees/feature PRs remain gated on accepted common contracts
 and audit closure. Goal remains active with concrete progress.
 
+## Settings persistence trace and14 real-filesystem baseline cases
+
+Previous turn made progress in51730a3. Mentu Navigator located renderer
+persistence, and coordinator followed the actual load, mutation, write,
+serialization and host-owner bodies. SP01–SP13 with15 pinned hashes close the
+previously unread profile-preparation body gap, not214-field consumer routing.
+The source settings-set acknowledgement schedules debounced persistence;
+it is not a durable barrier. Remote visibility updates split local/server
+writes and can partially succeed. Renderer authority and migration precedence
+must survive the rewrite.
+
+Original durable-file-write.test.ts passed13 cases, and syscall-proof passed1,
+each in a fresh6-file capsule plus MIT license, Node24.19.0/Vitest4.1.11.
+Both exited0, no skips/todos/timeout. These tests use real fresh temporary
+directories, removed by their existing scoped cleanup. They do not touch
+personal profiles. Raw/archive receipt values, hashes and config differences
+are retained in the two c9790628-durable-file-write capture directories.
+The inherited stdout phrase pure-function is inaccurate for these capsules;
+READMEs explicitly correct it without altering observed raw reports.
+
+The byte tests do not simulate power loss or concurrent readers; the last-writer
+case is sequential. The syscall test delegates actual synchronous operations
+and asserts file-sync/rename order with conditional directory support.
+The full Store round-trip and overlapping server-switch test bodies were read,
+not executed. Original baseline total is114 distinct cases across10 capsules.
+
+No product changes, installation, user session, model invocation, worker
+launch, push or PR action. E2 and the broader audit remain open; accepted
+common base and closed audit still gate hierarchical implementation.
+Goal remains active; this turn produced source contracts and executed evidence.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

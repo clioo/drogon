@@ -44,7 +44,8 @@ Defaults builder, platform injection (`constants.ts:164-178`),
 load normalization (`normalize-loaded-global-settings.ts:16-60`: defaults
 spread first, retired-stripped persisted settings over them, per-domain
 normalizers + migration flags), profile preparation
-(`prepare-loaded-profile-settings.ts` — body not fully read: gap),
+(`prepare-loaded-profile-settings.ts` — body now fully read and characterized
+in `parity-settings-persistence-contracts.json` SP02; not execution proof),
 persistence file (`user-data-path.ts:16-29`, `orca-data.json` + githubCache
 sidecar), per-domain normalizers (no single `normalizeGlobalSettings`).
 Tests: `state-write-round-trip.test.ts:77`,
@@ -72,5 +73,7 @@ top-level settings fields. This does not verify composite values or behavior.
 
 Per-read-file SHA256 in JSON `files`. Gaps: unresolved nested spreads/calls,
 caller-injected resolution, 27
-absent-default hydration paths, profile-preparation body, no UI/behavior
-closure. Follow-up: full persistence-path inventory + per-field UI mapping.
+absent-default hydration paths, no UI/behavior closure. Central profile,
+mutation, owner-routing and write paths are now characterized in
+`parity-settings-persistence-contracts.json`; per-field UI mapping and
+full persistence execution remain owed.

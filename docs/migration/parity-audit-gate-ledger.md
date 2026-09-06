@@ -24,7 +24,7 @@ from one specialized probe registry are not 26 missing harnesses.
 | ID | Required resolution | Owner |
 | --- | --- | --- |
 | E1 | Reconcile remaining named UI surfaces and correct unsupported behavioral claims before freezing cards. | UI package leads; coordinator acceptance |
-| E2 | Trace 214 setting consumers or explicit internal classification; keep platform/dynamic shortcut boundaries explicit. | UI-SETTINGS + ENG-SHARED |
+| E2 | Central load/mutation/owner-routing/write contracts SP01–SP13 characterized; complete214-field consumer/internal classification and preserve platform/dynamic shortcut boundaries. | UI-SETTINGS + ENG-SHARED |
 | E3 | Delegated12 and main54request/12send linked;94/96 push producers identified. Two legacy identities stay unresolved; current close/PDF alternate paths characterized separately. Remaining payload/state contracts owed. | ENG-IPC |
 | E4 | Six skills handlers characterized; remaining per-command value/default/required/output/error contracts and passthrough dispatch still owed. | ENG-CLI |
 | E5 | Reconcile existing journey/platform/gap IDs against these artifacts; only source-backed omissions may become new owned follow-ups. | Coordinator |

@@ -60,8 +60,8 @@
         "WP-UI-SETTINGS",
         "WP-ENG-SHARED"
       ],
-      "evidence": "parity-settings-properties.json fields; parity-settings-keybindings.json; parity-settings-consumers.json bounded routing census (39 scanner fixtures, independently reviewed); parity-settings-unobserved-contracts.json coordinator-reviewed v2",
-      "resolution": "The472-file prefiltered census supplies1093 typed locations and896 unknown-receiver candidates, not full consumer/type-checker coverage. Its exact10 no-observed fields now have bounded consumer/migration/assertion-body traces with34 verified hashes. Those absence flags remain historical scanner output, not unused-field claims. Preserve retryable keybinding seeding, shared target-id settings, actual intro gates and GitLab lookup history. Complete remaining214-field routing/internal-storage classification using existing pointers; do not repeat accepted field/default/keybinding or10-field traces.",
+      "evidence": "parity-settings-properties.json fields; parity-settings-keybindings.json; parity-settings-consumers.json bounded routing census (39 scanner fixtures, independently reviewed); parity-settings-unobserved-contracts.json coordinator-reviewed v2; parity-settings-persistence-contracts.json (SP01-SP13,15 hashes); reference-captures/c9790628-durable-file-write/README.md; reference-captures/c9790628-durable-file-write-syscall-proof/README.md",
+      "resolution": "The472-file census and10 no-observed-field traces remain accepted bounded evidence, not unused-field or full type-checker claims. Central profile-preparation, mutation/authority, owner routing and write lifecycle now characterized separately in SP01-SP13. Generic settings acknowledgement is not durability; remote visibility is not client state or an atomic multi-host transaction.14 original filesystem cases pass, not Store lifecycle or candidate parity. Complete remaining214-field routing/internal-storage classification without repeating accepted censuses or central traces.",
       "proofStillOwed": "Persistence, override/migration and OS shortcut execution."
     },
     {
