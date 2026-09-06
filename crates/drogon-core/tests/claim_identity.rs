@@ -59,7 +59,7 @@ fn is_base64url(value: &str) -> bool {
 }
 
 fn decode_hex(hex: &str) -> Vec<u8> {
-    assert!(hex.len() % 2 == 0, "hex must have even length");
+    assert!(hex.len().is_multiple_of(2), "hex must have even length");
     (0..hex.len() / 2)
         .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("valid hex"))
         .collect()
@@ -398,12 +398,13 @@ fn resume_argv_matches_source_rules_for_every_agent() {
         transcript_path: Some(transcript.clone()),
         ..session_id("s1")
     };
-    let cases: &[(
-        &str,
+    type ResumeArgvCase<'a> = (
+        &'a str,
         AgentProviderSessionMetadata,
-        Option<&str>,
-        Option<Vec<&str>>,
-    )] = &[
+        Option<&'a str>,
+        Option<Vec<&'a str>>,
+    );
+    let cases: &[ResumeArgvCase<'_>] = &[
         (
             "claude",
             session_id("s1"),
@@ -561,11 +562,10 @@ fn provider_session_id_utf16_length_and_trim_boundaries() {
         Some("😀".repeat(256).as_str())
     );
     assert_eq!(normalize_id(&"😀".repeat(257)), None);
-    // Mixed BMP + astral: 511 units (one astral pair + 509 BMP) accepted,
-    // 515 units (one astral pair + 513 BMP) rejected.
-    let mixed_ok = format!("{}😀{}", "a".repeat(509), "b".repeat(1));
+    // Mixed BMP + astral: 512 units accepted; 516 rejected.
+    let mixed_ok = format!("{}😀b", "a".repeat(509));
     assert_eq!(normalize_id(&mixed_ok).as_deref(), Some(mixed_ok.as_str()));
-    let mixed_bad = format!("{}😀{}", "a".repeat(513), "b".repeat(1));
+    let mixed_bad = format!("{}😀b", "a".repeat(513));
     assert_eq!(normalize_id(&mixed_bad), None);
 }
 

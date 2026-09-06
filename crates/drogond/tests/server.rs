@@ -55,6 +55,25 @@ fn connect(server: &TestServer) -> UnixStream {
     UnixStream::connect(server.dir.path().join("runtime-v1.sock")).unwrap()
 }
 
+fn assert_peer_closed(stream: &mut UnixStream) {
+    let mut buf = Vec::new();
+    match stream.read_to_end(&mut buf) {
+        Ok(_) => assert!(buf.is_empty(), "rejected frame must not receive a response"),
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+        other => panic!("expected peer closure, not a timeout or transport error: {other:?}"),
+    }
+}
+
+#[test]
+#[should_panic(expected = "expected peer closure")]
+fn frame_rejection_does_not_accept_a_read_timeout() {
+    let (mut client, _held_peer) = UnixStream::pair().unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .unwrap();
+    assert_peer_closed(&mut client);
+}
+
 fn send(stream: &mut UnixStream, request: &Request) {
     let mut bytes = serde_json::to_vec(request).unwrap();
     bytes.push(b'\n');
@@ -180,11 +199,24 @@ fn garbled_frame_gets_a_synthesized_error_and_the_connection_stays_open() {
 fn oversized_frame_closes_the_connection_but_not_the_server() {
     let server = start_server();
     let mut stream = connect(&server);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
     let oversized = vec![b'a'; drogon_protocol::MAX_FRAME_BYTES + 100];
     // Deliberately no trailing newline within the budget.
-    let _ = stream.write_all(&oversized);
-    let mut buf = Vec::new();
-    let _ = stream.read_to_end(&mut buf);
+    if let Err(error) = stream.write_all(&oversized) {
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+            ),
+            "unexpected oversized-frame write failure: {error}"
+        );
+    }
+    assert_peer_closed(&mut stream);
 
     let mut stream2 = connect(&server);
     send(
