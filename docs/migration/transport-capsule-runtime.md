@@ -1,5 +1,7 @@
 # Pinned transport dependencies for source capsules
 
+Follow-up: the wrapper now also permits optional, version/tree-pinned zod for the complete original request-connection import closure. That suite passed2/2 and the expanded infrastructure suite passed95/95; see remote-runtime-connection-source-baseline.md/json. The initial-block results and pending-work statements below are historical. Shared-control reconnect remains unrun.
+
 Test infrastructure only. This extends the accepted capsule runner so full original WebSocket/crypto suites can be admitted without substituting imports with mocks or modifying source assertions. It does not itself admit those suites or establish a working remote Drogon transport.
 
 ## Change and boundary

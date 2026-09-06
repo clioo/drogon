@@ -36,6 +36,19 @@ it('links and verifies the two declared package trees', () => {
   expect(readFileSync(path.join(capsule, 'node_modules/ws/index.js'), 'utf8')).toBe('module.exports = {};\n');
 });
 
+it('admits optional zod only with an exact version and package-tree hash', () => {
+  const directory = path.join(root, 'node_modules/zod');
+  mkdirSync(directory);
+  writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'zod', version: '4.3.6' }));
+  declaration.zod = { version: '4.3.6', treeSha256: snapshotTransportPackage(directory).treeSha256 };
+  const runtime = resolveTransportRuntime(declaration, root);
+  stageTransportRuntime(runtime, capsule);
+  verifyTransportRuntime(runtime, capsule);
+  expect(runtime.map(entry => entry.name)).toEqual(['ws', 'tweetnacl', 'zod']);
+  delete declaration.zod.treeSha256;
+  expect(() => resolveTransportRuntime(declaration, root)).toThrow();
+});
+
 it.each(['missing', 'extra', 'version', 'hash', 'field'])('rejects %s declarations', (variant) => {
   if (variant === 'missing') delete declaration.ws;
   if (variant === 'extra') declaration.extra = declaration.ws;

@@ -35,14 +35,15 @@ export function snapshotTransportPackage(packageRoot) {
 
 export function resolveTransportRuntime(declaration, sourceRoot) {
   if (declaration === undefined) return null;
-  assert(declaration && Object.keys(declaration).sort().join() === [...NAMES].sort().join(), 'Transport runtime requires ws and tweetnacl only');
-  for (const name of NAMES) {
+  const names = declaration && Object.hasOwn(declaration, 'zod') ? [...NAMES, 'zod'] : NAMES;
+  assert(declaration && Object.keys(declaration).sort().join() === [...names].sort().join(), 'Transport runtime requires ws and tweetnacl, with optional pinned zod only');
+  for (const name of names) {
     const entry = declaration[name];
     assert(entry && Object.keys(entry).sort().join() === 'treeSha256,version', `Invalid transport declaration: ${name}`);
     assert(typeof entry.version === 'string' && /^[a-f0-9]{64}$/.test(entry.treeSha256), `Unpinned transport package: ${name}`);
   }
-  const versions = Object.fromEntries(NAMES.map((name) => [name, declaration[name].version]));
-  return resolvePackageRuntime(versions, sourceRoot, NAMES, 'Transport runtime').map((entry) => {
+  const versions = Object.fromEntries(names.map((name) => [name, declaration[name].version]));
+  return resolvePackageRuntime(versions, sourceRoot, names, 'Transport runtime').map((entry) => {
     const snapshot = snapshotTransportPackage(path.dirname(entry.packageFile));
     assert.equal(snapshot.treeSha256, declaration[entry.name].treeSha256, `Transport package bytes differ: ${entry.name}`);
     return { ...entry, ...snapshot };
