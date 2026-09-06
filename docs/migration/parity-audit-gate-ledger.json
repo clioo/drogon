@@ -79,8 +79,8 @@
         "WP-ENG-CLI"
       ],
       "evidence": "parity-cli-argument-contract.json + parity-source-contracts.json + parity-cli-skills-contracts.json coordinator-reviewed v2 + parity-cli-terminal-contracts.json coordinator-reviewed v2 + parity-cli-workspace-contracts.json coordinator-reviewed v2 (13 repo/worktree/folder-setup commands)",
-      "resolution": "Six skills,11 terminal and13 workspace/repo handlers characterized. Terminal review preserves distinct single/bulk close errors, list host-scope annotation, focus-versus-renderer fields, catch-all cwd fallback, actual timeout defaults and unknown-versus-null agentWait. These are CLI-side source contracts, not runtime acceptance. Continue remaining command value/default/required/output/error contracts and passthrough dispatch; do not repeat accepted parser/skills/terminal metadata.",
-      "proofStillOwed": "Remaining command families, passthrough and host-routing dispatch; original CLI commands and candidate dual-target results with no assertion weakening. Do not repeat the13 workspace source contracts or promote their located test summaries to runtime proof."
+      "resolution": "Previous30 skills/terminal/workspace contracts retained. Root now accepts the bounded S1 CLI handler/request-builder mapping for204 remaining commands in audit-closure/e4-cli/followup-command-semantics.json:234 unique canonical rows, zero name or literal-flag omissions,74 pinned source hashes checked and independent source samples recorded in audit-root-followup-review.md. This closes the finite S1 source map, not E4 or runtime acceptance. Preserve all per-row branches, shared/factory contracts and unrun assertion obligations; do not repeat accepted censuses.",
+      "proofStillOwed": "E4-S2 validators, S3 transport/protocol, S4 local effects, S5 formatter semantics in the live followup-cli-boundaries task; original CLI baseline and candidate dual-target results without weakening assertions. Source mapping is not all-command test coverage."
     },
     {
       "id": "E5",
