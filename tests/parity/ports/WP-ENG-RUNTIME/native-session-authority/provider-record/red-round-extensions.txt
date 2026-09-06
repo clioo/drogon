@@ -1,0 +1,61 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.56s
+     Running tests/provider_extension_roundtrip.rs (target/debug/deps/provider_extension_roundtrip-2b3014961cfb3432)
+
+running 7 tests
+test transition_known_field_updates_never_resurrect_stale_values ... ok
+test future_version_quarantine_preserves_extensions_raw ... ok
+test known_optional_null_and_absent_states_roundtrip_faithfully ... FAILED
+test raw_unknown_values_and_minimum_next_fence_survive_roundtrip ... FAILED
+test extensions_survive_live_transition_and_appended_link_known_fields_win ... FAILED
+test retry_append_dedupe_preserves_head_link_extensions ... FAILED
+test admitted_extensions_survive_admission_serialization_and_repeat ... FAILED
+
+failures:
+
+---- known_optional_null_and_absent_states_roundtrip_faithfully stdout ----
+
+thread 'known_optional_null_and_absent_states_roundtrip_faithfully' (11939155) panicked at crates/drogon-core/tests/provider_extension_roundtrip.rs:256:5:
+assertion `left == right` failed: source-written null must not collapse to absent
+  left: None
+ right: Some(Null)
+
+---- raw_unknown_values_and_minimum_next_fence_survive_roundtrip stdout ----
+
+thread 'raw_unknown_values_and_minimum_next_fence_survive_roundtrip' (11939156) panicked at crates/drogon-core/tests/provider_extension_roundtrip.rs:349:5:
+assertion `left == right` failed
+  left: Null
+ right: Array [Number(1), Number(2)]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- extensions_survive_live_transition_and_appended_link_known_fields_win stdout ----
+
+thread 'extensions_survive_live_transition_and_appended_link_known_fields_win' (11939153) panicked at crates/drogon-core/tests/provider_extension_roundtrip.rs:173:5:
+assertion `left == right` failed
+  left: Null
+ right: Object {"lane": String("native")}
+
+---- retry_append_dedupe_preserves_head_link_extensions stdout ----
+
+thread 'retry_append_dedupe_preserves_head_link_extensions' (11939157) panicked at crates/drogon-core/tests/provider_extension_roundtrip.rs:327:5:
+assertion `left == right` failed
+  left: Null
+ right: String("mint-1")
+
+---- admitted_extensions_survive_admission_serialization_and_repeat stdout ----
+
+thread 'admitted_extensions_survive_admission_serialization_and_repeat' (11939152) panicked at crates/drogon-core/tests/provider_extension_roundtrip.rs:139:5:
+assertion `left == right` failed
+  left: Null
+ right: Object {"lane": String("native")}
+
+
+failures:
+    admitted_extensions_survive_admission_serialization_and_repeat
+    extensions_survive_live_transition_and_appended_link_known_fields_win
+    known_optional_null_and_absent_states_roundtrip_faithfully
+    raw_unknown_values_and_minimum_next_fence_survive_roundtrip
+    retry_append_dedupe_preserves_head_link_extensions
+
+test result: FAILED. 2 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p drogon-core --test provider_extension_roundtrip`

@@ -17,6 +17,7 @@ use serde_json::{Map, Value};
 use super::provider_handle::{
     HandleProvider, ProviderHandleLink, is_handle_chain_json, js_utf16_len, json_safe_integer,
 };
+use super::{Extensions, serialized_extensions, split_extensions};
 
 pub(crate) const AGENT_SESSION_RECORD_SCHEMA_VERSION: u32 = 2;
 pub(crate) const MAX_ID_UTF16_LENGTH: usize = 512;
@@ -26,6 +27,57 @@ pub(crate) const MAX_LAUNCH_ENV_VALUE_UTF16_LENGTH: usize = 65_536;
 pub(crate) const MAX_LAUNCH_ARGS: usize = 256;
 pub(crate) const MAX_LAUNCH_ARGS_BYTES: usize = 16 * 1024;
 pub(crate) const MAX_OPTIONS_ENTRIES: usize = 32;
+
+// Known members per object level; anything else at that level is preserved
+// verbatim in `extensions`, exactly like the source object spreads that
+// rebuild record/lease and carry the nested objects by reference.
+const RECORD_KNOWN_KEYS: &[&str] = &[
+    "schemaVersion",
+    "sessionId",
+    "location",
+    "provider",
+    "providerHandleChain",
+    "accountHome",
+    "options",
+    "launchArgs",
+    "lease",
+    "createdAt",
+    "updatedAt",
+    // Source-refused key: the validator rejects its presence on a schema-v2
+    // record, so it must never survive extensions serialization either.
+    "launchEnv",
+];
+const LOCATION_KNOWN_KEYS: &[&str] = &[
+    "executionHostId",
+    "wslDistro",
+    "workspaceId",
+    "workspaceKind",
+];
+const ACCOUNT_HOME_KNOWN_KEYS: &[&str] = &["variable", "path"];
+const PROCESS_KNOWN_KEYS: &[&str] = &["hostId", "pid", "processStartTimeMs", "spawnToken"];
+const JOURNAL_CHECKPOINT_KNOWN_KEYS: &[&str] = &["epoch", "sequence"];
+const DEATH_EVIDENCE_KNOWN_KEYS: &[&str] = &["kind", "detail", "observedAt"];
+const LEASE_KNOWN_KEYS: &[&str] = &[
+    "sessionId",
+    "runtimeKind",
+    "runtimeFence",
+    "handoffStage",
+    "provenHandleLinkId",
+    "ownerProcess",
+    "reservedSpawnToken",
+    "processlessAt",
+    "leaseDeadlineAt",
+    "lastRenewedAt",
+    "handoffOperationId",
+    "journalCheckpoint",
+    "claimKeyId",
+    "claimStatus",
+    "unreconciled",
+    "minimumNextFence",
+    "deathEvidence",
+    "settlementRetryRequired",
+    "settlementRetryId",
+];
 
 // `SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/` — the quantifier counts
 // UTF-16 units, but every matched character is ASCII, so char count is exact.
@@ -64,6 +116,8 @@ pub struct ExecutionLocation {
     pub wsl_distro: Option<String>,
     pub workspace_id: String,
     pub workspace_kind: WorkspaceKind,
+    /// Unknown members, preserved verbatim like the source object graph.
+    pub extensions: Extensions,
 }
 
 /// Account root pinned at launch by the account selector, so a resume cannot
@@ -95,6 +149,7 @@ impl AccountHomeVariable {
 pub struct AccountHome {
     pub variable: AccountHomeVariable,
     pub path: String,
+    pub extensions: Extensions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +271,7 @@ pub struct DeathEvidence {
     pub kind: DeathEvidenceKind,
     pub detail: String,
     pub observed_at: i64,
+    pub extensions: Extensions,
 }
 
 /// PID-reuse-safe process identity. `spawn_token` is the only element
@@ -226,12 +282,16 @@ pub struct ProcessIdentity {
     pub pid: i64,
     pub process_start_time_ms: Option<i64>,
     pub spawn_token: String,
+    pub extensions: Extensions,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Required-nullable in the source; carried by reference through every
+/// transition, so unknown members travel in `extensions`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JournalCheckpoint {
     pub epoch: i64,
     pub sequence: i64,
+    pub extensions: Extensions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -250,9 +310,11 @@ pub struct Lease {
     /// Reserved before any process exists, then matched against the child's
     /// environment.
     pub reserved_spawn_token: Option<String>,
-    /// Set only when acquisition failed before any spawn attempt; absent or
-    /// null in the source.
-    pub processless_at: Option<i64>,
+    /// Optional nullable in the source (`?: number | null`): the source
+    /// writes `null` explicitly (reservation, commit, evict), so absence and
+    /// null are distinct persisted states — outer `None` is absent, inner
+    /// `None` is null.
+    pub processless_at: Option<Option<i64>>,
     pub lease_deadline_at: i64,
     pub last_renewed_at: i64,
     pub handoff_operation_id: Option<String>,
@@ -275,6 +337,10 @@ pub struct Lease {
     pub settlement_retry_required: Option<bool>,
     /// Stable lifecycle batch id used when retrying the terminal settlement.
     pub settlement_retry_id: Option<String>,
+    /// Unknown members, carried through the source's `{...record.lease}`
+    /// spreads verbatim; known fields always serialize from typed state, so
+    /// no stale shadow of them can exist here.
+    pub extensions: Extensions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,6 +357,10 @@ pub struct AgentSessionRecord {
     pub lease: Lease,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Unknown record-level members, carried through the source's
+    /// `{...record}` spreads verbatim. `launchEnv` never reaches here: the
+    /// source refuses its presence on a schema-v2 record outright.
+    pub extensions: Extensions,
 }
 
 /// Why a persisted record was refused at admission time.
@@ -734,6 +804,7 @@ fn execution_location_from_json(value: &Value) -> Option<ExecutionLocation> {
         },
         workspace_id: bounded_string_field(object, "workspaceId", MAX_ID_UTF16_LENGTH)?.to_string(),
         workspace_kind: WorkspaceKind::from_str_opt(object.get("workspaceKind")?.as_str()?)?,
+        extensions: split_extensions(object, LOCATION_KNOWN_KEYS),
     })
 }
 
@@ -751,6 +822,7 @@ fn process_identity_from_json(value: &Value) -> Option<ProcessIdentity> {
             None => return None,
         },
         spawn_token: object.get("spawnToken")?.as_str()?.to_string(),
+        extensions: split_extensions(object, PROCESS_KNOWN_KEYS),
     })
 }
 
@@ -763,6 +835,7 @@ fn death_evidence_from_json(value: &Value) -> Option<DeathEvidence> {
         kind: DeathEvidenceKind::from_str_opt(object.get("kind")?.as_str()?)?,
         detail: object.get("detail")?.as_str()?.to_string(),
         observed_at: json_safe_integer(object.get("observedAt")?)?,
+        extensions: split_extensions(object, DEATH_EVIDENCE_KNOWN_KEYS),
     })
 }
 
@@ -791,10 +864,12 @@ fn lease_from_json(value: &Value) -> Option<Lease> {
                 .filter(|token| is_bounded_string(token, MAX_ID_UTF16_LENGTH))
                 .map(str::to_string)
         })?,
-        // Absent and null both collapse to None, as the source allows both.
+        // Absent and null are distinct states in the source (it writes null
+        // explicitly), so this field is optional-nullable, not collapsing.
         processless_at: match object.get("processlessAt") {
-            None | Some(Value::Null) => None,
-            Some(value) => json_safe_integer(value).filter(|at| *at >= 0),
+            None => None,
+            Some(Value::Null) => Some(None),
+            Some(value) => json_safe_integer(value).filter(|at| *at >= 0).map(Some),
         },
         lease_deadline_at: safe_integer_field(object, "leaseDeadlineAt")?,
         last_renewed_at: safe_integer_field(object, "lastRenewedAt")?,
@@ -809,6 +884,7 @@ fn lease_from_json(value: &Value) -> Option<Lease> {
             Some(JournalCheckpoint {
                 epoch: nonnegative_field(object, "epoch")?,
                 sequence: nonnegative_field(object, "sequence")?,
+                extensions: split_extensions(object, JOURNAL_CHECKPOINT_KNOWN_KEYS),
             })
         })?,
         claim_key_id: bounded_string_field(object, "claimKeyId", MAX_ID_UTF16_LENGTH)?.to_string(),
@@ -826,6 +902,7 @@ fn lease_from_json(value: &Value) -> Option<Lease> {
             None => None,
             Some(value) => value.as_str().map(str::to_string),
         },
+        extensions: split_extensions(object, LEASE_KNOWN_KEYS),
     })
 }
 
@@ -924,12 +1001,14 @@ pub fn admit_persisted_record(value: &Value) -> Result<AgentSessionRecord, Recor
                 .and_then(Value::as_str)
                 .ok_or_else(invalid)?
                 .to_string(),
+            extensions: split_extensions(home_object, ACCOUNT_HOME_KNOWN_KEYS),
         },
         options,
         launch_args,
         lease: lease_from_json(object.get("lease").expect("validated")).ok_or_else(invalid)?,
         created_at: safe_integer_field(object, "createdAt").expect("validated"),
         updated_at: safe_integer_field(object, "updatedAt").expect("validated"),
+        extensions: split_extensions(object, RECORD_KNOWN_KEYS),
     };
     Ok(record)
 }
@@ -937,7 +1016,10 @@ pub fn admit_persisted_record(value: &Value) -> Result<AgentSessionRecord, Recor
 impl AgentSessionRecord {
     /// Serialize back to the schema-v2 JSON shape. Fields the source
     /// requires are always emitted (null when unset); fields the source
-    /// treats as optional are omitted when unset.
+    /// treats as optional are omitted when unset. Unknown members preserved
+    /// at admission are re-emitted verbatim at every level; known keys that
+    /// a typed caller inserted into a public extensions map are filtered
+    /// out, so known fields always serialize from typed state.
     pub fn to_json(&self) -> Value {
         let mut location = Map::new();
         location.insert(
@@ -960,6 +1042,9 @@ impl AgentSessionRecord {
             "workspaceKind".to_string(),
             Value::from(self.location.workspace_kind.as_str()),
         );
+        for (key, value) in serialized_extensions(&self.location.extensions, LOCATION_KNOWN_KEYS) {
+            location.insert(key, value);
+        }
 
         let mut account_home = Map::new();
         account_home.insert(
@@ -970,6 +1055,11 @@ impl AgentSessionRecord {
             "path".to_string(),
             Value::from(self.account_home.path.clone()),
         );
+        for (key, value) in
+            serialized_extensions(&self.account_home.extensions, ACCOUNT_HOME_KNOWN_KEYS)
+        {
+            account_home.insert(key, value);
+        }
 
         let lease = &self.lease;
         let mut lease_json = Map::new();
@@ -1014,6 +1104,11 @@ impl AgentSessionRecord {
                             .unwrap_or(Value::Null),
                     );
                     object.insert("spawnToken".to_string(), Value::from(process.spawn_token));
+                    for (key, value) in
+                        serialized_extensions(&process.extensions, PROCESS_KNOWN_KEYS)
+                    {
+                        object.insert(key, value);
+                    }
                     Value::Object(object)
                 })
                 .unwrap_or(Value::Null),
@@ -1026,8 +1121,13 @@ impl AgentSessionRecord {
                 .map(Value::from)
                 .unwrap_or(Value::Null),
         );
-        if let Some(processless_at) = lease.processless_at {
-            lease_json.insert("processlessAt".to_string(), Value::from(processless_at));
+        // Absent, null, and set are three distinct persisted states.
+        if let Some(processless_at) = &lease.processless_at {
+            let value = match processless_at {
+                None => Value::Null,
+                Some(at) => Value::from(*at),
+            };
+            lease_json.insert("processlessAt".to_string(), value);
         }
         lease_json.insert(
             "leaseDeadlineAt".to_string(),
@@ -1049,11 +1149,17 @@ impl AgentSessionRecord {
             "journalCheckpoint".to_string(),
             lease
                 .journal_checkpoint
+                .clone()
                 .map(|checkpoint| {
-                    serde_json::json!({
-                        "epoch": checkpoint.epoch,
-                        "sequence": checkpoint.sequence,
-                    })
+                    let mut object = Map::new();
+                    object.insert("epoch".to_string(), Value::from(checkpoint.epoch));
+                    object.insert("sequence".to_string(), Value::from(checkpoint.sequence));
+                    for (key, value) in
+                        serialized_extensions(&checkpoint.extensions, JOURNAL_CHECKPOINT_KNOWN_KEYS)
+                    {
+                        object.insert(key, value);
+                    }
+                    Value::Object(object)
                 })
                 .unwrap_or(Value::Null),
         );
@@ -1075,11 +1181,16 @@ impl AgentSessionRecord {
                 .death_evidence
                 .clone()
                 .map(|evidence| {
-                    serde_json::json!({
-                        "kind": evidence.kind.as_str(),
-                        "detail": evidence.detail,
-                        "observedAt": evidence.observed_at,
-                    })
+                    let mut object = Map::new();
+                    object.insert("kind".to_string(), Value::from(evidence.kind.as_str()));
+                    object.insert("detail".to_string(), Value::from(evidence.detail));
+                    object.insert("observedAt".to_string(), Value::from(evidence.observed_at));
+                    for (key, value) in
+                        serialized_extensions(&evidence.extensions, DEATH_EVIDENCE_KNOWN_KEYS)
+                    {
+                        object.insert(key, value);
+                    }
+                    Value::Object(object)
                 })
                 .unwrap_or(Value::Null),
         );
@@ -1091,6 +1202,9 @@ impl AgentSessionRecord {
                 "settlementRetryId".to_string(),
                 Value::from(retry_id.clone()),
             );
+        }
+        for (key, value) in serialized_extensions(&lease.extensions, LEASE_KNOWN_KEYS) {
+            lease_json.insert(key, value);
         }
 
         let mut record = Map::new();
@@ -1141,6 +1255,9 @@ impl AgentSessionRecord {
         record.insert("lease".to_string(), Value::Object(lease_json));
         record.insert("createdAt".to_string(), Value::from(self.created_at));
         record.insert("updatedAt".to_string(), Value::from(self.updated_at));
+        for (key, value) in serialized_extensions(&self.extensions, RECORD_KNOWN_KEYS) {
+            record.insert(key, value);
+        }
         Value::Object(record)
     }
 }
