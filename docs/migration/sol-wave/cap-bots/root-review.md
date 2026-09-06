@@ -139,3 +139,32 @@ receipt `8c334701-f34b-4b24-9fc3-09ac0047787e`: retained/external, no process ac
 Root then acknowledged `delivery_69b74767abc4`. No active authority remains on
 that attempt. Independent UI/ENG Sol Tasks may proceed under the corrected
 instructions; this is not blanket acceptance of test migration or product code.
+# Native parser review — 2026-09-06, 16:49 UTC
+
+The native parser is not accepted yet. Root inspected the current implementation
+and returned these corrections to the same Sonnet leaf via Sol, without parent
+manual implementation (`msg_45b904edc784` and accepted terminal nudge):
+
+- Rust `str::trim` differs from ECMAScript trim; reuse the existing native
+  `claim_identity::js_trim`, not another approximate whitespace table.
+- The inclusive `u64::MAX as f64` timestamp bound rounds to 2^64 and permits a
+  saturating cast that changes the source value. Preserve finite nonnegative
+  source numbers without imposing an unsupported safe-integer constraint.
+- Unknown object keys are input too; diagnostic paths must not echo arbitrary
+  user-controlled keys containing sensitive content.
+
+Root independently executed the actual pinned source parser in memory from the
+previously admitted isolated `wp-cap-bots-schemas-otoIL4` capsule. Ten source/license
+hashes matched; all three bundle inputs were manifest-listed; the sole external
+import was staged Zod 4.5.4. No bundle/file writes or reference-cwd execution.
+Source trim removed U+FEFF, retained U+0085, U+001C and U+200B. Source timestamps
+preserved 0, 0.5, 2^64-2048, 2^64, 2^64+4096 and Number.MAX_VALUE.
+These findings require source-derived regressions before native acceptance;
+they are not evidence that the candidate corrections are complete.
+
+Root provisionally registered `drogon_core::bots::input` for actual public-library
+tests, exposed the existing trim function only within the core crate, and exported
+the shared known-ID catalog from `drogon_harness`. Root owns these registration
+files; the leaf retains input implementation/tests/evidence and catalog files.
+Recognition remains separate from `HarnessId::ALL` (four launchable variants).
+There is no RPC, Bot execution, persistence or installed-capability claim.
