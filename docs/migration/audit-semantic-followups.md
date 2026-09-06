@@ -35,3 +35,15 @@ Message `msg_b25d1fecff20` authorizes **only E1 initially** to launch one real d
 At this checkpoint, the setting and authorization are verified; **a successfully launched/completed depth-2 worker is not yet proved**. Sidebar worktree lineage is separate from Dispatch ancestry: same-worktree child terminals can appear as peers. Do not claim hidden children or a working three-level hierarchy from the setting alone.
 
 No app build/install, source edit, deployment, provider experiment, Git push or PR merge was performed by this checkpoint. Preserve the latest accepted installed preview and all pre-existing uncommitted product work.
+
+### First real child verified, 06:07 UTC
+
+E1 created child Run `run_3d1c0573e82c`, Task `task_9cfdb3d5d545`, Dispatch `ctx_840482929375`, terminal `term_5d791978-1eeb-4b4e-be79-8dc4e9fc3bc8`, from its own active lead identity. Root independently inspected `worker-show`: depth **2**, `ready` / `input_accepted`, exact worker **live**. Root also read the Orca-resolved Claude transcript and observed actual source-read/tool actions. This proves launched execution, not just accepted input. E1 reported launch argv `claude --model claude-sonnet-5 --effort medium --dangerously-skip-permissions`; attached custom-terminal model fields remain null, not authenticated model proof.
+
+Root message `msg_1a8527912dcf` confirms launch/inference acceptance and requests reviewed delivery plus child release before authorizing the remaining four leaves. Child completion and cleanup are still pending at this checkpoint; the root does not take over E1's child lifecycle.
+
+## Additional root source finding for E2-O01
+
+Mentu Navigator 1.1.1 successfully located the Settings toggle, and root read the actual rich-editor prop chain in the reference checkout. `TabGroupPanel.tsx:381` passes no annotation-enabled override; `EditorPanel.tsx:35` defaults `markdownAnnotationsEnabled` to true and forwards it at 389. `EditorPanelShell.tsx:165` and `EditorMarkdownFileSurface.tsx:119` propagate it to `RichMarkdownEditor`, whose independent default is false at 52 and whose review-controller call forwards the prop at 116. `useRichMarkdownReviewData.ts:43` derives permission from that prop and relative-path existence. `FloatingTerminalPanelSurface.tsx:296–300` explicitly sets the prop false. These paths are under `src/renderer/src/components/` in the read-only original.
+
+This is stronger bounded evidence than an absent exact-name search: the located standard and floating editor paths explicitly gate annotations independently of `markdownReviewToolsEnabled`, despite the Settings copy advertising that toggle as controlling rich-editor review notes. It remains a source-defect candidate, not a rendered true/false-toggle test, proof about every possible caller, or permission to remove the setting. Root sent these anchors and limits to E2 in `msg_4f46be672376`; the 88-action follow-up remains its priority. Source-faithful characterization and any intended behavior correction must remain distinguishable in migration tests.
