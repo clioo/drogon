@@ -2,12 +2,10 @@
 // src/renderer/src/app-shell/shutdown-checkpoint-restart-lifecycle.test.ts at
 // c97906287bb7a390b25e2025b600d9fb3c25d9c3
 // (SHA256 4dc096bd4c6ce625efc4f730e970368a67ee10a3ef4fa9b202f9ceadbba07444).
-// Assertions preserved without weakening. The source harness wires
-// lib/updater-beforeunload.ts (unmigrated, outside this leaf's ownership); the
-// helper below is a faithful inline reproduction of that 44-line module's
-// semantics (SHA256 79b67eb76e596dd79d1373205ffc2333c312cd45614e69cf60f110a98a4c8886)
-// using only candidate shared events. It is test harness wiring, not a mock of
-// either module under test.
+// Assertions preserved without weakening. The former faithful inline
+// updater-beforeunload copy was removed per the persisted-renderer-contract
+// migration: the harness now imports the real candidate implementation at
+// apps/desktop/src/renderer/src/lib/updater-beforeunload.ts.
 
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -27,44 +25,13 @@ import {
   createShutdownCheckpointGuard,
 } from "../../../../../apps/desktop/src/renderer/src/lib/shutdown-checkpoint-guard";
 import {
+  isIntentionalAppRestartInProgress,
+  registerUpdaterBeforeUnloadBypass,
+} from "../../../../../apps/desktop/src/renderer/src/lib/updater-beforeunload";
+import {
   createShutdownCheckpointPersist,
   type ShutdownCheckpointPersistDeps,
 } from "../../../../../apps/desktop/src/renderer/src/app-shell/shutdown-checkpoint-persist";
-
-// --- begin faithful inline reproduction of lib/updater-beforeunload.ts ---
-let intentionalAppRestartInProgress = false;
-
-function isIntentionalAppRestartInProgress(): boolean {
-  return intentionalAppRestartInProgress;
-}
-
-function registerUpdaterBeforeUnloadBypass(): () => void {
-  const markInProgress = (): void => {
-    intentionalAppRestartInProgress = true;
-  };
-  const clearInProgress = (): void => {
-    intentionalAppRestartInProgress = false;
-  };
-
-  window.addEventListener(ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT, markInProgress);
-  window.addEventListener(ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT, clearInProgress);
-  window.addEventListener(ORCA_APP_RESTART_STARTED_EVENT, markInProgress);
-  window.addEventListener(ORCA_APP_RESTART_ABORTED_EVENT, clearInProgress);
-  window.addEventListener(ORCA_RENDERER_SHUTDOWN_CHECKPOINT_ABORTED_EVENT, clearInProgress);
-
-  return () => {
-    window.removeEventListener(ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT, markInProgress);
-    window.removeEventListener(ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT, clearInProgress);
-    window.removeEventListener(ORCA_APP_RESTART_STARTED_EVENT, markInProgress);
-    window.removeEventListener(ORCA_APP_RESTART_ABORTED_EVENT, clearInProgress);
-    window.removeEventListener(ORCA_RENDERER_SHUTDOWN_CHECKPOINT_ABORTED_EVENT, clearInProgress);
-    // Why: hot reloads can re-register this listener inside the same renderer.
-    // Reset the module flag on cleanup so a failed earlier restart attempt
-    // cannot silently suppress future unsaved-change prompts.
-    intentionalAppRestartInProgress = false;
-  };
-}
-// --- end faithful inline reproduction ---
 
 type LifecycleHarness = {
   cleanup: () => void;

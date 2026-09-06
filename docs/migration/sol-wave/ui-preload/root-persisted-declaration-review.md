@@ -52,3 +52,20 @@ Root subsequently ran both checks from the rewrite with the same Node24:
 These independently verify the current fixtures, unchanged policy regressions
 and strict library checking. They still do not prove runtime checkpoint
 serialization, host authority, durable storage or the packaged Electron flow.
+
+## Scoped integration admission
+
+Sol-UI settled parent `ctx_ccc470781ffd` in `msg_87211359f763`, having released
+the GLM correction. Root released the settled Sol through Orca; it was retained
+as an external terminal with no process action, then its delivery was acknowledged.
+Root repeated 129/129 declaration checks, strict fixture typecheck and 39/39
+tests against the handed-off files before admitting this finite type/updater
+block. The source map's old "30 fields" label is a documentation count error:
+the actual session declaration has 33, confirmed by source AST and the lead
+handoff. Likewise, the lead's open full-AST-rerun item is superseded by root's
+recorded checks above. Original leaf/lead evidence is retained unchanged.
+
+Admission covers the complete extracted type closure, generic envelope and real
+updater lifecycle module; runtime persistence/IPC/restore remain required. It is
+not an installed feature, repository-wide acceptance or permission to claim the
+rewrite finished. Further work follows the user-requested worktree/PR transition.

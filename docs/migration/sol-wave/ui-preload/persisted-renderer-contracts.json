@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "reportedAt": "2026-09-06",
+  "status": "partial_handoff",
+  "source": {
+    "root": "/Users/carlos/Documents/Drogon-mentu-session",
+    "revision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "executedFromSourceCwd": false,
+    "keySha256": {
+      "workspaceSessionState": "fc6c6c52c303fd50fbb9720b94e9cd9e1c98cff9fffa084623530a41892a0fcd",
+      "persistedUiState": "b7162f2c1982b2353d4cc6db11c68077909236546e3414509e96f3c057434244",
+      "workspaceSessionHostPersistence": "cc4edd0b06b6bda36bf76e0ff38962768f7e0780944335483724d0ed000041e1",
+      "updaterBeforeunload": "79b67eb76e596dd79d1373205ffc2333c312cd45614e69cf60f110a98a4c8886",
+      "updaterBeforeunloadTest": "64c8e09e771fbc9ef3d5806698f0c6b1cadc44bdea3d4d1ad2652dffe19b7e68",
+      "releaseChannel": "ea143e54f7264dabecd04305c1ab7e1ce0491e14f4d4a93ce39121585354723f"
+    }
+  },
+  "candidate": {
+    "persistenceContractTsFiles": 38,
+    "workspaceSessionStateFields": 33,
+    "persistedUiStateFields": 115,
+    "persistedOpenFileFields": 11,
+    "reusedUpdateStatusTypesSha256": "b75c4c98aaf984e1d3b18aac0d75ffbf8f7d2e7dac683c6d78d72d2d459336fc",
+    "leafHashManifest": "tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts/leaf-implementation.md",
+    "leafHashEntriesVerified": 47,
+    "leafHashMismatches": 0,
+    "additionalSha256": {
+      "tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts/declaration-mapping.md": "4124c8bae5588f64b51afb4528e2a2027c1a2c754eda4758d9b333e380b3bee9",
+      "tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts/leaf-implementation.md": "28db54dfd7a3ebf85c0dc7fe71f3bcd5c2aa68b7688300ed23b9d089e22b2a8c"
+    }
+  },
+  "review": {
+    "rootNormalizedAstInitialExact": 119,
+    "rootNormalizedAstInitialTotal": 120,
+    "targetedMismatchRepaired": true,
+    "restoredFields": [
+      "automaticResumeBlockedBy?: 'legacy-orchestration-worker'",
+      "restoreOnTabOpenOnly?: boolean"
+    ],
+    "postCorrectionFullAstRerunRecorded": false,
+    "extractedConstantsExact": {
+      "passed": 8,
+      "total": 8
+    },
+    "genericDepsDirectReuse": true,
+    "skipLibCheck": false
+  },
+  "validation": {
+    "node": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "desktopTypecheck": {
+      "exitCode": 0
+    },
+    "ownedFixtureTypecheck": {
+      "exitCode": 0,
+      "negativeCompileCases": 15
+    },
+    "focusedVitest": {
+      "exitCode": 0,
+      "filesPassed": 5,
+      "testsPassed": 39
+    },
+    "reusedSourceBaselines": {
+      "shutdownCheckpointPersist": "12/12",
+      "shutdownCheckpointGuard": "15/15",
+      "shutdownCheckpointRestartLifecycle": "4/4",
+      "mainIpc": "8/8",
+      "preloadRouting": "6/6"
+    }
+  },
+  "openGates": [
+    "runtime admission and legacy validation",
+    "serialization and native/database durable round trip",
+    "main/preload IPC and caller wiring",
+    "DOM/Electron acceptance and real restore lifecycle",
+    "full post-correction normalized AST rerun"
+  ],
+  "orca": {
+    "runId": "run_c7e93ad3a68d",
+    "initialTaskId": "task_fc98ab95eee9",
+    "initialDispatchId": "ctx_323c1f3d8f61",
+    "finalTaskId": "task_fa4d182c67ce",
+    "finalDispatchId": "ctx_f2f252e21be9",
+    "terminal": "term_1a7ca3a1-3710-4f61-b349-1da5b738d37f",
+    "agent": "OpenCode 1.18.29",
+    "modelEvidence": "Build auto · GLM-5.3-Flash Z.AI Coding Plan",
+    "workerState": "succeeded/settled",
+    "releaseState": "retained",
+    "releaseReason": "external_terminal",
+    "processAction": "none",
+    "deliveryId": "delivery_25cd864498da",
+    "deliveryAcknowledged": true
+  },
+  "progress": {
+    "sourceTypeAuditPercent": 100,
+    "testMigrationCandidate": "39/39",
+    "sourceBaselinesReused": "45/45",
+    "wholeFeatureFidelity": "partial",
+    "nextMilestone": "root runtime, durable storage and caller/DOM acceptance",
+    "deadlineRisk24h": "medium"
+  }
+}
