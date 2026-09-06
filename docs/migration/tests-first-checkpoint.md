@@ -1061,6 +1061,31 @@ Next is the existing E5/G1–G20 reconciliation; do not endlessly re-audit these
 same accepted subsets. No product/installation/user-session/PR/push action.
 Goal remains active; this turn materially corrected and accepted deliverables.
 
+## G1–G20 platform dispositions reconciled
+
+At base43e90035 the coordinator reconciled all20 existing platform gap IDs
+against accepted artifacts, with concrete existing work-package owners and
+acceptance obligations in parity-platform-gap-reconciliation.json/.md.
+Previously accepted enumerations are not repeated or treated as runtime proof.
+Remaining bounded source reviews are explicitly G7/G8/G9/G10/G13/G14/G17/G18/G19,
+alongside broader E1–E4 and journey obligations. No hierarchy was dispatched.
+
+New direct source work: complete orcad entry/parser/path/bind/test review
+corrected the old data-root flag premise and separates serve from orcad;
+complete emulator bridge/RPC-table review confirms management is separate
+from streams. Eight source fingerprints match both frozen checkout bytes
+and pinned Git blobs. Node24 validation confirmed exact unique G1–G20,
+valid existing package owners and44 existing evidence links. Source remains
+c97906287bb7a390b25e2025b600d9fb3c25d9c3. git diff --check passed.
+
+No original tests were executed; baseline remains116 cases/12 capsules.
+No product edits, installation, models, sessions, PRs or remote pushes were
+performed by this pass. Existing unaccepted product changes are preserved.
+The English, justified/tested Mentu upstream PR route is explicitly retained
+for implementation, including local pinned-PR testing without waiting for merge.
+Audit and goal remain open; the next action is bounded source review of the
+named remaining scopes, not another full census of already accepted material.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

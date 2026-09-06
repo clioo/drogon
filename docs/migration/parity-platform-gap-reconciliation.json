@@ -1,0 +1,325 @@
+{
+  "schema": "drogon.parity-platform-gap-reconciliation/1",
+  "status": "coordinator-reconciled-existing-identifiers-not-audit-closure",
+  "auditClosed": false,
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "reviewBase": "43e90035",
+  "historicalRegister": "parity-platform-audit.md section 10 (local unaccepted historical draft; exact IDs/scopes preserved below)",
+  "ownershipMeaning": "Existing work-package responsibility, not live worker assignment or permission to dispatch before audit closure.",
+  "evidenceMeaning": "Accepted bounded artifacts are reused; no identifier is declared runtime complete. Open review means no closure established in this reconciliation, not proof no implementation or other evidence exists.",
+  "gaps": [
+    {
+      "id": "G1",
+      "originalScope": "Settings keys past global-settings-types.ts:224",
+      "owners": [
+        "WP-UI-SETTINGS",
+        "WP-ENG-SHARED"
+      ],
+      "state": "enumerated-bounded",
+      "evidence": [
+        "parity-settings-properties.json",
+        "parity-settings-field-routing.json",
+        "parity-settings-persistence-contracts.json"
+      ],
+      "enumerationDisposition": "No repeat key census: 214 fields are allocated; 180 inherited consumer classifications retain semantic uncertainty under E2.",
+      "acceptance": "Preserve every field, per-field override/migration and host authority behavior; execute persistence/restart and platform shortcut cases."
+    },
+    {
+      "id": "G2",
+      "originalScope": "gitlab.ts past line 60",
+      "owners": [
+        "WP-CAP-INT",
+        "WP-ENG-IPC"
+      ],
+      "state": "enumerated-bounded",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-bridge-import-factory-correction.md"
+      ],
+      "enumerationDisposition": "Imported alias correction captures 28 GitLab methods/channels. No repeat missing-file claim; payload/handler semantics remain E3/provider work.",
+      "acceptance": "Port provider assertions and compare request/result/error, authentication and unavailable-provider behavior without assuming GitHub equivalence."
+    },
+    {
+      "id": "G3",
+      "originalScope": "Full linear-bridge channel list",
+      "owners": [
+        "WP-CAP-INT",
+        "WP-ENG-IPC"
+      ],
+      "state": "enumerated-bounded",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-bridge-enumeration.md"
+      ],
+      "enumerationDisposition": "24 assembled bridge methods are in the accepted census; this does not characterize every handler.",
+      "acceptance": "Preserve Linear request/result/error and workspace/team selection behavior with source tests and rendered provider states."
+    },
+    {
+      "id": "G4",
+      "originalScope": "Full gh-bridge census",
+      "owners": [
+        "WP-CAP-INT",
+        "WP-ENG-IPC"
+      ],
+      "state": "enumerated-bounded",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-bridge-enumeration.md"
+      ],
+      "enumerationDisposition": "59 assembled bridge methods are enumerated; not a full provider or CLI behavior proof.",
+      "acceptance": "Trace host/client credential and gh-execution ownership, then compare provider success/error/disconnected states and source assertions."
+    },
+    {
+      "id": "G5",
+      "originalScope": "PreloadApi api-types authoritative census",
+      "owners": [
+        "WP-ENG-IPC",
+        "WP-UI-PRELOAD"
+      ],
+      "state": "enumerated-with-explicit-unknowns",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-bridge-import-factory-correction.md"
+      ],
+      "enumerationDisposition": "87 assembly/type domains agree. Three usage factory exports remain explicit scanner unknowns; 24 factory-generated channel shapes have separate source characterization. 981 extracted methods are a bounded subset, not the full API denominator.",
+      "acceptance": "Retain delegated/dynamic/factory entries and validate actual payload, subscription teardown, error and mixed-version contracts."
+    },
+    {
+      "id": "G6",
+      "originalScope": "Main-side ipcMain registry census previously truncated",
+      "owners": [
+        "WP-ENG-IPC"
+      ],
+      "state": "enumerated-with-explicit-unknowns",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-bridge-main-request-send-resolution.json",
+        "parity-bridge-main-push-resolution.json",
+        "parity-close-export-current-paths.md"
+      ],
+      "enumerationDisposition": "Bounded scanner covers 4579 main files; delegated main requests/sends and 94/96 missing push producers have later source traces. Two legacy producers remain unidentified. Current close/PDF paths are not those missing producers.",
+      "acceptance": "Preserve unknown legacy receivers, close acknowledgement expiry/intent and payload/error/disposal contracts; test both version skews. Do not remove channels because a producer was not found."
+    },
+    {
+      "id": "G7",
+      "originalScope": "config/ keys, orca.yaml and headless serve flags",
+      "owners": [
+        "WP-SUP-CONFIG",
+        "WP-ENG-CLI"
+      ],
+      "state": "partially-located",
+      "evidence": [
+        "parity-source-contracts.json",
+        "parity-cli-argument-contract.json",
+        "parity-orcad-launch-contract.md"
+      ],
+      "enumerationDisposition": "serve registry and shared parser metadata exist; config/orca.yaml consumer precedence and serve execution need bounded source review. orcad options cannot substitute for serve.",
+      "acceptance": "Produce config-schema/precedence/error and serve handler contracts, then source/candidate tests using isolated profiles and explicit network exposure."
+    },
+    {
+      "id": "G8",
+      "originalScope": "Casks/resources/cloud deploy surfaces",
+      "owners": [
+        "WP-ENG-INSTALL",
+        "WP-ENG-CLOUD",
+        "WP-SUP-ASSETS"
+      ],
+      "state": "open-review",
+      "evidence": [
+        "parity-work-packages.md",
+        "rewrite-parity-plan.md"
+      ],
+      "enumerationDisposition": "Existing file allocation is not a deployment/asset capability inventory. Reconcile packaging and cloud entrypoints, distribution surfaces and provenance; do not claim these are absent from the product.",
+      "acceptance": "Verify package contents, licensing, installer/update/rollback, independent public deployment configuration and required cloud capabilities without copying private destinations or credentials."
+    },
+    {
+      "id": "G9",
+      "originalScope": "Crash-report submission endpoints",
+      "owners": [
+        "WP-CAP-DIAG"
+      ],
+      "state": "partially-located",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-bridge-delegated-resolution.json"
+      ],
+      "enumerationDisposition": "Nine crash bridge methods and local heap/process readers are known; this does not identify submission destinations, redaction or consent authority.",
+      "acceptance": "Trace submission client/config/server and consent/redaction/retry contracts; test with fixture destinations, never send diagnostic data to upstream as an audit side effect."
+    },
+    {
+      "id": "G10",
+      "originalScope": "Tray assets per operating system",
+      "owners": [
+        "WP-UI-SHELL-WIN",
+        "WP-ENG-INSTALL"
+      ],
+      "state": "open-review",
+      "evidence": [
+        "parity-work-packages.md"
+      ],
+      "enumerationDisposition": "Reconcile actual asset selection and packaging branches per OS. Finding macOS template files is not evidence of Linux/Windows absence or parity.",
+      "acceptance": "Record OS-specific icon selection, template/density/theme behavior and menu actions; validate packaged rendered tray on each supported OS."
+    },
+    {
+      "id": "G11",
+      "originalScope": "Keybinding channels",
+      "owners": [
+        "WP-UI-SETTINGS",
+        "WP-ENG-IPC"
+      ],
+      "state": "enumerated-bounded",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-settings-keybindings.json",
+        "parity-settings-field-routing.json"
+      ],
+      "enumerationDisposition": "Seven bridge methods/channels are enumerated, including changed push. Dedicated file-backed KeybindingService is not GlobalSettings.keybindings authority.",
+      "acceptance": "Preserve get/edit/reload/file/reveal and changed-event behavior, platform key labels/modifiers, dynamic harness bindings and restart persistence."
+    },
+    {
+      "id": "G12",
+      "originalScope": "orcad full flags beyond bind/data-root",
+      "owners": [
+        "WP-ENG-DAEMON",
+        "WP-ENG-CLI",
+        "WP-ENG-INSTALL"
+      ],
+      "state": "source-contract-characterized",
+      "evidence": [
+        "parity-orcad-launch-contract.md"
+      ],
+      "enumerationDisposition": "Complete five-option parser plus entrypoint smoke flag reviewed. Historical data-root flag premise corrected: data root is environment selected. No port default inferred from empty options.",
+      "acceptance": "Port launch assertions plus uncovered parse edges, validate native preflight, isolated data-root lock, readiness, error exits and bounded shutdown; distinguish PID-scoped from cgroup-wide restart."
+    },
+    {
+      "id": "G13",
+      "originalScope": "src/relay method list",
+      "owners": [
+        "WP-ENG-RELAY",
+        "WP-ENG-REMOTE"
+      ],
+      "state": "partially-located",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-remote-enoent-contract.md"
+      ],
+      "enumerationDisposition": "615 runtime RPC names and a bounded relay error path are accepted; they do not establish the separate relay dispatcher method/notification/stream surface.",
+      "acceptance": "Enumerate actual relay dispatch composition, auth, stream opcodes and parameter/error handling; preserve SSH ownership and both client/host version skews."
+    },
+    {
+      "id": "G14",
+      "originalScope": "mobile/src RPC surface",
+      "owners": [
+        "WP-CAP-MOBILE",
+        "WP-ENG-REMOTE"
+      ],
+      "state": "partially-located",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-skill-provider-catalog.json",
+        "parity-work-packages.md"
+      ],
+      "enumerationDisposition": "Desktop mobile bridge (15 methods), wire constants and 532 allocated mobile test/support files are not the mobile client's outgoing RPC/subscription census.",
+      "acceptance": "Reconcile mobile client adapters, methods/streams, capability gates, pairing/revocation and reconnect; port tests and verify against old/new host combinations."
+    },
+    {
+      "id": "G15",
+      "originalScope": "Speech model catalog",
+      "owners": [
+        "WP-CAP-DEVICE",
+        "WP-UI-SETTINGS",
+        "WP-CAP-MOBILE"
+      ],
+      "state": "enumerated-bounded",
+      "evidence": [
+        "parity-speech-catalog.json",
+        "parity-speech-catalog.md"
+      ],
+      "enumerationDisposition": "12 built-ins and 10 local manifests are explicit; no repeated registry discovery. Custom user models are not inferred absent.",
+      "acceptance": "Verify custom/built-in selection, credentials, download integrity/progress/cancel/retry/delete, native loading and actual transcription. Cloud product parity does not authorize cloud inference in the Spark-only benchmark."
+    },
+    {
+      "id": "G16",
+      "originalScope": "Emulator device management beyond streams",
+      "owners": [
+        "WP-CAP-DEVICE",
+        "WP-ENG-CLI"
+      ],
+      "state": "enumerated-bounded",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-source-contracts.json",
+        "parity-platform-gap-reconciliation.md"
+      ],
+      "enumerationDisposition": "Ten preload methods are stream/UI-facing. The distinct EMULATOR_METHODS table already enumerates 19 RPCs including device management; fully read here. Runtime device effects and errors remain uncharacterized.",
+      "acceptance": "Trace each runtime delegation and device/host selector; preserve schemas and execute source/candidate managed/unmanaged device, install/launch/permissions, shutdown, stream and recovery tests."
+    },
+    {
+      "id": "G17",
+      "originalScope": "Dashboard/popout window placement authority",
+      "owners": [
+        "WP-UI-DASH",
+        "WP-UI-SHELL-WIN",
+        "WP-UI-STATE"
+      ],
+      "state": "partially-located",
+      "evidence": [
+        "parity-source-bridges.json",
+        "parity-settings-persistence-contracts.json"
+      ],
+      "enumerationDisposition": "Dashboard bridge (16 methods) and general settings persistence do not prove placement ownership, monitor reconciliation or popout lifecycle.",
+      "acceptance": "Trace geometry/state persistence and cross-window identity; verify reopen, monitor loss/DPI, main/popout transitions and restart with rendered evidence."
+    },
+    {
+      "id": "G18",
+      "originalScope": "browser.clientHost lease flow across UI",
+      "owners": [
+        "WP-ENG-BROWSER",
+        "WP-UI-BROWSER",
+        "WP-ENG-REMOTE"
+      ],
+      "state": "partially-located",
+      "evidence": [
+        "parity-bridge-delegated-resolution.json",
+        "parity-bridge-main-push-resolution.json"
+      ],
+      "enumerationDisposition": "browser.readClientHostId argument reader and push producer linkage do not establish client-host lease acquisition, renewal, expiry or reassignment.",
+      "acceptance": "Trace lease state/authority transitions across runtime and UI, then test disconnect/reconnect, expiry, concurrent ownership and stale-client refusal with both version skews."
+    },
+    {
+      "id": "G19",
+      "originalScope": "agentWait absent-vs-null beyond wire documentation",
+      "owners": [
+        "WP-ENG-HARNESS",
+        "WP-ENG-CLI",
+        "WP-ENG-IPC"
+      ],
+      "state": "partially-located",
+      "evidence": [
+        "parity-cli-terminal-contracts.json",
+        "parity-cli-terminal-contracts.md"
+      ],
+      "enumerationDisposition": "CLI show preserves undefined as unknown/not evaluated and null as none. Producer/transport/consumer plumbing beyond this formatter remains owed.",
+      "acceptance": "Trace all transformations and assert missing, null and populated states through host RPC to CLI/UI, including older peers; never collapse unknown into none."
+    },
+    {
+      "id": "G20",
+      "originalScope": "ENOENT string-code Rule-1 exit design",
+      "owners": [
+        "WP-ENG-REMOTE",
+        "WP-ENG-IPC"
+      ],
+      "state": "source-contract-characterized",
+      "evidence": [
+        "parity-remote-enoent-contract.md"
+      ],
+      "enumerationDisposition": "Bounded relay error serialization/reconstruction and current phrase fallback documented; seven original in-memory classification cases pass. No actual SSH transport or candidate proof.",
+      "acceptance": "Preserve old-host fallback; compare real transport error reconstruction and remote-path behavior in both version skews. Path-existence booleans are not process-liveness verdicts; structured errno extension is not assumed implemented."
+    }
+  ],
+  "upstreamMentuPolicy": {
+    "phase": "During implementation whenever a required Mentu capability is missing",
+    "action": "Prepare minimal justified English upstream PRs with tests and Codex attribution; discuss material scope expansions. Build and test the pinned local PR revision without waiting for upstream merge.",
+    "acceptance": "Validate actual Drogon/Pi integration and run records; model statements and PR existence are not functional proof. Comparative inference remains exclusively Pi + DGX Spark, with real token measurement; inference_budget enforcement is not required."
+  }
+}

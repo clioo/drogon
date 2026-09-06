@@ -7,8 +7,9 @@ The machine record contains exact owners, artifacts and remaining evidence.
 
 ## Accepted metadata — do not repeat completed censuses
 
-Source/test allocation: 9,037 unique paths. Bridge: 87 domains, 947 channels,
-953 reachable methods and 615 RPC names, with explicit attribution gaps.
+Source/test allocation: 9,037 unique paths. Bridge: 87 domains, 975 extracted
+channels, 981 extracted reachable methods and 615 RPC names, with explicit
+attribution gaps and three usage factories characterized separately.
 CLI: 234 commands and shared parser rules. Settings: 214 fields, 187 builder
 defaults, 88 core shortcut IDs plus 36 generated agent definitions. Harnesses:
 36 IDs and specialized model-probe registries. Skills: eight guide projections,
@@ -24,10 +25,10 @@ from one specialized probe registry are not 26 missing harnesses.
 | ID | Required resolution | Owner |
 | --- | --- | --- |
 | E1 | Reconcile remaining named UI surfaces and correct unsupported behavioral claims before freezing cards. | UI package leads; coordinator acceptance |
-| E2 | Central load/mutation/owner-routing/write contracts SP01–SP13 characterized; complete214-field consumer/internal classification and preserve platform/dynamic shortcut boundaries. | UI-SETTINGS + ENG-SHARED |
+| E2 | SP01–SP13 and all214 routing rows mapped with explicit evidence tiers;180 inherited classifications retain semantic uncertainty. Preserve platform/dynamic shortcut boundaries. | UI-SETTINGS + ENG-SHARED |
 | E3 | Delegated12 and main54request/12send linked;94/96 push producers identified. Two legacy identities stay unresolved; current close/PDF alternate paths characterized separately. Remaining payload/state contracts owed. | ENG-IPC |
-| E4 | Six skills handlers characterized; remaining per-command value/default/required/output/error contracts and passthrough dispatch still owed. | ENG-CLI |
-| E5 | Reconcile existing journey/platform/gap IDs against these artifacts; only source-backed omissions may become new owned follow-ups. | Coordinator |
+| E4 | Six skills,11 terminal and13 workspace handlers characterized; remaining per-command contracts and passthrough dispatch still owed. | ENG-CLI |
+| E5 | Existing G1–G20 reconciled in parity-platform-gap-reconciliation.json, each with owners and acceptance; complete the specific open source reviews and remaining journey reconciliation. | Coordinator + named package owners |
 
 These five rows group existing obligations; they are not an exact count of
 missing behaviors. A speculative list of 17 stores/registries is not accepted

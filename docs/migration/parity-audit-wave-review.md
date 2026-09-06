@@ -24,9 +24,11 @@ reported succeeded, then were released; runtime retained external terminals
 without process action. Deliveries6bbec72594a4 andf67cbd20d4b5 acknowledged.
 No active correction writer or nested worker remains from this wave.
 
-Next: reconcile E5 existing G1–G20 identifiers against accepted artifacts and
-assign explicit remaining execution/contract ownership. Do not repeat these
-three bounded reviews. Audit closure and a common accepted implementation base
+E5 follow-up now reconciles all G1–G20 identifiers in
+parity-platform-gap-reconciliation.json, with explicit remaining contract and
+execution ownership. G12 launch parser and G16 management table were directly
+read; no runtime closure claimed. Next: the named open source reviews and
+journey reconciliation, not repeated accepted censuses. Audit closure and a common accepted implementation base
 still precede the authorized Sol-lead hierarchy and feature worktree/PR wave.
 
 ## Historical initial review queue (superseded by results above)
