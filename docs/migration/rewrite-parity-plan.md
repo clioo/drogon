@@ -7,6 +7,16 @@ Decisión del usuario del 5 de septiembre: **tests primero, features después**.
 Se inventaría y porta la suite completa antes de la siguiente ola de producto;
 la preparación de fixtures/adaptadores de pruebas no cuenta como una feature.
 
+## Actualización de coordinación — 6 de septiembre
+
+La última instrucción de Carlos sustituye las restricciones históricas de
+auditoría plana y jerarquía Sol posterior descritas abajo: cinco responsables
+Astra pueden trabajar ya sobre E1–E5 y delegar a un worker hoja cada uno si
+el runtime lo permite. La asignación vigente y sus límites están en
+`audit-closure-coordination.md`. Los gates de fidelidad/tests no cambian.
+Las 24 horas son una referencia flexible; excederlas unas horas es aceptable.
+No modificar ajustes globales ni eludir límites de anidamiento.
+
 ## 1. Qué significa terminar
 
 El objetivo es conservar la experiencia completa de Orca y todos los cambios

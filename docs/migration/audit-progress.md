@@ -20,7 +20,7 @@ The authoritative detail remains parity-audit-gate-ledger.json and linked source
 
 Goal creation is recorded at2026-09-05 19:08:47 UTC. At this checkpoint approximately10h12m have elapsed from that reference, leaving approximately13h48m of a24-hour window. This is not a separately verified implementation-start timestamp. The full-fidelity rewrite is **high risk / not a reliable24-hour commitment at the observed pace**. No scope reduction or false acceptance is authorized to meet the clock.
 
-There is not yet a defensible numerical ETA for closing the audit. The next planning action is to turn E1–E5 into finite closure assignments and consolidate the existing evidence, not repeat accepted censuses. Keep up to three flat audit workers with disjoint ownership; the authorized Sol hierarchy remains gated on coordinator audit closure. Baseline/port/behavioral RED–GREEN/platform execution obligations must remain explicit and satisfied at their required phase, not silently waived or confused with source enumeration.
+There is not yet a defensible numerical ETA for closing the audit. The user subsequently clarified that24 hours is a flexible target and authorized five Astra area leads for E1–E5, each with an approved leaf when runtime depth permits. This supersedes the previous flat-audit scheduling restriction, not acceptance criteria. See audit-closure-coordination.md. Consolidate existing evidence instead of repeating accepted censuses. Baseline/port/behavioral RED–GREEN/platform execution obligations remain explicit at their required phase, not waived or confused with source enumeration.
 
 ## Required updates from here
 
