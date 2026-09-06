@@ -66,8 +66,26 @@ Sol-ENG bounded assignments concurrently, initially at most one approved leaf
 each, keeping source → port → RED → implementation → integrated GREEN gates.
 No provider fallback after quota failure without root reassignment.
 
-Approved leaf pool: Sonnet 5, GLM-5.3-Flash, Muse 1.3 and DeepSeek V4 Flash,
-subject to current capacity. AGY remains on quota hold. Pi + DGX Qwen remains
+Approved leaf pool: Sonnet 5, GLM-5.3-Flash, Muse 1.3, DeepSeek V4 Flash and
+Kimi K2.7 Code, subject to current capacity. The user reports the Qwen token
+plan exhausted; hold new assignments to that plan (including Alibaba-plan
+routes until capacity is clarified), without retrying it. This is not evidence
+that the separately hosted DGX local model is unavailable. OpenCode's installed
+catalog identifies `kimi-for-coding/kimi-for-coding` as **Kimi K2.7 Code**, using
+the Kimi For Coding provider, not OpenRouter/Alibaba/OpenCode Go. Catalog presence
+is not inference proof; a bounded Orca provider smoke precedes development use.
+That smoke has now passed: Task `task_02655c38c47c`, Dispatch
+`ctx_d97c34900c65`, OpenCode TUI showing Kimi K2.7 Code / Kimi For Coding,
+successful `worker_done` `msg_d132b53278a3`. Root independently recomputed the
+report's exact manifest digest, 46 packages, 9037 unique paths and five
+integration groups. Evidence: `tests/parity/provider-smokes/kimi-k27/report.json`.
+This proves bounded tool/read/write/report behavior, not billing capacity or
+backend model identity attestation. The first release call used unsupported
+flags and was rejected; delivery was acknowledged prematurely. Root immediately
+corrected the release with the documented Dispatch-only command: receipt
+`f83fcf8f-a589-414a-ae25-4ecfedb5d059`, retained/external_terminal, no process
+action. No active Kimi assignment remains; future use requires a fresh Task.
+AGY remains on quota hold. Pi + DGX Qwen remains
 exclusively test inference/controlled Mentu comparison, with measured tokens and
 no cloud fallback. Root retains the English, tested Mentu upstream PR route.
 

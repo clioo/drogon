@@ -1,0 +1,60 @@
+{
+  "schema": "drogon.parity-provider-smoke/1",
+  "purpose": "Bounded provider preflight smoke: verify this session can read repo inputs, compute verifiable digests/counts with real tools, and write exactly one report file. This is NOT product parity evidence and NOT proof of independent model identity.",
+  "provider": {
+    "requested": "kimi-for-coding/kimi-for-coding",
+    "client": "OpenCode",
+    "invocationMode": "--auto (per AGENTS.md; explicit denies remain enforced)"
+  },
+  "inputs": {
+    "agentsMd": "AGENTS.md (read, 23 lines)",
+    "manifest": {
+      "path": "docs/migration/parity-test-work-packages.json",
+      "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a",
+      "sha256Tool": "shasum -a 256",
+      "schema": "drogon.parity-test-work-packages/1",
+      "documentStatus": "proposal",
+      "documentDispatchable": false
+    }
+  },
+  "computed": {
+    "packageCount": 46,
+    "uniquePackageIds": 46,
+    "totalFileEntries": 9037,
+    "uniqueFilePaths": 9037,
+    "integrationGroups": 5,
+    "countTool": "python3 json.load over packages[].files[].path (set cardinality)",
+    "note": "All 9037 file entries carry distinct paths; counts computed from parsed JSON, not guessed. Document's own source.manifestEntries (9038) exceeds package file entries (9037) by 1, consistent with the recorded byte-identical duplicate record noted in source.manifestDuplicateRecords."
+  },
+  "observedToolCommands": [
+    "read AGENTS.md",
+    "read docs/migration/parity-test-work-packages.json (first 50 lines)",
+    "shasum -a 256 docs/migration/parity-test-work-packages.json",
+    "python3 -c json.load: top-level key inventory",
+    "python3 -c json.load: per-package files[] structure inspection",
+    "python3 -c json.load: package/file unique-path cardinality counts",
+    "command -v apply_patch (absent on PATH; Write tool used for the single report file)"
+  ],
+  "capabilitiesObserved": [
+    "Read repository files within the working directory",
+    "Execute local read-only shell tooling (shasum, python3) to compute digest and counts",
+    "Write exactly one new file at the assigned path"
+  ],
+  "limitations": [
+    "No provider billing, quota, or plan-status verification was performed and none can be claimed from this session.",
+    "This smoke does not establish product parity, test migration progress, or model-identity independence.",
+    "apply_patch CLI was not available in this environment; the single-file write was performed with the editor Write tool instead.",
+    "Only the manifest header/sample and machine-derived counts were inspected; package-level semantic content was not audited."
+  ],
+  "scopeCompliance": {
+    "sourceEdits": "none",
+    "credentialsOrGlobalConfigsTouched": "none",
+    "dependenciesInstalled": "none",
+    "servicesStarted": "none",
+    "gitActions": "none",
+    "subDispatches": "none",
+    "filesWritten": [
+      "tests/parity/provider-smokes/kimi-k27/report.json"
+    ]
+  }
+}
