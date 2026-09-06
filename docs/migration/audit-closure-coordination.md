@@ -8,7 +8,13 @@ The user's latest instruction before sleeping is explicit: **these five Astra ar
 
 This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoints below are not current state; consult audit-semantic-followups.md and audit-progress.md. No tool-supported objective rewrite was performed: the old Codex goal's flat-worker text is superseded by this later user direction, not a reason to complete or replace an unfinished goal.
 
-## Current residual ownership — 2026-09-06 08:00 UTC
+## Current checkpoint — E5 final source reconciliation
+
+After independent acceptance of the19 bounded services contracts (not full E5), root created `task_9f72f8ecff7a` and reused the exact released E5 Astra terminal `term_86e2b660-83d2-4440-811e-50467ae6fed8`. New Dispatch `ctx_8dbbbe469ed9` returned ready/input_accepted, no setup/residual resources, receipt `b52757b1-fd4c-4eca-ba44-2a179a59a29c`. Existing-terminal receipt model fields are null; actual Astra launch provenance is retained from the earlier verified session, not inferred from those null fields. Five area assignments are active again: four E3 result/consumer assignments plus this E5 consolidation.
+
+E5 writes only `audit-closure/e5-platform/final-source-gate.md/json` and `final-source-gate-leaf/`. It reconciles original20 groups/21 entries and config/assets/services residuals against actual accepted contracts and needed local bodies. It may use one Claude Sonnet5 medium child for the exact six D-CLOUD-COLLAB files, with no nested leaf delegation or source/Git/cloud operations. All prior evidence remains frozen. Named ownership alone cannot close an unread source seam, and no recursive re-census is requested. Root owns final acceptance; actual Sol implementation remains gated.
+
+## Historical residual ownership — 2026-09-06 08:00 UTC
 
 The initial directory assignments below are historical. E2/E4 source gates remain accepted and their evidence frozen. Their exact idle Astra terminals have been revalidated and officially reused for disjoint E5 residual audit work; this is not a sixth lead, a reopened E2/E4 gate, or implementation authority. All three Tasks were created before their parallel worker-start calls, which returned ready/input_accepted, exact existing-terminal reuse, no setup and no residual resources.
 

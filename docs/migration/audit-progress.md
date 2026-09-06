@@ -1,6 +1,6 @@
 # Audit progress — reporting baseline
 
-Updated 2026-09-06 after independent E1 final source acceptance. User requested percentage estimates and explicitly flagged the pace and24-hour risk. Earlier deadline figures below are a historical checkpoint, not current remaining-time estimates.
+Updated 2026-09-06 after E1 final source acceptance and the bounded E5 services review. User requested percentage estimates and explicitly flagged the pace and24-hour risk. Earlier deadline figures below are a historical checkpoint, not current remaining-time estimates.
 
 **Estimated audit progress: approximately83%, medium-low confidence.** The stable ledger now has7 accepted metadata blocks (M1–M7),3 accepted source-reconciliation groups (E1/E2/E4), and2 open groups (E3/E5):10/12 =83.3%, up one group from9/12 =75%. This is an orientation index, not measured code coverage, tests passed, remaining-effort accuracy or product completion. Unequal group sizes prevent a linear time forecast.
 
@@ -12,6 +12,10 @@ Keep this denominator stable. Closing a group requires its actual evidence, not 
 | E5 | Specific platform/relay/distribution reviews and journey reconciliation |
 
 The authoritative detail remains parity-audit-gate-ledger.json and linked source contracts. E1 now reconciles152 initial obligations through22 final contracts plus prior accepted boundaries, preserving50 features,19 invariants and complete test/journey obligations. Root accepted E2 after214-field/O01/O02 reconciliation,13 persistence contracts,16 shared shortcut boundaries and all88 action routes. E4 combines234 canonical command contracts,22 helper contracts and30 final named source boundaries; see audit-root-followup-review.md for independent samples and fingerprint checks. Monaco integration questions, source defect corrections and every baseline/port/render/platform obligation remain T1–T4 gates, not silently accepted behavior. M1–M7 retain metadata-only scope. Partial E3/E5 follow-ups do not close those groups.
+
+## Latest services checkpoint
+
+Root accepted19 immediate services/control-flow contracts with explicit corrections, verifying515 evidence records/323 pinned files/340 ranges,147 canonical relay rows and216 mobile receiver/allowlist joins. E5 overall stays open; the fifth Astra received a fresh final-reconciliation assignment, so five audit leads are active again (four E3, one E5). New original mutation-lease baseline passed5/5 under the admitted isolated cloud runner; no real cloud operation or candidate parity was tested. Audit delta0, still10/12=83.3%, medium-low confidence. Next milestone remains complete E3/E5 source reconciliation, followed by actual Sol implementation leads; no defensible completion ETA.
 
 ## Deadline assessment
 

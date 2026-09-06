@@ -1,0 +1,41 @@
+{
+  "capsuleId": "cloud-mutation-lease",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "cloud/apps/relay-fence-broker/src/mutation-lease.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 5
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "cloud/apps/relay-fence-broker/src/mutation-lease.test.ts",
+      "role": "test",
+      "sha256": "f26ec86f077871497b9ca1639ba9d9ea8e3a130bb7264ada5153cb0d6d0fca08"
+    },
+    {
+      "path": "cloud/apps/relay-fence-broker/src/mutation-lease.ts",
+      "role": "module",
+      "sha256": "407947799f0d920dab4531f2ce714e9fdb6bedfd1cab18eb511faddbdb06f6dc"
+    },
+    {
+      "path": "cloud/apps/relay-fence-broker/src/google-metadata.ts",
+      "role": "module",
+      "sha256": "333d4215cc13afdf6b0a783867a13277ce7720a56b3a1729b41111f9066717b2"
+    }
+  ],
+  "sourceVitestVersion": "4.1.9",
+  "sourceVitestConfigFile": null,
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "The fence-broker package invokes vitest run without custom configuration. Capsule explicitly selects Node environment and the exact unchanged original file, excluding other suites and desktop setup.",
+    "Uses the same separately locked Vitest4.1.9/Vite8.0.16 toolchain documented in cloud-gcloud-source-baseline.json, not the entire original cloud dependency lock. Node24.19.0 is selected explicitly.",
+    "All five tests supply a synthetic fetcher and deterministic clock. No default fetch, metadata server, real storage object, provider credential or external subprocess is invoked by these assertions."
+  ],
+  "isolationRationale": "Root fully read the original test, mutation-lease module and google-metadata import. Only Vitest and node:crypto runtime imports; no top-level effects. Every constructor in the test injects vi.fn fetch responses, all metadata and storage operations use that fetcher. Copy exact pinned bytes and MIT notice; preserve every original assertion.",
+  "contract": "RP-C4 original fixture baseline: create/release generation guards, conflicting live request, expired takeover, explicitly matched live takeover, generation-mismatch refusal. Last title says any field but asserts only mismatched generation. Not real GCS concurrency, authentication, full failure matrix or candidate parity."
+}
