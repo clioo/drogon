@@ -111,7 +111,12 @@ const [packagedDirectory] = await packager({
   ...(process.platform === "darwin"
     ? {
         darwinDarkModeSupport: true,
-        osxSign: { identity: "-", hardenedRuntime: false },
+        osxSign: {
+          identity: "-",
+          // Ad-hoc signing has no keychain certificate to discover.
+          identityValidation: false,
+          hardenedRuntime: false,
+        },
       }
     : {}),
 });
