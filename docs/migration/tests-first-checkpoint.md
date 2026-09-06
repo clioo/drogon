@@ -925,6 +925,35 @@ this bounded slice. No active assignment, new worker, hierarchy, implementation,
 test process, model inference, installation, push or PR action occurred.
 Goal remains active with progress; no blocking condition occurred.
 
+## Bot ownership original baseline:11 executed,93 cumulative
+
+Previous turn made progress in9826a48 with reviewed UI state contracts.
+This turn used Mentu Navigator1.1.1 to confirm BotPersistence, then read and
+checked the additional runtime dependency closure before executing the
+unchanged original bot-responsibility-owner.test.ts. Twelve pinned files plus
+MIT license were verified against disk/Git and staged into the fresh canonical
+coordinator-bot-owner-UYe7Am fixture. AST checks confirm18 runtime imports
+closing within the slice (plus vitest/node:crypto) and11 direct original tests.
+
+Original Vitest4.1.11 under Node24.19.0 passed all11 tests, no skips/todos,
+no timeout, exit0. Raw results, stage receipt and coordinator stdout are
+archived under reference-captures/c9790628-bot-owner, with original/archive
+SHA256 values and newline-only archive normalization disclosed. Manifest and
+execution digest are retained under tests/parity/baseline-capsules.
+
+Only in-memory Bot state, flush spy and scheduler/store doubles are exercised;
+no real Bot, process dispatch, profile persistence or UI runs. The first6
+capsules' raw receipts were reread and counts deduplicated by capsule ID:
+timeout2 + Git cache4 + socket liveness2 + CLI args38 + reactive dispatch29 +
+remote ENOENT7 + Bot ownership11 =93 original cases. No prior case rerun or
+double-counting. This original baseline does not prove candidate behavior.
+
+No production files, source assertions, personal profile, user terminal,
+installation, model config, remote branch or PR were changed. No worker was
+launched. E1-E5 enumeration and T1-T5 execution obligations remain open; this
+is concrete test evidence rather than an audit closure. Goal stays active;
+no blocked condition occurred.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

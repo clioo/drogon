@@ -1,0 +1,97 @@
+{
+  "capsuleId": "bot-responsibility-owner",
+  "description": "Unchanged original Bot ownership/persistence-domain tests; in-memory store/flush/scheduler doubles, no real automation dispatch.",
+  "entryTestFile": "src/main/bots/bot-responsibility-owner.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 11,
+    "plainIt": 11,
+    "tableRows": 0
+  },
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "files": [
+    {
+      "path": "src/main/bots/bot-responsibility-owner.test.ts",
+      "role": "test",
+      "sha256": "f4ae1f7e05c58cb3019c61777b0599821243535c378bb420b13c11e582edef6f"
+    },
+    {
+      "path": "src/main/bots/bot-responsibility-owner.ts",
+      "role": "module",
+      "sha256": "7287e3c0b8e76385790af3f5183f26fe579f035e0fb2c03faca85f5a2e519159"
+    },
+    {
+      "path": "src/main/bots/bot-service.ts",
+      "role": "module",
+      "sha256": "fbef1f60684b75e0c29af7e85657388f60ed036c55ad6b88c14bb53aba15c82c"
+    },
+    {
+      "path": "src/main/persistence/loading-store/bot-persistence.ts",
+      "role": "module",
+      "sha256": "0b62fc7b3c494b7566c1f4b2252f38b5adb864ac5a61e3be5a5ac8fd8cc62909"
+    },
+    {
+      "path": "src/shared/drogon-bot-contract.ts",
+      "role": "module",
+      "sha256": "870600454e28b6f51ed73017b6c8d390f8bdc0ba3a0ed61509982c6cef7cfd66"
+    },
+    {
+      "path": "src/shared/drogon-bot-session.ts",
+      "role": "module",
+      "sha256": "dd7d3625dd983d90f8f4b05a7c888f3ceaade6d30b6b4481920946c3e393112e"
+    },
+    {
+      "path": "src/shared/tui-agent-config.ts",
+      "role": "module",
+      "sha256": "192226db679f6241bc68a3093b4aac2e8922d11079beeb16cddc26698b4f1b7f"
+    },
+    {
+      "path": "src/shared/orca-cli-command-name.ts",
+      "role": "module",
+      "sha256": "c90b037ec7a6143770a40dd907bf9d053fb2cede21128b60b78a78671c0780c0"
+    },
+    {
+      "path": "src/shared/drogon-bot-prompt.ts",
+      "role": "module",
+      "sha256": "6c2585a28387880ae843343d5df61ba72b26b1381c5f17e95150ebd5e824f511"
+    },
+    {
+      "path": "src/shared/automations-types.ts",
+      "role": "module",
+      "sha256": "ac7b60881d60f8bd777b56bacb99de3c3661ea26ed77cb8f233f8375956761e9"
+    },
+    {
+      "path": "src/main/automations/automation-run-writer.ts",
+      "role": "module",
+      "sha256": "1165b9522e48ed991081a31c86257b6122f05cfb969466d30ed7156b3790fa8c"
+    },
+    {
+      "path": "src/main/bots/bot-automation-dispatch-context.ts",
+      "role": "module",
+      "sha256": "00c64a0ede57d9dafcc80f2fc953f9a4670c80226017371796fbc5a775d106c3"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "isolationRationale": "Coordinator read all11 original assertion bodies and the12-file runtime import closure. BotPersistence uses a test-owned state object and flush spy; service uses in-test Store/runNow doubles; automation writer uses stub create/update/history/publish inputs. Runtime operations are normalization, ownership projection, strings, collections, Date.now and node:crypto randomUUID. Agent registry strings are data and never launched. Imports marked type are erased. No actual filesystem persistence, process, Electron, network, credential, personal profile or inference operation is reached. Staging/runner writes only in a fresh canonical fixture. This is not a general sandbox and does not prove disk durability or scheduler execution.",
+  "runtimeImports": [
+    "vitest original installed4.1.11",
+    "node:crypto randomUUID",
+    "relative runtime imports are all within the12 pinned files"
+  ],
+  "typeOnlyImports": [
+    "Store/StoreRuntimeState/flush barrier/AutomationService/agent/host/wire declarations and further type-only dependency chains are not staged or typechecked."
+  ],
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Both configurations use node. Explicit Node24.19.0 and original installed Vitest4.1.11 are required and recorded; no dependencies are installed.",
+    "Minimal config omits renderer aliases, feature-wall define and DOM/host-port setup scripts. This runtime closure uses none of those symbols, aliases, DOM or host-port facilities.",
+    "Root GC/webstorage execArgv, Windows worker override and30s/60s test/hook timeouts are omitted. Tests use no GC/webstorage assertions, no OS-specific branches and no timed waits. Default Vitest timeouts and a30s outer limit apply; not full source-environment equivalence."
+  ],
+  "testEvidenceBoundary": "11 declared cases inspected in bot-responsibility-owner.test.ts:55-323. Passing does not prove actual scheduling, disk restart, live event adapter or any renderer behavior. Preserve exact original test bytes; assertions are not replaced."
+}
