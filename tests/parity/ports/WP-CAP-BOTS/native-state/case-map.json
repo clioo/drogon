@@ -1,0 +1,252 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "generatedBy": "manual, source-verified via git -C <checkout> show/grep from the rewrite repo cwd (never source cwd)",
+  "totalCases": 20,
+  "tally": { "covered": 12, "partial": 5, "open": 3 },
+  "suites": [
+    {
+      "file": "src/main/bots/bot-responsibility-owner.test.ts",
+      "cases": [
+        {
+          "title": "migrates scheduled responsibility ownership and run links",
+          "status": "partial",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::migrate_ownership_resolves_conflicting_claims_with_first_bot_wins_by_insertion_order",
+            "crates/drogon-core/tests/bot_storage.rs::migrate_ownership_drops_a_scheduled_responsibility_whose_automation_is_missing"
+          ],
+          "gap": "ownership repair is covered; re-pointing bot_responsibility_runs rows to a corrected owner ('run links') is not additionally asserted."
+        },
+        {
+          "title": "keeps a Bot automation in global administration while projecting Bot history",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::delete_bot_preserves_owned_automations_and_their_history_stripping_only_ownership",
+            "crates/drogon-core/tests/bot_storage.rs::history_for_bot_is_newest_first_with_null_joins_for_orphans"
+          ]
+        },
+        {
+          "title": "drops a dangling owner from a legacy automation instead of inventing a Bot",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::migrate_ownership_still_clears_a_dangling_owner_that_is_in_scope"
+          ],
+          "note": "added in this bounded correction; the prior delivery only covered the missing-automation drop case, not the in-scope-dangling-owner clear case, and had a real cross-scope bug here (see migrate_ownership_never_clears_an_automation_owned_by_a_bot_in_a_different_scope)."
+        },
+        {
+          "title": "repairs mismatched owners and drops responsibilities whose automation is gone",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::migrate_ownership_resolves_conflicting_claims_with_first_bot_wins_by_insertion_order",
+            "crates/drogon-core/tests/bot_storage.rs::migrate_ownership_drops_a_scheduled_responsibility_whose_automation_is_missing"
+          ]
+        },
+        {
+          "title": "persists a Bot mutation and rotates its session through the persistence domain",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::rotate_session_never_touches_instructions_memories_character_responsibilities_or_history"
+          ]
+        },
+        {
+          "title": "creates a scheduled responsibility as an Orca-owned automation",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::create_scheduled_responsibility_commits_the_automation_and_bot_update_together",
+            "crates/drogon-core/tests/bot_storage.rs::create_scheduled_responsibility_rejects_a_trigger_automation_id_mismatch_before_any_write",
+            "crates/drogon-core/tests/bot_storage.rs::create_scheduled_responsibility_cannot_hijack_an_existing_foreign_automation_id",
+            "crates/drogon-core/tests/bot_storage.rs::create_scheduled_responsibility_cannot_hijack_an_existing_same_id_automation_even_with_the_same_owner",
+            "crates/drogon-core/tests/bot_storage.rs::create_scheduled_responsibility_rolls_back_the_automation_insert_on_a_later_failure_and_stays_absent_after_reopen"
+          ]
+        },
+        {
+          "title": "records scheduler-created runs in Bot history without replacing automation status",
+          "status": "partial",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::record_responsibility_run_dedupes_on_automation_run_id_with_null_merge_semantics",
+            "crates/drogon-core/tests/bot_storage.rs::record_responsibility_run_is_atomic_across_two_real_concurrent_connections"
+          ],
+          "gap": "the recording/dedup half is covered; 'without replacing automation status' is structurally true (this storage layer never mutates Automation.status-shaped fields from a responsibility run) but is not separately asserted."
+        },
+        {
+          "title": "closes Bot history when the linked automation reaches a final status",
+          "status": "open",
+          "gap": "no history-closing-on-final-status behavior is implemented in this storage layer; execution/dispatch-time concern, out of records.rs/storage.rs scope."
+        },
+        {
+          "title": "refuses to manually fake execution of a reactive responsibility",
+          "status": "partial",
+          "assertions": [
+            "record_responsibility_run's ResponsibilityTrigger::Reactive branch (bots/storage.rs) rejects a run carrying an automationId with OwnershipViolation"
+          ],
+          "gap": "the storage-layer half (a reactive responsibility's run cannot carry scheduled-only fields) is covered; the source title's dispatch-time 'manual fake execution' framing is otherwise out of scope."
+        },
+        {
+          "title": "hydrates current Bot identity and memory into every scheduled dispatch",
+          "status": "open",
+          "gap": "dispatch-time session-context hydration is out of this task's record/storage scope entirely."
+        },
+        {
+          "title": "keeps scheduler history idempotent and rejects invented automation runs",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::record_responsibility_run_dedupes_on_automation_run_id_with_null_merge_semantics",
+            "crates/drogon-core/tests/bot_storage.rs::record_responsibility_run_is_atomic_across_two_real_concurrent_connections",
+            "require_owned_automation and the automation-run-existence check in record_responsibility_run (bots/storage.rs)"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "src/shared/drogon-bot-contract.test.ts",
+      "cases": [
+        {
+          "title": "keeps a typed identity and separates default harness from explicit model",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::normalize_bot_is_legacy_tolerant_of_any_non_empty_explicit_model",
+            "crates/drogon-core/tests/bot_storage.rs::normalize_bot_falls_back_to_default_harness_for_an_unknown_harness"
+          ]
+        },
+        {
+          "title": "turns a character preset, standing instructions, and memory into real session context",
+          "status": "open",
+          "gap": "session-context construction is dispatch-time, out of this task's storage/record scope."
+        },
+        {
+          "title": "rotates a session without changing Bot identity",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::rotate_session_never_touches_instructions_memories_character_responsibilities_or_history"
+          ]
+        },
+        {
+          "title": "preserves multiple proactive responsibilities for one persistent Bot",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::create_bot_preserves_multiple_proactive_responsibilities_for_one_persistent_bot"
+          ]
+        },
+        {
+          "title": "preserves actual Mentu recipe/run/evidence identifiers",
+          "status": "covered",
+          "assertions": [
+            "round-tripped transitively through every test that stores/reads a Responsibility/ResponsibilityRun carrying a RecipeLink (JSON payload round-trip)"
+          ]
+        },
+        {
+          "title": "links only a real Mentu run record and leaves unavailable evidence unlinked",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::link_mentu_run_links_only_a_real_run_record_and_leaves_unavailable_evidence_unlinked"
+          ]
+        },
+        {
+          "title": "rejects malformed persisted responsibility evidence instead of trusting partial rows",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::normalize_responsibility_rejects_malformed_persisted_evidence_instead_of_trusting_partial_rows"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "src/main/persistence-bot-automation.test.ts",
+      "cases": [
+        {
+          "title": "persists the optional Bot owner on the existing Orca automation record",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/automation_records.rs::upsert_and_get_round_trip_every_field_via_json_payload",
+            "crates/drogon-core/tests/automation_records.rs::list_automations_owned_by_bot_filters_by_bot_id"
+          ]
+        },
+        {
+          "title": "removes the Bot responsibility projection when its global automation is deleted",
+          "status": "covered",
+          "assertions": [
+            "crates/drogon-core/tests/bot_storage.rs::delete_automation_everywhere_removes_every_bot_scheduled_responsibility_that_referenced_it",
+            "crates/drogon-core/tests/bot_storage.rs::delete_automation_everywhere_cleans_dangling_projections_in_every_scope_not_just_one"
+          ]
+        }
+      ]
+    }
+  ],
+  "boundedCorrectionAdditions": {
+    "description": "Production-bound gaps fixed in this pass, beyond the original 20-case map, each with its own assertion-level test (not part of the source's 20 cases, but required by root/Sol review).",
+    "items": [
+      {
+        "fix": "rev-based CAS replacing updated_at-keyed CAS (real same-timestamp two-connection clobber race closed)",
+        "assertions": [
+          "crates/drogon-core/tests/bot_storage.rs::cas_write_detects_a_same_timestamp_two_connection_clobber_race",
+          "crates/drogon-core/tests/bot_storage.rs::cas_write_detects_a_stale_snapshot_across_two_real_connections_to_the_same_file",
+          "crates/drogon-core/tests/bot_storage.rs::cas_write_distinguishes_a_deleted_row_notfound_from_a_changed_row_staleupdate"
+        ]
+      },
+      {
+        "fix": "atomic responsibility-run dedupe/null-merge via BEGIN IMMEDIATE + partial UNIQUE(bot_id, automation_run_id) index",
+        "assertions": [
+          "crates/drogon-core/tests/bot_storage.rs::record_responsibility_run_is_atomic_across_two_real_concurrent_connections"
+        ]
+      },
+      {
+        "fix": "AutomationOwnerPrecondition: a Bot-ownership (Automation.bot_id) precondition required before automation deletion. Round-3 correction: this is NOT a port or adaptation of the source's assertAutomationOwnerFence, which fences an unrelated concept (SSH execution-host authority) this crate does not implement -- see EVIDENCE.md 'Round 3' and its 'Mandatory follow-on gate before global-automation RPC admission'. The SSH host-authority fence remains fully open; no host-authority type/adapter/registry was added anywhere in this crate.",
+        "assertions": [
+          "crates/drogon-core/tests/automation_records.rs::delete_automation_rejects_a_missing_automation_when_an_owner_is_expected",
+          "crates/drogon-core/tests/automation_records.rs::delete_automation_rejects_a_foreign_owner_mismatch",
+          "crates/drogon-core/tests/automation_records.rs::delete_automation_rejects_unowned_expectation_against_an_owned_automation",
+          "crates/drogon-core/tests/automation_records.rs::delete_automation_succeeds_when_the_expected_owner_matches",
+          "crates/drogon-core/tests/automation_records.rs::delete_automation_detects_ownership_changed_by_a_different_connection",
+          "crates/drogon-core/tests/bot_storage.rs::delete_automation_everywhere_rejects_a_foreign_owner_expectation_before_any_mutation",
+          "crates/drogon-core/tests/bot_storage.rs::delete_automation_everywhere_rejects_a_missing_automation_when_an_owner_is_expected",
+          "crates/drogon-core/tests/bot_storage.rs::delete_automation_everywhere_succeeds_when_the_expected_owner_matches",
+          "crates/drogon-core/tests/bot_storage.rs::delete_automation_everywhere_detects_ownership_changed_by_a_concurrent_connection"
+        ]
+      },
+      {
+        "fix": "insert_new_automation (plain INSERT) replacing upsert_automation in create_scheduled_responsibility -- cannot hijack an existing foreign/same-id automation",
+        "assertions": [
+          "crates/drogon-core/tests/automation_records.rs::insert_new_automation_fails_on_id_collision_instead_of_overwriting",
+          "crates/drogon-core/tests/bot_storage.rs::create_scheduled_responsibility_cannot_hijack_an_existing_foreign_automation_id",
+          "crates/drogon-core/tests/bot_storage.rs::create_scheduled_responsibility_cannot_hijack_an_existing_same_id_automation_even_with_the_same_owner"
+        ]
+      },
+      {
+        "fix": "real post-automation-insert SQLite failure rolls the transaction back, proven absent after a genuine file close+reopen",
+        "assertions": [
+          "crates/drogon-core/tests/bot_storage.rs::create_scheduled_responsibility_rolls_back_the_automation_insert_on_a_later_failure_and_stays_absent_after_reopen"
+        ]
+      },
+      {
+        "fix": "step-wise migrate() (older supported version actually re-applies missing steps, instead of any found <= CURRENT being a no-op); future-version refusal unchanged",
+        "assertions": [
+          "crates/drogon-core/tests/automation_records.rs::migrate_steps_an_older_supported_version_forward_instead_of_treating_it_as_current",
+          "crates/drogon-core/tests/automation_records.rs::migrate_from_a_genuine_v1_schema_applies_the_v2_step_and_preserves_data",
+          "crates/drogon-core/tests/automation_records.rs::migrate_refuses_a_future_schema_version_without_touching_tables",
+          "crates/drogon-core/tests/bot_storage.rs::migrate_from_a_genuine_v1_bots_schema_applies_the_v2_step_and_preserves_data"
+        ]
+      },
+      {
+        "fix": "migrate_ownership no longer clears/reassigns an automation owned by a Bot in a different (host_id, folder) scope",
+        "assertions": [
+          "crates/drogon-core/tests/bot_storage.rs::migrate_ownership_never_clears_an_automation_owned_by_a_bot_in_a_different_scope",
+          "crates/drogon-core/tests/bot_storage.rs::migrate_ownership_still_clears_a_dangling_owner_that_is_in_scope"
+        ]
+      },
+      {
+        "fix": "delete_automation_everywhere now cleans dangling scheduled-responsibility projections in every scope (a global entity's deletion cannot stay scoped without leaving other scopes' Bots dangling forever)",
+        "assertions": [
+          "crates/drogon-core/tests/bot_storage.rs::delete_automation_everywhere_cleans_dangling_projections_in_every_scope_not_just_one"
+        ]
+      }
+    ]
+  },
+  "knownOpenGaps": [
+    "closes Bot history when the linked automation reaches a final status (open)",
+    "hydrates current Bot identity and memory into every scheduled dispatch (open)",
+    "turns a character preset, standing instructions, and memory into real session context (open)",
+    "run-link re-pointing during ownership migration (partial)",
+    "recorded run history's relationship to automation status transitions (partial)",
+    "reactive-responsibility manual-fake-execution refusal is only storage-layer-verified, not dispatch-layer (partial)",
+    "The source's real assertAutomationOwnerFence (SSH execution-host authority: self/ssh(targetId, targetGeneration)/orphan, resolved live against an SSH-target registry, workspace-host table, and repo/connection table) is FULLY OPEN, not partially implemented and not approximated by AutomationOwnerPrecondition, which is an unrelated Bot-ownership (Automation.bot_id) check. See EVIDENCE.md's 'Mandatory follow-on gate before global-automation RPC admission' for the exact root-owned prerequisites (SSH-target registry, workspace-host resolution, then the fence itself) required before this gap can close."
+  ]
+}

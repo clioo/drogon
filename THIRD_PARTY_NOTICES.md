@@ -11,6 +11,14 @@ The original MIT notice is retained below and in `tests/parity/ports/LICENSE.orc
 
 The selected tokens in `apps/desktop/src/renderer/src/assets/main.css` and the Button/Input adaptations in `apps/desktop/src/renderer/src/components/ui/` derive from Orca's corresponding renderer files at source revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`. The source migration inventories document additional behavior used as reference. Drogon does not include Orca's telemetry, update service, account credentials or runtime as an execution dependency.
 
+The native Bot/Automation record and storage ports in
+`crates/drogon-core/src/{bots,automations}` and their parity tests adapt the
+same pinned Orca implementation. Source paths, hashes and remaining behavioral
+gaps are recorded in `tests/parity/ports/WP-CAP-BOTS/native-state/case-map.json`
+and `docs/migration/sol-wave/cap-bots/native-state.md`. The locale comparator
+uses the ICU4X dependencies already pinned in Cargo.lock; their redistribution
+licenses must be included in packaged dependency notices.
+
 MIT License
 
 Copyright (c) 2026 Lovecast Inc.
