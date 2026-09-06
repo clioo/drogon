@@ -30,6 +30,21 @@ E3 domain/usage and E5 config/CI have now delivered and been officially released
 
 ## Initial ownership and bounded deliverables
 
+### Current E3 result/consumer residual wave
+
+After commit2a6d8ae, four independent Tasks were created before their parallel worker starts. All returned ready/input_accepted, exact existing-terminal reuse, no setup or residual resources. These remain the same verified Astra audit processes, not new Sol launches; null model fields on reuse receipts are not model authentication. E5 services continues its original Task concurrently.
+
+| Audit assignment | Task / Dispatch | Exact terminal | Exclusive outputs / approved leaf |
+| --- | --- | --- | --- |
+| Runtime/session/browser results:16 groups,211 methods | `task_c8c718dc586c` / `ctx_73644d3d0ebf` | `term_c317aa5c-b92d-4338-a888-e88676e58fde` | `e3-bridge/result-runtime/`; Claude Sonnet5 medium |
+| Repository/files/provider results:10 groups,264 methods | `task_48dd8de6cf99` / `ctx_006b14bc1968` | `term_06b0aa79-c95c-4be8-826e-7fc44e92ad71` | `e3-bridge/result-integrations/`; OpenCode DeepSeek V4 Flash0731 Alibaba |
+| Capability/platform results:21 groups,126 methods | `task_d472a9fbf442` / `ctx_76d7be38749c` | `term_628055f8-e9bc-4f00-995c-0f119af80751` | `e3-bridge/result-platform/`; Claude Sonnet5 medium |
+| Six remaining consumer joins and three usage input boundaries | `task_d34d2e7f2d03` / `ctx_2e817dfed909` | `term_233f0742-c797-43da-b5b9-0efd8e91ad43` | `e3-bridge/consumer-ingestion-final.md/json`, `consumer-ingestion-leaf/`; OpenCode Muse1.3 |
+
+`e3-result-audit-partition.json` fixes all47 result group IDs and601 method identities, without overlap; the14 explicitly reused same-service Mentu methods retain their schema/host differences and test gates. These are existing E3 gaps, not new denominator units. The consumer lead has the accepted E1 fingerprints and must inspect real contract coverage, not wait on a now-settled E1 Task. Root reviews the delivered configuration report independently.
+
+Each lead may use at most one disjoint depth2 leaf, through official Orca coordination with the assigned model and per-invocation flags. Child activation is not claimed from permission alone. No Git, source edits, dependency installs, personal settings or external operations are allowed for these workers. Finite service result/state/error contracts must come from actual owning code, not return annotations or CLI formatting; expand necessary local result-producing callees, not an unlimited import census. Frozen reports and other workers' directories remain read-only. Root retains common files, review, integration and Git. Actual Sol implementation still follows full source-audit acceptance, with tests first.
+
 Root Astra owns acceptance, shared contracts, progress ledger, Git, integration and installation. Five fresh Codex `gpt-6-astra` leads own only the corresponding new directory under `docs/migration/audit-closure/`. They read the current evidence and pinned original source; no product edits, dependency installs, personal profile changes or background services in this audit wave. Reports must correct evidence rather than re-enumerate accepted M1–M7.
 
 | Lead | Exclusive directory | Finite closure assignment | Initial leaf model if runtime allows |

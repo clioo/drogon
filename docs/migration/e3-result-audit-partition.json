@@ -1,0 +1,868 @@
+{
+  "schema": "drogon.e3-result-audit-partition/1",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "input": {
+    "path": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json",
+    "sha256": "61c72df0ea371dacdce020b9c3d8b0e54a42b1bf38d96af5d24777da1ef2b167"
+  },
+  "assignments": [
+    {
+      "id": "runtime",
+      "contracts": [
+        {
+          "id": "DR-STATUS_METHODS",
+          "methods": [
+            "status.get"
+          ]
+        },
+        {
+          "id": "DR-AGENT_SESSION_METHODS",
+          "methods": [
+            "terminal.ensureAgentSession",
+            "terminal.createAgentSession"
+          ]
+        },
+        {
+          "id": "DR-STRUCTURED_AGENT_SESSION_METHODS",
+          "methods": [
+            "agentSession.createSupport",
+            "agentSession.create",
+            "agentSession.ensure",
+            "agentSession.send",
+            "agentSession.cancel",
+            "agentSession.close",
+            "agentSession.respondToApproval",
+            "agentSession.respondToQuestion",
+            "agentSession.setOption",
+            "agentSession.handoffStatus",
+            "agentSession.options",
+            "agentSession.history",
+            "agentSession.subscribe",
+            "agentSession.unsubscribe",
+            "agentSession.hold",
+            "agentSession.release"
+          ]
+        },
+        {
+          "id": "DR-TERMINAL_METHODS",
+          "methods": [
+            "terminal.list",
+            "terminal.resolveActive",
+            "terminal.resolvePane",
+            "terminal.recoverPane",
+            "terminal.show",
+            "terminal.read",
+            "terminal.inspectProcess",
+            "terminal.isRunningAgent",
+            "terminal.agentStatus",
+            "terminal.rename",
+            "terminal.clearBuffer",
+            "terminal.send",
+            "terminal.wait",
+            "terminal.create",
+            "terminal.split",
+            "terminal.stop",
+            "terminal.closeAll",
+            "terminal.sleep",
+            "terminal.stopExact",
+            "terminal.resizeForClient",
+            "terminal.focus",
+            "terminal.close",
+            "terminal.closeTab",
+            "agentTeams.tmuxCompat",
+            "agentTeams.prepareLaunch",
+            "terminal.setDisplayMode",
+            "terminal.restoreFit",
+            "terminal.getDisplayMode",
+            "terminal.updateViewport",
+            "terminal.multiplex",
+            "terminal.subscribe",
+            "terminal.unsubscribe",
+            "terminal.getAutoRestoreFit",
+            "terminal.setAutoRestoreFit"
+          ]
+        },
+        {
+          "id": "DR-TERMINAL_ORPHAN_METHODS",
+          "methods": [
+            "terminal.adoptOrphans"
+          ]
+        },
+        {
+          "id": "DR-BROWSER_CORE_METHODS",
+          "methods": [
+            "browser.snapshot",
+            "browser.click",
+            "browser.goto",
+            "browser.certificate.proceed",
+            "browser.fill",
+            "browser.type",
+            "browser.keyboardInsertText",
+            "browser.select",
+            "browser.scroll",
+            "browser.back",
+            "browser.reload",
+            "browser.screenshot",
+            "browser.eval",
+            "browser.tabList",
+            "browser.tabShow",
+            "browser.tabCurrent",
+            "browser.tabSwitch",
+            "browser.tabCreate",
+            "browser.openUrl",
+            "browser.tabSetProfile",
+            "browser.tabProfileShow",
+            "browser.tabProfileClone",
+            "browser.tabClose",
+            "browser.profileList",
+            "browser.profileCreate",
+            "browser.profileDelete",
+            "browser.profileDetectBrowsers",
+            "browser.profileImportFromBrowser",
+            "browser.profileClearDefaultCookies",
+            "browser.hover",
+            "browser.drag",
+            "browser.upload",
+            "browser.wait",
+            "browser.check",
+            "browser.focus",
+            "browser.clear",
+            "browser.selectAll",
+            "browser.keypress",
+            "browser.pdf",
+            "browser.fullScreenshot",
+            "browser.dblclick",
+            "browser.forward",
+            "browser.scrollIntoView",
+            "browser.get",
+            "browser.is",
+            "browser.find",
+            "browser.console",
+            "browser.network",
+            "browser.exec",
+            "browser.capture.start",
+            "browser.capture.stop",
+            "browser.download",
+            "browser.highlight"
+          ]
+        },
+        {
+          "id": "DR-BROWSER_SCREENCAST_METHODS",
+          "methods": [
+            "browser.screencast",
+            "browser.screencast.unsubscribe"
+          ]
+        },
+        {
+          "id": "DR-BROWSER_EXTRA_METHODS",
+          "methods": [
+            "browser.cookie.get",
+            "browser.cookie.set",
+            "browser.cookie.delete",
+            "browser.viewport",
+            "browser.geolocation",
+            "browser.intercept.enable",
+            "browser.intercept.disable",
+            "browser.intercept.list",
+            "browser.mouseMove",
+            "browser.mouseDown",
+            "browser.mouseClick",
+            "browser.mouseUp",
+            "browser.mouseWheel",
+            "browser.setDevice",
+            "browser.setOffline",
+            "browser.setHeaders",
+            "browser.setCredentials",
+            "browser.setMedia",
+            "browser.clipboardRead",
+            "browser.clipboardWrite",
+            "browser.dialogAccept",
+            "browser.dialogDismiss",
+            "browser.storage.local.get",
+            "browser.storage.local.set",
+            "browser.storage.local.clear",
+            "browser.storage.session.get",
+            "browser.storage.session.set",
+            "browser.storage.session.clear"
+          ]
+        },
+        {
+          "id": "DR-BROWSER_CLIENT_HOST_METHODS",
+          "methods": [
+            "browser.clientHost.attach",
+            "browser.clientHost.commandResult",
+            "browser.clientHost.pageMetadata"
+          ]
+        },
+        {
+          "id": "DR-BROWSER_CLIENT_FILE_CHANNEL_METHODS",
+          "methods": [
+            "browser.clientHost.fileChannel.read",
+            "browser.clientHost.fileChannel.write",
+            "browser.clientHost.fileChannel.abort"
+          ]
+        },
+        {
+          "id": "DR-BROWSER_NETWORK_TUNNEL_METHODS",
+          "methods": [
+            "network.browserTunnel"
+          ]
+        },
+        {
+          "id": "DR-ORCHESTRATION_METHODS",
+          "methods": [
+            "orchestration.runCreate",
+            "orchestration.runUse",
+            "orchestration.runCurrent",
+            "orchestration.runList",
+            "orchestration.runShow",
+            "orchestration.workerStart",
+            "orchestration.workerShow",
+            "orchestration.workerRead",
+            "orchestration.workerAbandon",
+            "orchestration.workerStop",
+            "orchestration.workerRelease",
+            "orchestration.workerRetain",
+            "orchestration.workerList",
+            "orchestration.workerTerminalUserInput",
+            "orchestration.federationAttachStart",
+            "orchestration.federationPull",
+            "orchestration.federationAck",
+            "orchestration.federationImport",
+            "orchestration.federationShow",
+            "orchestration.federationRead",
+            "orchestration.federationReadOutput",
+            "orchestration.federationStop",
+            "orchestration.requestShow",
+            "orchestration.send",
+            "orchestration.check",
+            "orchestration.reply",
+            "orchestration.inbox",
+            "orchestration.taskCreate",
+            "orchestration.taskList",
+            "orchestration.taskUpdate",
+            "orchestration.dispatch",
+            "orchestration.dispatchShow",
+            "orchestration.ask",
+            "orchestration.run",
+            "orchestration.runStop",
+            "orchestration.gateCreate",
+            "orchestration.gateResolve",
+            "orchestration.gateList",
+            "orchestration.reset"
+          ]
+        },
+        {
+          "id": "DR-SESSION_TAB_METHODS",
+          "methods": [
+            "session.tabs.list",
+            "session.tabs.listAll",
+            "session.tabs.activate",
+            "session.tabs.move",
+            "session.tabs.updatePaneLayout",
+            "session.tabs.setTabProps",
+            "session.tabs.close",
+            "session.tabs.closeLifecycle",
+            "session.tabs.createTerminal",
+            "session.tabs.subscribe",
+            "session.tabs.unsubscribe",
+            "session.tabs.subscribeAll",
+            "session.tabs.unsubscribeAll",
+            "markdown.readTab",
+            "markdown.saveTab"
+          ]
+        },
+        {
+          "id": "DR-NATIVE_CHAT_METHODS",
+          "methods": [
+            "nativeChat.readSession",
+            "nativeChat.subscribe",
+            "nativeChat.unsubscribe"
+          ]
+        },
+        {
+          "id": "DR-CLIENT_EVENT_METHODS",
+          "methods": [
+            "runtime.clientEvents.subscribe",
+            "runtime.clientEvents.unsubscribe"
+          ]
+        },
+        {
+          "id": "DR-CLIENT_UI_METHODS",
+          "methods": [
+            "settings.get",
+            "settings.update",
+            "settings.getTerminalQuickCommands",
+            "settings.updateTerminalQuickCommands",
+            "settings.updatePRBotAuthorOverride",
+            "ui.get",
+            "ui.set",
+            "ui.recordFeatureInteraction"
+          ]
+        }
+      ],
+      "writeRoot": "docs/migration/audit-closure/e3-bridge/result-runtime"
+    },
+    {
+      "id": "integrations",
+      "contracts": [
+        {
+          "id": "DR-REPO_METHODS",
+          "methods": [
+            "repo.list",
+            "project.list",
+            "project.update",
+            "projectHostSetup.list",
+            "projectHostSetup.create",
+            "projectHostSetup.setupExistingFolder",
+            "projectHostSetup.clone",
+            "projectHostSetup.update",
+            "projectHostSetup.delete",
+            "projectGroup.list",
+            "projectGroup.create",
+            "projectGroup.update",
+            "projectGroup.delete",
+            "projectGroup.moveProject",
+            "folderWorkspace.list",
+            "folderWorkspace.create",
+            "drogonQuickSession.create",
+            "drogonQuickSession.restore",
+            "drogonQuickSession.promote",
+            "folderWorkspace.update",
+            "folderWorkspace.delete",
+            "folderWorkspace.getPathStatus",
+            "projectGroup.scanNested",
+            "projectGroup.importNested",
+            "repo.sparsePresets",
+            "repo.saveSparsePreset",
+            "repo.add",
+            "repo.create",
+            "repo.gitAvailable",
+            "repo.clone",
+            "repo.show",
+            "repo.update",
+            "repo.rm",
+            "repo.reorder",
+            "repo.setBaseRef",
+            "repo.baseRefDefault",
+            "repo.searchRefs",
+            "repo.hooks",
+            "repo.hooksCheck",
+            "repo.setupScriptImports",
+            "repo.issueCommandRead",
+            "repo.issueCommandWrite"
+          ]
+        },
+        {
+          "id": "DR-WORKTREE_METHODS",
+          "methods": [
+            "worktree.ps",
+            "worktree.list",
+            "worktree.listRetiredNames",
+            "worktree.detectedList",
+            "worktree.teardownMissingTerminals",
+            "worktree.lineageList",
+            "worktree.show",
+            "worktree.sleep",
+            "worktree.activate",
+            "worktree.create",
+            "worktree.prefetchCreateBase",
+            "worktree.set",
+            "worktree.persistSortOrder",
+            "worktree.resolvePrBase",
+            "worktree.resolveMrBase",
+            "worktree.rm",
+            "worktree.forceDeleteBranch"
+          ]
+        },
+        {
+          "id": "DR-FILE_METHODS",
+          "methods": [
+            "files.list",
+            "files.searchPaths",
+            "files.open",
+            "files.openDiff",
+            "files.read",
+            "files.readDocPreview",
+            "files.resolveTerminalPath",
+            "files.readTerminalArtifact",
+            "files.readTerminalArtifactPreview",
+            "files.writeTerminalArtifact",
+            "files.readPreview",
+            "files.readChunk",
+            "files.readDir",
+            "files.browseServerDir",
+            "files.write",
+            "files.writeBase64",
+            "files.writeBase64Chunk",
+            "files.createFile",
+            "files.createDir",
+            "files.createDirNoClobber",
+            "files.commitUpload",
+            "files.rename",
+            "files.copy",
+            "files.delete",
+            "files.search",
+            "files.listAll",
+            "files.listMarkdownDocuments",
+            "files.stat",
+            "files.watch",
+            "files.unwatch"
+          ]
+        },
+        {
+          "id": "DR-GIT_METHODS",
+          "methods": [
+            "git.status",
+            "git.checkIgnored",
+            "git.submoduleStatus",
+            "git.history",
+            "git.conflictOperation",
+            "git.abortMerge",
+            "git.abortRebase",
+            "git.checkout",
+            "git.localBranches",
+            "git.diff",
+            "git.branchDiff",
+            "git.commitDiff",
+            "git.branchCompare",
+            "git.commitCompare",
+            "git.upstreamStatus",
+            "git.fetch",
+            "git.forkSync",
+            "git.pull",
+            "git.fastForward",
+            "git.rebaseFromBase",
+            "git.push",
+            "git.commit",
+            "git.generateCommitMessage",
+            "git.discoverCommitMessageModels",
+            "git.cancelGenerateCommitMessage",
+            "git.generatePullRequestFields",
+            "git.cancelGeneratePullRequestFields",
+            "git.stage",
+            "git.bulkStage",
+            "git.unstage",
+            "git.bulkUnstage",
+            "git.discard",
+            "git.bulkDiscard",
+            "git.remoteFileUrl",
+            "git.remoteCommitUrl"
+          ]
+        },
+        {
+          "id": "DR-GITHUB_METHODS",
+          "methods": [
+            "github.repoSlug",
+            "github.repoUpstream",
+            "github.rateLimit",
+            "github.listWorkItems",
+            "github.listIssues",
+            "github.countWorkItems",
+            "github.listLabels",
+            "github.listAssignableUsers",
+            "github.workItem",
+            "github.workItemByOwnerRepo",
+            "github.workItemDetails",
+            "github.issue",
+            "github.createIssue",
+            "github.updateIssue",
+            "github.addIssueComment",
+            "github.prForBranch",
+            "github.prChecks",
+            "github.prCheckDetails",
+            "github.rerunPRChecks",
+            "github.prComments",
+            "github.setPRCommentReaction",
+            "github.prFileContents",
+            "github.resolveReviewThread",
+            "github.setPRFileViewed",
+            "github.updatePRTitle",
+            "github.updatePR",
+            "github.mergePR",
+            "github.setPRAutoMerge",
+            "github.updatePRState",
+            "github.markPRReadyForReview",
+            "github.requestPRReviewers",
+            "github.removePRReviewers",
+            "github.addPRReviewComment",
+            "github.addPRReviewCommentReply",
+            "github.project.listAccessible",
+            "github.project.listLabelsBySlug",
+            "github.project.listAssignableUsersBySlug",
+            "github.project.listIssueTypesBySlug",
+            "github.project.resolveRef",
+            "github.project.listViews",
+            "github.project.viewTable",
+            "github.project.workItemDetailsBySlug",
+            "github.project.updateItemField",
+            "github.project.clearItemField",
+            "github.project.updateIssueBySlug",
+            "github.project.updatePullRequestBySlug",
+            "github.project.updateIssueTypeBySlug",
+            "github.project.addIssueCommentBySlug",
+            "github.project.updateIssueCommentBySlug",
+            "github.project.deleteIssueCommentBySlug"
+          ]
+        },
+        {
+          "id": "DR-GITLAB_METHODS",
+          "methods": [
+            "gitlab.listMRs",
+            "gitlab.listWorkItems",
+            "gitlab.listIssues",
+            "gitlab.todos",
+            "gitlab.diagnoseAuth",
+            "gitlab.rateLimit",
+            "gitlab.listLabels",
+            "gitlab.createIssue",
+            "gitlab.updateIssue",
+            "gitlab.addIssueComment",
+            "gitlab.addMRComment",
+            "gitlab.addMRInlineComment",
+            "gitlab.resolveMRDiscussion",
+            "gitlab.jobTrace",
+            "gitlab.retryJob",
+            "gitlab.mergeMR",
+            "gitlab.updateMRState",
+            "gitlab.updateMR",
+            "gitlab.updateMRReviewers",
+            "gitlab.workItemDetails",
+            "gitlab.workItemByPath"
+          ]
+        },
+        {
+          "id": "DR-HOSTED_REVIEW_METHODS",
+          "methods": [
+            "hostedReview.forBranch",
+            "hostedReview.getCreationEligibility",
+            "hostedReview.create",
+            "hostedReview.createStacked"
+          ]
+        },
+        {
+          "id": "DR-LINEAR_METHODS",
+          "methods": [
+            "linear.connect",
+            "linear.disconnect",
+            "linear.selectWorkspace",
+            "linear.status",
+            "linear.testConnection",
+            "linear.searchIssues",
+            "linear.listIssues",
+            "linear.mcpListIssues",
+            "linear.createIssue",
+            "linear.getIssue",
+            "linear.updateIssue",
+            "linear.addIssueComment",
+            "linear.issueComments",
+            "linear.listTeams",
+            "linear.listProjects",
+            "linear.createProject",
+            "linear.getProject",
+            "linear.listProjectIssues",
+            "linear.listCustomViews",
+            "linear.getCustomView",
+            "linear.listCustomViewIssues",
+            "linear.listCustomViewProjects",
+            "linear.teamStates",
+            "linear.teamLabels",
+            "linear.teamMembers"
+          ]
+        },
+        {
+          "id": "DR-LINEAR_AGENT_ACCESS_METHODS",
+          "methods": [
+            "linear.saveIssue",
+            "linear.agentSearchIssues",
+            "linear.issueContext",
+            "linear.agentTeamList",
+            "linear.agentTeamMembers",
+            "linear.agentTeamStates",
+            "linear.agentTeamLabels",
+            "linear.agentIssueList",
+            "linear.agentProjectList",
+            "linear.resolveCurrentIssue",
+            "linear.issueSetState",
+            "linear.issueUpdateTask",
+            "linear.issueRelationWrite",
+            "linear.issueAddComment",
+            "linear.issueAttachLink",
+            "linear.issueCreate"
+          ]
+        },
+        {
+          "id": "DR-JIRA_METHODS",
+          "methods": [
+            "jira.connect",
+            "jira.disconnect",
+            "jira.selectSite",
+            "jira.status",
+            "jira.readStatus",
+            "jira.testConnection",
+            "jira.searchIssues",
+            "jira.listIssues",
+            "jira.getIssue",
+            "jira.lookupIssueSummary",
+            "jira.getIssueStream",
+            "jira.createIssue",
+            "jira.updateIssue",
+            "jira.addIssueComment",
+            "jira.issueComments",
+            "jira.issueCommentsStream",
+            "jira.listProjects",
+            "jira.listIssueTypes",
+            "jira.listCreateFields",
+            "jira.listPriorities",
+            "jira.listAssignableUsers",
+            "jira.searchUsers",
+            "jira.listTransitions",
+            "jira.getProjectStatusOrder"
+          ]
+        }
+      ],
+      "writeRoot": "docs/migration/audit-closure/e3-bridge/result-integrations"
+    },
+    {
+      "id": "platform",
+      "contracts": [
+        {
+          "id": "DR-AGENT_HOOK_METHODS",
+          "methods": [
+            "agentHooks.prepareCodexForWslPane"
+          ]
+        },
+        {
+          "id": "DR-AI_VAULT_METHODS",
+          "methods": [
+            "aiVault.resolveSessionTitles",
+            "aiVault.listSessions",
+            "aiVault.prepareSessionResume"
+          ]
+        },
+        {
+          "id": "DR-ARTIFACT_METHODS",
+          "methods": [
+            "artifacts.list",
+            "artifacts.getPublishedLink",
+            "artifacts.share",
+            "artifacts.publish",
+            "artifacts.update",
+            "artifacts.unshare",
+            "artifacts.delete"
+          ]
+        },
+        {
+          "id": "DR-AUTOMATION_METHODS",
+          "methods": [
+            "automation.list",
+            "automation.show",
+            "automation.create",
+            "automation.update",
+            "automation.delete",
+            "automation.runNow",
+            "automation.runs"
+          ]
+        },
+        {
+          "id": "DR-NOTIFICATION_METHODS",
+          "methods": [
+            "notifications.subscribe",
+            "notifications.unsubscribe",
+            "notifications.getMissedSince"
+          ]
+        },
+        {
+          "id": "DR-STATS_METHODS",
+          "methods": [
+            "stats.summary"
+          ]
+        },
+        {
+          "id": "DR-DIAGNOSTICS_METHODS",
+          "methods": [
+            "diagnostics.memory"
+          ]
+        },
+        {
+          "id": "DR-ACCOUNT_METHODS",
+          "methods": [
+            "accounts.list",
+            "accounts.selectClaude",
+            "accounts.selectCodex",
+            "accounts.selectCodexForTarget",
+            "accounts.consumeCodexResetCredit",
+            "accounts.removeClaude",
+            "accounts.removeCodex",
+            "accounts.addClaudeFromConfigDir",
+            "accounts.addCodexFromHome",
+            "accounts.subscribe",
+            "accounts.unsubscribe"
+          ]
+        },
+        {
+          "id": "DR-PREFLIGHT_METHODS",
+          "methods": [
+            "preflight.check",
+            "preflight.detectAgents",
+            "preflight.detectRemoteAgents",
+            "preflight.detectRemoteWindowsTerminalCapabilities",
+            "preflight.refreshAgents"
+          ]
+        },
+        {
+          "id": "DR-COMPUTER_METHODS",
+          "methods": [
+            "computer.capabilities",
+            "computer.listApps",
+            "computer.permissions",
+            "computer.permissionsStatus",
+            "computer.listWindows",
+            "computer.getAppState",
+            "computer.click",
+            "computer.performSecondaryAction",
+            "computer.scroll",
+            "computer.drag",
+            "computer.typeText",
+            "computer.pressKey",
+            "computer.hotkey",
+            "computer.pasteText",
+            "computer.setValue"
+          ]
+        },
+        {
+          "id": "DR-SSH_METHODS",
+          "methods": [
+            "ssh.getState",
+            "ssh.connect",
+            "ssh.listTargets",
+            "ssh.listTargetSummaries",
+            "ssh.listRemovedTargetLabels"
+          ]
+        },
+        {
+          "id": "DR-SPEECH_METHODS",
+          "methods": [
+            "speech.models.list",
+            "speech.models.download",
+            "speech.models.delete",
+            "speech.dictation.setup",
+            "speech.dictation.start",
+            "speech.dictation.chunk",
+            "speech.dictation.finish",
+            "speech.dictation.cancel"
+          ]
+        },
+        {
+          "id": "DR-WORKSPACE_PORT_METHODS",
+          "methods": [
+            "workspacePorts.scan",
+            "workspacePorts.kill"
+          ]
+        },
+        {
+          "id": "DR-PLUGIN_METHODS",
+          "methods": [
+            "plugins.list",
+            "plugins.consent",
+            "plugins.setEnabled",
+            "plugins.panelAction",
+            "plugins.readPanelEntry",
+            "plugins.invokeCommand"
+          ]
+        },
+        {
+          "id": "DR-SKILL_METHODS",
+          "methods": [
+            "skills.discover",
+            "skills.previewDelete",
+            "skills.delete",
+            "skills.share",
+            "skills.install",
+            "skills.installBundle",
+            "skills.cancelInstall",
+            "skills.getInstallProgress",
+            "skills.previewInstall",
+            "skills.removeInstall",
+            "skills.listManagedInstalls",
+            "skills.beginUpload",
+            "skills.uploadChunk",
+            "skills.commitUpload",
+            "skills.cancelUpload"
+          ]
+        },
+        {
+          "id": "DR-CLIPBOARD_METHODS",
+          "methods": [
+            "clipboard.saveImageAsTempFile",
+            "clipboard.startImageUpload",
+            "clipboard.appendImageUploadChunk",
+            "clipboard.commitImageUpload",
+            "clipboard.abortImageUpload"
+          ]
+        },
+        {
+          "id": "DR-HOST_CAPABILITY_METHODS",
+          "methods": [
+            "host.platform",
+            "host.wsl.isAvailable",
+            "host.wsl.listDistros",
+            "host.pwsh.isAvailable",
+            "host.gitBash.isAvailable"
+          ]
+        },
+        {
+          "id": "DR-RUNTIME_CLIENT_CAPABILITY_METHODS",
+          "methods": [
+            "runtime.clientCapabilities.update"
+          ]
+        },
+        {
+          "id": "DR-EMULATOR_METHODS",
+          "methods": [
+            "emulator.list",
+            "emulator.attach",
+            "emulator.tap",
+            "emulator.gesture",
+            "emulator.type",
+            "emulator.button",
+            "emulator.rotate",
+            "emulator.exec",
+            "emulator.kill",
+            "emulator.shutdown",
+            "emulator.listSimulators",
+            "emulator.availability",
+            "emulator.listDevices",
+            "emulator.install",
+            "emulator.launch",
+            "emulator.permissions",
+            "emulator.ax",
+            "emulator.logcat",
+            "emulator.unregisterActive"
+          ]
+        },
+        {
+          "id": "DR-PAIRING_METHODS",
+          "methods": [
+            "pairing.getEndpoints",
+            "pairing.provisionRelay"
+          ]
+        },
+        {
+          "id": "DR-UPDATER_METHODS",
+          "methods": [
+            "updater.getStatus",
+            "updater.check",
+            "updater.download",
+            "updater.install"
+          ]
+        }
+      ],
+      "writeRoot": "docs/migration/audit-closure/e3-bridge/result-platform"
+    }
+  ],
+  "excluded": {
+    "id": "DR-MENTU_METHODS",
+    "reason": "14 exact same-service methods already explicitly reused in owning report; preserve RPC schema/host coercion differences and execution gates."
+  }
+}
