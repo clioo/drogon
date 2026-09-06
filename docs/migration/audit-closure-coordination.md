@@ -10,6 +10,8 @@ This policy also appears in AGENTS.md. Historical launch/depth/progress checkpoi
 
 ## Current checkpoint — bounded Seti/Original provenance audit
 
+Superseding lifecycle: Seti Task delivered `msg_c4637dd7deb2`, then root officially released `ctx_a9bdf7c77130` (receipt `2df7550d-b9ce-4c67-8b75-8a2512520345`, retained/external_terminal/processAction none) before acknowledging `delivery_3e335424c63c`. No fresh Task or child remains assigned to this terminal. Independent root source acceptance, with the precise history-excerpt qualification and retained Ruby/publication obligations, is recorded in e5-seti-root-review.md. The launch paragraph below is historical; no actual Sol phase transition is claimed.
+
 2026-09-06: the user's audit-only Astra / implementation Sol policy above remains in force. Source audit is11/12 (91.7%, medium confidence); E5 remains open. Product parity and test migration are separate, unfinished gates. No Sol phase transition or publication approval is inferred from the pending questions.
 
 Fresh Task `task_6404c5c78cb5` / Dispatch `ctx_a9bdf7c77130` reuses the verified idle E5 Astra terminal `term_86e2b660-83d2-4440-811e-50467ae6fed8`. Start receipt `82ec50b7-a1f9-4ba2-81a9-a6a7a7b58439` confirms ready/input_accepted, existing worktree, no setup or residual resources. This is accepted task input, not task completion. Null model fields on an existing-terminal receipt do not establish a new model launch; the retained TUI was independently observed as gpt-6-astra high.
