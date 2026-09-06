@@ -1,5 +1,18 @@
 # Post-review corrections to the PR #3 Bot/Automation storage slice
 
+## Root integrated verification — 2026-09-06
+
+Corrections were committed as `1a812ed`; current main `b63719b` was merged
+without conflicts as `9af8515`. Root independently ran the combined Rust
+workspace: **368 passed, 0 failed, 1 ignored**. The ignored test is the
+marker-gated environment probe invoked by its parent test in an owned child,
+not an omitted product acceptance case. Workspace/all-target Clippy with
+`-D warnings`, rustfmt and diff checks passed. This combines PR2 provider
+records, PR4 native lifecycle and PR3 storage corrections; it does not prove
+Bot RPC, scheduling, desktop UX, SSH authority or complete product parity.
+
+The remainder below records the worker's earlier pre-integration checkpoint.
+
 Status: **root-directed depth-1 correction task complete; uncommitted in this
 worktree (commits/push remain root-owned)**. Base: root merged `main`
 (`2b6b163`) into candidate `6ae8ea2` with exact module-union resolution;
