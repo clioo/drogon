@@ -50,6 +50,23 @@ E4 delivered its 204-command S1 candidate in `msg_2068f05b9416`, not yet root-ac
 
 Root executed three unchanged original Activity React assertions with source-compatible dependencies; see `activity-portal-test-review.md` for retained results and limits. They correct the leaf's missing-test claim, not full renderer parity.
 
+### 06:36 UTC lifecycle and remaining handoffs
+
+Root read the actual E1 tool-result transcript: `worker-release --dispatch ctx_840482929375 --json` succeeded, receipt request `26298d3b-52c6-454c-9a19-c4fa7584b299`, state `retained`, reason `external_terminal`, processAction `none`. This satisfies cleanup accounting despite worker-show retaining `not_requested`; no manual close is authorized. The first child launch, execution, completion, lead review and safe release path are verified, not merely asserted by its parent.
+
+Nested inbox limitation: E1 reported `consumer_fenced` when checking root mail after binding its child Run. Root's explicit `send --to run:run_3d1c0573e82c` failed `run_not_found`. A bounded `terminal send` to the existing E1 handle delivered current-task guidance, which E1 acknowledged in `msg_0e5ad5bc3ed5`. No identity rebinding, run reset or depth bypass was used. This limitation is an orchestration migration test obligation; do not promise transparent nested mail.
+
+Completed E3/E5 deliveries were received, not semantically accepted. Their exact terminals were immediately reused, preserving all previous candidate files:
+
+| Area | New Task / Dispatch | Finite source-only follow-up |
+| --- | --- | --- |
+| E3 | `task_1875ceb5017c` / `ctx_ec50da0dfe3b` | Remaining original callback families excluding delivered Bots/Mentu21; `followup-remaining-callbacks.md/json` |
+| E5 | `task_a57a6176eeea` / `ctx_60f3ef7f9c21` | Listed 18 O3/O4/O5 install/build helper paths; `followup-install-build-boundaries.md/json` |
+
+Root independently checked E4 S1's 74 declared source-file hashes and E5 release-entrypoints' 64 against both pinned Git blobs and working bytes: no mismatches. This authenticates bounded bytes, not semantic claims or tests. Root review of both complete reports remains open.
+
+After verifying the depth-2 release receipt, root authorized one disjoint leaf for each active E2–E5 lead (not proof launched): E2 up to22 remaining shortcut handlers via Claude Sonnet5 medium; E3 Skills callback family via OpenCode Muse; E4 S5 formatters via OpenCode `alibaba-token-plan/deepseek-v4-flash-0731`; E5 O4 installation helpers via Claude Sonnet5 medium. Messages respectively `msg_da946dfc2d74`, `msg_128584005065`, `msg_9bcf6eb24424`, `msg_6f224cfc9ad2`. Existing-task scope and leaf-only write directories are explicit; leads must skip redundant spawning, review results and release children before completion. All remain audit-only. No acceptance percentage changes.
+
 ## Additional root source finding for E2-O01
 
 Mentu Navigator 1.1.1 successfully located the Settings toggle, and root read the actual rich-editor prop chain in the reference checkout. `TabGroupPanel.tsx:381` passes no annotation-enabled override; `EditorPanel.tsx:35` defaults `markdownAnnotationsEnabled` to true and forwards it at 389. `EditorPanelShell.tsx:165` and `EditorMarkdownFileSurface.tsx:119` propagate it to `RichMarkdownEditor`, whose independent default is false at 52 and whose review-controller call forwards the prop at 116. `useRichMarkdownReviewData.ts:43` derives permission from that prop and relative-path existence. `FloatingTerminalPanelSurface.tsx:296–300` explicitly sets the prop false. These paths are under `src/renderer/src/components/` in the read-only original.
