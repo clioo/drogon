@@ -1,0 +1,38 @@
+{
+  "capsuleId": "mac-build-compatibility",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "manifestSha256": "a55ca5b0be9000a4bef95020986cb95b659ad1329e9f2ee3d94c0c0c2c2fca17",
+  "entryTestFile": "config/scripts/mac-build-compatibility.test.mjs",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 2
+  },
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mac-build-compatibility-IYsqlk",
+  "staged": [
+    {
+      "path": "config/scripts/mac-build-compatibility.test.mjs",
+      "role": "test",
+      "sha256": "11bf3fa716151d588fe275daffa0633d2fd5687dfcf08e6e76ebad406c6a302e",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mac-build-compatibility-IYsqlk/config/scripts/mac-build-compatibility.test.mjs"
+    },
+    {
+      "path": "config/scripts/mac-build-compatibility.cjs",
+      "role": "module",
+      "sha256": "acc0613ecf2a0f40a721177be64fa54b9385371ea0a555f383543d8140d77e78",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mac-build-compatibility-IYsqlk/config/scripts/mac-build-compatibility.cjs"
+    },
+    {
+      "path": "src/shared/local-build-compatibility-contract.json",
+      "role": "module",
+      "sha256": "72db629cf8122a446ed8de8424707372650bf2adacf6f90af64374901299845a",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mac-build-compatibility-IYsqlk/src/shared/local-build-compatibility-contract.json"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mac-build-compatibility-IYsqlk/LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "capsules": [
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-shared-control-connection.json",
+      "approvedManifestSha256": "3d956ce0580d0bc3d62856eeb5724ddf319ead060b80d1b03ed21cc5246eecb0"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-shared-control-reconnect.json",
+      "approvedManifestSha256": "cf273060894ce506943f46840d96b9f710c3535adcd1408e628219ab6afc18dd"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-shared-control-socket-generation.json",
+      "approvedManifestSha256": "0f666e8770b5f4e7a5a57fccc727af5dac068971f4b4d765da11f660f23aebd1"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-socket-liveness.json",
+      "approvedManifestSha256": "933e32c8490b14f18ead835be323b3dfab92106bccd5a2eff3e6c5150807634b"
+    }
+  ]
+}

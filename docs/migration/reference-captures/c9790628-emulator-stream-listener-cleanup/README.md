@@ -1,0 +1,9 @@
+# Original emulator stream listener-cleanup baseline
+
+Three unchanged original cases passed on macOS arm64 with Node24.19.0 and Vitest4.1.11: exit0, no timeout, no failed/pending/todo cases. The original test uses its own Electron, MJPEG, video registry and diagnostic mocks; it exercises the real handler code and EventEmitter listeners, not a running Electron app or emulator.
+
+Source revision: `c97906287bb7a390b25e2025b600d9fb3c25d9c3`. Manifest: `tests/parity/baseline-capsules/emulator-stream-listener-cleanup.json`, SHA256 `b61d7c774e7f0c14915297020cd2209ee3d36f6079d6d5008d74596eb0f9affb`. Stage: `.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn`. The companion JSON records preserve actual runner results, stage receipt and individual assertion outcomes. All six source files and the MIT LICENSE matched their pinned Git blobs before execution.
+
+Scope: fifteen explicit start/stop cycles for frame and video listener cleanup, plus frame cleanup when its owner emits destroyed. No test asserts cross-owner stop rejection, real bytes/devices, UI rendering, remote wire, complete registry lifecycle or other platforms. In source, frame stop ignores the caller sender while video stop checks owner; these passing cases do not prove that asymmetry safe or reproduce a cross-owner failure. An adversarial migration test remains required.
+
+Original assertions, imports and mocks were not changed. Mock-target files are retained for resolution/provenance, not exercised as real transport implementations. The runner uses a reduced node configuration; differences and reviewed effects are declared in the manifest. `ORCA_EMULATOR_PROBE=0` was set only for this invocation. No model inference, dependency install, personal profile modification or product installation occurred. This is original baseline evidence, not Drogon parity or E3 closure.

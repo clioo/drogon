@@ -1,0 +1,38 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/main/bots/bot-reactive-dispatch.test.ts",
+  "sourceSha256": "ad6eddd2749c20af80665b57410ed67f3ae3776831bded290091cc0349e8a0a0",
+  "portPath": "tests/parity/ports/WP-CAP-BOTS/reactive-dispatch/bot-reactive-dispatch.contract.test.ts",
+  "portMethod": "literal assertions and original in-test boundary fakes; provenance header and import-only binding seam",
+  "sourceCases": 29,
+  "sourcePlainCases": 17,
+  "sourceTableRows": 12,
+  "sourceExpectCallSites": 56,
+  "sourceAssertionEvaluations": 92,
+  "binding": {
+    "status": "blocked_missing_candidate_interface",
+    "expectedPath": "apps/desktop/src/main/bots/bot-reactive-dispatch.ts",
+    "seam": "tests/parity/ports/WP-CAP-BOTS/reactive-dispatch/candidate-binding.ts",
+    "runnerResult": "setup_failed_not_behavioral_red"
+  },
+  "cases": [
+    {"id":"filtering","sourceLines":"144-164","assertionLines":[155,161,163],"assertionEvaluations":3,"portStatus":"preserved_blocked_binding"},
+    {"id":"invalid-config-table","sourceLines":"166-219","dataRows":12,"rowLabels":["null event","primitive event","null config","primitive config","non-boolean enabled","non-array mentions","empty repositoryIds","empty mentionHandles","mentionHandles that normalize to empty","mentionHandles that are only @/whitespace once trimmed","whitespace-only botId","whitespace-only eventId"],"assertionLines":[216,217,218],"assertionEvaluations":36,"portStatus":"preserved_blocked_binding"},
+    {"id":"mention-normalization","sourceLines":"221-235","assertionLines":[233,234],"assertionEvaluations":2,"portStatus":"preserved_blocked_binding"},
+    {"id":"deterministic-keying","sourceLines":"237-275","assertionLines":[270,271,272,273,274],"assertionEvaluations":5,"portStatus":"preserved_blocked_binding"},
+    {"id":"bot-isolation","sourceLines":"277-291","assertionLines":[288,289,290],"assertionEvaluations":3,"portStatus":"preserved_blocked_binding"},
+    {"id":"concurrent-dedupe","sourceLines":"293-315","assertionLines":[312,313,314],"assertionEvaluations":3,"portStatus":"preserved_blocked_binding"},
+    {"id":"admission-storage-failure","sourceLines":"317-331","assertionLines":[326,328,330],"assertionEvaluations":3,"portStatus":"preserved_blocked_binding"},
+    {"id":"pre-dispatch-storage-failure","sourceLines":"333-348","assertionLines":[342,344,345,347],"assertionEvaluations":4,"portStatus":"preserved_blocked_binding"},
+    {"id":"ambiguous-timeout-dedupe","sourceLines":"350-366","assertionLines":[357,359,361,364,365],"assertionEvaluations":5,"portStatus":"preserved_blocked_binding"},
+    {"id":"ambiguous-never-time-retried","sourceLines":"368-386","assertionLines":[379,384,385],"assertionEvaluations":3,"portStatus":"preserved_blocked_binding"},
+    {"id":"late-ack-ignored","sourceLines":"388-405","assertionLines":[395,402,403,404],"assertionEvaluations":4,"portStatus":"preserved_blocked_binding"},
+    {"id":"malformed-ack-ambiguous","sourceLines":"407-422","assertionLines":[416,418,419,420],"assertionEvaluations":4,"portStatus":"preserved_blocked_binding"},
+    {"id":"invalid-host-observation","sourceLines":"424-437","assertionLines":[436],"assertionEvaluations":1,"portStatus":"preserved_blocked_binding"},
+    {"id":"async-rejection-ambiguous","sourceLines":"439-455","assertionLines":[450,452,453],"assertionEvaluations":3,"portStatus":"preserved_blocked_binding"},
+    {"id":"sync-throw-ambiguous","sourceLines":"457-470","assertionLines":[466],"assertionEvaluations":1,"portStatus":"preserved_blocked_binding"},
+    {"id":"confirmed-evidence-storage-fallback","sourceLines":"472-491","assertionLines":[481,483,484,485,489,490],"assertionEvaluations":6,"portStatus":"preserved_blocked_binding"},
+    {"id":"invalid-timeout-overrides","sourceLines":"493-504","dataRows":4,"rowInputs":["0","-5","Number.NaN","Number.POSITIVE_INFINITY"],"assertionLines":[500],"assertionEvaluations":4,"portStatus":"preserved_blocked_binding"},
+    {"id":"default-timeout-bounds","sourceLines":"506-509","assertionLines":[507,508],"assertionEvaluations":2,"portStatus":"preserved_blocked_binding"}
+  ]
+}

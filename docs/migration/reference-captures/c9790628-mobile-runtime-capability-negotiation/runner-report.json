@@ -1,0 +1,97 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned pure-function capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "mobile-runtime-capability-negotiation",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "mobile/src/transport/mobile-runtime-capability-negotiation.test.ts",
+        "role": "test",
+        "sha256": "69c21857cafef210cc2827caa22b459f3dd4a95591c80334373e98f035ede108",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/mobile/src/transport/mobile-runtime-capability-negotiation.test.ts"
+      },
+      {
+        "path": "mobile/src/transport/mobile-runtime-capability-negotiation.ts",
+        "role": "module",
+        "sha256": "6720f223ccbdcc60a9e77fe7e151a3a7c7367a0bb88b1324b1792fb362ffa9cc",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/mobile/src/transport/mobile-runtime-capability-negotiation.ts"
+      },
+      {
+        "path": "mobile/src/transport/mobile-runtime-client-capabilities.ts",
+        "role": "module",
+        "sha256": "1e01dc5e2747863e0672bd04f0c5fa592d4b95ca7486c6d4420096c1bb675641",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/mobile/src/transport/mobile-runtime-client-capabilities.ts"
+      },
+      {
+        "path": "mobile/src/transport/rpc-delivery-ambiguity.ts",
+        "role": "module",
+        "sha256": "1a7405c363c2a12edc3349a5e569fb2643f40582e1ad6121529ff5cd56d37bd0",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/mobile/src/transport/rpc-delivery-ambiguity.ts"
+      },
+      {
+        "path": "src/shared/protocol-version.ts",
+        "role": "module",
+        "sha256": "e21f10647fe18df2b31e84c2a8d596c083e8ae52714829890969a1b65286803a",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/src/shared/protocol-version.ts"
+      },
+      {
+        "path": "src/shared/remote-runtime-client-capabilities.ts",
+        "role": "module",
+        "sha256": "f41ea998bdd4a3621f3f06eb1c11dd6b2c6678efe5808f93be1518a50eed938a",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/src/shared/remote-runtime-client-capabilities.ts"
+      },
+      {
+        "path": "src/shared/skill-install-capability.ts",
+        "role": "module",
+        "sha256": "4dae209e014524ad9bd1f72f8366a78f80720546d36e19adbc299d3d7da1ff19",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/src/shared/skill-install-capability.ts"
+      },
+      {
+        "path": "src/shared/remote-server-update.ts",
+        "role": "module",
+        "sha256": "c7384b964a0bfaa1573cd00761c5e2d29143c591cb1b4cd6ee1b0db464110d12",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/src/shared/remote-server-update.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-runtime-capability-negotiation-d2lLbZ/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "mobile/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Use the original repository root installed Vitest4.1.11 with Node24.19.0; mobile/node_modules/vitest is absent. No installation or source-tree writes.",
+    "Minimal node config omits mobile setupFiles (only sets IS_REACT_ACT_ENVIRONMENT=true), react-test-renderer warning filter, TSX inclusion and oxc.tsconfig=false. Reviewed closure has no React/TSX, app tsconfig or runtime aliases. No full mobile configuration or typecheck equivalence claimed."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "8454b3fc211d72cc12d948be7bca4cea0ddc9c33acefa8267f32907ef412629f",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 5,
+      "numPassedTests": 5,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 5
+    }
+  }
+}

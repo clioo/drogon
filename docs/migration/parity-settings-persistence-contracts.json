@@ -1,0 +1,186 @@
+{
+  "schema": "drogon.parity-settings-persistence/1",
+  "status": "coordinator-reviewed-bounded-source-contract",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "owners": [
+    "WP-UI-SETTINGS",
+    "WP-ENG-SHARED"
+  ],
+  "scope": "Central settings load/mutation/persistence and owner routing, not per-field UI closure of214 settings. Source/profile-preparation gap is characterized; full field routing remains open.",
+  "files": {
+    "src/main/persistence/loading-store/loaded-state-parsing.ts": "82fe4060fa4038dd9a5d13204b64928ebdaa3b6c1d37cf4c1cf88fde68de5864",
+    "src/main/persistence/loading-store/prepare-loaded-profile-settings.ts": "e047d597ffc9e0efb299d22188a376072c4dd0ca98377d127a28010fd5afc9bd",
+    "src/main/persistence/loading-store/normalize-loaded-global-settings.ts": "f8badd5a9ad46b3677853e4b436ce5f31791c045d85d9985f64e8437de651c95",
+    "src/main/persistence/applying-settings/settings-update.ts": "c69c90ef1ae327d0afa9aee1e45ee9eef601814564334b44b8b89a705396fbc8",
+    "src/main/ipc/settings.ts": "d44c465d544ae87f71a11408cdd63ce5b2f85e2983e4a286d73d3d4524c9af0f",
+    "src/renderer/src/store/slices/settings.ts": "3fd9d128652c7d99fd4b178944f92bb9cffa3d5be98d7e4861d8ccee4682201c",
+    "src/renderer/src/store/slices/worktree-visibility-settings-write.ts": "44461ef8db11c39876432ec49c8c8b658829ff1d43f30286558e4446fd4a368c",
+    "src/shared/host-setting-overrides.ts": "e4e2465afe0b3a313f258a195bda8b32543d99fbdc6ad209ae9dc1a583eebdec",
+    "src/main/persistence/loading-store/write-scheduling.ts": "65f03dad6518ab81d285fdfe079f7670b45742e71547a807c3d3edf122408d9f",
+    "src/main/persistence/loading-store/state-serialization-secret-handling.ts": "ad0fdb7a33a7bde4e2482002b8fb9a19a7d300a2f8f835b632f6a2ebcb82bf2c",
+    "src/main/persistence/loading-store/primary-state-writes.ts": "80c98e096d155fd6548460c1d77ee716adcb4fe75b4f4e47715504c76030d864",
+    "src/main/persistence/applying-settings/terminal-settings-migrations.ts": "7c555e2016d43d06c6f47ef10f8a1a4fd6d511f5fa328d188cf77243740450dc",
+    "src/main/durable-file-write.ts": "8a0c66965b690a8b710cd8fd60a5e5b82d8ff66867ea0f99d78589ca69a71aad",
+    "src/renderer/src/store/slices/runtime-switch-settings-persistence.test.ts": "8856ac6726b9b2b21c4933bd6ab8772feff0c251f30516565879cdd164620b76",
+    "src/main/persistence/loading-store/state-write-round-trip.test.ts": "eb8e5d56705e26263cbce9c1252c8f41b77ed9c3357307eeea789a65f045f748"
+  },
+  "contracts": [
+    {
+      "id": "SP01",
+      "title": "Load and recovery",
+      "source": {
+        "path": "src/main/persistence/loading-store/loaded-state-parsing.ts",
+        "line": 82,
+        "needle": "load(allowBackupRecovery = true)"
+      },
+      "contract": "Parse primary; decrypt protected slots with status handling; prepare terminal/profile settings then normalize state. On failure try a usable backup once via load(false), then defaults. Subsequent Bot/automation/folder/cohort migrations mark loadNeedsSave. GitHub cache is a sidecar; absent primary does not prove a fresh install when a backup exists.",
+      "verificationBoundary": "Actual corrupt-file/backup/secret-unavailable recovery and migrated disk readback remain required."
+    },
+    {
+      "id": "SP02",
+      "title": "Profile migration",
+      "source": {
+        "path": "src/main/persistence/loading-store/prepare-loaded-profile-settings.ts",
+        "line": 58,
+        "needle": "export function prepareLoadedProfileSettings("
+      },
+      "contract": "Preserve rollout markers and explicit opt-outs: activity requires prior rollout boundary, compact current value wins over legacy, cursor/right-click/primary-selection/Jira/agent/account defaults migrate with distinct stamps. Normalize notification/address/group settings and mark repairs for saving. Returned prepared data is not a disk write.",
+      "verificationBoundary": "Per-migration before/after/reload cases, Linux/Windows defaults and user opt-out preservation."
+    },
+    {
+      "id": "SP03",
+      "title": "Load merge",
+      "source": {
+        "path": "src/main/persistence/loading-store/normalize-loaded-global-settings.ts",
+        "line": 16,
+        "needle": "export function normalizeLoadedGlobalSettings("
+      },
+      "contract": "Defaults first, retired-stripped saved settings next, domain repairs last. Keep voice nested merge and current sourceControlAi projected into legacy commitMessageAi. False differs from absent: e.g. tray exact true; menu icon anything except false on load, with platform effect gated elsewhere.",
+      "verificationBoundary": "Do not replace this precedence with blanket defaults or a generic shallow deserializer."
+    },
+    {
+      "id": "SP04",
+      "title": "Mutation boundary",
+      "source": {
+        "path": "src/main/persistence/applying-settings/settings-update.ts",
+        "line": 52,
+        "needle": "export function updateSettings("
+      },
+      "contract": "Retired keys stripped; capability booleans exact true; domain normalizers and migration stamps applied; notification and telemetry siblings merged. Preserve workspace-layout history and sourceControlAi/legacy projection. Windows runtime reference change invalidates each distinct repo scan. scheduleSave precedes return; changed-key notification is opt-in and uses Object.is.",
+      "verificationBoundary": "Returned settings are in-memory acknowledgement, not durable commit. Scalar no-op differs from normalized object identity."
+    },
+    {
+      "id": "SP05",
+      "title": "Renderer authority",
+      "source": {
+        "path": "src/main/ipc/settings.ts",
+        "line": 49,
+        "needle": "function sanitizeRendererSettingsUpdate("
+      },
+      "contract": "Generic renderer settings cannot grant plugin consent/enablement, floating trusted directories or active-server preference. settings:set strips these; active server has a separate validated/resolved handler. Broadcast settings changes excludes origin window; synchronous read exists for PTY authority setup. Proxy, hooks, language/menu and appearance side effects follow their own conditions.",
+      "verificationBoundary": "Do not widen generic settings authority. This source trace does not execute hook/network/menu side effects."
+    },
+    {
+      "id": "SP06",
+      "title": "Renderer publication",
+      "source": {
+        "path": "src/renderer/src/store/slices/settings.ts",
+        "line": 135,
+        "needle": "async function persistSettingsUpdates("
+      },
+      "contract": "Normalize renderer updates before routing; updateSettings catches/logs persistence errors, updateSettingsOrThrow propagates them. Runtime switch probes compatibility before dedicated preference write; publication fencing prevents stale probe completion from persisting a prior switch. After persistence it hydrates selected host and refreshes catalog slices without clearing other hosts.",
+      "verificationBoundary": "The inspected overlapping-switch test asserts one persist call for env-b using mocked status/RPC, not actual SSH or disk."
+    },
+    {
+      "id": "SP07",
+      "title": "Owner-specific visibility",
+      "source": {
+        "path": "src/renderer/src/store/slices/worktree-visibility-settings-write.ts",
+        "line": 9,
+        "needle": "export async function persistVisibilityAwareSettings("
+      },
+      "contract": "For remote visibility change require advertised support, and separate source-default support; split local patch from owner RPC. Local patch may succeed before remote failure. On failure retain owner defaults while preserving applicable local changes and rethrow. Stale publication must not overwrite newly focused settings. Local/nonvisibility writes retain per-host default projection rules.",
+      "verificationBoundary": "Not an atomic multi-host transaction; never silently use client visibility defaults for unsupported server."
+    },
+    {
+      "id": "SP08",
+      "title": "Host overrides",
+      "source": {
+        "path": "src/shared/host-setting-overrides.ts",
+        "line": 39,
+        "needle": "export function getEffectiveHostSetting("
+      },
+      "contract": "Only displayLabel and defaultWorktreeLocation in this narrow map. Effective value is trimmed nonempty host override then client default. Empty override clears the key, removing host entry when empty. Updates preserve other hosts/keys; label lookup normalizes values.",
+      "verificationBoundary": "These client-side overrides are distinct from execution-owner visibility defaults. Actual UI associations remain separately owed."
+    },
+    {
+      "id": "SP09",
+      "title": "Debounced save",
+      "source": {
+        "path": "src/main/persistence/loading-store/write-scheduling.ts",
+        "line": 40,
+        "needle": "export function scheduleSave("
+      },
+      "contract": "Invalidate projection cache; no new scheduled write after quit flush begins. Bump generation and debounce 1s with 5s maximum pending-window delay, then enqueue. waitForPendingWrite awaits tracked pendingWrite and active view preference, not a future debounce timer.",
+      "verificationBoundary": "Delay is scheduling, not bounded durable completion. Do not treat a returned settings:update or pending-write wait as universal durability barrier."
+    },
+    {
+      "id": "SP10",
+      "title": "Serialization",
+      "source": {
+        "path": "src/main/persistence/loading-store/state-serialization-secret-handling.ts",
+        "line": 33,
+        "needle": "buildStateToSave():"
+      },
+      "contract": "Exclude cache from primary durable state, keep settings after retired-key strip, substitute protected slots with per-slot sentinels without mutating plaintext memory. Payload and stable guard hash differ; retention updates committed later by writer. Normalize redundant remote partition globals; preserve folder comments through relocation.",
+      "verificationBoundary": "No guarantee every setting is encrypted; native secure storage and degradation paths need separate tests. Round-trip test uses fake enc: encryption."
+    },
+    {
+      "id": "SP11",
+      "title": "Writer ordering",
+      "source": {
+        "path": "src/main/persistence/loading-store/primary-state-writes.ts",
+        "line": 138,
+        "needle": "export async function writeToDiskAsync("
+      },
+      "contract": "Serialize behind pending writes/snapshot work; writesFrozen returns without I/O. State-hash no-op skips rewrite. Async temp write/fsync precedes generation check and durable rename; recheck generation before hash/retention commit and backup rotation. Sync flush bumps generation, invalidates pending temp, may force rewrite, and rejects after final persistence starts.",
+      "verificationBoundary": "Real 14-case low-level baseline below is not a test of this whole scheduling/generation/backup controller."
+    },
+    {
+      "id": "SP12",
+      "title": "Retired and launch-default migration",
+      "source": {
+        "path": "src/main/persistence/applying-settings/terminal-settings-migrations.ts",
+        "line": 65,
+        "needle": "export function stripRetiredGlobalSettings("
+      },
+      "contract": "Strip only terminalScrollbackBytes, enableGitHubAttribution and showAgentsSidebar in this helper; do not infer all unknown keys must be dropped. Rows beat legacy bytes. Existing launch-default overrides win; already-migrated profiles get empty missing-agent args/env so newly added agents do not inherit automatic permissive defaults.",
+      "verificationBoundary": "Migration source data is preserved as a reference; no user-level launch default was changed in this audit."
+    },
+    {
+      "id": "SP13",
+      "title": "Filesystem primitive",
+      "source": {
+        "path": "src/main/durable-file-write.ts",
+        "line": 125,
+        "needle": "export async function writeFileDurableIfCurrent("
+      },
+      "contract": "File fsync before rename; directory fsync best-effort by actual platform. Async veto cleans temp without publishing; sync replacement uses Windows retry helper. Separate copy/stale-temp operations have their own contracts and are not exercised by the two selected suites.",
+      "verificationBoundary": "13 original byte/error tests +1 synchronous syscall-order test passed on macOS; no power-loss, concurrent reader, Windows retry or async syscall-order proof."
+    }
+  ],
+  "baselineEvidence": [
+    "reference-captures/c9790628-durable-file-write/README.md",
+    "reference-captures/c9790628-durable-file-write-syscall-proof/README.md"
+  ],
+  "unexecutedTestEvidence": [
+    {
+      "path": "src/renderer/src/store/slices/runtime-switch-settings-persistence.test.ts",
+      "scope": "One overlapping runtime switch test, stubbed transport; body read, not executed."
+    },
+    {
+      "path": "src/main/persistence/loading-store/state-write-round-trip.test.ts",
+      "scope": "One real Store temp-file round-trip test with mocked Electron safeStorage, local/remote partitions and second reload byte equality; body read, closure not executed."
+    }
+  ]
+}

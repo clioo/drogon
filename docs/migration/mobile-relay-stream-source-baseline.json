@@ -1,0 +1,135 @@
+{
+  "schema": "drogon.mobile-relay-stream-source-baseline/1",
+  "date": "2026-09-06",
+  "scope": "Six unchanged original S-M3 failure tests; no server cleanup, physical transport or rewritten-product parity.",
+  "report": {
+    "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned test capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+    "capsuleId": "mobile-relay-stream-failures",
+    "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj",
+    "stage": {
+      "ok": true,
+      "stagedFiles": [
+        {
+          "path": "mobile/src/transport/mobile-relay-rpc-streams.test.ts",
+          "role": "test",
+          "sha256": "6827d287fef5e1480e24da46ac3a1de7ae37c0398f41a4044db334ab35c84587",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj/mobile/src/transport/mobile-relay-rpc-streams.test.ts"
+        },
+        {
+          "path": "mobile/src/transport/mobile-relay-rpc-streams.ts",
+          "role": "module",
+          "sha256": "85cf8a7573a8613da0ecc36023fa4eac8a50c7d69ccf132fe927b5a798181478",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj/mobile/src/transport/mobile-relay-rpc-streams.ts"
+        },
+        {
+          "path": "mobile/src/transport/browser-screencast-protocol.ts",
+          "role": "module",
+          "sha256": "a46ddb6091b401eb4b7999c665a4e88bffebf43869cafe2eaf0b8a38057ca66d",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj/mobile/src/transport/browser-screencast-protocol.ts"
+        },
+        {
+          "path": "mobile/src/transport/rpc-client-terminal-binary-frame.ts",
+          "role": "module",
+          "sha256": "ebefb4a8dfb8c077d6c8c3998574cfd23a663e305dab1b3f42f5d83be4bfa214",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj/mobile/src/transport/rpc-client-terminal-binary-frame.ts"
+        },
+        {
+          "path": "mobile/src/transport/rpc-client-terminal-subscription.ts",
+          "role": "module",
+          "sha256": "cd8264d10eb8be9e6f0d8e390eef91f3bf4d8554406a17571728c01ba4ec8fa8",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj/mobile/src/transport/rpc-client-terminal-subscription.ts"
+        },
+        {
+          "path": "mobile/src/transport/terminal-stream-protocol.ts",
+          "role": "module",
+          "sha256": "4798024edb670617d9603e5468859a45392158fdab76a27d6929563ef33e06ad",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj/mobile/src/transport/terminal-stream-protocol.ts"
+        },
+        {
+          "path": "src/shared/native-chat-stream-unsubscribe.ts",
+          "role": "module",
+          "sha256": "5f2e9959a570730bba610107e07d0c40e47bdf4834b87fed6126ac85de2ef49b",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj/src/shared/native-chat-stream-unsubscribe.ts"
+        }
+      ],
+      "license": {
+        "path": "LICENSE",
+        "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj/LICENSE",
+        "spdxId": "MIT",
+        "copyright": "Copyright (c) 2026 Lovecast Inc."
+      }
+    },
+    "sourceVitestVersion": "4.1.11",
+    "sourceVitestConfigFile": "mobile/vitest.config.ts",
+    "sourceVitestConfigDifferences": [
+      "Use the already installed original-root Vitest4.1.11 with explicit Node24.19.0. No dependency installation or source-tree writes.",
+      "Minimal Node capsule omits mobile setupFiles (IS_REACT_ACT_ENVIRONMENT only), react-test-renderer warning filtering, broad TS/TSX collection and oxc.tsconfig=false. Closure has no React/TSX/app aliases and no tsconfig is staged. This is not whole-mobile config or typecheck equivalence.",
+      "All six original assertion bodies and seven runtime test/module files are unchanged; type-only imports are erased, not replaced with product stubs."
+    ],
+    "execution": {
+      "mode": "execute",
+      "ok": true,
+      "problems": [],
+      "approvedManifestSha256": "fa6101a3b7d7f47c28c1b379815af9c6100548fe6987b85e5c8db2ae1260dca2",
+      "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+      "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+      "timedOut": false,
+      "exitCode": 0,
+      "signal": null,
+      "testCounts": {
+        "numTotalTests": 6,
+        "numPassedTests": 6,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numTodoTests": 0,
+        "numFailedTestSuites": 0,
+        "success": true
+      },
+      "expectedTestCounts": {
+        "files": 1,
+        "tests": 6
+      }
+    }
+  },
+  "independentReview": {
+    "root": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/mobile-relay-stream-failures-skDVLj",
+    "stageReceiptSha256": "b91154627e58eb0d3f8e8e30e3256fa962ce0bd17c3b8acd26ee71f3836c74c1",
+    "resultsSha256": "74dc0c9cdc5332228e039ef5f7ef44aa1b8890e2476931b1598be601375fd1f9",
+    "manifestSha256": "fa6101a3b7d7f47c28c1b379815af9c6100548fe6987b85e5c8db2ae1260dca2",
+    "allStagedHashesVerified": true,
+    "assertions": [
+      {
+        "name": "MobileRelayRpcStreams failure parity emits an RPC failure exactly once before removing the stream",
+        "status": "passed"
+      },
+      {
+        "name": "MobileRelayRpcStreams failure parity emits a connection-wait rejection exactly once without sending or cancelling",
+        "status": "passed"
+      },
+      {
+        "name": "MobileRelayRpcStreams failure parity emits a send failure exactly once and fences cancellation and late frames",
+        "status": "passed"
+      },
+      {
+        "name": "MobileRelayRpcStreams failure parity does not emit a failure after the caller cancels a queued stream",
+        "status": "passed"
+      },
+      {
+        "name": "MobileRelayRpcStreams failure parity does not send or emit after session clear settles a connection wait",
+        "status": "passed"
+      },
+      {
+        "name": "MobileRelayRpcStreams failure parity removes a failed stream even when its listener throws",
+        "status": "passed"
+      }
+    ]
+  },
+  "limitations": [
+    "The last error-listener test does not exercise end-listener throwing.",
+    "No successful method-specific unsubscribe payload/receiver cleanup, direct/relay reconnect, auth or E2EE test ran.",
+    "Original mobile config/setup differences remain explicit. Full532 mobile files within9037 total allocation remain; these six cases are not a capability gate."
+  ]
+}

@@ -1,0 +1,232 @@
+{
+  "capsuleId": "eng-identity-source-lease",
+  "description": "Original lease-renewal suite with both tests and unchanged assertions.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRevisionNote": "The reviewed capsule runner verifies source HEAD and both working-tree and pinned-revision bytes before every stage; mismatch refuses execution.",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "entryTestFile": "src/main/runtime/agent-session-lease-renewal.test.ts",
+  "files": [
+    {
+      "path": "src/main/codex-accounts/fs-utils.ts",
+      "role": "module",
+      "sha256": "ea5d9302abdb02b48a09d204e3498edf2748aca508e2b0225f9a4995e1cb9cfe"
+    },
+    {
+      "path": "src/main/durable-file-write.ts",
+      "role": "module",
+      "sha256": "8a0c66965b690a8b710cd8fd60a5e5b82d8ff66867ea0f99d78589ca69a71aad"
+    },
+    {
+      "path": "src/main/runtime/agent-session-acquisition-failure-settlement.ts",
+      "role": "module",
+      "sha256": "4d077ef5eb3f4030e1fbd68cb4e07212b08cbf39f378e006de78e798f439a481"
+    },
+    {
+      "path": "src/main/runtime/agent-session-backup-recovery-fence.ts",
+      "role": "module",
+      "sha256": "70f53ee93f98cd4413a9e5c23efc63482e72cb59ef4d77d4fa2ee2917bced89c"
+    },
+    {
+      "path": "src/main/runtime/agent-session-lease-renewal.test.ts",
+      "role": "test",
+      "sha256": "901b96b322a1f040fe6dd037fd4ab0d12de9b6210ba982485a4c3800155d530d"
+    },
+    {
+      "path": "src/main/runtime/agent-session-lease-renewal.ts",
+      "role": "module",
+      "sha256": "fd45259b3a6269eed7c2641b4bcad12a20f20b617896934300fe0c1265ffa1a1"
+    },
+    {
+      "path": "src/main/runtime/agent-session-lease-transitions.ts",
+      "role": "module",
+      "sha256": "3713a2f2094dfd7837cde12924b07b627c5813bc918908432bc52739bc83bbaf"
+    },
+    {
+      "path": "src/main/runtime/agent-session-operation-admission.ts",
+      "role": "module",
+      "sha256": "c9bb639ab2a27cc87c2024e125408336ff0d73a15f18461e64e499c37c4162f1"
+    },
+    {
+      "path": "src/main/runtime/agent-session-processless-reservation.ts",
+      "role": "module",
+      "sha256": "fd122cfc0ef7cb4c6d5eee7726c621ae4f8c50ff1769333e6276fa28c275b367"
+    },
+    {
+      "path": "src/main/runtime/agent-session-reconciliation-target.ts",
+      "role": "module",
+      "sha256": "b7168ebd8c06852f8d46453553372527c655f5197f21d3b16739cf7040a6ce63"
+    },
+    {
+      "path": "src/main/runtime/agent-session-record-options.ts",
+      "role": "module",
+      "sha256": "dd11bebc9e29ce27e09ba37a394dddf882d687cb34938af7c8e44a67458af6ed"
+    },
+    {
+      "path": "src/main/runtime/agent-session-record-store-file.ts",
+      "role": "module",
+      "sha256": "51ce6a8e0450fbd12b2edbfc4bdb912d602f1693cb87a9906ba3a0294ce180f0"
+    },
+    {
+      "path": "src/main/runtime/agent-session-record-store-security.ts",
+      "role": "module",
+      "sha256": "99cfabc375e53fef557cf5032e211d2ad924d92e78a53ec7814f3a25c1d02814"
+    },
+    {
+      "path": "src/main/runtime/agent-session-record-store.ts",
+      "role": "module",
+      "sha256": "601b64eb322b52d0dd51d9627e15cbfe427f1b130f016df647de6e8709412edd"
+    },
+    {
+      "path": "src/main/runtime/agent-session-reservation-admission.ts",
+      "role": "module",
+      "sha256": "012456f1124e2f9f01542683ac6601da49530e1ce2a5d785fe83c6b2d4d9e3f8"
+    },
+    {
+      "path": "src/main/runtime/agent-session-restart-handoff-adjudication.ts",
+      "role": "module",
+      "sha256": "2879408fc55977b6d061d4bccd5c432202f5920246732c802c9e011e300b0701"
+    },
+    {
+      "path": "src/main/runtime/agent-session-restart-lease-transitions.ts",
+      "role": "module",
+      "sha256": "ba9bd9f292c22628e5a3239515fb240120d49e3dad2346b3df0e9089151acc48"
+    },
+    {
+      "path": "src/main/runtime/agent-session-restart-reconciliation.ts",
+      "role": "module",
+      "sha256": "15c0bd3109bad06d8a9de1619164822ce2bac40333754435790f82121130bfbd"
+    },
+    {
+      "path": "src/main/runtime/agent-session-store-serialization.ts",
+      "role": "module",
+      "sha256": "edc6b2abda20918b3625687c25a1b9e4d7dd5d99b5b17e6cd31c5baab4407be1"
+    },
+    {
+      "path": "src/main/runtime/agent-session-store-transaction-lock.ts",
+      "role": "module",
+      "sha256": "62f8d7b0575e4fb55badbe99c717d32c5d624d1a03d2562273d83b0418dd7830"
+    },
+    {
+      "path": "src/main/runtime/agent-session-store-transaction-queue.ts",
+      "role": "module",
+      "sha256": "5919575bf0d4778484203a94d313305717cbe83b30855b1a4b07ee75350d7031"
+    },
+    {
+      "path": "src/main/runtime/agent-session-visible-tab-index.ts",
+      "role": "module",
+      "sha256": "d1e2ec34b120d8b06dd1ad65b8766947ff0f917420248f7edaddc4d2312277c7"
+    },
+    {
+      "path": "src/main/win32-utils.ts",
+      "role": "module",
+      "sha256": "1ecfcf5f829617792a2b16615001aee4c888cc80c3e8156191378c4a57d637b6"
+    },
+    {
+      "path": "src/shared/agent-session-host-authority.ts",
+      "role": "module",
+      "sha256": "19e1b7435eca3e99209cd9ebbaa0270a74657a25bdc75e704f5eaea15643cc17"
+    },
+    {
+      "path": "src/shared/agent-session-lease-adjudication.ts",
+      "role": "module",
+      "sha256": "019eefb48160d17f045789125eb0bbd30655ba66f295ba26cf24aa9cd69c4e4b"
+    },
+    {
+      "path": "src/shared/agent-session-next-fence.ts",
+      "role": "module",
+      "sha256": "f19c2b859dd8217924c134e50372fc2b61951f217a977aa05664ada9447bf9de"
+    },
+    {
+      "path": "src/shared/agent-session-operation-ledger.ts",
+      "role": "module",
+      "sha256": "943dcf581e2674517e914302a1909b1a5f49a54b932467a58ad54315a8e1574e"
+    },
+    {
+      "path": "src/shared/agent-session-provider-handle.ts",
+      "role": "module",
+      "sha256": "418c5dfd36702716c26421b3b82e45903d98a00de683c0282304ad8d58cbb18b"
+    },
+    {
+      "path": "src/shared/agent-session-record.ts",
+      "role": "module",
+      "sha256": "c1b9ebaaa37c0263e72fb5aa3657015b645367901073f3cd349cad8983d2293c"
+    },
+    {
+      "path": "src/shared/agent-session-resume.ts",
+      "role": "module",
+      "sha256": "ebd386d6613f3d6251817039eff56c18e3bc4496dd6bd7cbc74322b9212442ae"
+    },
+    {
+      "path": "src/shared/node-file-content-equality.ts",
+      "role": "module",
+      "sha256": "1e8b91fa8afdcd9f05bfe7cddfcd148e3400429bfae2fcf8d563524b2d0b01e2"
+    },
+    {
+      "path": "src/shared/protocol-version.ts",
+      "role": "module",
+      "sha256": "e21f10647fe18df2b31e84c2a8d596c083e8ae52714829890969a1b65286803a"
+    },
+    {
+      "path": "src/shared/remote-server-update.ts",
+      "role": "module",
+      "sha256": "c7384b964a0bfaa1573cd00761c5e2d29143c591cb1b4cd6ee1b0db464110d12"
+    },
+    {
+      "path": "src/shared/skill-install-capability.ts",
+      "role": "module",
+      "sha256": "4dae209e014524ad9bd1f72f8366a78f80720546d36e19adbc299d3d7da1ff19"
+    },
+    {
+      "path": "src/shared/stable-pane-id.ts",
+      "role": "module",
+      "sha256": "0dfb20a173dc658229c46b7df4e36a443fee7089cffb79d76a74d8a92f41b884"
+    },
+    {
+      "path": "src/shared/terminal-surface-id.ts",
+      "role": "module",
+      "sha256": "7093584672a541e22c0094bfb0257f6bd8f83d4b23e1a5b077132da011f8f9da"
+    },
+    {
+      "path": "src/shared/terminal-tab-id.ts",
+      "role": "module",
+      "sha256": "3bf691ba305880a6d67f620d9ce671e5388e169c4783b1caf0d73fa589b5aa82"
+    },
+    {
+      "path": "src/shared/windows-batch-spawn.ts",
+      "role": "module",
+      "sha256": "ec71689e7efc8229f980ed853120d281fc47c1431831548b5bf7baa8cb13933d"
+    }
+  ],
+  "runtimeExternalImports": [
+    "node:child_process",
+    "node:crypto",
+    "node:fs",
+    "node:fs/promises",
+    "node:os",
+    "node:path",
+    "node:util",
+    "proper-lockfile",
+    "vitest"
+  ],
+  "dependencyClosureNote": "Runtime closure computed from the entry with source esbuild using bundle/write:false/platform:node/packages:external, then manually reviewed. It includes every first-party runtime-loaded module. The sole third-party product dependency is proper-lockfile@4.1.2 with graceful-fs@4.2.11, retry@0.12.0, and signal-exit@3.0.7; complete package-tree fingerprints are recorded in dependency-lock.json.",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 2
+  },
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigSha256": "19d14b8f028a84ff3401534c22f3241d4ed5695fea5c5df3a140ba2c9f3c0880",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "The capsule retains Node environment but intentionally omits the source-wide ORCA_FEATURE_WALL_ENABLED define because this closure does not reference it.",
+    "The capsule omits the source-wide happy-dom canvas, MutationObserver-retention, and host-port setup files because these runtime suites use no DOM, canvas, MutationObserver, or host ports.",
+    "The capsule omits source-wide --no-experimental-webstorage and --expose-gc worker flags because these suites observe neither Web Storage nor GC timing.",
+    "The capsule uses Vitest defaults instead of source-wide 60000ms hook and 30000ms test timeouts; execution remains bounded externally by the reviewed runner.",
+    "Execution explicitly uses the source-installed Vitest 4.1.11 entry module; no version substitution is admitted."
+  ],
+  "isolationRationale": "No provider/session/service calls. The tests create only test-owned os.tmpdir trees, chmod directories, create/remove proper-lockfile lock directories, write/fsync/rename agent-sessions.json plus backup/temp files, reopen those files, and remove all test trees in afterEach. proper-lockfile registers an exit cleanup listener at module load and uses short unref'd update timers while locks are held; every acquired lock is released in finally. Imported child-process/Windows helpers are definition-only on this Darwin run and are not invoked."
+}

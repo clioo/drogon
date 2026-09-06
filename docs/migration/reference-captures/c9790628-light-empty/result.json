@@ -1,0 +1,61 @@
+{
+  "fixture": "/private/tmp/drogon-ref-LAye2j",
+  "sourceSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "patchSha256": "fafa751661885cbd8782d38983d63670bd1428fd1a79974536ba9e299f838874",
+  "scope": "visual reference only; guarded keychain/CLI/hooks and loopback bind are not unmodified behavior evidence",
+  "env": {
+    "PATH": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "HOME": "/private/tmp/drogon-ref-LAye2j/home",
+    "USERPROFILE": "/private/tmp/drogon-ref-LAye2j/home",
+    "USER": "drogon-reference-fixture",
+    "LOGNAME": "drogon-reference-fixture",
+    "SHELL": "/bin/sh",
+    "TMPDIR": "/private/tmp/drogon-ref-LAye2j/tmp",
+    "XDG_CONFIG_HOME": "/private/tmp/drogon-ref-LAye2j/home/.config",
+    "XDG_CACHE_HOME": "/private/tmp/drogon-ref-LAye2j/home/.cache",
+    "XDG_DATA_HOME": "/private/tmp/drogon-ref-LAye2j/home/.local/share",
+    "CLAUDE_CONFIG_DIR": "/private/tmp/drogon-ref-LAye2j/home/.claude",
+    "CODEX_HOME": "/private/tmp/drogon-ref-LAye2j/home/.codex",
+    "NODE_ENV": "development",
+    "CI": "1",
+    "DO_NOT_TRACK": "1",
+    "ORCA_TELEMETRY_DISABLED": "1",
+    "ORCA_DIAGNOSTICS_DISABLED": "1",
+    "ORCA_E2E_USER_DATA_DIR": "/private/tmp/drogon-ref-LAye2j/profile",
+    "ORCA_E2E_HOME_DIR": "/private/tmp/drogon-ref-LAye2j/home",
+    "ORCA_E2E_HEADLESS": "1",
+    "ORCA_BACKGROUND_LAUNCH": "1",
+    "DROGON_REFERENCE_VISUAL_ONLY": "1",
+    "ORCA_BOOTSTRAP_FATAL_LOG": "/private/tmp/drogon-ref-LAye2j/bootstrap-fatal.log",
+    "LANG": "en_US.UTF-8"
+  },
+  "screenshots": [
+    {
+      "name": "01-first-window-light",
+      "path": "/private/tmp/drogon-ref-LAye2j/01-first-window-light.png",
+      "sha256": "e575fe910d1ce9ede244af50fbdf3b03e20177f8df1bbb8fae3e794efc5b2b1d"
+    },
+    {
+      "name": "02-bots-light",
+      "path": "/private/tmp/drogon-ref-LAye2j/02-bots-light.png",
+      "sha256": "df52d59262b5f4737ee630dc60e5a0e6da82eac15765ae9c311d72b835f7ce3d"
+    },
+    {
+      "name": "03-meetings-light",
+      "path": "/private/tmp/drogon-ref-LAye2j/03-meetings-light.png",
+      "sha256": "43efe02121dfcffc21db533bfdb1fd914e473d3e55f51e361025b5e55f42e66b"
+    }
+  ],
+  "startedAt": "2026-09-05T23:31:39.220Z",
+  "pid": 21297,
+  "paths": {
+    "home": "/private/tmp/drogon-ref-LAye2j/home",
+    "userData": "/private/tmp/drogon-ref-LAye2j/profile",
+    "appPath": "/Users/carlos/Documents/Drogon-rewrite/.preflight/reference-build-Z1ylje/source"
+  },
+  "initialText": "Drogon\nSearch\nSessions\nBots\nMeetings\nTasks\nAutomations\nDrogon Mobile\nNew\nProjects\nNo workspaces found",
+  "listeners": "COMMAND    PID   USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\nElectron 21297 carlos   21u  IPv4 0x3f4cc48af90ed4e2      0t0  TCP 127.0.0.1:62795 (LISTEN)\nElectron 21297 carlos   41u  IPv4 0xc1190a240b4c8a01      0t0  TCP 127.0.0.1:62799 (LISTEN)\nElectron 21297 carlos   77u  IPv4 0x23d12b3321a4eb99      0t0  TCP 127.0.0.1:62803 (LISTEN)\n",
+  "success": true,
+  "closed": true,
+  "endedAt": "2026-09-05T23:31:41.603Z"
+}

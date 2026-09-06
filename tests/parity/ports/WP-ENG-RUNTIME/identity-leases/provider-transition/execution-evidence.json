@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06",
+  "workPackage": "WP-ENG-RUNTIME",
+  "capsule": "identity-leases/provider-transition",
+  "sourceBaseline": {
+    "status": "NOT_ESTABLISHED_NOT_ADMITTED",
+    "excludedCommand": "cd /Users/carlos/Documents/Drogon-mentu-session && node_modules/.bin/vitest run src/main/runtime/agent-session-provider-handle-transition.test.ts --config config/vitest.config.ts --reporter=verbose",
+    "exclusionReason": "This command ran with the read-only reference checkout as process cwd, violating the AGENTS.md/sol-test-wave.md source-cwd restriction. It is excluded from accepted evidence; its previously reported result (exitCode 0, 1 file passed, 2 tests passed, ~158ms) must not be treated as an admitted source baseline.",
+    "observedSideEffect": "Parent observed the resulting ignored Vitest results cache inside the reference checkout at node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json, mtime 2026-09-06T08:47:49-0600. Recorded here as an observed fact only; not inspected or repaired by this leaf — no further contact with the reference checkout was made.",
+    "gitInspectionNote": "Git inspection (git rev-parse HEAD, git log -1, git status --short) was also performed against the reference checkout in the prior pass, despite being out of scope. That output is not treated as evidence anywhere in this file.",
+    "replacementBaseline": "none gathered; re-establishing the source baseline without touching the reference checkout is root/parent-owned"
+  },
+  "candidateRunner": {
+    "node": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "nodeVersion": "v24.19.0",
+    "vitestEntry": "apps/desktop/node_modules/vitest/vitest.mjs",
+    "vitestVersion": "5.0.0",
+    "platform": "darwin-arm64"
+  },
+  "commands": [
+    {
+      "suite": "agent-session-provider-handle-transition",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run --root tests/parity/ports/WP-ENG-RUNTIME/identity-leases/provider-transition src/main/runtime/agent-session-provider-handle-transition.test.ts --environment node --reporter dot",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "ERR_MODULE_NOT_FOUND: ../../shared/agent-session-record.test-fixture",
+      "classification": "blocked_binding_not_behavioral_red"
+    }
+  ],
+  "preservationVerification": [
+    { "suite": "agent-session-provider-handle-transition", "method": "byte comparison (sha256) against pinned source", "sourceSha256": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1", "portedSha256": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1", "match": true }
+  ],
+  "sourceBaselineReuse": {
+    "note": "No pre-existing reused baseline entry found in tests/parity/baseline-batches or tests/parity/baseline-capsules for this exact path. No source baseline is admitted by this leaf (see sourceBaseline.status above); the prior claim of a freshly reproduced baseline is retracted because the run that produced it violated the source-cwd restriction."
+  },
+  "verdict": "The one original suite (2 cases / 4 assertion evaluations) is frozen as a port artifact and its byte-identical preservation against the pinned manifest sha256 is valid evidence. Its candidate binding remains fully blocked (no product module exists in the rewrite for recordAgentSessionProviderHandle or its shared dependencies) — that blocked-binding collection evidence (commands[] above, run entirely inside this rewrite repo) stands. The source baseline is NOT established/admitted, and no Git operation performed by this leaf is treated as evidence."
+}

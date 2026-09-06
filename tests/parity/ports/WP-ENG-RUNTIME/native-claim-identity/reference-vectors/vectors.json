@@ -1,0 +1,389 @@
+{
+  "generator": "generate-vectors.mjs",
+  "generatorSource": "src/main/runtime/agent-session-claim-identity.ts",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "nodeVersion": "v24.19.0",
+  "keysAreTestOnly": true,
+  "vectors": [
+    {
+      "name": "codex-session-1-worktree-1",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "codex",
+      "sessionKey": "session_id",
+      "sessionId": "session-1",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "0mjTDTde0wIdOjkn0HlMs6J_A5lS_-VLM83SEM3LuWg",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "codex-session-1-worktree-2",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "codex",
+      "sessionKey": "session_id",
+      "sessionId": "session-1",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-2",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "0mjTDTde0wIdOjkn0HlMs6J_A5lS_-VLM83SEM3LuWg",
+      "expectedWorktreeScopeDigest": "71rsb69bD7N5po1Si2Nc0zLCEhDJsRH5BC5JLBKHgfc"
+    },
+    {
+      "name": "claude-transcript-ignored",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "claude",
+      "sessionKey": "session_id",
+      "sessionId": "claude-session",
+      "transcriptPath": "/home/u/.claude/projects/slug/real.jsonl",
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "_bYgyyQ27L4DWZg8M4WrLkxfpHgI-6mBbz7v-hdHAyo",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "gemini-session",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "gemini",
+      "sessionKey": "session_id",
+      "sessionId": "gemini-session",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "A-PcVNFBYLjIqyRRVY29u0pVhmxA2tca2nV-22rJd9w",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "antigravity-conversation",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "antigravity",
+      "sessionKey": "conversation_id",
+      "sessionId": "agy-conversation",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "Kgrx6ANs0j1o6jOCmxdp0HdZWdQuDOp3mplZQzr8pW0",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "opencode-session",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "opencode",
+      "sessionKey": "session_id",
+      "sessionId": "opencode-session",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "1Aij_Jgp_qQZYkdOiPVTmcTtNv9ty6FVG03ty0ECgpU",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "pi-transcript",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "pi",
+      "sessionKey": "session_id",
+      "sessionId": "pi-session",
+      "transcriptPath": "/data/pi/session.jsonl",
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "K1PeySc2DRd6_Gm6-aqWIiMTDdFSH6aGoqxpqedHPPw",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "prime-transcript",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "prime-agent",
+      "sessionKey": "session_id",
+      "sessionId": "prime-session-1",
+      "transcriptPath": "/data/prime/session.jsonl",
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "mlWYgeYhz5rKMehMLRVRs64KgCqrcd2cNWkJqrrvNkE",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "mimo-session",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "mimo-code",
+      "sessionKey": "session_id",
+      "sessionId": "mimo-session",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "SdooXQi6NYhHjJ9TNUiuTwgDHEc8Yyyt7eRZwOEmSwQ",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "droid-session",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "droid",
+      "sessionKey": "session_id",
+      "sessionId": "droid-session",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "DQ4Cd69-wnD6Ub1MalbrWiPFaqfHUgnIhMxDSETE6gs",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "grok-session",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "grok",
+      "sessionKey": "session_id",
+      "sessionId": "grok-session",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "dEG4TSVPMkrxdH-lNHuBNmMsMrV4pEQ0sA2mwyZDk2w",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "devin-session",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "devin",
+      "sessionKey": "session_id",
+      "sessionId": "devin-session",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "e50i9boX08TQX41zCuxVvn0YAHoA5x4uYQCX7LHnTMM",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "omp-session",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "omp",
+      "sessionKey": "session_id",
+      "sessionId": "omp-session",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "OecqCIGML3MR51UMuCsBaUWCjo6snyhFrzn9IvAfkLU",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "copilot-joined-resume",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "copilot",
+      "sessionKey": "session_id",
+      "sessionId": "940237d9-c712-48e8-bca1-fd75fc4a8d4b",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "QkgciBHW93XbgUV7YEL8ivA_jdoj4Vr95hlntkvgwMs",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "kimi-session",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "kimi",
+      "sessionKey": "session_id",
+      "sessionId": "session_431324d7-2165-42f0-9ecd-9f93437b3201",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "wlbP3HHs_bHYd-Voo52pfiMKAnt8xZPLXFAYg3EJ_kE",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "unicode-id",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "codex",
+      "sessionKey": "session_id",
+      "sessionId": "ses-ümlaut-会话-🚀",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "D9XwXmdctrxMBhsBd3ghrEIjsz-oPITZ4dePaYNHC-4",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "trimmed-id-normalized-form",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "codex",
+      "sessionKey": "session_id",
+      "sessionId": "padded-id",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "neezcz0h3_4HuSHskG1ibkdZQAeG7hpW9xK-Q6KCTUE",
+      "expectedWorktreeScopeDigest": "--gmVKDV8xQHjd5kD7RwQ1uI77E7XmAKKYrkpaWW75w"
+    },
+    {
+      "name": "other-authority-domain",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-2",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "codex",
+      "sessionKey": "session_id",
+      "sessionId": "session-1",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "QqfMCar0JMhJIjCrFjQUneKGfLsCRA18wveY4GGbdek",
+      "expectedWorktreeScopeDigest": "iir2pz6cbA9hYQiATnArtXuKrlB2Rj8BFT9mSvCl2xk"
+    },
+    {
+      "name": "other-principal",
+      "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "other-user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "codex",
+      "sessionKey": "session_id",
+      "sessionId": "session-1",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "Yw3NKWbEM2aRElRIu7JbT_",
+      "expectedIdentityDigest": "2yVy7Ml-6jn_nHUWRvzaoxtCEouWYEfnmXd66SX3mDA",
+      "expectedWorktreeScopeDigest": "9gvLg8-gyLpe8GYyI9trQC_jHmJlPbiKPf-wMBSevvg"
+    },
+    {
+      "name": "second-key",
+      "keyHex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "authorityDomainId": "profile-1",
+      "namespace": {
+        "machine": "machine",
+        "principal": "user",
+        "container": "native",
+        "providerRoot": "default"
+      },
+      "agent": "codex",
+      "sessionKey": "session_id",
+      "sessionId": "session-1",
+      "transcriptPath": null,
+      "canonicalWorktreeId": "worktree-1",
+      "expectedKeyId": "ctu3M2x2eAAj-D2kw1Xy7u",
+      "expectedIdentityDigest": "LRcLmw1ZMyt-XKyJHw9M4vSBDKzzYCKxZZYWnaS-7Pc",
+      "expectedWorktreeScopeDigest": "tCEFad7JWIeK-WCyffLQ77DWzFDJ7BhFoYDw3Cd0w_o"
+    }
+  ]
+}

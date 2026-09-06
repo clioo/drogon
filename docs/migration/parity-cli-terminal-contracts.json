@@ -1,0 +1,553 @@
+{
+  "schema": "drogon.parity-cli-terminal-contracts/2",
+  "status": "coordinator-reviewed-bounded-cli-contracts",
+  "disclaimer": "Static CLI-side characterization, corrected by coordinator body review. All 22 file hashes, exact 11-command cohort and 53 test declarations independently verified on Node24.19.0. No terminal command or original test in this cohort was executed. Empty errors arrays mean no additional handler-specific validation recorded, not absence of shared flag/selector/transport errors. Runtime-side behavior remains unproven.",
+  "source": {
+    "root": "/Users/carlos/Documents/Drogon-mentu-session",
+    "pinnedSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "verifiedHeadShaMatchesPinned": true,
+    "rewriteCheckout": "/Users/carlos/Documents/Drogon-rewrite",
+    "rewriteHead": "4fe379bd9d11f62f27755e9cd0a5b12771cf5c0e"
+  },
+  "scope": {
+    "selection": "every docs/migration/parity-source-contracts.json cli.specs[] entry with path[0]==='terminal' -- 11 canonical commands (one, 'terminal switch', carries an alias 'terminal focus' attached to the same row, not a separate command)",
+    "cohortCountExact": 11,
+    "previouslyAcceptedMetadataReused": [
+      "docs/migration/parity-source-contracts.json (cli.specs[] path/aliases/allowedFlags/source anchors for all 11 terminal commands -- reused verbatim, not re-censused)",
+      "docs/migration/parity-cli-argument-contract.json (global flag set, boolean-flag parsing, --flag=value / space-separated value rules -- reused, not re-derived)"
+    ],
+    "notRepeated": "The generic argv parser (equals-form, boolean-vs-string inference, positional binding) is characterized in parity-cli-argument-contract.json and is not re-explained per row here; only per-command REQUIRED/optional flags and any command-specific validation are recorded below."
+  },
+  "counts": {
+    "canonicalCommands": 11,
+    "sourceTests": {
+      "filesInvolved": 7,
+      "directDeclarations": 50,
+      "parameterizedTables": 1,
+      "parameterizedTableCases": 3,
+      "expandedStaticCases": 53,
+      "executed": 0,
+      "perFile": {
+        "src/cli/index-terminal-list-host-scope.test.ts": {
+          "direct": 3,
+          "tables": 0,
+          "expanded": 3
+        },
+        "src/cli/terminal-format-draft.test.ts": {
+          "direct": 1,
+          "tables": 0,
+          "expanded": 1
+        },
+        "src/cli/index-terminal-commands.test.ts": {
+          "direct": 18,
+          "tables": 0,
+          "expanded": 18
+        },
+        "src/cli/terminal-list-host-scope-format.test.ts": {
+          "direct": 5,
+          "tables": 0,
+          "expanded": 5
+        },
+        "src/cli/terminal-read-screen.test.ts": {
+          "direct": 6,
+          "tables": 0,
+          "expanded": 6
+        },
+        "src/cli/terminal-format.test.ts": {
+          "direct": 4,
+          "tables": 0,
+          "expanded": 4
+        },
+        "src/cli/handlers/terminal.test.ts": {
+          "direct": 13,
+          "tables": 1,
+          "tableCases": 3,
+          "expanded": 16
+        }
+      }
+    }
+  },
+  "globalContractReused": {
+    "globalFlags": "help, json, pairing-code, environment (src/shared/cli-argument-boundary.ts:1-2) -- always allowed regardless of a command's own allowedFlags",
+    "allTerminalCommandsAcceptJson": true
+  },
+  "rows": [
+    {
+      "command": "terminal list",
+      "aliases": [],
+      "flags": {
+        "required": [],
+        "optional": [
+          "worktree",
+          "limit",
+          "include-visual-layouts",
+          "json"
+        ]
+      },
+      "defaults": {
+        "worktree": "undefined (no filter) if omitted -- getOptionalWorktreeSelector does NOT auto-resolve cwd, unlike most other terminal commands (terminal.ts:97-105; selectors.ts:142-157)",
+        "includeVisualLayouts": "!json || flags.has('include-visual-layouts') -- true by default for human text output, false by default for --json unless explicitly requested (terminal.ts:103)"
+      },
+      "dispatch": "client.call('terminal.list', {worktree, limit, includeVisualLayouts}) then annotateOmittedHostScope(client, result.result) before printing (terminal.ts:97-107)",
+      "errors": [
+        "--limit must be a positive integer (flags.ts:77-88, getOptionalPositiveIntegerFlag)"
+      ],
+      "output": "JSON: RPC envelope after in-place omittedHostSelectors annotation when hostScope lists omitted hosts; not byte-for-byte raw server data. printResult serializes that envelope. Text includes the scope, records, optional visual layout and truncation; an empty list returns early with only 'No terminals listed.' and scope (terminal-format.ts:21-40).",
+      "hostScopeLiveness": "annotateOmittedHostScope/resolveOmittedHostScopeSelectors (omitted-host-scope-selectors.ts:38-59) resolves ONLY whether an omitted host is selectable from this machine (local pairing store + SSH-target registry lookup) -- source comment verbatim: 'this answers can I select it, never is it up -- no host is claimed live or exited on this path.' formatListingHostScope (terminal-format.ts:24, omitted-host-scope-selectors.ts:99-116) renders 'scope: unverifiable' when the host reports no scope at all, distinct from an empty covered list.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:96-108",
+        "src/cli/omitted-host-scope-selectors.ts:38-59,99-126",
+        "src/cli/terminal-format.ts:21-40"
+      ],
+      "testFiles": [
+        "src/cli/index-terminal-list-host-scope.test.ts",
+        "src/cli/terminal-list-host-scope-format.test.ts"
+      ]
+    },
+    {
+      "command": "terminal show",
+      "aliases": [],
+      "flags": {
+        "required": [],
+        "optional": [
+          "terminal",
+          "json"
+        ]
+      },
+      "defaults": {
+        "terminal": "active terminal in the resolved current worktree via getTerminalHandle -> client.call('terminal.resolveActive', {worktree}) when --terminal is omitted (selectors.ts:206-218)"
+      },
+      "dispatch": "client.call('terminal.show', {terminal})",
+      "errors": [],
+      "output": "JSON: full RPC envelope, unmodified. Text: formatTerminalShow (terminal-format.ts:96-112) prints handle/title/worktree/branch/leaf/ptyId/connected/writable/agentWait/preview; agentWait is rendered 'unknown (not evaluated)' when undefined, distinct from 'none'.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:109-114",
+        "src/cli/selectors.ts:206-218",
+        "src/cli/terminal-format.ts:96-122"
+      ],
+      "testFiles": []
+    },
+    {
+      "command": "terminal read",
+      "aliases": [],
+      "flags": {
+        "required": [],
+        "optional": [
+          "terminal",
+          "cursor",
+          "limit",
+          "screen",
+          "json"
+        ]
+      },
+      "defaults": {
+        "terminal": "active terminal via getTerminalHandle (same as `show`)"
+      },
+      "dispatch": "client.call('terminal.read', {terminal, cursor?, screen?, limit})",
+      "errors": [
+        "invalid_argument: '--cursor must be a non-negative integer' when --cursor is present but not /^\\d+$/ (terminal.ts:116-123)",
+        "invalid_argument: '--screen reads the current rendered screen...' when both --screen and --cursor are present -- mutually exclusive by design, source comment: 'a screen read is the current frame and has nothing behind it to page' (terminal.ts:124-132)",
+        "incompatible_runtime: when --screen was requested but result.terminal.source is undefined -- an older host silently answered with accumulated output instead of a screen read; the CLI refuses to return that silently rather than let it be mistaken for the requested screen (terminal.ts:139-147)",
+        "Shared --limit requires a positive integer. --cursor first uses optional-string parsing (empty becomes omitted); digits-only then parseInt has no safe-integer/finite bound in this handler. --screen checks source absence only, not an enum; screen-unavailable is rendered with an accumulated-output warning."
+      ],
+      "output": "JSON: full RPC envelope, unmodified. Text: formatTerminalRead (terminal-format.ts:124-150) prints handle/status/source/draft/cursor/oldestCursor/latestCursor, a 'truncated' warning, a limited-output warning (two variants depending on which cursors differ), a 'screen-unavailable' warning, then a blank line and terminal.tail lines. `draft` is explicitly UI-only composer text per the spec's own note field -- never terminal output.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:115-149",
+        "src/cli/terminal-format.ts:124-172"
+      ],
+      "testFiles": [
+        "src/cli/terminal-read-screen.test.ts",
+        "src/cli/terminal-format-draft.test.ts"
+      ]
+    },
+    {
+      "command": "terminal send",
+      "aliases": [],
+      "flags": {
+        "required": [],
+        "optional": [
+          "terminal",
+          "text",
+          "enter",
+          "interrupt",
+          "json"
+        ]
+      },
+      "defaults": {
+        "terminal": "active terminal via getTerminalHandle"
+      },
+      "dispatch": "client.call('terminal.send', {terminal, text, enter, interrupt, agentPrompt?, client:{id:'orca-cli',type:'desktop'}})",
+      "errors": [],
+      "exitBehavior": "process.exitCode=1 when !result.result.send.accepted (falsy, not strictly false), after printing the receipt; no throw in that branch.",
+      "output": "JSON: full RPC envelope, unmodified. Text: formatTerminalSend (terminal-format.ts:174-182) returns a structured refusal copy via structuredChatPtyWriteRefusalCopy(agentSessionRefusal, 'terminal-send') when result.send.agentSessionRefusal is set, else 'Sent <n> bytes to <handle>.'. `agentPrompt: true` is added to the RPC payload only when text && enter && !interrupt (terminal.ts:159) -- distinguishes a submitted agent prompt from a raw keystroke send.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:150-166",
+        "src/cli/terminal-format.ts:174-182"
+      ],
+      "testFiles": [
+        "src/cli/handlers/terminal.test.ts (describe: 'terminal send CLI')"
+      ]
+    },
+    {
+      "command": "terminal wait",
+      "aliases": [],
+      "flags": {
+        "required": [
+          "for"
+        ],
+        "optional": [
+          "terminal",
+          "timeout-ms",
+          "json"
+        ]
+      },
+      "defaults": {
+        "terminal": "active terminal via getTerminalHandle"
+      },
+      "dispatch": "client.call('terminal.wait', {terminal, for, timeoutMs}, {timeoutMs: <RPC transport timeout>}) -- note TWO distinct timeout concepts: the domain `timeoutMs` PARAM sent to the runtime (how long the WAIT CONDITION itself may take) vs the THIRD-ARGUMENT `timeoutMs` (the CLI<->runtime RPC transport's own timeout).",
+      "rpcTimeoutDefault": "Handler passes explicit transport timeout300000ms when domain timeout omitted, or requested positive timeoutMs+5000. Source comment mentions a historical generic15s cap, but inspected RuntimeClient constructor default is60000ms (runtime/client.ts:61-63). Do not treat that comment as the current generic default. Effective wire path beyond call(options) remains outside this slice.",
+      "errors": [
+        "invalid_argument: 'Missing required --for' when --for is absent (flags.ts:5-11, getRequiredStringFlag) -- --for is NOT validated against the 'exit|tui-idle' enum client-side; the spec's usage string documents the values, but the handler forwards whatever string --for holds to the runtime unchecked.",
+        "Shared getOptionalPositiveIntegerFlag validates --timeout-ms as finite positive integer; getRequiredStringFlag rejects absent or empty --for, without validating the condition enum."
+      ],
+      "exitBehavior": "process.exitCode = 1 when result.result.wait.satisfied === false (terminal.ts:181-185) -- source comment: 'callers commonly chain terminal wait && terminal send; a structured blocked result is still an unsatisfied wait condition.'",
+      "output": "JSON: full RPC envelope, unmodified. Text: formatTerminalWait (terminal-format.ts:229-241) prints handle/condition/satisfied/status/exitCode ('null' literal when absent), plus blockedReason when present.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:47-50,167-186",
+        "src/cli/terminal-format.ts:229-241"
+      ],
+      "testFiles": [
+        "src/cli/index-terminal-commands.test.ts (it: 'exits nonzero when terminal wait returns an unsatisfied blocked result')"
+      ]
+    },
+    {
+      "command": "terminal stop",
+      "aliases": [],
+      "hidden": true,
+      "destructive": false,
+      "flags": {
+        "required": [
+          "worktree"
+        ],
+        "optional": [
+          "json"
+        ]
+      },
+      "defaults": {},
+      "dispatch": "client.call('terminal.stop', {worktree}) -- worktree resolved via getRequiredWorktreeSelector, which DOES accept 'active'/'current' and resolves them via cwd (selectors.ts:159-171), but the --worktree flag itself is mandatory (no cwd auto-default when omitted entirely).",
+      "errors": [
+        "invalid_argument: 'Missing required --worktree' when omitted (flags.ts:5-11)"
+      ],
+      "deprecation": "Hidden compatibility spec recommends terminal close --worktree <selector> --all. This CLI handler still calls terminal.stop and formats its stopped count, without the CLI close handlers' verdict checks. Tab/layout/resume effects in terminal.stop's runtime implementation are untraced, not asserted absent.",
+      "output": "JSON: full RPC envelope, unmodified. Text: inline formatter '`Stopped ${value.stopped} terminals.`' (terminal.ts:191) -- no dedicated terminal-format.ts function.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:187-191",
+        "src/cli/specs/core.ts:241 (hidden:true, deprecation note)"
+      ],
+      "testFiles": [],
+      "destructiveRegistryNote": "The spec lacks a destructive property; census normalizes that absence to false. It is NOT a claim that stopping processes is nondestructive or authorized in an audit."
+    },
+    {
+      "command": "terminal rename",
+      "aliases": [],
+      "flags": {
+        "required": [],
+        "optional": [
+          "terminal",
+          "title",
+          "json"
+        ]
+      },
+      "defaults": {
+        "terminal": "active terminal via getTerminalHandle",
+        "title": "null when --title is omitted OR passed as an empty string -- getOptionalStringFlag treats '' the same as absent (flags.ts:24-30), so title:null is sent either way, which the RUNTIME (not the CLI) interprets as 'reset to the auto-generated title' per the spec's own note."
+      },
+      "dispatch": "client.call('terminal.rename', {terminal, title})",
+      "errors": [],
+      "output": "JSON: full RPC envelope, unmodified. Text: formatTerminalRename (terminal-format.ts:184-188) -- 'Renamed terminal <handle> to \"<title>\".' when result.rename.title is truthy, else 'Cleared title for terminal <handle>.'",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:193-199",
+        "src/cli/terminal-format.ts:184-188"
+      ],
+      "testFiles": []
+    },
+    {
+      "command": "terminal create",
+      "aliases": [],
+      "flags": {
+        "required": [],
+        "optional": [
+          "worktree",
+          "title",
+          "command",
+          "focus",
+          "json"
+        ]
+      },
+      "defaults": {
+        "worktree": "Guard first rejects remote client when flags.has('worktree') is false. Otherwise getBrowserWorktreeSelector resolves the value: 'all' or empty-string can yield undefined, including on remote; explicit active/current reject on remote; omitted local resolves cwd with catch-all fallback to undefined. No unconditional remote-omitted success path.",
+        "focus": "false (flags.get('focus') === true) -- terminal.ts:210"
+      },
+      "dispatch": "client.call('terminal.create', {worktree,command,title,focus,...(focus?{presentation:'focused'}:{}),...(useRendererBackedInteractiveTerminal?{rendererBacked:true,activate:focus}:{})}). presentation depends only on focus, including remote; rendererBacked/activate depend separately on the local interactive classifier.",
+      "localVsRemoteDispatch": "!client.isRemote && shouldUseRendererBackedInteractiveTerminal(command) decides whether to add rendererBacked:true+activate:focus (terminal.ts:208-209,220) -- this decision is NEVER made for a remote client (client.isRemote short-circuits it to false), regardless of the command string.",
+      "commandClassification": "shouldUseRendererBackedInteractiveTerminal (codex-command-classification.ts:288-307): tokenizes --command (max 32 leading shell words), strips a shell-launch prefix, takes the executable basename; if it's a Codex executable, returns true unless the tokens form a non-interactive Codex subcommand; if it's a Claude executable, returns true unless a later token is a help/version/print flag; otherwise false. Deeper tokenization/classification helper bodies (isCodexExecutable, isNonInteractiveCodexSubcommand, isClaudeExecutable, isClaudePrintFlag, stripShellLaunchPrefix) are named but not individually traced in this document -- bounded, untraced runtime behavior.",
+      "errors": [
+        "invalid_argument: 'Remote terminal create requires --worktree...' when client.isRemote && !flags.has('worktree') (terminal.ts:201-206)"
+      ],
+      "output": "JSON: full RPC envelope, unmodified. Text: formatTerminalCreate (terminal-format.ts:190-195) -- 'Created terminal <handle>' plus optional title/surface/warning suffixes.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:200-223",
+        "src/cli/selectors.ts:175-201",
+        "src/cli/codex-command-classification.ts:288-307",
+        "src/cli/terminal-format.ts:190-195"
+      ],
+      "testFiles": [
+        "src/cli/index-terminal-commands.test.ts (multiple: focus-through-create, Codex/Claude backgrounding, remote worktree requirement)"
+      ]
+    },
+    {
+      "command": "terminal switch",
+      "aliases": [
+        [
+          "terminal",
+          "focus"
+        ]
+      ],
+      "flags": {
+        "required": [],
+        "optional": [
+          "terminal",
+          "json"
+        ]
+      },
+      "defaults": {
+        "terminal": "active terminal via getTerminalHandle"
+      },
+      "dispatch": "shared terminalFocusHandler (terminal.ts:87-93): client.call('terminal.focus', {terminal, navigation:'host'}) -- 'navigation' is a fixed literal, not flag-derived.",
+      "aliasNote": "'terminal focus' resolves to canonical 'terminal switch' via CommandSpec.aliases BEFORE dispatch (source comment at terminal.ts:224 confirms this verbatim); TERMINAL_HANDLERS has exactly one entry ('terminal switch') for both surface names -- there is no separate 'terminal focus' handler key.",
+      "errors": [],
+      "output": "JSON: full RPC envelope, unmodified. Text: formatTerminalFocus (terminal-format.ts:201-206) -- 'Focused terminal <handle> (tab <tabId>).' or, when result.focus.navigated===false, 'Focus request for terminal <handle> was superseded or host navigation was skipped (tab <tabId>).'",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:87-93,224-225",
+        "src/cli/terminal-format.ts:201-206"
+      ],
+      "testFiles": []
+    },
+    {
+      "command": "terminal close",
+      "aliases": [],
+      "flags": {
+        "required": [],
+        "optional": [
+          "terminal",
+          "tab",
+          "worktree",
+          "all",
+          "json"
+        ]
+      },
+      "defaults": {
+        "terminal": "active terminal via getTerminalHandle, ONLY reached in the non---all branch"
+      },
+      "dispatch": "Three possible RPC method names in two branches: --all => terminal.closeAll({worktree:required}); otherwise --tab => terminal.closeTab({terminal}), else terminal.close({terminal}).",
+      "errors": [
+        "invalid_argument: '--all uses --worktree and cannot be combined with --terminal or --tab' when --all is set together with --terminal or --tab (terminal.ts:227-233)",
+        "invalid_argument: 'Closing a workspace requires --all: terminal close --worktree <selector> --all' when --worktree is given WITHOUT --all (terminal.ts:261-266)",
+        "incompatible_runtime: 'This Orca host does not support closing every terminal in a workspace yet...' when the --all RPC call itself fails with method_not_found (terminal.ts:251-258) -- re-thrown as a clearer error, not swallowed."
+      ],
+      "livenessVerdictHandling": "Single close: no CLI failure when ptyKilled truthy OR ptyStopVerdict===undefined; otherwise live -> terminal_stop_live, any other supplied value -> terminal_stop_unverifiable. Bulk close: no CLI failure when !ptyStopVerdict; otherwise live -> terminal_stop_live, other truthy verdict -> terminal_stop_unverifiable. The bulk helper has NO ptyKilled shortcut. Missing legacy verdict yields a non-failing CLI receipt, not positive evidence of death.",
+      "exitBehavior": "Failure sets exitCode=1. Bulk always calls reportCliError(failure,json), hence text goes to stderr as an error; single close uses reportCliError only for JSON and prints formatTerminalClose for text. Tab-mode text returns 'Closed terminal tab...' before the PTY suffix helper, so do not promise a warning suffix there.",
+      "output": "JSON success envelope is printed; classified failures become local error envelope retaining close receipt in error.data. Bulk success text gives closed/stopped counts. Single formatTerminalClose returns tab-only text when closeMode==='tab'; otherwise confirmed ptyKilled adds 'PTY killed.', literal live/unverifiable add their warnings, undefined/other values add no suffix. CLI success without a verdict is not verified death.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:53-85,226-286",
+        "src/cli/terminal-format.ts:208-227",
+        "src/shared/pty-liveness-verdict.ts"
+      ],
+      "testFiles": [
+        "src/cli/handlers/terminal.test.ts (describe: 'terminal close CLI', incl. it.each 'rejects ambiguous bulk-close flags' [3 cases], 'fails safely before mutation when the host predates bulk close')"
+      ]
+    },
+    {
+      "command": "terminal split",
+      "aliases": [],
+      "flags": {
+        "required": [],
+        "optional": [
+          "terminal",
+          "direction",
+          "command",
+          "json"
+        ]
+      },
+      "defaults": {
+        "terminal": "active terminal via getTerminalHandle"
+      },
+      "dispatch": "client.call('terminal.split', {terminal, direction, command})",
+      "errors": [
+        "invalid_argument: '--direction must be horizontal or vertical' when --direction is present and matches neither literal exactly (terminal.ts:288-295) -- client-side enum validation, unlike terminal wait's --for."
+      ],
+      "output": "JSON: full RPC envelope, unmodified. Text: formatTerminalSplit (terminal-format.ts:197-199) -- 'Split pane <handle> in tab <tabId>'.",
+      "sourceAnchors": [
+        "src/cli/handlers/terminal.ts:287-301",
+        "src/cli/terminal-format.ts:197-199"
+      ],
+      "testFiles": []
+    }
+  ],
+  "sharedHelperContracts": {
+    "getTerminalHandle (src/cli/selectors.ts:206-218)": "Used by show/read/send/wait/rename/switch/split/close(non---all). Returns the EXPLICIT --terminal value verbatim if present; otherwise resolves the worktree via getBrowserWorktreeSelector and calls client.call('terminal.resolveActive', {worktree}) to get the active terminal's handle for that worktree. This is the single default-resolution path shared by 8 of the 11 commands.",
+    "getBrowserWorktreeSelector (src/cli/selectors.ts:175-201)": "Directly used by create and indirectly by8 handle-resolving commands. all -> undefined; active/current require local client and resolve enclosing worktree; other explicit selectors pass through caller-WSL normalization. Omitted remote -> undefined. Omitted local attempts cwd resolution but catches EVERY error (including failed worktree.list), not only selector_not_found. That fallback behavior is source parity, not evidence of healthy host.",
+    "getRequiredWorktreeSelector / getOptionalWorktreeSelector (selectors.ts:142-171)": "Required by stop and close --all, optional by list. active/current require local and resolve cwd; other values normalize. Omitted required throws Missing required --worktree; omitted optional returns undefined. These helpers do not special-case 'all' like getBrowserWorktreeSelector.",
+    "client.call(method, params, opts?) (src/cli/runtime/client.ts:87-...)": "isRemote getter (client.ts:83-85) is true iff a remote pairing was resolved from userDataPath/pairingCode/environmentSelector at client construction; this is the ONLY local-vs-remote branch point visible at the terminal-handler layer (client.isRemote checked directly in terminal.ts for terminal create, and indirectly via the selector helpers above). When isRemote, call() routes through a lazily-loaded WebSocket transport (client.ts:118-124); the local (non-remote) dispatch path, full SSH host-resolution mechanics, and the generic RPC transport timeout/retry machinery are NOT traced further in this document -- named as bounded, untraced runtime infrastructure shared across all CLI domains, not specific to terminal commands.",
+    "printResult / prepareComputerCliJsonResult (src/cli/format.ts:74-84, src/cli/computer-format.ts:57-69)": "JSON serializes prepareComputerCliJsonResult(response). Its early return preserves responses without result.screenshotStatus. Terminal list has already annotated omittedHostSelectors in place. Close failure bypasses success printing. Therefore this is envelope-shaped JSON, not a universal raw-server-verbatim guarantee.",
+    "reportCliError (src/cli/format.ts:132-...)": "Bulk liveness failure always uses reportCliError: JSON envelope or text stderr. Single close failure uses this for JSON only and formatTerminalClose for text. Both set nonzero exitCode. reportCliError itself does not run the single-close text formatter."
+  },
+  "fileHashesSha256": {
+    "src/cli/handlers/terminal.ts": {
+      "lines": 303,
+      "sha256": "99c5afe117d0a079b6e4d08c2e6a9c044683bc9a18e1aa8892208ccf2ed58d62"
+    },
+    "src/cli/handlers/terminal.test.ts": {
+      "lines": 363,
+      "sha256": "106f621279b8823237d6a92abc0b997360295ad5eb639e02c07eb349f511418f"
+    },
+    "src/cli/specs/terminal-close.ts": {
+      "lines": 21,
+      "sha256": "376f6957489edab19b30cc1545a8a13dfb6519ed8ec5b8beeaeeef41dda27373"
+    },
+    "src/cli/specs/core.ts": {
+      "lines": 301,
+      "sha256": "597b60b31db62ddb83358059e76f8abc43b0c9faacb97ed9ab9c13565c25dacf"
+    },
+    "src/cli/selectors.ts": {
+      "lines": 325,
+      "sha256": "c3627f26f9bb2c2ed21ca7854869517ecc4c113e6f7ecea3e34888461c1a0cc5"
+    },
+    "src/cli/flags.ts": {
+      "lines": 138,
+      "sha256": "c7bf17b2fafbd379b4de4a1353b2ed934eb3ef0482df14a3ad25e11afbabcb83"
+    },
+    "src/cli/format.ts": {
+      "lines": 256,
+      "sha256": "a4ba264d88340fc580c35c691f7f04ffdc7a72e1a3095432340aa49745d9fe43"
+    },
+    "src/cli/computer-format.ts": {
+      "lines": 321,
+      "sha256": "cd26b0993398d11d489519465d17c9bab7197b39f7a214ed215907a4eec12ae3"
+    },
+    "src/cli/terminal-format.ts": {
+      "lines": 241,
+      "sha256": "30b3fc671f3d57c48b911130c32c4937ac78aa8893ff66aa80b060fc57ef65e3"
+    },
+    "src/cli/omitted-host-scope-selectors.ts": {
+      "lines": 126,
+      "sha256": "f7ff764140a9c2a21b3641765ea5f49a1d774303cb8f80402b2aa06a89555ec3"
+    },
+    "src/cli/runtime-client.ts": {
+      "lines": 14,
+      "sha256": "d3adc4b381983f4816f83faf489d503f6790e469cb621ccbd396a6f43839ef02"
+    },
+    "src/cli/runtime/client.ts": {
+      "lines": 325,
+      "sha256": "74c546a02194b46c697cec8c06f2db4f3e77f44c6d60f60cc90c526c46b37367"
+    },
+    "src/cli/codex-command-classification.ts": {
+      "lines": 307,
+      "sha256": "1d0aa9a5051694b5d8efaa2a2ebfa851abb0b1532129138cd7e5f793866d6e89"
+    },
+    "src/cli/args.ts": {
+      "lines": 263,
+      "sha256": "3d6362e8910aa57796a0d2bdce2acd7cdf8e3bb69a710235c7364158381e8e77"
+    },
+    "src/shared/cli-argument-boundary.ts": {
+      "lines": 96,
+      "sha256": "ea0e0bd3c21b26c6506ee8b9d636874cd329783275d3139a50fe3bc7a7fcea01"
+    },
+    "src/shared/pty-liveness-verdict.ts": {
+      "lines": 34,
+      "sha256": "f56a5f48829cfe498c920333dd18229f1eb89692665e0f668628a0fb8cec420f"
+    },
+    "src/cli/index-terminal-list-host-scope.test.ts": {
+      "lines": 131,
+      "sha256": "593400f4fcaaac4a85d4ae947b630f728889a50856f594dd1b4a01fc571a3090"
+    },
+    "src/cli/terminal-format-draft.test.ts": {
+      "lines": 21,
+      "sha256": "203e5a93bfdd989f4cd238d2c219b03a8c55814768855352661123d95fe3a2ef"
+    },
+    "src/cli/index-terminal-commands.test.ts": {
+      "lines": 663,
+      "sha256": "21ea2104cc0e8854e382ed86c58f78941ab47e43d47b6dcc51ea34c530bcb0ad"
+    },
+    "src/cli/terminal-list-host-scope-format.test.ts": {
+      "lines": 76,
+      "sha256": "48a9a60e4958b1112da140eca88e62969818811b7d8ba5286b226ea7e518d94f"
+    },
+    "src/cli/terminal-read-screen.test.ts": {
+      "lines": 155,
+      "sha256": "f8de895b38c8b7745e3639cef47a45a9a84e0f537a3de33e25a02b493c186146"
+    },
+    "src/cli/terminal-format.test.ts": {
+      "lines": 61,
+      "sha256": "ae8305abe969bb11118cdbf4f0ab535a23ba0fb98bf266c709d059cf5b846ef3"
+    }
+  },
+  "crossValidation": {
+    "hashesIndependentlyVerifiedAgainstAcceptedMetadata": [
+      {
+        "path": "src/cli/specs/core.ts",
+        "acceptedIn": "docs/migration/parity-source-contracts.json (cli.specs[].source)",
+        "matched": true
+      },
+      {
+        "path": "src/cli/specs/terminal-close.ts",
+        "acceptedIn": "docs/migration/parity-source-contracts.json (cli.specs[].source)",
+        "matched": true
+      },
+      {
+        "path": "src/cli/args.ts",
+        "acceptedIn": "docs/migration/parity-cli-argument-contract.json (scope.filesRead)",
+        "matched": true
+      },
+      {
+        "path": "src/shared/cli-argument-boundary.ts",
+        "acceptedIn": "docs/migration/parity-cli-argument-contract.json (scope.filesRead)",
+        "matched": true
+      }
+    ]
+  },
+  "genuineUnknowns": [
+    "Full local (non-remote) RPC dispatch path inside client.call and the SSH host-resolution/ownership mechanics beyond what selectors/omitted-host-scope-selectors expose are shared, cross-domain runtime infrastructure -- not traced in this terminal-only slice.",
+    "codex-command-classification.ts's deeper helpers (isCodexExecutable, isNonInteractiveCodexSubcommand, isClaudeExecutable, isClaudePrintFlag, tokenizeLeadingShellWords, stripShellLaunchPrefix) were named at their call site but their own bodies were not individually read -- shouldUseRendererBackedInteractiveTerminal's OWN body (lines 288-307) was read in full.",
+    "The runtime-side (main process / native host) implementations of terminal.list/show/read/send/wait/stop/create/focus/close/closeTab/closeAll/split/resolveActive are outside src/cli and outside this document's scope entirely -- only the CLI-side request shape and CLI-side response handling are characterized."
+  ],
+  "coordinatorReview": {
+    "sourceHead": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "fullBodyReads": [
+      "src/cli/handlers/terminal.ts",
+      "src/cli/terminal-format.ts",
+      "src/cli/flags.ts",
+      "src/cli/omitted-host-scope-selectors.ts",
+      "src/shared/pty-liveness-verdict.ts",
+      "src/cli/specs/terminal-close.ts"
+    ],
+    "boundedReads": [
+      "selectors.ts:1-218",
+      "format.ts:74-84,132-158",
+      "computer-format.ts:57-76",
+      "runtime/client.ts:25-132",
+      "codex-command-classification.ts:288-307",
+      "specs/core.ts:188-301"
+    ],
+    "independentChecks": {
+      "sourceHashes": 22,
+      "canonicalCommands": 11,
+      "testFiles": 7,
+      "directDeclarations": 50,
+      "tableRows": 3,
+      "expandedStaticCases": 53,
+      "executed": 0
+    }
+  },
+  "livenessAndHostOwnershipInvariant": "Process verdict vocabulary remains live/unverifiable/exited. These close receipt handlers use failure hints live/unverifiable, not a full liveness classifier; missing verdict can pass for older hosts without confirming death. Single and bulk guards differ. Formatter emits a killed suffix only for truthy ptyKilled outside tab mode; it warns only for literal live/unverifiable. Remote contact loss must not be promoted to exited."
+}

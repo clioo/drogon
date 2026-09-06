@@ -1,0 +1,2897 @@
+{
+ "schema": "drogon.parity-relay-registration-composition/2",
+ "status": "leaf-reported-pending-coordinator-review",
+ "auditClosed": false,
+ "runtimeAcceptance": "unproven",
+ "generatedBy": "manual bounded source read + mapping computed from the accepted census (Orca task_5f6097897f74 / dispatch ctx_32b26a8bba25); no scanner rerun, no source/test execution, no product edits",
+ "task": {
+  "taskId": "task_5f6097897f74",
+  "dispatchId": "ctx_32b26a8bba25",
+  "gapIds": [
+   "G13-gap-2 (registration/composition portion)",
+   "G13-gap-3 (registration/outbound composition portion)"
+  ]
+ },
+ "source": {
+  "root": "/Users/carlos/Documents/Drogon-mentu-session",
+  "pinnedSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3"
+ },
+ "mentuNavigator": {
+  "skillRead": "~/.codex/skills/mentu-navigator/SKILL.md",
+  "statusCheck": "succeeds",
+  "version": "1.1.1",
+  "note": "previous leaf claim of a navigator capability gap is WITHDRAWN; the missing ~/.agents entry did not prove any gap"
+ },
+ "correctionLog": [
+  "removed the prose 'wrapper as 148th site': registeredMethod is INSIDE the 22 census Identifiers; census stays 147 = 116 StringLiteral + 22 Identifier + 9 MemberExpression; fixed-constant Identifier sites are 21, wrapper-parameter site is 1",
+  "guest runtime lane registrations corrected 11 -> 13 (2 preflight + 2 agent_hook + 9 wslfs): preflight-handler.ts sites are SHARED SOURCE instantiated in both daemon (relay-runtime-services.ts:71) and guest (wsl-agent-hook-relay.ts:73); the previous 137+11 partition ignored them",
+  "distinct method names no longer summed across lanes: relay.configureGraceTime and session.registerRoot are dual-lane single names; the two different 135 figures are now explicitly distinguished",
+  "fullBodyReads downgraded to interval reads where only intervals were opened",
+  "earlier navigator capability-gap note replaced with verified skill status"
+ ],
+ "reusedAcceptedArtifacts": [
+  {
+   "file": "docs/migration/parity-relay-mobile-wire-contracts.json",
+   "sha256": "e64b22ed4fc24b349d5b08c1f9db574bbf522a01c4b00320dcd1df5b569f76fd",
+   "schemaVersion": 3
+  },
+  {
+   "file": "docs/migration/parity-relay-mobile-wire-contracts.md",
+   "sha256": "cc55298a5b90c8f2246ef99644c25d2bc4e76fbda1d01f45c6f4f296b62d2f3c"
+  },
+  {
+   "file": "docs/migration/parity-wire-call-sites.json",
+   "sha256": "6501f8468fdcf1d49911885a83b76be3fd315ce841dd4648db769c9de8eac5f3",
+   "role": "accepted AST census: relayCallsites=148, relayRegistrationCandidates=147; reused as the candidate list, not proof"
+  }
+ ],
+ "summariesComputedFromMapping": {
+  "uniqueSourceCallSites": 147,
+  "sitesByCensusArgumentClass": {
+   "stringLiteral": 116,
+   "identifierTotal": 22,
+   "memberExpression": 9
+  },
+  "identifierSplit": {
+   "fixedConstantIdentifierSites": 21,
+   "localWrapperParameterSites": 1
+  },
+  "sitesByLane": {
+   "request": 136,
+   "notification": 11
+  },
+  "sourceLevelRegistrations_contextsCollapsed": 148,
+  "wrapperExpansionExtra_atSourceLevel": 1,
+  "runtimeLaneRegistrations": {
+   "sshDaemonDispatcher": 137,
+   "wslGuestDispatcher": 13,
+   "total": 150,
+   "sharedSiteLanes_totalBothProcesses": 4
+  },
+  "sharedSourceSites": {
+   "file": "src/relay/preflight-handler.ts",
+   "lines": [
+    48,
+    49
+   ],
+   "names": [
+    "preflight.detectAgents",
+    "preflight.detectWindowsTerminalCapabilities"
+   ],
+   "instantiationPointers": [
+    "src/relay/relay-runtime-services.ts:71 (daemon)",
+    "src/relay/wsl-agent-hook-relay.ts:73 (guest)"
+   ],
+   "lanesPerProcess": 2
+  },
+  "distinctMethodNames": {
+   "sshDaemon": 135,
+   "sshDaemonRequest": 126,
+   "sshDaemonNotification": 11,
+   "dualLaneNamesBothLanes_countedOnceAsNames": [
+    "relay.configureGraceTime",
+    "session.registerRoot"
+   ],
+   "wslGuest": 13,
+   "wslGuestNames": [
+    "agent_hook.installPlugins",
+    "agent_hook.requestReplay",
+    "preflight.detectAgents",
+    "preflight.detectWindowsTerminalCapabilities",
+    "wslfs.chmod",
+    "wslfs.home",
+    "wslfs.mkdir",
+    "wslfs.readFile",
+    "wslfs.readdir",
+    "wslfs.rename",
+    "wslfs.stat",
+    "wslfs.unlink",
+    "wslfs.writeFile"
+   ],
+   "crossContextUnion": 144,
+   "crossContextRequestNameVocabulary": 135,
+   "note": "two different 135 figures exist and must not be conflated: (a) sshDaemon distinct method names = 126 request + 11 notification - 2 dual-lane overlaps = 135; (b) cross-context REQUEST-name vocabulary = 126 daemon requests + 9 guest-only wslfs requests = 135 (matches accepted census requestMethodCount=135). Neither is a universal per-process registration count."
+  }
+ },
+ "entrypointComposition": {
+  "deployedEntry": {
+   "file": "src/relay/relay.ts",
+   "sha256": "18e0d15548685cb2c02f814a8d407a31c945cd117f4783101d1c375ef0a6d18e",
+   "lines": "11-28",
+   "modes": [
+    "default daemon -> runRelayDaemon",
+    "--connect -> runRelayConnectChannel (socket client, registers nothing)",
+    "--orca-cli -> runRelayOrcaCliChannel (socket client, registers nothing)"
+   ]
+  },
+  "sshRelayDaemon": {
+   "file": "src/relay/relay-daemon.ts",
+   "sha256": "62ca17e6ac0623360049d41df8a32512be414aa73c99bdbc4b4f63c2a8bcc4aa",
+   "assemblyOrder": [
+    "RelayPrimaryChannel (relay-primary-channel.ts:12 dispatcher on stdio)",
+    "RelayRuntimeServices L44-48",
+    "RelayAgentHookRuntime L51-56",
+    "RelayGraceLifecycle L57-73",
+    "RelayReconnectListener L76-90",
+    "registerRelayStatus L92-100 -> relay.status L139-164"
+   ]
+  },
+  "runtimeServices": {
+   "file": "src/relay/relay-runtime-services.ts",
+   "sha256": "d14045f56abbab12c55958d84206c16a1a48b02bbaf12fb646ec6087789d5fea",
+   "facts": [
+    "session.registerRoot notification L121 + request L127 (dual lane, one name); session.resolveHome L134",
+    "ONE shared GitResponseStreamRegistry given to FsHandler L64 and GitHandler L70 (unique streamIds; only GitHandler routes git.responseAck)",
+    "unconditional: Preflight L71, SkillInstall L72, ExternalAutomations L73, PortScan L74, AgentExec L75, WorkspaceSession L76",
+    "conditional: hostPlatform may be undefined; aiVaultService only when known L77-79; AiVaultHandler skips both aiVault.* registrations on unsupported platform or missing service (ai-vault-handler.ts:36-51)",
+    "plugin methods installed with identity resolver ()=>null and {grantedCapabilities:null,services:null} policy L93-97 -> both answer {ok:false,code:'unavailable'} (plugin-host-call-handler.ts:41-47)",
+    "orca.cli / orca.cli.postOutput proxies via requestAnyClient(excludeClientId=caller, timeoutMs remoteCliRequestTimeoutMs(params)) L139-152; dispatcher-rpc-routing.ts:37-51 prefers real socket clients over synthetic primary"
+   ]
+  },
+  "wslGuest": {
+   "file": "src/relay/wsl-agent-hook-relay.ts",
+   "sha256": "d8a384967d78e01778dca8e83309555979d43081366a3e276b16a3553e4fe98b",
+   "facts": [
+    "guest-resident process, own RelayDispatcher on stdin/stdout L42-61; dies with stdin; no grace, no daemon socket",
+    "13 runtime lane registrations: new PreflightHandler L73 (2 lanes, SHARED source sites) + agent_hook.requestReplay L75 + agent_hook.installPlugins L84-85 + 9 wslfs.* via registerWslHookFsHandlers L87-90",
+    "outbound publishAgentHookEnvelope from loopback hook receiver L67-72",
+    "host-side launcher src/main/agent-hooks/wsl-hook-relay-manager.ts (callsite-only tier)"
+   ]
+  },
+  "testSupportSeparation": {
+   "harnessFile": "src/relay/agent-exec-handler-test-harness.ts (sha a27a9c71ebeec37861dd0b08616e0a4a006501d71a3d24293f552da825fd4c55) is test-support; deployed AgentExecHandler is RelayRuntimeServices L75",
+   "testComposition": "8+ src/relay/*.test.ts construct new RelayDispatcher directly; vitest-only, proves nothing about deployed assembly",
+   "noConstructionOutsideRelay": "no new RelayDispatcher / new RelayRuntimeServices / runRelayDaemon found in non-test files outside src/relay; desktop main consumes the relay protocol as a CLIENT (G13-gap-3 owner WP-ENG-REMOTE)"
+  }
+ },
+ "inboundSurface": {
+  "rpcCancelSpecialCase": "dispatcher-rpc-routing.ts:170-176 handles rpc.cancel INLINE before the notification map; aborts RequestContext signal via requestAborts; never an onNotification registration, so absent from all counts above",
+  "laneDistinctions": "notifications have no response fence (onResponseSettled throws, routing L184-186); requests get AbortController + stale-generation checks + settlement fences L80-117; unknown request -> -32601 L72-77; unknown notification ignored L177-188; fs.unwatch (notification) vs fs.unwatchAndWait (request) is a deliberate lane pair; pty.setDeliveryPaused validates grant+generations+deliveryToken (ssh-pty-consumer-session-adapter.ts:73-99)"
+ },
+ "outboundSurface": {
+  "preserved13": "reused verbatim from accepted v3 notificationMethodsOutbound (pty.data/pty.exit/pty.replay/pty.restoreRequired/pty.recoveryComplete/fs.changed/fs.watchFailed/fs.streamChunk/git.cloneProgress/git.responseChunk/agent.hook/workspace.changed/workspace.stale); fs.changed origin relay-watcher-event-emitter.ts:101/168; workspace.stale parameterized resync publisher workspace-snapshot-publication.ts:18-21",
+  "notRuntimeRpc615": "relay dispatcher publication names only; no equivalence to the 615 runtime RPC registry names",
+  "deltaObservation": "pty.deliveryCanceled via dispatcher.notifyControl at ssh-pty-consumer-session-adapter.ts:38-43; 0 mentions in accepted v3; scoped delta for coordinator review, not a correction claim"
+ },
+ "authorityBoundaries": {
+  "errorShape": "handler code else -32000; error.data only via schema allowlist (SkillInstallFailureSchema, TerminalUnavailableCauseSchema) else dropped (routing L139-151)",
+  "capacity": "oversized response -> ResponseOverCapacity substitute on control lane, connection preserved (L204-239); relay->client default timeout 30s (dispatcher-contract.ts:93)",
+  "authContext": "RequestContext.sessionIdentity {principal, authenticated, allowSessionOwner, authenticationKind} (dispatcher-contract.ts:18-23); per-method consumption NOT traced (U1)",
+  "plugins": "transport authority fixed by registered method name; params cannot promote panel->worker (plugin-host-call-handler.ts:65-68)"
+ },
+ "evidenceTiers": {
+  "fullBodyReads": [
+   "src/relay/relay.ts",
+   "src/relay/relay-daemon.ts",
+   "src/relay/relay-runtime-services.ts",
+   "src/relay/plugin-host-call-handler.ts",
+   "src/relay/relay-grace-lifecycle.ts",
+   "src/relay/dispatcher-rpc-routing.ts",
+   "src/relay/dispatcher-contract.ts",
+   "src/relay/wsl-agent-hook-relay.ts"
+  ],
+  "intervalReads_downgraded": [
+   "src/relay/ai-vault-handler.ts L1-80",
+   "src/relay/ssh-pty-consumer-session-adapter.ts L1-115",
+   "src/relay/relay-agent-hook-runtime.ts L115-169",
+   "src/relay/preflight-handler.ts L40-55",
+   "src/relay/fs-handler.ts registration block L81-123 + helper window",
+   "src/relay/pty-handler.ts L1066-1112 window",
+   "src/relay/git-handler-registration.ts L1-12 + census lines",
+   "src/relay/skill-install-handler.ts L65-75 + census lines",
+   "src/relay/managed-hook-installer.ts L40-70",
+   "src/relay/wsl-hook-fs-bridge.ts export signature + const window",
+   "constant definition windows (ssh-types.ts:10, skill-ssh-relay-contract.ts:12-22, ssh-ai-vault-relay.ts:1-2, agent-hook-relay.ts:202/207/211, wsl-hook-relay-contract.ts:35-45)",
+   "src/main/agent-hooks/wsl-hook-relay-manager.ts grep-tier only",
+   "remaining small handlers (external-automations, port-scan, workspace-session, agent-exec) at census-line tier"
+  ],
+  "testsActuallyRead": "NONE this dispatch (source-only instruction; no test bodies opened, none executed); original test obligations remain with WP-ENG-RELAY / WP-ENG-REMOTE per accepted gaps G13-gap-1..3"
+ },
+ "semanticTestObligationsRemaining": [
+  "dual-lane methods: session.registerRoot request returns {ok:true}, relay.configureGraceTime request returns {graceTimeMs:number}; both also accept notifications; name counted once in any surface assertion. Coordinator correction: parity-relay-boundary-review.json",
+  "rpc.cancel inline abort cancels an in-flight request's AbortController without touching the notification map",
+  "aiVault.* absent on unsupported platform or missing service; failed-constructor startup-survival claim withdrawn. Runtime composition calls factory without a catch; later child startup failures need separate characterization. Coordinator correction: parity-relay-boundary-review.json",
+  "plugin resolver answers {ok:false,code:'unavailable'} for both plugin methods under the daemon null identity resolver; panel admission gate separate",
+  "WSL guest dispatcher: exactly 13 runtime lanes (2 shared-source preflight + 2 agent_hook + 9 wslfs) and no fs/git/pty methods",
+  "orca.cli proxy excludes calling client and applies remoteCliRequestTimeoutMs",
+  "pty.deliveryCanceled delta: characterize control-lane proof payload before adding it to any register"
+ ],
+ "unknowns": [
+  {
+   "id": "U1",
+   "scope": "per-method consumption of RequestContext.sessionIdentity not traced",
+   "owner": "WP-ENG-RELAY",
+   "pointer": "dispatcher-contract.ts:18-23; relay-handshake.ts; relay-reconnect-listener.ts"
+  },
+  {
+   "id": "U2",
+   "scope": "wsl-hook-relay-manager spawn/respawn lifecycle at grep tier",
+   "owner": "WP-ENG-RELAY",
+   "pointer": "src/main/agent-hooks/wsl-hook-relay-manager.ts"
+  },
+  {
+   "id": "U3",
+   "scope": "pty.deliveryCanceled client-side handling unverified",
+   "owner": "WP-ENG-REMOTE",
+   "pointer": "src/relay/ssh-pty-source-credit-adapter.ts + client credit code"
+  },
+  {
+   "id": "U4",
+   "scope": "git/fs/pty handler parameter/auth/error bodies at registration-line tier",
+   "owner": "WP-ENG-RELAY",
+   "pointer": "git-handler-operation-set.ts; fs-handler-*; pty-handler.ts"
+  }
+ ],
+ "closureClaim": "registration-composition reconciliation only; no universal surface count, no runtime pass, no transport lifecycle proof, no audit closure",
+ "sourceCallSiteMap": [
+  {
+   "sourceFile": "src/relay/agent-exec-handler.ts",
+   "line": 120,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "agent.execNonInteractive",
+   "resolvedMethodNames": [
+    "agent.execNonInteractive"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/agent-exec-handler.ts",
+   "line": 123,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "agent.cancelExec",
+   "resolvedMethodNames": [
+    "agent.cancelExec"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/ai-vault-handler.ts",
+   "line": 52,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SSH_AI_VAULT_LIST_SESSIONS_METHOD",
+   "resolvedMethodNames": [
+    "aiVault.listSessions"
+   ],
+   "nameDefinitionPointer": "src/shared/ssh-ai-vault-relay.ts:1",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/ai-vault-handler.ts",
+   "line": 55,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SSH_AI_VAULT_RESOLVE_SESSION_TITLES_METHOD",
+   "resolvedMethodNames": [
+    "aiVault.resolveSessionTitles"
+   ],
+   "nameDefinitionPointer": "src/shared/ssh-ai-vault-relay.ts:2",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/external-automations-handler.ts",
+   "line": 33,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "externalAutomations.list",
+   "resolvedMethodNames": [
+    "externalAutomations.list"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/external-automations-handler.ts",
+   "line": 34,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "externalAutomations.runs",
+   "resolvedMethodNames": [
+    "externalAutomations.runs"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/external-automations-handler.ts",
+   "line": 35,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "externalAutomations.create",
+   "resolvedMethodNames": [
+    "externalAutomations.create"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/external-automations-handler.ts",
+   "line": 36,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "externalAutomations.update",
+   "resolvedMethodNames": [
+    "externalAutomations.update"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/external-automations-handler.ts",
+   "line": 37,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "externalAutomations.act",
+   "resolvedMethodNames": [
+    "externalAutomations.act"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 81,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.readDir",
+   "resolvedMethodNames": [
+    "fs.readDir"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 82,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.readFile",
+   "resolvedMethodNames": [
+    "fs.readFile"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 83,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.readFileStream",
+   "resolvedMethodNames": [
+    "fs.readFileStream"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 84,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.readFileRange",
+   "resolvedMethodNames": [
+    "fs.readFileRange"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 85,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.readDocPreview",
+   "resolvedMethodNames": [
+    "fs.readDocPreview"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 88,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.readTerminalArtifact",
+   "resolvedMethodNames": [
+    "fs.readTerminalArtifact"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 89,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.tempDir",
+   "resolvedMethodNames": [
+    "fs.tempDir"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 90,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.writeFile",
+   "resolvedMethodNames": [
+    "fs.writeFile"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 91,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.writeTerminalArtifact",
+   "resolvedMethodNames": [
+    "fs.writeTerminalArtifact"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 92,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.stat",
+   "resolvedMethodNames": [
+    "fs.stat"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 93,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.lstat",
+   "resolvedMethodNames": [
+    "fs.lstat"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 94,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.deletePath",
+   "resolvedMethodNames": [
+    "fs.deletePath"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 95,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.createFile",
+   "resolvedMethodNames": [
+    "fs.createFile"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 96,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.createDir",
+   "resolvedMethodNames": [
+    "fs.createDir"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 97,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.createDirNoClobber",
+   "resolvedMethodNames": [
+    "fs.createDirNoClobber"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 98,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.rename",
+   "resolvedMethodNames": [
+    "fs.rename"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 99,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.renameNoClobber",
+   "resolvedMethodNames": [
+    "fs.renameNoClobber"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 100,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.copy",
+   "resolvedMethodNames": [
+    "fs.copy"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 101,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.realpath",
+   "resolvedMethodNames": [
+    "fs.realpath"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 102,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.search",
+   "resolvedMethodNames": [
+    "fs.search"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 103,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.getCapabilities",
+   "resolvedMethodNames": [
+    "fs.getCapabilities"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 107,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.listFiles",
+   "resolvedMethodNames": [
+    "fs.listFiles"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 108,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.workspaceSpaceScan",
+   "resolvedMethodNames": [
+    "fs.workspaceSpaceScan"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 109,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.watch",
+   "resolvedMethodNames": [
+    "fs.watch"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 116,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.unwatchAndWait",
+   "resolvedMethodNames": [
+    "fs.unwatchAndWait"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 119,
+   "callSite": "this.dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.unwatch",
+   "resolvedMethodNames": [
+    "fs.unwatch"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 122,
+   "callSite": "this.dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.cancelStream",
+   "resolvedMethodNames": [
+    "fs.cancelStream"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/fs-handler.ts",
+   "line": 123,
+   "callSite": "this.dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "fs.streamAck",
+   "resolvedMethodNames": [
+    "fs.streamAck"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 10,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.status",
+   "resolvedMethodNames": [
+    "git.status"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 11,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.submoduleStatus",
+   "resolvedMethodNames": [
+    "git.submoduleStatus"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 14,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.checkIgnored",
+   "resolvedMethodNames": [
+    "git.checkIgnored"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 15,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.history",
+   "resolvedMethodNames": [
+    "git.history"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 16,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.commit",
+   "resolvedMethodNames": [
+    "git.commit"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 17,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.diff",
+   "resolvedMethodNames": [
+    "git.diff"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 18,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.stage",
+   "resolvedMethodNames": [
+    "git.stage"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 19,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.unstage",
+   "resolvedMethodNames": [
+    "git.unstage"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 20,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.bulkStage",
+   "resolvedMethodNames": [
+    "git.bulkStage"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 21,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.bulkUnstage",
+   "resolvedMethodNames": [
+    "git.bulkUnstage"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 22,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.abortMerge",
+   "resolvedMethodNames": [
+    "git.abortMerge"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 23,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.abortRebase",
+   "resolvedMethodNames": [
+    "git.abortRebase"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 24,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.checkout",
+   "resolvedMethodNames": [
+    "git.checkout"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 25,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.localBranches",
+   "resolvedMethodNames": [
+    "git.localBranches"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 26,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.discard",
+   "resolvedMethodNames": [
+    "git.discard"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 27,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.bulkDiscard",
+   "resolvedMethodNames": [
+    "git.bulkDiscard"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 28,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.conflictOperation",
+   "resolvedMethodNames": [
+    "git.conflictOperation"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 29,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.branchCompare",
+   "resolvedMethodNames": [
+    "git.branchCompare"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 30,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.commitCompare",
+   "resolvedMethodNames": [
+    "git.commitCompare"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 31,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.upstreamStatus",
+   "resolvedMethodNames": [
+    "git.upstreamStatus"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 32,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.fetch",
+   "resolvedMethodNames": [
+    "git.fetch"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 33,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.forkSync",
+   "resolvedMethodNames": [
+    "git.forkSync"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 34,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.fetchRemoteTrackingRef",
+   "resolvedMethodNames": [
+    "git.fetchRemoteTrackingRef"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 37,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.fetchGitHubPullRequestHead",
+   "resolvedMethodNames": [
+    "git.fetchGitHubPullRequestHead"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 40,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.fetchGitLabMergeRequestHead",
+   "resolvedMethodNames": [
+    "git.fetchGitLabMergeRequestHead"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 48,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.fetchGitLabMergeRequestHeadRef",
+   "resolvedMethodNames": [
+    "git.fetchGitLabMergeRequestHeadRef"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 51,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.push",
+   "resolvedMethodNames": [
+    "git.push"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 52,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.pull",
+   "resolvedMethodNames": [
+    "git.pull"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 53,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.fastForward",
+   "resolvedMethodNames": [
+    "git.fastForward"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 54,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.rebaseFromBase",
+   "resolvedMethodNames": [
+    "git.rebaseFromBase"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 57,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.branchDiff",
+   "resolvedMethodNames": [
+    "git.branchDiff"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 58,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.commitDiff",
+   "resolvedMethodNames": [
+    "git.commitDiff"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 59,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.listWorktrees",
+   "resolvedMethodNames": [
+    "git.listWorktrees"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 62,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.addWorktree",
+   "resolvedMethodNames": [
+    "git.addWorktree"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 63,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.removeWorktree",
+   "resolvedMethodNames": [
+    "git.removeWorktree"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 64,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.worktreeIsClean",
+   "resolvedMethodNames": [
+    "git.worktreeIsClean"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 65,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.refreshLocalBaseRefForWorktreeCreate",
+   "resolvedMethodNames": [
+    "git.refreshLocalBaseRefForWorktreeCreate"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 68,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.markRemoteOrcaCreated",
+   "resolvedMethodNames": [
+    "git.markRemoteOrcaCreated"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 69,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.renameCurrentBranch",
+   "resolvedMethodNames": [
+    "git.renameCurrentBranch"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 70,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.forceDeletePreservedBranch",
+   "resolvedMethodNames": [
+    "git.forceDeletePreservedBranch"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 73,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.exec",
+   "resolvedMethodNames": [
+    "git.exec"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 74,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.clone",
+   "resolvedMethodNames": [
+    "git.clone"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 75,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.isGitRepo",
+   "resolvedMethodNames": [
+    "git.isGitRepo"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 76,
+   "callSite": "dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.responseAck",
+   "resolvedMethodNames": [
+    "git.responseAck"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/git-handler-registration.ts",
+   "line": 77,
+   "callSite": "dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "git.cancelResponseStream",
+   "resolvedMethodNames": [
+    "git.cancelResponseStream"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/managed-hook-installer.ts",
+   "line": 59,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "AGENT_HOOK_INSTALL_MANAGED_HOOKS_METHOD",
+   "resolvedMethodNames": [
+    "agent_hook.installManagedHooks"
+   ],
+   "nameDefinitionPointer": "src/shared/agent-hook-relay.ts:211",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/plugin-host-call-handler.ts",
+   "line": 34,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "localWrapperParameter",
+   "censusArgumentToken": "registeredMethod",
+   "resolvedMethodNames": [
+    "plugins.hostCall.panel",
+    "plugins.hostCall.worker"
+   ],
+   "nameDefinitionPointer": "closure parameter of register(); invoked at L67 (RELAY_PLUGIN_PANEL_HOST_CALL_METHOD, defined L13) and L68 (RELAY_PLUGIN_WORKER_HOST_CALL_METHOD, defined L14)",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 2,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/port-scan-handler.ts",
+   "line": 20,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "ports.detect",
+   "resolvedMethodNames": [
+    "ports.detect"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/preflight-handler.ts",
+   "line": 48,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "preflight.detectAgents",
+   "resolvedMethodNames": [
+    "preflight.detectAgents"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "shared-source",
+   "instantiatedInContexts": [
+    "ssh-daemon",
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/preflight-handler.ts",
+   "line": 49,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "preflight.detectWindowsTerminalCapabilities",
+   "resolvedMethodNames": [
+    "preflight.detectWindowsTerminalCapabilities"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "shared-source",
+   "instantiatedInContexts": [
+    "ssh-daemon",
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1073,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.spawn",
+   "resolvedMethodNames": [
+    "pty.spawn"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1074,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.attach",
+   "resolvedMethodNames": [
+    "pty.attach"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1075,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.shutdown",
+   "resolvedMethodNames": [
+    "pty.shutdown"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1076,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.sendSignal",
+   "resolvedMethodNames": [
+    "pty.sendSignal"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1077,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.getCwd",
+   "resolvedMethodNames": [
+    "pty.getCwd"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1078,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.getInitialCwd",
+   "resolvedMethodNames": [
+    "pty.getInitialCwd"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1079,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.getSize",
+   "resolvedMethodNames": [
+    "pty.getSize"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1080,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.clearBuffer",
+   "resolvedMethodNames": [
+    "pty.clearBuffer"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1081,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.hasChildProcesses",
+   "resolvedMethodNames": [
+    "pty.hasChildProcesses"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1082,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.getForegroundProcess",
+   "resolvedMethodNames": [
+    "pty.getForegroundProcess"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1083,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.inspectProcess",
+   "resolvedMethodNames": [
+    "pty.inspectProcess"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1084,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.getCapabilities",
+   "resolvedMethodNames": [
+    "pty.getCapabilities"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1092,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.listProcesses",
+   "resolvedMethodNames": [
+    "pty.listProcesses"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1093,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.getDefaultShell",
+   "resolvedMethodNames": [
+    "pty.getDefaultShell"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1094,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.serialize",
+   "resolvedMethodNames": [
+    "pty.serialize"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1095,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.revive",
+   "resolvedMethodNames": [
+    "pty.revive"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1096,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.getProfiles",
+   "resolvedMethodNames": [
+    "pty.getProfiles"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1097,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.deleteWorktreeHistory",
+   "resolvedMethodNames": [
+    "pty.deleteWorktreeHistory"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1104,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.closeStartupQueryAuthority",
+   "resolvedMethodNames": [
+    "pty.closeStartupQueryAuthority"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1108,
+   "callSite": "this.dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.data",
+   "resolvedMethodNames": [
+    "pty.data"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/pty-handler.ts",
+   "line": 1109,
+   "callSite": "this.dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.resize",
+   "resolvedMethodNames": [
+    "pty.resize"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/relay-agent-hook-runtime.ts",
+   "line": 140,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "AGENT_HOOK_REQUEST_REPLAY_METHOD",
+   "resolvedMethodNames": [
+    "agent_hook.requestReplay"
+   ],
+   "nameDefinitionPointer": "src/shared/agent-hook-relay.ts:202",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/relay-agent-hook-runtime.ts",
+   "line": 144,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "AGENT_HOOK_INSTALL_PLUGINS_METHOD",
+   "resolvedMethodNames": [
+    "agent_hook.installPlugins"
+   ],
+   "nameDefinitionPointer": "src/shared/agent-hook-relay.ts:207",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/relay-daemon.ts",
+   "line": 139,
+   "callSite": "primaryChannel.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "relay.status",
+   "resolvedMethodNames": [
+    "relay.status"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/relay-grace-lifecycle.ts",
+   "line": 33,
+   "callSite": "options.dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD",
+   "resolvedMethodNames": [
+    "relay.configureGraceTime"
+   ],
+   "nameDefinitionPointer": "src/shared/ssh-types.ts:10",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": "relay.configureGraceTime"
+  },
+  {
+   "sourceFile": "src/relay/relay-grace-lifecycle.ts",
+   "line": 36,
+   "callSite": "options.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD",
+   "resolvedMethodNames": [
+    "relay.configureGraceTime"
+   ],
+   "nameDefinitionPointer": "src/shared/ssh-types.ts:10",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": "relay.configureGraceTime"
+  },
+  {
+   "sourceFile": "src/relay/relay-runtime-services.ts",
+   "line": 121,
+   "callSite": "this.dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "session.registerRoot",
+   "resolvedMethodNames": [
+    "session.registerRoot"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": "session.registerRoot"
+  },
+  {
+   "sourceFile": "src/relay/relay-runtime-services.ts",
+   "line": 127,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "session.registerRoot",
+   "resolvedMethodNames": [
+    "session.registerRoot"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": "session.registerRoot"
+  },
+  {
+   "sourceFile": "src/relay/relay-runtime-services.ts",
+   "line": 134,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "session.resolveHome",
+   "resolvedMethodNames": [
+    "session.resolveHome"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/relay-runtime-services.ts",
+   "line": 140,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "orca.cli",
+   "resolvedMethodNames": [
+    "orca.cli"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/relay-runtime-services.ts",
+   "line": 146,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "orca.cli.postOutput",
+   "resolvedMethodNames": [
+    "orca.cli.postOutput"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 110,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_INSTALL_METHOD",
+   "resolvedMethodNames": [
+    "skills.install"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 125,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_INSTALL_BUNDLE_METHOD",
+   "resolvedMethodNames": [
+    "skills.installBundle"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 145,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_GET_INSTALL_PROGRESS_METHOD",
+   "resolvedMethodNames": [
+    "skills.getInstallProgress"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 149,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_PREVIEW_METHOD",
+   "resolvedMethodNames": [
+    "skills.previewInstall"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 160,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_PREVIEW_BUNDLE_METHOD",
+   "resolvedMethodNames": [
+    "skills.previewBundleInstall"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 171,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_REMOVE_METHOD",
+   "resolvedMethodNames": [
+    "skills.removeInstall"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 182,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_LIST_METHOD",
+   "resolvedMethodNames": [
+    "skills.listManagedInstalls"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 186,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_BEGIN_UPLOAD_METHOD",
+   "resolvedMethodNames": [
+    "skills.beginUpload"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 189,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_UPLOAD_CHUNK_METHOD",
+   "resolvedMethodNames": [
+    "skills.uploadChunk"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 192,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_COMMIT_UPLOAD_METHOD",
+   "resolvedMethodNames": [
+    "skills.commitUpload"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/skill-install-handler.ts",
+   "line": 195,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "SKILL_SSH_RELAY_CANCEL_UPLOAD_METHOD",
+   "resolvedMethodNames": [
+    "skills.cancelUpload"
+   ],
+   "nameDefinitionPointer": "src/shared/skill-ssh-relay-contract.ts:12-22",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/ssh-pty-consumer-session-adapter.ts",
+   "line": 59,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedConstantLocalToRegisteringModule",
+   "censusArgumentToken": "SSH_PTY_OPEN_CLIENT_METHOD",
+   "resolvedMethodNames": [
+    "pty.openClient"
+   ],
+   "nameDefinitionPointer": "src/relay/ssh-pty-consumer-session-adapter.ts:24",
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/ssh-pty-consumer-session-adapter.ts",
+   "line": 73,
+   "callSite": "dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.setDeliveryPaused",
+   "resolvedMethodNames": [
+    "pty.setDeliveryPaused"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/ssh-pty-consumer-session-adapter.ts",
+   "line": 100,
+   "callSite": "dispatcher.onNotification",
+   "lane": "notification",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.ackData",
+   "resolvedMethodNames": [
+    "pty.ackData"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/ssh-pty-consumer-session-adapter.ts",
+   "line": 103,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "pty.cancelDelivery",
+   "resolvedMethodNames": [
+    "pty.cancelDelivery"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/workspace-session-handler.ts",
+   "line": 63,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "workspace.get",
+   "resolvedMethodNames": [
+    "workspace.get"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/workspace-session-handler.ts",
+   "line": 64,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "workspace.patch",
+   "resolvedMethodNames": [
+    "workspace.patch"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/workspace-session-handler.ts",
+   "line": 65,
+   "callSite": "this.dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "stringLiteral",
+   "censusArgumentToken": "workspace.presence",
+   "resolvedMethodNames": [
+    "workspace.presence"
+   ],
+   "nameDefinitionPointer": null,
+   "sourceSiteClass": "daemon-resident",
+   "instantiatedInContexts": [
+    "ssh-daemon"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-agent-hook-relay.ts",
+   "line": 75,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "AGENT_HOOK_REQUEST_REPLAY_METHOD",
+   "resolvedMethodNames": [
+    "agent_hook.requestReplay"
+   ],
+   "nameDefinitionPointer": "src/shared/agent-hook-relay.ts:202",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-agent-hook-relay.ts",
+   "line": 85,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "fixedExportedConstant",
+   "censusArgumentToken": "AGENT_HOOK_INSTALL_PLUGINS_METHOD",
+   "resolvedMethodNames": [
+    "agent_hook.installPlugins"
+   ],
+   "nameDefinitionPointer": "src/shared/agent-hook-relay.ts:207",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 60,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.home",
+   "resolvedMethodNames": [
+    "wslfs.home"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 67,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.readFile",
+   "resolvedMethodNames": [
+    "wslfs.readFile"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 79,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.writeFile",
+   "resolvedMethodNames": [
+    "wslfs.writeFile"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 92,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.stat",
+   "resolvedMethodNames": [
+    "wslfs.stat"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 104,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.rename",
+   "resolvedMethodNames": [
+    "wslfs.rename"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 115,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.unlink",
+   "resolvedMethodNames": [
+    "wslfs.unlink"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 124,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.chmod",
+   "resolvedMethodNames": [
+    "wslfs.chmod"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 133,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.readdir",
+   "resolvedMethodNames": [
+    "wslfs.readdir"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  },
+  {
+   "sourceFile": "src/relay/wsl-hook-fs-bridge.ts",
+   "line": 145,
+   "callSite": "dispatcher.onRequest",
+   "lane": "request",
+   "argumentClass": "memberExpressionFixedConstObject",
+   "censusArgumentToken": "WSL_HOOK_FS_METHODS.mkdir",
+   "resolvedMethodNames": [
+    "wslfs.mkdir"
+   ],
+   "nameDefinitionPointer": "src/shared/wsl-hook-relay-contract.ts:35-45 (WSL_HOOK_FS_METHODS)",
+   "sourceSiteClass": "guest-resident",
+   "instantiatedInContexts": [
+    "wsl-guest"
+   ],
+   "laneRegistrationsPerContext": 1,
+   "dualLaneName": null
+  }
+ ]
+}

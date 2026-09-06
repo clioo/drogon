@@ -1,0 +1,26 @@
+[package]
+name = "drogon-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+drogon-harness.workspace = true
+drogon-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+portable-pty = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+hmac = "=0.12.1"
+getrandom = "=0.4.3"
+icu_collator = "=2.2.1"
+icu_locale = "=2.2.0"
+
+[dev-dependencies]
+tempfile = { workspace = true }

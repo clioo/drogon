@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "upstreamRevision": "fa7b859994228a9c8759f99c55a8d31ee92a1b5e",
+  "scope": "Exact declarations and modification records adjacent to glyph components; not aggregate-font reconstruction or legal clearance.",
+  "files": [
+    {
+      "path": "src/glyphs/codicons/LICENSE.txt",
+      "bytes": 19047,
+      "sha256": "d6239afa918961b465b07bf7411cbe34ff6685854f58553db7966f4881a0211f"
+    },
+    {
+      "path": "src/glyphs/codicons/README.md",
+      "bytes": 239,
+      "sha256": "86fd7d1b3b215633d6a8457fe0dbf561bda25af01c5c1ca4a4c53ec4e7c9ffea"
+    },
+    {
+      "path": "src/glyphs/devicons/README.md",
+      "bytes": 480,
+      "sha256": "4d5547fb89112b934f117d1688872dc29389f1ac1cd7e831fc938561a1023aea"
+    },
+    {
+      "path": "src/glyphs/font-awesome/LICENSE.txt",
+      "bytes": 7427,
+      "sha256": "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d"
+    },
+    {
+      "path": "src/glyphs/font-awesome/README.md",
+      "bytes": 419,
+      "sha256": "83a5c255a5c182d1697086313265bf83788c22fe9f2c160777ecda3e32d8d76c"
+    },
+    {
+      "path": "src/glyphs/materialdesign/LICENSE",
+      "bytes": 992,
+      "sha256": "3bae6305bcaa6d10219b999f65c342034c2d40b1c0e8567fa08605e73ccba829"
+    },
+    {
+      "path": "src/glyphs/materialdesign/README.md",
+      "bytes": 1212,
+      "sha256": "7afc59be7303f6877297db80c1ea8f506bcf4e18290ff85e1bba1584ffa0555b"
+    },
+    {
+      "path": "src/glyphs/octicons/LICENSE",
+      "bytes": 1068,
+      "sha256": "4f886642f9e8d99eeadd484acdac011c3fde8a338faf52f5ca1408c13b9a9b63"
+    },
+    {
+      "path": "src/glyphs/pomicons/LICENSE",
+      "bytes": 4395,
+      "sha256": "cb4797a9745683f287c28833db596e9d68ec43082d59359b3a49c504f0f610ce"
+    },
+    {
+      "path": "src/glyphs/pomicons/README.md",
+      "bytes": 127,
+      "sha256": "c0de5db022d38bc135ceb3d1d0c892b2a36a0deb2d4df5e728c964e952edeacd"
+    },
+    {
+      "path": "src/glyphs/powerline-extra/LICENSE",
+      "bytes": 1072,
+      "sha256": "544307a58e6826c24145b2af1c3578b53e2e21ae0e6c67ab4c6abd544304d26a"
+    },
+    {
+      "path": "src/glyphs/powerline-extra/README.md",
+      "bytes": 674,
+      "sha256": "5c79ad0af0366752aac6a0887126554e74c84cecff9b56e1e411758000d3e8cc"
+    },
+    {
+      "path": "src/glyphs/powerline-symbols/LICENSE.txt",
+      "bytes": 1132,
+      "sha256": "46d5355e4734468135d8e4a30d0916292cc4df2b3ec30aa68c866f82497933be"
+    },
+    {
+      "path": "src/glyphs/powerline-symbols/README.md",
+      "bytes": 250,
+      "sha256": "c6cde819271276da3f8faa35a1163d902f2a903e9eb375646dd473c0c582cdef"
+    },
+    {
+      "path": "src/glyphs/weather-icons/OFL.txt",
+      "bytes": 4692,
+      "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790"
+    }
+  ],
+  "findings": [
+    {
+      "family": "Codicons",
+      "declaration": "CC-BY-4.0",
+      "notice": "src/glyphs/codicons/LICENSE.txt",
+      "modificationRecord": "src/glyphs/codicons/README.md",
+      "observation": "README identifies0.0.35 and upstream manual fixes to glyphs0xEB40/0xEB41. Retain existing modification attribution."
+    },
+    {
+      "family": "Devicons",
+      "declaration": "MIT in aggregate audit; no standalone notice at this immediate directory level",
+      "modificationRecord": "src/glyphs/devicons/README.md",
+      "observation": "README identifies2.16.0.custom assembled from selected non-linemark icons. Deeper origin/notice reconciliation remains outstanding; do not substitute historical Vorillaz notice automatically."
+    },
+    {
+      "family": "Font Awesome",
+      "declaration": "CC-BY-4.0 for SVG/JS icons; OFL-1.1 for distributed fonts; MIT for non-font/non-icon code",
+      "notice": "src/glyphs/font-awesome/LICENSE.txt",
+      "modificationRecord": "src/glyphs/font-awesome/README.md",
+      "observation": "Nerd README identifies6.5.1.custom created from release SVGs, not every6.5.1 icon. Preserve complete supplied notice and SVG-derived route; do not infer license solely from .otf extension. Brand identity warning remains."
+    },
+    {
+      "family": "Material Design",
+      "declaration": "Pictogrammers notice references Apache-2.0 for fonts/icons and MIT for code; some icons retain respective licenses",
+      "notice": "src/glyphs/materialdesign/LICENSE",
+      "modificationRecord": "src/glyphs/materialdesign/README.md",
+      "observation": "README records manually repaired glyph0xF1522 and a dormant older font. Notice contains an Apache URL, not the full Apache text. Keep required upstream notices and full text in eventual package."
+    },
+    {
+      "family": "Octicons",
+      "declaration": "MIT",
+      "notice": "src/glyphs/octicons/LICENSE",
+      "observation": "Copyright2023 GitHub Inc. Exact notice available."
+    },
+    {
+      "family": "Pomicons",
+      "declaration": "OFL-1.1",
+      "notice": "src/glyphs/pomicons/LICENSE",
+      "modificationRecord": "src/glyphs/pomicons/README.md",
+      "observation": "Copyright2021 Gabriele Lana; explicit Reserved Font Name Pomicons. README1.001. Preserve declared conditions."
+    },
+    {
+      "family": "Powerline Extra",
+      "declaration": "MIT",
+      "notice": "src/glyphs/powerline-extra/LICENSE",
+      "modificationRecord": "src/glyphs/powerline-extra/README.md",
+      "observation": "Copyright2016 Ryan L McIntyre. README records version1.200 modifications, including added glyphs, strips and landing platforms."
+    },
+    {
+      "family": "Powerline Symbols",
+      "declaration": "MIT-form permission text",
+      "notice": "src/glyphs/powerline-symbols/LICENSE.txt",
+      "modificationRecord": "src/glyphs/powerline-symbols/README.md",
+      "observation": "Copyright2013 Kim Silkebaekken and contributors. README records7-percent strip changes. Aggregate label Free License is not a missing notice."
+    },
+    {
+      "family": "Weather Icons",
+      "declaration": "OFL-1.1 with unfilled attribution/RFN template fields",
+      "notice": "src/glyphs/weather-icons/OFL.txt",
+      "observation": "Supplied header still includes <dates>, <URL|email>, <Reserved Font Name> and additional-holder placeholders. Preserve original, but obtain exact upstream attribution rather than inventing values."
+    }
+  ],
+  "remaining": [
+    "Devicons exact derived-source notice",
+    "Font Awesome Extension exact notice",
+    "IEC Power Symbols exact notice",
+    "Seti-derived original-source exact notice",
+    "Weather Icons complete upstream attribution",
+    "Aggregate glyph transformation and final bundled notice verification"
+  ],
+  "signatureVerified": false
+}

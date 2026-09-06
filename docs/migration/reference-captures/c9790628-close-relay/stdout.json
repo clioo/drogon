@@ -1,0 +1,70 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned pure-function capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "session-tab-close-relay",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-close-relay-tG4CDG",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/main/window/session-tab-close-request-relay.test.ts",
+        "role": "test",
+        "sha256": "3053304c2b73b4e9bb932d3328219a48954147ac6d7afa4fc78fec0e8da65614",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-close-relay-tG4CDG/src/main/window/session-tab-close-request-relay.test.ts"
+      },
+      {
+        "path": "src/main/window/session-tab-close-request-relay.ts",
+        "role": "module",
+        "sha256": "4a86342ebbb3ac06e7feccd556ab377143daaec67a8e8931267eb8891001ff3d",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-close-relay-tG4CDG/src/main/window/session-tab-close-request-relay.ts"
+      },
+      {
+        "path": "src/shared/session-tab-close.ts",
+        "role": "module",
+        "sha256": "9d975e0ef5e7501ade215ed954c86230316aa6db48ebf7b28de94db65327239d",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-close-relay-tG4CDG/src/shared/session-tab-close.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-close-relay-tG4CDG/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Both configs use node. Execute with Node24.19.0 and original installed Vitest4.1.11; no package install.",
+    "Minimal config omits feature-wall define, renderer aliases and DOM/host-port setup, unused by this closure.",
+    "Root GC/webstorage flags, Windows worker override and30s/60s per-test/hook limits are omitted. Test-owned fake timers drive lease expiry; default unit timeouts and30s outer bound remain. No platform or full-config equivalence claim."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "0ab02a9641b3e8f543de4827e3afe1caac8e2282fd2f37c1256c90bacda2feb2",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 7,
+      "numPassedTests": 7,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 7,
+      "plainIt": 4,
+      "tableRows": 3
+    }
+  }
+}

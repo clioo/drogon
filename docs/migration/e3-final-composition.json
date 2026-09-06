@@ -1,0 +1,647 @@
+{
+  "schema": "drogon.audit.e3-final-composition.v1",
+  "date": "2026-09-06",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "decision": "Root accepts complete E3 source characterization at the audited owning-service, receiver and immediate consumer boundaries. This is source-audit closure only; E5/publication and every original/candidate/integrated execution gate remain open.",
+  "e3SourceAccepted": true,
+  "fullAuditAccepted": false,
+  "productParity": false,
+  "solImplementationStarted": false,
+  "inputs": [
+    {
+      "path": "docs/migration/rate-limit-source-review.json",
+      "sha256": "fbeb2fe37b2b58815459949e917937185e89cb09517a84b3fc1eb219f82f7b6a"
+    },
+    {
+      "path": "docs/migration/e3-result-audit-partition.json",
+      "sha256": "dd23aae021cc34217ac262a4b8edf5af450ec5990e27e67bbf494d65aa2445d5"
+    },
+    {
+      "path": "docs/migration/audit-root-followup-review.md",
+      "sha256": "6d15b0f6c3494a5ba9bd45e5cd75e74eae5564b2ad17c28465a818d9b087252c"
+    },
+    {
+      "path": "docs/migration/e3-domain-root-review.json",
+      "sha256": "e38a7b90f906ee60ded2119f738e5b8d7203bce488742792f01da38e63432737"
+    },
+    {
+      "path": "docs/migration/e3-runtime-root-review.json",
+      "sha256": "c63e02ecb91d57e13e62051867f4444b0135d7848fc8af7387a1510210d3fa95"
+    },
+    {
+      "path": "docs/migration/e3-platform-final-root-review.json",
+      "sha256": "69c7c15b31a82f69bbdf0ab0f4d3dc1cf0dbe62e193d942a6c139db56fd77815"
+    },
+    {
+      "path": "docs/migration/e3-provider-inputs-root-review.json",
+      "sha256": "6329e901a8130611808d3ee6d9a08b72d991eead54edbc31d57c9262ca974add"
+    },
+    {
+      "path": "docs/migration/e3-account-launch-root-review.json",
+      "sha256": "135d76171e1da58b6522f06e1d5d9f79793a24bd3d4c8ebe59ecd72d598ba5fc"
+    },
+    {
+      "path": "docs/migration/e3-account-residual-root-review.json",
+      "sha256": "03e3701add8c590cdefaea9ac374814e909b79c75f74e09f1d8cae0a0305ea3b"
+    },
+    {
+      "path": "docs/migration/e3-provider-runtime-root-review.json",
+      "sha256": "a5336923ec31319776623f020dada225daa0f0f5b6478837a9ad16c42671ec5a"
+    },
+    {
+      "path": "docs/migration/e3-integrations-correction-root-review.json",
+      "sha256": "0c2d972c62472c4d105ab5cf5ee08f40b195e369c8a247810ea8871205c0de9c"
+    },
+    {
+      "path": "docs/migration/e3-mirror-source-review.json",
+      "sha256": "b64df4d4a62b8878e72141be2947ff7c2081768ff4ed3beab5e596783498232d"
+    },
+    {
+      "path": "docs/migration/e5-final-root-review.json",
+      "sha256": "372e6edd8fe13fe9898592e501fbda734e11568feed0c2d711be5f7a32b979c7"
+    },
+    {
+      "path": "docs/migration/parity-test-work-packages.json",
+      "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json",
+      "sha256": "61c72df0ea371dacdce020b9c3d8b0e54a42b1bf38d96af5d24777da1ef2b167"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/followup-final-boundaries.json",
+      "sha256": "4f6a744ce71689aa6a31330cbb0f9e0b913156416fee3c1fad840673509582f1"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/followup-bots-mentu.json",
+      "sha256": "a64b672b989d5018e28e59f29d7bcd6a0e244bab47de931a056c2fa87fa35374"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/followup-remaining-callbacks.json",
+      "sha256": "b8c9a473ec604d7f1bdbccfaba9f0467372264a81c7c255b5db6556c4910f7d0"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/consumer-ingestion-final.json",
+      "sha256": "2e5d6dc0de8cef266f1db57df766fd4c792c8871edea229f4648663d9939a7f6"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-runtime/contracts.json",
+      "sha256": "8f4aab64a07aaf2c013543d3e65c9f8142037526deec8ee148b938ae834e86d3"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/contracts.json",
+      "sha256": "5269e951e15986e04f2ed0a2373b943d9c4a522389bcb308bf4d00d451cd9093"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json",
+      "sha256": "e34195da3f1abcc56660c04388782a4396ad47ad6afc23a24979020ef899a861"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-integrations/contracts.json",
+      "sha256": "1e682edc0082f4109758601bb5f5a46a0b150d66d81ca28610e30f189f0afa12"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-integrations/source-fidelity-corrections.json",
+      "sha256": "1626700bb49932e718c362ea4fb5a3ed2d57c385de5b7fdaab9ebc0d7b26f27d"
+    }
+  ],
+  "independentSourceReads": [
+    {
+      "path": "src/main/startup/main-process-automations.ts",
+      "start": 1,
+      "end": 100,
+      "fileSha256": "8ae25dc1e03a4b628effca126430ab18f3df0f74e97df2393b56bfd977c979df",
+      "rangeSha256": "8ae25dc1e03a4b628effca126430ab18f3df0f74e97df2393b56bfd977c979df"
+    },
+    {
+      "path": "src/main/runtime/runtime-git-generation-commands.ts",
+      "start": 1,
+      "end": 290,
+      "fileSha256": "507e1665de27f0d401cc040ebc864d7d65f276728c12ff494329f85af559ae54",
+      "rangeSha256": "507e1665de27f0d401cc040ebc864d7d65f276728c12ff494329f85af559ae54"
+    },
+    {
+      "path": "src/main/text-generation/commit-message-agent-environment.ts",
+      "start": 1,
+      "end": 147,
+      "fileSha256": "ade780f28746acc9cf6f64cdba4c0b08f58f932d44a1c76b9d320a12eb53d8b6",
+      "rangeSha256": "ade780f28746acc9cf6f64cdba4c0b08f58f932d44a1c76b9d320a12eb53d8b6"
+    },
+    {
+      "path": "src/main/startup/main-process-runtime-service.ts",
+      "start": 130,
+      "end": 149,
+      "fileSha256": "fddb522e9f3b19e30577b1b130db06f966c2a0fbb6e90495294407a532a5a78d",
+      "rangeSha256": "14c0beb6c6e475e5353478e39a9d8988d09c36b95a63b9e85614ccbb80e35a5f"
+    },
+    {
+      "path": "src/main/runtime/orca-runtime-create-managed-worktree.ts",
+      "start": 1,
+      "end": 297,
+      "fileSha256": "7943f023b1d55441681bb9f6266ab7e0e5fa48692999bd377e60f9ea1a243b3d",
+      "rangeSha256": "7943f023b1d55441681bb9f6266ab7e0e5fa48692999bd377e60f9ea1a243b3d"
+    },
+    {
+      "path": "src/main/runtime/orca-runtime-list-managed-worktrees.ts",
+      "start": 117,
+      "end": 119,
+      "fileSha256": "cfc7f2733c1759a78082a819d4b13e8f24ee742c513c5ac3d33e21684453f4f8",
+      "rangeSha256": "905c2ba2ff1e5a9aa4c21485c952dda82b3927fbd3fb615cf11c9fa6dfb77462"
+    },
+    {
+      "path": "src/main/runtime/remote-server-updater.ts",
+      "start": 1,
+      "end": 59,
+      "fileSha256": "cd1ea56f0e405c630b851a9b4ba6297d9ff02cafd926719051672e11a66af418",
+      "rangeSha256": "cd1ea56f0e405c630b851a9b4ba6297d9ff02cafd926719051672e11a66af418"
+    },
+    {
+      "path": "src/main/updater/updater-remote-status.ts",
+      "start": 1,
+      "end": 123,
+      "fileSha256": "85e574456ed37471e17162c12ac39fe604af9f1db75c4dfd0de2ae4bbc01d72b",
+      "rangeSha256": "85e574456ed37471e17162c12ac39fe604af9f1db75c4dfd0de2ae4bbc01d72b"
+    },
+    {
+      "path": "src/main/runtime/runtime-mobile-notification-controller.ts",
+      "start": 1,
+      "end": 82,
+      "fileSha256": "9d3b6fcc652a134c6fbbec8a3f43ec016199e2a1c96c1e70f7163bd9a48cd7fc",
+      "rangeSha256": "9d3b6fcc652a134c6fbbec8a3f43ec016199e2a1c96c1e70f7163bd9a48cd7fc"
+    },
+    {
+      "path": "src/main/runtime/mobile-notification-replay.ts",
+      "start": 1,
+      "end": 94,
+      "fileSha256": "211ddc8aa6431fbd23cf1227cc77d8b8f9a49375e6aaf1a3ae1a0d5a33237b18",
+      "rangeSha256": "211ddc8aa6431fbd23cf1227cc77d8b8f9a49375e6aaf1a3ae1a0d5a33237b18"
+    },
+    {
+      "path": "src/main/runtime/runtime-file-commands-write-file-explorer-file.ts",
+      "start": 1,
+      "end": 163,
+      "fileSha256": "a9b3424c6d24909cff87156457248b275faf4fc6c223d2c67eaecdd2eae9154c",
+      "rangeSha256": "a9b3424c6d24909cff87156457248b275faf4fc6c223d2c67eaecdd2eae9154c"
+    },
+    {
+      "path": "src/main/runtime/runtime-file-commands-create-file-explorer-dir-no-clobber.ts",
+      "start": 1,
+      "end": 166,
+      "fileSha256": "4f5d0b8f0aa0f6d9d7957fbdcec08e80852f1fc4ced485c79046726dcff097ea",
+      "rangeSha256": "4f5d0b8f0aa0f6d9d7957fbdcec08e80852f1fc4ced485c79046726dcff097ea"
+    },
+    {
+      "path": "src/main/runtime/runtime-file-commands-read-mobile-file.ts",
+      "start": 1,
+      "end": 40,
+      "fileSha256": "30afb3e9ad384eb42dc97130d4ac2222297dab3f88b1c3903ab8b3129650503b",
+      "rangeSha256": "30afb3e9ad384eb42dc97130d4ac2222297dab3f88b1c3903ab8b3129650503b"
+    },
+    {
+      "path": "src/main/runtime/rpc/methods/mentu.ts",
+      "start": 1,
+      "end": 185,
+      "fileSha256": "cad6161373ba9a8633530711f906777853fc95da393178091d0982a7947cf786",
+      "rangeSha256": "cad6161373ba9a8633530711f906777853fc95da393178091d0982a7947cf786"
+    }
+  ],
+  "groups": [
+    {
+      "group": "DR-STATUS_METHODS",
+      "owner": "runtime",
+      "methods": 1
+    },
+    {
+      "group": "DR-AGENT_SESSION_METHODS",
+      "owner": "runtime",
+      "methods": 2
+    },
+    {
+      "group": "DR-STRUCTURED_AGENT_SESSION_METHODS",
+      "owner": "runtime",
+      "methods": 16
+    },
+    {
+      "group": "DR-TERMINAL_METHODS",
+      "owner": "runtime",
+      "methods": 34
+    },
+    {
+      "group": "DR-TERMINAL_ORPHAN_METHODS",
+      "owner": "runtime",
+      "methods": 1
+    },
+    {
+      "group": "DR-BROWSER_CORE_METHODS",
+      "owner": "runtime",
+      "methods": 53
+    },
+    {
+      "group": "DR-BROWSER_SCREENCAST_METHODS",
+      "owner": "runtime",
+      "methods": 2
+    },
+    {
+      "group": "DR-BROWSER_EXTRA_METHODS",
+      "owner": "runtime",
+      "methods": 28
+    },
+    {
+      "group": "DR-BROWSER_CLIENT_HOST_METHODS",
+      "owner": "runtime",
+      "methods": 3
+    },
+    {
+      "group": "DR-BROWSER_CLIENT_FILE_CHANNEL_METHODS",
+      "owner": "runtime",
+      "methods": 3
+    },
+    {
+      "group": "DR-BROWSER_NETWORK_TUNNEL_METHODS",
+      "owner": "runtime",
+      "methods": 1
+    },
+    {
+      "group": "DR-ORCHESTRATION_METHODS",
+      "owner": "runtime",
+      "methods": 39
+    },
+    {
+      "group": "DR-SESSION_TAB_METHODS",
+      "owner": "runtime",
+      "methods": 15
+    },
+    {
+      "group": "DR-NATIVE_CHAT_METHODS",
+      "owner": "runtime",
+      "methods": 3
+    },
+    {
+      "group": "DR-CLIENT_EVENT_METHODS",
+      "owner": "runtime",
+      "methods": 2
+    },
+    {
+      "group": "DR-CLIENT_UI_METHODS",
+      "owner": "runtime",
+      "methods": 8
+    },
+    {
+      "group": "DR-REPO_METHODS",
+      "owner": "integrations",
+      "methods": 42
+    },
+    {
+      "group": "DR-WORKTREE_METHODS",
+      "owner": "integrations",
+      "methods": 17
+    },
+    {
+      "group": "DR-FILE_METHODS",
+      "owner": "integrations",
+      "methods": 30
+    },
+    {
+      "group": "DR-GIT_METHODS",
+      "owner": "integrations",
+      "methods": 35
+    },
+    {
+      "group": "DR-GITHUB_METHODS",
+      "owner": "integrations",
+      "methods": 50
+    },
+    {
+      "group": "DR-GITLAB_METHODS",
+      "owner": "integrations",
+      "methods": 21
+    },
+    {
+      "group": "DR-HOSTED_REVIEW_METHODS",
+      "owner": "integrations",
+      "methods": 4
+    },
+    {
+      "group": "DR-LINEAR_METHODS",
+      "owner": "integrations",
+      "methods": 25
+    },
+    {
+      "group": "DR-LINEAR_AGENT_ACCESS_METHODS",
+      "owner": "integrations",
+      "methods": 16
+    },
+    {
+      "group": "DR-JIRA_METHODS",
+      "owner": "integrations",
+      "methods": 24
+    },
+    {
+      "group": "DR-AGENT_HOOK_METHODS",
+      "owner": "platform",
+      "methods": 1
+    },
+    {
+      "group": "DR-AI_VAULT_METHODS",
+      "owner": "platform",
+      "methods": 3
+    },
+    {
+      "group": "DR-ARTIFACT_METHODS",
+      "owner": "platform",
+      "methods": 7
+    },
+    {
+      "group": "DR-AUTOMATION_METHODS",
+      "owner": "platform",
+      "methods": 7
+    },
+    {
+      "group": "DR-NOTIFICATION_METHODS",
+      "owner": "platform",
+      "methods": 3
+    },
+    {
+      "group": "DR-STATS_METHODS",
+      "owner": "platform",
+      "methods": 1
+    },
+    {
+      "group": "DR-DIAGNOSTICS_METHODS",
+      "owner": "platform",
+      "methods": 1
+    },
+    {
+      "group": "DR-ACCOUNT_METHODS",
+      "owner": "platform",
+      "methods": 11
+    },
+    {
+      "group": "DR-PREFLIGHT_METHODS",
+      "owner": "platform",
+      "methods": 5
+    },
+    {
+      "group": "DR-COMPUTER_METHODS",
+      "owner": "platform",
+      "methods": 15
+    },
+    {
+      "group": "DR-SSH_METHODS",
+      "owner": "platform",
+      "methods": 5
+    },
+    {
+      "group": "DR-SPEECH_METHODS",
+      "owner": "platform",
+      "methods": 8
+    },
+    {
+      "group": "DR-WORKSPACE_PORT_METHODS",
+      "owner": "platform",
+      "methods": 2
+    },
+    {
+      "group": "DR-PLUGIN_METHODS",
+      "owner": "platform",
+      "methods": 6
+    },
+    {
+      "group": "DR-SKILL_METHODS",
+      "owner": "platform",
+      "methods": 15
+    },
+    {
+      "group": "DR-CLIPBOARD_METHODS",
+      "owner": "platform",
+      "methods": 5
+    },
+    {
+      "group": "DR-HOST_CAPABILITY_METHODS",
+      "owner": "platform",
+      "methods": 5
+    },
+    {
+      "group": "DR-RUNTIME_CLIENT_CAPABILITY_METHODS",
+      "owner": "platform",
+      "methods": 1
+    },
+    {
+      "group": "DR-EMULATOR_METHODS",
+      "owner": "platform",
+      "methods": 19
+    },
+    {
+      "group": "DR-PAIRING_METHODS",
+      "owner": "platform",
+      "methods": 2
+    },
+    {
+      "group": "DR-UPDATER_METHODS",
+      "owner": "platform",
+      "methods": 4
+    }
+  ],
+  "scope": {
+    "assignedGroups": 47,
+    "assignedMethods": 601,
+    "reusedMentuMethods": 14,
+    "totalRpcMethods": 615,
+    "mainRegistrationCallbacks": 66,
+    "pushRows": 96,
+    "knownPushProducers": 94,
+    "unknownLegacyPushProducers": 2,
+    "originalFiles": 9037,
+    "originalPackages": 46,
+    "meaning": "Exact inventories and source contracts, not executed methods/tests or complete recursive dependency proof."
+  },
+  "acceptanceComposition": [
+    {
+      "owner": "runtime",
+      "groups": 16,
+      "methods": 211,
+      "authority": "e3-runtime-root-review.md/json",
+      "conditionResolved": "Configured updater joins platform DR-UPDATER_METHODS; managed worktree and file outcomes join integrations DR-WORKTREE_METHODS/DR-FILE_METHODS. Keep all RRT qualifications."
+    },
+    {
+      "owner": "integrations",
+      "groups": 10,
+      "methods": 264,
+      "authority": "result-integrations/contracts.json plus e3-integrations-correction-root-review.md/json and the root qualifications below",
+      "conditionResolved": "95 inherited owning-body corrections accepted. The two generation-method account joins resolve through AL-C01–10/AR-C01–09 and actual startup/environment adapters; no remaining local account dependency is assigned to an idle auditor."
+    },
+    {
+      "owner": "platform",
+      "groups": 21,
+      "methods": 126,
+      "authority": "result-platform/contracts.json plus final-local/provider/account/runtime supplements and their root reviews",
+      "conditionResolved": "All8 finite local/cross-owner residuals explicitly disposed below; root additionally read all21 base contract narratives and independently checked updater/notification and automation composition."
+    },
+    {
+      "owner": "Mentu",
+      "groups": 1,
+      "methods": 14,
+      "authority": "followup-bots-mentu.json and accepted root21-callback review; followup-final-boundaries RPC rows601–614",
+      "conditionResolved": "Same actual mentuRuntime methods reused with RPC schema/host-coercion differences preserved; raw run records are not formal Commitment Protocol or live process proof."
+    }
+  ],
+  "platformResidualDispositions": [
+    {
+      "id": "P-ACCOUNT-STATE",
+      "status": "accepted-source-composition",
+      "authority": [
+        "rate-limit-source-review.json",
+        "e3-provider-inputs-root-review.json",
+        "e3-account-launch-root-review.json",
+        "e3-account-residual-root-review.json",
+        "e3-provider-runtime-root-review.json"
+      ],
+      "retained": "Raw values, cached publication, launch materialization, parsing/history and guard lifetimes all retain distinct source defects and exact tests; no credential/provider/native execution inferred."
+    },
+    {
+      "id": "P-AI-PARSE",
+      "status": "accepted-source-composition",
+      "authority": [
+        "e3-platform-final-root-review.json"
+      ],
+      "retained": "FL-AI-SESSION/CACHE/SQLITE plus18 format specializations; full malformed/incremental/worker/SQLite behavior execution still owed."
+    },
+    {
+      "id": "P-AUTO-RUN",
+      "status": "accepted-source-composition",
+      "authority": [
+        "e3-runtime-root-review.json",
+        "audit-closure/e3-bridge/result-integrations/contracts.json"
+      ],
+      "retained": "Actual configured main-process headless dispatcher joins managed worktree create/show and launch/read/wait. tui-idle satisfaction marks completed but does not verify intended output; partial workspace/terminal effects and rejected completion remain."
+    },
+    {
+      "id": "P-SKILL-REUSE",
+      "status": "accepted-source-composition",
+      "authority": [
+        "e3-platform-final-root-review.json",
+        "audit-closure/e3-bridge/followup-remaining-callbacks.json"
+      ],
+      "retained": "FL-SKILL-RESULT plus14 exact S bodies, source defects and all R gates; no arbitrary third-party behavior certified."
+    },
+    {
+      "id": "P-COMPUTER-PRODUCER",
+      "status": "accepted-source-composition",
+      "authority": [
+        "e3-platform-final-root-review.json"
+      ],
+      "retained": "FL-COMPUTER-MAC-OBS/ACTIONS/DESKTOP; real OS, permissions, ABI and actual input effects unverified."
+    },
+    {
+      "id": "P-COMPUTER-CACHE",
+      "status": "accepted-source-composition",
+      "authority": [
+        "e3-platform-final-root-review.json"
+      ],
+      "retained": "FL-COMPUTER-CACHE-PERMISSION/DESKTOP; preserve cache identity and TS/native removal differences, no physical-exit proof."
+    },
+    {
+      "id": "P-SPEECH-LOCAL",
+      "status": "accepted-source-composition",
+      "authority": [
+        "e5-final-root-review.json"
+      ],
+      "retained": "FG-SP1–4 accepted finite local speech source; cancellation can submit buffered cloud audio and logical worker settlement is not physical exit. No model/native inference executed."
+    },
+    {
+      "id": "P-EMULATOR-PRODUCER",
+      "status": "accepted-source-composition",
+      "authority": [
+        "e3-platform-final-root-review.json"
+      ],
+      "retained": "FL-EM-INVENTORY/SESSION/STREAM/AX-GESTURE; exact Android/iOS result constructors covered, native simulator/adapters execution still owed."
+    }
+  ],
+  "domainResidualDispositions": [
+    {
+      "id": "S-FACTORIES",
+      "status": "accepted-source-composition",
+      "authority": "e3-domain-root-review + consumer-ingestion-final UIG contracts and later rate/provider joins",
+      "retained": "24 original channels,25 ingestion methods, five usage gates; no provider freshness inferred."
+    },
+    {
+      "id": "S-CONSUMER-DOWNSTREAM",
+      "status": "accepted-source-composition",
+      "authority": "accepted consumer-ingestion-final nine contracts plus e3-mirror-source-review",
+      "retained": "Prior7 plus13 consumer identities account for20; six named E1 consumer dependencies resolved with corrected pointers; all effect/renderer fixtures remain."
+    },
+    {
+      "id": "S-RPC-RESULTS",
+      "status": "accepted-source-composition",
+      "authority": "47 exact result groups plus14 same-service Mentu methods in this record",
+      "retained": "615 original rows/schemas and host/result/error/cancel/subscription fixtures unchanged."
+    },
+    {
+      "id": "S-REMOTE-LIFECYCLE",
+      "status": "characterized-defect-retained",
+      "authority": "e3-domain-root-review and F-RPC-ROUTE/HOST",
+      "retained": "Duplicate subscription precheck before await is not atomic reservation; characterize and separately test corrected cleanup."
+    },
+    {
+      "id": "S-LEGACY",
+      "status": "unknown-origin-with-preserved-receiver-contract",
+      "authority": "E3-PUSH-033 and E3-PUSH-054 in followup-final-boundaries",
+      "retained": "Do not invent producers, increase94/96, remove receivers or launch history recensus. Preserve optional expiry/intent and F-LEGACY mixed-version fixtures."
+    },
+    {
+      "id": "S-45-REVIEW",
+      "status": "accepted-source-composition",
+      "authority": "accepted45 callback review at d1dc550",
+      "retained": "PMR-FAF-001 scalar zoomFactor overrides frozen shorthand; all14 R gates survive."
+    }
+  ],
+  "rootQualifications": [
+    {
+      "id": "E3-COMP-AUTOMATION",
+      "detail": "Configured new_per_run creation can persist a workspace before missing terminal throws. Existing-workspace launch can succeed before subsequent show/read/wait fails. A satisfied tui-idle wait yields completed; it is not independent task-output verification. Full headless dispatcher remains serve-mode only."
+    },
+    {
+      "id": "E3-COMP-ENV",
+      "detail": "prepareLocalCommitMessageAgentEnv receiving a WSL UNC home for a host target returns ok:true with no env, not a structured refusal. Do not translate the frozen 'host launch refuses' shorthand into a false error contract. Earlier target/settings/linked-context preparation can reject outside structured result catches."
+    },
+    {
+      "id": "E3-COMP-FILES",
+      "detail": "files.commitUpload is the actual registered name, not files.commit. Local commit copies EXCL then removes temp; cleanup rejection can follow published destination. SSH copies through provider then swallows temp-delete failure; do not infer the local EXCL guarantee or rollback from the wrapper."
+    },
+    {
+      "id": "E3-COMP-UPDATER",
+      "detail": "Configured updater ownership is platform DR-UPDATER_METHODS, not the integrations assignment named by old runtime prose. Returned install acceptance precedes restart/health proof and may not return if quitAndInstall throws."
+    },
+    {
+      "id": "E3-COMP-REPLAY",
+      "detail": "Epoch mismatch returns the retained notification buffer; omitted epoch remains sequence-only. Replay cannot recover entries evicted beyond256. Repeating the same watermark is deterministic only while the retained buffer is unchanged."
+    },
+    {
+      "id": "E3-COMP-MENTU",
+      "detail": "Mentu RPC rewrites runtime: host IDs to local at the owning runtime but leaves SSH IDs remote. Optional workspace schema meets dispatcher params??{} normalization, so omitted capability input differs from direct IPC. Preserve BM schema/state/evidence flaws as characterization plus desired-correction obligations."
+    }
+  ],
+  "verification": {
+    "command": "node scripts/verify-e3-final-composition.mjs /Users/carlos/Documents/Drogon-mentu-session",
+    "basis": "Exact method/group/receiver and original allocation/gate joins, initial platform file/range revalidation, frozen authority hashes and14 independent source reads. Separate bf8a7e0 integrations verifier revalidated its264 methods/1253 plus434 correction ranges. No model assertion substituted for source review.",
+    "testsRun": 0,
+    "modelsInvoked": 0,
+    "productCodeChanged": false,
+    "publicationAuthorized": false
+  },
+  "executionDebt": {
+    "gates": "All47 inherited BM/R/F/D gates,70 execution queue records,33 original test records and9037 files/46 packages survive, plus each source-defect correction and supplemental contract obligation.",
+    "required": "Complete admitted original baselines; assertion-preserving ports and behavioral RED before each feature wave; implementation and integrated GREEN; real Electron/OS/SSH/folder/skew/persistence/cancel/performance/package evidence.",
+    "separation": "Compile failure is not behavioral RED; skips/mocks are not product parity. E5 external/provenance decisions are not cleared by E3 acceptance."
+  },
+  "progress": {
+    "accepted": 11,
+    "total": 12,
+    "percentage": 91.7,
+    "deltaAcceptedGroups": 1,
+    "deltaPercentagePoints": 8.333333333333334,
+    "confidence": "medium for source characterization; no product parity estimate",
+    "remaining": "E5 final source/provenance dispositions, especially AO-RIGHTS/NOTICES/RECORDINGS/SERVICE. Actual Sol leads wait for complete audit acceptance.",
+    "deadlineRisk": "Full-fidelity flexible24-hour target remains high risk; no defensible delivery ETA."
+  }
+}

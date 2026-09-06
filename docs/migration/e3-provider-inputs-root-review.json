@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-06",
+  "scope": "Finite E3 raw-provider input contracts, not whole E3 or product parity",
+  "status": "accepted-with-root-qualifications",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "taskId": "task_ff8c47a44761",
+  "dispatchId": "ctx_48840b69bf1e",
+  "candidateArtifacts": [
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.md",
+      "sha256": "2c37650cb98563585f74c4f68da636281fa3d7a650556fe5554fbeb7b92288df"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json",
+      "sha256": "ebf5c68f96c0c148ad48f23aa3ca8bfd152eb92aff730fe7638373c16a4aae1c"
+    }
+  ],
+  "verification": {
+    "sourceFiles": 81,
+    "inclusiveRanges": 82,
+    "inputHashes": 9,
+    "contracts": 13,
+    "originalTestBodyAssociations": 15,
+    "retainedAllocationPointers": 16,
+    "inheritedGates": 47,
+    "totalOriginalTestFiles": 9037,
+    "totalPackages": 46,
+    "checks": [
+      "All current source bytes equal named Git pin and candidate whole/range hashes.",
+      "All nine frozen document input hashes match.",
+      "Contract source pointers resolve to matching paths; all15 original test associations resolve to path+sha256 package records.",
+      "Original allocation object,47 gates and inherited execution obligations deep-equal prior final-local.json; package lengths and IDs match central inventory.",
+      "Root read all13 contract narratives, residuals, seven cross-owner joins, eight findings and15 test-body summaries; independently read named source samples and two complete original assertion files."
+    ],
+    "command": "node <<'NODE'\nconst fs=require('fs'), cp=require('child_process'), path=require('path'), crypto=require('crypto'), assert=require('assert/strict');\nconst base='docs/migration/audit-closure/e3-bridge/result-platform/';\nconst j=JSON.parse(fs.readFileSync(base+'provider-inputs-final.json'));\nconst hash=b=>crypto.createHash('sha256').update(b).digest('hex');\nlet ranges=0; const failures=[];\nfor (const e of j.sourceEvidence) {\n const b=fs.readFileSync(path.join(j.sourceRoot,e.path));\n const pin=cp.execFileSync('git',['show',j.sourceRevision+':'+e.path],{cwd:j.sourceRoot,maxBuffer:10*1024*1024});\n assert.deepEqual(b,pin,e.path+' pin'); assert.equal(hash(b),e.sha256,e.path+' hash'); assert.equal(b.length,e.bytes);\n const lines=b.toString('utf8').match(/[^\\n]*\\n|[^\\n]+$/g)||[];\n assert.equal(lines.length,e.lines,e.path+' lines');\n for(const r of e.ranges){assert.equal(hash(Buffer.from(lines.slice(r.first-1,r.last).join(''))),r.sha256,e.path+' range');ranges++;}\n}\nfor(const i of j.inputs) assert.equal(hash(fs.readFileSync(i.path)),i.sha256,i.path);\nconst docs=new Map();\nfunction pointer(ref){const [p,s]=ref.split('#');const d=p?(docs.has(p)?docs.get(p):(docs.set(p,JSON.parse(fs.readFileSync(p))),docs.get(p))):j;return (s||'').split('/').slice(1).reduce((a,k)=>a?.[k.replace(/~1/g,'/').replace(/~0/g,'~')],d);}\nfor(const c of j.contracts){assert.equal(c.sourcePaths.length,c.sourceEvidenceRefs.length,c.id);c.sourcePaths.forEach((p,i)=>assert.equal(pointer(c.sourceEvidenceRefs[i]).path,p));}\nfor(const t of j.originalAssertionBodiesRead){assert.equal(pointer(t.evidenceRef).path,t.path);for(const a of t.originalAllocations){assert(pointer(a.filesRef).some(f=>f.path===t.path && f.sha256===pointer(t.evidenceRef).sha256),t.path);}}\nconst old=JSON.parse(fs.readFileSync(base+'final-local.json'));\nassert.deepEqual(j.originalTestAllocation,old.originalTestAllocation); assert.deepEqual(j.inheritedGates,old.inheritedGates); assert.deepEqual(j.inheritedExecutionObligations,old.inheritedExecutionObligations);\nconst pkg=JSON.parse(fs.readFileSync('docs/migration/parity-test-work-packages.json'));\nfor(const p of j.originalTestAllocation.packages){assert.equal(pointer(p.filesRef).length,p.fileCount);assert.equal(pkg.packages[p.i].id,p.id);}\nfor(const gate of j.inheritedGates) assert(pointer(gate.ref),gate.id);\nconsole.log(JSON.stringify({sourcePin:j.sourceRevision,sourceFiles:j.sourceEvidence.length,ranges,inputHashes:j.inputs.length,contracts:j.contracts.length,testBodyAssociations:j.originalAssertionBodiesRead.length,retainedAllocations:j.originalTestAllocation.packages.length,inheritedGates:j.inheritedGates.length,wholeTestFiles:pkg.packages.reduce((n,p)=>n+p.files.length,0),wholePackages:pkg.packages.length,artifacts:[base+'provider-inputs-final.md',base+'provider-inputs-final.json'].map(p=>({path:p,sha256:hash(fs.readFileSync(p))}))},null,2));\nNODE",
+    "initialVerifierCorrection": "Initial verifier assumed packages[].files were strings; actual records are {path,sha256,domain}. Corrected checker to compare path+digest; no candidate/central allocation changed."
+  },
+  "rootReadFullFiles": [
+    "src/main/rate-limits/minimax-request-context.ts",
+    "src/main/rate-limits/opencode-go-request-session.ts",
+    "src/main/rate-limits/gemini-oauth-sources.ts",
+    "src/main/rate-limits/claude-managed-usage-panel.ts",
+    "src/main/rate-limits/claude-managed-account-usage.ts",
+    "src/main/rate-limits/claude-oauth-usage-request.ts",
+    "src/main/rate-limits/gemini-usage-fetcher.ts",
+    "src/main/rate-limits/opencode-go-page-scraper.ts",
+    "src/main/rate-limits/codex-backend-auth.ts",
+    "src/main/rate-limits/claude-oauth-usage-error.ts",
+    "src/main/rate-limits/claude-oauth-usage-error.test.ts",
+    "src/main/rate-limits/codex-rate-limit-window-classification.ts",
+    "src/main/rate-limits/codex-rate-limit-window-classification.test.ts"
+  ],
+  "rootReadExtraRange": {
+    "path": "src/main/rate-limits/claude-oauth-recovery.ts",
+    "first": 100,
+    "last": 122
+  },
+  "qualifications": [
+    {
+      "id": "PI-ROOT-RETRY",
+      "contract": "PI-CLAUDE-WIRE",
+      "statement": "The raw OAuthUsageError property is retryAfterMs:number|null, a duration capped at24h, null for invalid/missing/non429. Later makeClaudeUsageClassificationError converts truthy duration to Date.now()+duration as metadata.retryAtMs, or undefined. Preserve these two distinct layers and serialized omission; do not port the candidate shorthand as raw retryAtMs or undefined retryAfterMs."
+    },
+    {
+      "id": "PI-ROOT-CLASSIFIER",
+      "contract": "PI-CODEX-WIRE",
+      "statement": "classifyCodexRateLimitWindows returns source window objects and does not clamp percentages. Its14 original assertions include values101/102/112/121 unchanged. Clamp/canonical-duration mapping is a separate mapper boundary. This baseline proves only the percentage projection, not complete objects/resets/credits."
+    },
+    {
+      "id": "PI-ROOT-COOKIE",
+      "contract": "PI-MINIMAX",
+      "statement": "Promise.all rejected cookie setup can reach finally cleanup while another cookies.set remains outstanding. Shared fixed partitions can race across calls for MiniMax and OpenCode; sequential OpenCode setup removes only the intra-call pending-set race. These are checked-source inferences, not executed race reproductions or confidentiality proof. MiniMax helper itself has no explicit proxy-setup call."
+    },
+    {
+      "id": "PI-ROOT-ROTATION",
+      "contract": "PI-GEMINI",
+      "statement": "New refresh tokens returned by refreshAccessToken are not used by fetcher persistence; auth.json branch does not persist rotation. Own-credential branch uses same PID temp name and rename without explicit private mode, lock or durability guard. These source effects need separate synthetic correction fixtures."
+    },
+    {
+      "id": "PI-ROOT-PREVIEW",
+      "contract": "PI-CLAUDE-AUTH",
+      "statement": "Panel similarity checks only shared session/weekly percentages and only requires this check for keychain locations; file locations can accept supplements without matching-window proof. A valid supplement may then write captured credentials. No real Keychain, credential store or provider was accessed."
+    }
+  ],
+  "baselines": [
+    {
+      "manifest": "tests/parity/baseline-capsules/claude-oauth-usage-error.json",
+      "command": "node scripts/run-parity-baseline-capsule.mjs --manifest tests/parity/baseline-capsules/claude-oauth-usage-error.json --source-root /Users/carlos/Documents/Drogon-mentu-session --node-bin /Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --vitest-entry /Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs --execute --approved-manifest-sha256 68173fe13bd7e4ce202ac92f5ab08e30f38dcbc33fe139090701964cc0182d95",
+      "root": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/claude-oauth-usage-error-B7QyR1",
+      "version": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+      "manifestSha256": "68173fe13bd7e4ce202ac92f5ab08e30f38dcbc33fe139090701964cc0182d95",
+      "receiptSha256": "0ad42e0c92357ad1b71aedb486ffb9f289750eee51680091f94aa25a0c377652",
+      "resultsSha256": "20444c894c5da6317a8c360f8262072dcf935b5a48a0b1622142abf68dc41353",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "manifest": "tests/parity/baseline-capsules/codex-rate-limit-window-classification.json",
+      "command": "node scripts/run-parity-baseline-capsule.mjs --manifest tests/parity/baseline-capsules/codex-rate-limit-window-classification.json --source-root /Users/carlos/Documents/Drogon-mentu-session --node-bin /Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --vitest-entry /Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs --execute --approved-manifest-sha256 6f1a63d49bb51196ca01febe46d7b24fadf6e57ddbc0da576cd92acac67a7b20",
+      "root": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/codex-rate-limit-window-classification-RD7OJ6",
+      "version": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+      "manifestSha256": "6f1a63d49bb51196ca01febe46d7b24fadf6e57ddbc0da576cd92acac67a7b20",
+      "receiptSha256": "fb8775325a4cbb847aa051de6b6f7357af53aeb88637968d9784f6765b54b1e5",
+      "resultsSha256": "07ed51151c35be37e29c139208dd99758f2ca016f33586665a8589901655267f",
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "baselineVerification": "Root reopened both JSON results and receipts, asserted exact19 passed/zero failed/skipped and all assertion statuses, one file per capsule; rehashed four staged source copies plus two LICENSE copies. Original assertions unchanged, Node24.19.0/Vitest4.1.11. Minimal config differences remain in manifests. No HTTP, account credentials, Electron runtime, inference or candidate behavior executed.",
+  "retainedJoins": [
+    {
+      "id": "PI-JOIN-LAUNCH",
+      "state": "delivered-awaiting-root-review",
+      "taskId": "task_823552276b48",
+      "artifact": "docs/migration/audit-closure/e3-bridge/result-platform/account-launch-final.json"
+    },
+    {
+      "id": "PI-JOIN-RUNTIME",
+      "state": "root-consolidation-required",
+      "note": "Named command/PATH/hook-lock/SQLite/native helpers stay actual local boundaries; reuse accepted E3/E4/E5 contracts by exact coverage, not owner label."
+    },
+    {
+      "id": "PI-JOIN-REQUEST-GUARD",
+      "state": "root-consolidation-required",
+      "note": "Actual application request-guard/login registration remains separate from default-session proxy helper policy."
+    }
+  ],
+  "lifecycle": {
+    "providerReleased": "769c05e4-9902-4d02-997a-7076f2b8bc9f",
+    "integrationsDelivered": "msg_61f887ddaf78",
+    "integrationsReleased": "573137a7-220f-43b3-a1a7-caca5c2bbcc4",
+    "accountDelivered": "msg_5525e954a75a",
+    "accountReleased": "9cd76071-b63b-454e-a7cd-d5e32c3a844b",
+    "releaseMeaning": "retained/external_terminal/processAction none; neither process termination nor source acceptance",
+    "remainingActiveAudit": "task_51aad0f813db / ctx_03e734b4369f"
+  },
+  "auditProgress": {
+    "accepted": 10,
+    "denominator": 12,
+    "percentage": 83.3,
+    "delta": 0,
+    "confidence": "medium-low",
+    "next": "Root acceptance of integrations/account and E3/E5 joins/publication handoff",
+    "deadline": "flexible24h high risk; no defensible ETA"
+  },
+  "implementation": "Actual Sol leads/workers start only after complete source audit acceptance. All original baseline/port/behavioral RED-GREEN/platform and published/installed product requirements retained."
+}

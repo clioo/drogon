@@ -1,0 +1,313 @@
+{
+ "acceptanceObligations": [
+  "Execute whole files still unrun: usage-provider-api.test.ts, usage-provider-handlers.test.ts, usage-web-client-fallback.test.ts, usage-snapshot-refresh.benchmark.test.ts, usage-provider-store-lifecycle.test.ts \u2014 preserve assertions; setup failures are not RED, skips are not PASS.",
+  "New behavioral acceptance: malformed-arg main-handler behavior (undefined args, wrong scope/range strings, non-boolean enabled) pinned as regression tests before any validation is added; per-provider stale-read contrast (getSnapshot without refresh vs getters with refresh); disabled-store refresh no-op; 5-minute STALE_MS boundary with changed/unchanged worktree fingerprint; concurrent-refresh single-scan sharing; schema-bump enabled-preserving invalidation; codex locationModelBreakdown backfill; web-fallback undefined no-throw for all three slices.",
+  "Real Electron structured-clone for all 24 channels with representative scope/range/limit/kind payloads; destroyed-sender behavior; wrong-sender admission outcome (documents the observed unguarded surface)."
+ ],
+ "counts": {
+  "channels": 24,
+  "operationsPerProvider": 8,
+  "providers": 3
+ },
+ "dispatch": {
+  "canDispatchSubWorkers": false,
+  "depth": 2,
+  "depthEvidence": "Dispatched leaf preamble names depth2; no child Run created; no nesting bypass via any identity or tool.",
+  "dispatchId": "ctx_1b83d1a79421",
+  "effectiveModel": null,
+  "modelEvidence": "Authorized launch opencode --model opencode-go/muse-spark-1.3-contributor --auto per task; terminal receipt only, no self-authentication.",
+  "parentTerminal": "term_233f0742-c797-43da-b5b9-0efd8e91ad43",
+  "taskId": "task_f6eae017c314"
+ },
+ "evidenceTier": "source-semantic-leaf; no execution",
+ "execution": "not-executed-by-this-leaf",
+ "factoryTable": {
+  "operations": [
+   "getScanState",
+   "setEnabled",
+   "refresh",
+   "getSnapshot",
+   "getSummary",
+   "getDaily",
+   "getBreakdown",
+   "getRecentSessions"
+  ],
+  "prefixes": [
+   "claudeUsage",
+   "codexUsage",
+   "openCodeUsage"
+  ]
+ },
+ "groupId": "E3-bridge leaf S-FACTORIES domain-usage",
+ "honestDefectsVsIntended": [
+  {
+   "classification": "observed-weakness-candidate-not-endorsed",
+   "detail": "All 24 handlers use raw ipcMain.handle with no sender admission (no isTrustedUIRenderer, no trusted-window equality wrapper). Any renderer with the channel name can read usage caches, toggle tracking, and force rescans. Whether this is intended (usage treated as non-sensitive local diagnostics) or a defect is a coordinator decision; do not silently reproduce it in the rewrite without an explicit disposition.",
+   "id": "S-FACT-GAP-TRUST"
+  },
+  {
+   "classification": "observed-validation-gap",
+   "detail": "No zod/schema validation on any of the 24 handlers. setEnabled destructures args.enabled (undefined args throws TypeError); refresh tolerates via args?.force ?? false; getSnapshot/getSummary/getDaily/getBreakdown/getRecentSessions destructure args.scope/range/kind/limit (undefined args throws). Scope/range/kind are unvalidated strings passed straight to rollup builders; limit is an unvalidated number passed as recentSessionLimit. Unknown scope/range values do not throw \u2014 builders filter to empty projections. Adding validation would change the wire contract; pin current behavior first.",
+   "id": "S-FACT-GAP-VALIDATION"
+  },
+  {
+   "classification": "observed-asymmetry",
+   "detail": "getSnapshot never auto-refreshes (serves last persisted projection) while getSummary/getDaily/getBreakdown/getRecentSessions always refresh(false) first. A reader comparing snapshot.recentSessions (limit 10 default) with getRecentSessions (limit 12 claude/codex, 10 opencode) can see different rows without any concurrent write. Intended or not is unstated in source; preserve the asymmetry until root rules.",
+   "id": "S-FACT-GAP-STALE"
+  },
+  {
+   "classification": "observed-asymmetry",
+   "detail": "Codex store omits jsonIndent (compact cache file) while claude/opencode write indent 2; codex same-version normalize backfills locationModelBreakdown ?? [] while claude/opencode same-version states return untouched. Cosmetic except the backfill, which changes rows on load.",
+   "id": "S-FACT-GAP-FORMAT"
+  }
+ ],
+ "hostBoundaries": {
+  "cacheFiles": {
+   "claudeUsage": "<userData>/orca-claude-usage.json",
+   "codexUsage": "<userData>/orca-codex-usage.json",
+   "openCodeUsage": "<userData>/orca-opencode-usage.json"
+  },
+  "dataPresenceKeys": {
+   "claudeUsage": "hasAnyClaudeData",
+   "codexUsage": "hasAnyCodexData",
+   "openCodeUsage": "hasAnyOpenCodeData"
+  },
+  "registration": "registerUsageProviderHandlers({claudeUsage, codexUsage, openCodeUsage}) from register-core-handlers.ts:145; single guarded call (registered flag). No re-registration guard inside the factory itself; no disposer; no sender gate.",
+  "schemaVersions": {
+   "claudeUsage": 6,
+   "codexUsage": 5,
+   "openCodeUsage": 2
+  },
+  "sourceKeys": {
+   "claudeUsage": "processedFiles",
+   "codexUsage": "processedFiles",
+   "openCodeUsage": "processedDatabases"
+  }
+ },
+ "operations": [
+  {
+   "errorSemantics": "Store getScanState is synchronous pure read (never throws absent programmer error). Handler returns its value directly; rejected promises from async store methods propagate as invoke rejections.",
+   "name": "getScanState",
+   "preload": "() => invoke(prefix:getScanState) \u2014 zero args; test asserts bare channel with no second invoke arg.",
+   "requestShape": "No payload. Omitted vs extra args: extras ignored (handler takes none).",
+   "resultShape": "PublicUsageProviderScanState = {enabled, lastScanStartedAt: number|null, lastScanCompletedAt: number|null, lastScanError: string|null, isScanning: boolean (scanPromise !== null), [dataPresenceKey]: boolean (sessions.length>0 || dailyAggregates.length>0)}. Null vs false vs absent: timestamps null until first scan; error null until first failure (cleared on next start AND on success); presence flag false (never null/undefined) until data exists.",
+   "store": "lifecycle getScanState (store-lifecycle.ts:68-75): spreads persisted scanState + live isScanning + computed presence flag. No refresh, no disk write, no validation."
+  },
+  {
+   "errorSemantics": "Synchronous TypeError when second invoke arg is undefined (destructuring args.enabled). Non-boolean values stored as-is into scanState.enabled (no coercion, no validation) then persisted; refresh() treats any truthy/falsy via !enabled check. No error channel for invalid input \u2014 either throws TypeError or silently persists.",
+   "name": "setEnabled",
+   "preload": "(args: {enabled: boolean}) => invoke(prefix:setEnabled, args). Test asserts exact arg passthrough.",
+   "requestShape": "{enabled: boolean} REQUIRED (destructured at handlers.ts:36). Omitted/undefined whole-args throws; enabled: undefined persists undefined (falsy \u2192 tracking off); null likewise. Optional vs required: whole-args effectively required despite no schema.",
+   "resultShape": "Full PublicUsageProviderScanState AFTER disk write (lifecycle 82-86). Disk write awaited; write failure rejects the invoke.",
+   "store": "lifecycle setEnabled: assigns, writeToDisk (queued snapshot writer), returns getScanState. No scan triggered (enable-then-fetch is the slice's job, not the store's)."
+  },
+  {
+   "errorSemantics": "Disabled store resolves current state without scanning (not an error). Scan throw captured into lastScanError + persisted; invoke still resolves (never rejects on scan failure). Persistence failure after successful scan swallowed (catch () => {}).",
+   "name": "refresh",
+   "preload": "(args?: {force?: boolean}) => invoke(prefix:refresh, args). No-args call passes undefined as second invoke arg (test asserts ['prefix:refresh', undefined]).",
+   "requestShape": "{force?: boolean} optional ENTIRELY: undefined args \u2192 false via args?.force ?? false. force: true skips the 5-minute STALE_MS + fingerprint freshness short-circuit; force: false/omitted/null all mean conditional. Unknown keys ignored.",
+   "resultShape": "PublicUsageProviderScanState after conditional scan. Freshness rule (lifecycle 88-101): disabled \u2192 current state; !force && lastScanCompletedAt && ageMs < 300000 && fingerprint unchanged \u2192 current state (no scan); else runScan. Concurrent callers share one scanPromise.",
+   "store": "lifecycle refresh + runScan (126-164): single-flight, startedAt/err reset, fingerprint-gated incremental input (changed fingerprint discards previous source cache for defaults), state replace + startedAt/completedAt stamps, disk write best-effort."
+  },
+  {
+   "errorSemantics": "No auto-refresh: serves whatever is persisted (possibly never-scanned defaults with null stamps and empty arrays) without error. Unknown scope/range strings flow into builders (no throw at this layer). Undefined whole-args throws TypeError on destructure.",
+   "name": "getSnapshot",
+   "preload": "(args: {scope, range, limit?}) => invoke(prefix:getSnapshot, args). Test asserts exact object passthrough including limit.",
+   "requestShape": "{scope, range, limit?: number}. scope/range effectively required (destructured); limit optional, default 10 at ALL three stores (getSnapshot third param = 10). limit: undefined \u2192 default; null/0/negative passed through unvalidated to row builders.",
+   "resultShape": "Full Snapshot: {scanState, summary, daily, modelBreakdown, projectBreakdown, recentSessions}. Claude and codex snapshots expose BOTH modelBreakdown and projectBreakdown (built with kinds 'model'/'project'); opencode likewise. Row-count bound: recentSessions capped by limit (default 10 here).",
+   "store": "Synchronous pure projection over in-memory state (claude 93-106, codex 97-110, opencode 64-77). No refresh, no disk I/O. Opencode filters via scope-range-filter helpers; claude/codex via build* rollups."
+  },
+  {
+   "errorSemantics": "refresh(false) failure modes inherited (resolve, never reject on scan error). Builder on unknown scope/range yields empty/zeroed projection (not an error).",
+   "name": "getSummary",
+   "preload": "(args: {scope, range}) => invoke(prefix:getSummary, args).",
+   "requestShape": "{scope, range} required; limit NOT accepted (extra keys ignored downstream \u2014 handler picks scope/range only).",
+   "resultShape": "Summary with scope+range echo. Claude: {scope, range, sessions, turns, zeroCacheReadTurns, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheReuseRate: number|null, estimatedCostUsd: number|null, topModel: string|null, topProject: string|null, hasAnyClaudeData}. Codex/OpenCode: {scope, range, sessions\u2192events, cachedInputTokens, reasoningOutputTokens, totalTokens, NO cacheReuseRate/zeroCacheReadTurns/topModel/topProject}. Null vs zero: cost null until priced; reuse rate null until computable; tops null until data.",
+   "store": "await refresh(false) THEN build from state (claude 108-111, codex 112-115, opencode 79-94). Stale-read impossible here by construction (subject to refresh short-circuit)."
+  },
+  {
+   "errorSemantics": "Same refresh-then-project discipline as getSummary.",
+   "name": "getDaily",
+   "preload": "(args: {scope, range}) => invoke(prefix:getDaily, args).",
+   "requestShape": "{scope, range} required; limit not accepted.",
+   "resultShape": "DailyPoint[]: Claude {day, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}; Codex/OpenCode {day, inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens, totalTokens}. day is a date string; ordering and range-windowing are builder behavior.",
+   "store": "await refresh(false) then buildDaily (claude 113-119, codex 117-120, opencode 96-109)."
+  },
+  {
+   "errorSemantics": "Unknown kind string flows to builders unvalidated (no error at this layer; builder behavior for unknown kind is rollup-body scope, not asserted here).",
+   "name": "getBreakdown",
+   "preload": "(args: {scope, range, kind}) => invoke(prefix:getBreakdown, args). Test uses kind 'project'.",
+   "requestShape": "{scope, range, kind} required. kind: 'model'|'project' by TYPE only \u2014 runtime accepts any string. Omitted kind \u2192 undefined passed to builder.",
+   "resultShape": "BreakdownRow[]: Claude {key, label, sessions, turns, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, estimatedCostUsd: number|null}; Codex rows add cachedInputTokens/reasoningOutputTokens/totalTokens and hasInferredPricing: boolean (Codex ONLY \u2014 OpenCode rows lack it per diff); key/label identity per kind.",
+   "store": "await refresh(false) then buildBreakdown(state, scope, range, kind) (claude 121-128, codex 122-129, opencode 111-130)."
+  },
+  {
+   "errorSemantics": "Same refresh-then-project discipline. Limit unvalidated (0/negative/huge passed to row builders).",
+   "name": "getRecentSessions",
+   "preload": "(args: {scope, range, limit?}) => invoke(prefix:getRecentSessions, args).",
+   "requestShape": "{scope, range, limit?}. Default limit DIVERGES: 12 for claude/codex (stores lines 130-137), 10 for opencode (132-139). limit: undefined \u2192 default; explicit values passed through.",
+   "resultShape": "SessionRow[]: Claude {sessionId, lastActiveAt, durationMinutes, projectLabel, branch: string|null, model: string|null, turns, input/output/cacheRead/cacheWrite}; Codex/OpenCode {sessionId, lastActiveAt, durationMinutes, projectLabel, model, events, cachedInputTokens, reasoningOutputTokens, totalTokens, (+Codex only hasInferredPricing)} \u2014 NO branch on event-billed providers. Null vs absent: branch/model null until known (Claude); model null (Codex/OpenCode).",
+   "store": "await refresh(false) then buildRecentSessions (claude 130-137, codex 131-138, opencode 132-147)."
+  }
+ ],
+ "proposedDisposition": "candidate-for-parent-review",
+ "providerDifferences": {
+  "billingModel": "Claude counts turns with peer cache buckets (input/output/cacheRead/cacheWrite, cacheReuseRate, zeroCacheReadTurns); Codex/OpenCode count events with subset cachedInput + reasoningOutput/totalTokens. Contract header documents WHY no normalized record (usage-provider-contract.ts:1-8).",
+  "breakdownKinds": "Identical union 'model'|'project' all three; snapshot always carries BOTH projections regardless of requested kind.",
+  "dataPresenceKeys": "hasAnyClaudeData / hasAnyCodexData / hasAnyOpenCodeData \u2014 distinct keys, same computation.",
+  "ranges": "Identical '7d'|'30d'|'90d'|'all' all three. No runtime validation anywhere.",
+  "recentSessionsDefaultLimit": "12 (claude, codex) vs 10 (opencode); getSnapshot default 10 everywhere.",
+  "schemaVersions": "6 (claude) / 5 (codex) / 2 (opencode); mismatch handling: claude+opencode discard analytics but preserve enabled flag; codex additionally backfills locationModelBreakdown on version match.",
+  "scopes": "Identical 'orca'|'all' all three. No runtime validation.",
+  "snapshotExtraKeys": "Claude-only: turns, zeroCacheReadTurns, cacheReuseRate, topModel/topProject, branch on sessions. Codex-only: hasInferredPricing on breakdown + session rows. Neither present on opencode rows.",
+  "sourceKeys": "processedFiles (claude, codex) vs processedDatabases (opencode); scanner bodies (file vs database ingestion) are the explicit external-provider fixture boundary and were not expanded."
+ },
+ "schema": "drogon.audit.e3-leaf-usage-factories/1",
+ "scope": {
+  "note": "Exact 24 pre-existing factory channels (3 providers x 8 ops). No recensus performed; generic 975/981 extraction totals untouched. External scanner internals (scanClaudeUsageFiles, scanCodexUsageFiles, scanOpenCodeUsageDatabases) remain the explicit fixture boundary."
+ },
+ "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+ "sourceTests": [
+  {
+   "assertionsRead": "4 its fully read (claude/codex/opencode + shared harness): fetch+enable no-op resolving undefined with null state preserved. Proves web-fallback tolerance, not desktop behavior.",
+   "file": "src/renderer/src/store/slices/usage-web-client-fallback.test.ts",
+   "lines": 65,
+   "sha256": "a97436d225089407bd50663c688654a0f6a985d899c2f5b7461887780b310405"
+  },
+  {
+   "assertionsRead": "Head + harness read (deferred helpers, codex-only store, scan-state factory); timing assertions NOT inventoried here \u2014 benchmark bounds, not contract proof.",
+   "file": "src/renderer/src/store/slices/usage-snapshot-refresh.benchmark.test.ts",
+   "lines": 135,
+   "sha256": "b85dcc7acf6785f7fbd394836a9b842b2e11f92c0eea30d62fd6ced8fe10391e"
+  },
+  {
+   "assertionsRead": "1 it fully read: all 24 channels registered in prefix\u00d7suffix order; claude forwarding exact args (setEnabled true; refresh [false]/[true]; snapshot deconstructed to scope/range/limit; kind model). Store doubles, not real services; codex/opencode forwarding asserted only for getScanState.",
+   "file": "src/main/ipc/usage-provider-handlers.test.ts",
+   "lines": 65,
+   "sha256": "c66ef81c1c5ad37aa6846b4765804829671d757cc5b375e4bf85c664b76aba25"
+  },
+  {
+   "assertionsRead": "1 it fully read: per-prefix exact invoke channel+arg sequence for all 8 ops (refresh passes undefined when argless). Real channel strings, mocked ipc.",
+   "file": "src/preload/usage-provider-api.test.ts",
+   "lines": 33,
+   "sha256": "f8ddeb999a1ea5d1092060fcf776f7881dba6b6a720521c24b3d481c79ea1683"
+  }
+ ],
+ "uiConsumption": {
+  "detail": "fetchUsage: getScanState \u2192 undefined means paired web client \u2192 return (no state change); disabled \u2192 stop after scanState write; else getSnapshot({scope, range, limit: 10}) \u2192 conditional write (populated only if lastScanCompletedAt !== null or hasCachedData) \u2192 refresh({force}) \u2192 getSnapshot again (unconditional write). Errors caught+logged, never surfaced to UI. setEnabled writes optimistic scanning state, clears projections, force-fetches when enabling. Scope/range setters update key then fetchUsage. Initial scope 'orca', range '30d', scanState/summary null, arrays empty \u2014 all three slices identical except prefix/name/presence-key. Individual getSummary/getDaily/getBreakdown/getRecentSessions channels: NO caller found in the desktop slice; only test-harness mocks reference them \u2014 exposed API surface, stated honestly.",
+  "immediateConsumer": "Renderer zustand slices (usage-provider-slices.ts:266-299): createClaudeUsageSlice / createCodexUsageSlice / createOpenCodeUsageSlice via shared createUsageProviderSlice factory. Consumed IPC ops per provider: getScanState, setEnabled, refresh, getSnapshot ONLY (4 of 8).",
+  "webFallback": "Paired web clients resolve unbridged usage calls to undefined; slice returns early leaving null state (usage-web-client-fallback.test.ts). No throw, no error toast."
+ },
+ "wholeFileHashes": [
+  {
+   "file": "src/main/codex-usage/codex-usage-provider.ts",
+   "lines": 20,
+   "sha256": "1ea60c659d5c58899541d6154db4310d16f2e30f7ac4227d2ff9488ed9d2e604"
+  },
+  {
+   "file": "src/main/codex-usage/store.ts",
+   "lines": 146,
+   "sha256": "98716869b703b1abae08653272ec5413adcb81b2ba34e80f4e675ff3bb3e80d0"
+  },
+  {
+   "file": "src/main/claude-usage/store.ts",
+   "lines": 145,
+   "sha256": "ffa7de0fcdadd4c9492e0a507c599b9f5013ea0b4a756aeda1f56440f34fae9b"
+  },
+  {
+   "file": "src/main/ipc/register-core-handlers/register-core-handlers.ts",
+   "lines": 238,
+   "sha256": "1b24e95f59bb6a398327581da308b2295b41ebd49a51df77b4e41cc522f8e057"
+  },
+  {
+   "file": "src/main/ipc/usage-provider-handlers.ts",
+   "lines": 68,
+   "sha256": "017ae5dbb06052ce73ce1be7094b12ba27bb8114b715a2016017e71bc8623eb1"
+  },
+  {
+   "file": "src/main/opencode-usage/opencode-usage-provider.ts",
+   "lines": 23,
+   "sha256": "6bf7843e26fde9059b1b3e0baad267d89c36553a0ae1758c82759c8aed93217b"
+  },
+  {
+   "file": "src/main/opencode-usage/persisted-state-normalization.ts",
+   "lines": 68,
+   "sha256": "0c8bab89b63bc80d704170f9baa1b8a4695f559b94dec9b03f38285b4c316c39"
+  },
+  {
+   "file": "src/main/opencode-usage/store.ts",
+   "lines": 162,
+   "sha256": "8ba2b123c7bede7e293a0f8a756b3289c924e4f447804dcd9c5bd8cd8073c1f4"
+  },
+  {
+   "file": "src/main/usage/usage-provider-contract.ts",
+   "lines": 41,
+   "sha256": "4e45dc812bdd79c5496d3760ec64a61331e4b77847962a04857b42d63afacec6"
+  },
+  {
+   "file": "src/main/usage/usage-provider-store-lifecycle.ts",
+   "lines": 170,
+   "sha256": "b1450f2b3848d0d6c9d26ba625513ae2e16709ba0b6ac5acb3d2fc5a64994e2f"
+  },
+  {
+   "file": "src/preload/api/agent-usage-api.ts",
+   "lines": 59,
+   "sha256": "c4ed548a1b0192f72009e7f24ce5f23a05dcd1ef23740488e34833f55994673a"
+  },
+  {
+   "file": "src/preload/api/claude-usage-bridge.ts",
+   "lines": 8,
+   "sha256": "a259f5c5c19e55cfb32b4c05eedb824b1c6cda7717bada80a31c562da9abec70"
+  },
+  {
+   "file": "src/preload/api/codex-usage-bridge.ts",
+   "lines": 8,
+   "sha256": "984ecd79b2869cd7a8464b4fd9df275bae632963dbcb39bde7e250358ef15e47"
+  },
+  {
+   "file": "src/preload/api/open-code-usage-bridge.ts",
+   "lines": 8,
+   "sha256": "1247230b115d84fe1d0010e7181663c910618113c9626fb537a995105b303de7"
+  },
+  {
+   "file": "src/preload/usage-provider-api.test.ts",
+   "lines": 33,
+   "sha256": "f8ddeb999a1ea5d1092060fcf776f7881dba6b6a720521c24b3d481c79ea1683"
+  },
+  {
+   "file": "src/preload/usage-provider-api.ts",
+   "lines": 29,
+   "sha256": "1376070698ca3cf469d2134a6dc40ae8544af1ed8f339b683b74fcbbcf08526f"
+  },
+  {
+   "file": "src/renderer/src/store/slices/usage-provider-slices.ts",
+   "lines": 299,
+   "sha256": "1b1553a6048644b578e41b60f57efd0c788ba60db7e4b7f6f68c5b388be276bf"
+  },
+  {
+   "file": "src/renderer/src/store/slices/usage-snapshot-refresh.benchmark.test.ts",
+   "lines": 135,
+   "sha256": "b85dcc7acf6785f7fbd394836a9b842b2e11f92c0eea30d62fd6ced8fe10391e"
+  },
+  {
+   "file": "src/renderer/src/store/slices/usage-web-client-fallback.test.ts",
+   "lines": 65,
+   "sha256": "a97436d225089407bd50663c688654a0f6a985d899c2f5b7461887780b310405"
+  },
+  {
+   "file": "src/shared/claude-usage-types.ts",
+   "lines": 72,
+   "sha256": "dc5a5216643180f3c7d705b7a469448833619df971a04d8e495749f066e2e105"
+  },
+  {
+   "file": "src/shared/codex-usage-types.ts",
+   "lines": 75,
+   "sha256": "1d11395c427e163dd816e1af5c59d31c0628a271178c2e534b4c6a0dba5c2fd6"
+  },
+  {
+   "file": "src/shared/opencode-usage-types.ts",
+   "lines": 73,
+   "sha256": "6842b933f5d02ca3b6da755b9cf7addf380fec7c23fa1e22f043d1948ba4e960"
+  }
+ ]
+}

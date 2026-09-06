@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06",
+  "workPackage": "WP-ENG-RUNTIME",
+  "boundedAssignment": "identity-leases",
+  "candidateRunner": {
+    "node": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "nodeVersion": "v24.19.0",
+    "vitestEntry": "apps/desktop/node_modules/vitest/vitest.mjs",
+    "vitestVersion": "5.0.0",
+    "platform": "darwin-arm64"
+  },
+  "candidateCommands": [
+    {
+      "suite": "agent-session-claim-identity",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-ENG-RUNTIME/identity-leases/claim-identity/agent-session-claim-identity.contract.test.ts --environment node --reporter dot",
+      "workingDirectory": "/Users/carlos/Documents/Drogon-rewrite",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "Cannot find module '../../../../../../apps/desktop/src/main/runtime/agent-session-claim-identity'",
+      "classification": "blocked_binding_not_behavioral_red"
+    },
+    {
+      "suite": "agent-session-lease-renewal",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-ENG-RUNTIME/identity-leases/lease-renewal/agent-session-lease-renewal.contract.test.ts --environment node --reporter dot",
+      "workingDirectory": "/Users/carlos/Documents/Drogon-rewrite",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "Cannot find module '../../../../../../apps/desktop/src/main/runtime/agent-session-record-store'",
+      "classification": "blocked_binding_not_behavioral_red"
+    },
+    {
+      "suite": "agent-session-provider-handle-transition",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /Users/carlos/Documents/Drogon-rewrite/apps/desktop/node_modules/vitest/vitest.mjs run --root . src/main/runtime/agent-session-provider-handle-transition.test.ts --environment node --reporter dot",
+      "workingDirectory": "/Users/carlos/Documents/Drogon-rewrite/tests/parity/ports/WP-ENG-RUNTIME/identity-leases/provider-transition",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "Cannot find module '../../shared/agent-session-record.test-fixture'",
+      "classification": "blocked_binding_not_behavioral_red"
+    }
+  ],
+  "preservationVerification": [
+    {
+      "suite": "agent-session-claim-identity",
+      "method": "diff after removing the two-line provenance header and reversing only the direct candidate import path",
+      "exitCode": 0
+    },
+    {
+      "suite": "agent-session-lease-renewal",
+      "method": "diff after removing the two-line provenance header and reversing only the three direct candidate import paths",
+      "exitCode": 0
+    },
+    {
+      "suite": "agent-session-provider-handle-transition",
+      "method": "SHA256 byte comparison against the pinned source test",
+      "sourceSha256": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1",
+      "portedSha256": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1",
+      "match": true
+    }
+  ],
+  "sourceBaseline": {
+    "admittedSuites": 0,
+    "status": "not_established_for_all_three_assigned_suites",
+    "reusedEvidenceSearched": [
+      "docs/migration/source-regression-node-20260906.json",
+      "tests/parity/batches/source-regression-node-20260906.json",
+      "tests/parity/baseline-capsules/**",
+      "docs/migration/parity-source-tests.json"
+    ],
+    "retainedInventory": "docs/migration/parity-source-tests.json records exact source hashes and Vitest membership but no execution outcome for these three suites",
+    "inadmissibleChildRun": {
+      "command": "cd /Users/carlos/Documents/Drogon-mentu-session && node_modules/.bin/vitest run src/main/runtime/agent-session-provider-handle-transition.test.ts --config config/vitest.config.ts --reporter=verbose",
+      "reportedResult": "2 passed",
+      "reasonExcluded": "The child ran with the read-only source checkout as cwd, violating AGENTS.md and the Dispatch restriction; an ignored Vitest cache was written, so this result is not accepted as a source baseline.",
+      "observedCachePath": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json",
+      "observedCacheMtime": "2026-09-06T08:47:49-0600",
+      "cleanup": "not attempted; the source checkout remains outside write ownership"
+    }
+  },
+  "verdict": "All three complete original suites are frozen with 18/18 assertion evaluations mapped and preserved. Candidate collection reaches no test body because the required interfaces are absent, so there is no behavioral RED, GREEN, or candidate parity evidence."
+}

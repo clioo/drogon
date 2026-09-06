@@ -1,0 +1,59 @@
+{
+  "schema": "drogon.cloud-mutation-lease-source-baseline/1",
+  "date": "2026-09-06",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "scope": "Five unchanged original fixture tests, RP-C4; not actual GCS, full cloud suite or rewritten-product parity.",
+  "manifest": "tests/parity/baseline-capsules/cloud-mutation-lease.json",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/cloud-mutation-lease-tKh5TJ",
+  "manifestSha256": "3369692582162b54b2ba4523ac24d628de6bd5174fea8f9357eac1fc32a33936",
+  "stageReceiptSha256": "cde699a6476fcc507620e3c7674cd07b207e0d437014746a85953d99f6548b02",
+  "resultsSha256": "495e7b2e1d185006bf7692286bdfceab52b3eaf307e20461cf914cbe5e7ba691",
+  "assertions": [
+    {
+      "name": "GoogleStorageMutationLease creates and conditionally releases a new lease",
+      "status": "passed"
+    },
+    {
+      "name": "GoogleStorageMutationLease rejects a different request while the durable lease is live",
+      "status": "passed"
+    },
+    {
+      "name": "GoogleStorageMutationLease takes over an expired lease with an exact generation precondition",
+      "status": "passed"
+    },
+    {
+      "name": "GoogleStorageMutationLease conditionally replaces the exact authorized live lease",
+      "status": "passed"
+    },
+    {
+      "name": "GoogleStorageMutationLease rejects a live-lease takeover when any expected field differs",
+      "status": "passed"
+    }
+  ],
+  "sourceFilesAndLicenseHashesVerified": true,
+  "counts": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "pending": 0,
+    "todo": 0
+  },
+  "execution": {
+    "node": "24.19.0",
+    "vitest": "4.1.9",
+    "platform": "darwin-arm64",
+    "exitCode": 0,
+    "timedOut": false,
+    "toolchainEvidence": "docs/migration/cloud-gcloud-source-baseline.json",
+    "toolchainManifest": "tests/parity/toolchains/cloud-vitest419/package.json",
+    "toolchainLockfile": "tests/parity/toolchains/cloud-vitest419/pnpm-lock.yaml",
+    "fullOriginalCloudLockEquivalence": false
+  },
+  "admission": "Root fully read the original test/module/google-metadata import before execution. All five cases inject synthetic fetch responses and clock; default network, real Google metadata/storage, credentials and subprocesses are not invoked. Staged exact source/license bytes independently rechecked after run.",
+  "interpretation": [
+    "Generation0 create and generation7 conditional delete, conflicting live request, expired takeover, exact authorized live takeover, and a generation mismatch are asserted.",
+    "The final test title says any expected field, but the body varies only generation. OperationId/requestDigest mismatch coverage remains unproved.",
+    "No 412 race, auth/default fetch failure, ambiguous write response, metadata/media generation race, same-digest replacement, release failure or actual storage isolation is proved.",
+    "All original source tests remain in the canonical9037-file allocation. This result does not close E5 or establish candidate behavioral RED/GREEN."
+  ]
+}

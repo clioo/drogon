@@ -1,0 +1,834 @@
+{
+  "schemaVersion": "drogon.audit.e3-result-platform-leaf-final/1",
+  "supersedes": "docs/migration/audit-closure/e3-bridge/result-platform/leaf/native-results.json",
+  "taskId": "task_25c85c3b15f2",
+  "dispatchId": "ctx_db93bd931201",
+  "correctiveContinuationOf": {
+    "taskId": "task_ee79699b5b27",
+    "outcome": "rejected"
+  },
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "auditOnly": true,
+  "scope": {
+    "assignedGroups": [
+      "DR-COMPUTER_METHODS (15)",
+      "DR-SPEECH_METHODS (8)",
+      "DR-EMULATOR_METHODS (19)"
+    ],
+    "totalMethods": 42,
+    "noRecursiveImportCensus": true,
+    "noTestsRun": true,
+    "noModelInference": true,
+    "noGit": true,
+    "noDescendants": true
+  },
+  "rejectionReasonsAddressed": [
+    "falsely_called_unread_local_implementations_real_external_boundaries",
+    "assumed_restricted_source_file_set_never_assigned",
+    "false_claim_only_speech_has_mutable_state",
+    "false_claim_all_computer_methods_only_throw",
+    "false_claim_only_2_platform_branches (named as an example correction)"
+  ],
+  "additionalFilesReadThisPass": [
+    {
+      "file": "src/main/computer/sidecar-entry.ts",
+      "wholeFileSha256": "975fece0490a7753e7f6a19ba277e46aadcf7a3416106caa1e6f815fe4b3eb02"
+    },
+    {
+      "file": "src/main/computer/computer-provider-lifecycle.ts",
+      "wholeFileSha256": "92921f1d06764d0fe0d1f65067e856ba9812e55388f399879f21f8eaa39820ba"
+    },
+    {
+      "file": "src/main/computer/computer-provider-unavailable-message.ts",
+      "wholeFileSha256": "31f1e9f4a1608ada65f9e0dfb2e75e93ce9bd1de6e2e1ea6088ac02920009051"
+    },
+    {
+      "file": "src/main/computer/macos-native-provider-client.ts",
+      "wholeFileSha256": "cc3f30e7fe17048ead8cba47687ba4eaf93a23582f13648e803c7cb2b0373e5a"
+    },
+    {
+      "file": "src/main/computer/macos-native-provider-availability.ts",
+      "wholeFileSha256": "ff1ae2e0ef41ec4d9a0d15e8ea47a951a5b7d919d1cfcb274ffb18f1d031ca78"
+    },
+    {
+      "file": "src/main/computer/macos-native-provider-contract.ts",
+      "wholeFileSha256": "e5ff8ba1c2ecccd6a3c31720d0fd72dffd9cee4f488c9437c91617cf3941cb4c"
+    },
+    {
+      "file": "src/main/computer/macos-native-provider-transport.ts",
+      "wholeFileSha256": "707dfbb59b26e9d4b2203a929b2926d8ed442ac21879c4dc46115aa672d79151"
+    },
+    {
+      "file": "src/main/computer/computer-provider-action-validation.ts",
+      "wholeFileSha256": "706912e0f1460b73a049b6cadf2801ffbc16324a25eaa1c08ce5024f773bec61"
+    },
+    {
+      "file": "src/main/computer/desktop-script-provider-client.ts",
+      "wholeFileSha256": "7a7cf737d79a9fc58fc3497b38826bfa593283d023bea1df74474222c885e967"
+    },
+    {
+      "file": "src/main/computer/desktop-script-provider-bridge.ts",
+      "wholeFileSha256": "0319534fef2778a955598110065f2f94c196449d1e62dadd502ba7bbdfaeda89"
+    },
+    {
+      "file": "src/main/computer/desktop-script-provider-paths.ts",
+      "wholeFileSha256": "19eadb58b628564454482549758f1b8cdf5d9410e8e234299b9290fdd360a82e"
+    },
+    {
+      "file": "src/main/computer/desktop-script-action.ts",
+      "wholeFileSha256": "b8e157cffebff6332226f110e6925f2ca9f84e946c6ede2fc21dd724fe5540d6"
+    },
+    {
+      "file": "src/main/speech/speech-runtime-service.ts",
+      "wholeFileSha256": "9700d1c8bbb3902589f6e14636e780a753a0a82229f27db6a8428d2d9eb6bc76"
+    },
+    {
+      "file": "src/main/speech/model-manager.ts",
+      "wholeFileSha256": "a73609763cee49eb89f9cd535c88fa3197667c62c9a9026473f9516399fe74f0"
+    },
+    {
+      "file": "src/main/speech/stt-service.ts",
+      "wholeFileSha256": "464c6ca825277a6c834816ae4cd014c52f3a96d620f3146e65a6a7ed383c52ce"
+    },
+    {
+      "file": "src/main/speech/stt-session-state.ts",
+      "wholeFileSha256": "77adc85a68bc66d03b48ddf52f497e292c6e584282686b8db857562cc5d7d603"
+    },
+    {
+      "file": "src/main/speech/stt-session-start.ts",
+      "wholeFileSha256": "1d4f0905b9d969c78fd96874b3a1e25c67698848d856391f12f6cef5b36795d2"
+    },
+    {
+      "file": "src/main/speech/stt-session-stop.ts",
+      "wholeFileSha256": "08d5db6147a929241e5fed3aa37bcf9597deca662e806ad9264349626ea9ea03"
+    },
+    {
+      "file": "src/main/speech/speech-model-deletion.ts",
+      "wholeFileSha256": "c4430e085905ceb62198348b268c4038a8cfaf9edd2fe053fe7c267d7671e9fd"
+    },
+    {
+      "file": "src/main/speech/model-catalog.ts",
+      "wholeFileSha256": "a2fde409df7b3e57a021761901a4d19a0651175c9709479d6081edf79186c305"
+    },
+    {
+      "file": "src/main/emulator/emulator-bridge.ts",
+      "wholeFileSha256": "8ddb22e722cff111b995c910844faa35ef3a3bf048833a57476081a014b3d50c"
+    },
+    {
+      "file": "src/main/emulator/backends/emulator-backend.ts",
+      "wholeFileSha256": "25668a66809fe9de49bc4e29de835d8a2719ba8afa10fcc2cce903d398ba4cbf"
+    },
+    {
+      "file": "src/main/emulator/backends/android-emulator-backend.ts",
+      "wholeFileSha256": "6caba17f4919234b855a6f1356151ffa399c405c8b4aa88102dc623062c359f5"
+    },
+    {
+      "file": "src/main/emulator/backends/ios-emulator-backend.ts",
+      "wholeFileSha256": "68ea4a58b37855aa4b365c66f03fa7b02c3df53e70f4809c43a698ac219f0e3a"
+    },
+    {
+      "file": "src/main/emulator/android/android-capability-operations.ts",
+      "wholeFileSha256": "b3a9a6d7e47c6e7c3412a29aed9fdf55c3056f3db3fc56d38caa83eb831ec83d"
+    },
+    {
+      "file": "src/main/emulator/android/android-command-runner.ts",
+      "wholeFileSha256": "6dcdce2f1412bf5d27d613b42675f59a6cc92e450e6fd5c18d585204843edda2"
+    },
+    {
+      "file": "src/main/emulator/android/android-adb-result.ts",
+      "wholeFileSha256": "668f8b17dd51fd5599214df1a7675edac719b439337f58d42301a4d2fd6c46df"
+    }
+  ],
+  "filesReadFirstPass": [
+    {
+      "file": "src/main/runtime/rpc/methods/computer.ts",
+      "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+    },
+    {
+      "file": "src/main/runtime/rpc/methods/speech.ts",
+      "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+    },
+    {
+      "file": "src/main/runtime/rpc/methods/emulator.ts",
+      "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+    },
+    {
+      "file": "src/main/computer/sidecar-client.ts",
+      "wholeFileSha256": "3ad4259f6d7fd39e5e3d259f8478c8d4fb44956d75a43c0af5a24b5b9389ad54"
+    },
+    {
+      "file": "src/main/computer/macos-computer-use-permissions.ts",
+      "wholeFileSha256": "9727bd0ca107fbaa6b30253c469b44bd3e2ac1c2f2d5ca25cc5844d768129dc4"
+    },
+    {
+      "file": "src/main/computer/macos-computer-use-permission-status.ts",
+      "wholeFileSha256": "83ea94c983419796fdc0984d921beeeb1b52ea3b115058474e66759c747df43d"
+    },
+    {
+      "file": "src/main/computer/computer-action-verification-normalization.ts",
+      "wholeFileSha256": "d774a429abd864b4c5296efcc17191cc31216638cb7169c19c79d9db88c1a159"
+    },
+    {
+      "file": "src/main/computer/computer-sidecar-paste-validation.ts",
+      "wholeFileSha256": "39b12973b1abbfb21187cd7e46d73256e2553db056cadc1823be57b03898bc55"
+    },
+    {
+      "file": "src/main/computer/runtime-client-error.ts",
+      "wholeFileSha256": "f4d011837b8dd7190484dd8c1a8bf2838dfd8d2945448e712cf693db039146e1"
+    },
+    {
+      "file": "src/main/runtime/runtime-service-command-surface.ts",
+      "wholeFileSha256": "aeeb863fb234298e73a0fe5434effa7cc40d7b4301f9f59a443375a9700090db"
+    },
+    {
+      "file": "src/main/runtime/runtime-mobile-speech-catalog.ts",
+      "wholeFileSha256": "2f17aecf8ddfefae88792f9d764bd8cbfc0028fd3f868d6b39fb597e310e2ca5"
+    },
+    {
+      "file": "src/main/runtime/runtime-mobile-dictation-controller.ts",
+      "wholeFileSha256": "b22a9223974b2b1a3220095acda140a0ff274aeef4bb9bf3b30da8238c640c69"
+    },
+    {
+      "file": "src/main/runtime/orca-runtime-emulator.ts",
+      "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+    },
+    {
+      "file": "src/main/emulator/emulator-errors.ts",
+      "wholeFileSha256": "67b603a05d8642563075046aff881205391ce0a1632528e39c73933493a003cf"
+    }
+  ],
+  "methods": [
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.capabilities",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 32,
+        "endLine": 38,
+        "rangeSha256": "05ed875896522f64f947786af19a8c1f0ad0156413cab0a57a977f4eeaddfc99",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Added: ensureCompatible() protocol-version gate on macOS-native path (throws provider_incompatible after one restart-retry if handshake protocolVersion mismatches REQUIRED_MACOS_PROVIDER_PROTOCOL_VERSION=1); desktop-script path throws accessibility_error 'desktop provider returned no capabilities' if handshake response lacks capabilities.",
+      "realBoundary": "spawn(signed macOS helper, --agent/--token-file) over Unix socket [macos-native-provider-transport.ts:117-129], OR execFile('python3'|'powershell.exe', script, operationPath) [desktop-script-provider-bridge.ts:77-98]"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.listApps",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 39,
+        "endLine": 45,
+        "rangeSha256": "6b9d1a4caff20af779e6e2f1465fd9c670cc71ac59fc7f31e8d72b5cb5497a7c",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Desktop-script path: bundleId resolved as app.bundleId ?? app.bundleIdentifier ?? null (two possible key names); isRunning/lastUsedAt/useCount are hardcoded literals (true/null/null), not passed through from the script response.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.permissions",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 46,
+        "endLine": 54,
+        "rangeSha256": "11483d1ce3e2c12a1e9312b795d93f4652df07b433b8613896c78ac7fdd79d05",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material change from first pass beyond confirming the platform-branch count (see corrections doc).",
+      "realBoundary": "spawn('/usr/bin/open'), spawnSync('/usr/bin/pkill') [macos-computer-use-permissions.ts]"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.permissionsStatus",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 55,
+        "endLine": 63,
+        "rangeSha256": "2793291a95793b0949150f49e5fa15ba048435b268c925d53412adf84927f0f4",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material change from first pass.",
+      "realBoundary": "spawn('/usr/bin/open') + temp status-file poll [macos-computer-use-permission-status.ts]"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.listWindows",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 64,
+        "endLine": 70,
+        "rangeSha256": "167334d41ae3d3872c4f83fe699476d7a28b588073b0067d82404079d23fa1c6",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Added: both providers require a windows.list capability check before the call, throwing unsupported_capability if the connected helper doesn't advertise it. Not present in first-pass characterization.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.getAppState",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 71,
+        "endLine": 77,
+        "rangeSha256": "27bf6010778ab8febab2684ce116508424cd03705bbd7a2a92f633f85a0adf43",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Desktop-script path: throws accessibility_error 'desktop provider returned no snapshot' if response lacks a snapshot field; successful snapshot is remembered in a per-app/window store consumed by later action calls' elementIndex resolution -- a cross-call state dependency not previously characterized.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.click",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 78,
+        "endLine": 84,
+        "rangeSha256": "d6df22725aca449c8a5fd7bb21dd38bb5b3d98f4df31f8c0f06f7bc352dd1dd0",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Added full pre-validation layer (computer-provider-action-validation.ts): throws invalid_argument for elementIndex/x+y XOR violations, mouse button/modifier validation. Desktop-script path can throw element_not_found from elementParam() for a stale index. macOS-native path requires per-action capability support (ensureActionSupported), throwing unsupported_capability if unsupported.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.performSecondaryAction",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 85,
+        "endLine": 91,
+        "rangeSha256": "5a5b7afc5599354d1d396a0ec1148c412840f85d5cd07b4b2710862f7f5d5d15",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Pre-validation requires elementIndex (non-negative integer) and a non-empty action string, throwing invalid_argument otherwise -- not characterized in first pass.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.scroll",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 92,
+        "endLine": 98,
+        "rangeSha256": "96c8dfe05a1edc12207da70f8e36727f24c066271be605c17df6b68511ce4182",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Pre-validation requires elementIndex or x+y (not both/neither), a valid direction enum, and a positive pages number if present -- not characterized in first pass.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.drag",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 99,
+        "endLine": 105,
+        "rangeSha256": "7301ac082e9be6a054ba080c72dc0474a6efc87092a04e976c8daeebc330ac4a",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Pre-validation requires either a full element-index pair or a full coordinate quad, never partial -- throws invalid_argument for every partial combination. Not characterized in first pass.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.typeText",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 106,
+        "endLine": 112,
+        "rangeSha256": "a1e9517fc380939ce6b14d2e343821131ba66a5f02493804e31857ec4195d8ab",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Pre-validation requires a non-empty text string -- not characterized in first pass (first pass said 'no coercion at this layer').",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.pressKey",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 113,
+        "endLine": 119,
+        "rangeSha256": "efd7114cb61338b43517a09f063d74f8adb667c81af71f641111bf78822ea851",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Pre-validation requires a non-empty key and validates it against computer-use-key-spec.ts's shared validator, throwing invalid_argument with the validator's message on failure -- not characterized in first pass.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.hotkey",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 120,
+        "endLine": 126,
+        "rangeSha256": "ce6818b51f5a4471e62a9fdc696b451d76bfad243f6d0206b796d389827da2d7",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Pre-validation requires a non-empty key and validates it against the shared hotkey validator -- not characterized in first pass.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.pasteText",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 127,
+        "endLine": 133,
+        "rangeSha256": "6755ed779285a663fc9d70979cd8195d4f80f45a40b75de6f7269c72b76f2a77",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "Pre-validation requires a non-empty text string AND runs validateComputerClipboardPasteTextWithBoundedYield BEFORE any provider call is reached (this validation now confirmed to run twice: once in computer-provider-action-validation.ts's validatePasteText, once in the sidecar-client-only computer-sidecar-paste-validation.ts path used by the child-process sidecar variant) -- first pass only knew of the second copy.",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.setValue",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 134,
+        "endLine": 140,
+        "rangeSha256": "d1c2b2089609b6dce69572fa548b1ee67be46435649578c54425bc8a5bf8b94e",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "MAJOR: desktop-script path's verifyDesktopAction can return a SUCCESSFUL (non-throwing) result with action.verification={state:'unverified',reason:'value_mismatch'|'provider_unavailable',expected,actualPreview} when the actual post-write value does not match the requested value -- directly disproves the first-pass claim that all computer.* methods only throw on failure. Pre-validation requires elementIndex (non-negative integer) and a value string (empty allowed).",
+      "realBoundary": "same as capabilities"
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.models.list",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 52,
+        "endLine": 56,
+        "rangeSha256": "cdadedfb9a85d5843c3dbd585d4655afaa558691b6adafe594eedc3ce6680d15",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: none reached directly (pure local disk/state read) except hasOpenAiSpeechApiKey() [openai-api-key-store.ts, not read -- reads a locally stored API key presence, not a network call]."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.models.download",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 57,
+        "endLine": 61,
+        "rangeSha256": "a1f3cac6f34739bbfff6c953a5348a3e5dff9bc95ed0b0e07cb6653a6d796464",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: SpeechModelDownloadTransport.downloadFileWithRetry (Electron streaming net.request, HTTPS model file download) + verifyFileSha256 -- base class body not read this pass, RPC-visible contract ({started:true} immediate return, silent console-logged async failure) fully characterized via downloadModel()'s call site."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.models.delete",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 62,
+        "endLine": 66,
+        "rangeSha256": "5db17a705ac23801f39570bfdc94621d7b41dbd8755f23d06f90642d2e02a247",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: local filesystem rm/rename only (no network); SpeechModelDownloadTransport not invoked on this path."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.setup",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 67,
+        "endLine": 76,
+        "rangeSha256": "d3ecda1d3c1f5cbfbd384d42c6a5890420d33c0da6770f4847ddb374d531c9f9",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: none (pure local settings-store read/write plus in-memory catalog lookup)."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.start",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 77,
+        "endLine": 82,
+        "rangeSha256": "25cb3712036f9966a346ecdde9e147c703128ff73a17f17621ffe7d3e39f65e9",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: node:worker_threads Worker running local STT inference (getSttWorkerPath()) for provider:'local' models, OR OpenAiTranscriptionSession (HTTPS to OpenAI) for provider:'openai' models -- both confirmed as genuine external/native boundaries, neither's internals read this pass (RPC-visible contract fully characterized via call sites in stt-session-start.ts, read in full)."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.chunk",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 83,
+        "endLine": 88,
+        "rangeSha256": "5d32f0681c4a55acb1a52fd471c7371911524913f4d0963b8784826f4a7445fe",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: same worker/cloud-session fork as .start -- worker.postMessage(transferable buffer) for local, cloudSession.feedAudio (HTTP-streamed) for cloud."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.finish",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 89,
+        "endLine": 94,
+        "rangeSha256": "f11fd3ec61072edb18fc7a3ddc1d6c7b098524c94ea575d63d75c5a114851a04",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: same worker/cloud-session fork -- worker.postMessage({type:'stop'}) + awaited worker-lifecycle event for local, session.finish() (HTTPS) for cloud."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.cancel",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 95,
+        "endLine": 100,
+        "rangeSha256": "80b7b23cfdaacce688de155428118e301b493ab80a436a67cf8542c9ae2bd0f6",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: same as .finish, reached via the same stopSttDictation() function."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.list",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 159,
+        "endLine": 163,
+        "rangeSha256": "1aa3193304c2affdf63d1ca3ff3f14a597c9c23219282bdcebb24088f5473b3b",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: serve-sim helper binary only (['--list','-q'], JSON output) -- iOS-only, confirmed no Android path is reachable through this specific RPC method."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.attach",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 164,
+        "endLine": 168,
+        "rangeSha256": "7b6a1c170a9786d6476e60c866c88c5b8b50f0ad106259b4362f8ce0fd3b54dc",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: backend.resolveDeviceId()/backend.acquireHelperForDevice() chain -- Android: adb device/AVD resolution + emulator boot; iOS: simctl resolve + boot + serve-sim --detach helper spawn. Resolution failures on the requested device are now confirmed to be caught and treated as 'not the active device' rather than propagated (emulator-bridge.ts:101-107)."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.tap",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 169,
+        "endLine": 173,
+        "rangeSha256": "a9695ad0330d97c1a8681a7efdf1ec25a8013e314743dc315212b84223f1d766",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: adb shell input tap (via android-input-commands.ts, arg-builder only, not read line-by-line) preceded by a real 'wm size' adb query [android-emulator-backend.ts:314-327, cached per-serial]; OR serve-sim helper binary ['tap', x, y, '-d', udid]."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.gesture",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 174,
+        "endLine": 178,
+        "rangeSha256": "1384d8899054f287719ba115d147aba136cf0f47059031b1ac9bd9992871b0d0",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: Android drives its own control mechanism via androidSwipe (adb-based, arg-builder not read); iOS requires a live websocket URL and sends the gesture sequence directly over it (sendEmulatorGestureSequence, not read further) -- NOT via the serve-sim CLI, a genuinely different transport from tap/type/button/rotate on iOS."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.type",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 179,
+        "endLine": 183,
+        "rangeSha256": "8d059380fd16eca08f3ca6a3804f89650eb63b1bafea735fca695849ec9f3269",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: adb shell input text (androidTypeText, arg-builder not read) OR serve-sim helper binary ['type', text, '-d', udid]."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.button",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 184,
+        "endLine": 188,
+        "rangeSha256": "5a6e024ed0ceeb466fc09e4464e2d67b33852fdfe0752108c8b35409b1f2924d",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: adb shell input keyevent (androidButton, arg-builder not read) OR serve-sim helper binary ['button', name, '-d', udid]."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.rotate",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 189,
+        "endLine": 193,
+        "rangeSha256": "d2af853f5093a3c3d7b1bed49cbc270cd7e388a89fdc02e8039a70b2d1c3478f",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: adb-based rotation (androidRotate, arg-builder not read, invalidates cached screen size) OR serve-sim helper binary ['rotate', orientation, '-d', udid]."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.exec",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 194,
+        "endLine": 198,
+        "rangeSha256": "87f6ee2b91679148cedd0b571806f7852ffdb55cce2355842286155b8772a6da",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: raw 'adb shell <command>' (androidExec, arg-builder not read) OR serve-sim CLI subcommand parsed from the command string (parseServeSimCommandArgs) -- the two backends interpret the `command` parameter with entirely different grammars."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.kill",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 199,
+        "endLine": 203,
+        "rangeSha256": "7d7e60da5bcf41082cef63d57999922b6add9f9f2cad70b2230c638031582fcd",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: adb port-forward cleanup (best-effort, swallowed failures) OR serve-sim --kill + helper-process reap; both backends' underlying binaries confirmed via android-command-runner.ts / serve-sim-execution.ts."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.shutdown",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 204,
+        "endLine": 208,
+        "rangeSha256": "7481bb884e76c45a1453a06877efdf83187a5def2042a9ebfa3463350acf3816",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: adb 'emu kill' equivalent (emuKillArgs, via execFileAndroidCommandRunner) OR xcrun simctl shutdown (shutdownSimulatorDevice, not read further -- same class of boundary as serve-sim)."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.listSimulators",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 209,
+        "endLine": 213,
+        "rangeSha256": "2efcbe33e808a08afd07be7f80d68b876a9efd5a8c59c223bbfed949156e380d",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: xcrun simctl device list (listSimulatorDevices, not read further) -- iOS-only."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.availability",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 214,
+        "endLine": 218,
+        "rangeSha256": "e8831fc00d553b6ecd37ea3b80bce3164221fb26551a9695e527d0fbed22402f",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: adb device/AVD probe (listDevices) for Android; xcrun simctl probe + serve-sim --help liveness check for iOS."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.listDevices",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 219,
+        "endLine": 223,
+        "rangeSha256": "d1801da25339330c078b93df1281df64a2b7c0d1f05efa5f5371b9ad3f85629a",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: aggregates both backends' listDevices() (adb + simctl probes)."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.install",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 224,
+        "endLine": 228,
+        "rangeSha256": "129af6ffedb03f02ed41772c2df69695b5696d925d61f6541f57fa2c87c2f25f",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: 'adb install' -- UNSUPPORTED on iOS (capabilities.install=false, throws emulator_unsupported before any binary is invoked). On Android, confirmed to guard against adb's exit-0-with-Failure-in-stdout silent-success trap by scanning output text, not just the exit code."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.launch",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 229,
+        "endLine": 233,
+        "rangeSha256": "5365449ef11f8ee503163a2d3e4316310bbb948ab05d0302256bc3212817d693",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: 'adb shell am start' equivalent (launchAppArgs, arg-builder not read) -- UNSUPPORTED on iOS (capabilities.launch=false)."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.permissions",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 234,
+        "endLine": 238,
+        "rangeSha256": "2356f2398cdac3f88ca06f2ff3d316dd6b4d0b2887981bc366314cdf879fe141",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: 'adb shell pm grant/revoke/reset' equivalent (permissionArgs, arg-builder not read) -- UNSUPPORTED on iOS (capabilities.permissions=false)."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.ax",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 239,
+        "endLine": 243,
+        "rangeSha256": "f7754ceace4682147a01af72fb8b7123eee635183e9f217e210457488664fe81",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: Android: two sequential 'adb shell uiautomator dump' + 'adb shell cat <file>' calls, each checked independently, parsed via parseUiAutomatorXml (not read). iOS: HTTP-style request to the serve-sim helper's AX endpoint (requestServeSimAccessibilityTree, not read), requires a live axUrl derived from the session's stream URL or throws emulator_no_active."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.logcat",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 244,
+        "endLine": 248,
+        "rangeSha256": "3cd85fcfccfdefba4312b93344c3a671feadeb9188ec3fe18dcc8f313c9b02cc",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: one-shot 'adb logcat -d' (explicitly NOT a streaming/follow tail per a source comment), parsed line-by-line via parseLogcatLine (not read) -- UNSUPPORTED on iOS (capabilities.logcat=false)."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.unregisterActive",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 249,
+        "endLine": 253,
+        "rangeSha256": "9348e585e57aeffc25ae083bc92cc90fba52104644098b475999029642b1fecc",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "correctionFromFirstPass": "No material correction beyond scope/hash confirmation; RPC-layer characterization from native-results.json stands.",
+      "realBoundary": "Real boundary: none (pure in-memory session-registry mutation, no backend call at all)."
+    }
+  ],
+  "keyCorrectedFindings": {
+    "computerSetValuePartialSuccessWithoutThrow": "desktop-script-action.ts verifyDesktopAction() returns a successful result with verification.state='unverified' on value mismatch instead of throwing (lines ~122-158)",
+    "mutableStateBeyondSpeech": [
+      "ComputerProviderLifecycle provider-instance cache",
+      "MacOSNativeProviderClient socket/pending/capabilities cache",
+      "DesktopScriptProviderClient snapshotStore (cross-call element/window targeting)",
+      "speech-runtime-service.ts module singletons",
+      "ModelManager activeDownloads/modelStates maps",
+      "SttSessionState full field set (richer than single controller session field)",
+      "EmulatorSessionRegistry / EmulatorStartLeaseRegistry",
+      "AndroidEmulatorBackend.screenSizes cache",
+      "scrcpyVideoRegistry"
+    ],
+    "platformVersionBranchCount": 10,
+    "iosBackendUnsupportedCapabilities": [
+      "install",
+      "launch",
+      "permissions",
+      "logcat"
+    ],
+    "androidAdbInstallSilentSuccessTrap": "adb install can exit 0 while printing 'Failure [...]' to stdout; installAndroidApk scans output text, not just exit code",
+    "emulatorListIsIosOnly": "EmulatorBridge.listRunningHelpers() unconditionally delegates to iosBackend; no Android path reachable through emulator.list",
+    "speechModelsDeleteSettingsSideEffect": "deleting the currently-selected sttModel clears voice.sttModel to '' and persists with notifyListeners:true",
+    "speechModelsDeleteExactErrorCodes": [
+      "voice_model_unknown",
+      "voice_model_not_deletable",
+      "voice_model_in_use"
+    ],
+    "dictationStartSessionReuseFastPath": "same modelId+hotwordsFilePath with no owner conflict reuses the live worker without respawning or full readiness re-check"
+  },
+  "residuals": [
+    "Signed macOS 'Orca Computer Use.app' helper binary internals (native code, not TS)",
+    "runtime.py / runtime.ps1 native automation scripts (Python/PowerShell, not TS)",
+    "adb / emulator / xcrun simctl binaries themselves (real OS/SDK tools)",
+    "serve-sim helper binary internals",
+    "stt-worker.ts internal inference message handling (RPC-visible contract already characterized via call sites)",
+    "openai-transcription-client.ts internals (RPC-visible contract already characterized via call sites)",
+    "SpeechModelDownloadTransport.downloadFileWithRetry/verifyFileSha256 internals (RPC-visible contract already characterized via call site)",
+    "Pure Android arg-builder/parser modules one hop past android-capability-operations.ts (existence/signatures confirmed via imports, bodies not read -- deliberate no-recursive-import-census boundary)",
+    "macos-native-provider-socket.ts raw net.connect implementation (transport-layer contract already characterized one layer up)"
+  ],
+  "testAssociations": "Unchanged from native-results.json this pass; no test file was opened. See first-pass artifact for the route-level shared assertion file list and the confirmed-but-unopened speech.test.ts.",
+  "precedence": "Corrective candidate leaf contribution for lead review/integration. Not E3 closure, not parity. Source counts/hashes are provenance, not behavior proof. No tests run, no model inference used to fill any identified gap."
+}

@@ -1,0 +1,184 @@
+{
+  "numTotalTestSuites": 2,
+  "numPassedTestSuites": 2,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 12,
+  "numPassedTests": 12,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1788671523168,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) returns the resolved home and merges linkStatus extras",
+          "status": "passed",
+          "title": "returns the resolved home and merges linkStatus extras",
+          "duration": 1.1455409999999944,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) round-trips writeFile + readFile inside home",
+          "status": "passed",
+          "title": "round-trips writeFile + readFile inside home",
+          "duration": 1.076791,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) refuses writeFile to an absolute path outside home",
+          "status": "passed",
+          "title": "refuses writeFile to an absolute path outside home",
+          "duration": 0.2797920000000005,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) refuses a `..` traversal that escapes home",
+          "status": "passed",
+          "title": "refuses a `..` traversal that escapes home",
+          "duration": 0.3019170000000031,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) refuses a sibling dir that shares home as a string prefix",
+          "status": "passed",
+          "title": "refuses a sibling dir that shares home as a string prefix",
+          "duration": 0.21945800000000304,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) reports ENOENT for a missing file inside home",
+          "status": "passed",
+          "title": "reports ENOENT for a missing file inside home",
+          "duration": 0.2622920000000022,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) allows readdir existence probes on an ancestor of home and on /",
+          "status": "passed",
+          "title": "allows readdir existence probes on an ancestor of home and on /",
+          "duration": 3.960459,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) refuses readdir on a non-ancestor dir outside home",
+          "status": "passed",
+          "title": "refuses readdir on a non-ancestor dir outside home",
+          "duration": 0.20787500000000136,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) refuses rename crossing the home boundary in either direction",
+          "status": "passed",
+          "title": "refuses rename crossing the home boundary in either direction",
+          "duration": 0.4835000000000065,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) refuses a relative path (resolved against cwd, which lands outside home)",
+          "status": "passed",
+          "title": "refuses a relative path (resolved against cwd, which lands outside home)",
+          "duration": 0.21383400000000563,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) refuses mkdir outside home and creates a dir inside home",
+          "status": "passed",
+          "title": "refuses mkdir outside home and creates a dir inside home",
+          "duration": 0.35966700000000174,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "registerWslHookFsHandlers (WSL fs bridge)"
+          ],
+          "fullName": "registerWslHookFsHandlers (WSL fs bridge) fails without crashing when chmod gets a non-numeric mode",
+          "status": "passed",
+          "title": "fails without crashing when chmod gets a non-numeric mode",
+          "duration": 0.45283299999999826,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1788671523258,
+      "endTime": 1788671523267.453,
+      "status": "passed",
+      "message": "",
+      "name": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-wsl-hook-fs-bridge-56PUGR/src/relay/wsl-hook-fs-bridge.test.ts"
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "scope": "Explicit regression rerun of admitted original Node capsules; unchanged assertions and source hashes. Not new coverage, all9037 tests, candidate parity or native platform proof.",
+  "exclusions": [
+    "two renderer capsules need their separate runtime links",
+    "CLI arguments admission requires a dedicated fixture environment",
+    "two cloud capsules keep their separate Vitest4.1.9 runner"
+  ],
+  "runner": "Original installed Vitest4.1.11, Node24.19.0, darwin-arm64; old orchestration-ask-timeout5.0 limitation is superseded only for this execution receipt.",
+  "expectedTests": 286,
+  "capsules": [
+    {
+      "manifestPath": "tests/parity/baseline-capsules/bot-reactive-dispatch.json",
+      "approvedManifestSha256": "422265b4a5100f523f569c6c6ddda7d1241080419401a03c7f11d055cdff19d8"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/bot-responsibility-owner.json",
+      "approvedManifestSha256": "801d9b00b65aaa0ce8ddfb6603f26c1c0b9d3866c42c7f780f15d73caf176580"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/bounded-json-serialization.json",
+      "approvedManifestSha256": "73d6a33428d1586dad2c48b1a83af0faa51e6fc97b94f397b3509b6b7c58fa1f"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/bounded-node-file-read.json",
+      "approvedManifestSha256": "f54fa1b6bb79d8b8eed43eed9604357855a75e51988fcd486868fe90f5bd6b65"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/browser-client-host-id-argument.json",
+      "approvedManifestSha256": "e90487cdde0c9804b87cf50d5f6ec553fe85f2eb5f13753933d9c44f63baef30"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/browser-client-host-identity.json",
+      "approvedManifestSha256": "21e43d1debbd1fe9942c4ae1a4b4be880cab4a25461b4f2ab9ccb42edc982db1"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/browser-client-host-placement-preparation.json",
+      "approvedManifestSha256": "a357a5f05537b64544273a69f0f2d7d3a3a13e2a7484e6f72dbf159e7732bec5"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/browser-host-client-page-adoption-grants.json",
+      "approvedManifestSha256": "ffa8d91760812fd7af30a41b3b63d9abd4943001c14e231cebde9b3e846f18ae"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/browser-host-client-page-adoption.json",
+      "approvedManifestSha256": "c77abda1d0ca3e704a05e06ab28a67bdb300461eb11dc86bcfe23278c699e961"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/diagnostic-upload-http.json",
+      "approvedManifestSha256": "9d56177e8056583f253b40a17e831a51afe4fbe361ec2d4dd4127bce317645c5"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/durable-file-write-syscall-proof.json",
+      "approvedManifestSha256": "72007a3f56ab436eb8df60495ef105619ec8b49c4ef94434e91ad05aeb9076c8"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/durable-file-write.json",
+      "approvedManifestSha256": "f476bde1ab60ad0fdb88681d6bcb4814f917efe4f790f3eccd1d947282d06486"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/emulator-stream-listener-cleanup.json",
+      "approvedManifestSha256": "b61d7c774e7f0c14915297020cd2209ee3d36f6079d6d5008d74596eb0f9affb"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/git-capability-cache.json",
+      "approvedManifestSha256": "8035dc96928494b8581f0a38e97b0a81f54364070ea912419773556776d91dfc"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/github-repository-identity.json",
+      "approvedManifestSha256": "6454ff684b1fcead03366993ac89ae544ad8920bce06d9eb2131e36f8bbb98b3"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/json-text-structure.json",
+      "approvedManifestSha256": "4be5caa37e8763358cc113cc2df8d82a200c01e5b297c5e09d309a48510d10ea"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/local-preview-build-marker.json",
+      "approvedManifestSha256": "7e5d176512e047800194ffed91df5fdda92106a1a83832950c4a2535821d3e6f"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/mac-build-compatibility.json",
+      "approvedManifestSha256": "a55ca5b0be9000a4bef95020986cb95b659ad1329e9f2ee3d94c0c0c2c2fca17"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/mobile-relay-stream-failures.json",
+      "approvedManifestSha256": "fa6101a3b7d7f47c28c1b379815af9c6100548fe6987b85e5c8db2ae1260dca2"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/mobile-request-single-flight.json",
+      "approvedManifestSha256": "be7ef86bf286285ddadf664223fa92b9df4334d0a6120d0b55df65c0fba274c7"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/mobile-runtime-capability-negotiation.json",
+      "approvedManifestSha256": "8454b3fc211d72cc12d948be7bca4cea0ddc9c33acefa8267f32907ef412629f"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/orchestration-ask-timeout.json",
+      "approvedManifestSha256": "7e3c58060f3727ec6b302b83551c88b973169231463f3ea9a5642dc7329d661c"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/packaged-daemon-entry.json",
+      "approvedManifestSha256": "df06d3cf196b7d48c32e99312168c980d9d489eecfa54431ef8d57b5c3d36eeb"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/relay-protocol-backpressure.json",
+      "approvedManifestSha256": "7aee5a85cb8078fd05de656b6c5a3b83c3059527ad87c4fb373b721deba83af0"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/relay-protocol-handshake.json",
+      "approvedManifestSha256": "106d1f1d41810cf02123c54dada6b138300b30f604465d95483636a8bc7669f4"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/relay-protocol-json-payload.json",
+      "approvedManifestSha256": "00d658b9290118b73fed23067b10d1d612c368ac138e663c1795b6a8ece0adfd"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-enoent-classification.json",
+      "approvedManifestSha256": "f83628d17c32c63ff9762622f681c56c0599d9c8aa587ee58c700d64e5212a53"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-socket-liveness.json",
+      "approvedManifestSha256": "933e32c8490b14f18ead835be323b3dfab92106bccd5a2eff3e6c5150807634b"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/secure-path-cache.json",
+      "approvedManifestSha256": "cfdbf6c8932516881dbd3838924813174a4a3524ff90bedd8f8011db3103a631"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/serve-mode-argv.json",
+      "approvedManifestSha256": "d784ca7d8dd7e774d2a7fcc7e307317f66efc98d3dbbac9fca1a11f0f41eb161"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/serve-options.json",
+      "approvedManifestSha256": "82298baec17f7ac48656e8ca439e9d7e3c58208bca08e23d714c5339a9db3fa4"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/serve-signal-exit-diagnostic.json",
+      "approvedManifestSha256": "d574a091ef2105a1f4b0c4eea1f4217429b454045845fdacdec24c2372b186d7"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/session-tab-close-relay.json",
+      "approvedManifestSha256": "0ab02a9641b3e8f543de4827e3afe1caac8e2282fd2f37c1256c90bacda2feb2"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/updater-local-preview-marker.json",
+      "approvedManifestSha256": "622642bea104247e931172996fe0f2a15e099968ee6302fde6bfebfbfc7d257c"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/usage-provider-api.json",
+      "approvedManifestSha256": "7dd506fb7c9055a4650e4a739f2714ca418a1cdc235494ac25c3ee2d0f50dac4"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/usage-provider-handlers.json",
+      "approvedManifestSha256": "bc1b8ef998795c0515f18f53f47e2378dc228feec2b5ccb1b2b7e4834fce391f"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/windows-environment-expansion.json",
+      "approvedManifestSha256": "34e86d1c39f9d88ce2c78f4cb214b4f1c657ea422f4783a7aaeb1f87179f9fb8"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/wsl-distro-list-output.json",
+      "approvedManifestSha256": "79a735d6e7fb1d14423b5c655d019cc15f0004a40eb3ff455db4f4e6b1c3d567"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/wsl-distro-list-single-flight.json",
+      "approvedManifestSha256": "cae13c42cd8b232fdd8d8033349374bbe01a84eb1910edfeea8d2630cd786304"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/wsl-hook-fs-bridge.json",
+      "approvedManifestSha256": "30f199e6e9cb0a1a6fbb0f31b02d4b48b135478694389ffa7400fc4987fcea06"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/wsl-running-distros.json",
+      "approvedManifestSha256": "93bbf1a73bb26a2c49f953e203747fd15693f399602d3c82462218c79846e31a"
+    }
+  ]
+}

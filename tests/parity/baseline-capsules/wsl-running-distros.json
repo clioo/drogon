@@ -1,0 +1,81 @@
+{
+  "capsuleId": "wsl-running-distros",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/main/wsl-running-distros.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 8
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "src/main/wsl-running-distros.test.ts",
+      "role": "test",
+      "sha256": "09201d515b61ff6bc1fc62fde08a979e74bab15c353a9ec5c4849f0816ca5122"
+    },
+    {
+      "path": "src/main/wsl.ts",
+      "role": "module",
+      "sha256": "d888b67769461a7ba0a175db9775e2e2ab30601cbec53077a27351604a04882a"
+    },
+    {
+      "path": "src/shared/wsl-paths.ts",
+      "role": "module",
+      "sha256": "1d9dcf5a1ff6693c02ff60a6b074eb2ebb7e83bda12aceba7e0b208d410b6d1a"
+    },
+    {
+      "path": "src/main/wsl-distro-list-output.ts",
+      "role": "module",
+      "sha256": "27f772c9dc451757f4397a4e47ca9c9e28c4067e50a41ceef846013ff43db7bc"
+    },
+    {
+      "path": "src/main/wsl-distro-retry.ts",
+      "role": "module",
+      "sha256": "d5711a29eb67bd49d9c512a5f35743921045b703ba27275cdcdc0d5aaf64e4be"
+    },
+    {
+      "path": "src/main/wsl-availability.ts",
+      "role": "module",
+      "sha256": "21875b1685a698ea48b63a64ec15107d84cc796fb0bbaec782a70646c8d6384b"
+    },
+    {
+      "path": "src/main/wsl-interop-spawn-directory.ts",
+      "role": "module",
+      "sha256": "857a1253971cb0d4e7da5659c9ded80c4f0930c70b03e243ed858f8999f294cf"
+    },
+    {
+      "path": "src/main/wsl-running-distro-cache.ts",
+      "role": "module",
+      "sha256": "d8bcf954daa78cba331ef725bf1ab2c63a117cb3d0bb099edba6133ffeee386a"
+    },
+    {
+      "path": "src/main/wsl-directory-probe-command.ts",
+      "role": "module",
+      "sha256": "1db18370dff7e8656d27b105625dd03bdba51cb60099e90c0abb3252ec2ec246"
+    },
+    {
+      "path": "src/main/wsl-running-path-filter.ts",
+      "role": "module",
+      "sha256": "4724395d8d899c0a320d99d007f76a898484e769fae37ea88775b822f237e9a6"
+    },
+    {
+      "path": "src/main/native-chat/wsl-transcript-running-observer.ts",
+      "role": "module",
+      "sha256": "c0a01ddaf89a0dba2631a456d6a48b29779b2fd5024ee47bb1491cab8362ab19"
+    }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Unchanged original complete test and dependency bodies, source-compatible Vitest4.1.11 and Node24. Original renderer/port setup, aliases, feature define and GC/WebStorage flags omitted for this reviewed closure.",
+    "Original tests mock child_process, temporarily override process.platform and restore it; fake timers remain original. Spawn-cwd selection may stat existing directories read-only. This does not execute native WSL or prove real host liveness.",
+    "Running-distro outage test retains its 30-minute virtual-time assertions; no assertion weakened, skipped or substituted."
+  ],
+  "isolationRationale": "Root fully read every staged production/test body. Fresh pinned capsule with original MIT provenance. Original child_process mocks and timer cleanup preserved; no app/profile changes or dependency installation.",
+  "contract": "E5 RP-W1 original discovery concurrency/backoff baseline; not candidate/native parity"
+}

@@ -1,0 +1,47 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleId": "remote-runtime-client-error-classification",
+  "entryTestFile": "src/shared/remote-runtime-client-error-classification.test.ts",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 / Node24.19.0 with minimal node config, not the full original config. No aliases, DOM/canvas/host-port setup, feature-wall define, GC/WebStorage flags or extended timeouts. Real-server cases bind ephemeral loopback explicitly; synthetic cases retain original clocks/spies. No original assertions/imports replaced."
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 14
+  },
+  "allocation": {
+    "package": "WP-ENG-SHARED",
+    "authority": "docs/migration/parity-test-work-packages.json",
+    "sourceTest": "src/shared/remote-runtime-client-error-classification.test.ts"
+  },
+  "isolationRationale": "Root read the complete original parameterized suite and its dependency-free classifier. In-memory Error/object/string inputs only; no timers, network, credentials or filesystem effects. Five recoverable-code rows, three negative/precedence cases and six legacy message rows expand to14 original tests.",
+  "testEvidenceBoundary": "Original classifier behavior only: five structured recoverable codes, unauthorized/protocol refusal, structured-code precedence over conflicting message text, and six legacy connection fragments. Does not exercise a real retry loop, every exported fragment/code, provider transport or rewritten product.",
+  "dependencyDiscovery": {
+    "parser": "Installed @babel/parser7.29.7; static runtime import/export walk excluding type-only imports",
+    "external": [
+      "vitest"
+    ],
+    "unresolvedDynamicImports": [],
+    "limits": "Discovery is routing only; root read complete source bodies before admission. Versions and tree fingerprints do not alone authorize arbitrary tests."
+  },
+  "files": [
+    {
+      "path": "src/shared/remote-runtime-client-error-classification.test.ts",
+      "sha256": "75a91d2b5bde77728da9d7329ee422b6fdab51cb6497679b318efca5d9a86a3c",
+      "role": "test"
+    },
+    {
+      "path": "src/shared/remote-runtime-client-error-classification.ts",
+      "sha256": "9e3906194428995fcfff5ba9ee3a4e774df715e9d8e557e5bd16ce08ec9b52a7",
+      "role": "module"
+    }
+  ]
+}

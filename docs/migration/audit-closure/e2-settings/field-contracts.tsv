@@ -1,0 +1,215 @@
+field	anchor	contract
+workspaceDir	S/worktree/ownership.ts:40	Workspace ownership includes configured layout; relative paths resolve against repository path. Layout changes preserve earlier roots through workspaceDirHistory.
+worktreeVisibilityDefaults	R/store/worktree-visibility-defaults-by-host.ts:18	Local defaults may fall back to settings; remote defaults are indexed by owner and never use client defaults when missing. SP07 governs split writes and failure.
+hostSettingOverrides	S/host-setting-overrides.ts:35	Client host-id map supports trimmed displayLabel/defaultWorktreeLocation overrides; empty removes override and effective value falls back to client default (SP08).
+nestWorkspaces	S/worktree/ownership.ts:38	Each workspace layout retains its nesting mode; current and historical layouts participate in ownership and scans.
+workspaceDirHistory	M/persistence/applying-settings/terminal-settings-migrations.ts:35	Append previous layout only on directory/nesting change and deduplicate by layout identity; ownership searches historical layouts, including WSL historical nesting modes.
+refreshLocalBaseRefOnWorktreeCreate	M/ipc/worktree-remote.ts:2052	Refresh local base from tracking ref on eligible new worktree creation; existing-branch checkout does not refresh. Local and SSH implementations both consult it.
+localBaseRefSuggestionDismissed	M/runtime/runtime-local-git-worktree-create.ts:136	Suppress local-base-update suggestion independently of whether automatic refresh is enabled; SSH path uses the same two-flag distinction.
+autoRenameBranchFromWork	M/agent-hooks/first-work-branch-rename.ts:103	First-work rename exits when disabled; migration defaults old unstamped profiles on while stamped explicit false survives.
+autoRenameBranchFromWorkDefaultedOn	S/auto-rename-branch-from-work-settings.ts:13	Rollout stamp distinguishes inherited false from later opt-out; explicit live update forces stamp true.
+branchPrefix	S/branch-prefix.ts:18	Select git username, custom prefix or no prefix; invalid inferred username may be skipped, whereas invalid custom prefix fails validation.
+branchPrefixCustom	S/branch-prefix.ts:22	Custom mode returns configured prefix with null fallback; Git settings retains a local editing draft to avoid delayed echoes overwriting typing.
+theme	S/terminal-color-scheme-protocol.ts:18	System follows current system dark preference; explicit light/dark wins. App document and terminal appearance consume the preference separately.
+leftSidebarAppearanceMode	R/lib/left-sidebar-appearance.ts:123	Default returns no surface override; match-terminal derives terminal colors, and tint mode derives sidebar tint independently.
+leftSidebarTintColor	R/lib/left-sidebar-appearance.ts:109	Normalize tint color before composing CSS color-mix for sidebar background.
+leftSidebarTintOpacity	R/lib/left-sidebar-appearance.ts:110	Normalize tint strength and convert to percentage for sidebar color-mix.
+uiLanguage	M/ipc/settings.ts:252	Normalized language changes update main language and rebuild menu; renderer I18nProvider resolves system/plugin language state separately.
+appIcon	M/ipc/settings.ts:266	Normalized live icon changes call applyAppIcon; window creation and tray icon construction also use this setting.
+appFontFamily	R/popout.tsx:38	Build CSS app font stack and publish document variable, including separate popout renderer.
+editorAutoSave	R/components/editor/editor-save-queue.ts:187	Disabled exits scheduling; enabled schedules eligible dirty file drafts through the save queue.
+editorAutoSaveDelayMs	R/components/editor/editor-save-queue.ts:191	Normalize delay before scheduling dirty drafts; delay preference alone does not save clean or ineligible files.
+editorMinimapEnabled	R/components/editor/MonacoEditor.tsx:239	File editor Monaco minimap uses false fallback; diff editor is explicitly outside this setting's effective surface.
+editorFontFamily	R/lib/editor-font-zoom.ts:44	Trimmed editor font wins, then terminal font, then monospace; separate notebook helper retains UI inheritance fallback.
+editorWordWrap	R/components/editor/EditorPanelHeader.tsx:100	Only explicit false disables file-editor wrapping; shortcut toggles file wrap independently from diff wrap.
+richMarkdownSpellcheckEnabled	R/components/editor/RichMarkdownEditor.tsx:60	Undefined defaults true in rich Markdown editor and provider composers; downstream editor option wiring must remain covered by UI tests.
+markdownReviewToolsEnabled	R/components/settings/GeneralEditorSettingsSection.tsx:391	Settings renders and toggles this boolean; targeted src TypeScript scan located no downstream behavior read beyond toggle, declaration and default. Do not invent review-tool gating or remove the persisted setting from this negative result.
+primarySelectionMiddleClickPaste	R/app-shell/use-app-shell-services.ts:30	Global app selection-paste service resolves platform fallback; Monaco separately enables selectionClipboard with Linux fallback for absent values.
+primarySelectionMiddleClickPasteDefaultedForLinux	M/persistence/loading-store/prepare-loaded-profile-settings.ts:112	Legacy Linux stamp participates in already-defaulted decision; preserve explicit opt-out once platform migration has occurred.
+primarySelectionMiddleClickPasteDefaultedForTerminalDefaults	M/persistence/loading-store/prepare-loaded-profile-settings.ts:114	Wider terminal-default stamp prevents repeating platform default rollout; migration enables only when injected platform default is enabled.
+terminalFontSize	R/components/terminal-pane/terminal-appearance.ts:189	Per-pane zoom size overrides global font size; editors/diffs also derive their base font size from this preference.
+terminalFontFamily	R/components/terminal-pane/terminal-appearance.ts:190	Build terminal font stack; ligature resolution and absent editor-font fallback also consume it.
+terminalFontWeight	R/components/terminal-pane/terminal-appearance.ts:155	Resolve normal and bold font weights together before applying terminal metrics and preview options.
+terminalFontWeightBold	R/components/terminal-pane/terminal-appearance.ts:156	Resolve bold weight with normal weight; applied to live panes and previews.
+terminalLineHeight	R/components/terminal-pane/terminal-appearance.ts:193	Normalize line height before metric application; IPC and load preparation also repair it and mark changed saved data.
+terminalScrollSensitivity	R/components/terminal-pane/terminal-appearance.ts:204	Normalize wheel scroll sensitivity before assigning terminal option; preview and pane creation use the same normalizer.
+terminalFastScrollSensitivity	R/components/terminal-pane/terminal-appearance.ts:207	Normalize fast wheel sensitivity before assigning terminal option; independent from TUI mouse wheel multiplier.
+terminalTuiScrollSensitivity	R/components/terminal-pane/terminal-pane-manager-options.ts:153	Read live settings through callback and normalize TUI mouse wheel multiplier; distinct from ordinary scroll sensitivity.
+terminalTuiScrollSensitivityDefaultedToOne	M/persistence/applying-settings/terminal-settings-migrations.ts:104	Move absent or legacy inherited multiplier to one only while unstamped; updates stamp completion.
+terminalGpuAcceleration	R/components/settings/TerminalRenderingSection.tsx:53	UI selects GPU mode; pane WebGL policy uses on/auto/off and renderer suitability/context-loss handling. Full option-to-pane propagation remains an explicit acceptance scenario.
+terminalLigatures	R/components/terminal-pane/terminal-appearance.ts:159	Resolve enabled state from mode and font family; attach/remove ligature support and avoid duplicate attachment.
+terminalCursorStyle	R/components/terminal-pane/terminal-appearance.ts:181	Absent cursor style falls back to block, with separate inactive-cursor style resolution; migration preserves stamped explicit choice.
+terminalCursorStyleDefaultedToBlock	S/terminal-cursor-style-settings.ts:17	Rollout stamp or preserveExplicitValue distinguishes prior inherited bar default from user choice.
+terminalCursorBlink	R/components/terminal-pane/terminal-appearance.ts:186	Apply through suspended-pane-aware blink setter so hidden panes do not re-arm blink timer; preview defaults absent to true.
+terminalThemeDark	R/lib/terminal-theme.ts:129	Select dark theme unless light appearance plus separate-light flag; empty theme falls back to built-in dark selection.
+terminalCustomThemes	R/lib/terminal-theme.ts:97	Normalize custom themes and append imported catalog options; load/update normalization and resolved selection keep custom identity separate from built-ins.
+terminalDividerColorDark	R/lib/terminal-theme.ts:132	Use normalized dark divider color with default fallback when dark theme variant is active.
+terminalUseSeparateLightTheme	R/lib/terminal-theme.ts:126	Light app appearance selects light terminal variant only when enabled; otherwise dark variant remains selected.
+terminalThemeLight	R/lib/terminal-theme.ts:128	Light variant uses configured name or built-in light fallback, conditional on separate-light flag.
+terminalDividerColorLight	R/lib/terminal-theme.ts:131	Light variant uses normalized light divider color and fallback.
+terminalInactivePaneOpacity	R/lib/terminal-theme.ts:167	Clamp inactive pane opacity to zero through one before applying pane styles.
+terminalActivePaneOpacity	R/lib/terminal-theme.ts:168	Clamp active pane opacity independently to zero through one.
+terminalPaneOpacityTransitionMs	R/lib/terminal-theme.ts:169	Clamp pane opacity transition duration to zero through 5000 milliseconds.
+terminalDividerThicknessPx	R/lib/terminal-theme.ts:170	Clamp divider thickness to one through 32 pixels before applying layout styles.
+terminalBackgroundOpacity	R/components/terminal-pane/terminal-appearance.ts:77	Convert theme background to alpha color when supplied; xterm transparency enabled when opacity is below one; mobile theme has its own hex guard.
+terminalColorOverrides	R/components/terminal-pane/terminal-appearance.ts:73	Merge per-color overrides above base terminal theme before opacity conversion; Ghostty import populates this object.
+terminalPaddingX	R/components/terminal-pane/terminal-appearance.ts:242	Pass horizontal padding to pane style application; absent remains undefined rather than an invented numeric default.
+terminalPaddingY	R/components/terminal-pane/terminal-appearance.ts:243	Pass vertical padding to pane style application independently of horizontal padding.
+terminalMouseHideWhileTyping	R/components/terminal-pane/use-terminal-pane-lifecycle.ts:181	Install/remove per-pane mouse-hide disposables as preference changes, including newly linked panes.
+terminalWordSeparator	R/components/terminal-pane/terminal-pane-manager-options.ts:149	Pass separator to terminal construction; empty settings input writes undefined. A live update without remount must be tested, not inferred from construction wiring.
+terminalCursorOpacity	R/components/terminal-pane/terminal-appearance.ts:84	Apply alpha only to hex cursor colors; named CSS cursor colors remain unchanged.
+terminalQuickCommands	M/runtime/runtime-client-settings.ts:143	Owner runtime returns its commands; renderer normalizes mutations and remote payloads. Quick-command host routing is separate from focused client preference.
+windowBackgroundBlur	M/window/createMainWindow.ts:79	Only Windows acrylic is applied at window creation; UI tracks restart-required by comparing mounted preference, not a live blur promise.
+minimizeToTrayOnClose	M/window/main-window-close-lifecycle.ts:69	Exact true permits hide-to-tray only outside quitting/crashed cases; mutation/load coerce to exact true.
+showMenuBarIcon	M/startup/main-window-actions.ts:113	Default-on persisted setting has darwin-specific effect; main store notification updates native menu bar item live.
+terminalRightClickToPaste	R/components/terminal-pane/use-terminal-pane-store-bindings.ts:37	Absent resolves to Windows platform convention; load migration preserves explicit false and resets inherited true to current platform default.
+terminalRightClickToPasteDefaultedForPlatform	M/persistence/loading-store/normalize-loaded-global-settings.ts:79	Stamp controls one-time platform migration; once true, saved value or current default is preserved.
+terminalWindowsShell	S/local-windows-terminal-runtime.ts:36	Configured shell participates with explicit requested shell and project execution runtime; setup script execution remains a separate platform contract.
+terminalWindowsWslDistro	S/local-windows-terminal-runtime.ts:37	Configured distro participates in local terminal runtime resolution; relay shell launch adds distro argv only for WSL shell.
+localAccountRuntime	S/local-account-runtime.ts:19	Explicit host/WSL wins; auto or absent follows global Windows runtime default on Windows and host elsewhere.
+localAccountWslDistro	S/local-account-runtime.ts:23	Normalize distro for explicit account WSL selection; account runtime changes synchronize rate-limit targets.
+localAccountRuntimeDefaultedToAutoForAllUsers	M/persistence/loading-store/prepare-loaded-profile-settings.ts:162	Once-only migration converts old host/default ambiguity to auto, preserving explicit WSL and later stamped choices.
+localAgentRuntime	S/project-execution-runtime.ts:126	Legacy explicit host/WSL contributes to deriving new global runtime default; preflight retains explicit compatibility handling.
+localAgentWslDistro	R/lib/local-preflight-context.ts:219	Legacy explicit WSL distro is trimmed before resolving preflight context; absence remains distinct from selected distro.
+localWindowsRuntimeDefault	S/local-account-runtime.ts:30	Normalized host/WSL default drives auto account runtime; settings mutation invalidates distinct repo scans when its reference changes.
+terminalWindowsPowerShellImplementation	M/startup/main-process-ready-foundation.ts:185	Startup shell-path hydration uses implementation preference with shell; renderer fallback is auto.
+terminalFocusFollowsMouse	R/lib/terminal-theme.ts:172	Boolean passes through pane style policy without numeric coercion; actual pointer focus belongs runtime acceptance.
+terminalClipboardOnSelect	R/components/terminal-pane/terminal-pane-pane-links.ts:120	Exact true writes normal clipboard on selection; primary selection is an independent decision and requires actual nonempty selection.
+terminalAllowOsc52Clipboard	R/components/terminal-pane/terminal-pane-pane-created.ts:81	OSC52 handler reads current setting and replay state before writing clipboard; rollout normalization defaults unstamped profiles on.
+terminalAllowOsc52ClipboardDefaultedOnForAllUsers	S/osc52-clipboard-settings.ts:11	Stamp distinguishes old persisted false default from later real opt-out and is saved after migration.
+claudeAgentTeamsMode	M/runtime/orca-runtime-create-terminal.ts:80	Main launch pipeline reads mode and passes it into Claude agent-teams launch planning; not merely a dead builder literal.
+setupScriptLaunchMode	R/lib/launch-worktree-background-terminals.ts:296	Default new-tab; split-horizontal/split-vertical select adjacent setup placement when setup exists.
+terminalScrollbackRows	M/ipc/pty/delivery/pending.ts:21	Normalized rows control desktop scrollback and pending-output cap; legacy bytes conversion belongs SP12.
+httpProxyUrl	M/network/proxy-policy-resolution.ts:19	Valid explicit proxy wins policy resolution; credentials separate from Electron proxyRules and protected persistence slot clears retained blob on explicit clearing.
+httpProxyBypassRules	M/network/proxy-policy-resolution.ts:22	Normalize bypass rules for configured proxy and omit empty bypass field; provider request sessions also receive network settings.
+electronHttp1CompatibilityMode	M/startup/configure-process.ts:44	Early startup reads persisted exact true, falling back false on parse error; UI advertises restart requirement.
+openLinksInApp	R/lib/http-link-routing.ts:131	Exact true participates in browser route policy alongside execution owner, modifier, forced-system option and availability.
+localhostWorktreeLabelsEnabled	R/lib/workspace-port-localhost-label.ts:19	Exact true plus workspace port and repository permits label route; remote-active handling is separately gated.
+openLinksInAppPreferencePrompted	R/components/terminal-pane/use-terminal-pane-startup-actions.ts:175	Exact true suppresses future link preference prompt; direct Settings change stamps it true with selected route.
+openLinksInAppModifierInverts	R/lib/http-link-routing.ts:135	Modifier routing consults inversion independently from default in-app route; hosted-review click route has its own policy.
+terminalLinkActionPopoverEnabled	R/components/terminal-pane/terminal-pane-mount-preparation.ts:133	Explicit false prevents link-action context; absent leaves it enabled, subject to pointer/pane eligibility.
+openAgentTabsInChatByDefault	R/lib/native-chat-initial-view-mode.ts:30	Requires native-chat feature plus this exact true preference and a supported/readable session to choose initial chat view.
+experimentalNativeChat	R/lib/native-chat-initial-view-mode.ts:30	Gates native chat initial view together with default-open preference; renderer agent type projection also gates on it.
+experimentalStructuredNativeChat	M/runtime/rpc/methods/structured-agent-session-policy.ts:17	Runtime policy requires exact true and fails closed on settings access error; renderer startup recovery also gates on it.
+nativeChatSessionOptions	R/components/native-chat/use-native-chat-session-options.ts:52	Serialize updates against latest settings after prior queued operation; launch preparation consumes per-session options.
+openInApplications	R/components/sidebar/WorktreeOpenInMenu.tsx:43	Normalized configured applications become external-editor menu entries with command; settings updates may create IDs and load may seed defaults.
+rightSidebarOpenByDefault	M/persistence/loading-store/normalize-loaded-ui-state.ts:37	Legacy setting hydrates UI rightSidebarOpen only when UI preference is absent; explicit UI boolean wins.
+showGitIgnoredFiles	R/components/right-sidebar/useFileExplorerVisibleRowProjection.ts:88	False filters ignored paths in explorer projections, including name-filter projection; this controls visibility rather than Git ignore contents.
+sourceControlViewMode	R/components/right-sidebar/source-control/panel/use-panel-view-state.ts:37	Normalize persisted list/tree selection for source-control view state.
+sourceControlGroupOrder	R/components/right-sidebar/source-control/panel/use-panel-view-state.ts:40	Resolve configured group order for source-control panel; mutation/load normalize array shape/order.
+sourceControlCompareAgainstUpstream	R/components/right-sidebar/source-control/sync/use-base-refs.ts:61	Select comparison base policy using upstream; PR/rebase effective merge target remains separately resolved.
+showTitlebarAppName	M/startup/main-process-i18n-menu.ts:93	Default-on appearance preference drives native menu check state; original UI toggle remains source-backed, titlebar rendering needs downstream proof.
+showTasksButton	R/components/sidebar/SidebarTaskNavButton.tsx:63	Absent defaults visible; task button additionally resolves providers and preflight availability.
+showAutomationsButton	R/components/sidebar/SidebarNav.tsx:42	Absent defaults visible, explicit false hides sidebar shortcut.
+artifactsEnabled	S/global-settings-types.ts:230	Deprecated declaration says Artifacts always available; only default assignment and declaration located in production TS. RPC test rejects deprecated grant alias; this is not a publish capability.
+artifactSharingEnabled	S/artifact-sharing-gate.ts:32	Publishing capability requires exact true and is checked in main/shared authority; independent from sidebar button visibility.
+agentSkillSharingEnabled	S/agent-skill-sharing-gate.ts:27	Agent skill publishing capability requires exact true; CLI advisory check is not final authority and manual reviewed publishing remains a separate flow.
+nestedWorkerMaxDepth	S/nested-worker-depth.ts:37	Accept positive safe integer; invalid values resolve default one. Runtime depth derives from invoking terminal, not merely a new Run namespace.
+showArtifactsButton	R/components/sidebar/SidebarNav.tsx:48	Only exact true shows shortcut; separate from publication permission and deprecated artifactsEnabled.
+showSkillsButton	R/components/sidebar/SidebarNav.tsx:54	Only exact true shows Skills sidebar shortcut; no publication permission follows.
+showMobileButton	R/components/sidebar/SidebarNav.tsx:36	Absent defaults visible; controls navigation, separate from pairing and emulator enablement.
+showPinnedWorktreesInGroups	R/components/sidebar/worktree-list/grouping/row-types.ts:14	Exact true duplicates pinned rows in groups; otherwise single-location policy, with pin reveal handling preserving active lineage visibility.
+ctrlTabOrderMode	R/components/tab-bar/RecentTabSwitcher.tsx:69	Normalize selected MRU/order policy when building recent-tab model; default MRU remains independent of key chord customization.
+terminalShortcutPolicy	S/keybindings/effective.ts:92	Default orca-first allows app shortcuts in terminal; terminal-first restricts to terminal scope or allowInTerminal definitions.
+floatingTerminalEnabled	R/app-shell/use-floating-workspace-panel.ts:32	Exact true enables floating workspace; unhydrated null settings is distinguished from user disable, avoiding premature teardown.
+browserClientHostedRemoteEnabled	M/ipc/runtime-environment-browser-client-host-handler.ts:31	Absent defaults enabled; browser hosting policy still depends on owner capability and explicit placement preference.
+browserSshWorkspaceRoutingEnabled	R/lib/ssh-workspace-browser-route-eligibility.ts:26	Absent defaults routed SSH egress; disabled-target membership independently excludes a target.
+browserSshWorkspaceRoutingDisabledTargetIds	R/lib/ssh-workspace-browser-route-eligibility.ts:27	Target-id exclusion list disables routing per target; hook appends only when not already present.
+browserSshWorkspaceRoutingProbeSkippedTargetIds	R/components/browser-pane/use-ssh-workspace-browser-route.ts:50	Persisted per-target skip list is distinct from routing disable; Try anyway appends, recheck removes, retry local reset does not clear persisted skip.
+floatingTerminalDefaultedForAllUsers	M/persistence/loading-store/prepare-loaded-terminal-settings.ts:108	Unstamped old profiles get default enabled; stamped false stays off.
+floatingTerminalCwd	M/ipc/settings.ts:148	Renderer path change is sanitized by main directory authority; floating panel consumes value without granting trust.
+floatingTerminalTrustedCwds	M/ipc/floating-workspace-directory.ts:46	Trusted directory set trims/resolves entries; generic renderer updates strip it, and main directory picker owns grants.
+floatingTerminalCwdMigratedToAppWorkspace	M/persistence/loading-store/prepare-loaded-terminal-settings.ts:122	One-time directory migration separates terminal home/default handling from notes workspace; trusted path migration is coupled but not a renderer grant.
+floatingTerminalTriggerLocation	R/app-shell/use-floating-workspace-panel.ts:38	Fallback floating-button; shell/status-bar select trigger placement and consider status-bar visibility.
+keybindings	M/startup/main-process-account-services.ts:115	GlobalSettings legacy overrides ARE read by startup callback on service construction; migration only writes absent file with nonempty overrides, then dedicated keybindings.json owns effective shortcuts.
+diffDefaultView	R/components/editor/EditorPanel.tsx:109	Initialize inline/side-by-side and observe later settings changes; combined-diff preference hook has independent local state synchronization.
+diffWordWrap	R/components/editor/EditorPanelHeader.tsx:97	Exact true means diff wrapping enabled; shortcut toggles diff setting when active file is diff, otherwise file-editor setting.
+diffShowWhitespace	R/components/editor/EditorPanelHeader.tsx:98	Exact true enables diff whitespace preference; combined diff receives the same saved value.
+combinedDiffFileTreeVisibleByDefault	R/components/editor/combined-diff/CombinedDiffViewer.tsx:92	Feed saved default to combined-diff view preferences, separate from ordinary explorer or per-session visibility.
+prBotAuthorOverrides	M/runtime/runtime-client-settings.ts:167	Dedicated mutation normalizes author bot override list and notifies listeners; whole Store boundary bounds values for all writers.
+notifications	M/ipc/notifications.ts:121	Master disabled returns delivered:false/disabled; individual channels, sound selection and foreground conditions remain nested policy. Mutation merges siblings then normalizes.
+promptCacheTimerEnabled	R/components/sidebar/CacheTimer.tsx:28	Timer requires enabled plus positive TTL; Claude completion capture tolerates pre-hydration settings and card display guards independently.
+promptCacheTtlMs	R/components/sidebar/CacheTimer.tsx:29	Nonpositive or absent TTL suppresses timer; card aggregate uses same duration as countdown input.
+codexManagedAccounts	M/codex-accounts/codex-reset-credit-scope-validation.ts:70	Account identity/revision validates reset-credit scope; WSL runtime home preparation uses account-owned home identities, not client-host flattening.
+activeCodexManagedAccountId	M/codex-accounts/runtime-selection.ts:33	Legacy host selection fallback sits after per-runtime host selection; null means system/default context.
+activeCodexManagedAccountIdsByRuntime	M/codex-accounts/runtime-selection.ts:32	Host and per-distro WSL selections are independent; host falls back to legacy id, WSL map copied.
+claudeManagedAccounts	M/claude-accounts/runtime-auth/runtime-auth-sync.ts:20	Runtime auth sync selects account for normalized runtime target from managed account list.
+activeClaudeManagedAccountId	M/claude-accounts/runtime-auth-service.ts:43	Legacy/current host active selection participates in serialized auth mutation; per-runtime selection remains distinct.
+activeClaudeManagedAccountIdsByRuntime	R/components/status-bar/status-bar-claude-accounts.ts:161	Renderer resolves account state using per-runtime map and legacy fallback; actual host/distro auth switching is separate execution proof.
+terminalScopeHistoryByWorktree	M/ipc/pty/ipc/spawn-options.ts:59	PTY spawn history isolation defaults true for absent settings on IPC and runtime paths.
+terminalHiddenViewParking	R/components/terminal-pane/use-manual-terminal-worktree-parking.ts:57	Absent defaults enabled; actual parking additionally requires eligible panes and watcher coverage.
+terminalSshViewParking	R/components/terminal-pane/pty-connection/hidden-restore-state-and-ssh-probe.ts:196	Absent defaults enabled; SSH reattach snapshot probe still checks PTY eligibility and timeout behavior.
+terminalHiddenWorktreeRetentionBudget	R/components/use-terminal-workspace-foundation.ts:81	Absent defaults enabled and feeds terminal retention policy; kill switch is not itself proof hidden worktrees are safely parkable.
+browserGuestWorktreeRetentionBudget	R/components/use-terminal-workspace-foundation.ts:84	Absent defaults enabled and feeds browser guest retention policy; browser guest destruction is separate from terminal process exit.
+terminalMainSideEffectAuthority	R/components/terminal-pane/terminal-side-effect-facts-handler.ts:55	Explicit false disables main authority; null renderer settings invokes synchronous persisted authority path, not unconditional default-on.
+terminalHiddenDeliveryGate	M/ipc/pty-hidden-delivery-gate.ts:40	Requires both main side-effect authority and hidden-delivery switch; renderer also resolves pre-hydration authority separately.
+terminalModelQueryAuthority	M/runtime/terminal-model-query-authority.ts:28	Requires hidden-delivery gate plus query-authority switch not false; model reply ownership must not be inferred from setting alone.
+defaultTuiAgent	M/runtime/runtime-worktree-agent-startup.ts:48	Explicit requested agent wins saved default; blank is explicit shell-only preference and stops implicit startup selection.
+disabledTuiAgents	M/runtime/orca-runtime-create-agent-session.ts:150	Runtime rejects disabled agent launch; renderer hides dynamic shortcut rows, so visibility is not the sole enforcement.
+pluginSystemEnabled	M/startup/main-process-plugins.ts:41	Exact true gates marketplace seed and renderer plugin panels; plugin consent remains separate.
+disabledPlugins	M/plugins/plugin-enablement.ts:44	Normalized disabled identity list wins over approval state; dedicated approval removes disabled entry and records consent fingerprint.
+pluginConsents	M/plugins/plugin-enablement.ts:45	Qualified plugin-key fingerprint must equal current consent fingerprint; dedicated enablement owns mutation, generic renderer settings cannot grant it.
+devPluginPaths	M/startup/main-process-plugins.ts:64	Normalized development paths drive discovery; development identity wins installed duplicate but duplicate dev identities remain errors.
+claudeAgentTeamsDefaultDisabledMigrated	M/persistence/loading-store/prepare-loaded-profile-settings.ts:131	Unstamped profile adds Claude agent-teams to disabled list and marks save; later stamped choices survive.
+skipDeleteWorktreeConfirm	R/components/sidebar/delete-worktree-flow.ts:103	Skip bypasses confirmation only when no lineage descendants; child-aware delete still asks.
+skipCloseTerminalWithRunningProcessConfirm	R/components/terminal/running-terminal-close-guard.ts:82	Exact true bypasses running-process probe prompt; no-PTY close is synchronous. Do not generalize one pane guard into remote liveness proof.
+skipDeleteAutomationConfirm	R/components/automations/automation-management-actions.ts:79	Truthy skip invokes delete directly, otherwise opens delete confirmation state.
+skipDeleteArtifactConfirm	R/components/artifacts/ArtifactsPage.tsx:102	Without skip, await confirmation before deletion; persisted preference does not authorize this audit to delete artifacts.
+skipCodexRateLimitResetConfirm	R/components/status-bar/use-codex-switcher-controller.ts:228	Skip calls redemption handler directly; scope/credit validation still occurs through account authority.
+defaultTaskViewPreset	R/components/use-task-page-resume-restoration.ts:72	Resume preset wins saved default, then normalize GitHub preset and derive query; cache warming mirrors this policy.
+defaultTaskSource	S/task-providers.ts:16	Normalize known provider and visible-provider fallback together; do not always reset to GitHub.
+visibleTaskProviders	S/task-providers.ts:15	Normalize provider list with default selection; load Jira rollout may append Jira unless previously stamped.
+visibleTaskProvidersDefaultedForJira	M/persistence/loading-store/prepare-loaded-profile-settings.ts:101	Stamp controls one-time Jira visibility expansion; explicit visible-provider update stamps completion.
+defaultRepoSelection	R/components/use-task-page-repo-selection.ts:52	Filter persisted ids by eligible repositories and normalize nonempty result; invalid/stale ids do not become selected blindly.
+defaultLinearTeamSelection	R/components/use-task-page-linear-list-selection.ts:45	Seed Linear team selection from saved value, with empty fallback; composer updates persistence on explicit selection.
+opencodeSessionCookie	M/startup/main-process-account-services.ts:99	Rate-limit resolver reads cookie; protected slot serialization differs from ordinary settings and clear removes retained ciphertext. No actual credential is read in this audit.
+opencodeWorkspaceId	M/startup/main-process-account-services.ts:100	Rate-limit resolver passes workspace override independently of cookie; UI persists text.
+minimaxGroupId	M/startup/main-process-account-services.ts:107	MiniMax resolver uses settings group id while session cookie comes from separate cookie authority.
+minimaxUsageModels	M/startup/main-process-account-services.ts:108	MiniMax resolver passes model choice; runtime projection falls back to general.
+geminiCliOAuthEnabled	M/startup/main-process-account-services.ts:111	Live resolver gates OAuth-backed usage, and status-bar provider visibility requires exact true.
+agentCmdOverrides	S/source-control-ai.ts:226	Per-agent command override trims before AI operation execution; detection also extracts executable token using platform policy.
+codexSessionSourceHome	M/codex/codex-session-source-home.ts:17	Normalize host source-home override; per-distro WSL override is separate, and absent retains default source.
+agentDefaultArgs	M/persistence/applying-settings/settings-update.ts:99	Normalize per-agent args on mutation, stamp migration; existing overrides beat launch defaults and migrated missing-agent entries remain empty.
+agentDefaultEnv	M/runtime/orca-runtime-resolve-recovered-structured-tui-transcript.ts:141	Resolve per-agent launch environment for runtime location; mutation normalizes env map and stamps migration.
+agentYoloDefaultsMigrated	M/persistence/applying-settings/terminal-settings-migrations.ts:129	Stamped profiles fill missing agent args/env with empty values to prevent newly added agents inheriting permissive defaults.
+agentStatusHooksEnabled	M/startup/main-process-ready-foundation.ts:223	Settings changes manage hook relays in both directions; disabled agent identities still constrain hook eligibility.
+dismissedSkillFreshnessNudges	R/components/skills/SkillFreshnessNudge.tsx:122	Explicit dismissal appends deduplicated exact identity/revision tuples and keeps final 512; failed write releases persistence guard, not strict LRU.
+tabAutoGenerateTitle	R/store/terminals/terminal-tab-presentation.ts:89	Only exact true and nonempty prompt permit generation; owner-tab resolution and manual-title precedence remain independent checks.
+confirmClosePinnedTab	R/store/pinned-tab-close-guard.ts:30	Absent defaults true; pinned-tab confirmation composes with running-process close guard rather than replacing it.
+keepComputerAwakeWhileAgentsRun	M/startup/main-process-observers.ts:34	Legacy boolean feeds awake-mode normalization; startup ignores persisted stale status rows and begins from empty live statuses.
+computerAwakeMode	M/startup/main-process-observers.ts:33	Normalized mode plus legacy fallback configures awake service; IPC keeps mode and legacy projection synchronized.
+terminalMacOptionAsAlt	R/components/terminal-pane/use-terminal-pane-startup-actions.ts:203	Effective mode resolves auto against keyboard layout; refs keep input current. Explicit left/right handling is distinct from xterm macOptionIsMeta true.
+terminalMacOptionAsAltMigrated	M/persistence/loading-store/prepare-loaded-terminal-settings.ts:101	Once-only old true/absent to auto migration; explicit false/left/right and stamped values preserve choice.
+terminalJISYenToBackslash	R/components/terminal-pane/terminal-pane-pane-input.ts:166	Exact true plus macOS enables physical JIS Yen mapping through input resolver; preserve composition/input distinction.
+experimentalMobile	S/global-settings-types.ts:403	Declaration, default and telemetry whitelist located; no feature gate consumer found in targeted production TS scan. Do not equate with mobileEmulatorEnabled or showMobileButton.
+mobileEmulatorEnabled	M/runtime/orca-runtime-emulator.ts:131	Explicit false blocks runtime attach with emulator_disabled and renderer tab creation; absent defaults on subject to platform capability.
+mobileEmulatorDefaultDeviceUdid	M/runtime/orca-runtime-emulator.ts:135	Request device wins saved preference, then runtime default attach-device resolution.
+androidSdkPath	M/runtime/orca-runtime-emulator.ts:42	Configured Android SDK path set before backend bridge resolution; Settings refreshes availability after save.
+mobileAutoRestoreFitMs	M/runtime/orca-runtime-reclaim-terminal-for-desktop.ts:133	Null/absent means indefinite hold; runtime validates numeric finite duration before automatic restore policy.
+mobilePairingConnectionMode	R/components/mobile/use-mobile-pairing-connection-mode.ts:18	Saved pairing preference initializes mode; automatic and explicit local-only stay distinct from each device's persisted pairing mode.
+mobilePairingCustomAddress	R/components/mobile/use-mobile-pairing-custom-address.ts:10	Normalize saved custom address for pairing; nonempty active address is also added to normalized recent address list on save/load.
+mobilePairingCustomAddresses	R/components/mobile/use-mobile-pairing-custom-address.ts:15	Normalize list and merge current saved address; singular and plural state remain synchronized without assuming atomic pairing execution.
+experimentalPet	R/app-shell/app-root-surface-settings.ts:10	Exact true enables pet overlay; current value wins legacy sidekick including explicit false.
+experimentalSidekick	M/persistence/applying-settings/onboarding-normalization.ts:242	Read legacy flag only for current pet fallback; normalization does not strip legacy key through retired-key helper.
+experimentalActivity	M/persistence/loading-store/prepare-loaded-profile-settings.ts:67	Legacy activity value survives only past prior rollout boundary and feeds Agents introduction migration; no current feature toggle inferred.
+experimentalAgentDashboardPopout	M/ipc/dashboard-popout.ts:29	Exact true gates dashboard main IPC and renderer entry, independently from in-window/popout mode.
+agentsSidebarIntroShown	R/components/sidebar/SidebarHeader.tsx:28	Acknowledgement state combines with migration eligibility; close/Got it requests persistence, not an unconditional once-ever guarantee.
+agentsSidebarMigratedFromExperimental	M/persistence/loading-store/normalize-loaded-global-settings.ts:90	Preserve prior true or derive from prepared legacy activity, then UI uses it for introduction eligibility.
+experimentalAgentDashboardMode	R/hooks/ipc-events/agent-dashboard-command.ts:20	Explicit popout opens separate window; other values use in-window drawer policy.
+experimentalAgentDashboardShowIdle	R/components/sidebar/AgentDashboardSidebarEntry.tsx:63	Exact true controls sidebar idle badge projection and is serialized into dashboard snapshot; serialized flag is not itself proof of actual card filtering.
+experimentalActivityDefaultedOffForAllUsers	M/persistence/loading-store/prepare-loaded-profile-settings.ts:64	Legacy rollout boundary controls whether raw activity is preserved; normalize output stamps true.
+experimentalTerminalAttention	R/hooks/agent-hook-completion-store-sync.ts:33	Exact true can keep completion tracking active even when notifications are disabled; attention state is separate from delivery permission.
+experimentalAgentHibernation	R/lib/agent-hibernation-planner.ts:103	Exact true enables planner; otherwise no candidates. Coordinator start/stop follows toggle and actual liveness remains independently checked.
+agentHibernationIdleMs	R/lib/agent-hibernation-planner.ts:106	Effective idle duration feeds candidate planner with mobile locks, foreground tabs and runtime liveness requirements.
+experimentalNewWorktreeCardStyle	R/components/sidebar/use-worktree-card-foundation.ts:43	Exact true selects new card style and suppresses compact-card branch even if compact preference is true.
+experimentalEphemeralVms	R/hooks/composer-state/runtime-target-selection.ts:212	Exact true gates recipe probing in runtime-target selection; toggling is not evidence a VM launched.
+compactWorktreeCards	R/components/sidebar/use-worktree-card-foundation.ts:44	Exact true selects compact only when new-card style is off; load current value wins legacy including false.
+experimentalCompactWorktreeCards	M/persistence/loading-store/prepare-loaded-profile-settings.ts:185	Legacy alias is fallback only; normalized output writes current compact setting and clears legacy to undefined.
+activeRuntimeEnvironmentId	S/execution-host.ts:223	Trimmed id selects runtime execution host or local fallback; renderer generic updates cannot grant server preference and dedicated switch validates compatibility/fences races (SP05-SP07).
+githubProjects	R/components/github-project/useProjectViewTable.ts:50	Saved active project and per-project last view drive table selection; runtime owner target is resolved separately.
+commitMessageAi	S/source-control-ai.ts:117	Legacy AI settings feed normalized sourceControlAi fallback; modern updates project back for rollback compatibility and legacy writes merge forward.
+sourceControlAi	S/source-control-ai.ts:118	Normalize modern settings with legacy fallback and repository overrides; action recipes/model/host maps remain nested execution policy.
+gitlabProjects	M/gitlab/gitlab-project-recents.ts:15	Successful lookup records deduplicated host/path recent list capped at ten and preserves pinned; null lookup does not write.
+telemetry	M/persistence/applying-settings/settings-update.ts:212	Partial telemetry updates merge siblings, preserving install/cohort fields; absent builder default is not absent authority. Opt-in UI remains separate from initialized install metadata.
+tabSwitchKeybindingSeed	M/startup/main-process-account-services.ts:117	Pending cohort triggers per-action file seed; mark done only after seed succeeds and retain pending on failure for retry.
+voice	M/speech/speech-runtime-service.ts:49	Voice nested options include model directory and STT choice; load merges voice defaults, model manager creation reads directory once, and deleting selected model updates selection.

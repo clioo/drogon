@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "taskId": "task_8381e7b4ffa2",
+  "dispatchId": "ctx_b82079aeeb62",
+  "leafProvider": "kimi-for-coding/kimi-for-coding",
+  "capability": "native-claim-identity-windows-path-compatibility",
+  "additiveRecord": true,
+  "existingEvidenceUntouched": {
+    "vectorsOverwritten": false,
+    "historicalReportsModified": false,
+    "priorReportsRelabeledAsFinalAcceptance": false,
+    "rootVerifiedVectors": "scripts/verify-native-claim-source-vectors.mjs verified all 20 vectors against the pinned source; still valid"
+  },
+  "sources": [
+    {
+      "name": "Rust std::fs::canonicalize docs (std 1.98.1)",
+      "url": "https://doc.rust-lang.org/std/fs/fn.canonicalize.html",
+      "keyFact": "On Windows, converts the path to use extended length path syntax (\\\\?\\...)"
+    },
+    {
+      "name": "Node v24.19.0 lib/fs.js",
+      "url": "https://raw.githubusercontent.com/nodejs/node/v24.19.0/lib/fs.js",
+      "keyFact": "realpathSync (lines 2772-2900) is a pure-JS walk over path.resolve output; no toNamespacedPath, no prefix stripping; Windows splitRoot (2719-2726) preserves \\\\?\\ device roots"
+    },
+    {
+      "name": "Node v24.19.0 lib/path.js",
+      "url": "https://raw.githubusercontent.com/nodejs/node/v24.19.0/lib/path.js",
+      "keyFact": "win32.resolve (lines 190-344) treats leading \\\\? / \\\\. as a device root (line 280 firstPart test) and preserves it"
+    },
+    {
+      "name": "Pinned reference source",
+      "path": "/Users/carlos/Documents/Drogon-mentu-session/src/main/runtime/agent-session-claim-identity.ts",
+      "revision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+      "keyFact": "canonicalPathForPlatform = normalize(realpathSync(value)) then toLocaleLowerCase('en-US')"
+    }
+  ],
+  "expectedTransformations": [
+    {
+      "input": "ordinary drive C:\\Foo\\Bar.txt",
+      "nodeRealpathSpelling": "c:\\foo\\bar.txt after en-US lowercase",
+      "rustCanonicalSpelling": "\\\\?\\C:\\Foo\\Bar.txt",
+      "seamOutput": "c:\\foo\\bar.txt"
+    },
+    {
+      "input": "ordinary UNC \\\\Server\\Share\\X.jsonl",
+      "nodeRealpathSpelling": "\\\\server\\share\\x.jsonl after lowercase",
+      "rustCanonicalSpelling": "\\\\?\\UNC\\Server\\Share\\X.jsonl",
+      "seamOutput": "\\\\server\\share\\x.jsonl"
+    },
+    {
+      "input": "namespaced drive \\\\?\\C:\\Foo (or //?/C:/Foo)",
+      "nodeRealpathSpelling": "\\\\?\\c:\\foo (prefix preserved)",
+      "rustCanonicalSpelling": "\\\\?\\C:\\Foo",
+      "seamOutput": "\\\\?\\c:\\foo"
+    },
+    {
+      "input": "namespaced UNC \\\\?\\UNC\\Server\\Share\\X",
+      "nodeRealpathSpelling": "\\\\?\\unc\\server\\share\\x (prefix preserved)",
+      "rustCanonicalSpelling": "\\\\?\\UNC\\Server\\Share\\X",
+      "seamOutput": "\\\\?\\unc\\server\\share\\x"
+    },
+    {
+      "input": "dot-namespace drive \\\\.\\C:\\Foo (also //./C:/Foo)",
+      "nodeRealpathSpelling": "\\\\.\\c:\\foo (device root preserved, lib/path.js lines 280-289; separators normalized, isPathSeparator lines 65-67)",
+      "rustCanonicalSpelling": "\\\\?\\C:\\Foo",
+      "seamOutput": "\\\\.\\c:\\foo (reconstruct source namespace on canonical bytes)"
+    },
+    {
+      "input": "dot-namespace UNC \\\\.\\UNC\\Server\\Share\\X",
+      "nodeRealpathSpelling": "\\\\.\\unc\\server\\share\\x (device root preserved)",
+      "rustCanonicalSpelling": "\\\\?\\UNC\\Server\\Share\\X",
+      "seamOutput": "\\\\.\\unc\\server\\share\\x"
+    },
+    {
+      "input": "symlink to ordinary target",
+      "nodeRealpathSpelling": "target spelling, ordinary form, lowercased",
+      "rustCanonicalSpelling": "\\\\?\\-prefixed final target",
+      "seamOutput": "prefix-stripped lowercased target"
+    }
+  ],
+  "knownLimitations": [
+    "volume-GUID spellings are never remapped; an explicitly typed \\\\.\\Volume{GUID} input gets the same single-character namespace swap as drive/UNC forms; exotic \\\\.\\ device objects beyond drive/UNC (e.g. \\\\.\\PHYSICALDRIVE0) are not realistic transcript paths and canonicalization is not guaranteed to succeed for them",
+    "toLocaleLowerCase('en-US') approximated with Unicode default lowercasing (identical for realistic path characters)"
+  ],
+  "round2DotNamespaceFix": {
+    "taskId": "task_bc62f713fc08",
+    "sourceProof": [
+      "lib/path.js lines 280-289: win32.resolve matches a device root for firstPart '.' or '?' and preserves the typed namespace verbatim (device = \\\\\\\\${firstPart}, rootEnd = 4)",
+      "lib/path.js lines 65-67: isPathSeparator accepts '/' and '\\\\', establishing separator normalization; //./C:/Foo signs like \\\\.\\C:\\Foo",
+      "lib/fs.js lines 2719-2726: splitRoot keeps the device root through the realpathSync walk",
+      "Rust canonicalize always reports the \\\\?\\ form (official docs), so the seam reconstructs the source \\\\.\\ spelling by swapping the namespace character on the canonical target bytes"
+    ],
+    "fix": "normalize_windows_canonical_path: explicit \\\\.\\ input (either separator style) maps canonical \\\\?\\ prefix to \\\\.\\ before lowercasing; explicit \\\\?\\ inputs unchanged; ordinary inputs de-namespaced as before; symlink target segments stay canonical"
+  },
+  "testsFirstGate": {
+    "setupFailure": "none (seam landed compiling with wrong prefix-preserving behavior)",
+    "behavioralRed": {
+      "command": "cargo test -p drogon-core --test claim_identity --locked windows_pure",
+      "passed": 3,
+      "failed": 2,
+      "failureMode": "assertion mismatch, not import error",
+      "observed": [
+        "got \\\\?\\c:\\foo\\bar.txt, expected c:\\foo\\bar.txt",
+        "got \\\\?\\unc\\server\\share\\x.jsonl, expected \\\\server\\share\\x.jsonl"
+      ]
+    },
+    "green": {
+      "command": "cargo test -p drogon-core --test claim_identity --locked",
+      "passed": 37,
+      "failed": 0,
+      "skipped": 0,
+      "composition": "32 pre-existing tests preserved unchanged + 5 pure normalization tests; 2 cfg(windows) real-filesystem tests compiled out on macOS"
+    },
+    "behavioralRedRound2DotNamespace": {
+      "command": "cargo test -p drogon-core --test claim_identity --locked dot_namespace",
+      "passed": 0,
+      "failed": 2,
+      "failureMode": "assertion mismatch, not import error",
+      "observed": [
+        "got \\\\?\\c:\\foo, expected \\\\.\\c:\\foo",
+        "got \\\\?\\unc\\server\\share\\x, expected \\\\.\\unc\\server\\share\\x"
+      ]
+    },
+    "greenRound2": {
+      "command": "cargo test -p drogon-core --test claim_identity --locked",
+      "passed": 39,
+      "failed": 0,
+      "skipped": 0,
+      "composition": "all 37 round-1 tests preserved + 2 new pure dot-namespace tests; 2 cfg(windows) real-filesystem tests still compiled out on macOS",
+      "workspace": "cargo test -p drogon-core --locked all targets green; cargo check --workspace --locked clean"
+    }
+  },
+  "round3OrderingAndVisibilityFix": {
+    "taskId": "task_9009fbf0bf1d",
+    "dispatchId": "ctx_e4a350ff5b15",
+    "orderingFix": "regular-file validation now runs on the RAW fs::canonicalize PathBuf (filesystem-safe extended-length spelling); only the returned/signed transcript string passes through normalize_windows_canonical_path via platform_canonical_string; symlink target segments stay canonical; non-Windows behavior byte-identical to round 2",
+    "visibility": "normalize_windows_canonical_path and its re-export are pub(crate); root owns public interfaces; the integration test reaches the seam through the path-included module in the same crate",
+    "newWindowsGatedTest": "windows_long_path_survives_production_canonicalization_validation_and_signed_mapping: real >MAX_PATH transcript (created via explicit \\\\?\\ fs calls); when actually run on Windows it exercises that long paths survive fs::canonicalize, raw-PathBuf regular-file validation, and the signed-string mapping seam; not executed on the macOS host",
+    "unverifiedQuestion": "whether ordinary >MAX_PATH inputs fail in the pinned Node source on Windows (pure-JS realpath stats unprefixed components) while the Rust port succeeds via std's internal verbatim switch, and how namespaced long inputs compare, is OPEN and requires an actual Windows Node 24 vs Rust run; JavaScript source alone does not prove Node native lstat binding behavior and Rust fs::metadata path conversion is unverified on Windows; NEITHER parity NOR divergence is claimed from macOS/source inspection",
+    "greenRound3": {
+      "command": "cargo test -p drogon-core --test claim_identity --locked",
+      "passed": 39,
+      "failed": 0,
+      "skipped": 0,
+      "testFunctionsTotal": 42,
+      "composition": "39 macOS-executed (unchanged from round 2, no test weakened or removed) + 3 cfg(windows) gated (ordinary, symlink, long-path)",
+      "workspace": "cargo test -p drogon-core --locked all targets green; cargo check --workspace --locked clean",
+      "noNewRed": "pure tests untouched by the refactor; preserved suite verifies it"
+    }
+  },
+  "round4EvidenceAccuracyRewording": {
+    "taskId": "task_16ae3bb28240",
+    "dispatchId": "ctx_091d67c81a93",
+    "scope": "test framing and additive reports only; no production code, assertion, or count changed",
+    "changes": "cfg(windows) long-path test renamed to windows_long_path_survives_production_canonicalization_validation_and_signed_mapping; comments now say it WILL exercise, when actually run on Windows, that long paths survive production canonicalization, raw validation, and signed-string mapping — not that it proves the ordering claim by itself; report divergence claim replaced by an explicit unverified question requiring a real Windows Node 24 vs Rust run",
+    "preserved": "source-backed ordinary drive/UNC/explicit-namespace/symlink mapping, 39 host-executed tests, 3 cfg(windows) gated tests, prior genuine RED records, internal pub(crate) seam, rounds 1-3 provenance",
+    "greenAfterCommentOnlyEdit": "cargo test -p drogon-core --test claim_identity --locked: 39 passed, 0 failed; 42 test functions total, unchanged"
+  },
+  "platformLimitations": {
+    "pureMappingTests": "execute on macOS; prove the string transformation only, not Windows runtime parity",
+    "windowsRealFilesystemTests": "3 cfg(windows) tests (ordinary, symlink, long-path ordering); executed nowhere so far — Windows execution unavailable on the macOS host; symlink test also needs developer mode or SeCreateSymbolicLinkPrivilege",
+    "linux": "untested",
+    "fabricatedParity": false
+  },
+  "signerCommentCorrection": "signer.rs doc now explicitly states separate source processes can race (read between another process's openSync('wx') and writeFileSync), the source's synchronous guarantee is same-process only, and the deliberate bounded Rust settle behavior is retained",
+  "environment": {
+    "cargo": "1.98.0",
+    "rustc": "1.98.0",
+    "platform": "darwin (macOS)",
+    "allCargoCommandsLocked": true,
+    "forbiddenActions": "none: no installs, manifest/lockfile/lib.rs/export/RPC/protocol/Git/services/global-settings/provider changes or source writes"
+  },
+  "integrationBoundary": "String-level canonical-path compatibility for the claim-identity module only; public export registration, RPC wiring, leases/handle transitions, packaged execution and integrated acceptance remain root-owned.",
+  "hashes": {
+    "crates/drogon-core/src/claim_identity/mod.rs": "d8e5621358aa78063bcc22639cd1915ea0c1993d9ca2299a6f0b3af997f45d00",
+    "crates/drogon-core/src/claim_identity/resume.rs": "4b0a00ea7dee39bbd5f2850d0fcc634bfc0a0c6c29b90d207c6f2d173fe95d54",
+    "crates/drogon-core/src/claim_identity/signer.rs": "a3b85db9866c893fbc2d697489ba7f39241eaa4d20b54606e918c1a14aa764c6",
+    "crates/drogon-core/src/claim_identity/windows_path.rs": "84d2336ad808463f02698698e91b23ce07d293dc7cbf4dca90f12cdc33d6b866",
+    "crates/drogon-core/tests/claim_identity.rs": "3341422aeb42d8ddfcda871ce689a637c96b06a83c68552752e881f9de5f897b"
+  },
+  "supersededRound3Hashes": {
+    "crates/drogon-core/tests/claim_identity.rs": "1b469227226a6b739f21a3895a9e49f0ed6eaf39fafbc484723622b47f05a246"
+  },
+  "supersededRound2Hashes": {
+    "crates/drogon-core/src/claim_identity/mod.rs": "ae2156c38b9169b7cbc4e9d7024df8247ed41ab0e52353fcc0e821144bd370ce",
+    "crates/drogon-core/src/claim_identity/windows_path.rs": "b98e14438976082deedc45ceb9e487c8eba6e763d26a4c54b0602522c55321f3",
+    "crates/drogon-core/tests/claim_identity.rs": "87a11bdc11706142cf9b3d2540e29a3960f00038d354f9ed41899324931bf985"
+  },
+  "supersededRound1Hashes": {
+    "crates/drogon-core/src/claim_identity/windows_path.rs": "0154dfb977b2ce94663caf9fb270c5573a0e33a945f6397d1854e77458ccec2f",
+    "crates/drogon-core/tests/claim_identity.rs": "8bef6f64cfde7b3bbe4d38220e341f5aff9292f846757978161b5aa1aa6388c9"
+  }
+}

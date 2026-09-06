@@ -1,0 +1,200 @@
+{
+  "capsuleId": "bot-responsibility-owner",
+  "workPackage": "WP-CAP-BOTS",
+  "owner": "responsibility-owner (leaf, this subtree only)",
+  "sourcePin": {
+    "repo": "/Users/carlos/Documents/Drogon-mentu-session (read-only reference)",
+    "commit": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "verified": "git rev-parse HEAD == commit; git cat-file -t commit == 'commit'; HEAD already at pin",
+    "entryTestFile": "src/main/bots/bot-responsibility-owner.test.ts",
+    "entryTestSha256": "f4ae1f7e05c58cb3019c61777b0599821243535c378bb420b13c11e582edef6f",
+    "portedCopySha256": "f4ae1f7e05c58cb3019c61777b0599821243535c378bb420b13c11e582edef6f",
+    "portedCopyIsByteIdentical": true
+  },
+  "sourceBaseline": {
+    "command": "cd /Users/carlos/Documents/Drogon-mentu-session && node_modules/.bin/vitest run src/main/bots/bot-responsibility-owner.test.ts --config config/vitest.config.ts --reporter=verbose",
+    "result": "1 file passed (1), 11 tests passed (11), duration ~167ms",
+    "note": "Reproduced directly against the pinned/read-only reference checkout, no modification made there."
+  },
+  "candidateInterfaceSearch": {
+    "searched": [
+      "apps/desktop/src/main/**, apps/desktop/src/renderer/**, apps/desktop/src/preload/**, apps/desktop/src/shared/**",
+      "crates/drogon-core/**, crates/drogond/**, crates/drogon-cli/**",
+      "pnpm-workspace.yaml (packages: apps/*) and root package.json (no bots package/workspace)"
+    ],
+    "found": "no 'bots', 'responsibility-owner', 'bot-service', 'bot-persistence', 'drogon-bot-contract', 'automation-run-writer', or 'bot-automation-dispatch-context' module anywhere in the Drogon-rewrite tree outside .preflight/ staging copies of the legacy reference",
+    "excludedAsNonCandidate": [
+      ".preflight/reference-cli-cRLmbn/source/** (staged copy of legacy reference, not a rewrite candidate)",
+      ".preflight/reference-build-Z1ylje/source/** (staged copy of legacy reference, not a rewrite candidate)",
+      ".preflight/parity-baseline/** (prior audit staging, not a rewrite candidate)"
+    ],
+    "verdict": "BLOCKED_MISSING_CANDIDATE for the entire capability group: zero product modules exist yet in this rewrite for the Bot/responsibility-owner domain. This is an import/interface absence, not a behavioral failure, per AGENTS.md and sol-test-wave.md."
+  },
+  "portArtifact": {
+    "path": "tests/parity/ports/WP-CAP-BOTS/responsibility-owner/src/main/bots/bot-responsibility-owner.test.ts",
+    "description": "Byte-identical copy of the pinned original test, frozen ahead of any implementation per docs/migration/parity-test-porting.md §3 (\"copy the source test into the candidate repo path before any implementation\"). Original relative import specifiers preserved unchanged (./bot-responsibility-owner, ./bot-service, ../persistence, ../persistence/loading-store/bot-persistence, ../../shared/drogon-bot-contract, ../../shared/automations-types, ../../shared/persisted-state-types, ../persistence/loading-store/write-flush-barriers, ../automations/automation-run-writer, ./bot-automation-dispatch-context) so that, once a real candidate module tree is created at these exact relative paths, this file can run unmodified.",
+    "noAssertionsChanged": true,
+    "noSkips": true,
+    "noMocksOfMissingProductBehavior": true,
+    "noImplementationBearingAdapterCreated": true
+  },
+  "attemptedExecution": {
+    "command": "cd tests/parity/ports/WP-CAP-BOTS/responsibility-owner && /Users/carlos/Documents/Drogon-rewrite/apps/desktop/node_modules/.bin/vitest run --root . src/main/bots/bot-responsibility-owner.test.ts --reporter=verbose",
+    "vitestBinaryUsed": "apps/desktop/node_modules/.bin/vitest (5.0.0, already installed in this repo; no dependency install performed)",
+    "result": "FAIL — 1 suite failed at collection time, 0 tests run: Error: Cannot find module './bot-responsibility-owner' imported from .../src/main/bots/bot-responsibility-owner.test.ts (code ERR_MODULE_NOT_FOUND)",
+    "classification": "BLOCKED (import resolution failure before any test body executed) — explicitly NOT recorded as behavioral RED, NOT recorded as a skip, and NOT recorded as passing/fake-green. No case count in this map is inferred from this failed collection; all 11 case identities below come from reading the frozen source body."
+  },
+  "assertionToPortMap": [
+    {
+      "case": 1,
+      "title": "migrates scheduled responsibility ownership and run links",
+      "sourceLines": "55-66",
+      "exercises": ["migrateDrogonBotAutomationOwners"],
+      "originalAssertions": [
+        "migrated.changed === true",
+        "migrated.state.automations[0] matches { botId: 'bot-1' }"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "migrateDrogonBotAutomationOwners has no candidate export anywhere in the rewrite"
+    },
+    {
+      "case": 2,
+      "title": "keeps a Bot automation in global administration while projecting Bot history",
+      "sourceLines": "68-93",
+      "exercises": ["automationBelongsToBot", "botResponsibilityHistory"],
+      "originalAssertions": [
+        "automationBelongsToBot(owned, 'bot-1') === true",
+        "botResponsibilityHistory(state, 'bot-1')[0] matches { automation: owned, automationRun: run, responsibilityRun: { recipe: { runId: 'mentu-run-3' } } }"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "automationBelongsToBot / botResponsibilityHistory have no candidate export"
+    },
+    {
+      "case": 3,
+      "title": "drops a dangling owner from a legacy automation instead of inventing a Bot",
+      "sourceLines": "95-104",
+      "exercises": ["migrateDrogonBotAutomationOwners"],
+      "originalAssertions": [
+        "migrated.changed === true",
+        "migrated.state.automations[0] does NOT have property 'botId'"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "same as case 1"
+    },
+    {
+      "case": 4,
+      "title": "repairs mismatched owners and drops responsibilities whose automation is gone",
+      "sourceLines": "106-128",
+      "exercises": ["migrateDrogonBotAutomationOwners"],
+      "originalAssertions": [
+        "migrated.state.automations[0] matches { botId: 'bot-1' }",
+        "migrated.state.bots?.[0]?.responsibilities has length 1",
+        "migrated.state.bots?.[1]?.responsibilities has length 0"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "same as case 1"
+    },
+    {
+      "case": 5,
+      "title": "persists a Bot mutation and rotates its session through the persistence domain",
+      "sourceLines": "130-162",
+      "exercises": ["BotPersistence.createBot", "BotPersistence.rotateBotSession", "BotPersistence.listBots"],
+      "originalAssertions": [
+        "persistence.listBots()[0] matches { id: created.id, currentSession: { sessionId: 'tab-1' } }",
+        "state.bots has length 1",
+        "rotated.id === created.id",
+        "flush was called"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "BotPersistence has no candidate module (src/main/persistence/loading-store/bot-persistence.ts absent; rewrite persistence lives in crates/drogon-core, not this TS shape)"
+    },
+    {
+      "case": 6,
+      "title": "creates a scheduled responsibility as an Orca-owned automation",
+      "sourceLines": "164-203",
+      "exercises": ["BotService.createResponsibility"],
+      "originalAssertions": [
+        "createAutomation called with objectContaining({ botId: 'bot-1', agentId: 'codex', prompt: stringContaining('Persistent Drogon Bot identity') })",
+        "result.responsibility.trigger toEqual({ kind: 'scheduled', automationId: 'automation-2' })"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "BotService has no candidate module"
+    },
+    {
+      "case": 7,
+      "title": "records scheduler-created runs in Bot history without replacing automation status",
+      "sourceLines": "205-228",
+      "exercises": ["createAutomationRunWriter(...).createRun"],
+      "originalAssertions": [
+        "recordBotResponsibilityRun called with objectContaining({ botId: 'bot-1', responsibilityId: 'responsibility-1', automationRunId: 'automation-run-1', hostObservation: null })"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "createAutomationRunWriter has no candidate module"
+    },
+    {
+      "case": 8,
+      "title": "closes Bot history when the linked automation reaches a final status",
+      "sourceLines": "230-257",
+      "exercises": ["createAutomationRunWriter(...).updateRun"],
+      "originalAssertions": [
+        "recordBotResponsibilityRun called with objectContaining({ automationRunId: 'run-1', endedAt: expect.any(Number) })"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "same as case 7"
+    },
+    {
+      "case": 9,
+      "title": "refuses to manually fake execution of a reactive responsibility",
+      "sourceLines": "259-277",
+      "exercises": ["BotService.runResponsibility"],
+      "originalAssertions": [
+        "await expect(service.runResponsibility('bot-1', 'responsibility-1')).rejects.toThrow('connected event adapter')"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "same as case 6"
+    },
+    {
+      "case": 10,
+      "title": "hydrates current Bot identity and memory into every scheduled dispatch",
+      "sourceLines": "279-294",
+      "exercises": ["resolveBotAutomationDispatchContext"],
+      "originalAssertions": [
+        "hydrated.agentId === 'codex'",
+        "hydrated.prompt contains 'Use the current standing instructions.'",
+        "hydrated.prompt contains 'The release branch changed.'",
+        "hydrated.prompt contains 'Daily watch'"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "resolveBotAutomationDispatchContext has no candidate module"
+    },
+    {
+      "case": 11,
+      "title": "keeps scheduler history idempotent and rejects invented automation runs",
+      "sourceLines": "296-323",
+      "exercises": ["BotPersistence.recordBotResponsibilityRun", "BotPersistence.listBotResponsibilityRuns"],
+      "originalAssertions": [
+        "persistence.recordBotResponsibilityRun(input).id === first.id (idempotent on second call)",
+        "persistence.listBotResponsibilityRuns() has length 1",
+        "persistence.recordBotResponsibilityRun({...input, automationRunId: 'invented-run'}) throws 'existing automation run'"
+      ],
+      "portStatus": "frozen-verbatim, blocked",
+      "bindingGap": "same as case 5"
+    }
+  ],
+  "transitiveTypeOnlyDependencies": [
+    "src/shared/drogon-bot-contract.ts (normalizeDrogonBot, DrogonBot, DrogonBotHistoryEntry, DrogonBotResponsibility types)",
+    "src/shared/drogon-bot-session.ts",
+    "src/shared/tui-agent-config.ts",
+    "src/shared/orca-cli-command-name.ts",
+    "src/shared/drogon-bot-prompt.ts (buildDrogonBotOperatingPrompt)",
+    "src/shared/automations-types.ts (Automation, AutomationRun)",
+    "src/shared/persisted-state-types.ts (PersistedState)",
+    "src/main/persistence (Store type) and loading-store/write-flush-barriers.ts (WriteFlushBarrierOperations)"
+  ],
+  "limitations": [
+    "No candidate product code exists for this capability group; nothing could be exercised read-only beyond import-resolution collection.",
+    "This subtree contains only the entry test file and this map. No product implementation, adapter, mock-of-missing-behavior, dependency install, Git operation, service launch, or recipe edit was performed, per assigned scope.",
+    "Whether the eventual candidate stays TypeScript (reused in an apps/desktop-like package) or is translated to Rust is not decided in any document this leaf could find; both the import specifiers preserved here and the case table above are written to be reusable either way, but no path decision is asserted.",
+    "Passing this frozen test in the future proves only the 11 original assertions again; it does not by itself prove scheduler execution, disk persistence durability, or a live reactive-event adapter (see legacy isolationRationale in tests/parity/baseline-capsules/bot-responsibility-owner.json, reused unmodified here as background, not restated as this leaf's own claim)."
+  ]
+}

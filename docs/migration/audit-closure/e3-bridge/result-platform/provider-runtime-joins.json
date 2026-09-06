@@ -1,0 +1,1697 @@
+{
+  "schemaVersion": 1,
+  "taskId": "task_de63b4c76c91",
+  "dispatchId": "ctx_72c23d4df328",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "auditOnly": true,
+  "testsExecutedHere": false,
+  "auditAccepted": false,
+  "wholeAreaSourceClosed": false,
+  "recommendation": "Submit the two exact joins as finite source-characterized candidates for root acceptance. No unread immediate local producer is retained inside these named contracts; genuine native/Electron/provider effects remain unrun execution obligations. This does not accept E3/E5 or any implementation.",
+  "progress": {
+    "accepted": 10,
+    "total": 12,
+    "percentage": 83.3,
+    "delta": 0,
+    "confidence": "medium-low",
+    "next": "root review of bounded joins and whole E3/E5 consolidation",
+    "eta": null,
+    "flexible24HourRisk": "high"
+  },
+  "provenance": {
+    "convention": "SHA256 of exact raw file bytes. Inclusive range digest is concatenation of bytes.splitlines(keepends=True)[first-1:last], preserving original line terminators and final newline absence. No newline normalization. Current-byte evidence only; root owns pinned Git verification. Read-only file hashing is artifact validation, not source execution or behavioral proof.",
+    "sourceExecution": "none",
+    "sourceEdits": "none"
+  },
+  "inputs": [
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json",
+      "sha256": "ebf5c68f96c0c148ad48f23aa3ca8bfd152eb92aff730fe7638373c16a4aae1c"
+    },
+    {
+      "path": "docs/migration/e3-provider-inputs-root-review.json",
+      "sha256": "6329e901a8130611808d3ee6d9a08b72d991eead54edbc31d57c9262ca974add"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/consumer-ingestion-final.json",
+      "sha256": "2e5d6dc0de8cef266f1db57df766fd4c792c8871edea229f4648663d9939a7f6"
+    },
+    {
+      "path": "docs/migration/audit-root-followup-review.md",
+      "sha256": "6d15b0f6c3494a5ba9bd45e5cd75e74eae5564b2ad17c28465a818d9b087252c"
+    },
+    {
+      "path": "docs/migration/parity-test-work-packages.json",
+      "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/final-local.json",
+      "sha256": "e34195da3f1abcc56660c04388782a4396ad47ad6afc23a24979020ef899a861"
+    },
+    {
+      "path": "docs/migration/rate-limit-source-review.json",
+      "sha256": "fbeb2fe37b2b58815459949e917937185e89cb09517a84b3fc1eb219f82f7b6a"
+    },
+    {
+      "path": "docs/migration/audit-closure/e5-platform/assets-observability-final.json",
+      "sha256": "08b4a58191b5f66229ee2334c99fcb1d0daa2f36b25e2723e3bba1c9e71f7d41"
+    }
+  ],
+  "reconciliation": [
+    {
+      "id": "PI-JOIN-RUNTIME",
+      "state": "source-characterized-candidate",
+      "contractIds": [
+        "PJ-COMMAND",
+        "PJ-LOCK-IDENTITY",
+        "PJ-LOCK-PROTOCOL",
+        "PJ-SQLITE",
+        "PJ-WINDOWS-KILL"
+      ],
+      "implementations": [
+        "resolveClaudeCommand",
+        "resolveCodexCommand",
+        "withCliRuntimeOnPath",
+        "withManagedHookInstallLock",
+        "readManagedHookHostIdentity",
+        "SyncDatabase",
+        "Windows process-tree termination helper"
+      ],
+      "omissions": []
+    },
+    {
+      "id": "PI-JOIN-REQUEST-GUARD",
+      "state": "source-characterized-candidate",
+      "contractIds": [
+        "PJ-GUARD-BINDING",
+        "PJ-GUARD-STATE-AUTH",
+        "PJ-GUARD-PARTITION-LIFETIME"
+      ],
+      "implementations": [
+        "getProxySessionApplicationReadiness",
+        "Electron request-guard/login registration"
+      ],
+      "omissions": []
+    }
+  ],
+  "acceptedReuse": [
+    {
+      "id": "PI-TRANSPORT",
+      "ref": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json#/contracts/12",
+      "authority": "docs/migration/e3-provider-inputs-root-review.json; supplied acceptance revision2ba025e",
+      "scope": "Queue/credentials/readiness body unchanged; actual registration and lifetime join supplied here.",
+      "contract": {
+        "id": "PI-TRANSPORT",
+        "title": "Shared proxy, diagnostic redaction and local/external ownership",
+        "sourcePaths": [
+          "src/shared/network-proxy.ts",
+          "src/main/network/proxy-settings.ts",
+          "src/main/network/bounded-proxy-application.ts",
+          "src/main/network/proxy-policy-resolution.ts",
+          "src/main/network/electron-proxy-credentials.ts",
+          "src/main/network/electron-default-proxy-session.ts",
+          "src/shared/codex-auth-errors.ts",
+          "src/shared/commit-message-agent-output.ts",
+          "src/main/network/macos-tailscale-dns-diagnostic.ts"
+        ],
+        "resultContract": [
+          "Proxy normalize accepts nonstring as empty, trims/max2048, allowlists http/https/socks variants, keeps URL userinfo+host and drops path/query; bypass first4096 chars split/trim. First truthy environment key wins, even if whitespace/invalid and later key valid. Configured child proxy writes six variables and explicitly empty NO_PROXY to remove inherited bypass.",
+          "Central default-session proxy queue serializes applications and memoizes settled policy/credentials; env fallback probes released system proxy first, preserves non-DIRECT. ensure without force reuses existing app pin. Credentials stripped from proxy rules and held by session WeakMap; proxy login supplies only matching normalized host/port and isProxy, scheme/realm not validated here.",
+          "runBoundedProxyApplication means at most THREE attempts with0/100ms delays, not a wall-clock timeout. Native setProxy/resolveProxy/close can hang. Failed policy readiness is false but caller Claude catches ensure failure and then attempts fetch; request-guard registration/native enforcement is a separately owned application/session boundary, not established by this raw-provider helper.",
+          "Codex recognized auth text strips basic ANSI and returns first matching line up to4000 characters (or bounded prefix), not credential redaction. Generic failure excerpt prefers stderr, scans8192-character ends, chooses two head lines/tail with100/130 budgets or single240; sanitizer removes Cc/Cf, whitespace, recognized filesystem paths and truncates240+ellipsis. It does not itself erase tokens.",
+          "Reuse OBS-COL-06/OBS-COL-INTEGRATION redactString source characterization: named/fingerprint/URL/env-shape rules, not universal PII/secret recognition. Its use in generic Codex close path does not protect every RPC/PTY/provider error path.",
+          "macOS DNS hint reads source-described scutil --dns synchronously at most1.5s, caches diagnostic/null five minutes, inspects global nameservers only, appends hint for matching network text when sole known resolver. It returns original message plus hint, not redacted text; reading host diagnostic precedes pattern decision. No diagnostic executed here.",
+          "Electron net/native fetch/session cookies/OS keychain/CLI auth are real external execution boundaries. Local source specifies request options and result parsing, not provider authorization, exact server schema, proxy DNS routing, encryption confidentiality, cookie isolation under runtime races or confirmed descendant exit. Account launch/home materialization and root cycle/cache acceptance stay explicit separate joins."
+        ],
+        "futureAcceptance": [
+          "Synthetic URL userinfo/case/bypass and invalid-first environment priority; same-session queue, late setProxy/close, three retry attempts and no total deadline; proxy login wrong host/port/session/scheme.",
+          "Error corpus including tokens inside recognized auth line, JSON nonstring errors, paths/ANSI/OSC/bidi, already-redacted and unknown secret forms; separately root-approved intended privacy correction.",
+          "Later disposable runtime routing and native OS fixtures; no real credentials, external provider requests or diagnostic uploads. Capture live/unverifiable/exited distinctly."
+        ],
+        "sourceFindings": [
+          "PI-DEF-REDACTION",
+          "PI-BOUND-DEADLINE"
+        ],
+        "execution": "not-run",
+        "sourceEvidenceRefs": [
+          "#/sourceEvidence/51",
+          "#/sourceEvidence/59",
+          "#/sourceEvidence/60",
+          "#/sourceEvidence/63",
+          "#/sourceEvidence/61",
+          "#/sourceEvidence/62",
+          "#/sourceEvidence/52",
+          "#/sourceEvidence/53",
+          "#/sourceEvidence/54"
+        ]
+      }
+    },
+    {
+      "id": "UIG-OPENCODE-Database",
+      "ref": "docs/migration/audit-closure/e3-bridge/consumer-ingestion-final.json#/ingestionMethods/16",
+      "authority": "docs/migration/audit-root-followup-review.md:320",
+      "scope": "Concrete immediate SyncDatabase body, not entire usage/runtime/native area.",
+      "contract": {
+        "id": "UIG-OPENCODE",
+        "method": "Database",
+        "file": "src/main/sqlite/sync-database.ts",
+        "result": "Default alias of SyncDatabase wrapping dynamic node:sqlite DatabaseSync, prepare/all/get/run, exec, pragma, close; options readonly/fileMustExist/timeout.",
+        "stateAndEffects": "fileMustExist precheck then native open (TOCTOU); statement LRU256, pragma/wildcard not cached, DDL regex clears cache before exec, close clears cache and closes driver.",
+        "errorAndNullBehavior": "Missing native module/open/query/close errors propagate. pragma simple returns first column first row or undefined. Native WAL/locking behavior requires supported platform/version fixtures, not a universal writeability claim.",
+        "sourceRefs": [
+          {
+            "path": "src/main/sqlite/sync-database.ts",
+            "start": 1,
+            "end": 111,
+            "sha256": "b120e5d7a5a167ef0eacd351a100b2f4c3a9dbdf8722ee0274090a97a8b9b2dd",
+            "rangeSha256": "b120e5d7a5a167ef0eacd351a100b2f4c3a9dbdf8722ee0274090a97a8b9b2dd"
+          }
+        ]
+      }
+    },
+    {
+      "id": "PI-PTY",
+      "ref": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json#/contracts/2",
+      "scope": "Accepted Codex drain/termination caller behavior unchanged; Windows helper joined here."
+    },
+    {
+      "id": "PI-JOIN-CYCLE",
+      "ref": "docs/migration/rate-limit-source-review.json",
+      "authority": "7e7544a",
+      "scope": "Existing accepted policy/cycle/cache/publication unchanged; not reread or executed."
+    }
+  ],
+  "contracts": [
+    {
+      "id": "PJ-COMMAND",
+      "join": "PI-JOIN-RUNTIME",
+      "implementations": [
+        "resolveClaudeCommand",
+        "resolveCodexCommand",
+        "withCliRuntimeOnPath"
+      ],
+      "sources": [
+        "src/main/codex-cli/command.ts",
+        "src/shared/node-cli-command-resolution.ts"
+      ],
+      "owner": "Executing Node host filesystem/environment; options can simulate platform selection but do not change host path implementation.",
+      "result": [
+        "command.ts re-exports the shared implementation. Claude/Codex wrappers specialize the name only. platform defaults to process.platform; pathEnv uses nullish fallback to PATH, then Path, then null, so explicit empty string suppresses environment PATH whereas null does not. PATH entries use imported host delimiter, are trimmed and empty entries removed.",
+        "Each PATH directory is scanned before version-manager fallbacks. Windows candidates prefer .cmd, .exe, .bat, bare; POSIX bare. stat must report file and POSIX access X_OK must succeed; Windows does not require X_OK. Failures skip candidates. stat follows symlinks. No match returns the bare command string, not null or a proved unavailable result.",
+        "Nvm version directories are sorted numerically descending with reverse lexical tie-break; installed components use parseInt with nonnumeric becoming zero. Default-alias preference follows at most ten hops and stops cycles. Only strict numeric version-prefix tokens select installed versions; missing/uninstalled/system/node/stable/unresolvable aliases leave newest-first fallback. Preferred version is a preference, not an exclusive restriction. Remaining directories cover volta/asdf/fnm/mise/user-local and platform pnpm/npm/Yarn/bun.",
+        "Alias files are synchronously read, trimmed and have no byte limit. The joined-path '..' test is not a general canonical containment check; only actual enumerated installed versions become candidates. Filesystem access and alias symlink effects remain fixture obligations, not an install or execution.",
+        "withCliRuntimeOnPath returns the original env object for relative commands, absent/unrunnable sibling node or an already-leading exact directory. Otherwise it clones, prepends the command directory and removes exact duplicate directory entries. It does not resolve symlink target runtime, verify ABI/version or run the selected binary.",
+        "Windows pairing chooses the first defined case-insensitive PATH key in object enumeration order, else Path; splits/joins with semicolon and deletes other PATH-key casings only on the clone branch. The already-leading early return preserves existing twins. POSIX uses PATH and host delimiter; comparisons are exact strings. options.platform does not change imported isAbsolute/dirname semantics."
+      ],
+      "tests": [
+        "src/main/codex-cli/command.test.ts",
+        "src/shared/nvm-default-alias.test.ts",
+        "src/shared/cli-runtime-pairing-boundary.test.ts"
+      ],
+      "execution": [
+        "PJ-T-COMMAND"
+      ]
+    },
+    {
+      "id": "PJ-LOCK-IDENTITY",
+      "join": "PI-JOIN-RUNTIME",
+      "implementations": [
+        "readManagedHookHostIdentity",
+        "readManagedHookProcessIdentity"
+      ],
+      "sources": [
+        "src/main/agent-hooks/managed-hook-owner-identity.ts"
+      ],
+      "owner": "Executing host, never the coordinator PID namespace; POSIX current UID token and native OS process-incarnation queries.",
+      "result": [
+        "Host identity promise and boot identity are cached, including fallback outcomes. POSIX first attempts a durable UUIDv4 token beneath the current UID's /var/tmp directory: directory/file lstat must match UID and prohibit group/other permission bits; token must be regular and valid. Draft is wx/0600, published with hard link, then best-effort unlinked and read back; no fsync. Invalid existing EEXIST token is not overwritten.",
+        "Linux durable-token failure falls back to process runtime UUID, not machine-id. macOS tries durable token then a one-second native hardware-UUID query, then runtime fallback. Windows uses a one-second registry identity query then runtime fallback. Only checked-in code was read; no identity/credential value was accessed.",
+        "Linux process identity combines boot identity, PID namespace and /proc start field after the last closing parenthesis; missing namespace/boot has an unknown marker and start field is not numerically validated. ENOENT means null; other failures yield a self runtime identity or undefined for a foreign process. Proc/filesystem operations lack their own elapsed deadline.",
+        "Windows CIM creation-time query has five-second timeout: literal missing maps null; other nonempty output becomes the incarnation string. Failures use kill(pid,0): ESRCH null; live/unknown foreign undefined; self may use runtime fallback. Self result is cached, foreign PIDs queried anew.",
+        "macOS/other ps query uses one-second timeout and fixed C locale; nonempty start/command text plus boot identity forms identity, empty means null. Fallback distinguishes ESRCH from unavailable inspection. Same PID is never enough to establish same incarnation; undefined is unverifiable, not exited.",
+        "Optional execution-scope fingerprint is composed with host identity. Recovery checks host equality before local PID comparison; a shared-home lock from another host must not be reinterpreted as a local dead PID."
+      ],
+      "tests": [
+        "src/main/agent-hooks/managed-hook-owner-identity.test.ts"
+      ],
+      "execution": [
+        "PJ-T-LOCK"
+      ]
+    },
+    {
+      "id": "PJ-LOCK-PROTOCOL",
+      "join": "PI-JOIN-RUNTIME",
+      "implementations": [
+        "withManagedHookInstallLock",
+        "managed-hook-lock-records",
+        "managed-hook-lock-claims"
+      ],
+      "sources": [
+        "src/main/agent-hooks/managed-hook-install-lock.ts",
+        "src/main/agent-hooks/managed-hook-lock-records.ts",
+        "src/main/agent-hooks/managed-hook-lock-claims.ts"
+      ],
+      "owner": "Home-scoped filesystem lock, fenced by executing host/process incarnation and in-process active token sets.",
+      "errorShapes": [
+        "Error: Could not identify the managed-hook installer process",
+        "Error: Managed-hook install lock has an unverifiable owner",
+        "Error: Managed-hook install lock belongs to another host",
+        "Error: Could not verify the managed-hook lock owner process",
+        "Error: Timed out waiting for another managed-hook install to finish",
+        "Error: Managed-hook install lock recovery belongs to another host",
+        "Error: Managed-hook install lock has an unverifiable recovery claim",
+        "signal.throwIfAborted propagates signal reason at explicit checks; timers/promises delay cancellation rejects through its native abort contract; non-EEXIST filesystem errors and callback rejection propagate, release failures warn"
+      ],
+      "result": [
+        "Acquisition creates the home .orca directory, checks cancellation, resolves host, cleans orphan records and resolves self identity before setting its default ten-second contention deadline. No private parent mode is requested. Setup IO/native queries are outside that deadline; success path can acquire after elapsed deadline because timeout is checked on contention. Polling/abort does not bound a hung filesystem operation.",
+        "Each attempt writes a wx/0600 draft, renames to a token owner record and hard-links the canonical lock. EEXIST is contention; other errors propagate. Successful publication marks active owner. Finally unlinks draft and removes unlinked owner records; draft cleanup can throw after canonical publication, leaving a lock although acquisition rejects. No fsync/durable-commit claim.",
+        "Canonical record requires nonempty host/process identity, token consistency and positive safe integer PID. Unknown/malformed canonical and foreign host fail fast; unavailable process inspection fails fast. Confirmed absent/different incarnation or own PID with inactive token permits attempted stale recovery, not a generic kill-zero test.",
+        "Recovery renames the owner witness into a claim, writes claimant metadata and fences with active claim tokens. Concurrent claim contention remains active; missing/ambiguous witnesses and foreign/unverifiable claim owners are not guessed dead. Dead claims can be recovered. After claim, canonical token is rechecked: missing/different token counts removed without deleting a replacement; unknown canonical or non-ENOENT unlink failure is unverifiable.",
+        "Cleanup deactivates claim in finally; record removal is conditional on removed state and cleanup errors warn. Orphan owner cleanup needs single link and same-host confirmed stale identity; malformed/foreign/unknown owners remain. Already-unlinked claimed files can be cleaned without reinterpreting canonical ownership. Directory scan failure is ignored and individual cleanup failures warn; scan size is not bounded.",
+        "withManagedHookInstallLock releases in finally after callback success or rejection and deactivates owner regardless. Release failure warns and does not turn successful callback into failure; residue may remain for later recovery. Cancellation after acquisition but before callback releases; cancellation after callback starts does not automatically cancel its work. Callback effects can precede a rejection; the lock adds no transaction rollback."
+      ],
+      "tests": [
+        "src/main/agent-hooks/managed-hook-install-lock.test.ts"
+      ],
+      "execution": [
+        "PJ-T-LOCK"
+      ]
+    },
+    {
+      "id": "PJ-SQLITE",
+      "join": "PI-JOIN-RUNTIME",
+      "implementations": [
+        "SyncDatabase"
+      ],
+      "sources": [
+        "src/main/sqlite/sync-database.ts"
+      ],
+      "owner": "Executing host native node:sqlite; existing accepted UIG-OPENCODE Database body reused.",
+      "reuse": "docs/migration/audit-closure/e3-bridge/consumer-ingestion-final.json#/ingestionMethods/16",
+      "result": [
+        "Accepted Database is the default alias of SyncDatabase wrapping dynamically loaded DatabaseSync, prepare/all/get/run, exec, pragma and close; options readonly/fileMustExist/timeout are forwarded/handled by that body.",
+        "fileMustExist checks before native open, with a TOCTOU gap; statement LRU is capped at256, pragma/wildcard excluded from caching, DDL regex clears cache before exec, close clears cache and closes driver.",
+        "Missing native module/open/query/close failures propagate. Simple pragma returns first column of first row or undefined. Native schema, WAL, locks, driver-version behavior and materialization require fixtures; accepted scanner outcomes do not assert every wrapper branch.",
+        "Exact accepted source body and current bytes are joined, not re-audited from a class name or formatter. No account database was opened."
+      ],
+      "tests": [],
+      "execution": [
+        "PJ-T-SQLITE"
+      ]
+    },
+    {
+      "id": "PJ-WINDOWS-KILL",
+      "join": "PI-JOIN-RUNTIME",
+      "implementations": [
+        "terminateWindowsProcessTree",
+        "admitSelfInitiatedTreeKill",
+        "getOrcaChromiumProcessPids"
+      ],
+      "sources": [
+        "src/main/windows-process-tree-kill.ts",
+        "src/main/own-chromium-tree-kill-guard.ts",
+        "src/main/orca-chromium-process-pids.ts",
+        "src/main/crash-reporting/self-initiated-tree-kill-log.ts"
+      ],
+      "owner": "Executing Windows host; Electron app metrics when available, empty set in unavailable/non-Electron paths; no SSH exit inference.",
+      "result": [
+        "Invalid/nonpositive/noninteger PID resolves void. Guard refuses a PID listed in current Electron Chromium metrics, records refusal and resolves without launching taskkill. Metrics are filtered to positive integers; missing API/failed metrics yields an empty set and therefore permits admission, with best-effort diagnostic logging. It is not a full ancestry or process-incarnation proof.",
+        "Admitted attempts are recorded before native execution. The local ring retains32 entries; metric-failure breadcrumb coalesces for five seconds. Guard and kill are separate operations with a PID-reuse/time-of-check race. No OS process was queried or killed in this audit.",
+        "taskkill receives /pid String(pid) /T /F, timeout5000 and windowsHide. Native callback resolves regardless of error, including process-not-found/timeout. An execFile synchronous throw in the Promise executor rejects. Guard/breadcrumb code runs before Promise creation; a propagated logger failure there can throw synchronously.",
+        "No independent callback-settlement timer or confirmation of target exit exists here. Successful Promise means attempted/best-effort completion, not exited. Caller PI-PTY drain/hard-kill wait semantics remain its accepted separate contract; no reinterpretation of false/ignored termination evidence.",
+        "Only immediate attempt/refusal/metrics breadcrumb bodies are joined. Durable diagnostic persistence/redaction remains the delivered OBS-COL-INTEGRATION/OBS-COL-06 contract with its declared limitations; native logging durability is not newly accepted."
+      ],
+      "tests": [
+        "src/main/windows-process-tree-kill.test.ts",
+        "src/main/own-chromium-tree-kill-guard.test.ts"
+      ],
+      "execution": [
+        "PJ-T-WINDOWS"
+      ]
+    },
+    {
+      "id": "PJ-GUARD-BINDING",
+      "join": "PI-JOIN-REQUEST-GUARD",
+      "implementations": [
+        "installElectronProxyRequestGuard",
+        "initializeReadyFoundation",
+        "initializeMainProcessReady",
+        "handleElectronProxyLogin"
+      ],
+      "sources": [
+        "src/main/network/electron-proxy-request-guard.ts",
+        "src/main/startup/main-process-ready-foundation.ts",
+        "src/main/startup/main-process-ready.ts",
+        "src/main/startup/main-process-preflight.ts",
+        "src/main/startup/main-process-runtime-launch.ts",
+        "src/main/index.ts"
+      ],
+      "owner": "Electron main-process app/default session; does not intercept arbitrary Node fetch/child process or automatically guard every custom partition.",
+      "result": [
+        "Preflight installs a resolver for session.defaultSession and Electron HTTP binding. index attaches initializeMainProcessReady to app.whenReady().then; this local chain has no terminal catch. Ready composition awaits foundation and runtime before launch, with i18n/menu joined separately; it is not proof every startup subsystem succeeded.",
+        "Foundation installs default onBeforeRequest guard early and registers anonymous app.on(login) forwarding webContents and defaultSession fallback into the accepted credential handler. No disposer/idempotence flag is returned. A later foundation failure leaves earlier registrations installed; retrying initialization could accumulate login listeners.",
+        "Later foundation queues applyElectronProxySettings, stores its Promise.then(success,rejection) in initialProxyApplicationReady and installs the default request guard again immediately. Rejection branch warns and resolves the barrier; it does not reset failed readiness. Early guard sees no policy state as ready, so no claim of fail-closed interception before initial policy enqueue.",
+        "Both serve and desktop launch paths await that barrier without checking a success result. A failed proxy application permits startup to proceed while this guard cancels requests for failed session state. Pending policy delays callback. Guard answers {} on ready and {cancel:true} on false, using either synchronous boolean or Promise.then; it adds no timeout, rejection handler or request-generation token.",
+        "Repeated onBeforeRequest registration and interaction with other listeners require an Electron fixture; source shows two registrations, not two independent guaranteed listeners. There is no default guard teardown in the named binding lifecycle and no login listener removal there. This statement is bounded to these owners, not a census of every app listener."
+      ],
+      "tests": [
+        "src/main/network/electron-proxy-request-guard.test.ts",
+        "src/main/startup/main-process-ready-phase-ordering.test.ts"
+      ],
+      "execution": [
+        "PJ-T-GUARD"
+      ]
+    },
+    {
+      "id": "PJ-GUARD-STATE-AUTH",
+      "join": "PI-JOIN-REQUEST-GUARD",
+      "implementations": [
+        "getProxySessionApplicationReadiness",
+        "retireProxySessionApplication",
+        "handleElectronProxyLogin"
+      ],
+      "sources": [
+        "src/main/network/proxy-settings.ts",
+        "src/main/network/bounded-proxy-application.ts",
+        "src/main/network/electron-proxy-credentials.ts",
+        "src/main/network/electron-default-proxy-session.ts"
+      ],
+      "owner": "Accepted PI-TRANSPORT per-Session WeakMap queue and credential map, now joined to actual binding; original provider auth selection unchanged.",
+      "reuse": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json#/contracts/12",
+      "result": [
+        "No state means ready true; failed or retired means false; pending waits for the latest queue tail, following replacement tails on resolve or reject. Only latest completion sets ready/failed. Queue serializes after prior rejection and retries three times with zero/100ms delays; this bounds attempts, not elapsed native setProxy/resolveProxy/close time.",
+        "Configured application awaits setProxy, then updates applied key/result and credentials before awaiting closeAllConnections; settled key follows close. A close failure can leave credentials installed and readiness failed. setProxy failure can preserve previous credentials. Later queued success can restore readiness; old-tail failure must not override newer pending state.",
+        "Release switches to system first, clears settled key and credentials before close, and clears applied key after close. Failure setting system can leave previous credentials. Retirement marks retired synchronously, queues release even though retired and finally clears credentials; it does not abort an in-flight apply, which can temporarily publish credentials before retirement completes.",
+        "Login uses isProxy and webContents.session when supplied, else the provided default Session. Credentials must exist for that exact Session and normalized bracket-stripped/lowercase host and exact port. Matching prevents default and invokes callback with stored decoded credentials; nonmatching leaves event/callback untouched. Malformed percent decoding retains raw value.",
+        "Credential match does not additionally validate origin URL, scheme, realm, readiness, retirement flag or request generation. Thus failed readiness blocks guarded requests but does not itself prevent answering a matching existing login challenge; during retirement/close failure credential availability can differ from request readiness. This is source composition, not a reproduced native race or credential success claim.",
+        "Node/CLI policy with no default resolver cannot acquire this Electron-session enforcement. Custom MiniMax/OpenCode provider partitions retain accepted own setup/cleanup/proxy limitations; central helper presence does not prove guard installation there. Root's duration/timestamp, nonclamping-classifier and keychain-only preview corrections remain unchanged."
+      ],
+      "tests": [
+        "src/main/network/proxy-settings-session.test.ts",
+        "src/main/network/proxy-settings.test.ts",
+        "src/main/network/electron-proxy-request-guard.test.ts"
+      ],
+      "execution": [
+        "PJ-T-GUARD"
+      ]
+    },
+    {
+      "id": "PJ-GUARD-PARTITION-LIFETIME",
+      "join": "PI-JOIN-REQUEST-GUARD",
+      "implementations": [
+        "installBrowserSessionPartitionPolicies",
+        "clearBrowserSessionPartitionPolicies",
+        "retireFailedBrowserSessionProfile",
+        "deleteProfile"
+      ],
+      "sources": [
+        "src/main/browser/browser-certificate-request-guard.ts",
+        "src/main/browser/browser-session-partition-policies.ts",
+        "src/main/browser/browser-manager-state.ts",
+        "src/main/browser/browser-manager.ts",
+        "src/main/browser/browser-certificate-trust-controller.ts",
+        "src/main/browser/browser-session-registry.ts",
+        "src/main/browser/browser-session-profile-retirement.ts",
+        "src/main/browser/browser-session-route-policies.ts"
+      ],
+      "owner": "Only adjacent managed browser Session guard install/remove seam, not certificate trust, UI, route transport or all partition behavior.",
+      "result": [
+        "browser-manager module constructs the certificate controller and injects it into the manager; manager's optional forwarding calls controller install/remove, which delegates to BrowserCertificateRequestGuard. Its Set prevents duplicate installation for a Session; listener composes proxy readiness with the separate certificate decision. remove sets onBeforeRequest(null) and drops session trust/guard state.",
+        "Partition installer starts proxy application (unless app-wide proxy opted out), clears credentials and rethrows on proxy failure, and installs the composed guard once per configured partition. Already-configured calls still return the new proxy Promise. Opted-out route partition uses its separately owned transport, not proof app-wide proxy governs it.",
+        "Normal profile deletion removes persisted profile first, retires session synchronously and awaits proxy release/storage/cache cleanup under best-effort catch; it returns true despite cleanup failure. Security callbacks/guard intentionally remain because Electron Session and attached guests can survive profile deletion.",
+        "Failed-profile cleanup instead starts retirement, then clears user-agent and partition policies in a catch, then awaits retirement under warning catch. Clear invalidates proxy-application memo, removes configured marker, removes certificate guard and resets named permission/download handlers. Source does not cancel callbacks already awaiting readiness. Route cleanup also explicitly removes policies. These owners have different teardown contracts.",
+        "Guard removal is a local call, not proof a lingering guest cannot issue new requests. Pending callbacks may settle after removal; no native listener lifetime/callback-once evidence was executed. Certificate trust decisions, user-agent and permission implementations beyond this immediate ownership seam are outside the requested join, not reopened."
+      ],
+      "tests": [
+        "src/main/browser/browser-session-partition-proxy-install.test.ts",
+        "src/main/browser/browser-session-registry.test.ts"
+      ],
+      "execution": [
+        "PJ-T-GUARD"
+      ]
+    }
+  ],
+  "sourceFindings": [
+    {
+      "id": "PJ-F-RESOLUTION",
+      "kind": "source-characterization-not-intended-correction",
+      "contracts": [
+        "PJ-COMMAND"
+      ],
+      "finding": "No binary match returns bare command; runtime pairing early no-op can preserve Windows PATH twins, and platform option does not replace host path semantics. Alias reads are not byte-bounded."
+    },
+    {
+      "id": "PJ-F-LOCK",
+      "kind": "source-partial-effect-and-failure-contract",
+      "contracts": [
+        "PJ-LOCK-IDENTITY",
+        "PJ-LOCK-PROTOCOL"
+      ],
+      "finding": "Contention deadline excludes setup, native/IO can hang, failed post-publication cleanup can strand lock, callback success survives release failure. Unknown/foreign process ownership is not dead."
+    },
+    {
+      "id": "PJ-F-KILL",
+      "kind": "source-best-effort-limitation",
+      "contracts": [
+        "PJ-WINDOWS-KILL"
+      ],
+      "finding": "Metrics failure admits; callback error resolves; logger/exec synchronous errors differ. No liveness or ancestry proof follows from resolution."
+    },
+    {
+      "id": "PJ-F-GUARD",
+      "kind": "source-composed-race-not-executed",
+      "contracts": [
+        "PJ-GUARD-BINDING",
+        "PJ-GUARD-STATE-AUTH"
+      ],
+      "finding": "Initial proxy rejection fulfills startup barrier while guard remains failed. No policy yet means ready. Credentials and request readiness can diverge after close failure/in-flight retirement; matching login has no readiness gate."
+    },
+    {
+      "id": "PJ-F-LIFETIME",
+      "kind": "source-lifecycle-distinction",
+      "contracts": [
+        "PJ-GUARD-BINDING",
+        "PJ-GUARD-PARTITION-LIFETIME"
+      ],
+      "finding": "Default registration has no owned disposer; normal deletion keeps guard but failed-profile/route cleanup removes it. In-flight callbacks lack a teardown generation fence; actual Electron race outcome is unrun."
+    }
+  ],
+  "sourceResiduals": [],
+  "excludedSourceJoins": [
+    {
+      "id": "PI-JOIN-LAUNCH",
+      "state": "delivered-separate-root-review",
+      "scope": "prepareCodexRuntimeHomeForLaunch and ClaudeRuntimeAuthService.prepareForClaudeLaunch owned separately. No duplicate audit or acceptance inferred here; root joins account-launch-final evidence."
+    },
+    {
+      "id": "PJ-SCOPE",
+      "state": "deliberate-finite-boundary",
+      "scope": "No expansion to certificate trust/UI/route transport internals, account preparation, provider parsing/auth, arbitrary imports or external/native implementations. Named immediate functions are source-characterized above; external API behavior is execution debt, not proof by callback registration."
+    }
+  ],
+  "originalAssertionBodiesRead": [
+    {
+      "path": "src/main/codex-cli/command.test.ts",
+      "assertions": "Full assertion bodies: PATH precedence, non-runnable/directory skip, install fallbacks for Claude/Codex, bare fallback, batch dedupe, version-manager directories, sibling-runtime pairing, original-object no-op and Windows path casing/dedupe. Simulated platform options and temp files do not prove real Windows shell execution.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/codex-cli/command.test.ts]"
+    },
+    {
+      "path": "src/shared/nvm-default-alias.test.ts",
+      "assertions": "Full bodies: default vs newest, highest matching prefix, alias chain, missing/uninstalled/cycle/system fallback, eleven invalid tokens, numeric zero prefix and CLI outside preferred version. Preserve Windows skip for literal lts/* fixture.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/shared/nvm-default-alias.test.ts]"
+    },
+    {
+      "path": "src/shared/cli-runtime-pairing-boundary.test.ts",
+      "assertions": "Full bodies are lexical repository ratchets with allowlist: resolver/spawn regex without pairing is exactly allowlist; stale exceptions empty. Not behavioral runtime pairing or actual process launch evidence; preserve original allowlist unchanged.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/shared/cli-runtime-pairing-boundary.test.ts]"
+    },
+    {
+      "path": "src/main/agent-hooks/managed-hook-owner-identity.test.ts",
+      "assertions": "Full mocked assertion bodies: durable host token/no machine-id, shared endpoint differing host/namespace, boot/process changes, unavailable fallbacks, explicit composed identity, Windows creation-time/self-cache and macOS retry. No real registry/ps/proc/keychain execution.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/agent-hooks/managed-hook-owner-identity.test.ts]"
+    },
+    {
+      "path": "src/main/agent-hooks/managed-hook-install-lock.test.ts",
+      "assertions": "Full bodies: contention timeout, same-process serial callbacks, shared inode/two links, malformed legacy rejection, stale/reboot identities, foreign/unverifiable owner refusal, concurrent recovery, dead recovery claimant, missing witness, orphan/malformed preservation, replacement-owner late release, failed unlink then recovery and waiting abort. File is skipped on Windows. Its host-identity helper can touch /var/tmp outside test home: later baseline must use an isolated host/filesystem capsule; do not run against a personal profile. Same-process callbacks do not prove multiple real relays.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/agent-hooks/managed-hook-install-lock.test.ts]"
+    },
+    {
+      "path": "src/main/windows-process-tree-kill.test.ts",
+      "assertions": "Full bodies: exact native argv/options, callback error resolves, invalid PID suppresses exec. exec is mocked, so timeout settlement and actual death are unrun.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/windows-process-tree-kill.test.ts]"
+    },
+    {
+      "path": "src/main/own-chromium-tree-kill-guard.test.ts",
+      "assertions": "Full bodies: mocked metrics/refusal and attempt breadcrumbs, guard integration into kill/account gates, metrics failure/coalescing; ancestry fixtures are retained assertions, not proof the narrow PID-membership guard traverses ancestry.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/own-chromium-tree-kill-guard.test.ts]"
+    },
+    {
+      "path": "src/main/network/electron-proxy-request-guard.test.ts",
+      "assertions": "Full five-case bodies: delay callback until ready, transient retry, third-attempt success, exhausted retries cancel, retired Session stays blocked. Fake listener/Session only.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/network/electron-proxy-request-guard.test.ts]"
+    },
+    {
+      "path": "src/main/network/proxy-settings-session.test.ts",
+      "assertions": "Full bodies: per-session/default isolation, memo and credential changes, coalescing/serialization/latest readiness, failed/retired state, pending retirement, cleanup failure credentials, slow environment vs explicit pin, fallback, failed-close reapply/release, retry exhaustion and untouched session. Synthetic native methods only.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/network/proxy-settings-session.test.ts]"
+    },
+    {
+      "path": "src/main/network/proxy-settings.test.ts",
+      "assertions": "Read only133–219: decoded proxy authentication and default-session fallback; wrong host/port and nonproxy event do not answer. Other original assertions retained as unrun whole-file allocation, not claimed reread.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/network/proxy-settings.test.ts]"
+    },
+    {
+      "path": "src/main/startup/main-process-ready-phase-ordering.test.ts",
+      "assertions": "Read1–152: mocked foundation/runtime/i18n/launch ordering and settlement; proxy startup checks are source-text includes/index order, not actual default-session registration/interception tests.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/startup/main-process-ready-phase-ordering.test.ts]"
+    },
+    {
+      "path": "src/main/browser/browser-session-partition-proxy-install.test.ts",
+      "assertions": "Read235–253: clearing partition policies during pending proxy install prevents another proxy application; selected assertion body only, whole-file allocation retained.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/browser/browser-session-partition-proxy-install.test.ts]"
+    },
+    {
+      "path": "src/main/browser/browser-session-registry.test.ts",
+      "assertions": "Read272–316: nondefault deletion true/profile absent and normal/delayed deletion retain request/security guards. Selected assertions only; no actual Electron lingering guest request.",
+      "execution": "not-run-here",
+      "evidenceRef": "sourceEvidence[path=src/main/browser/browser-session-registry.test.ts]"
+    }
+  ],
+  "originalTestAllocation": {
+    "authority": {
+      "path": "docs/migration/parity-test-work-packages.json",
+      "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+    },
+    "policy": "Exact original whole-file allocation retained by immutable JSON pointers below; no file removed/reassigned and no new smaller test denominator. These packages overlap broader capabilities; their full file sets remain the central owner obligation, not claimed exercised by this assignment.",
+    "packages": [
+      {
+        "i": 0,
+        "id": "WP-CAP-AUTO",
+        "fileCount": 24,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/0/files",
+        "runner": "vitest automations tests",
+        "platforms": "all"
+      },
+      {
+        "i": 2,
+        "id": "WP-CAP-DEVICE",
+        "fileCount": 62,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/2/files",
+        "runner": "vitest (per-OS gates)",
+        "platforms": "per-OS gates"
+      },
+      {
+        "i": 3,
+        "id": "WP-CAP-DIAG",
+        "fileCount": 57,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/3/files",
+        "runner": "vitest diag tests",
+        "platforms": "all"
+      },
+      {
+        "i": 7,
+        "id": "WP-CAP-MOBILE",
+        "fileCount": 532,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/7/files",
+        "runner": "vitest mobile + route-boundary",
+        "platforms": "iOS/Android"
+      },
+      {
+        "i": 8,
+        "id": "WP-ENG-AGENTSVC",
+        "fileCount": 166,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/8/files",
+        "runner": "vitest (fakes at boundary)",
+        "platforms": "all"
+      },
+      {
+        "i": 15,
+        "id": "WP-ENG-INSTALL",
+        "fileCount": 44,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/15/files",
+        "runner": "vitest fixture roots only",
+        "platforms": "macOS/Windows/Ubuntu"
+      },
+      {
+        "i": 17,
+        "id": "WP-ENG-NATIVE",
+        "fileCount": 33,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/17/files",
+        "runner": "swift test + smoke (OS-gated)",
+        "platforms": "per-OS; elsewhere unverified"
+      },
+      {
+        "i": 19,
+        "id": "WP-ENG-PLUGINS",
+        "fileCount": 132,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/19/files",
+        "runner": "vitest host-conformance",
+        "platforms": "all"
+      },
+      {
+        "i": 21,
+        "id": "WP-ENG-REMOTE",
+        "fileCount": 282,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/21/files",
+        "runner": "vitest fixture hosts only",
+        "platforms": "local/SSH/WSL; mixed versions"
+      },
+      {
+        "i": 22,
+        "id": "WP-ENG-RUNTIME",
+        "fileCount": 688,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/22/files",
+        "runner": "vitest incl. orca-runtime.test.ts gate",
+        "platforms": "local/SSH/WSL/relay"
+      },
+      {
+        "i": 24,
+        "id": "WP-ENG-SHELL",
+        "fileCount": 367,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/24/files",
+        "runner": "vitest background-launch only",
+        "platforms": "all"
+      },
+      {
+        "i": 29,
+        "id": "WP-UI-AUTO",
+        "fileCount": 100,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/29/files",
+        "runner": "vitest + automations specs",
+        "platforms": "all"
+      },
+      {
+        "i": 30,
+        "id": "WP-UI-AUX",
+        "fileCount": 160,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/30/files",
+        "runner": "vitest",
+        "platforms": "all"
+      },
+      {
+        "i": 32,
+        "id": "WP-UI-CORE",
+        "fileCount": 829,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/32/files",
+        "runner": "vitest app-shell tests",
+        "platforms": "all"
+      },
+      {
+        "i": 39,
+        "id": "WP-UI-SETTINGS",
+        "fileCount": 171,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/39/files",
+        "runner": "vitest settings tests",
+        "platforms": "all"
+      },
+      {
+        "i": 44,
+        "id": "WP-UI-WORK",
+        "fileCount": 262,
+        "filesRef": "docs/migration/parity-test-work-packages.json#/packages/44/files",
+        "runner": "vitest + source-control specs",
+        "platforms": "all"
+      }
+    ],
+    "receiverMapping": "Each of 126 methods preserves its exact originalTestsRef and directMethodAssertionRefs plus remainingAcceptance/receiverFixture refs.",
+    "sharedRouteAssertionFiles": [
+      "src/main/ipc/runtime.test.ts",
+      "src/main/ipc/runtime-subscribe-lifecycle.test.ts",
+      "src/main/runtime/rpc/dispatcher-request-parsing.test.ts",
+      "src/main/ipc/runtime-environments-call-routing.test.ts",
+      "src/renderer/src/runtime/runtime-rpc-client.test.ts"
+    ],
+    "sharedRouteReadStatus": "retained prior body associations and pointers, not newly read all five here; route assertions do not prove service outcomes",
+    "wholeOriginalQueueRef": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/originalTestQueue",
+    "wholeOriginalQueueCount": 33,
+    "inheritedExecutionQueueRef": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/inheritedExecutionQueue",
+    "inheritedExecutionQueueCount": 70,
+    "execution": "not-run"
+  },
+  "wholeOriginalAllocation": {
+    "ref": "docs/migration/parity-test-work-packages.json#/packages",
+    "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a",
+    "fileAllocations": 9037,
+    "packages": 46,
+    "state": "unchanged-root-owned; no recensus performed"
+  },
+  "inheritedGates": [
+    {
+      "id": "BM-AUTH",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/0",
+      "obligation": "Exercise each real registered IPC callback with trusted, wrong-ID, destroyed/non-window and development-origin senders; verify exact argument arity/scalars/object roots, null/undefined/unknown keys, output serialization and invoke rejection. Mentu remove/re-register and Bots conditional/duplicate registration behavior must be characterized."
+    },
+    {
+      "id": "BM-BOT-WRITES",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/1",
+      "obligation": "Create/update/delete/first+second rotation through IPC and reload actual temp persistence. Include undefined patch values, field bounds/models/session IDs, retained enabled automation/history after Bot deletion, quit/frozen/error flush and disk failures. Decide durable acknowledgment and model/session validation intent before implementing correction."
+    },
+    {
+      "id": "BM-RESPONSIBILITY",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/2",
+      "obligation": "Create reactive and scheduled via IPC; prove no reactive adapter activates on creation; exact schedule/default/clamp/zone/recipe semantics; missing project and recurrence fail-before-write; second-write/compensation failures; runNow true dispatch/refusal/failure and completion/history joins; disabled responsibility versus automation; same-millisecond duplicates; Bot/history errors after launch and owner deletion races."
+    },
+    {
+      "id": "BM-HOST",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/3",
+      "obligation": "Owner/folder/worktree/SSH captured generation/paired runtime/WSL host-mirror contracts through boundary. Verify no local fallback, actual remote forwarding requirements and host loss unverifiable. Establish explicit Windows/Linux/WSL admitted-runtime support versus current local darwin-arm64 pin; source only gates those out."
+    },
+    {
+      "id": "BM-FILES",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/4",
+      "obligation": "Path/native+Win absolute/NUL/symlink/size/malformed matrix; row reorder and verify predicate unknown-field preservation policy; load-growth race. Guarded save crash at temp/held/compare/link/cleanup, concurrent target writer, filesystems without hardlink, Windows retries/ACL effects, fsync/durability decision and post-save reread race."
+    },
+    {
+      "id": "BM-PROBES",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/5",
+      "obligation": "Exact argv, no installation, late executable resolution, version/adapters malformed/nonzero/null exit/timeouts/truncation, strict doctor warning and recipe-name mismatch, unexpected report schemas and all host routes; available capability must not promise execution on unsupported pin/platform."
+    },
+    {
+      "id": "BM-ADMISSION",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/6",
+      "obligation": "Prove legacy routes launch zero commands; run/review/approval/request IDs distinct, unknown/wrong namespace/scalar/restart IDs fail, concurrent and repeated approval execution once per key. Validate complete request schema before launch; mutate every bound recipe/tree/prompt/skill/profile/model/provider/vars/policy/runner/Pi/node/lock/host/plan field, including during revalidation-to-spawn window."
+    },
+    {
+      "id": "BM-RECOVERY",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/7",
+      "obligation": "Actual admitted native resume and retry-step of failed/running/terminal targets, wrong recipe/ref/step, missing recipe_ref, foreign state/event IDs, outcomes/attempts/vars/state changes omitted from recovery digest; demonstrate native reservation/request conflicts across processes and restart rather than infer them from cached promises."
+    },
+    {
+      "id": "BM-RESULTS-CANCEL",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/8",
+      "obligation": "Native child/descendant cancellation during each review/launch stage, deferred capability probes, repeated cancel, confirmed exit versus unverified tree. Cross product current0/nonzero/null/timedOut and prior evidence statuses/missing run IDs/busy text/cancel; do not let loose busy-text matching or old terminal record mask current failure."
+    },
+    {
+      "id": "BM-EVIDENCE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/9",
+      "obligation": "Primary ID and optional cross-record identity/ordering/duplicate labels, permissive numerics/timestamps/nulls and future outcomes; unbounded primary file policy, 512KiB output limits and200 quarantine reporting; filesystem race/error matrix. Real restart/contact-loss liveness and formal Commitment Protocol records require separate authoritative evidence; a local run file never proves either."
+    },
+    {
+      "id": "R-TRUST",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/10",
+      "obligation": "Use real registration wrapper: exact trusted live WebContents vs foreign live object, missing trusted registration, destroyed sender, malformed/null/omitted/extra-key payload; verify rejection before archive/profile/network/process/file effects. Real Electron structured-clone of every payload/union; repeat registration/disposal ownership. Existing mocked trust tests do not substitute."
+    },
+    {
+      "id": "R-DISCOVERY",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/11",
+      "obligation": "Native vs Windows-host vs WSL resolved/repair target; falsy whole payload/nested null; cwd/repo/provideraccount roots; duplicate/remotehost IDs; WSL unavailable/timeouts/partial records/pluginenrichment; cache refreshstale completion/destroy/reload; actualdiscovery outputs and host-owned paths."
+    },
+    {
+      "id": "R-FRESHNESS",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/12",
+      "obligation": "Native home/provider/repo/plugin128 limits, inaccessiblepaths and positive lock/digestidentification; explicitWSL/SSH exclusion; brokenalias before/after convergence, snapshot/lock corruption andmax issues; real platform filesystem notjust injectedobservations."
+    },
+    {
+      "id": "R-UPDATE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/13",
+      "obligation": "CapturedIPC+realrunner: non-array, mixed non-strings, name bounds/eligibility, throwresolve/spawn after running state; zero exit+rescan rejection, nonzero+cleanconvergence, aliaslostfromtopology; ordered32koutput/throttle, cancelrunningbefore/afterspawn, late events/rescan, 12shung kill withunverifiable liveness; POSIX descendant/Windowsjob oridentity-safe tree termination; acklive/settled and getState acrossreload. Preserve existing fake child assertions andadd real disposable process acceptance."
+    },
+    {
+      "id": "R-PREPARE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/14",
+      "obligation": "Captured prepare distinct/missing/duplicate IDs, WSL/native pathhandoff andWindows receiptmode; source mutation/case collision/contentlimits; cap8includinginflight, lazyTTL/activepublish/no-op cancel/release, initretry andarchive cleanup failure; concurrentpublish, versioncached+lostshare response/reconnect, profilechangebetweenversion/share, unpinnedsharebehavior, progresssendthrows, restartaftercloud commit, abortbefore/duringupload/finalize/share withremote effects probed."
+    },
+    {
+      "id": "R-CLOUD",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/15",
+      "obligation": "Actual cloud service auth/errorclasses: absentconfig/session, dev-onlyoverride, expiryrefreshrotation/fencedprofile/orgswitch; SkillCloudRequestError401/403 vsOrcaCloudRequestError; malformed200JSON/null/204/200void/nestedversion/manifests, ID grammar mismatch, requests60s timeout/no redirects; all read/delete methods exact route/body/envelope. External managedservice fixtures needed forcanManage/ownedmembership/expiredrevokedshare/last pinned version/package cascade andidempotentmutation lostresponses; source backendpolicy remainsunverified."
+    },
+    {
+      "id": "R-INSTALL",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/16",
+      "obligation": "Each fourcaptured install callbacks: authorizingbeforecap,unsupportednogrant, versionmismatchnoinstall, packagevs publicshare auth, schemaunknown/omitted/null/provider[]/duplicate selections/conflictdecisions, localfull parse vsIPC shape; operation collision acrosssingle/bundle, cancelbefore grant/token/during download/between rename/after commit; 40MiB/hash/origin/expiry/redirect/archive identity/manifest guard fixtures; canonical receipt+journal states/recovery/stalecommit, unchangedrepair andcancelchoice, bundlekeep-local clean update, per-skill unknown error andouterpartial rejection; unowned provider/copyfailure/discoveryunavailable partialorfailedwithretaineddisk state. Preserve user-ownedfiles acrossall failurepoints."
+    },
+    {
+      "id": "R-REMOTE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/17",
+      "obligation": "Paired vs absent env SSHdestination vs explicit outerssh:, host/folder/worktree ownership andmixed versions; exactcapabilities/providers[]; install5min/status15s/progress2s andtransportloss, same operation retry<=3 andstaged upload resume/ack/cancelcleanup. Cancelstrict true OR, negative/unsupported/throw paths andlatercommit; real reconnect fixtures prove liveness unverifiable on loss. Full RPCconsumer/SSHproducer gap is separate andnotclosed here."
+    },
+    {
+      "id": "R-MANAGEMENT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/18",
+      "obligation": "Captured IPCsingle preview/remove/list/distro handlers missingdirect assertions; optionalenv/null/strictkeys/schemaresponsevalidation; WSLnonWindows/cache/execfail vs remoteinvalid/mixedarray; previewstates all seven andduplicatebundleIDs withbatch8failures; local receipt shallow/malformed/2048/traversalunavailable vsmissing, SSHhost/legacyambiguousfolder/worktree, selected account provider root changes; remove cancelclean/modified/discard andeveryjournalphase/recovery failure."
+    },
+    {
+      "id": "R-DELETE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/19",
+      "obligation": "Actualtrusted registered handlers (no direct sourcefile found), full nestedtarget/strictrequest, duplicateid/path, output>64placements vsannotation; native/WSL roots/pathsymlink/aliasfile/plugin/system/timestampnull, malicious self-declared directory, stale change between plan and lock/rename, busybatch/recoverypartial journals/files, crashreplay/stagedcleanupfailed/lockreleasefail after effects andexistingWindows skips. Execution only disposablefixtures."
+    },
+    {
+      "id": "R-TCC",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/20",
+      "obligation": "Exact live owner forfourcallbacks, captured dismiss invocation, claimID safe integer/null/foreign/stale/new registration/main frame/gone, best-efforttally save failure andrestart old/malformedcounts; atomicpersistence genuinefixture plusmacOSnotice lifecycle. Thisisnotice bookkeeping, notTCC permission acquisition."
+    },
+    {
+      "id": "R-WINDOW",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/21",
+      "obligation": "CapturedisMaximized/minimize/maximize/menu/confirm direct assertions absent; senderboundarydecision, destroyedwindow, platformzoomNaN/infinite, tray/latch/crash/gone/quit/watchdog/request ID matching anddrawn X without ID, beforeunload abort/dispose/reopen/old handler races. RealpackagedElectron macOS/Windows/Linux smoke; nativewindowdestroy isnotPTY exit."
+    },
+    {
+      "id": "R-FOCUS",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/22",
+      "obligation": "Everycallback wrong sender/true/false/null/object, floating panel/terminal all four truth-table combinations; recorderprecedence/terminal policy/markdownB/platformkeys andzoom; resetonmain framenavigation/gone/destroy/dispose withrealElectron focus, no effectonPTYliveness."
+    },
+    {
+      "id": "R-VIEWPORT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/23",
+      "obligation": "ActualreportIPC withtrusted ID andfallbackorigin, foreign page owner, malformed state/missing fields/NaN/infinity/negative/coercion nullfalseempty numericstrings, position>max, ownership dispose/reuse; managerwheel clampandpartialCDPfailure. Existingmanager direct tests do notcoverreportparser/trust."
+    },
+    {
+      "id": "F-PUSH-ADMISSION",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/24",
+      "obligation": "All96 exact rows: invoke real producer/preload/consumer with valid/omitted/null/wrong scalar/unknown fields, wrong window/frame/page/worktree/host, reload/dispose and throwing callback; assert exact state changes described per row and no wrong-owner effect. Run packaged Electron on supported macOS/Windows/Linux; absence of a push is not exit."
+    },
+    {
+      "id": "F-PUSH-ORDER",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/25",
+      "obligation": "Per-row push before/after snapshot, duplicate and out-of-order deliveries, queue overflow300, reconnect and late Promise completion; mobile relay must keep newer push, updater source currently permits late snapshot overwrite; require explicit intended-correction test if changing policy."
+    },
+    {
+      "id": "F-PUSH-RESOURCE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/26",
+      "obligation": "Streams: MJPEG owner-safe stop, JPEG buffer/Blob revoke, video stream+device collision/late-start/H264 config/decode/timeouts, preview Unicode byte ack/overflow/resync/disconnect/reconnect with disposable PTYs and real WebCodecs. Confirm no process exit inferred from unavailable snapshot."
+    },
+    {
+      "id": "F-PUSH-STATE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/27",
+      "obligation": "Dashboard omitted icon retention,250ms throttle1s topology cap and stale refresh; downloads nullable/omitted page IDs and duplicate finaltoasts; WebAuthn queue/cancel/teardown/reply rejection; cleanup/space scan collision, appendduplicate and supersession; native-chat initial/pending/replacement/reconnect; local log identity/rotation/partial bytes."
+    },
+    {
+      "id": "F-PUSH-COMMAND",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/28",
+      "obligation": "Exact app/guest commands across active/floating/pinned tabs, profile inheritance and stale source; createTerminal ack identity/partial failure, split legacy hint/ambiguous owners, close expiry and disposal, automation dispatch duplicate/token30min/reservation/refusal, notification-only sleep/wake versus durable host state."
+    },
+    {
+      "id": "F-RPC-SCHEMA",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/29",
+      "obligation": "Every615 exact rpcRows receiver: retained params expression plus namedSchemaRefs; valid fixture, omitted, explicit null, unknownkeys, scalar/array mismatch, min/max boundary, optional/default/nullable/refinement/transform and handler post-parse projection; keep source and intended-correction fixtures distinct. Explicitly test null-param methods ignoring arbitrary params and root request.params??{} behavior, including optional Mentu capability and scalar review/approval IDs."
+    },
+    {
+      "id": "F-RPC-ROUTE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/30",
+      "obligation": "For all615 registry rows prove exact method string through local unary or stream lane and supported/legacy remote routes; unknown method and wrong unary/stream lane; current main frame, sender document retirement, colliding subscription IDs, premature unsubscribe, malformed ACK, callback throw, binary ownership, close/setup races. Use 48 receiver groups plus actual dynamic namespace tests, no colon/dot alias assumption."
+    },
+    {
+      "id": "F-RPC-HOST",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/31",
+      "obligation": "Local/environment/explicit owner/null/SSH selector matrix; environment re-pair before enqueue/during probe/start/return, capability TTL60s/cache32, hotpath cached connection and snapshot one-shot exclusions; supported shared failure must not rerun mutation by fallback; timeout/cancel and loss contact ->unverifiable. Real disposable paired sockets/SSH required."
+    },
+    {
+      "id": "F-RPC-RESULT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/32",
+      "obligation": "No universal result validator: fixture each actual handler return projection, omitted result vsnull under JSON/structuredclone, BigInt/cycles/errors, optionalerror.data; apply actual browser/emulator/error allowlists, keepalive vsresult, parse-error mapping. Direct service result shapes that remain unknown are source exceptions, never filled from TResult annotations."
+    },
+    {
+      "id": "F-EXTERNAL",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/33",
+      "obligation": "Explicit fixture/platform contracts for Electron/WebContents/menu/native clipboard/WebCodecs, backend/cloud/provider schemas and policy, RPC remote transport auth/caps, Zod compiled/fallback/strip/refine semantics, persistence durability and host process execution. No real provider/account/profile execution in audit. Owner E1/E2/E4/E5 evidence remains separately accepted or pending."
+    },
+    {
+      "id": "F-LEGACY",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/34",
+      "obligation": "Preserve zeroarg export:requestPdf receiver and tabId/worktreeId ui:closeSessionTab receiver; producer provenance remains unknown. Test mixed-version receivers and concrete close behavior; no removal/alias inference, no additional history search authorized."
+    },
+    {
+      "id": "F-SUPPLEMENTAL",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/35",
+      "obligation": "Retain PBR001..012, E3-FACTORIES usage-store/results/UI and imported backend obligations from closure.json; current boundary pass joins dynamic local/remote/envelope only, does not certify every delegated OS/library effect. Preserve original futureAcceptanceCommands and sourceTestGroups whole-file queues."
+    },
+    {
+      "id": "D-USAGE-ADMISSION",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/36",
+      "obligation": "Exercise all24 real registered handlers with preload transport and disposable store: omitted/null/primitive/object arguments, unknown fields/scope/range/kind, nonboolean enabled, truthy force, nonfinite/negative/string limit; actual trusted/wrong/destroyed sender and Electron structured clone. Characterize raw acceptance first; intended validation/auth changes require explicit rejection/no-write tests. Do not replace current null semantics silently."
+    },
+    {
+      "id": "D-USAGE-LIFECYCLE",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/37",
+      "obligation": "Whole lifecycle/writer suites plus disabled no-op, 299999/300000 freshness, changed metadata fingerprint, concurrent refresh, metadata failure before scan, scanner failure after start, write/rename/flush failure, disable during scan, restart after failed write, generation supersession, and schema6/5/2 mismatch preserving enabled only for Claude/Codex. Source defect fixture must show memory mutation survives failed setEnabled; intended durable acknowledgment/recovery gets separate regression."
+    },
+    {
+      "id": "D-USAGE-PROJECTION",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/38",
+      "obligation": "All24 result fixtures across3providers; complete named structures with null/zero/nonzero cost, top fields/sessions/events, scope/date/DST boundary, invalid range/scope/limit, multi-location/model sessions, inferred versus recorded prices, Claude tier aggregation versus daily sums, OpenCode primary-worktree and all-range invalid timestamp asymmetries. No new universal normalized billing record."
+    },
+    {
+      "id": "D-USAGE-INGEST",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/39",
+      "obligation": "Preserve original whole scanner/parser/path/dedup/model pricing tests listed in originalTestQueue. Three scanned entry bodies are characterized; validate actual local discovery/parser/attribution outputs on synthetic provider JSONL/SQLite versions, priority/reclaim/deferred claims, malformed/corrupt file/DB, permission/removal/race and WSL boundaries; do not relabel unread local helper bodies as external platform proof. No personal logs or live provider requests."
+    },
+    {
+      "id": "D-USAGE-UI",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/40",
+      "obligation": "Real slice+IPC+rendered panes: web undefined fallback, initial/off/loading/empty/error/stale/null/zero states, toggle and filter, share eligibility and provider swap/unmount. Deferred old filter response and disable while pending must first reproduce stale overwrite; intended request-generation/disabled-state fence and rejection reset require separate tests. Benchmark assertions do not prove interaction correctness."
+    },
+    {
+      "id": "D-GRAB-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/41",
+      "obligation": "D-GRAB-ACCEPT: real wired shortcut with wrong/reminted/destroyed page, payload clamp/URL userinfo and budget edges, selecting/cancel/navigation/timeout, clipboard rejection, screenshot null/failure, unmount during all awaits, serial-intent replacement; fixture Electron guest capture and intended state-reset/redaction fixes."
+    },
+    {
+      "id": "D-PR-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/42",
+      "obligation": "D-PR-ACCEPT: same/lower sequence, stale request timestamp and same-ms entry replacement, duplicate worktree IDs across hosts, fallback merged PR, provider-neutral/GitHub null distinctions, error retry, cache eviction and rejected metadata persist through real consumer; external provider fixtures separate."
+    },
+    {
+      "id": "D-MARKDOWN-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/43",
+      "obligation": "D-MARKDOWN-ACCEPT: whole real editor suites plus callback wiring/wrong coordinates/stale target/read-only/malformed command; ignored false command and thrown library errors; header/multicell/undo/serialization platform fixtures."
+    },
+    {
+      "id": "D-PREVIEW-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/44",
+      "obligation": "D-PREVIEW-ACCEPT: whole replay suite plus actual xterm asynchronous writes/resync/replacement and dispose during callbacks; malformed snapshot and thrown write; no loss-of-contact=>exit inference."
+    },
+    {
+      "id": "D-NUDGE-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/45",
+      "obligation": "D-NUDGE-ACCEPT: whole campaign/parser/updater suites plus malformed/null/boundary campaign, cooldown race, destroyed sender/send throw partial-state recovery, dismissal restart and packaged native updater fixture; intended failure recovery must have separate test."
+    },
+    {
+      "id": "D-PORT-ACCEPT",
+      "ref": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json#/remainingAcceptance/46",
+      "obligation": "D-PORT-ACCEPT: whole parsing/cache/PID suites plus wired push after disposal/selection/host change, partial ANSI/URL chunk limits, LRU/ties/bind/unbind, ambiguous PID, failed kernel scan and real OS process-identity fixtures. Kernel scan/kill result remains DR-WORKSPACE_PORT_METHODS."
+    }
+  ],
+  "inheritedExecutionObligations": [
+    {
+      "id": "P-EXEC-BASELINE",
+      "status": "not-run",
+      "owner": "root-assigned Sol/test owners after full audit acceptance",
+      "obligation": "Run all original allocated whole files in a disposable source-derived baseline using original runner/platform config and assertions. Do not run in read-only source checkout. Record exact revision/command/environment and every parameter/platform/skip; setup failure is not behavioral RED, skip is not PASS."
+    },
+    {
+      "id": "P-EXEC-PORT",
+      "status": "not-run",
+      "obligation": "Port retained original assertion bodies/test membership to versioned Rust service/CLI and Electron boundary without weakening; prove candidate behavioral RED before feature changes and GREEN after. Separate baseline defect expectations from root-approved intended-correction tests."
+    },
+    {
+      "id": "P-EXEC-RESULT",
+      "status": "not-run",
+      "obligation": "For every method in methods, use its exact receiverFixture and resultContract plus group acceptance cases: success/null/undefined/omission/coercion, each pre/post-effect failure, partial success, retries, cancellation/cleanup, old/new host capability branches. Mocked provider admission alone cannot prove owning implementation outcome."
+    },
+    {
+      "id": "P-EXEC-HOST",
+      "status": "not-run",
+      "obligation": "Exercise Linux/macOS supported+unsupported versions/Windows/WSL native and packaged profiles plus SSH old/new mixed versions and folder/worktree ownership. Assert live/unverifiable/exited, never convert contact loss/timeout/unregister to exited. Use isolated app-owned fixtures, never personal profiles or live credentials."
+    },
+    {
+      "id": "P-EXEC-NATIVE",
+      "status": "not-run",
+      "obligation": "Real authorized native helper/SDK/speech worker/model/download and temporary filesystem tests after source obligations close. Preserve model/catalog/keychain/TCC/ADB/simctl provenance and consent; no inference tests or desktop actions during this audit."
+    },
+    {
+      "id": "P-EXEC-EXTERNAL",
+      "status": "not-run",
+      "obligation": "Reprovision authorized isolated cloud/provider test destinations. Fault response loss after commit, retry/idempotency scope, partial cleanup, stream end/disconnect, stale owner fencing and upload cancellation. Never copy source secrets or infer production operation from mocks."
+    }
+  ],
+  "executionObligations": [
+    {
+      "id": "PJ-T-COMMAND",
+      "owner": "Sol runtime/CLI port and platform test owners after whole source acceptance",
+      "status": "not-run",
+      "cases": [
+        "Run original command and nvm whole suites without weakened assertions plus original lexical boundary/allowlist; record skips separately.",
+        "Behavioral RED then GREEN for explicit empty/null PATH, duplicate casing with already-leading runtime, extension precedence, denied/symlink/directory candidates, alias cycle/depth/invalid prefix and alias read errors; separate existing source quirks from approved corrections.",
+        "Use disposable real Windows/macOS/Linux/WSL/SSH host fixtures to confirm delimiter/absolute-path semantics and sibling node actually used without relying on schema or regex; test unsupported runtime ABI separately. No personal installations."
+      ]
+    },
+    {
+      "id": "PJ-T-LOCK",
+      "owner": "Sol hook/runtime filesystem and OS owners",
+      "status": "not-run",
+      "cases": [
+        "Preserve both original identity/lock whole files including Windows skip and all failure assertions; baseline only in isolated filesystem/OS capsule because identity may touch /var/tmp.",
+        "Behavioral RED/GREEN for hardlink publication failure, draft unlink failure after publication, dead/foreign/undefined incarnation, ambiguous witness, concurrent claimers, replacement lock during release, release unlink failure preserving callback result, orphan malformed records and abort at each await.",
+        "Real separate-process shared-home contention on supported local filesystems and SSH hosts; same endpoint/different boot/namespace, permissions/symlinks/hardlink unsupported, clock/deadline overshoot and hung IO. Scope by host; undefined/contact loss remains unverifiable. No account/home credential operations."
+      ]
+    },
+    {
+      "id": "PJ-T-SQLITE",
+      "owner": "Sol usage/runtime native SQLite owners; retain UIG-OPENCODE allocation",
+      "status": "not-run",
+      "cases": [
+        "Reuse all accepted UIG-OPENCODE original scanner/test allocations without replacing them by wrapper tests.",
+        "Faithful baseline/port fixtures for module unavailable, readonly/missing file, open/query/close failure, empty/simple pragma undefined, statement eviction/exclusion, DDL cache clear even on failure and open precheck race.",
+        "Supported Node/native-version fixtures with synthetic database: schema evolution/WAL/locks/partial materialization/close; verify actual results and errors. Never open real account DB."
+      ]
+    },
+    {
+      "id": "PJ-T-WINDOWS",
+      "owner": "Sol Windows runtime/native owners",
+      "status": "not-run",
+      "cases": [
+        "Original kill and guard whole suites baseline unchanged then faithful port RED/GREEN; keep source resolving callback failure separate from any intended structured termination result.",
+        "Synthetic guard cases metrics unavailable, Chromium PID membership, invalid PID, logger failure before Promise, synchronous exec throw, callback errors/timeout and callback never arrives.",
+        "Disposable authorized Windows child process tree only: timeout behavior, late callback, PID reuse/TOCTOU, own Chromium exclusions and handle cleanup. Successful Promise is not exited; verify live/unverifiable/exited independently and preserve SSH loss-of-contact semantics."
+      ]
+    },
+    {
+      "id": "PJ-T-GUARD",
+      "owner": "Sol Electron session/network and startup owners",
+      "status": "not-run",
+      "cases": [
+        "Retain all original whole proxy/request/startup/browser assertion files above and central allocation; source-text ordering checks do not replace behavioral startup assertions.",
+        "Behavioral RED/GREEN with synthetic Sessions for no-state early allow, two registrations, failed initial application with fulfilled startup barrier, pending latest-tail replacement, failed close with credentials retained, setProxy failure with old credentials, retired in-flight publication then final credential clear.",
+        "Fake login challenges: exact Session vs default/no webContents, normalized IPv6/case host and exact port, nonproxy/wrong session/host/port; challenge during failed/retired readiness and multiple login listeners. Assert preventDefault/callback count and no cross-session credential selection using dummy values only.",
+        "Disposable Electron app fixture with controlled loopback proxy only after authorization: real onBeforeRequest replacement/filter behavior, callbacks outstanding during removal, login event host/session identity, retries/close rejection/hang, destroyed guest, normal deletion guard retained vs failed-profile/route cleanup removal. No provider requests, active profiles or actual credentials.",
+        "Keep unexpected early allow/no timeout/cleanup races as source characterization; root-approved fixes require separate intended-correction assertions and must not silently alter baseline. Node/custom partitions must demonstrate their own policy; do not infer all transport is blocked by global guard."
+      ]
+    }
+  ],
+  "sourceEvidence": [
+    {
+      "path": "src/main/codex-cli/command.ts",
+      "sha256": "772b742267e67643acf86929d8663619119e81e65de82b0be879c0b1e9cab995",
+      "bytes": 57,
+      "lines": 1,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 1,
+          "sha256": "772b742267e67643acf86929d8663619119e81e65de82b0be879c0b1e9cab995"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/shared/node-cli-command-resolution.ts",
+      "sha256": "42cf7855dd41d7bf0c18e2a723bc2eccffb9049fceab53f59584483275d049a2",
+      "bytes": 13672,
+      "lines": 379,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 379,
+          "sha256": "42cf7855dd41d7bf0c18e2a723bc2eccffb9049fceab53f59584483275d049a2"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/agent-hooks/managed-hook-install-lock.ts",
+      "sha256": "65f6d28f85f397ed7c429afc50664ba41e90c1b0e6b4c634239684feb11dd24e",
+      "bytes": 4833,
+      "lines": 149,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 149,
+          "sha256": "65f6d28f85f397ed7c429afc50664ba41e90c1b0e6b4c634239684feb11dd24e"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/agent-hooks/managed-hook-owner-identity.ts",
+      "sha256": "1c1d48647a1db09d1255b0816b267f3b8d2ec7b1ca267ffbef67b875eedcaf4c",
+      "bytes": 9003,
+      "lines": 276,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 276,
+          "sha256": "1c1d48647a1db09d1255b0816b267f3b8d2ec7b1ca267ffbef67b875eedcaf4c"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/agent-hooks/managed-hook-lock-records.ts",
+      "sha256": "487218675161be4342bfda3499c62ebedc465363f0e0b91da03e8993caebe489",
+      "bytes": 8138,
+      "lines": 274,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 274,
+          "sha256": "487218675161be4342bfda3499c62ebedc465363f0e0b91da03e8993caebe489"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/agent-hooks/managed-hook-lock-claims.ts",
+      "sha256": "9f86a9e82cc35e229fa6e564e303110bb7503ad6d681f9b53dc24404419e88dc",
+      "bytes": 6508,
+      "lines": 216,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 216,
+          "sha256": "9f86a9e82cc35e229fa6e564e303110bb7503ad6d681f9b53dc24404419e88dc"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/windows-process-tree-kill.ts",
+      "sha256": "cc40a99eb6bac35407707a651eac8bb03c213b5e30006dc3d92fffa4c20fb83f",
+      "bytes": 1596,
+      "lines": 44,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 44,
+          "sha256": "cc40a99eb6bac35407707a651eac8bb03c213b5e30006dc3d92fffa4c20fb83f"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/own-chromium-tree-kill-guard.ts",
+      "sha256": "0e020a25985e1efbe7f4ac56353382e9d0123f314f878cdd2c3a81778e1eff0e",
+      "bytes": 1769,
+      "lines": 40,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 40,
+          "sha256": "0e020a25985e1efbe7f4ac56353382e9d0123f314f878cdd2c3a81778e1eff0e"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/orca-chromium-process-pids.ts",
+      "sha256": "67ec0522a384433a7a08da20610380ea0d4981983605688b7c14329dc348bcb0",
+      "bytes": 2983,
+      "lines": 64,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 64,
+          "sha256": "67ec0522a384433a7a08da20610380ea0d4981983605688b7c14329dc348bcb0"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/crash-reporting/self-initiated-tree-kill-log.ts",
+      "sha256": "5197246552d0d14604a5043324e488b20cb1a6c1fa375f0fba0e0cdbbd019a90",
+      "bytes": 8455,
+      "lines": 197,
+      "ranges": [
+        {
+          "first": 54,
+          "last": 71,
+          "sha256": "3cc2c78ee8e84d7c166639b629833f7c0e92e20ffcf02acb2ed9b4eb15d8c31e"
+        },
+        {
+          "first": 84,
+          "last": 134,
+          "sha256": "1978a041f2c532cfff77b3262b4f333c05cc190426536803324f3c4a012ee358"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/network/electron-proxy-request-guard.ts",
+      "sha256": "e10661d2d96ec7c36d5860c067a46d6d39bbdeeb6039e28c6e271fed57989783",
+      "bytes": 632,
+      "lines": 15,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 15,
+          "sha256": "e10661d2d96ec7c36d5860c067a46d6d39bbdeeb6039e28c6e271fed57989783"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/startup/main-process-ready.ts",
+      "sha256": "843d61186f628d112cf03dec896950fc21fe2298451125387107a4c977d7c7f8",
+      "bytes": 1210,
+      "lines": 22,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 22,
+          "sha256": "843d61186f628d112cf03dec896950fc21fe2298451125387107a4c977d7c7f8"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/startup/main-process-ready-foundation.ts",
+      "sha256": "c779632070246eee4629c714c3d57e7cf68e2b956bdcf145caadc657e362295b",
+      "bytes": 13439,
+      "lines": 279,
+      "ranges": [
+        {
+          "first": 52,
+          "last": 66,
+          "sha256": "dc7909237d76737cb2ac5eb139ec2c228c9c34f3d7ad4846871aa050114985e3"
+        },
+        {
+          "first": 131,
+          "last": 158,
+          "sha256": "b0c3ee121db13dbda7e71cd61494baa32830b2d9dcc9fa066819720406aed08e"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/startup/main-process-preflight.ts",
+      "sha256": "ebef79b2e478f743721ebecd516745351b06f4fa9c49e8f64cf3e88595be07b9",
+      "bytes": 18661,
+      "lines": 330,
+      "ranges": [
+        {
+          "first": 240,
+          "last": 247,
+          "sha256": "8712c1a1f7921b8f5dba2cd808d6e21ce33be6f680963082b413b34f3837dcb1"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/startup/main-process-runtime-launch.ts",
+      "sha256": "72d5290c5b3f5092ce8a6040d1d62185d6998371cd73eb8b31d59abfa40f1f37",
+      "bytes": 16240,
+      "lines": 338,
+      "ranges": [
+        {
+          "first": 119,
+          "last": 126,
+          "sha256": "39681000e871725055ec13d3ce1b77d9c77835b938860e4824dd8a315af67e1c"
+        },
+        {
+          "first": 240,
+          "last": 243,
+          "sha256": "8755a1e37f70fc5f4e126c5beb20952871e40737de6cadd37ac692e26d35e8e4"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/index.ts",
+      "sha256": "72de2fa85b91d94e53573e706f7281216925b0d652d16e072f9f02e26e7d7c46",
+      "bytes": 4619,
+      "lines": 115,
+      "ranges": [
+        {
+          "first": 108,
+          "last": 115,
+          "sha256": "be725357688b4ded4f7222ccaf5c1bedb60f813be59963674fa0410de1103a58"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-certificate-request-guard.ts",
+      "sha256": "6f36c603f2315396ab716070577838ae3cecc1a0e9ed594bb261ee6e94b849d0",
+      "bytes": 7303,
+      "lines": 212,
+      "ranges": [
+        {
+          "first": 35,
+          "last": 74,
+          "sha256": "5867d5d62ebb2f31f90c1a57a8fa69d99470064fb5fb5fbdd4997b2bd2675982"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-session-partition-policies.ts",
+      "sha256": "14aabecd676b01823b0170041e360a920a04b840b8557753bac13987abef008a",
+      "bytes": 8060,
+      "lines": 203,
+      "ranges": [
+        {
+          "first": 72,
+          "last": 95,
+          "sha256": "a4d0c0fb11e703ce54efa8aee75d8f0c0673a2a674bde16e4b3ed5361efd3ab5"
+        },
+        {
+          "first": 170,
+          "last": 181,
+          "sha256": "cfcbf3fa164ce3b8b429c18b4e1bb782d2f1573496d093e27392c50ceaed1dfc"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-manager-state.ts",
+      "sha256": "d684252f717edd1d1b8835e83cfe9bb37ef0425f78d397411cc6eb4505b0f982",
+      "bytes": 12705,
+      "lines": 289,
+      "ranges": [
+        {
+          "first": 172,
+          "last": 182,
+          "sha256": "9b304bb3eb1e6bc92f9ad73d6d577346721a6c21dfe96528884eddabf6de4840"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-manager.ts",
+      "sha256": "a2590145296f58a9b768a131cc85bd74724c4a4b7328a498bdee971ad2e3283d",
+      "bytes": 1230,
+      "lines": 23,
+      "ranges": [
+        {
+          "first": 11,
+          "last": 23,
+          "sha256": "a22eadee88f3dd6dfc66291437835580eb164189e1d4bae86ddfdae3afd64fdd"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-certificate-trust-controller.ts",
+      "sha256": "0f0c7236303e74fd7f491912fb3d2283a8fbb0631ac41a546cf2c4f61104a689",
+      "bytes": 10495,
+      "lines": 307,
+      "ranges": [
+        {
+          "first": 29,
+          "last": 54,
+          "sha256": "7f58be482672beac35f8ab32c16dad271e19894120762a2536041319409ad38b"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-session-registry.ts",
+      "sha256": "d30cf8ff5e8412cd07398ed3e42601373942041b4b386fb27203c3e6aa18cc1a",
+      "bytes": 12677,
+      "lines": 341,
+      "ranges": [
+        {
+          "first": 279,
+          "last": 298,
+          "sha256": "f95df3d76ca80e4478405f22af548c7f500b6d720790fe3c2593c0c33c894fc4"
+        }
+      ],
+      "readStatus": "bounded-source-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-session-profile-retirement.ts",
+      "sha256": "5228b1707738bbb6b7ceb18091dcce4ff9ef1a2ca8894bb81193430dae12bd3b",
+      "bytes": 780,
+      "lines": 22,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 22,
+          "sha256": "5228b1707738bbb6b7ceb18091dcce4ff9ef1a2ca8894bb81193430dae12bd3b"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-session-route-policies.ts",
+      "sha256": "24f02622b3859681d1e979b87d264b967fc1f0c643b69f8d93b72bddef226bf0",
+      "bytes": 1043,
+      "lines": 30,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 30,
+          "sha256": "24f02622b3859681d1e979b87d264b967fc1f0c643b69f8d93b72bddef226bf0"
+        }
+      ],
+      "readStatus": "full-source-body-read"
+    },
+    {
+      "path": "src/main/codex-cli/command.test.ts",
+      "sha256": "65e17acdc325a706a67d41befc58f8319e8f72d605bfacbb16839a8ab96e515e",
+      "bytes": 15441,
+      "lines": 392,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 392,
+          "sha256": "65e17acdc325a706a67d41befc58f8319e8f72d605bfacbb16839a8ab96e515e"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/shared/nvm-default-alias.test.ts",
+      "sha256": "5e39972f9f2d85952051ecd41e3560eeafc4882abebc7f4ec938649f5b38df12",
+      "bytes": 6439,
+      "lines": 158,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 158,
+          "sha256": "5e39972f9f2d85952051ecd41e3560eeafc4882abebc7f4ec938649f5b38df12"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/shared/cli-runtime-pairing-boundary.test.ts",
+      "sha256": "824689e1e0e02d3009142eb6716496342d00ef29afcf87e1ee153628b2a381d7",
+      "bytes": 3837,
+      "lines": 105,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 105,
+          "sha256": "824689e1e0e02d3009142eb6716496342d00ef29afcf87e1ee153628b2a381d7"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/main/agent-hooks/managed-hook-owner-identity.test.ts",
+      "sha256": "d7d2640f715b28582f8b7fdff5a818e5f7bd9dac258b224c3160494cc5b90f4a",
+      "bytes": 8891,
+      "lines": 234,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 234,
+          "sha256": "d7d2640f715b28582f8b7fdff5a818e5f7bd9dac258b224c3160494cc5b90f4a"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/main/agent-hooks/managed-hook-install-lock.test.ts",
+      "sha256": "d6b345326650c8edd3209e6a6c6ef4e41f4ebf3359744f5c96648dbd12fd31f8",
+      "bytes": 15023,
+      "lines": 397,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 397,
+          "sha256": "d6b345326650c8edd3209e6a6c6ef4e41f4ebf3359744f5c96648dbd12fd31f8"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/main/windows-process-tree-kill.test.ts",
+      "sha256": "173c4bc57c3e87e803545cb610b517b021919859ecf1edb50f98752726026152",
+      "bytes": 1677,
+      "lines": 55,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 55,
+          "sha256": "173c4bc57c3e87e803545cb610b517b021919859ecf1edb50f98752726026152"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/main/own-chromium-tree-kill-guard.test.ts",
+      "sha256": "f5f4d3f904629768a71d369e9c4bc7d0fdb8f16cad06d63dce3337c504d33b5b",
+      "bytes": 6858,
+      "lines": 200,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 200,
+          "sha256": "f5f4d3f904629768a71d369e9c4bc7d0fdb8f16cad06d63dce3337c504d33b5b"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/main/network/electron-proxy-request-guard.test.ts",
+      "sha256": "716d917ed09324c5a73d138c0286fe4d29f106ef95c6c5bf0f291345c0b1c308",
+      "bytes": 4993,
+      "lines": 144,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 144,
+          "sha256": "716d917ed09324c5a73d138c0286fe4d29f106ef95c6c5bf0f291345c0b1c308"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/main/network/proxy-settings-session.test.ts",
+      "sha256": "92fac2e923ed0948a4d75d9dffe42e32c2495040d51ac8200bde2a5e6f20ec94",
+      "bytes": 18960,
+      "lines": 555,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 555,
+          "sha256": "92fac2e923ed0948a4d75d9dffe42e32c2495040d51ac8200bde2a5e6f20ec94"
+        }
+      ],
+      "readStatus": "full-assertion-body-read"
+    },
+    {
+      "path": "src/main/network/proxy-settings.test.ts",
+      "sha256": "308692e488e52c06a2b319cfa799251b52ada05266e56a4e3e848c005f64af5e",
+      "bytes": 10418,
+      "lines": 332,
+      "ranges": [
+        {
+          "first": 133,
+          "last": 219,
+          "sha256": "f5cc6d50dc98b114b1a5d7a46564ecb51af048fb5066b1402f3790ef377c3754"
+        }
+      ],
+      "readStatus": "bounded-assertion-body-read"
+    },
+    {
+      "path": "src/main/startup/main-process-ready-phase-ordering.test.ts",
+      "sha256": "a933ac36aa19c15cff627fa4c918aa442f61bd828f69b5a5a3e2b268e619bacf",
+      "bytes": 5513,
+      "lines": 153,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 152,
+          "sha256": "9a9c771878c07c933d477f8a13fcdc45a89713d743aa0d5967a137d8935a721d"
+        }
+      ],
+      "readStatus": "bounded-assertion-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-session-partition-proxy-install.test.ts",
+      "sha256": "380687c35593b4a76095919f764a213ba4a65e08843d6ced8a72d284cb9e174c",
+      "bytes": 9056,
+      "lines": 253,
+      "ranges": [
+        {
+          "first": 235,
+          "last": 253,
+          "sha256": "6b6d2c496a1c73247ada35aede47945191afd6bc811190b7b4d46061d9e55f50"
+        }
+      ],
+      "readStatus": "bounded-assertion-body-read"
+    },
+    {
+      "path": "src/main/browser/browser-session-registry.test.ts",
+      "sha256": "8f68acb36728748696df6e233a6a7876dbdb7050aa0014f405d4d095dfc78c43",
+      "bytes": 31549,
+      "lines": 749,
+      "ranges": [
+        {
+          "first": 272,
+          "last": 316,
+          "sha256": "c1c95a389e8c202baa5c7957af0eb0def046f3341eb615ad07703a42da1f4719"
+        }
+      ],
+      "readStatus": "bounded-assertion-body-read"
+    },
+    {
+      "path": "src/main/network/proxy-settings.ts",
+      "sha256": "ca8355af218f3db372be3c80e077c902403ea6f9f4939df34402a92d27322ef5",
+      "bytes": 10673,
+      "lines": 325,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 325,
+          "sha256": "ca8355af218f3db372be3c80e077c902403ea6f9f4939df34402a92d27322ef5"
+        }
+      ],
+      "readStatus": "reused-accepted-source-body-not-reread-here",
+      "acceptedEvidence": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json#/contracts/12"
+    },
+    {
+      "path": "src/main/network/bounded-proxy-application.ts",
+      "sha256": "1278a0176320fb01e98ac567b063960e6ff4950d964206e60c70631d9a715abf",
+      "bytes": 644,
+      "lines": 20,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 20,
+          "sha256": "1278a0176320fb01e98ac567b063960e6ff4950d964206e60c70631d9a715abf"
+        }
+      ],
+      "readStatus": "reused-accepted-source-body-not-reread-here",
+      "acceptedEvidence": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json#/contracts/12"
+    },
+    {
+      "path": "src/main/network/electron-proxy-credentials.ts",
+      "sha256": "437af182cf304e7582a5ac35cb2eefa9fbe4abf73143545e877a0a9304523035",
+      "bytes": 3189,
+      "lines": 114,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 114,
+          "sha256": "437af182cf304e7582a5ac35cb2eefa9fbe4abf73143545e877a0a9304523035"
+        }
+      ],
+      "readStatus": "reused-accepted-source-body-not-reread-here",
+      "acceptedEvidence": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json#/contracts/12"
+    },
+    {
+      "path": "src/main/network/electron-default-proxy-session.ts",
+      "sha256": "06f3e3a5d0e45ec44e1cc5983d3b39690efa20ad4106cf29dc6bcb6447fec6df",
+      "bytes": 582,
+      "lines": 19,
+      "ranges": [
+        {
+          "first": 1,
+          "last": 19,
+          "sha256": "06f3e3a5d0e45ec44e1cc5983d3b39690efa20ad4106cf29dc6bcb6447fec6df"
+        }
+      ],
+      "readStatus": "reused-accepted-source-body-not-reread-here",
+      "acceptedEvidence": "docs/migration/audit-closure/e3-bridge/result-platform/provider-inputs-final.json#/contracts/12"
+    },
+    {
+      "path": "src/main/sqlite/sync-database.ts",
+      "start": 1,
+      "end": 111,
+      "sha256": "b120e5d7a5a167ef0eacd351a100b2f4c3a9dbdf8722ee0274090a97a8b9b2dd",
+      "rangeSha256": "b120e5d7a5a167ef0eacd351a100b2f4c3a9dbdf8722ee0274090a97a8b9b2dd",
+      "readStatus": "reused-accepted-source-body-not-reread-here",
+      "acceptedEvidence": "docs/migration/audit-closure/e3-bridge/consumer-ingestion-final.json#/ingestionMethods/16"
+    }
+  ],
+  "retainedPointers": [
+    {
+      "ref": "docs/migration/audit-closure/e3-bridge/consumer-ingestion-final.json#/contracts/8",
+      "scope": "Original UIG-OPENCODE source-test associations and whole suites retained; not all wrapper assertions reread here."
+    },
+    {
+      "ref": "docs/migration/audit-closure/e5-platform/assets-observability-final.json#/contracts/16",
+      "scope": "OBS-COL-INTEGRATION and its OBS-COL-06 redaction/durable-logging limitations; source characterization reused, no new E5 acceptance."
+    },
+    {
+      "ref": "docs/migration/audit-closure/e3-bridge/result-platform/contracts.json",
+      "scope": "All21 group IDs and126 method identities/original allocation unchanged. This supplement adds no method denominator or reassignment."
+    }
+  ],
+  "delegation": {
+    "children": [],
+    "status": "none-authorized-or-started"
+  },
+  "attribution": "Upstream MIT/copyright provenance retained in existing allocation and source; no product code, credentials, provider endpoints or private artifacts copied.",
+  "validation": {
+    "type": "artifact-only",
+    "result": "passed: JSON parses; two exact joins; eight unique contracts; all42 source records and inclusive ranges match current bytes; all eight input fingerprints unchanged; inherited47 gates, original allocation and execution obligations deep-equal frozen provider input; every contract source reference resolves",
+    "intendedChecks": [
+      "only two new owned files",
+      "parse JSON",
+      "exact two joins",
+      "unique contract IDs and resolved evidence",
+      "current whole/range digests",
+      "inherited47 gates/allocation/execution deep equality",
+      "frozen inputs unchanged except legitimate root review progress if any"
+    ],
+    "productTests": "not-run"
+  }
+}

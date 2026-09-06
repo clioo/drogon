@@ -1,0 +1,206 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleId": "remote-runtime-shared-control-reconnect",
+  "entryTestFile": "src/shared/remote-runtime-shared-control-reconnect.test.ts",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 / Node24.19.0 with minimal node config, not the full original config. No aliases, DOM/canvas/host-port setup, feature-wall define, GC/WebStorage flags or extended timeouts. Real-server cases bind ephemeral loopback explicitly; synthetic cases retain original clocks/spies. No original assertions/imports replaced.",
+    "Transport package trees are pinned. Optional ws native peers are disabled per child via WS_NO_BUFFER_UTIL=1 and WS_NO_UTF_8_VALIDATE=1; real ws/tweetnacl/zod implementations remain. Native-addon/performance, full config and real SSH equivalence are not established."
+  ],
+  "files": [
+    {
+      "path": "src/shared/remote-runtime-shared-control-reconnect.test.ts",
+      "sha256": "fc5e0384e9f362d74e25243f636f29eccdfec85bdc0302ce37a37ff8f5d74099",
+      "role": "test"
+    },
+    {
+      "path": "src/shared/remote-runtime-shared-control-reconnect.ts",
+      "sha256": "6ad670e8a49d444a3d8aca112d3ca198ad079ad2cb7007952ba58128f838d609",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-shared-control-state.ts",
+      "sha256": "a2d7b40eb8c950f6b5c32fb082973a9d58ac32115fc8356814af82fde0d2d402",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-prepared-request-admission.ts",
+      "sha256": "ceebb01eb75df7f29d1d3e0d2ee6ceb72a0188666a85a462d53e4b3bc84a6c90",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-request-frames.ts",
+      "sha256": "ace20e1a4cd69329e9210cb0f42ecdc4b0c0f02d1eaf3435187edd952c2db1c3",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-shared-control-protocol.ts",
+      "sha256": "61e56215f111f4cb8e9e0524d7099c0b729094180b4babf29665627913dafae3",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/reconnect-jitter.ts",
+      "sha256": "7a725830c039fcba04fb4ead75931cb0d4dc6da651e2063369bcf0e30a671791",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/runtime-subscription-replay.ts",
+      "sha256": "e6412a614876545d28b98ddddb14cdbd29bb521ab37611477cc7514da502265c",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-client-error.ts",
+      "sha256": "593ff4ee6466c4b18b69f65a20631967205fb8e1bd5e46239cf7f526b764156a",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-memory-limits.ts",
+      "sha256": "862a317d7f564a2cc54cfa60b6c093de5dc8a61714eac45daa178608c1f6acb1",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/runtime-rpc-envelope.ts",
+      "sha256": "a46eba9fcef5a7490b9717059357cd2d0dcabe6472ba630c316ac5280edd4f83",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/json-text-structure-limit.ts",
+      "sha256": "d2c02e311eda500d935589f167106890cec715a141d4976dc89860c0dc6b6bfd",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/e2ee-crypto.ts",
+      "sha256": "0f187808227a77b9e3d6799741d2145e205820f6c5119db9b39c3e218bbfecc4",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-client.ts",
+      "sha256": "12e81120eb151d3ae8e61b2f9ab3a5aa4560f8a43d39e5c6386d3e5f2a02e18b",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/node-bounded-json-stringify.ts",
+      "sha256": "fcadabc537aa3125d1ee514026ecca5b8e2a76aabca7e29f08d3d35008001622",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-request-socket.ts",
+      "sha256": "6c0b1d7c90789b16de40fcc5658dfedff3a0ce1a16040b9de19606b14966106e",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-subscription-transport.ts",
+      "sha256": "51019065291ee52fa66aec2f144a69287ea60080e23f921d31796e4abeadf318",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/abort-signal-reason.ts",
+      "sha256": "ef979f2aa87e3d6712dc80abb4d86a8c6e0fa7a1d807cfa1bf35c82b362b7455",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-client-capabilities.ts",
+      "sha256": "f41ea998bdd4a3621f3f06eb1c11dd6b2c6678efe5808f93be1518a50eed938a",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-client-handshake.ts",
+      "sha256": "9d4a4be03e74f7cabaa4c3db9bd4c10d349dfb41ae5852ac2862f38f02492c30",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-request-response-router.ts",
+      "sha256": "c658708e63a12e998d1d1bfbcbd77a59447a4d1c23989e548cbd47776462024f",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/timer-delay.ts",
+      "sha256": "7e529ed30d1b25521f5d72d7c2a6d05d16efe66faf2619b859d67b330cca767f",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-subscription-frame-router.ts",
+      "sha256": "854b12a5936eca99f14ed6701e282bdc2cd4ea66cb632428f36089df2d01bd79",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-subscription-outbound.ts",
+      "sha256": "b7a2d04c5071a6ed6aac8e375305ec76a2acc8c24e547ba29460919c7fb65402",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-subscription-request-channel.ts",
+      "sha256": "c6297d9ab6486e6aa931809778d5093b68c0f883493f87d7bbbe1dadad122cb0",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-runtime-socket-liveness.ts",
+      "sha256": "cd183251d2970e69493c841c8e9464c5af5eccda4948b30c0747b51329b8e91d",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/protocol-version.ts",
+      "sha256": "e21f10647fe18df2b31e84c2a8d596c083e8ae52714829890969a1b65286803a",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/skill-install-capability.ts",
+      "sha256": "4dae209e014524ad9bd1f72f8366a78f80720546d36e19adbc299d3d7da1ff19",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/ws-outbound-backpressure-queue.ts",
+      "sha256": "73bf7ff3c10c42ada557045ac4be57f7676b87678984985f2dfe1b99a6e23e17",
+      "role": "module"
+    },
+    {
+      "path": "src/shared/remote-server-update.ts",
+      "sha256": "c7384b964a0bfaa1573cd00761c5e2d29143c591cb1b4cd6ee1b0db464110d12",
+      "role": "module"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "transportRuntime": {
+    "ws": {
+      "version": "8.21.3",
+      "treeSha256": "aad13c0d5b988c454b067e8f6d9d0e8ed938293ec60989a2207cf8614ef9a4a0"
+    },
+    "tweetnacl": {
+      "version": "1.0.3",
+      "treeSha256": "79d76ce10a07a02d66cba99b0f11b00724e8095e0a5004ed62c8bc2f43183793"
+    },
+    "zod": {
+      "version": "4.5.4",
+      "treeSha256": "8675df81babc63b169f49743e654198f574342b364a9bf831eb39f4e881ba63f"
+    }
+  },
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 2
+  },
+  "allocation": {
+    "package": "WP-ENG-SHARED",
+    "authority": "docs/migration/parity-test-work-packages.json",
+    "sourceTest": "src/shared/remote-runtime-shared-control-reconnect.test.ts"
+  },
+  "isolationRationale": "Whole two-case original scheduler suite reviewed with29 exact module hashes from the standing-intent closure. It invokes only fake-clock scheduling and spies; no WebSocket constructor or external effect is invoked, despite indirect transport imports. Original afterEach restores timers. No profile/filesystem/process/network action.",
+  "testEvidenceBoundary": "Two original fake-clock scheduler cases prove immediate retry consumes pending callback at most once and does not resurrect cleared/intentionally closed work. They do not exercise real reconnection, SSH, OS-resume event delivery or rewritten-product behavior.",
+  "dependencyDiscovery": {
+    "parser": "Installed @babel/parser7.29.7; static runtime import/export walk excluding type-only imports",
+    "external": [
+      "vitest",
+      "zod",
+      "tweetnacl",
+      "node:crypto",
+      "ws"
+    ],
+    "unresolvedDynamicImports": [],
+    "limits": "Discovery is routing only; root read complete source bodies before admission. Versions and tree fingerprints do not alone authorize arbitrary tests."
+  }
+}

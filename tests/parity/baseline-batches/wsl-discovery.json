@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "capsules": [
+    {
+      "manifestPath": "tests/parity/baseline-capsules/wsl-distro-list-single-flight.json",
+      "approvedManifestSha256": "cae13c42cd8b232fdd8d8033349374bbe01a84eb1910edfeea8d2630cd786304"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/wsl-running-distros.json",
+      "approvedManifestSha256": "93bbf1a73bb26a2c49f953e203747fd15693f399602d3c82462218c79846e31a"
+    }
+  ]
+}

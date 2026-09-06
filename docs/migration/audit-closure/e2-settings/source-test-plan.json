@@ -1,0 +1,4730 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "scope": "Bounded E2 execution candidates, combined with accepted consumer test pointers; supplements and never replaces accepted M7 whole-source test map.",
+  "fileCount": 93,
+  "files": [
+    {
+      "path": "src/main/browser/browser-guest-shortcut-forwarding.test.ts",
+      "sha256": "2c734869d54facf4a7eafc099928aad3cf0ca3b6d2977a6968a5b421389d73e5",
+      "declarationPointers": [
+        {
+          "line": 63,
+          "text": "it('passes through guest viewport coordinates (params.x/y) to the renderer', () => {"
+        },
+        {
+          "line": 81,
+          "text": "it('includes navigation state and page URL alongside coordinates', () => {"
+        },
+        {
+          "line": 84,
+          "text": "getURL: vi.fn(() => 'https://test.dev/page'),"
+        },
+        {
+          "line": 98,
+          "text": "triggerContextMenu(guest, { x: 50, y: 75, linkURL: 'https://test.dev/link' })"
+        },
+        {
+          "line": 106,
+          "text": "pageUrl: 'https://test.dev/page',"
+        },
+        {
+          "line": 107,
+          "text": "linkUrl: 'https://test.dev/link',"
+        },
+        {
+          "line": 114,
+          "text": "it('forwards the native selection text so the renderer can offer Copy', () => {"
+        },
+        {
+          "line": 132,
+          "text": "it('reads navigation state from navigationHistory', () => {"
+        },
+        {
+          "line": 161,
+          "text": "it('does not send when renderer is unavailable', () => {"
+        },
+        {
+          "line": 175,
+          "text": "it('cleans up context-menu listener on teardown', () => {"
+        },
+        {
+          "line": 199,
+          "text": "it('dismisses context menu on left-click', () => {"
+        },
+        {
+          "line": 219,
+          "text": "it('does not dismiss context menu on right-click', () => {"
+        },
+        {
+          "line": 240,
+          "text": "it('dismisses context menu on middle-click', () => {"
+        },
+        {
+          "line": 260,
+          "text": "it('ignores non-mouseDown events', () => {"
+        },
+        {
+          "line": 326,
+          "text": "it('resolves ctrl wheel direction from guest mouse input', () => {"
+        },
+        {
+          "line": 331,
+          "text": "it('allows command wheel only on macOS', () => {"
+        },
+        {
+          "line": 338,
+          "text": "it('ignores non-zoom wheel input', () => {"
+        },
+        {
+          "line": 357,
+          "text": "it('forwards ctrl wheel to browser page zoom and consumes the guest wheel event', () => {"
+        },
+        {
+          "line": 373,
+          "text": "it('consumes guest ctrl wheel even when the renderer is unavailable', () => {"
+        },
+        {
+          "line": 386,
+          "text": "it('cleans up the mouse wheel listener on teardown', () => {"
+        },
+        {
+          "line": 470,
+          "text": "it('commits Ctrl+Tab switching from focused guest pages on generic release events', () => {"
+        },
+        {
+          "line": 512,
+          "text": "it('forwards browser page zoom shortcuts from focused guest pages', () => {"
+        },
+        {
+          "line": 548,
+          "text": "it('forwards browser history shortcuts from focused guest pages', () => {"
+        },
+        {
+          "line": 573,
+          "text": "it('forwards browser Find with its registered page and workspace owner', () => {"
+        },
+        {
+          "line": 592,
+          "text": "it('forwards browser Find by page alone when no workspace owner is registered', () => {"
+        },
+        {
+          "line": 608,
+          "text": "it('forwards quick-command menu shortcuts from focused guest pages', () => {"
+        },
+        {
+          "line": 631,
+          "text": "it('forwards workspace delete shortcuts from focused guest pages', () => {"
+        },
+        {
+          "line": 651,
+          "text": "it('consumes repeated workspace delete shortcuts from focused guest pages', () => {"
+        },
+        {
+          "line": 672,
+          "text": "it('consumes guest zoom shortcuts even when the renderer is unavailable', () => {"
+        },
+        {
+          "line": 685,
+          "text": "it('uses customized zoom keybindings when forwarding guest shortcuts', () => {"
+        },
+        {
+          "line": 703,
+          "text": "it('forwards native guest zoom commands to browser page zoom when default zoom keys are bound', () => {"
+        },
+        {
+          "line": 721,
+          "text": "it('does not double-forward ctrl wheel when Electron also emits a native zoom command', () => {"
+        },
+        {
+          "line": 750,
+          "text": "it('ignores native guest zoom commands when matching default zoom keys are unbound', () => {"
+        },
+        {
+          "line": 769,
+          "text": "it('forwards double-tap window shortcuts from focused guest pages', () => {"
+        },
+        {
+          "line": 797,
+          "text": "it('forwards double-tap tab shortcuts from focused guest pages', () => {"
+        },
+        {
+          "line": 823,
+          "text": "it('resets guest double-tap detection on blur', () => {"
+        },
+        {
+          "line": 861,
+          "text": "it('routes tab.close to ui:closeFloatingItem with the source id for a floating guest', () => {"
+        },
+        {
+          "line": 880,
+          "text": "it('routes workspace/tab index chords to ui:selectFloatingIndex for a floating guest', () => {"
+        },
+        {
+          "line": 897,
+          "text": "it('keeps main routing for a non-floating guest', () => {"
+        },
+        {
+          "line": 914,
+          "text": "it('keeps main routing when no worktree resolver is provided', () => {"
+        },
+        {
+          "line": 927,
+          "text": "it('drops auto-repeat index chords at the source for a floating guest', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/browser/browser-manager-grab-shortcuts.test.ts",
+      "sha256": "30613f67d543e66845021d1df95eb653e059903c6f79ab06ea517482dcc60819",
+      "declarationPointers": [
+        {
+          "line": 41,
+          "text": "it('forwards cmd/ctrl+c from the guest when the page is not using copy', async () => {"
+        },
+        {
+          "line": 67,
+          "text": "it('does not forward cmd/ctrl+c when the guest reports native copy should win', async () => {"
+        },
+        {
+          "line": 93,
+          "text": "it('forwards bare s from the guest while a grab op is active', async () => {"
+        },
+        {
+          "line": 124,
+          "text": "it('forwards Cmd/Ctrl+Shift+B to the renderer and prevents the guest default', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/browser/browser-manager-guest-shortcuts.test.ts",
+      "sha256": "01f720d974de672a4e88f899d407f2c8fcfd52225dafe22e5f0184252c7b0947",
+      "declarationPointers": [
+        {
+          "line": 68,
+          "text": "it('does not forward ctrl/cmd+r or readline chords from browser guests', () => {"
+        },
+        {
+          "line": 160,
+          "text": "it('forwards browser guest tab shortcuts alongside shared window shortcuts', () => {"
+        },
+        {
+          "line": 312,
+          "text": "it('uses customized keybindings when forwarding browser guest shortcuts', () => {"
+        },
+        {
+          "line": 418,
+          "text": "it('forwards browser guest Ctrl+Tab keydown and Ctrl release', () => {"
+        },
+        {
+          "line": 488,
+          "text": "it('respects disabled browser guest tab-switch bindings', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/claude-accounts/runtime-auth-service-materialization.test.ts",
+      "sha256": "391cb6aba48c2e11820fe3368cbdf39bd7b96f22b13ad79e1e1b199881fb7a7e",
+      "declarationPointers": [
+        {
+          "line": 56,
+          "text": "it('rematerializes unchanged managed credentials when the runtime file is missing', async () => {"
+        },
+        {
+          "line": 83,
+          "text": "it('restores system default instead of materializing corrupt managed credentials', async () => {"
+        },
+        {
+          "line": 106,
+          "text": "it('restores system default instead of materializing wrong-shaped managed credentials', async () => {"
+        },
+        {
+          "line": 129,
+          "text": "it('does not materialize managed credentials from unowned auth paths', async () => {"
+        },
+        {
+          "line": 156,
+          "text": "it('adopts canonical legacy managed auth paths without existing markers', async () => {"
+        },
+        {
+          "line": 184,
+          "text": "it('rejects symlinked managed credential children', async () => {"
+        },
+        {
+          "line": 215,
+          "text": "it('restores system auth when switching from an owned account to an unowned account', async () => {"
+        },
+        {
+          "line": 273,
+          "text": "it('restores system auth when the previously synced account is no longer in settings', async () => {"
+        },
+        {
+          "line": 333,
+          "text": "it('restores system auth when switching from an owned account to missing credentials', async () => {"
+        },
+        {
+          "line": 395,
+          "text": "it('removes runtime credentials when deselecting with a missing system-default snapshot', async () => {"
+        },
+        {
+          "line": 423,
+          "text": "it('falls back to atomic write when the unchanged check cannot read the target', async () => {"
+        },
+        {
+          "line": 462,
+          "text": "it('tightens credential file permissions when unchanged content is already present', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/claude-accounts/runtime-selection.test.ts",
+      "sha256": "79c7c8a09fca27296e30847f5f059e7e221530febccda31a21b3c8a36183401d",
+      "declarationPointers": [
+        {
+          "line": 44,
+          "text": "it('selects host and WSL accounts independently', () => {"
+        },
+        {
+          "line": 59,
+          "text": "it('resolves a WSL default target when exactly one WSL distro has a selection', () => {"
+        },
+        {
+          "line": 71,
+          "text": "it('clears WSL selections without clearing the host selection for a WSL default target', () => {"
+        },
+        {
+          "line": 87,
+          "text": "it('drops selections whose account belongs to another runtime', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/codex-accounts/runtime-home-service-per-account-migration.test.ts",
+      "sha256": "b0a7c0cc0243331c4c97a8158814d2442671721cf59ce92a75928f52525bfa7d",
+      "declarationPointers": [
+        {
+          "line": 51,
+          "text": "it('upgrades a realistic two-account shared-home fixture without losing auth or sessions', async () => {"
+        },
+        {
+          "line": 124,
+          "text": "it('migrates the one proven C-era refresh, launches E home, then ignores shared auth', async () => {"
+        },
+        {
+          "line": 149,
+          "text": "it('keeps E in-place auth when selection becomes real-home without an explicit sync', async () => {"
+        },
+        {
+          "line": 172,
+          "text": "it('never continuously recovers a missing E auth from shared state after takeover', async () => {"
+        },
+        {
+          "line": 199,
+          "text": "it('bridges real-home and sibling-account history into the launched account home', async () => {"
+        },
+        {
+          "line": 239,
+          "text": "it('does not expose an untrusted persisted home through rollout discovery', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/codex-accounts/runtime-selection.test.ts",
+      "sha256": "25d36754179e7d82f6c24962d94835ab28a7429319156ff41ff29d0456f6e070",
+      "declarationPointers": [
+        {
+          "line": 44,
+          "text": "it('selects host and WSL accounts independently', () => {"
+        },
+        {
+          "line": 59,
+          "text": "it('resolves a WSL default target when exactly one WSL distro has a selection', () => {"
+        },
+        {
+          "line": 71,
+          "text": "it('clears WSL selections without clearing the host selection for a WSL default target', () => {"
+        },
+        {
+          "line": 87,
+          "text": "it('drops selections whose account belongs to another runtime', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/durable-file-write-syscall-proof.test.ts",
+      "sha256": "41edb3840ca6eb8eb0425b2e7b0af59df0aafd3471a7e7e4840a785598b78a73",
+      "declarationPointers": [
+        {
+          "line": 2,
+          "text": "// allows it. Counted at the module boundary rather than inferred from reading the implementation."
+        },
+        {
+          "line": 50,
+          "text": "it('fsyncs the file before rename, and the directory after where supported', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/durable-file-write.test.ts",
+      "sha256": "850e292fd22343dcaf661c96d800a7cbe714d34d87c316f7f529dd4621bdbfe0",
+      "declarationPointers": [
+        {
+          "line": 29,
+          "text": "it('publishes the payload at the final path', async () => {"
+        },
+        {
+          "line": 35,
+          "text": "it('replaces existing content atomically', async () => {"
+        },
+        {
+          "line": 42,
+          "text": "it('leaves no temp file behind on success', async () => {"
+        },
+        {
+          "line": 49,
+          "text": "it('round-trips a multi-megabyte payload without truncation', async () => {"
+        },
+        {
+          "line": 57,
+          "text": "it('preserves exact bytes for multibyte and escape-sensitive content', async () => {"
+        },
+        {
+          "line": 64,
+          "text": "it('surfaces an unwritable temp path instead of silently succeeding', async () => {"
+        },
+        {
+          "line": 81,
+          "text": "it('keeps the last writer when async and sync paths target one file', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/ipc/keybindings.test.ts",
+      "sha256": "21477fceb6e1740c9d15bec227ff2b4a52a954e9ffe6922a087bd0b5ce7dae68",
+      "declarationPointers": [
+        {
+          "line": 71,
+          "text": "it('authorizes the keybindings file for in-app editing when ensuring it exists', () => {"
+        },
+        {
+          "line": 78,
+          "text": "it('reconciles plugin command conflicts after a shortcut edit', () => {"
+        },
+        {
+          "line": 95,
+          "text": "it('authorizes the keybindings file before opening it outside Orca', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/ipc/settings.test.ts",
+      "sha256": "7c72696b12cf43cd8598f630aa22436d99c352828be620a209d1c69a9c2d786b",
+      "declarationPointers": [
+        {
+          "line": 123,
+          "text": "it('registers settings:previewGhosttyImport handler', () => {"
+        },
+        {
+          "line": 129,
+          "text": "it('answers the synchronous settings read with the persisted settings', () => {"
+        },
+        {
+          "line": 145,
+          "text": "it('does not reconcile hooks when the disabled-agent set is unchanged', async () => {"
+        },
+        {
+          "line": 166,
+          "text": "it('reconciles hooks when the disabled-agent set changes', async () => {"
+        },
+        {
+          "line": 192,
+          "text": "it('rejects durable Active Server writes through generic settings:set', async () => {"
+        },
+        {
+          "line": 209,
+          "text": "it('persists Active Server only through the dedicated preference channel', () => {"
+        },
+        {
+          "line": 238,
+          "text": "it('applies bot-author deltas against the authoritative settings snapshot', () => {"
+        },
+        {
+          "line": 259,
+          "text": "it('registers settings:previewWarpThemeImport handler', () => {"
+        },
+        {
+          "line": 265,
+          "text": "it('settings:previewGhosttyImport returns preview result', async () => {"
+        },
+        {
+          "line": 279,
+          "text": "it('settings:previewWarpThemeImport returns preview result', async () => {"
+        },
+        {
+          "line": 294,
+          "text": "it('settings:previewWarpThemeImport forwards malformed sources for main validation', async () => {"
+        },
+        {
+          "line": 318,
+          "text": "it('broadcasts store-level settings changes to open windows', () => {"
+        },
+        {
+          "line": 338,
+          "text": "it('does not rebroadcast renderer settings writes to the origin window', () => {"
+        },
+        {
+          "line": 360,
+          "text": "it('updates the agent awake service when the keep-awake setting changes', () => {"
+        },
+        {
+          "line": 383,
+          "text": "it('does not notify the agent awake service for unrelated setting changes', () => {"
+        },
+        {
+          "line": 399,
+          "text": "it('prepares local worktree roots when workspace directory changes', async () => {"
+        },
+        {
+          "line": 414,
+          "text": "it('prepares local worktree roots when workspace nesting changes', async () => {"
+        },
+        {
+          "line": 429,
+          "text": "it('does not prepare local worktree roots when workspace layout values do not change', async () => {"
+        },
+        {
+          "line": 444,
+          "text": "it('does not accept floating workspace trust grants from renderer settings IPC', async () => {"
+        },
+        {
+          "line": 462,
+          "text": "it('does not accept plugin authority grants from generic renderer settings IPC', async () => {"
+        },
+        {
+          "line": 483,
+          "text": "it('normalizes terminal scrollback row updates and drops legacy byte updates', async () => {"
+        },
+        {
+          "line": 504,
+          "text": "it('normalizes terminal line height updates before persistence', async () => {"
+        },
+        {
+          "line": 522,
+          "text": "it('normalizes custom mobile pairing addresses before persistence', async () => {"
+        },
+        {
+          "line": 552,
+          "text": "it('clears malformed custom mobile pairing addresses before persistence', async () => {"
+        },
+        {
+          "line": 570,
+          "text": "it('normalizes custom terminal themes from renderer settings IPC', async () => {"
+        },
+        {
+          "line": 593,
+          "text": "sourcePath: '/Users/alice/.warp/themes/test.yaml'"
+        },
+        {
+          "line": 615,
+          "text": "it('sanitizes and applies proxy settings from renderer settings IPC', async () => {"
+        },
+        {
+          "line": 646,
+          "text": "it('does not sweep sessions for a no-op proxy save', async () => {"
+        },
+        {
+          "line": 667,
+          "text": "it('queues every proxy snapshot on both authorities before either apply settles', async () => {"
+        },
+        {
+          "line": 713,
+          "text": "it('orders proxy writes before unrelated settings reconciliation can suspend', async () => {"
+        },
+        {
+          "line": 759,
+          "text": "it('drops invalid proxy URLs at the settings boundary', async () => {"
+        },
+        {
+          "line": 778,
+          "text": "it('normalizes and applies app icon changes from renderer settings IPC', async () => {"
+        },
+        {
+          "line": 797,
+          "text": "it('falls back to the classic app icon for invalid renderer settings IPC values', async () => {"
+        },
+        {
+          "line": 816,
+          "text": "it('rebuilds the app menu after Automations sidebar visibility changes', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/keybindings/keybinding-file.test.ts",
+      "sha256": "92568fd2be8950b4175901eb42eaf65c2507a033e06884a84f0bf37e0f889cbb",
+      "declarationPointers": [
+        {
+          "line": 27,
+          "text": "it('resolves the user-facing keybindings path under ~/.orca', () => {"
+        },
+        {
+          "line": 33,
+          "text": "it('returns an empty snapshot when the file does not exist', () => {"
+        },
+        {
+          "line": 42,
+          "text": "it('parses common and platform-specific overrides', () => {"
+        },
+        {
+          "line": 76,
+          "text": "it('accepts bare keys for actions that explicitly opt in', () => {"
+        },
+        {
+          "line": 95,
+          "text": "it('preserves valid plugin overrides while rejecting malformed plugin action IDs', () => {"
+        },
+        {
+          "line": 121,
+          "text": "it('ignores invalid, unknown, and conflicting manual edits', () => {"
+        },
+        {
+          "line": 144,
+          "text": "it('writes active-platform overrides while preserving other platforms', () => {"
+        },
+        {
+          "line": 172,
+          "text": "it('migrates root-level legacy overrides before writing settings edits', () => {"
+        },
+        {
+          "line": 203,
+          "text": "it('rejects writes that would conflict with another effective shortcut', () => {"
+        },
+        {
+          "line": 210,
+          "text": "it('validates write inputs at the file boundary', () => {"
+        },
+        {
+          "line": 219,
+          "text": "it('resets only the active platform override', () => {"
+        },
+        {
+          "line": 247,
+          "text": "it('migrates legacy settings once when no file exists', () => {"
+        },
+        {
+          "line": 256,
+          "text": "it('seeds the legacy tab-switch chords into the active platform section', () => {"
+        },
+        {
+          "line": 276,
+          "text": "it('preserves a customized action while still pinning the un-customized ones', () => {"
+        },
+        {
+          "line": 292,
+          "text": "it('preserves pre-swap customizations that conflict only with the new defaults', () => {"
+        },
+        {
+          "line": 296,
+          "text": "// resulting conflict for an absent user override and replace it."
+        },
+        {
+          "line": 324,
+          "text": "it('is a no-op once every swapped action already resolves on this platform', () => {"
+        },
+        {
+          "line": 335,
+          "text": "it('does not let a foreign-platform override block the active-platform pin', () => {"
+        },
+        {
+          "line": 351,
+          "text": "it('leaves unrelated overrides intact and stays idempotent when seeding', () => {"
+        },
+        {
+          "line": 365,
+          "text": "it('migrates root-level legacy overrides without losing custom shortcuts', () => {"
+        },
+        {
+          "line": 397,
+          "text": "it('throws instead of freezing the seed when a legacy binding fails normalization', () => {"
+        },
+        {
+          "line": 412,
+          "text": "it('does not replace an unreadable keybindings file while seeding', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/keybindings/keybinding-service.test.ts",
+      "sha256": "58476268e53981998c74a9061364369cdbdea2397ace3090d18444f2b4fdb839",
+      "declarationPointers": [
+        {
+          "line": 72,
+          "text": "it.each(PLATFORMS)("
+        },
+        {
+          "line": 114,
+          "text": "it.each(PLATFORMS)("
+        },
+        {
+          "line": 154,
+          "text": "it('existing install keeps a rebound action AND pins the pre-swap default on the rest', () => {"
+        },
+        {
+          "line": 184,
+          "text": "it('is idempotent: a second launch after the seed changes nothing', () => {"
+        },
+        {
+          "line": 209,
+          "text": "it('leaves the cohort pending when the seed write fails (retries next launch)', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence-flush-and-save-scheduling.test.ts",
+      "sha256": "75b24d0a6a773799f605c60b3eba166ade040ec50897afaaf75f0cf04df55717",
+      "declarationPointers": [
+        {
+          "line": 71,
+          "text": "it('flush writes state to disk synchronously', async () => {"
+        },
+        {
+          "line": 81,
+          "text": "it('flush remains safe when a debounced save is also pending', async () => {"
+        },
+        {
+          "line": 99,
+          "text": "it('debounced save writes data after the delay', async () => {"
+        },
+        {
+          "line": 124,
+          "text": "it('skips the disk write when a mutation burst nets out to already-persisted state', async () => {"
+        },
+        {
+          "line": 144,
+          "text": "it('skips the sync flush when state already matches the last write', async () => {"
+        },
+        {
+          "line": 161,
+          "text": "it('bounds save postponement under sustained mutation bursts (max-wait)', async () => {"
+        },
+        {
+          "line": 181,
+          "text": "it('re-binding an already-persisted pty does not rewrite the state file', async () => {"
+        },
+        {
+          "line": 227,
+          "text": "it('garbage-collects stale local worktreeMeta at load with a 30-day grace', async () => {"
+        },
+        {
+          "line": 275,
+          "text": "it('never GCs folder-workspace instance metas — the meta IS the workspace', async () => {"
+        },
+        {
+          "line": 289,
+          "text": "it('never GCs Linux-style WSL worktree paths on Windows', async () => {"
+        },
+        {
+          "line": 305,
+          "text": "it.each([null, [], 5])('repairs a corrupt worktreeMeta map (%#)', async (worktreeMeta) => {"
+        },
+        {
+          "line": 315,
+          "text": "it('cache refreshes never rewrite the durable state file', async () => {"
+        },
+        {
+          "line": 335,
+          "text": "it('snapshots the cache at flush and seeds the next Store from the sidecar', async () => {"
+        },
+        {
+          "line": 345,
+          "text": "it('keeps GitHub cache sidecars scoped to explicit profile data files', async () => {"
+        },
+        {
+          "line": 372,
+          "text": "it('keeps a legacy in-file cache as the seed and strips it from disk', async () => {"
+        },
+        {
+          "line": 378,
+          "text": "// The legacy key marks the state dirty at load; the next write drops it."
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence-load-repair-durability.test.ts",
+      "sha256": "946c7d6b17e3a641f9f3525c7ae1262cf17824dbde4dc3b586528f069e2f154e",
+      "declarationPointers": [
+        {
+          "line": 88,
+          "text": "it('persists the legacy search-tab explorer view repair', async () => {"
+        },
+        {
+          "line": 100,
+          "text": "it('persists a repaired notification settings block', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence-loading-store-write-risks.test.ts",
+      "sha256": "85e5f61338c53c565261f9fa316de9970db938db5a787b96ab092393b2cb89f6",
+      "declarationPointers": [
+        {
+          "line": 100,
+          "text": "it('allows an already-started primary rename to publish after writes are frozen', async () => {"
+        },
+        {
+          "line": 117,
+          "text": "it('keeps a rejected durable mutation in memory for a later unrelated flush', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence-settings-ui-defaults.test.ts",
+      "sha256": "44a83fd17fdfebbcf4de236f14fd1867a547aaa79f56f939e22f20c299da24db",
+      "declarationPointers": [
+        {
+          "line": 71,
+          "text": "it('returns default settings when no data file exists', async () => {"
+        },
+        {
+          "line": 110,
+          "text": "it('repairs a persisted terminal line height outside xterm bounds', async () => {"
+        },
+        {
+          "line": 124,
+          "text": "it('returns default UI state when no data file exists', async () => {"
+        },
+        {
+          "line": 141,
+          "text": "it('surfaces the usage percentage display change notice for upgraded profiles', async () => {"
+        },
+        {
+          "line": 162,
+          "text": "it('keeps the usage percentage display change notice dismissed when remaining was chosen', async () => {"
+        },
+        {
+          "line": 183,
+          "text": "it('defaults minimizeToTrayOnClose to false when unset', async () => {"
+        },
+        {
+          "line": 188,
+          "text": "it('coerces loaded minimizeToTrayOnClose to false unless stored as true', async () => {"
+        },
+        {
+          "line": 201,
+          "text": "it('persists minimizeToTrayOnClose true/false round-trip', async () => {"
+        },
+        {
+          "line": 211,
+          "text": "it('persists native chat session options with per-model isolation', async () => {"
+        },
+        {
+          "line": 236,
+          "text": "it('coerces non-boolean minimizeToTrayOnClose payloads to a strict boolean', async () => {"
+        },
+        {
+          "line": 247,
+          "text": "it('defaults the menu bar icon on regardless of platform', async () => {"
+        },
+        {
+          "line": 259,
+          "text": "it('enables the menu bar icon when an existing macOS profile has no stored value', async () => {"
+        },
+        {
+          "line": 271,
+          "text": "it('persists an explicit macOS menu bar opt-out', async () => {"
+        },
+        {
+          "line": 282,
+          "text": "it('normalizes menu bar icon writes to a strict boolean', async () => {"
+        },
+        {
+          "line": 292,
+          "text": "it('round-trips a macOS menu bar opt-out through a non-mac host unchanged', async () => {"
+        },
+        {
+          "line": 312,
+          "text": "it('defaults trayMinimizeNoticeShown to false and persists it strictly', async () => {"
+        },
+        {
+          "line": 322,
+          "text": "it('hides the setup guide sidebar entry for existing users backfilled as completed', async () => {"
+        },
+        {
+          "line": 339,
+          "text": "it('persists the existing-user onboarding backfill back to disk', async () => {"
+        },
+        {
+          "line": 359,
+          "text": "it('keeps the setup guide sidebar entry available while onboarding is open', async () => {"
+        },
+        {
+          "line": 377,
+          "text": "it('keeps new worktree card style off while onboarding is open', async () => {"
+        },
+        {
+          "line": 395,
+          "text": "it('preserves explicit new worktree card style opt-out while onboarding is open', async () => {"
+        },
+        {
+          "line": 415,
+          "text": "it('preserves explicit new worktree card style opt-in on load', async () => {"
+        },
+        {
+          "line": 429,
+          "text": "it('keeps new worktree card style off for existing users backfilled as completed', async () => {"
+        },
+        {
+          "line": 442,
+          "text": "it('treats persisted false setup guide sidebar dismissal as stale once onboarding is closed', async () => {"
+        },
+        {
+          "line": 461,
+          "text": "it('keeps malformed completed onboarding closed for the setup guide sidebar gate', async () => {"
+        },
+        {
+          "line": 484,
+          "text": "it('does not reopen the setup guide sidebar when closed onboarding has a null timestamp', async () => {"
+        },
+        {
+          "line": 502,
+          "text": "it('recovers a close timestamp when closed onboarding omits the closedAt key', async () => {"
+        },
+        {
+          "line": 520,
+          "text": "it('does not mutate gate fields for a consistent closed-onboarding existing user', async () => {"
+        },
+        {
+          "line": 548,
+          "text": "it.each(["
+        },
+        {
+          "line": 576,
+          "text": "it.each(["
+        },
+        {
+          "line": 604,
+          "text": "it.each(["
+        },
+        {
+          "line": 631,
+          "text": "it('keeps current onboarding progress marked as the five-step flow', async () => {"
+        },
+        {
+          "line": 649,
+          "text": "it('migrates legacy completed onboarding progress to the current final step', async () => {"
+        },
+        {
+          "line": 667,
+          "text": "it.each(["
+        },
+        {
+          "line": 694,
+          "text": "it('preserves legacy none grouping as ungrouped workspaces', async () => {"
+        },
+        {
+          "line": 703,
+          "text": "it('normalizes interim flat grouping back to none', async () => {"
+        },
+        {
+          "line": 712,
+          "text": "it('preserves explicit workspace status grouping', async () => {"
+        },
+        {
+          "line": 721,
+          "text": "it('defaults projectOrderBy to manual when absent, even with recent sortBy', async () => {"
+        },
+        {
+          "line": 730,
+          "text": "it('falls back invalid projectOrderBy to manual', async () => {"
+        },
+        {
+          "line": 739,
+          "text": "it('preserves and round-trips an explicit recent projectOrderBy', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence-settings-update.test.ts",
+      "sha256": "3cf2635da497b24ed46b1d37cbd04a2a348489f4f2dc47c5c762f936a615eb64",
+      "declarationPointers": [
+        {
+          "line": 75,
+          "text": "it('updateSettings merges partial updates', async () => {"
+        },
+        {
+          "line": 100,
+          "text": "it('persists the agent skill sharing capability as an exact boolean', async () => {"
+        },
+        {
+          "line": 114,
+          "text": "it('normalizes bot-author overrides on load and every settings write', async () => {"
+        },
+        {
+          "line": 135,
+          "text": "it('normalizes custom mobile pairing addresses on load and every settings write', async () => {"
+        },
+        {
+          "line": 188,
+          "text": "it('notifies settings listeners with changed keys only', async () => {"
+        },
+        {
+          "line": 214,
+          "text": "it('does not notify settings listeners for unchanged scalar updates', async () => {"
+        },
+        {
+          "line": 224,
+          "text": "it('does not notify settings listeners unless requested by the producer', async () => {"
+        },
+        {
+          "line": 234,
+          "text": "it('invalidates local worktree scans when the global Windows runtime changes', async () => {"
+        },
+        {
+          "line": 249,
+          "text": "it('migrates missing terminal scrollback rows to the row default and writes back rows only', async () => {"
+        },
+        {
+          "line": 262,
+          "text": "it('migrates legacy terminal scrollback byte presets by intent', async () => {"
+        },
+        {
+          "line": 279,
+          "text": "it('lets persisted terminal scrollback rows win over legacy bytes', async () => {"
+        },
+        {
+          "line": 297,
+          "text": "it('normalizes invalid and clamped terminal scrollback rows on load', async () => {"
+        },
+        {
+          "line": 318,
+          "text": "it('normalizes terminal scrollback row updates and ignores stale byte updates', async () => {"
+        },
+        {
+          "line": 345,
+          "text": "it('retires the persisted GitHub attribution setting without dropping unknown settings', async () => {"
+        },
+        {
+          "line": 369,
+          "text": "it('ignores retired GitHub attribution updates and strips stale in-memory values on save', async () => {"
+        },
+        {
+          "line": 389,
+          "text": "it('normalizes terminal cursor style before persistence and listener broadcasts', async () => {"
+        },
+        {
+          "line": 425,
+          "text": "it('normalizes disabled TUI agents on load and update', async () => {"
+        },
+        {
+          "line": 444,
+          "text": "it('enables Claude Agent Teams by default for fresh installs', async () => {"
+        },
+        {
+          "line": 451,
+          "text": "it('migrates yolo default args onto untouched agent launch settings', async () => {"
+        },
+        {
+          "line": 473,
+          "text": "it('does not add yolo defaults for legacy agents with command overrides', async () => {"
+        },
+        {
+          "line": 492,
+          "text": "it('removes unsupported TUI skip-permissions args from migrated profiles', async () => {"
+        },
+        {
+          "line": 520,
+          "text": "it('normalizes app icon on load and update', async () => {"
+        },
+        {
+          "line": 538,
+          "text": "it('updateSettings keeps the legacy commit-message AI projection in sync', async () => {"
+        },
+        {
+          "line": 567,
+          "text": "it('updateSettings keeps source-control AI in sync for legacy commit-message updates', async () => {"
+        },
+        {
+          "line": 600,
+          "text": "it('updateSettings normalizes open-in applications', async () => {"
+        },
+        {
+          "line": 614,
+          "text": "it('updateSettings deep-merges and clamps notification custom sound volume', async () => {"
+        },
+        {
+          "line": 628,
+          "text": "it('updateSettings toggles editorAutoSave', async () => {"
+        },
+        {
+          "line": 639,
+          "text": "it('keeps legacy rightSidebarOpenByDefault writable for backward compatibility', async () => {"
+        },
+        {
+          "line": 650,
+          "text": "it('updateSettings persists sourceControlViewMode as a user setting', async () => {"
+        },
+        {
+          "line": 658,
+          "text": "it('updateSettings persists sourceControlGroupOrder as a user setting', async () => {"
+        },
+        {
+          "line": 669,
+          "text": "it('updateSettings normalizes terminal shortcut policy', async () => {"
+        },
+        {
+          "line": 679,
+          "text": "it('reloads sourceControlViewMode from global settings without touching workspace state', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence-source-control-ai-migration.test.ts",
+      "sha256": "75a755d98dc568d837943aa4b76a9d262dff2388f2f50724395678af0bf98e67",
+      "declarationPointers": [
+        {
+          "line": 69,
+          "text": "it('falls back to defaults when data file contains invalid JSON', async () => {"
+        },
+        {
+          "line": 81,
+          "text": "it('merges loaded data with defaults for missing fields', async () => {"
+        },
+        {
+          "line": 118,
+          "text": "it('migrates legacy commit-message AI settings to source-control AI on load', async () => {"
+        },
+        {
+          "line": 170,
+          "text": "it('migrates first-work branch auto-rename on for existing profiles once', async () => {"
+        },
+        {
+          "line": 187,
+          "text": "it('preserves first-work branch auto-rename opt-outs after the default-on migration', async () => {"
+        },
+        {
+          "line": 207,
+          "text": "it('does not let settings updates clear the first-work branch auto-rename migration guard', async () => {"
+        },
+        {
+          "line": 215,
+          "text": "it('migrates inherited TUI scroll sensitivity defaults to one report on first load', async () => {"
+        },
+        {
+          "line": 234,
+          "text": "it('preserves TUI scroll sensitivity choices after the one-report migration', async () => {"
+        },
+        {
+          "line": 254,
+          "text": "it('stamps the TUI scroll sensitivity migration guard on future updates', async () => {"
+        },
+        {
+          "line": 266,
+          "text": "it('merges rollback commit-message AI writes into existing source-control AI on load', async () => {"
+        },
+        {
+          "line": 361,
+          "text": "it('does not let rollback projection clobber existing source-control action templates on load', async () => {"
+        },
+        {
+          "line": 422,
+          "text": "it('keeps a cleared global commit-message recipe template after persistence re-read', async () => {"
+        },
+        {
+          "line": 464,
+          "text": "it('normalizes malformed visible task providers on load', async () => {"
+        },
+        {
+          "line": 479,
+          "text": "it('preserves a deliberate Jira provider opt-out after migration', async () => {"
+        },
+        {
+          "line": 497,
+          "text": "it('normalizes malformed terminal shortcut policy on load', async () => {"
+        },
+        {
+          "line": 512,
+          "text": "it('normalizes malformed source control group order on load', async () => {"
+        },
+        {
+          "line": 527,
+          "text": "it('repairs drifted task provider defaults on load', async () => {"
+        },
+        {
+          "line": 543,
+          "text": "it('normalizes invalid task provider defaults on load', async () => {"
+        },
+        {
+          "line": 559,
+          "text": "it('normalizes persisted open-in applications on load', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence-worktree-visibility.test.ts",
+      "sha256": "447b8476a776bc9d6ea1905d2473a90b7e2eac79ef8ad3adcf27c23f2c25e8da",
+      "declarationPointers": [
+        {
+          "line": 61,
+          "text": "it('updateRepo stamps legacy external-worktree visibility before changing old repos', async () => {"
+        },
+        {
+          "line": 77,
+          "text": "it('migrates implicit legacy visibility to an explicit override before defaulting global hide', async () => {"
+        },
+        {
+          "line": 115,
+          "text": "it('merges visibility-default patches so future source defaults survive older controls', async () => {"
+        },
+        {
+          "line": 132,
+          "text": "it('normalizes and persists global worktree source defaults', async () => {"
+        },
+        {
+          "line": 164,
+          "text": "it('persists agent worktree visibility independently from external visibility', async () => {"
+        },
+        {
+          "line": 189,
+          "text": "it('persists bounded custom worktree sources separately from their preferences', async () => {"
+        },
+        {
+          "line": 219,
+          "text": "it('clears an explicit external-worktree override without stamping an inherited default', async () => {"
+        },
+        {
+          "line": 238,
+          "text": "it('sanitizes raw custom worktree visibility sources on the read path', async () => {"
+        },
+        {
+          "line": 265,
+          "text": "it('updateRepo clears source-control AI overrides independently from other clearable fields', async () => {"
+        },
+        {
+          "line": 291,
+          "text": "it('updateRepo treats source-control AI null as a transport clear sentinel', async () => {"
+        },
+        {
+          "line": 313,
+          "text": "it('updateRepo normalizes source-control AI overrides before storing', async () => {"
+        },
+        {
+          "line": 363,
+          "text": "it('updateRepo ignores malformed source-control AI overrides without clearing existing overrides', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence/applying-settings/terminal-settings-migrations.test.ts",
+      "sha256": "469018c8689238bfeb1cef29663a855593462bbeb905b16904d09b7b692c74a6",
+      "declarationPointers": [
+        {
+          "line": 5,
+          "text": "it('keeps newly added agent defaults manual for already migrated profiles', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence/loading-store/normalize-loaded-global-settings.test.ts",
+      "sha256": "9b119c0577e8e04b18e222f6dcb7e01ef036163ad1f80ec8522c8ba2f1a5f0e9",
+      "declarationPointers": [
+        {
+          "line": 25,
+          "text": "it('does not mark new profiles as migrated', () => {"
+        },
+        {
+          "line": 29,
+          "text": "it('drops the old visibility setting while preserving migration metadata', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence/loading-store/persisted-state-redundancy.test.ts",
+      "sha256": "34b0ba12f89b1525007a7e2db7405f149a06b1ecfc510be5ad75a0e4a72957a8",
+      "declarationPointers": [
+        {
+          "line": 170,
+          "text": "it('round-trips a legacy-shaped file to identical in-memory state and a smaller file', () => {"
+        },
+        {
+          "line": 175,
+          "text": "// migrations a synthetic fixture triggers (same reason as state-write-round-trip.test.ts)."
+        },
+        {
+          "line": 226,
+          "text": "it('loads an old-serializer file and a new-serializer file to the same state', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence/loading-store/secret-sentinel-substitution.test.ts",
+      "sha256": "a3ceb273cc42e3da504fd359f08c12c4d574beb67b43e0c446c07b52ca797352",
+      "declarationPointers": [
+        {
+          "line": 48,
+          "text": "it('produces bytes and a hash identical to the previous implementation', () => {"
+        },
+        {
+          "line": 70,
+          "text": "it('stays identical when the state holds multi-byte and escaped characters', () => {"
+        },
+        {
+          "line": 88,
+          "text": "it('stays identical with no substitutions and with the degraded-storage prefix', () => {"
+        },
+        {
+          "line": 101,
+          "text": "it('escapes regex metacharacters in the sentinel itself', () => {"
+        },
+        {
+          "line": 111,
+          "text": "it('substitutes every occurrence when a sentinel repeats', () => {"
+        },
+        {
+          "line": 122,
+          "text": "it('copies and UTF-8 encodes the full state once, not once per sentinel per side', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/persistence/loading-store/state-write-round-trip.test.ts",
+      "sha256": "eb8e5d56705e26263cbce9c1252c8f41b77ed9c3357307eeea789a65f045f748",
+      "declarationPointers": [
+        {
+          "line": 74,
+          "text": "it('reloads settings, secrets and both session partitions unchanged', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/runtime/orca-runtime-tests/gitlab-and-pr-bases-part-02.spec.ts",
+      "sha256": "f0eaee4f1686cf2c5000ba30286597c0373de9773c8d2833a8adc832c0339afd",
+      "declarationPointers": [
+        {
+          "line": 23,
+          "text": "it('records GitLab pasted-project recents only after successful runtime lookup', async () => {"
+        },
+        {
+          "line": 78,
+          "text": "it('threads explicit origin preference through runtime WSL PR base resolution', async () => {"
+        },
+        {
+          "line": 181,
+          "text": "it('resolves SSH GitHub fork PR heads through the write-capable fetch RPC', async () => {"
+        },
+        {
+          "line": 246,
+          "text": "it('resolves local GitLab fork MR bases from the target project MR head ref', async () => {"
+        },
+        {
+          "line": 317,
+          "text": "it('captures the fork MR head from a dedicated ref, not the shared FETCH_HEAD', async () => {"
+        },
+        {
+          "line": 380,
+          "text": "it('keeps the durable MR head when the head fetch fails but the local ref resolves', async () => {"
+        },
+        {
+          "line": 440,
+          "text": "it.each(["
+        },
+        {
+          "line": 508,
+          "text": "it('routes runtime GitLab fork MR base git calls through the selected WSL project runtime', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/runtime/orca-runtime-tests/paired-settings.spec.ts",
+      "sha256": "7667edea25a030a4fa340602f203eca16885ce9d33aac75d6d0fb12dde7bd806",
+      "declarationPointers": [
+        {
+          "line": 11,
+          "text": "it('projects runtime-backed settings to paired clients', () => {"
+        },
+        {
+          "line": 51,
+          "text": "it('updates quick commands without widening general paired settings payloads', () => {"
+        },
+        {
+          "line": 87,
+          "text": "it('rejects a concurrent add after the quick command limit is reached', () => {"
+        },
+        {
+          "line": 119,
+          "text": "it('accepts runtime-backed setting updates from paired clients', async () => {"
+        },
+        {
+          "line": 167,
+          "text": "it('broadcasts visibility default changes to paired clients', async () => {"
+        },
+        {
+          "line": 184,
+          "text": "it('reconciles hooks only when paired-client hook settings change', async () => {"
+        },
+        {
+          "line": 216,
+          "text": "it('serializes paired-client hook reconciliation and reads current settings', async () => {"
+        },
+        {
+          "line": 255,
+          "text": "it('rejects relative paths for runtime nested repo scan/import', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/runtime/rpc/methods/artifact-sharing-capability-grant.test.ts",
+      "sha256": "1b7f05498476ee7e3f8e746adf8658d2725c71bc64e5ca53cd0a754abc936e81",
+      "declarationPointers": [
+        {
+          "line": 15,
+          "text": "it('rejects settings.update attempts to turn on artifactSharingEnabled', () => {"
+        },
+        {
+          "line": 19,
+          "text": "it('rejects the deprecated artifactsEnabled alias too', () => {"
+        },
+        {
+          "line": 23,
+          "text": "it('still accepts an unrelated allowlisted setting', () => {"
+        },
+        {
+          "line": 29,
+          "text": "it('publishes the capability read-only through settings.get', () => {"
+        },
+        {
+          "line": 35,
+          "text": "it('reports the projection fail-closed, so a truthy disk value never reads as granted', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/speech/speech-model-deletion.test.ts",
+      "sha256": "f836e6983413dda6078692e7acd95548c5bae57bee4f770aac906d8569039c72",
+      "declarationPointers": [
+        {
+          "line": 26,
+          "text": "it('clears the selected local model after deletion succeeds', async () => {"
+        },
+        {
+          "line": 61,
+          "text": "it('does not clear selection when another client selected a newer model', async () => {"
+        },
+        {
+          "line": 85,
+          "text": "it('leaves settings untouched when deletion fails', async () => {"
+        },
+        {
+          "line": 107,
+          "text": "it('rejects unknown and cloud models before preparing storage deletion', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/text-generation/commit-message-text-generation-settings.test.ts",
+      "sha256": "b0e696b1477b36bf3105d65944a20fd12c8ebe8701c9fc44bf3f8ee4591711bc",
+      "declarationPointers": [
+        {
+          "line": 12,
+          "text": "it('falls back when a dynamic persisted model was not discovered', () => {"
+        },
+        {
+          "line": 38,
+          "text": "it('falls back from stale Claude version ids to the CLI alias default', () => {"
+        },
+        {
+          "line": 62,
+          "text": "it(\"uses the user's default agent when the AI setting has no explicit agent\", () => {"
+        },
+        {
+          "line": 78,
+          "text": "it('preserves dynamic persisted models that were discovered by the CLI', () => {"
+        },
+        {
+          "line": 112,
+          "text": "it('uses host-scoped discovered models for SSH worktrees', () => {"
+        },
+        {
+          "line": 140,
+          "text": "it('falls back to the model default thinking level when a persisted level is stale', () => {"
+        },
+        {
+          "line": 164,
+          "text": "it('passes the per-agent command override into non-interactive planning', () => {"
+        },
+        {
+          "line": 188,
+          "text": "it('falls back when persisted thinking belongs to an undiscovered dynamic model', () => {"
+        },
+        {
+          "line": 211,
+          "text": "it('requires a non-empty custom command for custom agents', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/window/createMainWindow-terminal-focus-shortcuts.test.ts",
+      "sha256": "e0b486f3f62d98f2defe74d628fd9d33e88dca5063033c681862cd5f418f45cb",
+      "declarationPointers": [
+        {
+          "line": 29,
+          "text": "it('only intercepts the dictation chord when enabled toggle mode can handle it', () => {"
+        },
+        {
+          "line": 121,
+          "text": "it('only intercepts double-tap dictation when enabled toggle mode can handle it', () => {"
+        },
+        {
+          "line": 215,
+          "text": "it('forwards ctrl/cmd+j to the worktree palette toggle event', () => {"
+        },
+        {
+          "line": 280,
+          "text": "it('suppresses auto-repeat quick-command menu toggles from before-input-event', () => {"
+        },
+        {
+          "line": 344,
+          "text": "it('suppresses auto-repeat workspace deletes from before-input-event', () => {"
+        },
+        {
+          "line": 402,
+          "text": "it('lets Terminal-first pass risky app shortcuts through when terminal input is focused', () => {"
+        },
+        {
+          "line": 464,
+          "text": "it('allows double-tap shortcuts while terminal input is focused with Terminal-first policy', () => {"
+        },
+        {
+          "line": 543,
+          "text": "it('notifies before Orca-first captures a risky terminal-focused shortcut', () => {"
+        },
+        {
+          "line": 608,
+          "text": "it('notifies before Orca-first captures a terminal-focused double-tap shortcut', () => {"
+        },
+        {
+          "line": 685,
+          "text": "it('forwards the default workspace delete shortcut while terminal input is focused', () => {"
+        },
+        {
+          "line": 753,
+          "text": "it('toggles devtools on F12 in development', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/main/window/createMainWindow-zoom-and-tab-switch-shortcuts.test.ts",
+      "sha256": "2ea5271d244e0e1db8a7e40b0168d7e6e7bc4279831a60866ef0f8b748faf87c",
+      "declarationPointers": [
+        {
+          "line": 29,
+          "text": "it('supports all minus key variants for terminal zoom out', () => {"
+        },
+        {
+          "line": 97,
+          "text": "it('routes Electron zoom command events to terminal zoom', () => {"
+        },
+        {
+          "line": 139,
+          "text": "it('respects custom zoom bindings for Electron zoom command fallbacks', () => {"
+        },
+        {
+          "line": 184,
+          "text": "it('does not intercept ctrl/cmd+r in before-input-event', () => {"
+        },
+        {
+          "line": 230,
+          "text": "it('forwards the platform tab-number jump shortcut to the renderer', () => {"
+        },
+        {
+          "line": 278,
+          "text": "it('yields indexed-switch chords to the floating panel and contains their repeats', () => {"
+        },
+        {
+          "line": 353,
+          "text": "it('contains indexed-switch repeats without dispatching them', () => {"
+        },
+        {
+          "line": 401,
+          "text": "it('lets main-window Ctrl+Tab flow to the renderer held switcher', () => {"
+        },
+        {
+          "line": 462,
+          "text": "it('does not hardcode Ctrl+Tab when the recent-tab binding is disabled', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/dashboard-popout/preview-terminal-shortcuts.test.ts",
+      "sha256": "f74ed357c4e59d197851aebfadd1a0fd716f198492c3638cc1b6a321b9d5cc04",
+      "declarationPointers": [
+        {
+          "line": 43,
+          "text": "it('kills the previous word on Ctrl+Backspace instead of deleting one character', () => {"
+        },
+        {
+          "line": 49,
+          "text": "it('maps the macOS line-kill and word-navigation chords', () => {"
+        },
+        {
+          "line": 65,
+          "text": "it('leaves Option chords to xterm while the TUI has kitty mode negotiated', () => {"
+        },
+        {
+          "line": 75,
+          "text": "it('preserves exact kitty flags for Option-composed text', () => {"
+        },
+        {
+          "line": 87,
+          "text": "it('tracks native Option dead keys without consuming their keydown', () => {"
+        },
+        {
+          "line": 96,
+          "text": "it('withholds the Ctrl+arrow translation on a local ConPTY pty, where PSReadLine binds it', () => {"
+        },
+        {
+          "line": 118,
+          "text": "it('routes Shift+Enter by the PTY host, not the client OS', () => {"
+        },
+        {
+          "line": 137,
+          "text": "it('protects local ConPTY shells while preserving trusted Ctrl+Enter consumers', () => {"
+        },
+        {
+          "line": 175,
+          "text": "it('reports pane-scoped chords so the caller can swallow them', () => {"
+        },
+        {
+          "line": 183,
+          "text": "// The pane yields it; the preview must not swallow it."
+        },
+        {
+          "line": 184,
+          "text": "it('follows the terminal shortcut policy for the tab.close pane-close alias', () => {"
+        },
+        {
+          "line": 209,
+          "text": "it('leaves ordinary typing to xterm', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/feature-tips/feature-tip-modal-state.test.ts",
+      "sha256": "85ba5e91c93c3f4c2175cbba13bea09a7e69981ecc22c25462549cdcda017fa9",
+      "declarationPointers": [
+        {
+          "line": 16,
+          "text": "it('keeps rendering the opened tip after app open has marked it seen', () => {"
+        },
+        {
+          "line": 28,
+          "text": "it('falls back to the CLI tip first when no modal tip id is pinned', () => {"
+        },
+        {
+          "line": 40,
+          "text": "it('falls back to the CLI tip when voice was already seen and the CLI is not installed', () => {"
+        },
+        {
+          "line": 52,
+          "text": "it('falls back to the command palette tip after the CLI tip is handled', () => {"
+        },
+        {
+          "line": 64,
+          "text": "it('returns no tip when every tip is already seen and no modal tip id is pinned', () => {"
+        },
+        {
+          "line": 76,
+          "text": "it('returns no CLI tip when the CLI is already installed', () => {"
+        },
+        {
+          "line": 88,
+          "text": "it('returns no unpinned tip after the user already interacted with the feature', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/feature-tips/feature-tip-startup-gate.test.ts",
+      "sha256": "cf5811914bea8c1347775c5e6847003c0c6304b444c2b8a32107c2117b8975a3",
+      "declarationPointers": [
+        {
+          "line": 45,
+          "text": "it('opens the CLI feature tip first for an existing user on app open', () => {"
+        },
+        {
+          "line": 61,
+          "text": "it('suppresses feature tips for first-time users while onboarding is showing', () => {"
+        },
+        {
+          "line": 77,
+          "text": "it('does not open later in the same session after onboarding suppressed it', () => {"
+        },
+        {
+          "line": 93,
+          "text": "it('opens the CLI tip after the voice tip was marked seen', () => {"
+        },
+        {
+          "line": 109,
+          "text": "it('opens the CLI tip after voice dictation is already enabled', () => {"
+        },
+        {
+          "line": 125,
+          "text": "it('opens the command palette tip after the CLI tip was marked seen', () => {"
+        },
+        {
+          "line": 141,
+          "text": "it('does not open after every tip was marked seen', () => {"
+        },
+        {
+          "line": 157,
+          "text": "it('does not open the voice tip after Settings marked it seen and dictation is disabled', () => {"
+        },
+        {
+          "line": 173,
+          "text": "it('does not open the CLI tip after the CLI is installed', () => {"
+        },
+        {
+          "line": 189,
+          "text": "it('waits for CLI install status before opening the CLI tip', () => {"
+        },
+        {
+          "line": 205,
+          "text": "it('waits for CLI install status before opening later tips', () => {"
+        },
+        {
+          "line": 221,
+          "text": "it('does not open after the user already interacted with the feature', () => {"
+        },
+        {
+          "line": 239,
+          "text": "it('requires an installed CLI to also be configured on PATH', () => {"
+        },
+        {
+          "line": 244,
+          "text": "it('treats unsupported CLI setup as completed for feature tips', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/right-sidebar/SourceControlAgentActionDialog.test.tsx",
+      "sha256": "2674510ad36f2fd1027d80a9f02dffefdd7b64b5474d5d97e9ff2aa029a111f3",
+      "declarationPointers": [
+        {
+          "line": 189,
+          "text": "it('hides the dialog and auto-starts once when the saved global launch recipe matches', async () => {"
+        },
+        {
+          "line": 204,
+          "text": "it('hides the dialog and auto-starts once when the saved repo launch recipe matches', async () => {"
+        },
+        {
+          "line": 218,
+          "text": "it('renders the form and does not auto-start when the saved launch recipe mismatches', async () => {"
+        },
+        {
+          "line": 229,
+          "text": "it('reveals the form with status copy when the saved agent is unavailable', async () => {"
+        },
+        {
+          "line": 240,
+          "text": "it('reveals the dialog and remains open when auto-start fails', async () => {"
+        },
+        {
+          "line": 251,
+          "text": "it('keeps prompt editing available when async auto-start delivery fails', async () => {"
+        },
+        {
+          "line": 270,
+          "text": "it('does not auto-start when a saved receipt appears after the dialog is already open', async () => {"
+        },
+        {
+          "line": 305,
+          "text": "it('does not double-start during StrictMode effect replay', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/right-sidebar/source-control-action-recipe-match.test.ts",
+      "sha256": "847916f3db1f488380d1062026c53d8a488825e2a9e4764cd77ebfa5cca88616",
+      "declarationPointers": [
+        {
+          "line": 27,
+          "text": "it('returns true when the launch recipe matches the global saved recipe', () => {"
+        },
+        {
+          "line": 42,
+          "text": "it('returns false when the repo target has no saved override yet', () => {"
+        },
+        {
+          "line": 58,
+          "text": "it('returns true when the launch recipe matches the repo saved recipe', () => {"
+        },
+        {
+          "line": 84,
+          "text": "it('returns true when the resolve conflicts recipe matches the repo saved recipe', () => {"
+        },
+        {
+          "line": 111,
+          "text": "it('returns true when a repo recipe inherits the global command template', () => {"
+        },
+        {
+          "line": 148,
+          "text": "it('returns true when a repo recipe explicitly clears inherited agent args', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/right-sidebar/source-control-text-generation-defaults.test.ts",
+      "sha256": "c7e97172a1000afc0507f776f3434f144205ef578da6488d5ac67e386b3b6663",
+      "declarationPointers": [
+        {
+          "line": 30,
+          "text": "it('returns true when the current params match the global saved recipe', () => {"
+        },
+        {
+          "line": 47,
+          "text": "it('returns false when the repo target has no saved override yet', () => {"
+        },
+        {
+          "line": 64,
+          "text": "it('returns true when the current params match the repo saved recipe', () => {"
+        },
+        {
+          "line": 93,
+          "text": "it('returns false when the command template differs from the saved recipe', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/AccountsPane.test.tsx",
+      "sha256": "a527e083c67081c489270d8620e7e141eeae24ee7011f0635d80aa2f5039727d",
+      "declarationPointers": [
+        {
+          "line": 29,
+          "text": "it('hides the WSL account location controls on platforms without WSL support', () => {"
+        },
+        {
+          "line": 40,
+          "text": "it('keeps the WSL account location controls on Windows-class hosts', () => {"
+        },
+        {
+          "line": 54,
+          "text": "it('selects the WSL account location under auto when the global project runtime is WSL', () => {"
+        },
+        {
+          "line": 56,
+          "text": "// a configurable own property and remove that shadow afterward to restore it."
+        },
+        {
+          "line": 84,
+          "text": "it('keeps the runtime label inside the localized account copy', () => {"
+        },
+        {
+          "line": 93,
+          "text": "it('localizes the runtime label before interpolating account copy', async () => {"
+        },
+        {
+          "line": 104,
+          "text": "it('scopes account copy to the active remote server and disables local sign-in actions', () => {"
+        },
+        {
+          "line": 107,
+          "text": "// The named-server label is covered in provider-account-scope.test.ts."
+        },
+        {
+          "line": 127,
+          "text": "// The WSL account-location toggle is a local concern; a remote owner hides it."
+        },
+        {
+          "line": 136,
+          "text": "it('omits the scope control on the web client, which cannot select Local desktop', () => {"
+        },
+        {
+          "line": 159,
+          "text": "it('keeps local copy and enabled sign-in actions when no remote server is active', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/AgentsPane.test.tsx",
+      "sha256": "8842932644835c3c09b54e4cacc5671a977ce27f6d49d8ee4180a2ea95218795",
+      "declarationPointers": [
+        {
+          "line": 168,
+          "text": "it('detects agents locally when no active remote server is set', () => {"
+        },
+        {
+          "line": 174,
+          "text": "it('scopes agent detection to the active remote server', () => {"
+        },
+        {
+          "line": 199,
+          "text": "it('shows a retryable error when initial remote detection fails', () => {"
+        },
+        {
+          "line": 214,
+          "text": "it('does not flash a failure before the initial detection effect starts', () => {"
+        },
+        {
+          "line": 225,
+          "text": "it('keeps Windows runtime changes scoped to the local agent refresh', () => {"
+        },
+        {
+          "line": 240,
+          "text": "it('renders the keep-awake modes from settings', () => {"
+        },
+        {
+          "line": 254,
+          "text": "it('hides desktop-only awake modes in paired web clients', () => {"
+        },
+        {
+          "line": 266,
+          "text": "it('renders the agent runtime control on Windows-class hosts', () => {"
+        },
+        {
+          "line": 281,
+          "text": "it('hides the WSL agent location controls on platforms without WSL support', () => {"
+        },
+        {
+          "line": 295,
+          "text": "it('updates the global project runtime when changing agent runtime', async () => {"
+        },
+        {
+          "line": 318,
+          "text": "it('describes Windows lid behavior according to the device', () => {"
+        },
+        {
+          "line": 324,
+          "text": "it('updates the keep-awake mode with its legacy fallback', () => {"
+        },
+        {
+          "line": 347,
+          "text": "it('toggles the agent status hook setting with the next value', () => {"
+        },
+        {
+          "line": 368,
+          "text": "it('toggles generated tab titles with the next value', () => {"
+        },
+        {
+          "line": 389,
+          "text": "it('includes awake and sleep search metadata for the setting', () => {"
+        },
+        {
+          "line": 395,
+          "text": "it('includes hook search metadata for the status setting', () => {"
+        },
+        {
+          "line": 401,
+          "text": "it('includes generated title search metadata', () => {"
+        },
+        {
+          "line": 406,
+          "text": "it('includes enable and hide search metadata for agent visibility', () => {"
+        },
+        {
+          "line": 411,
+          "text": "it('includes agent permission search metadata', () => {"
+        },
+        {
+          "line": 417,
+          "text": "it('applies the selected agent permission mode from settings without a mixed segment', () => {"
+        },
+        {
+          "line": 435,
+          "text": "it('keeps catalog agent ids, labels, and commands discoverable in settings search', () => {"
+        },
+        {
+          "line": 450,
+          "text": "it('renders per-agent availability as labeled status choices without row explanation copy', () => {"
+        },
+        {
+          "line": 466,
+          "text": "it('only toggles agent availability when the segmented value changes', () => {"
+        },
+        {
+          "line": 489,
+          "text": "it('clears the default agent when disabling that agent', () => {"
+        },
+        {
+          "line": 505,
+          "text": "it('keeps the default setting untouched when re-enabling an agent', () => {"
+        },
+        {
+          "line": 520,
+          "text": "it('includes agent runtime search metadata', () => {"
+        },
+        {
+          "line": 528,
+          "text": "it('serializes rapid availability writes against the latest settings snapshot', async () => {"
+        },
+        {
+          "line": 582,
+          "text": "it('keeps repeated queued availability requests idempotent', async () => {"
+        },
+        {
+          "line": 652,
+          "text": "it('does not present Auto as the active choice while an agent is stored', () => {"
+        },
+        {
+          "line": 663,
+          "text": "it('still offers the stored agent so the choice can be kept', () => {"
+        },
+        {
+          "line": 672,
+          "text": "it('keeps a Refresh control reachable when nothing is detected', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/ArtifactsSettingsPane.test.tsx",
+      "sha256": "c4750fca4383f88941828b3b8b56629b31e814a488417042678fb0c545a372fb",
+      "declarationPointers": [
+        {
+          "line": 55,
+          "text": "it('explains the complete sharing workflow', () => {"
+        },
+        {
+          "line": 67,
+          "text": "'Open an HTML or Markdown file and select Share as artifact, or ask an agent to share it.'"
+        },
+        {
+          "line": 85,
+          "text": "it('offers sign in for a local profile', async () => {"
+        },
+        {
+          "line": 95,
+          "text": "it('shows reconnect and connecting states', () => {"
+        },
+        {
+          "line": 110,
+          "text": "it('loads missing account status and disables sign in until configured', () => {"
+        },
+        {
+          "line": 118,
+          "text": "it('controls only sidebar visibility and always allows opening Artifacts', async () => {"
+        },
+        {
+          "line": 142,
+          "text": "it('describes public publishing and existing-link retention', () => {"
+        },
+        {
+          "line": 153,
+          "text": "it('grants and revokes the publish capability through the toggle', async () => {"
+        },
+        {
+          "line": 178,
+          "text": "it('makes the capability read-only on web, where the grant never reaches the host', async () => {"
+        },
+        {
+          "line": 198,
+          "text": "it('leads with the opt-in step while publishing is off, and drops it once granted', () => {"
+        },
+        {
+          "line": 219,
+          "text": "it('points web clients at the desktop app for the opt-in step', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/BrowserSshWorkspaceRoutingSetting.test.tsx",
+      "sha256": "bbbfbc4cc426086f06d728958d328ee7403b9dab1d90c270e5f7cf70453bbf76",
+      "declarationPointers": [
+        {
+          "line": 42,
+          "text": "it('hides the per-host list when no host opted out', () => {"
+        },
+        {
+          "line": 47,
+          "text": "it('restores routing for an opted-out host via Use SSH host', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/FloatingWorkspacePane.test.tsx",
+      "sha256": "242b036b941b48bddc01df2d8c55186fea60b1a2918577cefb1a03e5e79e0209",
+      "declarationPointers": [
+        {
+          "line": 5,
+          "text": "it('shows home shorthand for the default terminal directory', () => {"
+        },
+        {
+          "line": 14,
+          "text": "it('shows home shorthand for legacy blank terminal directory settings', () => {"
+        },
+        {
+          "line": 23,
+          "text": "it('shows the main-resolved trusted custom directory', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/GitPane.test.tsx",
+      "sha256": "514a393858778ccc989fb6309aded8135d655ddeeac12711c31128bc1e27738a",
+      "declarationPointers": [
+        {
+          "line": 41,
+          "text": "it('previews the resulting branch name and drops a redundant trailing slash', () => {"
+        },
+        {
+          "line": 47,
+          "text": "it('warns when the custom prefix contains invalid characters', () => {"
+        },
+        {
+          "line": 52,
+          "text": "it('shows neither preview nor warning when no custom prefix is set', () => {"
+        },
+        {
+          "line": 59,
+          "text": "it('explains when a custom prefix normalizes away to empty', () => {"
+        },
+        {
+          "line": 65,
+          "text": "it('warns in git-username mode when the displayed username is invalid', () => {"
+        },
+        {
+          "line": 70,
+          "text": "it('previews in git-username mode when the displayed username is valid', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/MobilePairingConnectionOptions.test.tsx",
+      "sha256": "1672b14e7c8dce2e8a048b79f014ad4ce7b9f9b19f8d6311d816238481e45c7b",
+      "declarationPointers": [
+        {
+          "line": 68,
+          "text": "it('shows Sign in directly under Orca Relay, above LAN', async () => {"
+        },
+        {
+          "line": 99,
+          "text": "it('hides Sign in when LAN is selected', () => {"
+        },
+        {
+          "line": 105,
+          "text": "it('shows Unavailable instead of a dead Sign in on unconfigured builds', () => {"
+        },
+        {
+          "line": 125,
+          "text": "it('keeps Relay unavailable and unselectable while LAN is selected', async () => {"
+        },
+        {
+          "line": 153,
+          "text": "it('moves selection with the arrow keys as a radiogroup', async () => {"
+        },
+        {
+          "line": 163,
+          "text": "it('does not change path when arrow keys hit the Sign in control', async () => {"
+        },
+        {
+          "line": 173,
+          "text": "it('selects a path from the compact list', async () => {"
+        },
+        {
+          "line": 191,
+          "text": "it('refreshes auth status when it is missing on mount', () => {"
+        },
+        {
+          "line": 201,
+          "text": "it('shows relay status when signed in on Orca Relay', async () => {"
+        },
+        {
+          "line": 225,
+          "text": "it('keeps LAN available while Relay is retrying', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/NotificationsPane.test.tsx",
+      "sha256": "0ac1b63b1522ff2f58df9c38e1b0d16b9faa74bbdd548cba09d639873fab26e7",
+      "declarationPointers": [
+        {
+          "line": 52,
+          "text": "it('renders built-in notification sound choices in settings', () => {"
+        },
+        {
+          "line": 63,
+          "text": "it('resets the volume draft only when the persisted volume changes', () => {"
+        },
+        {
+          "line": 74,
+          "text": "it('uses native main-process delivery even when renderer permission is stale denied on macOS', async () => {"
+        },
+        {
+          "line": 119,
+          "text": "it('confirms delivered test notifications on platforms where show means displayed', async () => {"
+        },
+        {
+          "line": 146,
+          "text": "it('opens macOS notification settings when the native test notification is not shown', async () => {"
+        },
+        {
+          "line": 186,
+          "text": "it('uses Windows notification settings copy when the native test notification is not shown', async () => {"
+        },
+        {
+          "line": 221,
+          "text": "it('does not show an inert settings action on platforms without a settings shortcut', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/OrchestrationPane.test.tsx",
+      "sha256": "9900175d9018ae819f029f7a36ec4cf8a6db51e04309684c6cbb13efe192ab5a",
+      "declarationPointers": [
+        {
+          "line": 173,
+          "text": "it('keeps skill setup visible after install and shows agent coverage plus examples', () => {"
+        },
+        {
+          "line": 195,
+          "text": "it('renders nested worker depth as an unbounded positive whole-number input', () => {"
+        },
+        {
+          "line": 210,
+          "text": "it('keeps the nested depth row visible when settings search routes to Orchestration', () => {"
+        },
+        {
+          "line": 219,
+          "text": "it('commits a whole-number depth and rejects fractional values', async () => {"
+        },
+        {
+          "line": 245,
+          "text": "it('keeps host-only nested depth out of paired web clients', () => {"
+        },
+        {
+          "line": 258,
+          "text": "it('passes update commands to the main panel without an installed manual-copy path', async () => {"
+        },
+        {
+          "line": 280,
+          "text": "it('keeps first-time manual copy on the install command', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/PrivacyPane.test.ts",
+      "sha256": "8f2e8c5a6d3c6aadd9228e4ad244f806e2f60e02f7ebe5df4f63d500c6531cb8",
+      "declarationPointers": [
+        {
+          "line": 54,
+          "text": "it('renders the toggle in its checked state when optedIn is true', () => {"
+        },
+        {
+          "line": 63,
+          "text": "it('renders the toggle unchecked when optedIn is false', () => {"
+        },
+        {
+          "line": 72,
+          "text": "it('renders the toggle unchecked when optedIn is null (existing user pre-banner)', () => {"
+        },
+        {
+          "line": 90,
+          "text": "it('returns true for DO_NOT_TRACK', () => {"
+        },
+        {
+          "line": 94,
+          "text": "it('returns true for ORCA_TELEMETRY_DISABLED', () => {"
+        },
+        {
+          "line": 98,
+          "text": "it('returns true for CI', () => {"
+        },
+        {
+          "line": 102,
+          "text": "it('returns false for user_opt_out (not env-blocked — the toggle remains actionable)', () => {"
+        },
+        {
+          "line": 109,
+          "text": "it('returns false for pending_banner', () => {"
+        },
+        {
+          "line": 113,
+          "text": "it('returns false for enabled', () => {"
+        },
+        {
+          "line": 117,
+          "text": "it('returns false for null (consent not yet fetched)', () => {"
+        },
+        {
+          "line": 123,
+          "text": "it('maps do_not_track to DO_NOT_TRACK', () => {"
+        },
+        {
+          "line": 127,
+          "text": "it('maps orca_disabled to ORCA_TELEMETRY_DISABLED', () => {"
+        },
+        {
+          "line": 131,
+          "text": "it('maps ci to CI', () => {"
+        },
+        {
+          "line": 137,
+          "text": "it('returns null when consent is enabled', () => {"
+        },
+        {
+          "line": 141,
+          "text": "it('returns null for a user_opt_out state (the toggle must remain actionable)', () => {"
+        },
+        {
+          "line": 146,
+          "text": "it('returns null for pending_banner (banner-pending does NOT gate the toggle)', () => {"
+        },
+        {
+          "line": 152,
+          "text": "it('names DO_NOT_TRACK as the env reason when set', () => {"
+        },
+        {
+          "line": 157,
+          "text": "it('names ORCA_TELEMETRY_DISABLED as the env reason when set', () => {"
+        },
+        {
+          "line": 162,
+          "text": "it('names CI as the env reason when set', () => {"
+        },
+        {
+          "line": 177,
+          "text": "// it."
+        },
+        {
+          "line": 186,
+          "text": "it('leaves the toggle enabled for a new user', () => {"
+        },
+        {
+          "line": 198,
+          "text": "it('leaves the toggle enabled for an existing user awaiting the banner (flip dismisses the banner)', () => {"
+        },
+        {
+          "line": 213,
+          "text": "it('leaves the toggle enabled once the existing-user banner is resolved', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/TasksPane.test.tsx",
+      "sha256": "d49e2c19ce4b363500489c49ededa2914fdec1fc896c9c56b17ec411d9c583b1",
+      "declarationPointers": [
+        {
+          "line": 155,
+          "text": "it('frames Task Sources as a guided setup hub, not visibility-only toggles', () => {"
+        },
+        {
+          "line": 166,
+          "text": "it('does not warn on a fresh install where nothing is connected yet', () => {"
+        },
+        {
+          "line": 186,
+          "text": "it('hides the incomplete banner when every visible provider is ready', () => {"
+        },
+        {
+          "line": 198,
+          "text": "it('does not warn or expand while connection checks are still in flight', () => {"
+        },
+        {
+          "line": 215,
+          "text": "it('passes context-safe readiness into the expanded Linear setup', () => {"
+        },
+        {
+          "line": 223,
+          "text": "it('deep-links connected Linear credential management to its integration card', async () => {"
+        },
+        {
+          "line": 236,
+          "text": "it('deep-links connected Jira credential management to its integration card', async () => {"
+        },
+        {
+          "line": 256,
+          "text": "it('auto-expands only the first incomplete provider', () => {"
+        },
+        {
+          "line": 266,
+          "text": "it('leaves hidden providers out of the incomplete warning', () => {"
+        },
+        {
+          "line": 278,
+          "text": "it('keeps Linear setup mounted while a skill recheck is in flight after auto-expand', async () => {"
+        },
+        {
+          "line": 297,
+          "text": "it('keeps the auto-expanded card open after hiding it instead of popping another open', async () => {"
+        },
+        {
+          "line": 318,
+          "text": "it('keeps Linear expanded when the slower code-host preflight lands after it', async () => {"
+        },
+        {
+          "line": 352,
+          "text": "it('does not warn about an unconnected code host once Linear is finished', () => {"
+        },
+        {
+          "line": 366,
+          "text": "it('shows a retry action instead of setup instructions when preflight is unavailable', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/VoicePane.test.tsx",
+      "sha256": "74e2f345d4fda98d91ab078645df1fc9f625d2e778b8f8bf450ac7c596b6e831",
+      "declarationPointers": [
+        {
+          "line": 131,
+          "text": "it('fetches speech data once across re-renders when voice settings are absent', async () => {"
+        },
+        {
+          "line": 149,
+          "text": "it('clicking the switch marks the voice tip seen before disabling voice settings', async () => {"
+        },
+        {
+          "line": 168,
+          "text": "it('clicking the switch marks the voice tip seen before the disable settings update', async () => {"
+        },
+        {
+          "line": 192,
+          "text": "it('clicking the switch marks the voice tip seen before requesting microphone permission', async () => {"
+        },
+        {
+          "line": 214,
+          "text": "it('marks the voice tip seen before requesting microphone permission when enabling is denied', async () => {"
+        },
+        {
+          "line": 242,
+          "text": "it('does not record voice feature interaction from the settings switch', async () => {"
+        },
+        {
+          "line": 257,
+          "text": "it('merges an in-flight voice write onto the newest settings, not the render-time snapshot', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/agent-availability-settings.test.ts",
+      "sha256": "f65f6e3b74946b58e1081e53bd5f21758ea477b8e4304fd9cda8f7b178aaab5e",
+      "declarationPointers": [
+        {
+          "line": 10,
+          "text": "it('normalizes duplicates and unknown ids before applying a request', () => {"
+        },
+        {
+          "line": 26,
+          "text": "it('continues serializing requests after a rejected write', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/codex-session-source-home-control.test.tsx",
+      "sha256": "b88121285124e2471ac75be821fe14d265c0ecc51e6aa9489636cf84365d8be6",
+      "declarationPointers": [
+        {
+          "line": 15,
+          "text": "it('reads and writes the host override on the host runtime', () => {"
+        },
+        {
+          "line": 31,
+          "text": "it('scopes to the selected WSL distro', () => {"
+        },
+        {
+          "line": 48,
+          "text": "it('reads a stored WSL value when the reported distro casing differs', () => {"
+        },
+        {
+          "line": 62,
+          "text": "it('updates the existing WSL key in place instead of creating a duplicate casing', () => {"
+        },
+        {
+          "line": 79,
+          "text": "it('clears the matching WSL key regardless of casing when reset', () => {"
+        },
+        {
+          "line": 96,
+          "text": "it('falls back to the host control when a WSL scope has no selected distro', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/settings/shortcut-recording-state.test.ts",
+      "sha256": "2493e678acd78233286b89379569f06ca6644c47044924b1b0e2bf1758883377",
+      "declarationPointers": [
+        {
+          "line": 6,
+          "text": "it('ends recording when the edited shortcut is disabled or reset', () => {"
+        },
+        {
+          "line": 15,
+          "text": "it('keeps a different active recorder untouched', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/sidebar/SidebarHeader.test.tsx",
+      "sha256": "1477795e5feedefccf2cc7ed4f2baa907b9763b068c2f8e5e1cedd5ec8248938",
+      "declarationPointers": [
+        {
+          "line": 120,
+          "text": "it('keeps New workspace clickable with zero projects, since the composer adds the first one', () => {"
+        },
+        {
+          "line": 135,
+          "text": "it('opens the composer the same way once projects exist', () => {"
+        },
+        {
+          "line": 149,
+          "text": "it('opens agent activity from the bell button', () => {"
+        },
+        {
+          "line": 166,
+          "text": "it('shows the Agents introduction only for migrated users and never offers a hide action', () => {"
+        },
+        {
+          "line": 183,
+          "text": "it('turns off agent activity from the active bell button', () => {"
+        },
+        {
+          "line": 201,
+          "text": "it('uses the legacy title based on workspace grouping', () => {"
+        },
+        {
+          "line": 219,
+          "text": "it('keeps the workspace filter alongside the active bell without Add Project', () => {"
+        },
+        {
+          "line": 231,
+          "text": "it('keeps the activity bell and actions on one row at the default sidebar width', () => {"
+        },
+        {
+          "line": 245,
+          "text": "it('keeps New workspace and a more menu on one row at compact width', () => {"
+        },
+        {
+          "line": 262,
+          "text": "it('does not reset a persisted agents body before settings hydrate', () => {"
+        },
+        {
+          "line": 272,
+          "text": "it('does not expose the deprecated full Agents view in agents mode', () => {"
+        },
+        {
+          "line": 282,
+          "text": "it('switches to compact actions only below the wide-layout breakpoint', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/sidebar/WorktreeCard.compact-hover.test.tsx",
+      "sha256": "bf16a0898d137e6a847abc83d824cdbf848aaaac2bbfc9a31a9e1aae7ab3dd80",
+      "declarationPointers": [
+        {
+          "line": 197,
+          "text": "it('shows PR and live port details from the compact worktree card hover', async () => {"
+        },
+        {
+          "line": 249,
+          "text": "it('shows hidden task, notes, and port details from the compact worktree card hover', async () => {"
+        },
+        {
+          "line": 300,
+          "text": "it('reads linked issue details from the local repo-owner cache while a runtime is focused', async () => {"
+        },
+        {
+          "line": 332,
+          "text": "it('shows selected task and note metadata on the compact card title row', async () => {"
+        },
+        {
+          "line": 355,
+          "text": "it('keeps selected task and note metadata above the compact branch row', async () => {"
+        },
+        {
+          "line": 382,
+          "text": "it('keeps branch identity visible on detailed cards by default', async () => {"
+        },
+        {
+          "line": 400,
+          "text": "it('uses one identity hover even when detailed metadata icons are visible when new card style is on', async () => {"
+        },
+        {
+          "line": 425,
+          "text": "it('keeps long workspace and branch identity in hover details when the branch row is hidden', async () => {"
+        },
+        {
+          "line": 449,
+          "text": "it('repeats a long workspace title inside the identity hover when branch is already visible', async () => {"
+        },
+        {
+          "line": 470,
+          "text": "it('uses identity hover for identity-only new card worktrees with branch row visible', async () => {"
+        },
+        {
+          "line": 492,
+          "text": "it('does not duplicate workspace identity when trimmed title equals branch', async () => {"
+        },
+        {
+          "line": 509,
+          "text": "it('keeps detailed metadata hover scoped to metadata icons by default', async () => {"
+        },
+        {
+          "line": 535,
+          "text": "it('keeps child card markup inside the parent card by default', async () => {"
+        },
+        {
+          "line": 557,
+          "text": "it('suppresses inline agent rows in compact cards by default', async () => {"
+        },
+        {
+          "line": 569,
+          "text": "it('does not create a compact metadata row solely for an aggregate cache timer', async () => {"
+        },
+        {
+          "line": 589,
+          "text": "it('keeps unlink available for an auto-detected PR in the identity hover', async () => {"
+        },
+        {
+          "line": 609,
+          "text": "it('suppresses the aggregate cache timer when compact inline agents are visible', async () => {"
+        },
+        {
+          "line": 628,
+          "text": "it('keeps status and agent tooltip targets outside the worktree details hover trigger', async () => {"
+        },
+        {
+          "line": 650,
+          "text": "it('preserves the aggregate cache timer when compact inline agents are enabled but absent', async () => {"
+        },
+        {
+          "line": 670,
+          "text": "it('keeps child card markup outside the parent hover trigger when new card style is on', async () => {"
+        },
+        {
+          "line": 699,
+          "text": "it('uses a centered parent row and raised title size when no meta row is visible', async () => {"
+        },
+        {
+          "line": 715,
+          "text": "it('does not show a folder path row in new-card mode when no project groups exist', async () => {"
+        },
+        {
+          "line": 738,
+          "text": "it('shows a folder path row in new-card mode through the branch setting when project groups exist', async () => {"
+        },
+        {
+          "line": 762,
+          "text": "it('keeps hidden folder path identity available from the new-card hover', async () => {"
+        },
+        {
+          "line": 787,
+          "text": "it('shows the branch row for migrated Default cards with branch enabled', async () => {"
+        },
+        {
+          "line": 804,
+          "text": "it('keeps compact card branch hidden in the row but available from title hover by default', async () => {"
+        },
+        {
+          "line": 822,
+          "text": "it('shows the branch row for compact cards when branch is enabled and new card style is on', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/sidebar/WorktreeCard.compact-ports-hover-independence.test.tsx",
+      "sha256": "103646ae195d0e37891119efdf2419dc7219690c8ca3960aa037da3d508a4eb5",
+      "declarationPointers": [
+        {
+          "line": 229,
+          "text": "it('does not force the compact title hover open when the live-ports hover opens', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/skills/SkillFreshnessNudge.test.tsx",
+      "sha256": "f924801475d77a414c95e70eb551e010459034e0f685e18d9441af61b2d5bb51",
+      "declarationPointers": [
+        {
+          "line": 142,
+          "text": "it('lingers without an auto-close timer or auto-close dismissal write', async () => {"
+        },
+        {
+          "line": 152,
+          "text": "it('opens the update dialog on action click without persisting a dismissal', async () => {"
+        },
+        {
+          "line": 163,
+          "text": "it('retracts a resolved nudge without recording a dismissal', async () => {"
+        },
+        {
+          "line": 182,
+          "text": "it('retracts a stale nudge when re-inventory fails', async () => {"
+        },
+        {
+          "line": 195,
+          "text": "it('retracts an active local nudge when runtime freshness becomes unavailable', async () => {"
+        },
+        {
+          "line": 208,
+          "text": "it('persists the exact placement/revision key once on explicit dismissal', async () => {"
+        },
+        {
+          "line": 221,
+          "text": "it('does not repeat the same nudge within a session', async () => {"
+        },
+        {
+          "line": 230,
+          "text": "it('does not repeat a nudge for an already dismissed exact tuple', async () => {"
+        },
+        {
+          "line": 238,
+          "text": "it('does not nudge for a poisoned name with no eligible update', async () => {"
+        },
+        {
+          "line": 252,
+          "text": "it('keeps a project copy out of the dismissal key it persists', async () => {"
+        },
+        {
+          "line": 282,
+          "text": "it('stays dismissed when only a project copy changed identity', async () => {"
+        },
+        {
+          "line": 305,
+          "text": "it('waits for persisted settings before deciding whether to nudge', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/components/terminal-pane/terminal-shortcut-option-compose.test.ts",
+      "sha256": "4b61e456445136fff25bd268350a9739391ba9889bb7643bc0e35e89c3a75e7e",
+      "declarationPointers": [
+        {
+          "line": 43,
+          "text": "it('types the layout-composed ASCII character instead of reporting a chord', () => {"
+        },
+        {
+          "line": 54,
+          "text": "it('types composed ASCII resolved through the active layout map', () => {"
+        },
+        {
+          "line": 63,
+          "text": "it('types composed ASCII that needs Shift as well', () => {"
+        },
+        {
+          "line": 77,
+          "text": "it('types a dead-key-layer ASCII character with event reporting balanced', () => {"
+        },
+        {
+          "line": 91,
+          "text": "it('keeps Shift-only ASCII as an Option hotkey', () => {"
+        },
+        {
+          "line": 104,
+          "text": "it('tracks a compose-side dead key while preserving its native keydown', () => {"
+        },
+        {
+          "line": 128,
+          "text": "it.each(["
+        },
+        {
+          "line": 139,
+          "text": "it('still reports non-ASCII Option chords as kitty CSI-u hotkeys', () => {"
+        },
+        {
+          "line": 156,
+          "text": "it('reports a chord when the layout composed nothing and echoed the base key', () => {"
+        },
+        {
+          "line": 168,
+          "text": "it('keeps the configured Alt-side Option a hotkey even when the layout composed ASCII', () => {"
+        },
+        {
+          "line": 188,
+          "text": "it('keeps global Option-as-Alt in the centralized encoder without associated text', () => {"
+        },
+        {
+          "line": 197,
+          "text": "it('uses the active layout for side-specific Option-as-Alt without kitty reporting', () => {"
+        },
+        {
+          "line": 204,
+          "text": "it('leaves global legacy Option-as-Alt with the terminal engine', () => {"
+        },
+        {
+          "line": 210,
+          "text": "it.each([4, 16])('keeps configured Alt legacy encoding for form-only flag %i', (flags) => {"
+        },
+        {
+          "line": 222,
+          "text": "it('keeps unknown or dual Option state conservative in side-specific modes', () => {"
+        },
+        {
+          "line": 228,
+          "text": "it.each(["
+        },
+        {
+          "line": 248,
+          "text": "it('reports repeats and associated text without changing the physical key identity', () => {"
+        },
+        {
+          "line": 264,
+          "text": "it('pairs raw composed text with a native-Option kitty release', () => {"
+        },
+        {
+          "line": 274,
+          "text": "it('uses no-Option layout layers for alternate-key reports', () => {"
+        },
+        {
+          "line": 292,
+          "text": "it('encodes ISO and Space keys from the active layout', () => {"
+        },
+        {
+          "line": 311,
+          "text": "it('preserves functional numpad identity under modified-key reporting', () => {"
+        },
+        {
+          "line": 321,
+          "text": "it.each(["
+        },
+        {
+          "line": 333,
+          "text": "it('includes CapsLock in Option protocol modifiers', () => {"
+        },
+        {
+          "line": 350,
+          "text": "it('types shifted ASCII when the layout resolves the physical key for the keyup', () => {"
+        },
+        {
+          "line": 368,
+          "text": "it('prefers composed text while the shifted layout snapshot is pending', () => {"
+        },
+        {
+          "line": 394,
+          "text": "it('omits associated text for an Option side configured as Alt', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/agent-tab-shortcuts.test.ts",
+      "sha256": "844c31a77cf002e331b5eb931f6ab57ff12a02608cdfcad3eebaa87f2949707a",
+      "declarationPointers": [
+        {
+          "line": 5,
+          "text": "it('returns only agents whose per-agent action has a user-assigned chord', () => {"
+        },
+        {
+          "line": 18,
+          "text": "it('skips disabled agents even when their action is bound', () => {"
+        },
+        {
+          "line": 30,
+          "text": "it('returns nothing without overrides', () => {"
+        },
+        {
+          "line": 37,
+          "text": "it('prefers the configured default agent when detected and enabled', () => {"
+        },
+        {
+          "line": 47,
+          "text": "it('falls back to the auto-pick order when the default is blank', () => {"
+        },
+        {
+          "line": 59,
+          "text": "it('skips disabled agents and returns null when nothing is launchable', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/keyboard-layout/detect-option-as-alt.test.ts",
+      "sha256": "ae34301bbb679cdbb7998f7f00c34062073b2971aba5281364ffad52de4dd0a2",
+      "declarationPointers": [
+        {
+          "line": 27,
+          "text": "it('classifies US Standard as us', () => {"
+        },
+        {
+          "line": 31,
+          "text": "it('classifies US International as us (same fingerprint, dead keys only)', () => {"
+        },
+        {
+          "line": 37,
+          "text": "it('classifies UK as non-us (Backquote → §)', () => {"
+        },
+        {
+          "line": 41,
+          "text": "it('classifies German QWERTZ as non-us (KeyZ → y, Semicolon → ö)', () => {"
+        },
+        {
+          "line": 57,
+          "text": "it('classifies Turkish Q as non-us (the #903 repro)', () => {"
+        },
+        {
+          "line": 72,
+          "text": "it('classifies Turkish F as non-us (KeyQ → f, every letter swapped)', () => {"
+        },
+        {
+          "line": 90,
+          "text": "it('classifies French AZERTY as non-us (KeyQ → a)', () => {"
+        },
+        {
+          "line": 108,
+          "text": "it('classifies Spanish ISO as non-us (Semicolon → ñ)', () => {"
+        },
+        {
+          "line": 114,
+          "text": "it('classifies Swedish as non-us (BracketLeft → å)', () => {"
+        },
+        {
+          "line": 129,
+          "text": "it('classifies Dvorak as non-us (KeyQ → apostrophe)', () => {"
+        },
+        {
+          "line": 147,
+          "text": "it('classifies Colemak as non-us (Semicolon → o)', () => {"
+        },
+        {
+          "line": 153,
+          "text": "it('returns unknown for null', () => {"
+        },
+        {
+          "line": 157,
+          "text": "it('returns unknown for empty map', () => {"
+        },
+        {
+          "line": 161,
+          "text": "it('returns unknown when fingerprint is incomplete (missing KeyQ)', () => {"
+        },
+        {
+          "line": 169,
+          "text": "it('us → true', () => {"
+        },
+        {
+          "line": 172,
+          "text": "it('non-us → false', () => {"
+        },
+        {
+          "line": 175,
+          "text": "it('unknown → false (conservative)', () => {"
+        },
+        {
+          "line": 181,
+          "text": "it('auto + us → true', () => {"
+        },
+        {
+          "line": 184,
+          "text": "it('auto + non-us → false', () => {"
+        },
+        {
+          "line": 187,
+          "text": "it('auto + unknown → false', () => {"
+        },
+        {
+          "line": 190,
+          "text": "it('explicit true wins over detected non-us', () => {"
+        },
+        {
+          "line": 193,
+          "text": "it('explicit false wins over detected us', () => {"
+        },
+        {
+          "line": 196,
+          "text": "it('explicit left passes through', () => {"
+        },
+        {
+          "line": 199,
+          "text": "it('explicit right passes through', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/keyboard-layout/input-source-id.test.ts",
+      "sha256": "86f33013615af5ea0c130aa6b2cb25618b80bfbcad8414f8bc0fa70469543018",
+      "declarationPointers": [
+        {
+          "line": 5,
+          "text": "it('returns \"unknown\" for nullish input so the caller falls back to the fingerprint', () => {"
+        },
+        {
+          "line": 11,
+          "text": "it('allowlists plain US Standard as meta', () => {"
+        },
+        {
+          "line": 15,
+          "text": "it('allowlists US International PC as meta', () => {"
+        },
+        {
+          "line": 19,
+          "text": "it('is case-insensitive on the allowlist (defaults differ between macOS versions)', () => {"
+        },
+        {
+          "line": 24,
+          "text": "it('classifies ABC as compose (the user-reported Option+A → å repro)', () => {"
+        },
+        {
+          "line": 31,
+          "text": "it('classifies Polish Pro as compose (#1205)', () => {"
+        },
+        {
+          "line": 35,
+          "text": "it('classifies US Extended and ABC Extended as compose', () => {"
+        },
+        {
+          "line": 40,
+          "text": "it('classifies every other Apple-shipped layout as compose (default-deny)', () => {"
+        },
+        {
+          "line": 54,
+          "text": "it('does not prefix-leak the US allowlist into extended variants', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/keyboard-layout/layout-base-character.test.ts",
+      "sha256": "e6dd837a8de4f58ec48ede2106fa50b95d9ff13f5ba9b9e2b72b96fa66d7a580",
+      "declarationPointers": [
+        {
+          "line": 16,
+          "text": "it('accepts a single printable codepoint, lowercased', () => {"
+        },
+        {
+          "line": 24,
+          "text": "it('rejects empty, named-key, multi-codepoint, and control values', () => {"
+        },
+        {
+          "line": 41,
+          "text": "it('returns undefined without a cached map, and resolves through one', () => {"
+        },
+        {
+          "line": 57,
+          "text": "it('uses the native Shift layer and falls back safely', () => {"
+        },
+        {
+          "line": 80,
+          "text": "it('keeps the last complete snapshot until an atomic refresh settles', async () => {"
+        },
+        {
+          "line": 127,
+          "text": "it('never combines a native snapshot with a separate layout-map fallback', () => {"
+        },
+        {
+          "line": 139,
+          "text": "it('invalidates synchronously and fences an older refresh after a layout change', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/keyboard-layout/option-as-alt-probe.test.ts",
+      "sha256": "efba6a0f9d5a9c5573c167b3967e71312600d00b999bd28f4e6c62b566715e07",
+      "declarationPointers": [
+        {
+          "line": 85,
+          "text": "it('uses the native snapshot identity before the preference fallback', async () => {"
+        },
+        {
+          "line": 104,
+          "text": "it('starts as unknown, upgrades after first probe resolves', async () => {"
+        },
+        {
+          "line": 113,
+          "text": "it('detects non-US layout (Turkish)', async () => {"
+        },
+        {
+          "line": 121,
+          "text": "it('notifies subscribers when category changes', async () => {"
+        },
+        {
+          "line": 131,
+          "text": "it('does not notify when category is unchanged', async () => {"
+        },
+        {
+          "line": 142,
+          "text": "it('re-probes on window focus-in and tracks layout switch', async () => {"
+        },
+        {
+          "line": 161,
+          "text": "it('invalidates immediately and refreshes on a native layout-change notification', async () => {"
+        },
+        {
+          "line": 186,
+          "text": "it('fences an in-flight probe until the matching refresh phase', async () => {"
+        },
+        {
+          "line": 217,
+          "text": "it('blocks focus and manual probes until the matching refresh phase', async () => {"
+        },
+        {
+          "line": 246,
+          "text": "it('stays unknown if navigator.keyboard is unavailable', async () => {"
+        },
+        {
+          "line": 254,
+          "text": "it('survives a rejected getLayoutMap without clobbering last-known value', async () => {"
+        },
+        {
+          "line": 271,
+          "text": "it('dispose removes focus listener', async () => {"
+        },
+        {
+          "line": 283,
+          "text": "it('forces non-us when the input source ID is not on the Option-as-Meta allowlist (#1205)', async () => {"
+        },
+        {
+          "line": 299,
+          "text": "it('resolves to us when the input source ID is plain US (allowlist match)', async () => {"
+        },
+        {
+          "line": 309,
+          "text": "it('trusts the input source ID over the fingerprint even when the fingerprint says us', async () => {"
+        },
+        {
+          "line": 323,
+          "text": "it('falls back to the fingerprint when the input-source reader returns null (non-Darwin)', async () => {"
+        },
+        {
+          "line": 333,
+          "text": "it('falls back to the fingerprint when the input-source reader throws', async () => {"
+        },
+        {
+          "line": 345,
+          "text": "it('re-probes the input source ID on focus-in so mid-session layout switches are picked up', async () => {"
+        },
+        {
+          "line": 367,
+          "text": "it('does not let an older probe overwrite a newer input source', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/keyboard-layout/option-key-location-state.test.ts",
+      "sha256": "afdb5ed5052e976fc1cfc918a390b7ac3a0e95c936508edcbb9e3e000aae5b9b",
+      "declarationPointers": [
+        {
+          "line": 5,
+          "text": "it('tracks both Option keys independently', () => {"
+        },
+        {
+          "line": 17,
+          "text": "it('clears stale state on blur or an unknown Option transition', () => {"
+        },
+        {
+          "line": 28,
+          "text": "it('ignores non-Option keys', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/plugin-command-keybindings.test.ts",
+      "sha256": "cc1fb0ada441bda850aebe83a0db2fdbc04f5f6dcd9c5468099a4c445424db69",
+      "declarationPointers": [
+        {
+          "line": 26,
+          "text": "it('builds a stable dynamic action definition', () => {"
+        },
+        {
+          "line": 35,
+          "text": "it('lets user overrides replace or disable contributed defaults', () => {"
+        },
+        {
+          "line": 44,
+          "text": "it('keeps removed-plugin overrides inert and restores them on reinstall', () => {"
+        },
+        {
+          "line": 54,
+          "text": "it('matches effective overrides and honors explicit disablement', () => {"
+        },
+        {
+          "line": 80,
+          "text": "it('reports conflicts between plugin and built-in definitions', () => {"
+        },
+        {
+          "line": 97,
+          "text": "it('does not match worktree commands without an active worktree', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/source-control-launch-agent-selection.test.ts",
+      "sha256": "51ae542da9f0ac72b25d04f2c4b9c44472d8a33e79c20997b28d31727314bdcb",
+      "declarationPointers": [
+        {
+          "line": 38,
+          "text": "it('flags a repo override that pins a different agent than the global default', () => {"
+        },
+        {
+          "line": 51,
+          "text": "it('does not flag a repo override that matches the global agent', () => {"
+        },
+        {
+          "line": 60,
+          "text": "it('does not flag when there is no repo override', () => {"
+        },
+        {
+          "line": 73,
+          "text": "it('falls back to the default agent when no global recipe agent is set', () => {"
+        },
+        {
+          "line": 99,
+          "text": "it('lists repos with any action recipe override', () => {"
+        },
+        {
+          "line": 129,
+          "text": "it('includes legacy repo instructions as command template overrides', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/lib/tab-number-shortcuts.test.ts",
+      "sha256": "b6d709a63018e1a8b510e70a079237f04821b023af92475ac1af6a32d62e0978",
+      "declarationPointers": [
+        {
+          "line": 59,
+          "text": "it('resolves by the active group tab order', () => {"
+        },
+        {
+          "line": 82,
+          "text": "it('ignores stale duplicate ids and appends current group tabs missing from tabOrder', () => {"
+        },
+        {
+          "line": 104,
+          "text": "it('uses only the active split group', () => {"
+        },
+        {
+          "line": 123,
+          "text": "it('returns null outside terminal workspaces or out of range', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/store/slices/runtime-switch-settings-persistence.test.ts",
+      "sha256": "8856ac6726b9b2b21c4933bd6ab8772feff0c251f30516565879cdd164620b76",
+      "declarationPointers": [
+        {
+          "line": 21,
+          "text": "it('does not persist a stale overlapping runtime switch', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/store/slices/settings-owner-hydration-write-fence.test.ts",
+      "sha256": "6a3ef4db98c6202d057775e09bed5fa8daff8e8f8a22304356ed6e04dffe26e5",
+      "declarationPointers": [
+        {
+          "line": 6,
+          "text": "it('does not overwrite a settings write with an older owner hydration', async () => {"
+        },
+        {
+          "line": 28,
+          "text": "it('preserves host defaults added while owner hydration is in flight', async () => {"
+        },
+        {
+          "line": 63,
+          "text": "it('publishes startup settings before remote owner hydration and local catalog work', async () => {"
+        },
+        {
+          "line": 112,
+          "text": "it('preserves deferred owner hydration across a no-op runtime selection', async () => {"
+        },
+        {
+          "line": 147,
+          "text": "it('waits for a replacement owner hydration before publishing remote rows', async () => {"
+        },
+        {
+          "line": 211,
+          "text": "it('preserves owner defaults when an unrelated settings write settles after hydration', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/store/slices/settings.test.ts",
+      "sha256": "ad349be3cb50e96d3bfa011ba74cf2568086794ac3fa83e4c2a9741d4630af67",
+      "declarationPointers": [
+        {
+          "line": 184,
+          "text": "it('stores the authoritative settings after a successful checked update', async () => {"
+        },
+        {
+          "line": 206,
+          "text": "it('rejects a failed checked update without changing local settings', async () => {"
+        },
+        {
+          "line": 223,
+          "text": "it('keeps the existing update action best-effort and logs persistence failures', async () => {"
+        },
+        {
+          "line": 246,
+          "text": "it('normalizes malformed mobile pairing addresses before renderer IPC', async () => {"
+        },
+        {
+          "line": 265,
+          "text": "it('repairs drifted task provider settings before sending updates', async () => {"
+        },
+        {
+          "line": 288,
+          "text": "it('rebases local state to the authoritative settings:set response', async () => {"
+        },
+        {
+          "line": 310,
+          "text": "it('preserves existing host state while loading the selected environment', async () => {"
+        },
+        {
+          "line": 450,
+          "text": "it('does not close host-owned mirrored resources when a paired web client switches servers', async () => {"
+        },
+        {
+          "line": 519,
+          "text": "it('keeps the previous host live terminal and browser resources intact on switch (multi-host keepalive)', async () => {"
+        },
+        {
+          "line": 612,
+          "text": "it('allows switching focus while editor tabs have unsaved state', async () => {"
+        },
+        {
+          "line": 640,
+          "text": "it('keeps the current environment when the selected remote server is unreachable', async () => {"
+        },
+        {
+          "line": 673,
+          "text": "it('keeps the current environment when the selected server is protocol-incompatible', async () => {"
+        },
+        {
+          "line": 712,
+          "text": "it('still probes the runtime catalog when the settings read fails', async () => {"
+        },
+        {
+          "line": 723,
+          "text": "it('probes the runtime catalog after a successful settings read', async () => {"
+        },
+        {
+          "line": 733,
+          "text": "it('coalesces concurrent settings refreshes into one all-host sweep', async () => {"
+        },
+        {
+          "line": 755,
+          "text": "it('fills status coverage after another path publishes only part of the catalog', async () => {"
+        },
+        {
+          "line": 769,
+          "text": "it('treats an offline result as checked on later settings refreshes', async () => {"
+        },
+        {
+          "line": 800,
+          "text": "it('retries a failed catalog read on the next settings refresh', async () => {"
+        },
+        {
+          "line": 827,
+          "text": "it('uses an authoritative sweep to remove ghost status entries', async () => {"
+        },
+        {
+          "line": 838,
+          "text": "it('picks up an externally added host once the listing goes stale', async () => {"
+        },
+        {
+          "line": 847,
+          "text": "// Another client adds a host; coverage still matches, so only staleness can reveal it."
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/store/slices/worktree-visibility-owner-settings.test.ts",
+      "sha256": "44ab4b813d4f15ddac74bedac16b4b458170aa4dfa9c933a26af1a0e577f72f0",
+      "declarationPointers": [
+        {
+          "line": 23,
+          "text": "it('reads defaults from the selected runtime owner', async () => {"
+        },
+        {
+          "line": 38,
+          "text": "it('uses compatibility fallback semantics when the host omits the field', async () => {"
+        },
+        {
+          "line": 48,
+          "text": "it('preserves cached support state when the host is temporarily unavailable', async () => {"
+        },
+        {
+          "line": 64,
+          "text": "it('preserves local defaults while projecting the focused runtime owner', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/store/slices/worktree-visibility-settings-write.test.ts",
+      "sha256": "aefbe2d80f53311fa4cf7a0360cddfdf26a42e9f82daee854167bf59c72e52e9",
+      "declarationPointers": [
+        {
+          "line": 8,
+          "text": "it('preserves the active runtime default during unrelated local settings writes', async () => {"
+        },
+        {
+          "line": 40,
+          "text": "it('reclassifies worktrees after changing the host visibility default', async () => {"
+        },
+        {
+          "line": 57,
+          "text": "it('does not restore a stale owner after its visibility write resolves', async () => {"
+        },
+        {
+          "line": 96,
+          "text": "it('rejects source-default writes before contacting an older runtime host', async () => {"
+        },
+        {
+          "line": 121,
+          "text": "it('rejects base visibility writes before contacting an unsupported runtime host', async () => {"
+        },
+        {
+          "line": 140,
+          "text": "it('does not publish a visibility write after a newer hydration starts', async () => {"
+        },
+        {
+          "line": 176,
+          "text": "it('publishes successful local fields when the paired runtime write fails', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/store/worktree-visibility-defaults-by-host.test.ts",
+      "sha256": "0faad018cb1c68e7055c9dd761cf727f114b4e423ab5d6fe51efaab492be3153",
+      "declarationPointers": [
+        {
+          "line": 5,
+          "text": "it('resolves defaults from each repository owner', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/web/web-preload-api-keybindings.test.ts",
+      "sha256": "f8bb05a021674e16ccee3cac2cb0e3280cdf0885a440dbbc9dd62f2d081fbe51",
+      "declarationPointers": [
+        {
+          "line": 14,
+          "text": "it('returns snapshots and persists customized bindings in browser storage', async () => {"
+        },
+        {
+          "line": 42,
+          "text": "it('rejects conflicts before mutating browser storage', async () => {"
+        },
+        {
+          "line": 62,
+          "text": "it('notifies listeners when web keybindings change', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/renderer/src/web/web-preload-api-settings.test.ts",
+      "sha256": "551f52438bb0a912d6308bb9a9106588277386977e59e8dea400a495f0451d68",
+      "declarationPointers": [
+        {
+          "line": 18,
+          "text": "it('migrates first-work branch auto-rename on for stored legacy web settings once', async () => {"
+        },
+        {
+          "line": 39,
+          "text": "it('migrates inherited terminal bar cursor defaults for stored web settings once', async () => {"
+        },
+        {
+          "line": 57,
+          "text": "it('preserves terminal cursor choices after the web block-default migration', async () => {"
+        },
+        {
+          "line": 74,
+          "text": "it('mirrors the host-owned agent skill sharing capability without granting it', async () => {"
+        },
+        {
+          "line": 110,
+          "text": "it('normalizes terminal cursor style before web settings writes return or persist', async () => {"
+        },
+        {
+          "line": 130,
+          "text": "it('migrates OSC 52 clipboard writes on for stored web settings once', async () => {"
+        },
+        {
+          "line": 153,
+          "text": "it('arms the OSC 52 notice in the web UI store when the flip overrides a persisted off', async () => {"
+        },
+        {
+          "line": 170,
+          "text": "it('does not arm the OSC 52 notice for a web profile with no persisted value', async () => {"
+        },
+        {
+          "line": 184,
+          "text": "it('arms the OSC 52 notice when ui.get is the read that runs the migration', async () => {"
+        },
+        {
+          "line": 189,
+          "text": "// after this one loaded is the shape that reaches it."
+        },
+        {
+          "line": 203,
+          "text": "it('preserves OSC 52 clipboard web opt-outs after migration', async () => {"
+        },
+        {
+          "line": 220,
+          "text": "it('preserves first-work branch auto-rename web opt-outs after migration', async () => {"
+        },
+        {
+          "line": 244,
+          "text": "it('stamps the first-work branch auto-rename guard for web setting updates', async () => {"
+        },
+        {
+          "line": 259,
+          "text": "it('hydrates compact worktree cards from paired runtime settings', async () => {"
+        },
+        {
+          "line": 299,
+          "text": "it('keeps a completed settings merge when the paired host is removed mid-read', async () => {"
+        },
+        {
+          "line": 348,
+          "text": "it('hydrates and updates worktree source defaults owned by a paired runtime', async () => {"
+        },
+        {
+          "line": 438,
+          "text": "it('does not persist a paired runtime visibility update as the local default', async () => {"
+        },
+        {
+          "line": 479,
+          "text": "it('rejects a failed paired visibility write after preserving local-only fields', async () => {"
+        },
+        {
+          "line": 523,
+          "text": "it('does not send the additive visibility field to an older paired runtime', async () => {"
+        },
+        {
+          "line": 555,
+          "text": "it('hydrates new worktree card style from a paired runtime', async () => {"
+        },
+        {
+          "line": 588,
+          "text": "it('hydrates MiniMax usage settings from a paired runtime', async () => {"
+        },
+        {
+          "line": 629,
+          "text": "it('hydrates bot-author overrides from paired runtime settings', async () => {"
+        },
+        {
+          "line": 658,
+          "text": "it('forwards compact worktree card updates to a paired runtime', async () => {"
+        },
+        {
+          "line": 701,
+          "text": "it('forwards new worktree card style updates to a paired runtime', async () => {"
+        },
+        {
+          "line": 734,
+          "text": "it('forwards MiniMax usage setting updates to a paired runtime', async () => {"
+        },
+        {
+          "line": 787,
+          "text": "it('forwards normalized bot-author overrides to a paired runtime', async () => {"
+        },
+        {
+          "line": 820,
+          "text": "it('atomically updates a bot-author override through a paired runtime', async () => {"
+        },
+        {
+          "line": 857,
+          "text": "it('does not claim a paired bot-author update succeeded when the runtime rejects it', async () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/host-setting-overrides.test.ts",
+      "sha256": "b694666eaec8d0f17291e301b1027d9f36636e46837f9e9353763c4644f4f689",
+      "declarationPointers": [
+        {
+          "line": 18,
+          "text": "it('prefers a host override over the client default', () => {"
+        },
+        {
+          "line": 25,
+          "text": "it('falls back to the client default when no override exists', () => {"
+        },
+        {
+          "line": 32,
+          "text": "it('falls back for an unknown host', () => {"
+        },
+        {
+          "line": 39,
+          "text": "it('treats a whitespace override as absent and falls back', () => {"
+        },
+        {
+          "line": 46,
+          "text": "it('allows local-host overrides', () => {"
+        },
+        {
+          "line": 53,
+          "text": "it('falls back when settings are null/undefined', () => {"
+        },
+        {
+          "line": 60,
+          "text": "it('returns the override when present', () => {"
+        },
+        {
+          "line": 65,
+          "text": "it('returns undefined when missing', () => {"
+        },
+        {
+          "line": 71,
+          "text": "it('adds an override for a new host', () => {"
+        },
+        {
+          "line": 76,
+          "text": "it('merges into an existing host without clobbering other keys', () => {"
+        },
+        {
+          "line": 82,
+          "text": "it('does not mutate the input map', () => {"
+        },
+        {
+          "line": 89,
+          "text": "it('clears the key when given an empty value', () => {"
+        },
+        {
+          "line": 99,
+          "text": "it('removes a single key but keeps remaining overrides', () => {"
+        },
+        {
+          "line": 108,
+          "text": "it('drops the host entry when no overrides remain', () => {"
+        },
+        {
+          "line": 113,
+          "text": "it('is a no-op for an unknown host', () => {"
+        },
+        {
+          "line": 120,
+          "text": "it('does not mutate the input map', () => {"
+        },
+        {
+          "line": 129,
+          "text": "it('collects non-empty display labels keyed by host id', () => {"
+        },
+        {
+          "line": 141,
+          "text": "it('returns an empty map when no overrides exist', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-conflicts.test.ts",
+      "sha256": "1c56b70fe770521b54552213706f1e11a6db1513c35b320f2ddccf3f85b80a2e",
+      "declarationPointers": [
+        {
+          "line": 12,
+          "text": "it('uses overrides as the complete effective binding list for an action', () => {"
+        },
+        {
+          "line": 38,
+          "text": "it('reports conflicts across default and customized actions', () => {"
+        },
+        {
+          "line": 49,
+          "text": "it('keeps zoom reset on Mod+0 and focuses worktree list on a distinct chord', () => {"
+        },
+        {
+          "line": 86,
+          "text": "it('finds app-level owners of a prospective plugin chord with overrides', () => {"
+        },
+        {
+          "line": 96,
+          "text": "it('reports quick-command menu conflicts with global shortcuts and digit ranges', () => {"
+        },
+        {
+          "line": 161,
+          "text": "it('flags the global send-review-notes command against editor chords it can shadow', () => {"
+        },
+        {
+          "line": 174,
+          "text": "it('ignores selected actions when checking shortcut conflicts', () => {"
+        },
+        {
+          "line": 187,
+          "text": "it('reports customized renderer conflicts with native menu accelerators', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-default-bindings.test.ts",
+      "sha256": "2a62f99274233ca30b2793251b6f23a47e56d6f9cf299ff3ef125d8425e28b3e",
+      "declarationPointers": [
+        {
+          "line": 17,
+          "text": "it('defines a default shortcut for opening markdown notes', () => {"
+        },
+        {
+          "line": 22,
+          "text": "it.each(['darwin', 'linux', 'win32'] as const)("
+        },
+        {
+          "line": 29,
+          "text": "it('matches macOS Option+Z through its composed key', () => {"
+        },
+        {
+          "line": 46,
+          "text": "it('defines a default shortcut for adding an editor review note', () => {"
+        },
+        {
+          "line": 84,
+          "text": "it('maps browser Find to Command on macOS and Control elsewhere', () => {"
+        },
+        {
+          "line": 103,
+          "text": "it('defines platform-native replace-in-editor shortcuts', () => {"
+        },
+        {
+          "line": 111,
+          "text": "it('defines macOS-only rename shortcuts that stay conflict-free', () => {"
+        },
+        {
+          "line": 184,
+          "text": "it('defaults tab-switch chords to the swapped convention for fresh installs', () => {"
+        },
+        {
+          "line": 201,
+          "text": "it('pins the pre-swap chords via LEGACY_TAB_SWITCH_BINDINGS for upgrading installs', () => {"
+        },
+        {
+          "line": 220,
+          "text": "it('defines browser history shortcuts for Logitech side-button remaps', () => {"
+        },
+        {
+          "line": 257,
+          "text": "it('binds close-all editor tabs to Mod+Alt+W beside tab.close', () => {"
+        },
+        {
+          "line": 325,
+          "text": "it('defines floating workspace panel action metadata', () => {"
+        },
+        {
+          "line": 336,
+          "text": "it('assigns the floating workspace maximize default only on macOS', () => {"
+        },
+        {
+          "line": 344,
+          "text": "it('captures and round-trips the macOS Option-composed maximize chord', () => {"
+        },
+        {
+          "line": 372,
+          "text": "it('defines a macOS-only default for the new agent tab shortcut', () => {"
+        },
+        {
+          "line": 386,
+          "text": "it('keeps explorer on Mod+Shift+E and gives the mobile emulator a non-colliding macOS default', () => {"
+        },
+        {
+          "line": 420,
+          "text": "it('defines an unassigned per-agent tab action for every TUI agent', () => {"
+        },
+        {
+          "line": 431,
+          "text": "it('matches per-agent tab actions only through user overrides', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-digit-index.test.ts",
+      "sha256": "9693ae5df026c43c8d542f2f19edfe6b9bbc6cb054161bbf37fe4e98e4fd6161",
+      "declarationPointers": [
+        {
+          "line": 25,
+          "text": "it('flags the two ranged actions as digit-index rows', () => {"
+        },
+        {
+          "line": 31,
+          "text": "it('resolves the default ranges per platform', () => {"
+        },
+        {
+          "line": 60,
+          "text": "it('ignores non-range presses and extra modifiers', () => {"
+        },
+        {
+          "line": 77,
+          "text": "it('honors custom bindings, including swapping tab and workspace modifiers', () => {"
+        },
+        {
+          "line": 106,
+          "text": "it('respects the terminal-first context gate', () => {"
+        },
+        {
+          "line": 133,
+          "text": "it('canonicalizes a captured chord to the digit-1 representative', () => {"
+        },
+        {
+          "line": 158,
+          "text": "it('allows extra modifiers (e.g. Shift) on a digit-index chord', () => {"
+        },
+        {
+          "line": 171,
+          "text": "it('matches via the physical-code fallback when the key value is unavailable', () => {"
+        },
+        {
+          "line": 182,
+          "text": "it('canonicalizes stored bindings and rejects non-number chords', () => {"
+        },
+        {
+          "line": 190,
+          "text": "it('lets the two ranges swap modifiers without a false conflict', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-double-tap.test.ts",
+      "sha256": "4c0b630055ea04309124cb43388c499e20072fc6a5133076e268eb8ab28b0d2a",
+      "declarationPointers": [
+        {
+          "line": 15,
+          "text": "it('parses, normalizes, and rejects double-tap modifier bindings', () => {"
+        },
+        {
+          "line": 43,
+          "text": "it('matches double-tap bindings only against synthetic double-tap input', () => {"
+        },
+        {
+          "line": 84,
+          "text": "it('captures double-tap gestures into canonical bindings', () => {"
+        },
+        {
+          "line": 119,
+          "text": "it('formats double-tap bindings as the modifier glyph twice', () => {"
+        },
+        {
+          "line": 132,
+          "text": "it('reports conflicts across two double-tap bindings', () => {"
+        },
+        {
+          "line": 145,
+          "text": "it('reports conflicts across platform-primary double-tap aliases', () => {"
+        },
+        {
+          "line": 167,
+          "text": "it('does not report a conflict when one action lists double-tap aliases for itself', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-keyboard-layout.test.ts",
+      "sha256": "fd32e7f196c95cd4fa33bdac9e218eddd982a17f5bf76e9f20184437fcdf40f9",
+      "declarationPointers": [
+        {
+          "line": 11,
+          "text": "it('matches the default file explorer delete shortcut', () => {"
+        },
+        {
+          "line": 25,
+          "text": "it('matches file explorer undo and redo by produced logical key', () => {"
+        },
+        {
+          "line": 70,
+          "text": "it('matches non-QWERTY shortcuts by the produced logical key', () => {"
+        },
+        {
+          "line": 102,
+          "text": "it('matches letter shortcuts on non-Latin layouts via the physical code (issue #6274)', () => {"
+        },
+        {
+          "line": 142,
+          "text": "it('does not let non-Latin physical fallback hijack AltGr text input (issue #6274)', () => {"
+        },
+        {
+          "line": 163,
+          "text": "it('uses shifted punctuation aliases only while Shift is pressed', () => {"
+        },
+        {
+          "line": 187,
+          "text": "it('matches logical bracket shortcuts on JIS keyboards without changing code fallback', () => {"
+        },
+        {
+          "line": 315,
+          "text": "it('matches macOS Option-composed bracket shortcuts for same-type tab switching', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-parse-cache.test.ts",
+      "sha256": "3f04f702f89327d004b80081940e50c3541f2267070559cfee494b8872aa562b",
+      "declarationPointers": [
+        {
+          "line": 8,
+          "text": "it('reuses the parsed result for a repeated binding string', () => {"
+        },
+        {
+          "line": 15,
+          "text": "it('caches rejections without re-parsing', () => {"
+        },
+        {
+          "line": 20,
+          "text": "it('never hands out an entry a caller can corrupt', () => {"
+        },
+        {
+          "line": 26,
+          "text": "it('stays bounded and correct when fed far more strings than the cache holds', () => {"
+        },
+        {
+          "line": 35,
+          "text": "it('parses every distinct token form identically across repeat calls', () => {"
+        },
+        {
+          "line": 85,
+          "text": "it('formats every default binding identically on repeat calls, on both glyph platforms', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-parsing.test.ts",
+      "sha256": "85c4430b9545337819fee47a4e92a7cb41247d876e43dccd1cce27b04cc5e9fa",
+      "declarationPointers": [
+        {
+          "line": 15,
+          "text": "it('accepts bounded plugin command action IDs and rejects malformed variants', () => {"
+        },
+        {
+          "line": 23,
+          "text": "it('normalizes editable shortcut input and rejects unsafe bindings', () => {"
+        },
+        {
+          "line": 40,
+          "text": "it('allows safe bare keys only for scoped actions that opt in', () => {"
+        },
+        {
+          "line": 48,
+          "text": "it('allows Shift-only chords only for native input-source switching', () => {"
+        },
+        {
+          "line": 64,
+          "text": "it('captures key events into canonical editable shortcuts', () => {"
+        },
+        {
+          "line": 82,
+          "text": "it('captures macOS Option-composed key events via the physical code', () => {"
+        },
+        {
+          "line": 109,
+          "text": "it('applies per-action bare-key rules while capturing shortcuts', () => {"
+        },
+        {
+          "line": 126,
+          "text": "it('binds F7 / Shift+F7 for diff-change navigation and matches their events', () => {"
+        },
+        {
+          "line": 144,
+          "text": "it('formats keybindings with platform labels', () => {"
+        },
+        {
+          "line": 152,
+          "text": "it('preserves explicit numpad shortcut tokens', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-terminal-context.test.ts",
+      "sha256": "4e472f7f5e4ce051d5d83589e79132afef814ec39c2c4424e09aa4914c8d4c97",
+      "declarationPointers": [
+        {
+          "line": 10,
+          "text": "it('keeps Orca-first terminal context backward compatible', () => {"
+        },
+        {
+          "line": 44,
+          "text": "it('keeps floating workspace tab shortcuts active in app focus even with terminal-first policy configured', () => {"
+        },
+        {
+          "line": 70,
+          "text": "it('keeps terminal-allowed app shortcuts active in terminal-first mode', () => {"
+        },
+        {
+          "line": 118,
+          "text": "it('keeps terminal clipboard shortcuts platform-native without stealing bare Ctrl+A', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/keybindings-unassigned-actions.test.ts",
+      "sha256": "668d918d868cd23c0b06daf0b44147ced1523e86d74cf0795f4156c7f02d83e7",
+      "declarationPointers": [
+        {
+          "line": 11,
+          "text": "it('keeps equalize pane sizes unassigned until users customize it', () => {"
+        },
+        {
+          "line": 30,
+          "text": "it('names terminal title shortcuts after pane menu actions', () => {"
+        },
+        {
+          "line": 59,
+          "text": "it('binds immediate workspace delete without claiming terminal split right', () => {"
+        },
+        {
+          "line": 93,
+          "text": "it('keeps workspace board unassigned until users customize it', () => {"
+        },
+        {
+          "line": 118,
+          "text": "it('keeps the agent dashboard toggle unassigned until users customize it', () => {"
+        },
+        {
+          "line": 150,
+          "text": "it('keeps the quick commands menu toggle unassigned until users customize it', () => {"
+        },
+        {
+          "line": 182,
+          "text": "it('keeps the sleeping-workspaces toggle unassigned until users customize it', () => {"
+        },
+        {
+          "line": 218,
+          "text": "it('leaves floating workspace minimize unassigned because floating terminal toggle owns show and hide', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/macos-symbolic-hotkeys.test.ts",
+      "sha256": "3557598b80fccc5c6cc79b3c2218f00eeaa9de8955a045efbb1f27a02f29cd94",
+      "declarationPointers": [
+        {
+          "line": 28,
+          "text": "it('parses enabled Switch to Desktop entries and skips disabled ones', () => {"
+        },
+        {
+          "line": 39,
+          "text": "it('decodes option and shift modifier masks', () => {"
+        },
+        {
+          "line": 46,
+          "text": "it('skips non-standard, unrecognized, and malformed entries', () => {"
+        },
+        {
+          "line": 69,
+          "text": "it('skips chords with modifier bits the matcher cannot represent', () => {"
+        },
+        {
+          "line": 76,
+          "text": "it('returns empty for missing or non-object domains', () => {"
+        },
+        {
+          "line": 93,
+          "text": "it('resolves physical keys through a digit-producing layout', () => {"
+        },
+        {
+          "line": 106,
+          "text": "it('does not equate AZERTY digit-row positions with logical digits', () => {"
+        },
+        {
+          "line": 112,
+          "text": "it('flags the default darwin tab range against captured Ctrl+digits, not the Cmd workspace range', () => {"
+        },
+        {
+          "line": 122,
+          "text": "it('covers every digit of the 1-9 range from the stored representative', () => {"
+        },
+        {
+          "line": 131,
+          "text": "it('clears the conflict when the user remaps away from the captured modifiers', () => {"
+        },
+        {
+          "line": 141,
+          "text": "it('flags a remapped workspace range when Spaces chords use the same modifiers', () => {"
+        },
+        {
+          "line": 153,
+          "text": "it('returns empty without captured chords', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/modifier-double-tap-detector.test.ts",
+      "sha256": "7500215735a309c0fb197da1c6c7592f37498809bfe1d0812e038c46265c3ab9",
+      "declarationPointers": [
+        {
+          "line": 31,
+          "text": "it('emits when the second press lands inside the window', () => {"
+        },
+        {
+          "line": 38,
+          "text": "it('does not emit when the second press is past the window', () => {"
+        },
+        {
+          "line": 45,
+          "text": "it('resets on an intervening non-modifier key', () => {"
+        },
+        {
+          "line": 53,
+          "text": "it('treats a different modifier as a fresh gesture, not a completion', () => {"
+        },
+        {
+          "line": 63,
+          "text": "it('does not treat an auto-repeat hold as a tap', () => {"
+        },
+        {
+          "line": 72,
+          "text": "it('does not emit when another modifier is held (isModifierOnly false)', () => {"
+        },
+        {
+          "line": 79,
+          "text": "it('handles a second keyDown of the same modifier without an intervening keyUp', () => {"
+        },
+        {
+          "line": 90,
+          "text": "it('clears armed state when the second keydown was suppressed (allowlisted path)', () => {"
+        },
+        {
+          "line": 102,
+          "text": "it('clears state on reset()', () => {"
+        },
+        {
+          "line": 110,
+          "text": "it('normalizes platform key events', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/source-control-ai-action-recipes.test.ts",
+      "sha256": "f5678d7875ada8ca8227b8917a3f5a909de4d0c07fec95557ec270de347c4c6b",
+      "declarationPointers": [
+        {
+          "line": 32,
+          "text": "it('resolves text action CLI args into generation params', () => {"
+        },
+        {
+          "line": 62,
+          "text": "it('treats an explicit action null agent as the default agent, not the global legacy agent', () => {"
+        },
+        {
+          "line": 85,
+          "text": "it('treats a repo action null agent as the default agent, not the global action agent', () => {"
+        },
+        {
+          "line": 112,
+          "text": "it('resolves launch action recipes from repo overrides over global defaults', () => {"
+        },
+        {
+          "line": 149,
+          "text": "it('lets repo action recipes explicitly clear inherited CLI args', () => {"
+        },
+        {
+          "line": 184,
+          "text": "it('lets repo text action null templates inherit global action templates', () => {"
+        },
+        {
+          "line": 221,
+          "text": "it('lets repo launch action null templates inherit resolved action templates', () => {"
+        },
+        {
+          "line": 254,
+          "text": "it('preserves existing action templates when legacy settings are only the rollback projection', () => {"
+        },
+        {
+          "line": 283,
+          "text": "it('does not let rollback enabled changes clobber independent branch action templates', () => {"
+        },
+        {
+          "line": 317,
+          "text": "it('does not let stale legacy branch instructions clobber independent branch templates', () => {"
+        },
+        {
+          "line": 355,
+          "text": "it('lets rollback custom-agent changes clear a commit action agent override', () => {"
+        },
+        {
+          "line": 384,
+          "text": "it('preserves an explicitly empty global text action template as invalid config', () => {"
+        },
+        {
+          "line": 407,
+          "text": "it('lists supported agents when a text action uses an unsupported saved agent', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/source-control-ai-recipe-save.test.ts",
+      "sha256": "e008f3d0728c6dec4664a6cf2bc10c414fee90764dcada8af1c96a8ec8c9cc7b",
+      "declarationPointers": [
+        {
+          "line": 27,
+          "text": "it('writes complete repo recipes and removes same-action legacy instructions', () => {"
+        },
+        {
+          "line": 79,
+          "text": "it('clears empty repo source-control AI writes with the JSON boundary sentinel', () => {"
+        },
+        {
+          "line": 85,
+          "text": "it('preserves boolean-only hosted-review defaults and strips legacy null defaults on write', () => {"
+        },
+        {
+          "line": 102,
+          "text": "it('stores repo custom commands when saving a custom-command recipe', () => {"
+        },
+        {
+          "line": 130,
+          "text": "it('writes global recipes through a complete normalized source-control AI value', () => {"
+        },
+        {
+          "line": 157,
+          "text": "it('replaces global recipes so cleared CLI args do not survive', () => {"
+        },
+        {
+          "line": 191,
+          "text": "it('writes empty repo CLI args so repository recipes can clear inherited args', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/source-control-ai.test.ts",
+      "sha256": "86cf32934738ab243c5f24c7030e215363dd52594ee718de9375baef358dfc80",
+      "declarationPointers": [
+        {
+          "line": 63,
+          "text": "it('uses the global default model for every operation', () => {"
+        },
+        {
+          "line": 69,
+          "text": "it('resolves generation config and PR defaults when Source Control AI actions are hidden', () => {"
+        },
+        {
+          "line": 116,
+          "text": "it('lets repo-hidden Source Control AI actions keep operation generation valid', () => {"
+        },
+        {
+          "line": 128,
+          "text": "it('lets repo action visibility override the global default', () => {"
+        },
+        {
+          "line": 152,
+          "text": "it('resolves PR defaults even when generation config is invalid', () => {"
+        },
+        {
+          "line": 185,
+          "text": "it('treats a normalized null agent as default instead of using stale legacy agent', () => {"
+        },
+        {
+          "line": 210,
+          "text": "it('lets a global operation model override win over the global default', () => {"
+        },
+        {
+          "line": 224,
+          "text": "it('lets a repo operation model override win over global operation override', () => {"
+        },
+        {
+          "line": 244,
+          "text": "it('uses the repo custom command before the global custom command', () => {"
+        },
+        {
+          "line": 272,
+          "text": "it('resolves thinking effort with override precedence and model default fallback', () => {"
+        },
+        {
+          "line": 298,
+          "text": "it('resolves repo instructions as replacement overrides, including explicit empty', () => {"
+        },
+        {
+          "line": 331,
+          "text": "it('does not treat null repo instructions as configured overrides', () => {"
+        },
+        {
+          "line": 358,
+          "text": "it('resolves repo tri-state PR defaults through inherit on and off', () => {"
+        },
+        {
+          "line": 367,
+          "text": "it('maps legacy custom prompt to released split instructions', () => {"
+        },
+        {
+          "line": 387,
+          "text": "it('merges legacy commit-message updates without wiping PR-only settings', () => {"
+        },
+        {
+          "line": 416,
+          "text": "it('can map explicit legacy PR generation instructions for old runtime callers', () => {"
+        },
+        {
+          "line": 433,
+          "text": "it('projects commit-message operation model overrides into legacy settings', () => {"
+        },
+        {
+          "line": 480,
+          "text": "it('merges projected legacy commit-message models without changing PR defaults', () => {"
+        },
+        {
+          "line": 520,
+          "text": "it('does not synthesize a commit-message override from projected global defaults', () => {"
+        },
+        {
+          "line": 534,
+          "text": "it('merges only rollback legacy model deltas into commit-message overrides', () => {"
+        },
+        {
+          "line": 569,
+          "text": "it('removes projected commit-message overrides cleared by legacy settings', () => {"
+        },
+        {
+          "line": 590,
+          "text": "it('reads and selects host-scoped model choices with local fallback rules', () => {"
+        },
+        {
+          "line": 624,
+          "text": "it('clears only the selected host model override when inheriting', () => {"
+        },
+        {
+          "line": 646,
+          "text": "it('normalizes repo overrides defensively and preserves explicit inherit sentinels', () => {"
+        },
+        {
+          "line": 732,
+          "text": "it('preserves repo null command templates without requiring another override field', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/terminal-line-height-settings.test.ts",
+      "sha256": "be04e0dfcb263f5d7668f559a63693b0d23348d6a3455cc6e79d83391049104c",
+      "declarationPointers": [
+        {
+          "line": 9,
+          "text": "it.each(["
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/window-shortcut-policy-agent-dashboard.test.ts",
+      "sha256": "675f12d2919b0638046f15eb466ad690945e3464ca9b2bb30e2377acff5216d5",
+      "declarationPointers": [
+        {
+          "line": 14,
+          "text": "it('stays unbound until a user assigns a chord', () => {"
+        },
+        {
+          "line": 18,
+          "text": "it('resolves a custom binding to the dashboard toggle', () => {"
+        },
+        {
+          "line": 24,
+          "text": "it('still resolves while a terminal owns focus under terminal-first', () => {"
+        },
+        {
+          "line": 37,
+          "text": "it('maps the action back to its keybinding id', () => {"
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    },
+    {
+      "path": "src/shared/window-shortcut-policy.test.ts",
+      "sha256": "8750eaa1da779ab5bc74de301f02a5811b625587e59751e4c70088b8d8367d1b",
+      "declarationPointers": [
+        {
+          "line": 13,
+          "text": "it('keeps ctrl/cmd+r and unrelated readline control chords out of the allowlist', () => {"
+        },
+        {
+          "line": 43,
+          "text": "it('resolves the explicit window shortcut allowlist on macOS', () => {"
+        },
+        {
+          "line": 80,
+          "text": "it('uses Alt+number for tab jumps on Windows/Linux without stealing workspace jumps', () => {"
+        },
+        {
+          "line": 103,
+          "text": "it('resolves customized quick-command menu shortcuts with terminal policy gating', () => {"
+        },
+        {
+          "line": 133,
+          "text": "it('keeps digit-index navigation ahead of customized quick-command shortcuts', () => {"
+        },
+        {
+          "line": 151,
+          "text": "it('honors remapped tab/workspace number ranges, including swapping the modifiers', () => {"
+        },
+        {
+          "line": 211,
+          "text": "it('keeps Orca-first active in terminal context but lets Terminal-first pass risky app chords', () => {"
+        },
+        {
+          "line": 267,
+          "text": "it('does not resolve the removed PDF export shortcut globally', () => {"
+        },
+        {
+          "line": 276,
+          "text": "it('routes menu-backed actions through the same window shortcut policy', () => {"
+        },
+        {
+          "line": 293,
+          "text": "it('requires shift for the non-mac worktree palette shortcut', () => {"
+        },
+        {
+          "line": 309,
+          "text": "it('resolves dictation using the layout-aware key value', () => {"
+        },
+        {
+          "line": 325,
+          "text": "it('applies custom keybinding overrides to dictation and main-process shortcuts', () => {"
+        },
+        {
+          "line": 343,
+          "text": "it('applies custom keybinding overrides to main-process shortcuts', () => {"
+        },
+        {
+          "line": 380,
+          "text": "it('resolves workspace delete by default and honors custom terminal-active bindings', () => {"
+        },
+        {
+          "line": 407,
+          "text": "it('resolves the MRU tab quick-toggle chord', () => {"
+        },
+        {
+          "line": 416,
+          "text": "it('gates the held Ctrl+Tab switcher on the configurable binding', () => {"
+        },
+        {
+          "line": 435,
+          "text": "it('matches real DOM-style event fields without relying on enumerable properties', () => {"
+        },
+        {
+          "line": 449,
+          "text": "it('recognizes Ctrl+Tab commit releases across Electron surfaces', () => {"
+        },
+        {
+          "line": 492,
+          "text": "it('accepts all supported zoom key variants', () => {"
+        },
+        {
+          "line": 525,
+          "text": "// Why: Ctrl+Shift+_ is PowerShell undo on Windows; zoom-out must not steal it."
+        },
+        {
+          "line": 534,
+          "text": "it('resolves the worktree-history chord despite carrying Alt', () => {"
+        },
+        {
+          "line": 578,
+          "text": "it('resolves the floating terminal chord despite carrying Alt', () => {"
+        },
+        {
+          "line": 608,
+          "text": "it('resolves the floating terminal chord when macOS Option composes the letter', () => {"
+        },
+        {
+          "line": 624,
+          "text": "it('rejects floating terminal chord variants with Shift or opposite primary modifier', () => {"
+        },
+        {
+          "line": 654,
+          "text": "it('rejects the history chord when Shift is also held', () => {"
+        },
+        {
+          "line": 670,
+          "text": "it('leaves Alt+Arrow without a primary modifier untouched (word-nav territory)', () => {"
+        },
+        {
+          "line": 686,
+          "text": "it('ignores Cmd/Ctrl+Alt combined with ArrowUp or ArrowDown', () => {"
+        },
+        {
+          "line": 719,
+          "text": "it('rejects the history chord when the opposite primary modifier is also held', () => {"
+        },
+        {
+          "line": 752,
+          "text": "it('still returns null for other Cmd/Ctrl+Alt combos (not an allowlist escape)', () => {"
+        },
+        {
+          "line": 772,
+          "text": "it('routes Cmd/Ctrl+Shift+N to the unified new-workspace composer', () => {"
+        },
+        {
+          "line": 799,
+          "text": "it('resolves letter shortcuts by layout-aware key, with code as fallback', () => {"
+        },
+        {
+          "line": 834,
+          "text": "// reject it."
+        },
+        {
+          "line": 860,
+          "text": "it('exposes the shared platform modifier gate used by browser guests', () => {"
+        },
+        {
+          "line": 872,
+          "text": "it('resolves an allowlisted action from a synthetic double-tap input', () => {"
+        },
+        {
+          "line": 879,
+          "text": "// (b) A different modifier does not resolve it."
+        }
+      ],
+      "status": "not-executed-in-this-dispatch",
+      "boundary": "Named declaration pointers are not expanded parameterized counts or assertion-body acceptance."
+    }
+  ],
+  "futureAcceptanceArgv": [
+    "pnpm",
+    "exec",
+    "vitest",
+    "run",
+    "--config",
+    "config/vitest.config.ts",
+    "src/main/browser/browser-guest-shortcut-forwarding.test.ts",
+    "src/main/browser/browser-manager-grab-shortcuts.test.ts",
+    "src/main/browser/browser-manager-guest-shortcuts.test.ts",
+    "src/main/claude-accounts/runtime-auth-service-materialization.test.ts",
+    "src/main/claude-accounts/runtime-selection.test.ts",
+    "src/main/codex-accounts/runtime-home-service-per-account-migration.test.ts",
+    "src/main/codex-accounts/runtime-selection.test.ts",
+    "src/main/durable-file-write-syscall-proof.test.ts",
+    "src/main/durable-file-write.test.ts",
+    "src/main/ipc/keybindings.test.ts",
+    "src/main/ipc/settings.test.ts",
+    "src/main/keybindings/keybinding-file.test.ts",
+    "src/main/keybindings/keybinding-service.test.ts",
+    "src/main/persistence-flush-and-save-scheduling.test.ts",
+    "src/main/persistence-load-repair-durability.test.ts",
+    "src/main/persistence-loading-store-write-risks.test.ts",
+    "src/main/persistence-settings-ui-defaults.test.ts",
+    "src/main/persistence-settings-update.test.ts",
+    "src/main/persistence-source-control-ai-migration.test.ts",
+    "src/main/persistence-worktree-visibility.test.ts",
+    "src/main/persistence/applying-settings/terminal-settings-migrations.test.ts",
+    "src/main/persistence/loading-store/normalize-loaded-global-settings.test.ts",
+    "src/main/persistence/loading-store/persisted-state-redundancy.test.ts",
+    "src/main/persistence/loading-store/secret-sentinel-substitution.test.ts",
+    "src/main/persistence/loading-store/state-write-round-trip.test.ts",
+    "src/main/runtime/orca-runtime-tests/gitlab-and-pr-bases-part-02.spec.ts",
+    "src/main/runtime/orca-runtime-tests/paired-settings.spec.ts",
+    "src/main/runtime/rpc/methods/artifact-sharing-capability-grant.test.ts",
+    "src/main/speech/speech-model-deletion.test.ts",
+    "src/main/text-generation/commit-message-text-generation-settings.test.ts",
+    "src/main/window/createMainWindow-terminal-focus-shortcuts.test.ts",
+    "src/main/window/createMainWindow-zoom-and-tab-switch-shortcuts.test.ts",
+    "src/renderer/src/components/dashboard-popout/preview-terminal-shortcuts.test.ts",
+    "src/renderer/src/components/feature-tips/feature-tip-modal-state.test.ts",
+    "src/renderer/src/components/feature-tips/feature-tip-startup-gate.test.ts",
+    "src/renderer/src/components/right-sidebar/SourceControlAgentActionDialog.test.tsx",
+    "src/renderer/src/components/right-sidebar/source-control-action-recipe-match.test.ts",
+    "src/renderer/src/components/right-sidebar/source-control-text-generation-defaults.test.ts",
+    "src/renderer/src/components/settings/AccountsPane.test.tsx",
+    "src/renderer/src/components/settings/AgentsPane.test.tsx",
+    "src/renderer/src/components/settings/ArtifactsSettingsPane.test.tsx",
+    "src/renderer/src/components/settings/BrowserSshWorkspaceRoutingSetting.test.tsx",
+    "src/renderer/src/components/settings/FloatingWorkspacePane.test.tsx",
+    "src/renderer/src/components/settings/GitPane.test.tsx",
+    "src/renderer/src/components/settings/MobilePairingConnectionOptions.test.tsx",
+    "src/renderer/src/components/settings/NotificationsPane.test.tsx",
+    "src/renderer/src/components/settings/OrchestrationPane.test.tsx",
+    "src/renderer/src/components/settings/PrivacyPane.test.ts",
+    "src/renderer/src/components/settings/TasksPane.test.tsx",
+    "src/renderer/src/components/settings/VoicePane.test.tsx",
+    "src/renderer/src/components/settings/agent-availability-settings.test.ts",
+    "src/renderer/src/components/settings/codex-session-source-home-control.test.tsx",
+    "src/renderer/src/components/settings/shortcut-recording-state.test.ts",
+    "src/renderer/src/components/sidebar/SidebarHeader.test.tsx",
+    "src/renderer/src/components/sidebar/WorktreeCard.compact-hover.test.tsx",
+    "src/renderer/src/components/sidebar/WorktreeCard.compact-ports-hover-independence.test.tsx",
+    "src/renderer/src/components/skills/SkillFreshnessNudge.test.tsx",
+    "src/renderer/src/components/terminal-pane/terminal-shortcut-option-compose.test.ts",
+    "src/renderer/src/lib/agent-tab-shortcuts.test.ts",
+    "src/renderer/src/lib/keyboard-layout/detect-option-as-alt.test.ts",
+    "src/renderer/src/lib/keyboard-layout/input-source-id.test.ts",
+    "src/renderer/src/lib/keyboard-layout/layout-base-character.test.ts",
+    "src/renderer/src/lib/keyboard-layout/option-as-alt-probe.test.ts",
+    "src/renderer/src/lib/keyboard-layout/option-key-location-state.test.ts",
+    "src/renderer/src/lib/plugin-command-keybindings.test.ts",
+    "src/renderer/src/lib/source-control-launch-agent-selection.test.ts",
+    "src/renderer/src/lib/tab-number-shortcuts.test.ts",
+    "src/renderer/src/store/slices/runtime-switch-settings-persistence.test.ts",
+    "src/renderer/src/store/slices/settings-owner-hydration-write-fence.test.ts",
+    "src/renderer/src/store/slices/settings.test.ts",
+    "src/renderer/src/store/slices/worktree-visibility-owner-settings.test.ts",
+    "src/renderer/src/store/slices/worktree-visibility-settings-write.test.ts",
+    "src/renderer/src/store/worktree-visibility-defaults-by-host.test.ts",
+    "src/renderer/src/web/web-preload-api-keybindings.test.ts",
+    "src/renderer/src/web/web-preload-api-settings.test.ts",
+    "src/shared/host-setting-overrides.test.ts",
+    "src/shared/keybindings-conflicts.test.ts",
+    "src/shared/keybindings-default-bindings.test.ts",
+    "src/shared/keybindings-digit-index.test.ts",
+    "src/shared/keybindings-double-tap.test.ts",
+    "src/shared/keybindings-keyboard-layout.test.ts",
+    "src/shared/keybindings-parse-cache.test.ts",
+    "src/shared/keybindings-parsing.test.ts",
+    "src/shared/keybindings-terminal-context.test.ts",
+    "src/shared/keybindings-unassigned-actions.test.ts",
+    "src/shared/macos-symbolic-hotkeys.test.ts",
+    "src/shared/modifier-double-tap-detector.test.ts",
+    "src/shared/source-control-ai-action-recipes.test.ts",
+    "src/shared/source-control-ai-recipe-save.test.ts",
+    "src/shared/source-control-ai.test.ts",
+    "src/shared/terminal-line-height-settings.test.ts",
+    "src/shared/window-shortcut-policy-agent-dashboard.test.ts",
+    "src/shared/window-shortcut-policy.test.ts"
+  ],
+  "executionLocation": "Coordinator-prepared isolated source checkout at pinned revision with native runtime/dependencies verified; never run setup or tests against the read-only migration reference.",
+  "candidateCommandBoundary": "Candidate test-port paths do not exist in this assignment; root must map each source suite/acceptance ID before implementation. No invented cargo/UI command is reported as runnable parity proof."
+}

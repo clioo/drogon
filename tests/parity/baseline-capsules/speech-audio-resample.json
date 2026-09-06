@@ -1,0 +1,36 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 and Node24.19.0; no install or source-tree writes.",
+    "Minimal node configuration omits feature-wall define, renderer aliases, original DOM/host-port setup, GC/WebStorage execArgv and extended timeouts. Complete imports are only Vitest and the pure relative source module; no full-suite configuration equivalence claimed."
+  ],
+  "isolationRationale": "Pure deterministic in-memory Float32Array fixtures; no native speech worker, microphone, model, filesystem, network, cloud inference or secret store imports. Licensed pinned source and unchanged assertions staged by the reviewed runner.",
+  "capsuleId": "speech-audio-resample",
+  "description": "Two unchanged original capture-rate normalization cases; despite original filename, no worker inference.",
+  "entryTestFile": "src/main/speech/stt-worker.test.ts",
+  "files": [
+    {
+      "path": "src/main/speech/stt-worker.test.ts",
+      "role": "test",
+      "sha256": "e8918545b98b5695d6d79d5dce423303d5efc07cb249576fdb99375d3e0cbebe"
+    },
+    {
+      "path": "src/main/speech/stt-audio-resample.ts",
+      "role": "module",
+      "sha256": "a2c8d561a20a9d23c32ff1377c10a746fd1590c4f9a9ee15e6ba6ea1faf9fbbc"
+    }
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 2
+  },
+  "testEvidenceBoundary": "Original cases assert two downsampling output lengths and same-rate object identity only. Invalid rates, upsampling boundaries, spectral quality, actual worker/native/OS behavior and rewritten-product parity remain unproven."
+}

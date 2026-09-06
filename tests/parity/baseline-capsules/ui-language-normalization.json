@@ -1,0 +1,36 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 and Node24.19.0; no dependency installation or source-tree writes.",
+    "Minimal node config omits renderer aliases, original DOM/host-port setup, feature-wall define, GC/WebStorage flags and extended timeouts. Pure relative imports were fully read; no full-suite config equivalence claimed."
+  ],
+  "isolationRationale": "Pure string/set/regex selection functions and unchanged Vitest assertions. No Electron import, actual locale preference change, catalog loader, filesystem/network/native operation or inference.",
+  "capsuleId": "ui-language-normalization",
+  "description": "Unchanged original locale/language selection assertions, independent of lazy-loading and rendered language fidelity.",
+  "entryTestFile": "src/shared/ui-language.test.ts",
+  "files": [
+    {
+      "path": "src/shared/ui-language.test.ts",
+      "role": "test",
+      "sha256": "dafbd2d0c9320cdbdccf9803d11c84518cfda507166f4bd4d03d4d5498452fe8"
+    },
+    {
+      "path": "src/shared/ui-language.ts",
+      "role": "module",
+      "sha256": "0e050e617565f9c8db651d042576fda2157974a4b7e2d648c1ca7a26a7c3358c"
+    }
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 2
+  },
+  "testEvidenceBoundary": "Only original locale-prefix/explicit-choice/plugin-preservation and setting normalization assertions. No translated catalog correctness, plugin authorization, async initialization, chunk packaging, ICU, screenshots or rewrite parity."
+}

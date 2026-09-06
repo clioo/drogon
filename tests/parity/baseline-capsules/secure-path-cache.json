@@ -1,0 +1,36 @@
+{
+  "capsuleId": "secure-path-cache",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/shared/secure-path-hardening-cache.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 4
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "src/shared/secure-path-hardening-cache.test.ts",
+      "role": "test",
+      "sha256": "77500cf9cce9624f6a693ed2adf6d576fd222ab58cce2c08a97211d60a60057d"
+    },
+    {
+      "path": "src/shared/secure-path-hardening-cache.ts",
+      "role": "module",
+      "sha256": "06ce6342d4cacf1b436ccb0886506da1ae09ad4d7f91cc54233f9c005ff0be7d"
+    }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Only unchanged selected test/module; original renderer/host-port setup, aliases, feature define and GC/WebStorage flags omitted because the reviewed dependency closure does not use them.",
+    "No dependency install, provider/profile operation, network or Electron launch. File-reader suite mocks async filesystem; pure helpers use in-memory fixtures.",
+    "Node24 rawJSON availability must be recorded so its guarded assertion is not mislabeled exercised when unavailable. This is a bounded source baseline, not candidate parity or OS acceptance."
+  ],
+  "isolationRationale": "Root source/effect and full assertion-body review; pinned two-file dependency closure with built-ins and Vitest only. Fresh retained capsule; reference checkout remains read-only.",
+  "contract": "E4-F30"
+}

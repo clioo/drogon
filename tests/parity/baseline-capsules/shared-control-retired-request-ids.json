@@ -1,0 +1,39 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleId": "shared-control-retired-request-ids",
+  "entryTestFile": "src/shared/remote-runtime-shared-control-retired-request-ids.test.ts",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use original installed Vitest4.1.11 with Node24.19.0. Minimal node configuration omits renderer aliases, DOM/canvas/host-port setup, feature-wall define, GC/WebStorage flags and extended source timeouts. Reviewed whole tests use none of those hooks; no full-config or cross-platform equivalence claimed."
+  ],
+  "files": [
+    {
+      "path": "src/shared/remote-runtime-shared-control-retired-request-ids.test.ts",
+      "sha256": "65f1b2f11806165f75045a6c33d40b1a8b61d244fc40fc4ff67ed4d1bf15b466",
+      "role": "test"
+    },
+    {
+      "path": "src/shared/remote-runtime-shared-control-retired-request-ids.ts",
+      "sha256": "9ee42f6e27855cf4561426930359e78b2ee9828d7ae6f44aa56d63239512bc4b",
+      "role": "module"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 4
+  },
+  "allocation": {
+    "package": "WP-ENG-SHARED",
+    "authority": "docs/migration/parity-test-work-packages.json",
+    "sourceTest": "src/shared/remote-runtime-shared-control-retired-request-ids.test.ts"
+  },
+  "isolationRationale": "Whole original test and complete runtime import closure reviewed by root. TTL, bounded oldest-ID eviction, refreshed eviction rank and backward clock movement. Injected clock or Date.now; no socket, timer, filesystem or external service. Type-only imports are erased by the original Vitest transform; this does not typecheck the whole source.",
+  "testEvidenceBoundary": "Original isolated behavior only, not a port, candidate behavioral RED/GREEN, real Electron/SSH/network or product parity. No assertion or source bytes are changed."
+}

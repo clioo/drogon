@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-06",
+  "status": "accepted-with-root-qualifications",
+  "scope": "Ten finite account launch preparation source contracts; not whole E3/E5 or product acceptance",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "taskId": "task_823552276b48",
+  "dispatchId": "ctx_dee67d480e3d",
+  "candidateArtifacts": [
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/account-launch-final.md",
+      "sha256": "c184c25f5edb2412975a9b5abb5734ddd2cd3c26b2e1aa5d849585871d007e81"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/result-platform/account-launch-final.json",
+      "sha256": "229f0da3b1908da484583b9a12d7472d02253a80761f218856aa98db628aa5d3"
+    }
+  ],
+  "verification": {
+    "sourceFiles": 72,
+    "inclusiveRanges": 75,
+    "inputHashes": 9,
+    "contracts": 10,
+    "originalAssertionGroups": 13,
+    "wholePackagePointers": 6,
+    "inheritedPointers": 12,
+    "reusedAcceptedContractPointers": 4,
+    "originalTestFiles": 9037,
+    "originalPackages": 46,
+    "command": "node <<'NODE'\nconst fs=require('fs'),cp=require('child_process'),path=require('path'),crypto=require('crypto'),assert=require('assert/strict');\nconst base='docs/migration/audit-closure/e3-bridge/result-platform/account-launch-final';\nconst j=JSON.parse(fs.readFileSync(base+'.json')),hash=b=>crypto.createHash('sha256').update(b).digest('hex');\nconst cache=new Map(),byId=new Map(j.sourceEvidence.map(e=>[e.id,e])),docs=new Map();assert.equal(byId.size,j.sourceEvidence.length);\nfor(const e of j.sourceEvidence){\n let b=cache.get(e.path);if(!b){b=fs.readFileSync(path.join(j.sourceRoot,e.path));assert.deepEqual(b,cp.execFileSync('git',['show',j.sourceRevision+':'+e.path],{cwd:j.sourceRoot,maxBuffer:10*1024*1024}),e.path+' pin');cache.set(e.path,b);}\n assert.equal(hash(b),e.sha256,e.path);\n const lines=b.toString('utf8').match(/[^\\n]*\\n|[^\\n]+$/g)||[];assert(e.start>0&&e.end<=lines.length);\n assert.equal(hash(Buffer.from(lines.slice(e.start-1,e.end).join(''))),e.rangeSha256,e.id);\n}\nfor(const e of j.inputEvidence) assert.equal(hash(fs.readFileSync(e.path)),e.sha256,e.path);\nfunction pointer(ref){const [p,s]=ref.split('#');if(!docs.has(p))docs.set(p,JSON.parse(fs.readFileSync(p)));return (s||'').split('/').slice(1).reduce((v,k)=>v?.[k.replace(/~1/g,'/').replace(/~0/g,'~')],docs.get(p));}\nconst canonical=v=>JSON.stringify(sort(v));function sort(v){if(Array.isArray(v))return v.map(sort);if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).sort().map(k=>[k,sort(v[k])]));return v;}\nfor(const e of [...j.testPreservation.wholePackages,...j.testPreservation.inheritedRefs,...j.reusedAcceptedEvidence]){\n const v=pointer(e.ref);assert(v!==undefined,e.ref);assert.equal(hash(canonical(v)),e.canonicalValueSha256,e.ref);\n if(e.count!==undefined&&e.count!==null)assert.equal(v.length,e.count,e.ref+' count');\n if(e.id&& !Array.isArray(v))assert.equal(v.id,e.id,e.ref+' id');\n}\nfor(const c of j.contracts)for(const ref of c.sourceEvidenceRefs)assert(byId.has(ref),ref);\nfor(const t of j.originalAssertionBodiesRead)for(const ref of t.sourceEvidenceRefs){const e=byId.get(ref);assert.equal(e.path,t.path);assert(e.start<=t.start&&e.end>=t.end);}\nconst pk=JSON.parse(fs.readFileSync('docs/migration/parity-test-work-packages.json'));\nfor(const t of j.originalAssertionBodiesRead)assert(pk.packages.some(p=>p.files.some(f=>f.path===t.path&&f.sha256===byId.get(t.sourceEvidenceRefs[0]).sha256)),t.path+' allocation');\nconsole.log(JSON.stringify({sourcePin:j.sourceRevision,sourceFiles:cache.size,ranges:j.sourceEvidence.length,inputHashes:j.inputEvidence.length,contracts:j.contracts.length,assertionGroups:j.originalAssertionBodiesRead.length,wholePackagePointers:j.testPreservation.wholePackages.length,inheritedPointers:j.testPreservation.inheritedRefs.length,reusedContractPointers:j.reusedAcceptedEvidence.length,originalFiles:pk.packages.reduce((n,p)=>n+p.files.length,0),originalPackages:pk.packages.length,artifacts:['.md','.json'].map(s=>({path:base+s,sha256:hash(fs.readFileSync(base+s))}))},null,2));\nNODE",
+    "checks": [
+      "Each whole/range digest and current source bytes verified against the named Git pin.",
+      "Nine frozen input documents retain exact digest.",
+      "Six whole package, twelve inherited and four reused contract JSON pointers match canonical sorted-value hashes; IDs/counts verified where declared.",
+      "All10 contract evidence references resolve;13 assertion-group ranges resolve within corresponding source ranges and unchanged central path/digest allocation.",
+      "Root read all10 narrative contracts, four defects, four residuals and13 assertion summaries; independently read concrete entry/selection/store/restore/WSL bodies below. No assertion execution claimed."
+    ]
+  },
+  "rootFullSourceReads": [
+    "src/main/startup/codex-launch-preparation.ts",
+    "src/main/claude-accounts/runtime-auth-service.ts",
+    "src/main/claude-accounts/runtime-auth/runtime-auth-preparation.ts",
+    "src/main/claude-accounts/runtime-auth/runtime-auth-sync.ts",
+    "src/main/claude-accounts/runtime-selection.ts",
+    "src/main/persistence/loading-store/profile-preferences.ts",
+    "src/main/persistence/applying-settings/settings-update.ts",
+    "src/main/claude-accounts/runtime-auth/runtime-auth-snapshot-restore.ts",
+    "src/main/codex-accounts/runtime-home-service-launch.ts",
+    "src/main/codex-accounts/legacy-wsl-runtime-auth-drain.ts"
+  ],
+  "rootRangeReads": [
+    {
+      "path": "src/main/claude-accounts/runtime-auth-service-deselect-restore.test.ts",
+      "start": 417,
+      "end": 584
+    },
+    {
+      "path": "src/main/wsl/wsl-runner.ts",
+      "start": 197,
+      "end": 259
+    },
+    {
+      "path": "src/shared/child-process/run-process.ts",
+      "start": 114,
+      "end": 354
+    },
+    {
+      "path": "src/main/persistence/applying-settings/terminal-settings-migrations.ts",
+      "start": 1,
+      "end": 82
+    }
+  ],
+  "findings": [
+    {
+      "id": "AL-ROOT-01",
+      "scope": "AL-C10/AL-D01",
+      "finding": "Confirmed source chain: invalid or unowned still-listed host account clears only legacy selection; stripRetiredGlobalSettings retains account fields; actual settings update shallow-merges and getSettings does not prune; normalizeClaudeRuntimeSelection prefers map.host; getPreparation can return managed provenance with stripAuthEnv true. Missing-account branch explicitly clears map and legacy, so it is a different fixture.",
+      "evidenceStrength": "Independently source-characterized; not executed or reproduced end to end.",
+      "requiredTest": "Actual settings operation plus Claude service, synthetic existing host account and both selection fields, unowned/invalid credentials. Assert source-surviving map before intended synchronized deselection correction; preserve WSL selection and ownership-aware restore."
+    },
+    {
+      "id": "AL-ROOT-02",
+      "scope": "AL-C06/AL-D02",
+      "finding": "Claude serializes sync, then computes a fresh preparation after await; Codex WSL captures home before drain. Neither local boundary itself supplies an account-generation fence. Upstream RRT-J01 spawn gates remain relevant.",
+      "evidenceStrength": "Race exposure by source; not proof an end-to-end wrong-account launch occurs.",
+      "requiredTest": "Controlled deferred read/refresh/drain plus selection change; observe actual bytes, returned provenance/home and final upstream refusal/spawn."
+    },
+    {
+      "id": "AL-ROOT-03",
+      "scope": "AL-C05/AL-C09",
+      "finding": "startLegacyWslRuntimeAuthDrain erases complete/pending into void. Apply error can recover to pending; throwOnFailure does not require migration completion. The WSL runner projects away outputTruncated/signal and passes no termination barrier in these account calls. Nonbarrier timeout resolves after force-attempt without proving guest exit.",
+      "evidenceStrength": "Source contract only; no WSL, filesystem mutation or process run.",
+      "requiredTest": "Retain late-writer/recovery artifacts, exact partial promotion, output truncation and live/unverifiable/exited gates; returned home is not full history/migration readiness."
+    },
+    {
+      "id": "AL-ROOT-04",
+      "scope": "AL-C08/AL-A04",
+      "finding": "Three original test bodies with restore/retain wording actually assert preserved stale credential/OAuth/Keychain values and legacy selection null. Preserve assertion bodies, not stronger titles. Restore independently checks file/scoped/legacy ownership and can partially complete before rejection.",
+      "evidenceStrength": "Original assertion bodies read only; no test success claim.",
+      "requiredTest": "Whole original suites unchanged plus separately named intended corrections; failure at each restore stage and preservation of externally changed auth."
+    },
+    {
+      "id": "AL-ROOT-05",
+      "scope": "AL-C01",
+      "finding": "Startup missing service or temporary ownership error can reject; managed hook refresh failures warn but still return selected home. Real-home null means omit managed home injection, not missing credentials. Launch preparation does not certify history completion or provider authorization.",
+      "evidenceStrength": "Full entry body read; provider/native success unverified.",
+      "requiredTest": "Full startup callback routing/error/partial-hook effects with upstream account guards and native/SSH/WSL fixtures."
+    }
+  ],
+  "joins": [
+    {
+      "id": "AL-SR01",
+      "state": "resolved-for-finite-raw-provider-source",
+      "evidence": "docs/migration/e3-provider-inputs-root-review.json",
+      "commit": "2ba025e",
+      "note": "Only thirteen provider-local contracts; runtime/request-guard joins still separate."
+    },
+    {
+      "id": "PI-JOIN-LAUNCH",
+      "state": "resolved-for-finite-account-launch-source",
+      "evidence": "this review AL-C01 through AL-C10",
+      "note": "Does not accept broader history/parser dependencies or final generation caller."
+    },
+    {
+      "id": "I-XOWNER-ACCOUNT-PREPARATION",
+      "state": "account-side-evidence-accepted-caller-join-pending",
+      "methods": [
+        "git.generateCommitMessage",
+        "git.discoverCommitMessageModels"
+      ],
+      "evidence": "docs/migration/audit-closure/e3-bridge/result-integrations/contracts.json"
+    },
+    {
+      "id": "AL-SR02/03/04",
+      "state": "fresh-disjoint-audit-active",
+      "taskId": "task_5154c82cf9ce",
+      "dispatchId": "ctx_30884f2404e3",
+      "output": "docs/migration/audit-closure/e3-bridge/result-platform/account-residual-joins.md/json"
+    },
+    {
+      "id": "PI-JOIN-RUNTIME/REQUEST-GUARD",
+      "state": "fresh-disjoint-audit-active",
+      "taskId": "task_de63b4c76c91",
+      "dispatchId": "ctx_72c23d4df328",
+      "output": "docs/migration/audit-closure/e3-bridge/result-platform/provider-runtime-joins.md/json"
+    }
+  ],
+  "lifecycle": {
+    "publicationDelivered": "msg_0ece9799da41",
+    "publicationReleased": "c7354ed1-d7cc-49d2-93f2-8ba5d2877d12",
+    "releaseMeaning": "retained/external_terminal/processAction none; no process exit claimed",
+    "publicationSourceAcceptance": "pending root review",
+    "newAuditLaunches": [
+      {
+        "taskId": "task_5154c82cf9ce",
+        "dispatchId": "ctx_30884f2404e3",
+        "terminal": "term_c317aa5c-b92d-4338-a888-e88676e58fde",
+        "receipt": "bf9fc90c-d507-4dcb-93f2-364362bc0ad3"
+      },
+      {
+        "taskId": "task_de63b4c76c91",
+        "dispatchId": "ctx_72c23d4df328",
+        "terminal": "term_628055f8-e9bc-4f00-995c-0f119af80751",
+        "receipt": "69cebe75-e2f9-4b4a-b72d-b38607e7c61c"
+      }
+    ],
+    "launchMeaning": "Both ready/input_accepted, exact previously released live Astra terminals reused; no new process/model flags, no children or setup. Null receipt model fields are not Sol/model authentication."
+  },
+  "testsExecutedThisReview": 0,
+  "productEditsThisReview": 0,
+  "auditProgress": {
+    "accepted": 10,
+    "denominator": 12,
+    "percentage": 83.3,
+    "delta": 0,
+    "confidence": "medium-low",
+    "next": "Root integrates delivered integration/publication evidence and the two finite local-join audits",
+    "risk": "Flexible24h full fidelity remains high risk; no defensible ETA"
+  },
+  "phase": "Astra audit-only. Actual Sol implementation leads+approved workers require full source audit acceptance. All9037 original allocations, faithful ports, actual behavioral RED-GREEN, native/platform/SSH mixed-version, installation and full fidelity gates remain."
+}

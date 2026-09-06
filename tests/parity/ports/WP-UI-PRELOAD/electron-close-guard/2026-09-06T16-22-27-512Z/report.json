@@ -1,0 +1,94 @@
+{
+  "kind": "preload-close-guard-acceptance",
+  "baseModuleRevision": "bb85b83",
+  "gitMetadata": {
+    "available": true,
+    "resolver": "direct .git file reads; no Git command executed",
+    "headRef": "refs/heads/codex/rewrite-foundation",
+    "candidateHeadRevision": "6d5cb27b9524238bb1c6056bac1d4a0fb2fcdaea",
+    "workingTreeNote": "candidateHeadRevision is the committed HEAD read directly from .git files (no Git command executed); working-tree changes may exist and are not asserted clean"
+  },
+  "behavioralArtifactIdentity": {
+    "note": "the built main/preload digests identify the artifacts whose live behavior was probed",
+    "builtPreloadSha256": "77f87eb59169e9f52693fc2e0ab9146fa6e0d50c931cfb9b3b23cd030bf6f735",
+    "builtMainSha256": "65cf7afdb764e3c0a561cd22feac7a24c03af7bc4b956a0a7bfc33505d122dfe"
+  },
+  "behavioralVerdict": "RED",
+  "evidenceVerdict": {
+    "verdict": "complete",
+    "complete": true,
+    "missing": []
+  },
+  "cleanupVerdict": "clean",
+  "status": "FAILED",
+  "failureClass": "guard-not-replaced-native",
+  "checks": [
+    "nonce-fixture-created-under-preflight-acceptance",
+    "actual-product-launched-with-loopback-cdp-endpoint",
+    "connected-to-production-window-over-cdp",
+    "main-world-has-no-node-privileged-globals-and-bridged-preload-ran",
+    "behavioral-red-descriptor-mismatch"
+  ],
+  "assertions": {
+    "securityPosture": {
+      "ok": true,
+      "failureClass": null,
+      "electronVersion": "44.2.0"
+    },
+    "closeGuardDescriptor": {
+      "own": {
+        "typeofValue": "function",
+        "configurable": true,
+        "writable": true,
+        "enumerable": true,
+        "isNative": true,
+        "sourcePreview": "function close() { [native code] }"
+      },
+      "prototype": null,
+      "sameValueAsPrototype": false
+    },
+    "closeGuardVerdict": {
+      "ok": false,
+      "failureClass": "guard-not-replaced-native",
+      "detail": "own window.close is the native close (or identical to the prototype close), so no guard replaced it"
+    }
+  },
+  "cleanup": [
+    "product electron instance: owned by this run",
+    "cdp browser session: closed",
+    "product electron instance: exited"
+  ],
+  "stages": {},
+  "startedAt": "2026-09-06T16:22:26.475Z",
+  "electronBinary": "/Users/carlos/Documents/Drogon-rewrite/node_modules/.pnpm/electron@44.2.0/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+  "nodeVersion": "v24.19.0",
+  "nodePath": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+  "fixture": "/Users/carlos/Documents/Drogon-rewrite/.preflight/acceptance/preload-close-guard-xOva4m",
+  "evidenceDir": "/Users/carlos/Documents/Drogon-rewrite/tests/parity/ports/WP-UI-PRELOAD/electron-close-guard",
+  "launch": {
+    "argv": [
+      "/Users/carlos/Documents/Drogon-rewrite/apps/desktop",
+      "--remote-debugging-port=0"
+    ],
+    "shell": false,
+    "clearedUnsafeEnvKeys": [
+      "ELECTRON_RUN_AS_NODE",
+      "ELECTRON_NO_ASAR",
+      "ELECTRON_EXTRA_LAUNCH_ARGS",
+      "ELECTRON_RENDERER_URL",
+      "NODE_OPTIONS",
+      "NODE_PATH"
+    ],
+    "clearedInheritedDrogonKeys": []
+  },
+  "endpoint": "ws://127.0.0.1:65144/devtools/browser/dcf4e147-b014-49b0-9abf-812d7d523175",
+  "pageUrl": "file:///Users/carlos/Documents/Drogon-rewrite/apps/desktop/out/renderer/index.html",
+  "electronVersion": "44.2.0",
+  "screenshots": {
+    "before": "/Users/carlos/Documents/Drogon-rewrite/tests/parity/ports/WP-UI-PRELOAD/electron-close-guard/2026-09-06T16-22-27-512Z/before.png",
+    "after": "/Users/carlos/Documents/Drogon-rewrite/tests/parity/ports/WP-UI-PRELOAD/electron-close-guard/2026-09-06T16-22-27-512Z/after.png"
+  },
+  "failureDetail": "own window.close is the native close (or identical to the prototype close), so no guard replaced it",
+  "finishedAt": "2026-09-06T16:22:27.512Z",
+  "evidencePath": "/Users/carlos/Documents/Drogon-rewrite/tests/parity/ports/WP-UI-PRELOAD/electron-close-guard/2026-09-06T16-22-27-512Z"
+}

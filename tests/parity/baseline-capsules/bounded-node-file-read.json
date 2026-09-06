@@ -1,0 +1,36 @@
+{
+  "capsuleId": "bounded-node-file-read",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/shared/node-bounded-file-reader.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 7
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "src/shared/node-bounded-file-reader.test.ts",
+      "role": "test",
+      "sha256": "20642738f6395a46372599e794ff829ed7705dc3e0a0ae53a8d550a2e7d39aaf"
+    },
+    {
+      "path": "src/shared/node-bounded-file-reader.ts",
+      "role": "module",
+      "sha256": "2cffa451b72d059226e0c2d4b6d2a5203cb8ddafb358d5e828dcd3436d197ecb"
+    }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Only unchanged selected test/module; original renderer/host-port setup, aliases, feature define and GC/WebStorage flags omitted because the reviewed dependency closure does not use them.",
+    "No dependency install, provider/profile operation, network or Electron launch. File-reader suite mocks async filesystem; pure helpers use in-memory fixtures.",
+    "Node24 rawJSON availability must be recorded so its guarded assertion is not mislabeled exercised when unavailable. This is a bounded source baseline, not candidate parity or OS acceptance."
+  ],
+  "isolationRationale": "Root source/effect and full assertion-body review; pinned two-file dependency closure with built-ins and Vitest only. Fresh retained capsule; reference checkout remains read-only.",
+  "contract": "E4-F27"
+}

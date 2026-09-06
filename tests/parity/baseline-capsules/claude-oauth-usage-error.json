@@ -1,0 +1,35 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 with Node24.19.0. Minimal node config omits renderer aliases, DOM/host-port setup, feature-wall define, GC/WebStorage flags and extended timeouts. Full original-suite config equivalence is not claimed."
+  ],
+  "capsuleId": "claude-oauth-usage-error",
+  "description": "Original Retry-After duration/error fields only; synthetic Response objects, no HTTP requests, provider auth, active-cycle retry scheduling or product parity.",
+  "entryTestFile": "src/main/rate-limits/claude-oauth-usage-error.test.ts",
+  "files": [
+    {
+      "path": "src/main/rate-limits/claude-oauth-usage-error.ts",
+      "role": "module",
+      "sha256": "2e1b7c0486e9e75f039f157195ce8fb7144acca1f9c2cbca7e3ed8fcc9a2b78e"
+    },
+    {
+      "path": "src/main/rate-limits/claude-oauth-usage-error.test.ts",
+      "role": "test",
+      "sha256": "44d876e96ea85ea407f6b7e21403b6d338015dcb333f7c4d594dc2a26abc7ffa"
+    }
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 5
+  },
+  "isolationRationale": "Both complete source files were read by root: only pure transformations, built-in Error/Date/Response objects and original Vitest assertions. No side-effecting dependency imports, network, filesystem, process, Electron or inference operations.",
+  "testEvidenceBoundary": "Original Retry-After duration/error fields only; synthetic Response objects, no HTTP requests, provider auth, active-cycle retry scheduling or product parity."
+}

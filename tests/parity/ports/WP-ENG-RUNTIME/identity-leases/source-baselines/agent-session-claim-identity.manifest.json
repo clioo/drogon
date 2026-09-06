@@ -1,0 +1,88 @@
+{
+  "capsuleId": "eng-identity-source-claim",
+  "description": "Original claim-identity suite with all three tests and unchanged assertions.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRevisionNote": "The reviewed capsule runner verifies source HEAD and both working-tree and pinned-revision bytes before every stage; mismatch refuses execution.",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "entryTestFile": "src/main/runtime/agent-session-claim-identity.test.ts",
+  "files": [
+    {
+      "path": "src/main/runtime/agent-session-claim-identity.test.ts",
+      "role": "test",
+      "sha256": "d4d84f3cc3f85b03347a0d645e8672997710cb58afb55797e305839bfe3fe28d"
+    },
+    {
+      "path": "src/main/runtime/agent-session-claim-identity.ts",
+      "role": "module",
+      "sha256": "57278157f30c998dea14e123c6dbebd4d60a596037805047ab68dd34377c97e8"
+    },
+    {
+      "path": "src/shared/agent-session-host-authority.ts",
+      "role": "module",
+      "sha256": "19e1b7435eca3e99209cd9ebbaa0270a74657a25bdc75e704f5eaea15643cc17"
+    },
+    {
+      "path": "src/shared/agent-session-resume.ts",
+      "role": "module",
+      "sha256": "ebd386d6613f3d6251817039eff56c18e3bc4496dd6bd7cbc74322b9212442ae"
+    },
+    {
+      "path": "src/shared/protocol-version.ts",
+      "role": "module",
+      "sha256": "e21f10647fe18df2b31e84c2a8d596c083e8ae52714829890969a1b65286803a"
+    },
+    {
+      "path": "src/shared/remote-server-update.ts",
+      "role": "module",
+      "sha256": "c7384b964a0bfaa1573cd00761c5e2d29143c591cb1b4cd6ee1b0db464110d12"
+    },
+    {
+      "path": "src/shared/skill-install-capability.ts",
+      "role": "module",
+      "sha256": "4dae209e014524ad9bd1f72f8366a78f80720546d36e19adbc299d3d7da1ff19"
+    },
+    {
+      "path": "src/shared/stable-pane-id.ts",
+      "role": "module",
+      "sha256": "0dfb20a173dc658229c46b7df4e36a443fee7089cffb79d76a74d8a92f41b884"
+    },
+    {
+      "path": "src/shared/terminal-surface-id.ts",
+      "role": "module",
+      "sha256": "7093584672a541e22c0094bfb0257f6bd8f83d4b23e1a5b077132da011f8f9da"
+    },
+    {
+      "path": "src/shared/terminal-tab-id.ts",
+      "role": "module",
+      "sha256": "3bf691ba305880a6d67f620d9ce671e5388e169c4783b1caf0d73fa589b5aa82"
+    }
+  ],
+  "runtimeExternalImports": [
+    "node:crypto",
+    "node:fs",
+    "node:os",
+    "node:path",
+    "vitest"
+  ],
+  "dependencyClosureNote": "Runtime closure computed from the entry with source esbuild using bundle/write:false/platform:node/packages:external, then manually reviewed. It includes every first-party runtime-loaded module; type-only imports are intentionally absent because Vitest/esbuild erases them and they are not runtime dependencies.",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 3
+  },
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigSha256": "19d14b8f028a84ff3401534c22f3241d4ed5695fea5c5df3a140ba2c9f3c0880",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "The capsule retains Node environment but intentionally omits the source-wide ORCA_FEATURE_WALL_ENABLED define because this closure does not reference it.",
+    "The capsule omits the source-wide happy-dom canvas, MutationObserver-retention, and host-port setup files because these runtime suites use no DOM, canvas, MutationObserver, or host ports.",
+    "The capsule omits source-wide --no-experimental-webstorage and --expose-gc worker flags because these suites observe neither Web Storage nor GC timing.",
+    "The capsule uses Vitest defaults instead of source-wide 60000ms hook and 30000ms test timeouts; execution remains bounded externally by the reviewed runner.",
+    "Execution explicitly uses the source-installed Vitest 4.1.11 entry module; no version substitution is admitted."
+  ],
+  "isolationRationale": "No provider/session/service calls. Runtime effects are randomBytes for an ephemeral key and one test-owned os.tmpdir directory/file for Prime transcript realpath canonicalization; the test removes that directory in finally. Imported first-party modules have no top-level filesystem, network, process-launch, credential, or service effects."
+}

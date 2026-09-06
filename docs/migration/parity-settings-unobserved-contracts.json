@@ -1,0 +1,302 @@
+{
+  "schema": "drogon.parity-settings-unobserved-contracts.v2",
+  "status": "coordinator-reviewed-bounded-consumer-traces",
+  "statusNote": "Exact ten scanner-unobserved fields have source-backed consumers. Bounded source and relevant assertion-body review, not full settings closure or execution. Global absence, permanent-state and per-account/per-worktree claims from v1 are corrected. Hashes establish file identity, not full-file reading.",
+  "source": {
+    "root": "/Users/carlos/Documents/Drogon-mentu-session",
+    "headSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "pinnedSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "shaMismatch": false
+  },
+  "inputArtifact": "docs/migration/parity-settings-consumers.json",
+  "inputArtifactFieldStatus": "no-observed-reference",
+  "targetFieldCount": 10,
+  "methodology": "Reused accepted field/default census. Coordinator read cited consumer functions and assertion bodies. Mentu Navigator1.1.1 located an omitted runtime GitLab test; source bodies verified. No source import, test execution, app or model invocation. Dirty navigator status reflects unrelated untracked source artifact; tracked source remains clean.",
+  "fileHashes": {
+    "src/shared/global-settings-types.ts": "83d22b5e186c931c596659576bb8209bf19a4c1a017c9854789580f635448e67",
+    "src/renderer/src/components/browser-pane/use-ssh-workspace-browser-route.ts": "ca19120d124b95f982b4fb83e81003f5bfe67c05937cc96e7f96c14219c4dfbd",
+    "src/renderer/src/components/skills/SkillFreshnessNudge.tsx": "0d92438a16cdfad133d77fa0bbe3029022a555b919e500def469ce298a12b16a",
+    "src/renderer/src/components/skills/SkillFreshnessNudge.test.tsx": "f924801475d77a414c95e70eb551e010459034e0f685e18d9441af61b2d5bb51",
+    "src/main/persistence/applying-settings/onboarding-normalization.ts": "20bf17c4c018e87d6eef9089251ee69d3f21c5604cecc1ed63ee49a16c66371e",
+    "src/main/persistence-terminal-option-key-migration.test.ts": "671fc1d6dcfecdec652394af67469bdfa62858a0d8fb1f6b1792092f09ffc88b",
+    "src/renderer/src/components/sidebar/SidebarHeader.tsx": "eeada8345524bfb510a2f9816a0715876ea09e545e9721abbf3e304c04308c69",
+    "src/renderer/src/components/sidebar/SidebarHeader.test.tsx": "1477795e5feedefccf2cc7ed4f2baa907b9763b068c2f8e5e1cedd5ec8248938",
+    "src/main/persistence/loading-store/normalize-loaded-global-settings.ts": "f8badd5a9ad46b3677853e4b436ce5f31791c045d85d9985f64e8437de651c95",
+    "src/main/persistence/loading-store/normalize-loaded-global-settings.test.ts": "9b119c0577e8e04b18e222f6dcb7e01ef036163ad1f80ec8522c8ba2f1a5f0e9",
+    "src/renderer/src/components/dashboard/AgentDashboardSettingsMenu.tsx": "d5a4520977c94daaa4fc3618a5712f0053883b6c4004477e04de4a1aa415302d",
+    "src/renderer/src/components/dashboard/AgentDashboardSettingsMenu.test.tsx": "15336cd304a3fb673271d8768aebd443ff09949375984ceaff33daf1fb9c6fd1",
+    "src/renderer/src/components/dashboard/build-dashboard-snapshot.ts": "50af7823d958d90a1081453f0b259ed0c7bf8c8743ce44b7da548edb75327ea5",
+    "src/renderer/src/components/sidebar/AgentDashboardSidebarEntry.tsx": "f6bfe13e3bc3b43e86e5b3846b45aed0b622acc594134cbcf73098ef565a51dc",
+    "src/main/persistence/loading-store/prepare-loaded-profile-settings.ts": "e047d597ffc9e0efb299d22188a376072c4dd0ca98377d127a28010fd5afc9bd",
+    "src/main/gitlab/gitlab-project-recents.ts": "9ca230ed8e69eb5c67c83929af2345e232af9b61614dffbb1e9d0013663c9dee",
+    "src/main/runtime/runtime-store-contract.ts": "f0486f770fe2d27d6c8405397b13c2af03cbeea0bb0e91a094b9117151ba36b8",
+    "src/shared/gitlab-projects.ts": "5fc0605f4200ea66d2907b78bfea875281f8b37f04cd3ee4da54f0a5ecd4f04b",
+    "src/shared/gitlab-projects.test.ts": "2e7a6c31f633aba0b4c90ee6b5bd02cdd1a02dac53a908255c90977b96507089",
+    "src/main/ipc/gitlab.test.ts": "96e4095770640af7b676ce7fa55078e0f8e2d85a67f5de6c93337b0cb87a493c",
+    "src/main/keybindings/keybinding-service.ts": "b9cad7470faf8448496977966bc4ea8cc029a2b3e7149abae5c0a777c953e8cb",
+    "src/main/keybindings/keybinding-file.ts": "7bf9f53682536254d2150314de5942551601be41670976cc7183bc9be6a0fbcb",
+    "src/main/keybindings/keybinding-file.test.ts": "92568fd2be8950b4175901eb42eaf65c2507a033e06884a84f0bf37e0f889cbb",
+    "src/main/startup/main-process-account-services.ts": "2fbdae922f8887a37f2ca21f146e54f00e119cf91fee72a77c3090b2bec9f117",
+    "src/main/persistence/loading-store/loaded-cohort-migrations.ts": "e65330e112273b27d9109cdffdcb43960b03a30a71e80309f1fb0b7d90a6880e",
+    "src/main/persistence-cohort-and-identity-migration.test.ts": "a216c4ee854298b63c39ebd3e0952135d626fe628d684a571b3b2eefcd5f6f85",
+    "src/shared/constants.test.ts": "20d597f09ab8c611f35668daacec20077eccefefc03b3f9242815657aca95379",
+    "src/main/persistence/applying-settings/terminal-settings-migrations.ts": "7c555e2016d43d06c6f47ef10f8a1a4fd6d511f5fa328d188cf77243740450dc",
+    "src/main/keybindings/keybinding-service.test.ts": "58476268e53981998c74a9061364369cdbdea2397ace3090d18444f2b4fdb839",
+    "src/main/runtime/orca-runtime-tests/gitlab-and-pr-bases-part-02.spec.ts": "f0eaee4f1686cf2c5000ba30286597c0373de9773c8d2833a8adc832c0339afd",
+    "src/main/runtime/orca-runtime-file-commands.ts": "114253f82614e1cec62e6007eb5472fe0620d4e079aa75e026bc43beab4a5cab",
+    "src/main/ipc/gitlab-work-item-handlers.ts": "79c7a26fa7d0af41bb6f20adcaad192f539c0f204983c592df11e2b5e5d92a20",
+    "src/shared/gitlab-types.ts": "30016e84c294b9322e772bdaa9c830dab5bee8acfe9f114c7b004316c010ea76",
+    "src/renderer/src/components/dashboard/build-dashboard-snapshot.test.ts": "04da109c9c8a31f3bdf3b8c6e5ffafa1152d1ae20ba6135054501f25c743d3c2"
+  },
+  "fields": [
+    {
+      "name": "browserSshWorkspaceRoutingProbeSkippedTargetIds",
+      "declaredType": "string[]",
+      "declarationAnchor": "src/shared/global-settings-types.ts:260",
+      "consumerAnchors": [
+        "src/renderer/src/components/browser-pane/use-ssh-workspace-browser-route.ts:37-170"
+      ],
+      "observableEffect": "Profile settings store a target-id list shared by workspaces using that target, not a per-worktree list. Membership OR local attempt.skipProbe adds skipProbe:true when preparing the eligible SSH partition. Try anyway deduplicates/appends the target; recheck removes it. Retry resets the local attempt flag but does not itself clear a persisted skip. Disabling routing is a different field.",
+      "defaultHydrationMigrationSemantics": "No builder default; reads use optional membership/empty-array fallback. Both update paths create new arrays; global reset/save behavior is outside this hook review.",
+      "testPointers": [],
+      "unknowns": [
+        "No direct hook assertion was established in this slice; absence of matching names does not prove no indirect tests exist."
+      ]
+    },
+    {
+      "name": "keybindings",
+      "declaredType": "KeybindingOverrides",
+      "declarationAnchor": "src/shared/global-settings-types.ts:272",
+      "consumerAnchors": [
+        "src/main/startup/main-process-account-services.ts:113-119",
+        "src/main/keybindings/keybinding-service.ts:34-88",
+        "src/main/keybindings/keybinding-file.ts:27-102"
+      ],
+      "observableEffect": "Legacy overrides getter is evaluated on every KeybindingService construction, BEFORE migrateLegacyKeybindings checks whether the file exists. The migration no-ops for an existing file or absent/empty overrides; otherwise writes the active platform section. File-based overrides thereafter drive getSnapshot/reload/getOverrides.",
+      "defaultHydrationMigrationSemantics": "No builder default. Legacy key survives the inspected normalize/strip path; this is not a read-drain or a lifetime-once getter. The current source file path is .orca/keybindings.json; candidate path migration must preserve user customization, not silently discard it.",
+      "testPointers": [
+        {
+          "anchor": "src/main/keybindings/keybinding-file.test.ts:247-254",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Calls migration twice with different overrides and asserts the first persisted value remains."
+        }
+      ],
+      "unknowns": [
+        "Full startup-store wiring and post-save serialized retention have not been exercised here."
+      ]
+    },
+    {
+      "name": "dismissedSkillFreshnessNudges",
+      "declaredType": "string[]",
+      "declarationAnchor": "src/shared/global-settings-types.ts:384",
+      "consumerAnchors": [
+        "src/renderer/src/components/skills/SkillFreshnessNudge.tsx:11-25,28-206"
+      ],
+      "observableEffect": "Tuple keys combine physicalIdentity, name and release revision with NUL separators. Eligible unseen tuples determine the nudge. Explicit dismiss persists a Set-union capped to the final512 entries; existing keys do not move to the end on re-insertion. Opening update, scan failure, replaced inventory or unavailable local freshness retract without persisting. Failed settings update removes the in-memory persisted-fingerprint guard.",
+      "defaultHydrationMigrationSemantics": "No builder default; empty-array fallback. Not an unbounded log, strict LRU, or irreversible dismissal. Local shown-fingerprint guard also prevents repeats within the mounted session.",
+      "testPointers": [
+        {
+          "anchor": "src/renderer/src/components/skills/SkillFreshnessNudge.test.tsx:196-219",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Unavailable freshness retracts without updateSettings; repeated onDismiss calls persist exact tuple once."
+        },
+        {
+          "anchor": "src/renderer/src/components/skills/SkillFreshnessNudge.test.tsx:221-236",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Same fingerprint does not repeat; already dismissed exact tuple produces no toast."
+        }
+      ],
+      "unknowns": [
+        "Cap eviction and write-failure re-trigger behavior were not covered by the assertion bodies read here."
+      ]
+    },
+    {
+      "name": "experimentalSidekick",
+      "declaredType": "boolean",
+      "declarationAnchor": "src/shared/global-settings-types.ts:425",
+      "consumerAnchors": [
+        "src/main/persistence/applying-settings/onboarding-normalization.ts:241-243",
+        "src/main/persistence/loading-store/normalize-loaded-global-settings.ts:55-64",
+        "src/main/persistence/applying-settings/terminal-settings-migrations.ts:65-78"
+      ],
+      "observableEffect": "Normalization takes experimentalPet ?? legacySidekick ?? false. An explicit false new value wins. stripRetiredGlobalSettings removes three named other fields and spreads the rest, so the legacy sidekick property survives the inspected returned settings object.",
+      "defaultHydrationMigrationSemantics": "No builder default. Migration writes the new experimentalPet result, unlike the worker's read-only-migration description; it does not explicitly clear the old property on this normalization path.",
+      "testPointers": [
+        {
+          "anchor": "src/main/persistence-terminal-option-key-migration.test.ts:259-272",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Store load seeded with legacy true yields experimentalPet:true; old-field serialized retention is not asserted."
+        }
+      ],
+      "unknowns": [
+        "Full post-save round-trip outside the reviewed normalization remains unverified."
+      ]
+    },
+    {
+      "name": "agentsSidebarIntroShown",
+      "declaredType": "boolean",
+      "declarationAnchor": "src/shared/global-settings-types.ts:431",
+      "consumerAnchors": [
+        "src/renderer/src/components/sidebar/SidebarHeader.tsx:28-38,57-64,109-116"
+      ],
+      "observableEffect": "Header opens the intro only when migratedFromExperimental===true and IntroShown!==true. Got it or closing the popover requests updateSettings({agentsSidebarIntroShown:true}); this is a persisted acknowledgement, not an unconditional exactly-once guarantee if writing fails or settings are reset.",
+      "defaultHydrationMigrationSemantics": "No builder default; absent is treated as not acknowledged. Generic settings persistence/reset remains outside this component.",
+      "testPointers": [
+        {
+          "anchor": "src/renderer/src/components/sidebar/SidebarHeader.test.tsx:166-181",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Migrated mock state opens intro and empty settings closes it."
+        },
+        {
+          "anchor": "src/renderer/src/components/sidebar/SidebarHeader.test.tsx:272-280",
+          "kind": "assertion-body-read-not-executed",
+          "note": "The field is fixture input while the assertion checks absence of deprecated full-view action; NOT an acknowledgement-persistence assertion."
+        }
+      ],
+      "unknowns": [
+        "No dismissal write/reload assertion was established from these read test bodies."
+      ]
+    },
+    {
+      "name": "agentsSidebarMigratedFromExperimental",
+      "declaredType": "boolean",
+      "declarationAnchor": "src/shared/global-settings-types.ts:433",
+      "consumerAnchors": [
+        "src/main/persistence/loading-store/prepare-loaded-profile-settings.ts:63-68",
+        "src/main/persistence/loading-store/normalize-loaded-global-settings.ts:85-91",
+        "src/renderer/src/components/sidebar/SidebarHeader.tsx:28-35"
+      ],
+      "observableEffect": "Normalizer ORs prior true with migratedExperimentalActivity; header reads the result as intro eligibility. Prepared activity depends on experimentalActivityDefaultedOffForAllUsers: without that marker it becomes false; with marker it uses stored activity or false. Thus legacy activity:true alone is not an unconditional migration trigger.",
+      "defaultHydrationMigrationSemantics": "No builder default. Prior true survives this normalizer, not a promise of permanence through generic reset/import. The test fixture spreads current defaults before its overrides.",
+      "testPointers": [
+        {
+          "anchor": "src/main/persistence/loading-store/normalize-loaded-global-settings.test.ts:10-36",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Prepared fixtures normalize fresh to false and activity opt-in to true while dropping retired showAgentsSidebar."
+        }
+      ],
+      "unknowns": [
+        "All historical marker combinations and real persistence round-trips have not been executed here."
+      ]
+    },
+    {
+      "name": "experimentalAgentDashboardShowIdle",
+      "declaredType": "boolean",
+      "declarationAnchor": "src/shared/global-settings-types.ts:437",
+      "consumerAnchors": [
+        "src/renderer/src/components/dashboard/AgentDashboardSettingsMenu.tsx:32,123-127",
+        "src/renderer/src/components/dashboard/build-dashboard-snapshot.ts:101,268-274",
+        "src/renderer/src/components/sidebar/AgentDashboardSidebarEntry.tsx:28-39,63,91"
+      ],
+      "observableEffect": "Settings switch writes !showIdle using ===true input. Snapshot builder serializes showIdle alongside cards; this read alone is NOT proof idle cards were removed during snapshot construction. Sidebar count renderer filters out the idle bucket unless showIdle, independently of snapshot generation.",
+      "defaultHydrationMigrationSemantics": "No builder default; absent is false at these consumers.",
+      "testPointers": [
+        {
+          "anchor": "src/shared/constants.test.ts:116-118",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Default dashboard showIdle remains undefined."
+        },
+        {
+          "anchor": "src/renderer/src/components/dashboard/AgentDashboardSettingsMenu.test.tsx:55-69",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Switch click requests true through mocked updateSettings."
+        },
+        {
+          "anchor": "src/renderer/src/components/dashboard/build-dashboard-snapshot.test.ts:722-731",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Asserts serialized snapshot.showIdle true, not card filtering."
+        }
+      ],
+      "unknowns": [
+        "Downstream full dashboard rendering and sidebar settings reload have not been executed."
+      ]
+    },
+    {
+      "name": "experimentalCompactWorktreeCards",
+      "declaredType": "boolean",
+      "declarationAnchor": "src/shared/global-settings-types.ts:453",
+      "consumerAnchors": [
+        "src/main/persistence/loading-store/prepare-loaded-profile-settings.ts:183-186",
+        "src/main/persistence/loading-store/normalize-loaded-global-settings.ts:92-94"
+      ],
+      "observableEffect": "Prepared value prefers compactWorktreeCards, then legacy experimentalCompactWorktreeCards, then default. Normalizer writes the effective current property and always explicitly sets the legacy property undefined.",
+      "defaultHydrationMigrationSemantics": "No legacy builder default. Explicit current false wins over legacy true via nullish precedence. Clear is established in returned settings; no blanket claim about every possible load route.",
+      "testPointers": [
+        {
+          "anchor": "src/main/persistence-terminal-option-key-migration.test.ts:275-289",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Load with legacy true yields current compact true and legacy undefined."
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "name": "gitlabProjects",
+      "declaredType": "GitLabProjectSettings",
+      "declarationAnchor": "src/shared/global-settings-types.ts:464",
+      "consumerAnchors": [
+        "src/main/gitlab/gitlab-project-recents.ts:9-22",
+        "src/shared/gitlab-projects.ts:5-25",
+        "src/shared/gitlab-types.ts:210-214",
+        "src/main/ipc/gitlab-work-item-handlers.ts:70-99",
+        "src/main/runtime/orca-runtime-file-commands.ts:157-174"
+      ],
+      "observableEffect": "Global settings object contains pinned and recent arrays of host/path, with timestamp on recent; not per-account storage. recordGitLabProjectRecent preserves pinned and prepends/deduplicates host+path, caps recent at10, returns a new array. Type comment reserves pinned for future UI. IPC records only truthy work-item lookup results; runtime wiring supplies the same helper through a callback.",
+      "defaultHydrationMigrationSemantics": "No builder default; helper substitutes {pinned:[],recent:[]} when absent. Main-process write is not a direct UI toggle or proof every visit records a recent.",
+      "testPointers": [
+        {
+          "anchor": "src/shared/gitlab-projects.test.ts:7-53",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Five pure tests assert prepend, host/path dedupe, host separation, cap10 and input non-mutation."
+        },
+        {
+          "anchor": "src/main/runtime/orca-runtime-tests/gitlab-and-pr-bases-part-02.spec.ts:23-77",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Runtime method with stub store requests pinned-preserving recent update after lookup success, and no update after null. Real persistence and full mock import closure are not asserted."
+        },
+        {
+          "anchor": "src/main/ipc/gitlab.test.ts:113-115",
+          "kind": "assertion-body-read-not-executed",
+          "note": "This IPC fixture mocks the helper, which does not negate the separate runtime test."
+        }
+      ],
+      "unknowns": [
+        "Full saved-state persistence and any pinned editing surface are not established by this bounded source review."
+      ]
+    },
+    {
+      "name": "tabSwitchKeybindingSeed",
+      "declaredType": "'pending' | 'done'",
+      "declarationAnchor": "src/shared/global-settings-types.ts:477",
+      "consumerAnchors": [
+        "src/main/persistence/loading-store/loaded-cohort-migrations.ts:11-25",
+        "src/main/startup/main-process-account-services.ts:116-118",
+        "src/main/keybindings/keybinding-service.ts:40-55",
+        "src/main/keybindings/keybinding-file.ts:118-166"
+      ],
+      "observableEffect": "Cohort migration preserves either pending or done; otherwise existing file => pending, fresh => done and loadNeedsSave=true. Startup wires pending predicate and done write. Constructor retries while pending, marking done only after seed returns; caught failure logs and leaves pending. Seed can preserve customized actions and can write good pins before throwing for invalid others.",
+      "defaultHydrationMigrationSemantics": "No builder default. pending is NOT terminal and does not mean exactly one attempt: it may survive failures and advance to done after success. Existing values are not recomputed by cohort classification, but seed changes pending to done.",
+      "testPointers": [
+        {
+          "anchor": "src/main/persistence-cohort-and-identity-migration.test.ts:159-198",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Four store-load fixtures assert fresh done, existing pending, corrupt existing pending and preserved done."
+        },
+        {
+          "anchor": "src/main/keybindings/keybinding-service.test.ts:184-226",
+          "kind": "assertion-body-read-not-executed",
+          "note": "Second construction preserves bindings; file-as-home failure is caught and cohort remains pending. Reads include cohort fixture implementation at24-39."
+        }
+      ],
+      "unknowns": [
+        "These are source assertion reads, not execution of persistence or OS keyboard events."
+      ]
+    }
+  ],
+  "crossFieldObservation": "These ten mix migration inputs, retry/cohort markers, renderer preferences and main-process history writes. They do not form a strict5+5 split. Scanner absence is not unused behavior; observable consumers and storage semantics must survive migration.",
+  "gaps": [
+    "All execution remains owed, including persistence/reload/reset, platform keyboard behavior and remote ownership.",
+    "No general no-test-exists claim is made from bounded searches or missing source-symbol mentions.",
+    "Full214-field routing and the remaining E2 obligations remain open."
+  ]
+}

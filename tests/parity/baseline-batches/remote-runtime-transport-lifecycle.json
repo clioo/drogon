@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "capsules": [
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-client.json",
+      "approvedManifestSha256": "94ecb8fd8d4011378f541624a1773b748daddd52277fce8069c2b9686763fd6f"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-request-response-router.json",
+      "approvedManifestSha256": "61774661623de998067fb7abfd5309892ac1463f4cc10e52c2522d7145065c30"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-subscription-frame-router.json",
+      "approvedManifestSha256": "9708f4c27ff079dd117682ffd76b6b2ce98f2b311b4149bb2046b534c38be850"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-request-connection-stale.json",
+      "approvedManifestSha256": "4f5d500ff05a9adf20cf87fc660c8f0f438fd8c36f254f376915b35c39d4550d"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-request-websocket.json",
+      "approvedManifestSha256": "66c5b87bbef4b6cfa1ac34c91fdadf088970dcc68e31579d8154e2a7478008d3"
+    }
+  ]
+}

@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "workPackage": "WP-CAP-BOTS",
+  "allocationManifest": {
+    "path": "docs/migration/parity-test-work-packages.json",
+    "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+  },
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "totals": {
+    "originalSuites": 4,
+    "portedSuites": 4,
+    "originalTestCases": 51,
+    "originalExpectCallSites": 100,
+    "originalAssertionEvaluations": 138,
+    "candidateBoundSuites": 0,
+    "candidateBehavioralRedSuites": 0,
+    "candidateGreenSuites": 0,
+    "skippedSuites": 0
+  },
+  "statusMeaning": {
+    "ported": "The original assertion body is present under this work package without weakened assertions or skips.",
+    "blocked_binding": "Collection cannot reach a candidate interface; this is setup failure, not behavioral RED.",
+    "source_baseline": "Historical source behavior only; it is never candidate parity."
+  },
+  "suites": [
+    {
+      "sourcePath": "src/main/bots/bot-reactive-dispatch.test.ts",
+      "sourceSha256": "ad6eddd2749c20af80665b57410ed67f3ae3776831bded290091cc0349e8a0a0",
+      "cases": 29,
+      "expectCallSites": 56,
+      "assertionEvaluations": 92,
+      "portPath": "tests/parity/ports/WP-CAP-BOTS/reactive-dispatch/bot-reactive-dispatch.contract.test.ts",
+      "detailMap": "tests/parity/ports/WP-CAP-BOTS/reactive-dispatch/assertion-map.json",
+      "preservation": "literal_source_body_after_provenance_and_import_only_normalization",
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePath": "apps/desktop/src/main/bots/bot-reactive-dispatch.ts",
+      "candidateExecution": "exit_1_collection_error_zero_tests_not_behavioral_red",
+      "reusedSourceBaseline": {
+        "receipt": "docs/migration/source-regression-node-20260906.json",
+        "capsule": "tests/parity/baseline-capsules/bot-reactive-dispatch.json",
+        "result": "29 passed, 0 failed, 0 pending, 0 todo",
+        "runner": "Vitest 4.1.11 / Node 24.19.0",
+        "scope": "source_only"
+      }
+    },
+    {
+      "sourcePath": "src/main/bots/bot-responsibility-owner.test.ts",
+      "sourceSha256": "f4ae1f7e05c58cb3019c61777b0599821243535c378bb420b13c11e582edef6f",
+      "cases": 11,
+      "expectCallSites": 25,
+      "assertionEvaluations": 25,
+      "portPath": "tests/parity/ports/WP-CAP-BOTS/responsibility-owner/src/main/bots/bot-responsibility-owner.test.ts",
+      "detailMap": "tests/parity/ports/WP-CAP-BOTS/responsibility-owner/binding-status.json",
+      "preservation": "byte_identical",
+      "bindingStatus": "blocked_binding",
+      "missingCandidateInterfaces": [
+        "bot-responsibility-owner",
+        "bot-service",
+        "bot-persistence",
+        "drogon-bot-contract",
+        "automation-run-writer",
+        "bot-automation-dispatch-context"
+      ],
+      "candidateExecution": "exit_1_collection_error_zero_tests_not_behavioral_red",
+      "reusedSourceBaseline": {
+        "receipt": "docs/migration/source-regression-node-20260906.json",
+        "capsule": "tests/parity/baseline-capsules/bot-responsibility-owner.json",
+        "result": "11 passed, 0 failed, 0 pending, 0 todo",
+        "runner": "Vitest 4.1.11 / Node 24.19.0",
+        "scope": "source_only"
+      }
+    },
+    {
+      "sourcePath": "src/main/ipc/bot-schemas.test.ts",
+      "sourceSha256": "ceeed197fc9ed3d6835a6d089d918f1140d7e6c94d142e0a8a3aae373ce284f6",
+      "cases": 3,
+      "expectCallSites": 6,
+      "assertionEvaluations": 6,
+      "portPath": "tests/parity/ports/WP-CAP-BOTS/bot-schemas/bot-schemas.contract.test.ts",
+      "detailMap": "tests/parity/ports/WP-CAP-BOTS/bot-schemas/assertion-map.json",
+      "preservation": "literal_source_body_after_provenance_and_import_only_normalization",
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePath": "apps/desktop/src/main/bots/bot-schemas.ts",
+      "candidateExecution": "exit_1_collection_error_zero_tests_not_behavioral_red",
+      "sourceBaseline": "not_established; retained audit records say assertion bodies were read but not run"
+    },
+    {
+      "sourcePath": "src/renderer/src/components/bots/BotsPage.test.tsx",
+      "sourceSha256": "bd056caf58c50dc0f3f09ebc9729db05153bd15d48d5cc9a1481a544739d264f",
+      "cases": 8,
+      "expectCallSites": 13,
+      "assertionEvaluations": 15,
+      "portPath": "tests/parity/ports/WP-CAP-BOTS/bots-page/BotsPage.contract.test.tsx",
+      "detailMap": "tests/parity/ports/WP-CAP-BOTS/bots-page/assertion-map.json",
+      "preservation": "literal_source_body_after_provenance_and_import_only_normalization",
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePaths": [
+        "apps/desktop/src/renderer/src/components/bots/BotsPage.tsx",
+        "apps/desktop/src/shared/drogon-bot-contract.ts"
+      ],
+      "missingInstalledTestPackages": ["happy-dom", "@testing-library/react"],
+      "candidateExecution": "exit_1_environment_startup_error_zero_tests_not_behavioral_red",
+      "sourceBaseline": "not_established; retained audit records say assertion bodies were read but not run",
+      "staticSourceCaution": "The pinned source component/form names and preset behavior visibly differ from several frozen assertions; this was not executed and is not classified as a source behavioral result."
+    }
+  ]
+}

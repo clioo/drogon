@@ -1,0 +1,32 @@
+{
+  "capsuleId": "mobile-request-single-flight",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "manifestSha256": "be7ef86bf286285ddadf664223fa92b9df4334d0a6120d0b55df65c0fba274c7",
+  "entryTestFile": "mobile/src/transport/request-single-flight.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 5
+  },
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-request-single-flight-rzSPmQ",
+  "staged": [
+    {
+      "path": "mobile/src/transport/request-single-flight.test.ts",
+      "role": "test",
+      "sha256": "b1974e06331ba16d6ad3d123d38eed4e1394725b36ff2530ceb512c547626c8d",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-request-single-flight-rzSPmQ/mobile/src/transport/request-single-flight.test.ts"
+    },
+    {
+      "path": "mobile/src/transport/request-single-flight.ts",
+      "role": "module",
+      "sha256": "a492c36e03191751cb20d0aa8911b7aadddf6b220b550096f870c7520593618f",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-request-single-flight-rzSPmQ/mobile/src/transport/request-single-flight.ts"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-mobile-request-single-flight-rzSPmQ/LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  }
+}

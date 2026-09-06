@@ -1,0 +1,36 @@
+{
+  "capsuleId": "serve-mode-argv",
+  "description": "Unchanged original pure serve startup tests; coordinator reviewed complete dependency closure.",
+  "entryTestFile": "src/main/startup/serve-mode-argv.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 17
+  },
+  "files": [
+    {
+      "path": "src/main/startup/serve-mode-argv.test.ts",
+      "role": "test",
+      "sha256": "670bca554be192ce00dc54fc8fe59d70d25187438bf2226bceb7c5edd668a617"
+    },
+    {
+      "path": "src/main/startup/serve-mode-argv.ts",
+      "role": "module",
+      "sha256": "6c84e4b3836bdf97ed00f53905334caf1a4675e8aba21868190c41eee4dfbd1c"
+    }
+  ],
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "isolationRationale": "Coordinator fully read all staged files. Pure synchronous arrays/strings/numbers only; imports close over staged modules and Vitest. No application imports, network, stores, filesystem operations, child processes, Electron, models or services in tested code. No source assertions or mocks changed. Minimal config is not a security sandbox.",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 using Node24.19.0 on macOS. Minimal node config omits original aliases, setupFiles, feature-wall define, GC/webstorage and platform worker settings. Complete reviewed closure does not use these; no full-config/typecheck equivalence claim.",
+    "Default unit timeout instead of original30s/60s; outer timeout30s; fresh owned stage, no installs."
+  ],
+  "testEvidenceBoundary": "Detection, normalization, help refusal, GUI launch preservation, equals-form values/booleans, prototype-name passthrough, terminator and exhaustive consistency over 22621 argv tails. The exhaustive loop is one case, not 22621 tests. No live server launch, pairing, CLI process lifecycle, platform execution or candidate parity proof."
+}

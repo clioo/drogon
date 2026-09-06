@@ -1,0 +1,17 @@
+{
+  "capsuleId": "ui-preload-close-active-tab",
+  "description": "Unchanged original close-active-tab payload admission tests against the pinned pure source module.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/preload/close-active-tab-payload-admission.test.ts",
+  "expectedTestCounts": { "files": 1, "tests": 8 },
+  "files": [
+    { "path": "src/preload/close-active-tab-payload-admission.test.ts", "role": "test", "sha256": "e42939244be46cea70ac2a0164114b70e1d127e6853b7dec9a418e75039f3708" },
+    { "path": "src/preload/close-active-tab-payload-admission.ts", "role": "module", "sha256": "6a604e2b7e089645e1c4db026d79ca30701a8d137ce6b653ac741b601c68749f" }
+  ],
+  "license": { "path": "LICENSE", "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3", "spdxId": "MIT", "copyright": "Copyright (c) 2026 Lovecast Inc." },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": ["Minimal node environment; source setup, aliases, feature-wall define, GC/webstorage flags and extended timeouts are omitted because this closure is a pure value classifier."],
+  "dependencyClosureNote": "The runtime module has one type-only local import, erased by Vitest; there are no runtime imports beyond Vitest and the pinned sibling module.",
+  "isolationRationale": "Pure synchronous value classification only; no Electron, DOM, filesystem, network, process, timers, credentials or services. The runner writes only a new nonce capsule under .preflight/parity-baseline."
+}

@@ -1,0 +1,770 @@
+{
+  "capsuleId": "preload-app-restart-checkpoint-routing",
+  "description": "Unchanged original preload app-restart-checkpoint-routing suite over the full preload index closure; pinned transport runtime supplies the zod dependency some shared modules import at runtime.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/preload/app-restart-checkpoint-routing.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 6
+  },
+  "files": [
+    {
+      "path": "src/preload/api/agent-awake-bridge.ts",
+      "role": "module",
+      "sha256": "ce2df2ceef2689274c0f6da01683643d64d6013f1904bc5030ba3ac06ef3ea82"
+    },
+    {
+      "path": "src/preload/api/agent-status-bridge.ts",
+      "role": "module",
+      "sha256": "3ca63bc36f9fb6762b6f59df82679bcedef703601cf29070cf94768d5dfb926a"
+    },
+    {
+      "path": "src/preload/api/agent-trust-bridge.ts",
+      "role": "module",
+      "sha256": "767f123ab8e459bf91f7430305bf6279ae41ddb492706cc162cea302934b7695"
+    },
+    {
+      "path": "src/preload/api/ai-vault-bridge.ts",
+      "role": "module",
+      "sha256": "399e4b96cd47d8628a1ef295a721c6b90b47bc523c11755b798e140699964822"
+    },
+    {
+      "path": "src/preload/api/app-bridge.ts",
+      "role": "module",
+      "sha256": "feaa5897704e3b104e911b405040f389d9616234a5f7cfb9e47cb416def53050"
+    },
+    {
+      "path": "src/preload/api/automations-bridge.ts",
+      "role": "module",
+      "sha256": "45d43424c39c8670aaa6b40998f261fdddd4d362969f0aca4f7507a2839ff564"
+    },
+    {
+      "path": "src/preload/api/bitbucket-bridge.ts",
+      "role": "module",
+      "sha256": "a785a2a2a807f222f0184bc6da80ce3459aa4717c599a8ca477f611275a16074"
+    },
+    {
+      "path": "src/preload/api/bots-bridge.ts",
+      "role": "module",
+      "sha256": "0c8f16087482d2ecfa015615090c8cf8d07d9bb55f194fafc9e8ea9db263dee7"
+    },
+    {
+      "path": "src/preload/api/browser-bridge-guest-registration-and-downloads.ts",
+      "role": "module",
+      "sha256": "e3ef767225d4e15338a85f76788b59ac2fee3cd384607f0cff136cdc44e15efd"
+    },
+    {
+      "path": "src/preload/api/browser-bridge-page-interaction-and-sessions.ts",
+      "role": "module",
+      "sha256": "401379233d2e384ab92bbacc3b3cdf51b848faa13b8237a72ec0133b1a1e06ec"
+    },
+    {
+      "path": "src/preload/api/browser-bridge.ts",
+      "role": "module",
+      "sha256": "5697184ce635e80f0b9250fda147cd67a391ef1189378ef5d4819c7544e66df1"
+    },
+    {
+      "path": "src/preload/api/cache-bridge.ts",
+      "role": "module",
+      "sha256": "595e4ea6fceb99d4a2463db9696f063d313f1e106336664cfd248c09aff7abd9"
+    },
+    {
+      "path": "src/preload/api/claude-accounts-bridge.ts",
+      "role": "module",
+      "sha256": "2d453d58f87c580f592f3df81acfeeb3f15741f0e5099ba3f7d00bbd4928dc0e"
+    },
+    {
+      "path": "src/preload/api/claude-usage-bridge.ts",
+      "role": "module",
+      "sha256": "a259f5c5c19e55cfb32b4c05eedb824b1c6cda7717bada80a31c562da9abec70"
+    },
+    {
+      "path": "src/preload/api/cli-bridge.ts",
+      "role": "module",
+      "sha256": "d2a9ff42a7a31c9241716fd3665765d5d188c3f8d8808974ebac75e95247dc68"
+    },
+    {
+      "path": "src/preload/api/codex-accounts-bridge.ts",
+      "role": "module",
+      "sha256": "cf16ac9203712f832cd6a9a38eb46a6e20dede0f469668813c6992d3f129d205"
+    },
+    {
+      "path": "src/preload/api/codex-config-sync-bridge.ts",
+      "role": "module",
+      "sha256": "5791a9a17f79898ff9846ed42f40bb7d07db7793bfcbc051690616a3d05f69bd"
+    },
+    {
+      "path": "src/preload/api/codex-usage-bridge.ts",
+      "role": "module",
+      "sha256": "984ecd79b2869cd7a8464b4fd9df275bae632963dbcb39bde7e250358ef15e47"
+    },
+    {
+      "path": "src/preload/api/computer-use-permissions-bridge.ts",
+      "role": "module",
+      "sha256": "34ecf233c729d7c07ddb5e4ad3c111ef2ab9409b41ec6e0fe6c282bc1b784e07"
+    },
+    {
+      "path": "src/preload/api/crash-reports-bridge.ts",
+      "role": "module",
+      "sha256": "74c795bfbb4df687a43d6d878fd58d3d408836c866ca0a6c3086ad1654a6dacf"
+    },
+    {
+      "path": "src/preload/api/dashboard-bridge.ts",
+      "role": "module",
+      "sha256": "68e6c4408de7e8d6f56af1a5ed5d8b2afa49f59572c16c30294680dd6d47e875"
+    },
+    {
+      "path": "src/preload/api/developer-permissions-bridge.ts",
+      "role": "module",
+      "sha256": "3a896bdb008a921c22de3d7e519579c61ae3b81bcc69970e67ba57593a446705"
+    },
+    {
+      "path": "src/preload/api/diagnostics-bridge.ts",
+      "role": "module",
+      "sha256": "6b1030f640acdd2d6ac24da7f56be0d279b36899bbcc83ee7d8be04c29b0ca08"
+    },
+    {
+      "path": "src/preload/api/doc-preview-bridge.ts",
+      "role": "module",
+      "sha256": "0b025e7119059d39f8ce84e0f3c32869c23aa3fc79f680c7245b11d775ee366a"
+    },
+    {
+      "path": "src/preload/api/drogon-quick-session-bridge.ts",
+      "role": "module",
+      "sha256": "12eb8b43105bed8ebb0ac97267e5828c31948bcd405ebd4c5a62b130348cb251"
+    },
+    {
+      "path": "src/preload/api/e2e-bridge.ts",
+      "role": "module",
+      "sha256": "7e0333e67e6729e12ace2ac074d15858aea98d12756288f02089e33396e5abbc"
+    },
+    {
+      "path": "src/preload/api/emulator-bridge.ts",
+      "role": "module",
+      "sha256": "52f0101e2f6f8eea41eaf4f02d038905ade986cf544c2bf16279b880ffa1add4"
+    },
+    {
+      "path": "src/preload/api/ephemeral-vm-bridge.ts",
+      "role": "module",
+      "sha256": "9966a6bc8026157ecf64aa50b7f34e8b69112b97e19b5db30c2cc28449992131"
+    },
+    {
+      "path": "src/preload/api/export-bridge.ts",
+      "role": "module",
+      "sha256": "53ab0a7327237861063fcff217e726e0a157f3566a463e87bb7b961f2d11b0c9"
+    },
+    {
+      "path": "src/preload/api/feedback-bridge.ts",
+      "role": "module",
+      "sha256": "2c8128a76521d0c763ef2e4c5a4f531581d12e182548c05b0491458cc88cfd1e"
+    },
+    {
+      "path": "src/preload/api/folder-workspaces-bridge.ts",
+      "role": "module",
+      "sha256": "0828ce337741eb0f3ac4f301fd1ea8782ec2e7c8049a426efc4b337ed931b094"
+    },
+    {
+      "path": "src/preload/api/fs-bridge.ts",
+      "role": "module",
+      "sha256": "07baadfdb7147f6c0406d2b535f34ac9575ed3d3a66eb897c09784c9a61f7a12"
+    },
+    {
+      "path": "src/preload/api/gh-bridge-mutations-and-projects.ts",
+      "role": "module",
+      "sha256": "fdd86d93af32ac443baf05a0f08bf98effa276138a04aab181fc05058d05a7e2"
+    },
+    {
+      "path": "src/preload/api/gh-bridge-pull-requests-and-work-items.ts",
+      "role": "module",
+      "sha256": "1e5fb21a8701a50c8fbbd910cc938f0e3a3f41a774fbe69a5b746dc72ca76cfa"
+    },
+    {
+      "path": "src/preload/api/gh-bridge.ts",
+      "role": "module",
+      "sha256": "0b92a8473e83fdeecda5d3b0d25dc46ebe6c42a0229b4a89e4f663728a559be8"
+    },
+    {
+      "path": "src/preload/api/git-bash-bridge.ts",
+      "role": "module",
+      "sha256": "d62a88b23623fc1400c138716fb2b99fabc26990b738bc26b06f1278241e5073"
+    },
+    {
+      "path": "src/preload/api/git-bridge.ts",
+      "role": "module",
+      "sha256": "8b607c69d58a87440ce58b241c65009be3c82f1e0a5218b589d1d57fe376a418"
+    },
+    {
+      "path": "src/preload/api/gl-bridge.ts",
+      "role": "module",
+      "sha256": "153bd5e1cc9260087d27cbfd5d7201bca355b543274683d2f2013f71606af7d6"
+    },
+    {
+      "path": "src/preload/api/grok-accounts-bridge.ts",
+      "role": "module",
+      "sha256": "94f37aa5420391ec0da78de80f847a464424ce15d258b016b023a01dc7d08f35"
+    },
+    {
+      "path": "src/preload/api/hooks-bridge.ts",
+      "role": "module",
+      "sha256": "e5a14a8b2f272c84cc14f04b0eaa93062536125e8f48e5ff3934c967d56b5f5a"
+    },
+    {
+      "path": "src/preload/api/hosted-review-bridge.ts",
+      "role": "module",
+      "sha256": "7f2ba71300af081c049d7d6dc8e4304e0d58e4ede9f295cce2e264be0fd7430a"
+    },
+    {
+      "path": "src/preload/api/jira-bridge.ts",
+      "role": "module",
+      "sha256": "b49f8925211a4d04b5c9f5ce70636e1259848196516620c74d9887b52a53d672"
+    },
+    {
+      "path": "src/preload/api/keybindings-bridge.ts",
+      "role": "module",
+      "sha256": "427b69d66044f9f3ffeebad4c6e55f0a722f7db711ff2e62b3c3eeda04daed75"
+    },
+    {
+      "path": "src/preload/api/linear-bridge.ts",
+      "role": "module",
+      "sha256": "2b81aa1223ad5a370885c2339f08ddcf86a3f4d49bc61e785211915a6cceea74"
+    },
+    {
+      "path": "src/preload/api/localhost-worktree-labels-bridge.ts",
+      "role": "module",
+      "sha256": "96eb8f28d7d082ea302e43c13a3cab8704bf3b4a830c78bfd6ef7bb913bab39f"
+    },
+    {
+      "path": "src/preload/api/macos-tcc-prompts-bridge.ts",
+      "role": "module",
+      "sha256": "647ce187942b4dba93b3186c0d2f5b9404edfcc9310499beda9bc3bf97b67f45"
+    },
+    {
+      "path": "src/preload/api/meetings-bridge.ts",
+      "role": "module",
+      "sha256": "60eef5038369dd6005187b8579972a696c71ed789f7e58f04d53fdd02a26e909"
+    },
+    {
+      "path": "src/preload/api/memory-bridge.ts",
+      "role": "module",
+      "sha256": "a825630c372e8e2c30409d41632f40f04094142af529fb8331f945727825760c"
+    },
+    {
+      "path": "src/preload/api/mentu-bridge.ts",
+      "role": "module",
+      "sha256": "f1149e1a27c276b0bbc5785261ec3bb83b488a5009e32a44bb61b7fd53e9e909"
+    },
+    {
+      "path": "src/preload/api/minimax-credentials-bridge.ts",
+      "role": "module",
+      "sha256": "2d1b107f13bdcf8e6adadfaa00fc0ab65ed4a3f4da36c98e7979681175be1994"
+    },
+    {
+      "path": "src/preload/api/mobile-bridge.ts",
+      "role": "module",
+      "sha256": "c96c46ec9f9e110d2fd610dd0ea455b4385030552ec52f94e13ff03912459bad"
+    },
+    {
+      "path": "src/preload/api/native-chat-bridge.ts",
+      "role": "module",
+      "sha256": "e73e392a31133de1d592aa60e1b89df7210e2dca9ab014d9ac2e13c5c5266ae7"
+    },
+    {
+      "path": "src/preload/api/notebook-bridge.ts",
+      "role": "module",
+      "sha256": "a54847f75fd0547c710a793632bc27d24fd908d1524780337b555f208182216e"
+    },
+    {
+      "path": "src/preload/api/notifications-bridge.ts",
+      "role": "module",
+      "sha256": "df19b19e59ec4ad50e00bcd2e1f29991dfc65d47566791458691a8f431065f4d"
+    },
+    {
+      "path": "src/preload/api/onboarding-bridge.ts",
+      "role": "module",
+      "sha256": "0df98dd8e6bf8616fdfc25e9427fcd90d2835a771ea225c1404bc6d80977a019"
+    },
+    {
+      "path": "src/preload/api/open-code-usage-bridge.ts",
+      "role": "module",
+      "sha256": "1247230b115d84fe1d0010e7181663c910618113c9626fb537a995105b303de7"
+    },
+    {
+      "path": "src/preload/api/orca-profiles-bridge.ts",
+      "role": "module",
+      "sha256": "2c24a8aeaaa94cf32461beef2ea06b6a0ac3adeffb5e2a3c1a876c8d7ce31ff9"
+    },
+    {
+      "path": "src/preload/api/pet-bridge.ts",
+      "role": "module",
+      "sha256": "bfe99581184a6f195f5be896564cf5a31d1c92b8d59412872edde141856cd571"
+    },
+    {
+      "path": "src/preload/api/platform-bridge.ts",
+      "role": "module",
+      "sha256": "1e6f47c095863111e2b5e930740b2e3a0105c542d536e005358bedc95d762fe9"
+    },
+    {
+      "path": "src/preload/api/plugins-bridge.ts",
+      "role": "module",
+      "sha256": "fe7d3030f777247cbc46f9a3aa9b30cee82d8bd47d3b8d25ac4576fa924dc95a"
+    },
+    {
+      "path": "src/preload/api/preflight-bridge.ts",
+      "role": "module",
+      "sha256": "00ca703971f2a27150865232b400943a129125040a70d6503563411be0c6ce87"
+    },
+    {
+      "path": "src/preload/api/project-groups-bridge.ts",
+      "role": "module",
+      "sha256": "812e503bf767563184b1e41d9e2d822fc4d2f2c2a5e6dc40edc239934071c3fa"
+    },
+    {
+      "path": "src/preload/api/projects-bridge.ts",
+      "role": "module",
+      "sha256": "79003e358bd81889b46370749199d06b591a88bf2811b7af760312c6b89a7b16"
+    },
+    {
+      "path": "src/preload/api/pty-bridge-session-control.ts",
+      "role": "module",
+      "sha256": "a8d1d69428d7c71ec9a7e6d79aee43106b2a4d52fc3c42af3bfd7c3b099ceec7"
+    },
+    {
+      "path": "src/preload/api/pty-bridge-stream-and-serialization.ts",
+      "role": "module",
+      "sha256": "feaa9ba56191bb7200e7500ee20bccc65dbc928349fa4a5f1e595906fdb1ea30"
+    },
+    {
+      "path": "src/preload/api/pty-bridge.ts",
+      "role": "module",
+      "sha256": "0e2351ca0b56a590866758901e0990bb0b8524e3c2f45ecddf22ef40fb289b1f"
+    },
+    {
+      "path": "src/preload/api/pwsh-bridge.ts",
+      "role": "module",
+      "sha256": "fa45ca5a61959e4476e6eb809b561709a077e6177b4b3b27dd54390fcc1d0d15"
+    },
+    {
+      "path": "src/preload/api/rate-limits-bridge.ts",
+      "role": "module",
+      "sha256": "69ec3f30c1f8318bc4bb0614310202f679473beb5edff2b4b13f6f6482a289d7"
+    },
+    {
+      "path": "src/preload/api/remote-workspace-bridge.ts",
+      "role": "module",
+      "sha256": "d50d59411795d35c38e261cb72704a3a906cd63628e0a2d99d517d7b6cbe6f0c"
+    },
+    {
+      "path": "src/preload/api/repos-bridge.ts",
+      "role": "module",
+      "sha256": "fe2a73de258493ce8756b8f2e4ccfd8a414850a981c208b69ceb11a1ac6b278b"
+    },
+    {
+      "path": "src/preload/api/runtime-bridge.ts",
+      "role": "module",
+      "sha256": "670533856326cd427516f3f56f6d3aa752f8e1ee38538605ef4fee7a9e8b21c3"
+    },
+    {
+      "path": "src/preload/api/runtime-environments-bridge.ts",
+      "role": "module",
+      "sha256": "3d496d0e9f53fe2b2554a26ddc70e10831b4451c19f9b3846f36bcd96bd80e58"
+    },
+    {
+      "path": "src/preload/api/session-bridge.ts",
+      "role": "module",
+      "sha256": "347ae9f2a0a6f7dc4840e1f8d0b9c6f38abb489cc5b75a0360687682cea141b5"
+    },
+    {
+      "path": "src/preload/api/settings-bridge.ts",
+      "role": "module",
+      "sha256": "ecd9cc642720466ba70e05fbea772491279d5f8c1898f156d6e96a0831ba3f4d"
+    },
+    {
+      "path": "src/preload/api/shell-bridge.ts",
+      "role": "module",
+      "sha256": "6444e93223e8855a05c60cc279fc32963d75723c9a101866b43092f472480f70"
+    },
+    {
+      "path": "src/preload/api/skills-bridge.ts",
+      "role": "module",
+      "sha256": "49781b1fd9076e2281dc90cb552fe4afd8d36e2617d9845683d05c7d5dd8214b"
+    },
+    {
+      "path": "src/preload/api/sparse-presets-bridge.ts",
+      "role": "module",
+      "sha256": "5a2021cfce1713d6095611f15be63b99022d89710aa9202e0b53a8c765c7653a"
+    },
+    {
+      "path": "src/preload/api/speech-bridge.ts",
+      "role": "module",
+      "sha256": "651c7855cab5c0addd2496942e9ccf670bbef4cad1296ade5870c70114ec91bb"
+    },
+    {
+      "path": "src/preload/api/ssh-bridge.ts",
+      "role": "module",
+      "sha256": "5d2ad37f82a459b0f5f1e01f199a0f8bd076dbbf52550eb661f073ce680c24fc"
+    },
+    {
+      "path": "src/preload/api/star-nag-bridge.ts",
+      "role": "module",
+      "sha256": "6e84033bed840a2f25a1c33f8b19c42286223017b3788fd041ffec4994c911e8"
+    },
+    {
+      "path": "src/preload/api/stats-bridge.ts",
+      "role": "module",
+      "sha256": "edefe17a2448bfb48b7fc1b2a8876f0c09ed2e17b4f015e5fdc44e3f3d60f339"
+    },
+    {
+      "path": "src/preload/api/terminal-preview-bridge.ts",
+      "role": "module",
+      "sha256": "5c3b0a011ee7d63a163c15a35a9581931acfc3ab446e9991931b3e7b67df2d9b"
+    },
+    {
+      "path": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts",
+      "role": "module",
+      "sha256": "a9af96d3c4f1d54b1079976c00e5ba1bffe91b6c3dd4a828ab15289f859ce156"
+    },
+    {
+      "path": "src/preload/api/ui-bridge-state-and-menu-commands.ts",
+      "role": "module",
+      "sha256": "efdab7347001131993445cda71db08c3845b1829a64444fbfe84ea6452d1cd51"
+    },
+    {
+      "path": "src/preload/api/ui-bridge-tab-and-browser-commands.ts",
+      "role": "module",
+      "sha256": "2b4f21ccc5330fe82c72c5af1bdf1329db4a3da7c9286861eb744effec3c55b2"
+    },
+    {
+      "path": "src/preload/api/ui-bridge-terminal-and-session-tabs.ts",
+      "role": "module",
+      "sha256": "db6d1270cf86b2a162ff1842db3c4ed420ea58c9c5f1ad0949f2f6e9eefe6588"
+    },
+    {
+      "path": "src/preload/api/ui-bridge.ts",
+      "role": "module",
+      "sha256": "6b26ca4843dda574c03819cb6d9ceb4b3e86dff33272278de2e4b968a7cca52c"
+    },
+    {
+      "path": "src/preload/api/updater-bridge.ts",
+      "role": "module",
+      "sha256": "9ab0bd6fa2b1499fd91c6942ead31f02cd26f472b985c4c2e80d08a756c14535"
+    },
+    {
+      "path": "src/preload/api/workspace-cleanup-bridge.ts",
+      "role": "module",
+      "sha256": "2a40fcb51757eeafe956e5230c1a5ac94a64a79980af1191ca39f3c4f0567a50"
+    },
+    {
+      "path": "src/preload/api/workspace-ports-bridge.ts",
+      "role": "module",
+      "sha256": "2c9bc4d2ee8f1464792cc8a0fa43de6ca570b3e9b62151f533c5316f5d1895b0"
+    },
+    {
+      "path": "src/preload/api/workspace-space-bridge.ts",
+      "role": "module",
+      "sha256": "c647d0d767c877d1f609e9053a1334347a7bf271fc9a2cca4bb4a5e2e4e6da93"
+    },
+    {
+      "path": "src/preload/api/worktrees-bridge.ts",
+      "role": "module",
+      "sha256": "98b347e57880d1726e238701e91cd2edeaddad8bdc97e3732b9b9f1bf60e59ff"
+    },
+    {
+      "path": "src/preload/api/wsl-bridge.ts",
+      "role": "module",
+      "sha256": "8d9e2cc7068b59f2767603a0542e854c9275bc29493cbdcbd5f466cd779f2ca8"
+    },
+    {
+      "path": "src/preload/app-restart-checkpoint-routing.test.ts",
+      "role": "test",
+      "sha256": "881d32d4e3621fd74a90b00d66d4b8f04613a024920dc6f956e911fab64a14ab"
+    },
+    {
+      "path": "src/preload/browser-client-page-renderer-requests.ts",
+      "role": "module",
+      "sha256": "f224cd1ce4f398eb1deac2953e58c2bd165f069e07c454f5883402c6b6b92f0b"
+    },
+    {
+      "path": "src/preload/browser-find-subscriptions.ts",
+      "role": "module",
+      "sha256": "599c10cc7100e09e909bd31d7a0877c33dccbff6c99afd53c5fdff660334bd06"
+    },
+    {
+      "path": "src/preload/close-active-tab-payload-admission.ts",
+      "role": "module",
+      "sha256": "6a604e2b7e089645e1c4db026d79ca30701a8d137ce6b653ac741b601c68749f"
+    },
+    {
+      "path": "src/preload/e2e-config.ts",
+      "role": "module",
+      "sha256": "105dd582a48ef36c6ec0c4c140bbcfdbaae33b70962257767b4668320105359d"
+    },
+    {
+      "path": "src/preload/gitlab.ts",
+      "role": "module",
+      "sha256": "e1c2ee188d38c82325e5cabf0f1f8a454aa080afbd321d96e445f81be8e380ef"
+    },
+    {
+      "path": "src/preload/index.ts",
+      "role": "module",
+      "sha256": "bda759d24c26339f6cd28cc282f639b3ad4c7754d9316458ae60c2a242141960"
+    },
+    {
+      "path": "src/preload/preload-runtime-support.ts",
+      "role": "module",
+      "sha256": "af169b11746f5a5f30de11e8a0c6c1826a93d7ef2823c90d075614ec6141583c"
+    },
+    {
+      "path": "src/preload/renderer-heap-statistics-reader.ts",
+      "role": "module",
+      "sha256": "3f533f4065b858f20206483af54522c8a1c1aa31c75c8cd3dbfba79e5eae43bd"
+    },
+    {
+      "path": "src/preload/renderer-process-memory-reader.ts",
+      "role": "module",
+      "sha256": "323525e4c476110b2a5d3a416e988c408b93af743874885e45846f10a53f4dad"
+    },
+    {
+      "path": "src/preload/renderer-restart-wiring.ts",
+      "role": "module",
+      "sha256": "dc1d269077b4e863076ff7271a5a57738bc8a490f078cbf8ff3b07f5d09636b1"
+    },
+    {
+      "path": "src/preload/runtime-environment-subscriptions.ts",
+      "role": "module",
+      "sha256": "96600d829b4d7c3997e55e52701b58a14fe19331ae6934e628eb74abac5b9802"
+    },
+    {
+      "path": "src/preload/usage-provider-api.ts",
+      "role": "module",
+      "sha256": "1376070698ca3cf469d2134a6dc40ae8544af1ed8f339b683b74fcbbcf08526f"
+    },
+    {
+      "path": "src/shared/browser-client-host-id-argument.ts",
+      "role": "module",
+      "sha256": "9a41ecfa0125fcd2dbb76cec4f32ff73d70682e03c8cfd343b9675bcf4d21d53"
+    },
+    {
+      "path": "src/shared/browser-client-page-renderer-protocol.ts",
+      "role": "module",
+      "sha256": "2b748808193af688173f33767616ff211a2d975ae4d0878193b0c691d8561103"
+    },
+    {
+      "path": "src/shared/browser-find-source.ts",
+      "role": "module",
+      "sha256": "e7eb61599429456c18977cc57b59eb8c9b39922d7990bc2b880ecd3b45e5b382"
+    },
+    {
+      "path": "src/shared/clipboard-text.ts",
+      "role": "module",
+      "sha256": "50f3155063244d6d12ac1493c80029a75df256c031f986f76da64a94152d0c38"
+    },
+    {
+      "path": "src/shared/doc-preview-scheme.ts",
+      "role": "module",
+      "sha256": "b96e527031adcaee27e8269919dc8b19625710706750fb8e692cf08da12d3976"
+    },
+    {
+      "path": "src/shared/e2e-config.ts",
+      "role": "module",
+      "sha256": "cc95e51e4c7986782f5dac870fc807a0377797f5eab2a2e6ae199c4ffcd5abb8"
+    },
+    {
+      "path": "src/shared/editor-save-events.ts",
+      "role": "module",
+      "sha256": "2fb1adac742aa3795ad7ef0d9ae4982da9c30134be5059ee6a0d3cd9d22bacf2"
+    },
+    {
+      "path": "src/shared/event-loop-yield.ts",
+      "role": "module",
+      "sha256": "d291b71f09eb88f24a849d0ae310f946deb7f93b0b6b490b6ea5a605ab7a53cf"
+    },
+    {
+      "path": "src/shared/keyboard-layout-events.ts",
+      "role": "module",
+      "sha256": "a3b70a5777fe9db244b9afa1d24f649671f4c6e59b6af425838c8e589cf2a232"
+    },
+    {
+      "path": "src/shared/native-file-drop.ts",
+      "role": "module",
+      "sha256": "310adf7ece57cc57fe703c2fa9590a40b57ee32290f1044930a3706e71fa835f"
+    },
+    {
+      "path": "src/shared/renderer-restart-preparation.ts",
+      "role": "module",
+      "sha256": "ccbe3af4bd913cd6699f03693f05f364ce7253ae8b3f27d62b39ba8844be5b24"
+    },
+    {
+      "path": "src/shared/renderer-shutdown-events.ts",
+      "role": "module",
+      "sha256": "bdd87131e559f09a968a947cbc6099c2b640dc460bed0f4d3ed7c391f75f5362"
+    },
+    {
+      "path": "src/shared/rich-markdown-context-menu.ts",
+      "role": "module",
+      "sha256": "921b3d5e1ae88b83a5662d3f9cfa5a358bd0d2555fd613c309724e9def727536"
+    },
+    {
+      "path": "src/shared/runtime-environment-diagnostics.ts",
+      "role": "module",
+      "sha256": "dc7e8cfea80abb85160b040c88041a96833bd4382f68b3c78d90698d9fb797d1"
+    },
+    {
+      "path": "src/shared/ssh-retained-payload-admission.ts",
+      "role": "module",
+      "sha256": "6b0bb638ab0c68b177604d005ea825671af90408f1ef357fb99858b32f2bf43f"
+    },
+    {
+      "path": "src/shared/updater-renderer-events.ts",
+      "role": "module",
+      "sha256": "e9f7f159c92a1d0a8350fd0ca8351b9c5b2064a8deceff177fd879d765aefba0"
+    },
+    {
+      "path": "src/shared/utf8-byte-limits.ts",
+      "role": "module",
+      "sha256": "07427f715975095184f81bcd1677808da82a6734e02cedc86c5b8fdee053ace3"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Minimal node environment with per-file @vitest-environment overrides; source setup files, aliases, feature-wall defines and extended timeouts omitted.",
+    "Type-only local imports are erased by the transform and are not staged (114 transitive type-only files recorded in the closure note)."
+  ],
+  "isolationRationale": "Pinned-byte capsule under .preflight/parity-baseline; no network, services, or credentials.",
+  "typeOnlyClosureFiles": [
+    "src/preload/api-types.ts",
+    "src/preload/api/doc-preview-api.ts",
+    "src/preload/api/mentu-api.ts",
+    "src/preload/api/ui-command-event-api.ts",
+    "src/preload/runtime-environment-subscriptions.ts",
+    "src/shared/agent-interrupt-intent.ts",
+    "src/shared/agent-question-answered-intent.ts",
+    "src/shared/agent-session-pty-write-admission.ts",
+    "src/shared/agent-session-resume.ts",
+    "src/shared/agent-status-types.ts",
+    "src/shared/ai-vault-resume-preparation.ts",
+    "src/shared/ai-vault-session-deletion.ts",
+    "src/shared/ai-vault-session-title.ts",
+    "src/shared/ai-vault-types.ts",
+    "src/shared/app-identity.ts",
+    "src/shared/automation-owner-ref.ts",
+    "src/shared/automations-types.ts",
+    "src/shared/browser-webauthn-account.ts",
+    "src/shared/browser-workspace-types.ts",
+    "src/shared/cli-install-types.ts",
+    "src/shared/client-hosted-browser-rows.ts",
+    "src/shared/clipboard-image.ts",
+    "src/shared/clipboard-text.ts",
+    "src/shared/code-search-types.ts",
+    "src/shared/codex-config-sync-types.ts",
+    "src/shared/codex-startup-delivery.ts",
+    "src/shared/computer-awake-mode.ts",
+    "src/shared/crash-reporting.ts",
+    "src/shared/dashboard-snapshot.ts",
+    "src/shared/execution-host.ts",
+    "src/shared/external-automation-scope.ts",
+    "src/shared/feature-education-telemetry.ts",
+    "src/shared/filesystem-entry-types.ts",
+    "src/shared/gh-star-source.ts",
+    "src/shared/git-fork-sync.ts",
+    "src/shared/git-history.ts",
+    "src/shared/git-status-types.ts",
+    "src/shared/github/auth-types.ts",
+    "src/shared/github/comment-types.ts",
+    "src/shared/github/project-request-types.ts",
+    "src/shared/github/project-result-types.ts",
+    "src/shared/github/pull-request-refresh-types.ts",
+    "src/shared/github/pull-request-types.ts",
+    "src/shared/github/rate-limit-types.ts",
+    "src/shared/github/work-item-types.ts",
+    "src/shared/global-settings-types.ts",
+    "src/shared/host-lineage-contract.ts",
+    "src/shared/host-repo-catalog-contract.ts",
+    "src/shared/hosted-review.ts",
+    "src/shared/issue-mutation-types.ts",
+    "src/shared/jira-types.ts",
+    "src/shared/keybindings.ts",
+    "src/shared/linear/project-types.ts",
+    "src/shared/local-log-tail-types.ts",
+    "src/shared/localhost-worktree-labels.ts",
+    "src/shared/macos-symbolic-hotkeys.ts",
+    "src/shared/mobile-markdown-document.ts",
+    "src/shared/mobile-pairing-connection-mode.ts",
+    "src/shared/mobile-relay-mint-failure.ts",
+    "src/shared/mobile-relay-status.ts",
+    "src/shared/native-chat-types.ts",
+    "src/shared/native-file-drop.ts",
+    "src/shared/notification-settings-types.ts",
+    "src/shared/onboarding-state-types.ts",
+    "src/shared/persisted-ui-state-types.ts",
+    "src/shared/pet-types.ts",
+    "src/shared/plugins/plugin-change-event.ts",
+    "src/shared/plugins/plugin-consent-request.ts",
+    "src/shared/plugins/plugin-panel-bridge.ts",
+    "src/shared/process-stats-types.ts",
+    "src/shared/project-execution-runtime.ts",
+    "src/shared/project-group-types.ts",
+    "src/shared/pty-delivery-diagnostics.ts",
+    "src/shared/pty-listed-session.ts",
+    "src/shared/pty-model-restore-marker.ts",
+    "src/shared/pty-renderer-delivery-health.ts",
+    "src/shared/rate-limit-types.ts",
+    "src/shared/remote-pairing-verification.ts",
+    "src/shared/remote-runtime-shared-control-types.ts",
+    "src/shared/remote-workspace-types.ts",
+    "src/shared/renderer-heap-statistics.ts",
+    "src/shared/renderer-process-memory.ts",
+    "src/shared/repo-types.ts",
+    "src/shared/runtime-client-events.ts",
+    "src/shared/runtime-environments.ts",
+    "src/shared/runtime-pairing-reach.ts",
+    "src/shared/runtime-rpc-envelope.ts",
+    "src/shared/runtime-types.ts",
+    "src/shared/shell-open-types.ts",
+    "src/shared/skill-cloud-contract.ts",
+    "src/shared/skill-delete-contract.ts",
+    "src/shared/skill-freshness.ts",
+    "src/shared/skill-sharing-contract.ts",
+    "src/shared/skills.ts",
+    "src/shared/speech-types.ts",
+    "src/shared/ssh-types.ts",
+    "src/shared/task-source-context.ts",
+    "src/shared/telemetry-events.ts",
+    "src/shared/terminal-custom-themes.ts",
+    "src/shared/terminal-preview.ts",
+    "src/shared/terminal-process-inspection.ts",
+    "src/shared/terminal-render-desync-evidence.ts",
+    "src/shared/terminal-reveal-identity.ts",
+    "src/shared/terminal-side-effect-facts.ts",
+    "src/shared/terminal-view-attributes.ts",
+    "src/shared/tui-agent.ts",
+    "src/shared/ui-chrome-types.ts",
+    "src/shared/update-status-types.ts",
+    "src/shared/workspace-cleanup.ts",
+    "src/shared/workspace-ports.ts",
+    "src/shared/workspace-space-types.ts",
+    "src/shared/worktree/base-ref-drift-types.ts",
+    "src/shared/worktree/launch-types.ts",
+    "src/shared/worktree/types.ts"
+  ],
+  "transportRuntime": {
+    "ws": {
+      "version": "8.21.3",
+      "treeSha256": "aad13c0d5b988c454b067e8f6d9d0e8ed938293ec60989a2207cf8614ef9a4a0"
+    },
+    "tweetnacl": {
+      "version": "1.0.3",
+      "treeSha256": "79d76ce10a07a02d66cba99b0f11b00724e8095e0a5004ed62c8bc2f43183793"
+    },
+    "zod": {
+      "version": "4.5.4",
+      "treeSha256": "8675df81babc63b169f49743e654198f574342b364a9bf831eb39f4e881ba63f"
+    }
+  }
+}

@@ -1,0 +1,444 @@
+/* Selected Orca design tokens, MIT Copyright (c) 2026 Lovecast Inc. */
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@xterm/xterm/css/xterm.css";
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius-md: calc(var(--radius) * 0.8);
+}
+:root {
+  --font-sans: "Geist Variable", "Geist", sans-serif;
+  --font-mono:
+    "SF Mono", SFMono-Regular, ui-monospace, "Cascadia Code", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --radius: 0.625rem;
+  --background: #fff;
+  --foreground: #0a0a0a;
+  --primary: #171717;
+  --primary-foreground: #fafafa;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #171717;
+  --muted-foreground: #737373;
+  --accent: #f5f5f5;
+  --accent-foreground: #171717;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #a1a1a1;
+  --destructive: #e40014;
+  --sidebar: #fafafa;
+  --sidebar-accent: #f5f5f5;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #fafafa;
+    --primary: #e5e5e5;
+    --primary-foreground: #171717;
+    --secondary: #262626;
+    --secondary-foreground: #fafafa;
+    --muted-foreground: #a1a1a1;
+    --accent: #404040;
+    --accent-foreground: #fafafa;
+    --border: rgb(255 255 255 / 0.07);
+    --input: rgb(255 255 255 / 0.15);
+    --ring: #737373;
+    --destructive: #ff6568;
+    --sidebar: #171717;
+    --sidebar-accent: #262626;
+    color-scheme: dark;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  color: var(--foreground);
+  background: var(--background);
+}
+button {
+  font: inherit;
+}
+button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+h1,
+h2 {
+  text-wrap: balance;
+}
+.app-shell {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+.workspace-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.brand {
+  height: 56px;
+  padding: 18px 20px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 20px 12px 8px 20px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  margin: 2px 8px;
+  padding: 8px 12px;
+  border-radius: calc(var(--radius) * 0.8);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+}
+.workspace-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-row svg {
+  flex-shrink: 0;
+}
+.workspace-row:hover,
+.workspace-row[data-current="true"] {
+  background: var(--sidebar-accent);
+}
+.sidebar-empty {
+  margin: 12px 20px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sidebar-footer {
+  margin-top: auto;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.folder-form {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.session-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.session-header {
+  min-height: 56px;
+  padding: 8px 16px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.workspace-heading {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.workspace-heading .path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.session-layout {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+.terminal-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.active-session-panel {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-height: 40px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  padding-right: 8px;
+}
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  border-right: 1px solid var(--border);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+.terminal-tab[data-current="true"] {
+  color: var(--foreground);
+  background: var(--accent);
+}
+.terminal-tab > button[role="tab"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 10px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.session-verdict {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.terminal-surface {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 4px 4px 12px;
+}
+.terminal-surface .xterm {
+  height: 100%;
+}
+.empty-state {
+  margin: auto;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  max-width: 480px;
+}
+.empty-state > svg {
+  color: var(--muted-foreground);
+}
+.empty-state h1 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.empty-state p {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+  text-wrap: pretty;
+}
+.session-details {
+  width: 250px;
+  flex-shrink: 0;
+  padding: 20px 16px;
+  border-left: 1px solid var(--border);
+  overflow: auto;
+}
+.session-details h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.session-details dt {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  margin-top: 20px;
+}
+.session-details dd {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.session-details p {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.migration-note {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.error-banner {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.error-banner span {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--destructive);
+  max-width: 75ch;
+}
+.tooltip {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: calc(var(--radius) * 0.8);
+  padding: 6px 10px;
+  font-size: 12px;
+  z-index: 10;
+}
+.harness-menu {
+  min-width: 200px;
+  background: var(--background);
+  border-radius: calc(var(--radius) * 0.8);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.18);
+  padding: 4px;
+  z-index: 10;
+}
+.harness-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: calc(var(--radius) * 0.6);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+.harness-menu-item[data-highlighted] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  /* --accent is nearly indistinguishable from --background in light mode;
+     an inset ring keeps the keyboard-highlighted row visible on its own. */
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+.harness-menu-item[data-disabled] {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+.harness-menu-hint {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.harness-menu-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+.harness-launch-form {
+  width: 280px;
+  background: var(--background);
+  border-radius: calc(var(--radius) * 0.8);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.18);
+  padding: 14px;
+  z-index: 10;
+}
+.harness-launch-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.harness-launch-form h2 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.harness-launch-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.harness-advanced {
+  font-size: 12px;
+}
+.harness-advanced summary {
+  cursor: pointer;
+  color: var(--muted-foreground);
+  margin-bottom: 8px;
+}
+.harness-advanced label {
+  margin-top: 8px;
+}
+.harness-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+}
+@media (max-width: 1100px) {
+  .session-details {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 250px;
+    z-index: 1;
+    background: var(--background);
+  }
+}
+@media (max-width: 800px) {
+  .workspace-sidebar {
+    width: 200px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -1,0 +1,1880 @@
+{
+  "schema": "drogon.audit-closure.e4/1",
+  "groupId": "E4",
+  "proposedDisposition": "open",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "evidence": [
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/parity-source-contracts.json",
+      "line": 1,
+      "sha256": "879616c5ad9764cf804acb5662d2fc39f76c686840cc44a0a67bf4b38ed598fa"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/parity-cli-argument-contract.json",
+      "line": 1,
+      "sha256": "2e7d79243422f97e3bfa479ab9c8fb42e1f0bc24b0cd45117707dd344e3edc4f"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/parity-cli-skills-contracts.json",
+      "line": 1,
+      "sha256": "d98bc53df3835692cfa9784e9e0461e7a60bb2f013438828fd1bcf32667cbbd2"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/parity-cli-terminal-contracts.json",
+      "line": 1,
+      "sha256": "70d8b86492aa6d97757df3c81c1bfbeaf82094b0d8be0e4864367efba29ad117"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/parity-cli-workspace-contracts.json",
+      "line": 1,
+      "sha256": "7de17dc6d3006d2dd4f185b81848e746d65e8a870f00965bf9ea8ccc480e14a5"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/parity-cli-audit.md",
+      "line": 1,
+      "sha256": "19bca1fdec935021603eb4a3c9b94acb5b503980326d8eb985ec09f386e601f3"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/parity-source-tests.json",
+      "line": 1,
+      "sha256": "85ac41eb43641abd6aff44ce1640e217b00e22ccfbf59eb6832a3ffb0f5caf83"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/parity-audit-gate-ledger.json",
+      "line": 1,
+      "sha256": "63a0825f1638215eadf54cf9809914c5095c825eb08de2abd0a33513c0d313a3"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/audit-progress.md",
+      "line": 1,
+      "sha256": "f27d97ef704655d17c8d3de81314f9b0f8a332bf28b41006c8af79981aca82c4"
+    },
+    {
+      "repository": "rewrite",
+      "path": "docs/migration/audit-closure-coordination.md",
+      "line": 1,
+      "sha256": "120027755de67a3f2acb20022bbb838192de28b2ebe5eb2b48306c11817871c3"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/agent-context.ts",
+      "line": 1,
+      "sha256": "e07ff5ec811332de7af9072075466e909cecf856b8cde33f16c44a8cf9cb35cd"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/args.ts",
+      "line": 1,
+      "sha256": "3d6362e8910aa57796a0d2bdce2acd7cdf8e3bb69a710235c7364158381e8e77"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/artifact-format.ts",
+      "line": 1,
+      "sha256": "4af3a35d0fea20bd4ca30f9eac3b5292a2717b2fa92f3306dd2f9e79cf871c6b"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/automation-destination.ts",
+      "line": 1,
+      "sha256": "3b0c792aaacdd6e5839e12f80b84a7d5f12ca2c7cc27cd93a371423463c04452"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/automation-format.ts",
+      "line": 1,
+      "sha256": "301cb3a49e995e0ed1883dda625cfe49c9dcaa217226156d2c543ebb762cba15"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/automation-owner-conflict-recovery.ts",
+      "line": 1,
+      "sha256": "9cc403f5a7cb84bea26b72a126f3840ee23fd0a8afa871794954ae8173875f96"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/base64-payload-byte-count.ts",
+      "line": 1,
+      "sha256": "476e6fd238f90d9eb38189b3d0861aca16e9241b662b5620b904b54a03236078"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/browser-format.ts",
+      "line": 1,
+      "sha256": "b8cfb19f688f2d5dd6755a0a299ad42ba0d3dcecde44c3f00eb5d128f4b7bc2a"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/browser-handler-groups.ts",
+      "line": 1,
+      "sha256": "2e40e856417cd40d9c6d1d0b5a126257fe5091b6bef73c49e755b8943cb60b63"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/cli-version.ts",
+      "line": 1,
+      "sha256": "fd60cad03e45825002bce1e6b444aa0e3ff80dbebb167727cc53c4fd5102f3bc"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/codex-command-classification.ts",
+      "line": 1,
+      "sha256": "1d0aa9a5051694b5d8efaa2a2ebfa851abb0b1532129138cd7e5f793866d6e89"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/command-spec.ts",
+      "line": 1,
+      "sha256": "6686b3e57543b6f6473f2d62b883e07827dbbedbec14b0b302d6c0cd0f78d5c7"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/command-suggestion.ts",
+      "line": 1,
+      "sha256": "f2afbb89f8239311c0234ca3a5a6a26d46fae31fb9e6315220d8cfe78dfcaaec"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/computer-format.ts",
+      "line": 1,
+      "sha256": "cd26b0993398d11d489519465d17c9bab7197b39f7a214ed215907a4eec12ae3"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/dispatch.ts",
+      "line": 1,
+      "sha256": "6ea2c17aadd8b326a58db17d704497153951ca94e1199dc56809c589a703aad7"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/emulator-logcat-format.ts",
+      "line": 1,
+      "sha256": "a4e7ba4e27cd4b2163fdcf0854a84f2c3ce4c202b9cf307c2353a13cec9e7282"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/emulator-permissions-args.ts",
+      "line": 1,
+      "sha256": "5bc2c2f5f3a4dc390bc3d19a843e7a20a95d126b8861aa3839ac9651d417176d"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/execution-host-flag.ts",
+      "line": 1,
+      "sha256": "0c000c1bbb42a8e174f52d400ca88630db8a4960e6983fa0203aa6d47168eb9e"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/flags.ts",
+      "line": 1,
+      "sha256": "c7bf17b2fafbd379b4de4a1353b2ed934eb3ef0482df14a3ad25e11afbabcb83"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/format.ts",
+      "line": 1,
+      "sha256": "a4ba264d88340fc580c35c691f7f04ffdc7a72e1a3095432340aa49745d9fe43"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handler-group-manifest.ts",
+      "line": 1,
+      "sha256": "20e59466659605fbef372631e465a70e810e1a3e42f4a233ef1662500cbb2a77"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/account.ts",
+      "line": 1,
+      "sha256": "2f98077d0915bbee1fbdeba16fe5b81b76ba8192f3edfc6d2dfd8d31b9d0745c"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/agent-hooks.ts",
+      "line": 1,
+      "sha256": "e868bd3318a49c543024e671d9d91a0f0717d780f22c87a6d09fc7325fa69950"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/artifacts.ts",
+      "line": 1,
+      "sha256": "6e73f165404e4f2ef6e57e1ce7ea900b13a4d4ca8f1729c2d92d7478752e0c76"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/automation-handler-flags.ts",
+      "line": 1,
+      "sha256": "84a2236da89129c775297313ee8b2e8f4cd861e3a8c89470d24c87b3f642e9e2"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/automations.ts",
+      "line": 1,
+      "sha256": "105339cc5db83d4de61bec4c0e610582589d041453884c561120f6fe9fa4abd8"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/browser-capture.ts",
+      "line": 1,
+      "sha256": "172ad59350524a6fdebeb17a27239eeee0d0cfbaa6d221520c81006d7d303625"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/browser-cookie.ts",
+      "line": 1,
+      "sha256": "927c5432634060f74b533e51467bb27765ff9fe4e9e98a1a5e5a3a57d2fa84e7"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/browser-env.ts",
+      "line": 1,
+      "sha256": "4760b0388adee9082f3bd2009be652e52648e766d329f97ac2e9359959d21638"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/browser-interact.ts",
+      "line": 1,
+      "sha256": "e2c3ddbdfca82279889d482729d655cc795112c61f104e133d40888e2d63ef9e"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/browser-nav.ts",
+      "line": 1,
+      "sha256": "b39225ef7c3e844d00b9c414f438af04ed1dd200a17ef6190193b4b128458ec8"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/browser-profile.ts",
+      "line": 1,
+      "sha256": "07e71413a03bacdeffdbf8b346bb7def88fb735263c0ffc7455da1e1f6d46155"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/browser-storage.ts",
+      "line": 1,
+      "sha256": "1e1f2d882888209ae3fccbf5ee8a08e59d2048e57fd37cb0a4b9b09a30ee7a68"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/browser-tab.ts",
+      "line": 1,
+      "sha256": "50c0426b92932da0f8a6d63f6811eff4a8c80dcec715d2b6acbae330824c858e"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/computer-action-flag-validation.ts",
+      "line": 1,
+      "sha256": "7001b4336ccc8412dab4c809df1ce337364341497568af261c6ec5638bc6846c"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/computer-action-flags.ts",
+      "line": 1,
+      "sha256": "0fe8822efef70bdc98cf5c6ec1f322d50fa3fe388475c7a558eea5dcca6e649b"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/computer.ts",
+      "line": 1,
+      "sha256": "ab0f29d7e160c6a0dcab9b15e1224aff88a6ab4bb9bd3ff1b9e16e8ec9352bf9"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/core.ts",
+      "line": 1,
+      "sha256": "f89d4a0387218221bcd85e199fd63d6090624084bd8ad009901b064249b484df"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/diagnostics.ts",
+      "line": 1,
+      "sha256": "2f7adef6acfa2202e08cd19194aa58a2da8ded74c7926ac638f39a4f2b34a87b"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/emulator.ts",
+      "line": 1,
+      "sha256": "95997a18e85e8d447bfcb8145a85d0679d908901ac26f3f8b34f45df691e58da"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/environment.ts",
+      "line": 1,
+      "sha256": "2c0f58597279b6c9667b13b179d874a4a43cd9390b21ecd4edc05cdb9c677fa8"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/file.ts",
+      "line": 1,
+      "sha256": "c9e8af7f7551ff5221223afa7f352a141cf0ccd49661ac5ddd2df3f45fa70cee"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/interactive-login-interruption.ts",
+      "line": 1,
+      "sha256": "c6622124b15a8763d11a1c2bc42263ecc06a3239f4a9163cc75e8c3ce178c32e"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/introspection.ts",
+      "line": 1,
+      "sha256": "cbda4f06f6c9221a19449b8472f69516fe6045300f23a6a3c831cd9ea13c886f"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/linear-list-issues.ts",
+      "line": 1,
+      "sha256": "10ca237cc07854b22b82ae19412e61f439523cfb1c9491af0bcbe9da5c36fd32"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/linear-relation-write.ts",
+      "line": 1,
+      "sha256": "f4adeb3435193f66391f5974230acb3588a41be7b34f413f9bc2fea3c23ae04e"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/linear-save-issue.ts",
+      "line": 1,
+      "sha256": "3fc9ff4463d6bbbceae2f8041d4fbd06fa6e9561b94d577bbdb7465ca391bdd2"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/linear.ts",
+      "line": 1,
+      "sha256": "dd1ceb4457dbd1f94017183cd62e80d9a81f9f2b4fe0b36ab47fe45eef61da93"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration-worker-settlement.ts",
+      "line": 1,
+      "sha256": "8d2569f3015a6c1147c1aefd4f3e6683423deb1c6144773c6154bda6454384e4"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration.ts",
+      "line": 1,
+      "sha256": "22fa3781048c0077ebf6d7deec1b10cc1629c1a2ad0eab70766946d551154c8b"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/check-keepalive.ts",
+      "line": 1,
+      "sha256": "8efb86b8dc07e14e63abb0e2999848f2d6d625f04f04ec6c3bdad716c1cacb8b"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/dispatch-handlers.ts",
+      "line": 1,
+      "sha256": "3532dc8e28859a609f7a5d80fd929d93d47939e4eeba78f1e9b41268ad83e94a"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/gate-handlers.ts",
+      "line": 1,
+      "sha256": "5c87c56df4060eac7f3708fbe9533c221015d627dc5f33e8ba8ef1da0f6f5c81"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/message-check-handler.ts",
+      "line": 1,
+      "sha256": "c7dbff8b2261757dd09b353441b7ffaf65baac7645015facacf0a960ba7354fa"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/message-inbox-handlers.ts",
+      "line": 1,
+      "sha256": "049ae8d586dbee22e0716c60e1855b86cc81a55c9db2bdb840a731b88b29909d"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/message-payload.ts",
+      "line": 1,
+      "sha256": "c27711a5b5f875ec5e93d9eaa0ba4fb23b679596f4ff9d7375fea80cf02db33c"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/message-send-handler.ts",
+      "line": 1,
+      "sha256": "b78b7774f952e2c57090224f9393c0448d9441cb0775d19f701f9a7062f1729e"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/mutation-request-show-handler.ts",
+      "line": 1,
+      "sha256": "66a907a2193da3be14664a91e6ff2d20635303f0ec459705232fb03a88454cbd"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/mutation-request.ts",
+      "line": 1,
+      "sha256": "e44f1f6575597a6a102255ee49467f90ea27051c32a64f5b05cd95cf339aa13d"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/numeric-flags.ts",
+      "line": 1,
+      "sha256": "4597506912c474a62f22a2e09d7e9d002adb9a154c7cfffc427c01c3c2159841"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/question-handler.ts",
+      "line": 1,
+      "sha256": "f997f50832dd13717d8ee83c2bf831a979235e9f81bf7bb68f23c660dd6c09bf"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/reset-handler.ts",
+      "line": 1,
+      "sha256": "46c1aeb2d4ef3d21cf050deeaf45a32cce0d052032930c6c7ba35432ec53cc73"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/run-handlers.ts",
+      "line": 1,
+      "sha256": "e3fc8c08902ab75df2fbaccc2be5ab30f182decb71f5d5e7d13fb8b282ed4086"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/runtime-compatibility.ts",
+      "line": 1,
+      "sha256": "a102ef1800a19043e2f39efcc12d44d67b8c038ec010fca91e8fa541ec3b19b7"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/task-handlers.ts",
+      "line": 1,
+      "sha256": "352e334ae0381bf7de2341237a83e17ebc6ca04ff72d980de0e44c4468799141"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/terminal-identity.ts",
+      "line": 1,
+      "sha256": "1a7fea34b5269c86a1c9aa256446fe1e4e32f410238c39300adf880daba29718"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/worker-launch-handler.ts",
+      "line": 1,
+      "sha256": "d985b68d9781b693a56de4e37c402ede184a817b4d922f719de55a72f79ff9a3"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/worker-observation-handlers.ts",
+      "line": 1,
+      "sha256": "9e19cbdaa41c0b82d28667a23e115aaff0aeab135f9f44df5ec4011c3a982049"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/worker-output.ts",
+      "line": 1,
+      "sha256": "1dc67e59a50eba8ac5906f5111e5a43d8142498102a4fb1b6ed68866ca211712"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/orchestration/worker-terminal-handlers.ts",
+      "line": 1,
+      "sha256": "da3ee739d34b71cec693dd58adb2e8f82bb53d2d16b8f680c6528ca30f20a1ac"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/project.ts",
+      "line": 1,
+      "sha256": "21f4b3b37faebba32500a61183b88d682d90cd9abedeec9111d8d12b486ea057"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/repo.ts",
+      "line": 1,
+      "sha256": "9e494ddc7acba5a16656dd229e3f1845039389432a601fdc1a86be94ecf700da"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/skill-sharing.ts",
+      "line": 1,
+      "sha256": "bf5845add572551a6f280cef5225e865991df4c45c19494c49ea524f1092ec44"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/skills.ts",
+      "line": 1,
+      "sha256": "ba6cbd54e92664e33dbe82ba29da999c10f2fc3e253137adbef3836327adad4e"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/terminal.ts",
+      "line": 1,
+      "sha256": "99c5afe117d0a079b6e4d08c2e6a9c044683bc9a18e1aa8892208ccf2ed58d62"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/vm.ts",
+      "line": 1,
+      "sha256": "8871c9aab3bf5e29b1b56a04ce08c513e4f6b6f66124c81269057f4fb77d2507"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/worktree-create-parent-selector.ts",
+      "line": 1,
+      "sha256": "4bd77706ae4e080fb519950878227b4ac9ab758f181712f87785251fc258cff3"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/worktree-lineage-summary.ts",
+      "line": 1,
+      "sha256": "35f12dd3dd91ebb4cc767c23ae5fd4733fa50eb64bc70cc5a789a83d440fb9e8"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/worktree-linear-issue-link.ts",
+      "line": 1,
+      "sha256": "01789161683fe74943376f16dcd6f01a4fc84687e34602624045ca4c677b6e90"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/handlers/worktree.ts",
+      "line": 1,
+      "sha256": "d0156b1fefbb43ec6f66de6ee1ce51652af17351c2bfdf4dd041ab27f7bb0c74"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/help.ts",
+      "line": 1,
+      "sha256": "38306f89fb7c2c8fe9cea2ddc23115e15f63abe0aebb7854b10bbf995bb01ebe"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/host-selector-alternatives.ts",
+      "line": 1,
+      "sha256": "eeab678c758d64fd8babfc719607c1769fd18df9114e5821254c475e683a7d6b"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/index.ts",
+      "line": 1,
+      "sha256": "8add6594ab78667aadc4d7b0f757f37b076d551ab22e77f5aa89df9388eef5b0"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/linear-format.ts",
+      "line": 1,
+      "sha256": "b190df9a9b1c382b40b5cc4ebe7e1e398e5afcb45d033469cab0c2e99e2cc002"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/linear-request-builders.ts",
+      "line": 1,
+      "sha256": "d5dcde1a9cee999b39f53422bcc247cdabd0e34a2a470bd6e84cae8099462509"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/linear-save-issue-request.ts",
+      "line": 1,
+      "sha256": "41f3a555dd0c104dde82731f1766f48b497eebfc2796be76de18b3bed3738c08"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/omitted-host-scope-selectors.ts",
+      "line": 1,
+      "sha256": "f7ff764140a9c2a21b3641765ea5f49a1d774303cb8f80402b2aa06a89555ec3"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/orchestration-mutation-recovery.ts",
+      "line": 1,
+      "sha256": "0f73d39af508b20ae6e9b3d79b841a5f6320634e13ca58d8ce484e09a1c23cf9"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/project-format.ts",
+      "line": 1,
+      "sha256": "23283f5ccda28ee097db5f35816769f0db14282f963f7d95b0b5a2e4d7c0df9b"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/quote-stripped-json-flag.ts",
+      "line": 1,
+      "sha256": "aa7345c8de7e9fd4a75003d1642b01249f4bfe0ad2c464a8ab78c3fe1da7cff1"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/remote-selection-flag-rejection.ts",
+      "line": 1,
+      "sha256": "b7185fb445f38fa73856078a70a42df48b28a3e33e6c4ca6adb778d66db9481b"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/repo-path-arguments.ts",
+      "line": 1,
+      "sha256": "93d99e96e0d22c0b33af715f96c8a16369b3066193c4818fa0c504de64106f96"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime-client.ts",
+      "line": 1,
+      "sha256": "d3adc4b381983f4816f83faf489d503f6790e469cb621ccbd396a6f43839ef02"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/client-error-recovery.ts",
+      "line": 1,
+      "sha256": "3f228cdb67af05edad816c2691c2c6819d8c0687b4daa223b6bc91dc89147b42"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/client.ts",
+      "line": 1,
+      "sha256": "74c546a02194b46c697cec8c06f2db4f3e77f44c6d60f60cc90c526c46b37367"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/envelope-schema.ts",
+      "line": 1,
+      "sha256": "f61bf6f224272f9dc6cd1782215b3a98345300a84adb6126c350d7176ed6bcd4"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/environments.ts",
+      "line": 1,
+      "sha256": "1c51c7ace0e1f4e9ad66cf8e2f85031b4be6bc9e4d009144a7529f458b9d48bd"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/index.ts",
+      "line": 1,
+      "sha256": "0f2aa249de7c88dd3ebb7dea681863bccc984cd1ca4c331590d5d5e552ef89ca"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/launch.ts",
+      "line": 1,
+      "sha256": "90db4d11f26034cda4019d433335773c57906544c261659b2e4691f398176771"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/mac-app-update-bundle.ts",
+      "line": 1,
+      "sha256": "ba270a94a7fc01d8614d036820967eaaf50869817b1cac76a49e877fb0277ca3"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/metadata.ts",
+      "line": 1,
+      "sha256": "59e760b8753a6e0b2f4df2acfa0af6abce1834ec92a2b812b935330887c6371f"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/orchestration-compatibility-envelope.ts",
+      "line": 1,
+      "sha256": "94462f66970139ab12622862263a0f3c772a6202cca52c3fa09402de7bd5a138"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/orchestration-recovery-command.ts",
+      "line": 1,
+      "sha256": "ea13a8eb3a74889f7ca0d0d174e7f5645ad3c9716688846e5abaf503fd977c03"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/remote-runtime-compat-gate.ts",
+      "line": 1,
+      "sha256": "91c24cd9f17aefe3ae51a8a3502b269a7abc39e1c019e66033d36a8c6a2fd82a"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/runtime-request-timeout.ts",
+      "line": 1,
+      "sha256": "93d55d2806a9725e5f426ed4b966d170215bdfa913cb64913de82def5bddb222"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/serve-signal-exit-diagnostic.ts",
+      "line": 1,
+      "sha256": "7dcc3238d2f2eb57fbcf90899fb77eec43df3d9aad659c5cc3a5615dc5d5ac20"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/serve-update-supervisor.ts",
+      "line": 1,
+      "sha256": "3cd094753949093437e00688f2b2289813c2e6a8e85a41be50e46d2156d7de15"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/status.ts",
+      "line": 1,
+      "sha256": "16152f122bb6f0db675c29e8c4978b4bb1039a868f1a432de4159515dbee82a9"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/transport.ts",
+      "line": 1,
+      "sha256": "5834b4bc0c66d43eb01ccc89ae1569e5df4e7d9ef371ba9ded7b261dcddb0cc0"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/runtime/types.ts",
+      "line": 1,
+      "sha256": "6c6c7bc9eb6c934cc06517026d54321a0abc9a5b6ee759d96cdeb243d8dcee70"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/selectors.ts",
+      "line": 1,
+      "sha256": "c3627f26f9bb2c2ed21ca7854869517ecc4c113e6f7ecea3e34888461c1a0cc5"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/shell-command-quote.ts",
+      "line": 1,
+      "sha256": "fcb9eb7bcdba0f41ced8122443aca6abd3d4cc2e5ffc5f1e8e1a417c56fe1138"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/specs/index.ts",
+      "line": 1,
+      "sha256": "6123ce602e26a63c100819120f4925318e4ba6c287d740136c5a9a94fb12cc88"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/terminal-format.ts",
+      "line": 1,
+      "sha256": "30b3fc671f3d57c48b911130c32c4937ac78aa8893ff66aa80b060fc57ef65e3"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/workspace-format.ts",
+      "line": 1,
+      "sha256": "ac51e8742a71a8a6b77641f57f278a289d7ce2cb9669f255c17faea4254fef42"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/cli/worktree-project-target.ts",
+      "line": 1,
+      "sha256": "e14c9702b9911fa7bf8ba73da6895c45ae6912b81b787aa15ed12f59c5b2616f"
+    },
+    {
+      "repository": "pinned-source",
+      "path": "src/main/startup/cli-launch-redirect.ts",
+      "line": 1,
+      "sha256": "fe451de7c5af9effc7dad147205c41b92c6ff112ef765d11c11975f4a56d304d"
+    }
+  ],
+  "task": {
+    "taskId": "task_75e78e6ac486",
+    "dispatchId": "ctx_902b01623a5b",
+    "terminal": "term_628055f8-e9bc-4f00-995c-0f119af80751",
+    "coordinator": "term_fa0de916-26da-4394-ba54-86a2ab8597e7",
+    "requestedModel": "gpt-6-astra",
+    "effectiveModel": "unverifiable from runtime terminal/dispatch inspection",
+    "runtimeAgentIdentity": "codex",
+    "depth": 1,
+    "injectedMaxDepth": null,
+    "injectedCanDispatchSubWorkers": null,
+    "children": [],
+    "hierarchy": "No child attempted; root directed continued direct audit."
+  },
+  "coverage": {
+    "canonicalCommands": 234,
+    "previouslyAcceptedContracts": 30,
+    "remainingRowsMapped": 204,
+    "commandsOmitted": [],
+    "newInterceptionOutsideCanonicalDenominator": [
+      "agent-teams-tmux"
+    ],
+    "additionalEntryBehavior": [
+      "help",
+      "--version/-v",
+      "packaged CLI launch redirect"
+    ],
+    "groups": {
+      "core": 4,
+      "repo": 5,
+      "worktree": 7,
+      "terminal": 11,
+      "artifacts": 5,
+      "account": 2,
+      "project": 7,
+      "file": 3,
+      "automations": 7,
+      "browser-tab": 8,
+      "browser-nav": 11,
+      "browser-interact": 25,
+      "browser-profile": 7,
+      "browser-cookie": 3,
+      "browser-env": 11,
+      "browser-capture": 7,
+      "browser-storage": 6,
+      "orchestration": 30,
+      "computer": 14,
+      "agent-hooks": 4,
+      "diagnostics": 1,
+      "introspection": 1,
+      "environment": 5,
+      "linear": 27,
+      "vm": 1,
+      "emulator": 16,
+      "skill-sharing": 2,
+      "skills": 4
+    },
+    "semanticClosure": false,
+    "methodLimitations": [
+      "lexical identifier/property/shadowing overapproximation",
+      "factory binding recorded but parameters not evaluated",
+      "dynamic imports/class methods/non-CLI functions are not a complete interprocedural proof",
+      "flag literal presence does not prove value/default/required semantics",
+      "source test associations do not establish assertion coverage"
+    ]
+  },
+  "resolvedObligations": [
+    {
+      "id": "E4-R1",
+      "description": "Complete accepted command-to-actual-handler reconciliation, with exact code anchors/hashes and no omitted canonical commands."
+    },
+    {
+      "id": "E4-R2",
+      "description": "Thirty accepted per-handler contract links retained; 204 additional rows include lexical request/output/error/helper evidence and manual family behavior summaries."
+    },
+    {
+      "id": "E4-R3",
+      "description": "Passthrough bypass is first-token-only; claude-teams raw argv and internal tmux shim are characterized separately from generic parser mode."
+    },
+    {
+      "id": "E4-R4",
+      "description": "Eight aliases, hidden terminal stop, retired-command errors and non-RPC observable operations explicitly accounted for."
+    },
+    {
+      "id": "E4-R5",
+      "description": "Host-routing, local/remote cwd, JSON/exit exceptions and compatibility refusal/recovery branches characterized at the CLI entry/handler layer."
+    }
+  ],
+  "stillOpenObligations": [
+    {
+      "id": "E4-S1",
+      "kind": "source-contract-normalization",
+      "obligation": "Finish scope-aware, per-command required/optional/default/enum and control-flow acceptance for the 204 newly mapped rows. Manual family summaries and exact expressions exist, but identifier/literal traversal can overassociate shadowed/property names and does not specialize factory parameters or prove all callback/catch paths.",
+      "commands": [
+        "open",
+        "serve",
+        "status",
+        "claude-teams",
+        "artifacts share",
+        "artifacts update",
+        "artifacts unshare",
+        "artifacts list",
+        "artifacts delete",
+        "account add",
+        "account list",
+        "project list",
+        "project setups",
+        "project setup-clone",
+        "project setup-create",
+        "project setup-update",
+        "project setup-delete",
+        "file open",
+        "file diff",
+        "file open-changed",
+        "automations list",
+        "automations show",
+        "automations create",
+        "automations edit",
+        "automations remove",
+        "automations run",
+        "automations runs",
+        "open-url",
+        "snapshot",
+        "screenshot",
+        "click",
+        "fill",
+        "type",
+        "select",
+        "scroll",
+        "goto",
+        "back",
+        "reload",
+        "eval",
+        "wait",
+        "check",
+        "uncheck",
+        "focus",
+        "clear",
+        "select-all",
+        "keypress",
+        "pdf",
+        "full-screenshot",
+        "hover",
+        "drag",
+        "upload",
+        "tab list",
+        "tab show",
+        "tab current",
+        "tab switch",
+        "tab create",
+        "tab profile list",
+        "tab profile create",
+        "tab profile delete",
+        "tab profile set",
+        "tab profile show",
+        "tab profile use-default",
+        "tab profile clone",
+        "tab close",
+        "exec",
+        "cookie get",
+        "cookie set",
+        "cookie delete",
+        "viewport",
+        "geolocation",
+        "intercept enable",
+        "intercept disable",
+        "intercept list",
+        "capture start",
+        "capture stop",
+        "console",
+        "network",
+        "dblclick",
+        "forward",
+        "scrollintoview",
+        "get",
+        "is",
+        "inserttext",
+        "mouse move",
+        "mouse down",
+        "mouse up",
+        "mouse wheel",
+        "find",
+        "set device",
+        "set offline",
+        "set headers",
+        "set credentials",
+        "set media",
+        "clipboard read",
+        "clipboard write",
+        "dialog accept",
+        "dialog dismiss",
+        "storage local get",
+        "storage local set",
+        "storage local clear",
+        "storage session get",
+        "storage session set",
+        "storage session clear",
+        "download",
+        "highlight",
+        "orchestration run-create",
+        "orchestration run-use",
+        "orchestration run-current",
+        "orchestration run-list",
+        "orchestration run-show",
+        "orchestration send",
+        "orchestration check",
+        "orchestration reply",
+        "orchestration inbox",
+        "orchestration task-create",
+        "orchestration task-list",
+        "orchestration task-update",
+        "orchestration worker-start",
+        "orchestration worker-show",
+        "orchestration worker-read",
+        "orchestration worker-stop",
+        "orchestration worker-abandon",
+        "orchestration worker-release",
+        "orchestration worker-retain",
+        "orchestration worker-list",
+        "orchestration dispatch",
+        "orchestration request-show",
+        "orchestration dispatch-show",
+        "orchestration ask",
+        "orchestration coordinator-start",
+        "orchestration coordinator-stop",
+        "orchestration gate-create",
+        "orchestration gate-resolve",
+        "orchestration gate-list",
+        "orchestration reset",
+        "computer capabilities",
+        "computer list-apps",
+        "computer permissions",
+        "computer list-windows",
+        "computer get-app-state",
+        "computer click",
+        "computer perform-secondary-action",
+        "computer scroll",
+        "computer drag",
+        "computer type-text",
+        "computer press-key",
+        "computer hotkey",
+        "computer paste-text",
+        "computer set-value",
+        "agent hooks prepare-codex",
+        "agent hooks status",
+        "agent hooks off",
+        "agent hooks on",
+        "diagnostics memory",
+        "agent-context",
+        "host list",
+        "environment add",
+        "environment list",
+        "environment show",
+        "environment rm",
+        "linear save-issue",
+        "linear list-issues",
+        "linear relation add",
+        "linear relation remove",
+        "linear issue",
+        "linear search",
+        "linear team list",
+        "linear team members",
+        "linear team states",
+        "linear team labels",
+        "linear project list",
+        "linear list",
+        "linear status set",
+        "linear assignee set",
+        "linear assignee clear",
+        "linear priority set",
+        "linear priority clear",
+        "linear estimate set",
+        "linear estimate clear",
+        "linear due-date set",
+        "linear due-date clear",
+        "linear label add",
+        "linear label remove",
+        "linear label set",
+        "linear comment add",
+        "linear attach",
+        "linear create",
+        "vm recipe doctor",
+        "emulator list",
+        "emulator devices",
+        "emulator attach",
+        "emulator tap",
+        "emulator type",
+        "emulator gesture",
+        "emulator button",
+        "emulator rotate",
+        "emulator exec",
+        "emulator kill",
+        "emulator shutdown",
+        "emulator install",
+        "emulator launch",
+        "emulator permissions",
+        "emulator ax",
+        "emulator logcat"
+      ],
+      "exactPairLocation": "command-map.json.commands[].flagRouting (754 declared flag occurrences over all 234 rows; do not interpret the zero lexical misses as zero semantic gaps)",
+      "factoryCommands": [
+        "check",
+        "uncheck",
+        "linear relation add",
+        "linear relation remove"
+      ],
+      "acceptance": "Root verifies full normalized field contracts against the anchored bodies and accepts the existing 30 links unchanged; no new command census is needed."
+    },
+    {
+      "id": "E4-S2",
+      "kind": "shared-validator-boundary",
+      "obligation": "Reconcile external shared validators and normalization constants that materially constrain CLI requests. Family rules are source-backed, but this lead has not fully reviewed every called shared function.",
+      "commands": [
+        "project list",
+        "project setups",
+        "project setup-existing-folder",
+        "project setup-clone",
+        "project setup-create",
+        "project setup-update",
+        "project setup-delete",
+        "automations list",
+        "automations show",
+        "automations create",
+        "automations edit",
+        "automations remove",
+        "automations run",
+        "automations runs",
+        "computer capabilities",
+        "computer list-apps",
+        "computer permissions",
+        "computer list-windows",
+        "computer get-app-state",
+        "computer click",
+        "computer perform-secondary-action",
+        "computer scroll",
+        "computer drag",
+        "computer type-text",
+        "computer press-key",
+        "computer hotkey",
+        "computer paste-text",
+        "computer set-value",
+        "linear save-issue",
+        "linear list-issues",
+        "linear relation add",
+        "linear relation remove",
+        "linear issue",
+        "linear search",
+        "linear team list",
+        "linear team members",
+        "linear team states",
+        "linear team labels",
+        "linear project list",
+        "linear list",
+        "linear status set",
+        "linear assignee set",
+        "linear assignee clear",
+        "linear priority set",
+        "linear priority clear",
+        "linear estimate set",
+        "linear estimate clear",
+        "linear due-date set",
+        "linear due-date clear",
+        "linear label add",
+        "linear label remove",
+        "linear label set",
+        "linear comment add",
+        "linear attach",
+        "linear create",
+        "emulator list",
+        "emulator devices",
+        "emulator attach",
+        "emulator tap",
+        "emulator type",
+        "emulator gesture",
+        "emulator button",
+        "emulator rotate",
+        "emulator exec",
+        "emulator kill",
+        "emulator shutdown",
+        "emulator install",
+        "emulator launch",
+        "emulator permissions",
+        "emulator ax",
+        "emulator logcat"
+      ],
+      "sourceEvidence": [
+        {
+          "path": "src/shared/automation-schedule-occurrences.ts",
+          "line": 1,
+          "sha256": "9fdbf8bbef69805923635c5ecb67750c6372744518900a1deca166b7e598b23b"
+        },
+        {
+          "path": "src/shared/automation-schedule-parsing.ts",
+          "line": 1,
+          "sha256": "5153712011896febbc704e9a6f24bc3b47447096e9d8a45094aa9d9f1a78e22c"
+        },
+        {
+          "path": "src/shared/task-source-context.ts",
+          "line": 1,
+          "sha256": "b9192200339181ba6b32fc26de279a75c145a87cee82d202a849274419b47f85"
+        },
+        {
+          "path": "src/shared/computer-use-key-spec.ts",
+          "line": 1,
+          "sha256": "ead25f5342242bb514b3dc76b459885007d4269ce0f9b058060c2cc0f3d9f23c"
+        },
+        {
+          "path": "src/shared/linear/agent-access.ts",
+          "line": 1,
+          "sha256": "f232907a42dad5c22d7334f5e86d0cfa209f9da8ddc22692b7c01bb9e40d3d29"
+        },
+        {
+          "path": "src/shared/linear/uuid.ts",
+          "line": 1,
+          "sha256": "91ea7401f34c89c2adbfd992f95996f30381722ac38609214b941b2f3b20ad5a"
+        },
+        {
+          "path": "src/shared/tui-agent-config.ts",
+          "line": 1,
+          "sha256": "192226db679f6241bc68a3093b4aac2e8922d11079beeb16cddc26698b4f1b7f"
+        },
+        {
+          "path": "src/shared/cross-platform-path.ts",
+          "line": 1,
+          "sha256": "eea78e4490a9ae0f190bd94ba1b9d07ac62ffb51361aa85868f872ed5212c270"
+        },
+        {
+          "path": "src/shared/execution-host.ts",
+          "line": 1,
+          "sha256": "b50beb1c179026e1457e490455fdcad1ebfa500b714635b598aa52dd6e55247a"
+        },
+        {
+          "path": "src/shared/wsl-paths.ts",
+          "line": 1,
+          "sha256": "1d9dcf5a1ff6693c02ff60a6b074eb2ebb7e83bda12aceba7e0b208d410b6d1a"
+        }
+      ],
+      "acceptance": "Confirm accepted E2/E3/E5/source artifacts cover these named function contracts or review the bounded functions, retaining exact defaults and refusals."
+    },
+    {
+      "id": "E4-S3",
+      "kind": "transport-and-compatibility-boundary",
+      "obligation": "Client dispatch/timeout/recovery entry behavior was read; finish the transport, protocol-envelope and compatibility helper contracts reached by class methods/dynamic imports, including both version skews and loss-of-contact semantics.",
+      "commands": [
+        "open",
+        "serve",
+        "status",
+        "claude-teams",
+        "repo list",
+        "repo add",
+        "repo show",
+        "repo set-base-ref",
+        "repo search-refs",
+        "worktree list",
+        "worktree show",
+        "worktree current",
+        "worktree create",
+        "worktree set",
+        "worktree rm",
+        "worktree ps",
+        "terminal list",
+        "terminal show",
+        "terminal read",
+        "terminal send",
+        "terminal wait",
+        "terminal stop",
+        "terminal create",
+        "terminal switch",
+        "terminal close",
+        "terminal rename",
+        "terminal split",
+        "artifacts share",
+        "artifacts update",
+        "artifacts unshare",
+        "artifacts list",
+        "artifacts delete",
+        "account add",
+        "account list",
+        "project list",
+        "project setups",
+        "project setup-existing-folder",
+        "project setup-clone",
+        "project setup-create",
+        "project setup-update",
+        "project setup-delete",
+        "file open",
+        "file diff",
+        "file open-changed",
+        "automations list",
+        "automations show",
+        "automations create",
+        "automations edit",
+        "automations remove",
+        "automations run",
+        "automations runs",
+        "open-url",
+        "snapshot",
+        "screenshot",
+        "click",
+        "fill",
+        "type",
+        "select",
+        "scroll",
+        "goto",
+        "back",
+        "reload",
+        "eval",
+        "wait",
+        "check",
+        "uncheck",
+        "focus",
+        "clear",
+        "select-all",
+        "keypress",
+        "pdf",
+        "full-screenshot",
+        "hover",
+        "drag",
+        "upload",
+        "tab list",
+        "tab show",
+        "tab current",
+        "tab switch",
+        "tab create",
+        "tab profile list",
+        "tab profile create",
+        "tab profile delete",
+        "tab profile set",
+        "tab profile show",
+        "tab profile use-default",
+        "tab profile clone",
+        "tab close",
+        "exec",
+        "cookie get",
+        "cookie set",
+        "cookie delete",
+        "viewport",
+        "geolocation",
+        "intercept enable",
+        "intercept disable",
+        "intercept list",
+        "capture start",
+        "capture stop",
+        "console",
+        "network",
+        "dblclick",
+        "forward",
+        "scrollintoview",
+        "get",
+        "is",
+        "inserttext",
+        "mouse move",
+        "mouse down",
+        "mouse up",
+        "mouse wheel",
+        "find",
+        "set device",
+        "set offline",
+        "set headers",
+        "set credentials",
+        "set media",
+        "clipboard read",
+        "clipboard write",
+        "dialog accept",
+        "dialog dismiss",
+        "storage local get",
+        "storage local set",
+        "storage local clear",
+        "storage session get",
+        "storage session set",
+        "storage session clear",
+        "download",
+        "highlight",
+        "orchestration run-create",
+        "orchestration run-use",
+        "orchestration run-current",
+        "orchestration run-list",
+        "orchestration run-show",
+        "orchestration send",
+        "orchestration check",
+        "orchestration reply",
+        "orchestration inbox",
+        "orchestration task-create",
+        "orchestration task-list",
+        "orchestration task-update",
+        "orchestration worker-start",
+        "orchestration worker-show",
+        "orchestration worker-read",
+        "orchestration worker-stop",
+        "orchestration worker-abandon",
+        "orchestration worker-release",
+        "orchestration worker-retain",
+        "orchestration worker-list",
+        "orchestration dispatch",
+        "orchestration request-show",
+        "orchestration dispatch-show",
+        "orchestration ask",
+        "orchestration gate-create",
+        "orchestration gate-resolve",
+        "orchestration gate-list",
+        "orchestration reset",
+        "computer capabilities",
+        "computer list-apps",
+        "computer permissions",
+        "computer list-windows",
+        "computer get-app-state",
+        "computer click",
+        "computer perform-secondary-action",
+        "computer scroll",
+        "computer drag",
+        "computer type-text",
+        "computer press-key",
+        "computer hotkey",
+        "computer paste-text",
+        "computer set-value",
+        "agent hooks prepare-codex",
+        "agent hooks off",
+        "agent hooks on",
+        "diagnostics memory",
+        "host list",
+        "linear save-issue",
+        "linear list-issues",
+        "linear relation add",
+        "linear relation remove",
+        "linear issue",
+        "linear search",
+        "linear team list",
+        "linear team members",
+        "linear team states",
+        "linear team labels",
+        "linear project list",
+        "linear list",
+        "linear status set",
+        "linear assignee set",
+        "linear assignee clear",
+        "linear priority set",
+        "linear priority clear",
+        "linear estimate set",
+        "linear estimate clear",
+        "linear due-date set",
+        "linear due-date clear",
+        "linear label add",
+        "linear label remove",
+        "linear label set",
+        "linear comment add",
+        "linear attach",
+        "linear create",
+        "emulator list",
+        "emulator devices",
+        "emulator attach",
+        "emulator tap",
+        "emulator type",
+        "emulator gesture",
+        "emulator button",
+        "emulator rotate",
+        "emulator exec",
+        "emulator kill",
+        "emulator shutdown",
+        "emulator install",
+        "emulator launch",
+        "emulator permissions",
+        "emulator ax",
+        "emulator logcat",
+        "skills installed",
+        "skills share"
+      ],
+      "sourceEvidence": [
+        {
+          "path": "src/cli/runtime/transport.ts",
+          "line": 1,
+          "sha256": "5834b4bc0c66d43eb01ccc89ae1569e5df4e7d9ef371ba9ded7b261dcddb0cc0"
+        },
+        {
+          "path": "src/cli/runtime/websocket-transport.ts",
+          "line": 1,
+          "sha256": "f6de5b70ae9968291609c20bd9905083588eb448c9ba6f62c7c1973f2dbb7bd1"
+        },
+        {
+          "path": "src/cli/runtime/envelope-schema.ts",
+          "line": 1,
+          "sha256": "f61bf6f224272f9dc6cd1782215b3a98345300a84adb6126c350d7176ed6bcd4"
+        },
+        {
+          "path": "src/cli/runtime/metadata.ts",
+          "line": 1,
+          "sha256": "59e760b8753a6e0b2f4df2acfa0af6abce1834ec92a2b812b935330887c6371f"
+        },
+        {
+          "path": "src/cli/runtime/status.ts",
+          "line": 1,
+          "sha256": "16152f122bb6f0db675c29e8c4978b4bb1039a868f1a432de4159515dbee82a9"
+        },
+        {
+          "path": "src/cli/runtime/launch.ts",
+          "line": 1,
+          "sha256": "90db4d11f26034cda4019d433335773c57906544c261659b2e4691f398176771"
+        },
+        {
+          "path": "src/shared/orchestration-check-output.ts",
+          "line": 1,
+          "sha256": "c8e6442712e4309a818711d85f6460e3d175383c0087aa36ac6043b4ce51c4fd"
+        },
+        {
+          "path": "src/shared/orchestration-rpc-contract.ts",
+          "line": 1,
+          "sha256": "3edd233e3a74ee0feed025257a2dbe65f70c6894f0e7ac54ec7b173d6519ae86"
+        }
+      ],
+      "acceptance": "Reconcile the existing relay/platform and E3 reviews at these exact boundaries; do not treat an RPC name or client-side type as a fully verified response contract."
+    },
+    {
+      "id": "E4-S4",
+      "kind": "local-effect-boundary",
+      "obligation": "CLI branches for account isolation/cleanup, hooks fallback and VM provision/cleanup were read. Their imported filesystem/keychain/process implementations remain separate source acceptance boundaries, not effects exercised by this audit.",
+      "commands": [
+        "artifacts share",
+        "artifacts update",
+        "artifacts unshare",
+        "artifacts list",
+        "artifacts delete",
+        "account add",
+        "account list",
+        "agent hooks prepare-codex",
+        "agent hooks status",
+        "agent hooks off",
+        "agent hooks on",
+        "host list",
+        "environment add",
+        "environment list",
+        "environment show",
+        "environment rm",
+        "vm recipe doctor"
+      ],
+      "sourceEvidence": [
+        {
+          "path": "src/main/claude-accounts/keychain.ts",
+          "line": 1,
+          "sha256": "2f2193e2926e50626cea5df9077def71569108307af8a9bf39138bf4d4876fa7"
+        },
+        {
+          "path": "src/main/agent-hooks/managed-agent-hook-controls.ts",
+          "line": 1,
+          "sha256": "e2b0618f6c8583d078f4543dca95d33d51c46a0aa54e5babfa946b6e11c43e33"
+        },
+        {
+          "path": "src/shared/ephemeral-vm-recipe-doctor.ts",
+          "line": 1,
+          "sha256": "51befcc6d70d12ed663a36ef674d4c8646881e71ce1373151c4bb3cdfaea8dc2"
+        },
+        {
+          "path": "src/shared/ephemeral-vm-recipe-runner.ts",
+          "line": 1,
+          "sha256": "cd259228b6561a7fc326dccf6c93e220c00199eda7d862948cb5c44a67e77ed1"
+        },
+        {
+          "path": "src/shared/runtime-environment-store.ts",
+          "line": 1,
+          "sha256": "2e09aab22fa5711f769cdaf93682cc158c8d0323e6f5c085d1557a9a24f88876"
+        },
+        {
+          "path": "src/shared/runtime-environments.ts",
+          "line": 1,
+          "sha256": "db40dd4aa44d45f796ec34fd2daf5413e1ec51b07b19772ba86edb276558bc54"
+        },
+        {
+          "path": "src/shared/artifact-file-read.ts",
+          "line": 1,
+          "sha256": "e0e0c81023bb5da4c3d946e3e96e34cf409e302e8edb1f412fd6f8c8c1e9faec"
+        },
+        {
+          "path": "src/shared/artifact-cli-bridge.ts",
+          "line": 1,
+          "sha256": "2de4d17442504ab136d90518c9ff5ec6c0cb72fb8672fdd6e8d35d9a9f8b3adb"
+        },
+        {
+          "path": "src/shared/windows-batch-spawn.ts",
+          "line": 1,
+          "sha256": "ec71689e7efc8229f980ed853120d281fc47c1431831548b5bf7baa8cb13933d"
+        },
+        {
+          "path": "src/shared/windows-console-input.ts",
+          "line": 1,
+          "sha256": "a4cc151cd4f9ca2633e5f9a90e06d70d812a606b533fdee09fa58c428b741728"
+        }
+      ],
+      "acceptance": "Match existing E5/platform evidence or inspect the named helper functions; preserve host ownership, rollback/cleanup, content limits and fail-closed behavior."
+    },
+    {
+      "id": "E4-S5",
+      "kind": "formatter-and-result-contract-boundary",
+      "obligation": "Exact output call sites and reachable formatter expressions are retained, and unusual JSON/exit branches were manually read. Complete golden field/value semantics for imported result formatting and shared output projections without claiming lexical extraction proves all returned variants.",
+      "commands": [
+        "open",
+        "serve",
+        "status",
+        "claude-teams",
+        "artifacts share",
+        "artifacts update",
+        "artifacts unshare",
+        "artifacts list",
+        "artifacts delete",
+        "account add",
+        "account list",
+        "project list",
+        "project setups",
+        "project setup-clone",
+        "project setup-create",
+        "project setup-update",
+        "project setup-delete",
+        "file open",
+        "file diff",
+        "file open-changed",
+        "automations list",
+        "automations show",
+        "automations create",
+        "automations edit",
+        "automations remove",
+        "automations run",
+        "automations runs",
+        "open-url",
+        "snapshot",
+        "screenshot",
+        "click",
+        "fill",
+        "type",
+        "select",
+        "scroll",
+        "goto",
+        "back",
+        "reload",
+        "eval",
+        "wait",
+        "check",
+        "uncheck",
+        "focus",
+        "clear",
+        "select-all",
+        "keypress",
+        "pdf",
+        "full-screenshot",
+        "hover",
+        "drag",
+        "upload",
+        "tab list",
+        "tab show",
+        "tab current",
+        "tab switch",
+        "tab create",
+        "tab profile list",
+        "tab profile create",
+        "tab profile delete",
+        "tab profile set",
+        "tab profile show",
+        "tab profile use-default",
+        "tab profile clone",
+        "tab close",
+        "exec",
+        "cookie get",
+        "cookie set",
+        "cookie delete",
+        "viewport",
+        "geolocation",
+        "intercept enable",
+        "intercept disable",
+        "intercept list",
+        "capture start",
+        "capture stop",
+        "console",
+        "network",
+        "dblclick",
+        "forward",
+        "scrollintoview",
+        "get",
+        "is",
+        "inserttext",
+        "mouse move",
+        "mouse down",
+        "mouse up",
+        "mouse wheel",
+        "find",
+        "set device",
+        "set offline",
+        "set headers",
+        "set credentials",
+        "set media",
+        "clipboard read",
+        "clipboard write",
+        "dialog accept",
+        "dialog dismiss",
+        "storage local get",
+        "storage local set",
+        "storage local clear",
+        "storage session get",
+        "storage session set",
+        "storage session clear",
+        "download",
+        "highlight",
+        "orchestration run-create",
+        "orchestration run-use",
+        "orchestration run-current",
+        "orchestration run-list",
+        "orchestration run-show",
+        "orchestration send",
+        "orchestration check",
+        "orchestration reply",
+        "orchestration inbox",
+        "orchestration task-create",
+        "orchestration task-list",
+        "orchestration task-update",
+        "orchestration worker-start",
+        "orchestration worker-show",
+        "orchestration worker-read",
+        "orchestration worker-stop",
+        "orchestration worker-abandon",
+        "orchestration worker-release",
+        "orchestration worker-retain",
+        "orchestration worker-list",
+        "orchestration dispatch",
+        "orchestration request-show",
+        "orchestration dispatch-show",
+        "orchestration ask",
+        "orchestration coordinator-start",
+        "orchestration coordinator-stop",
+        "orchestration gate-create",
+        "orchestration gate-resolve",
+        "orchestration gate-list",
+        "orchestration reset",
+        "computer capabilities",
+        "computer list-apps",
+        "computer permissions",
+        "computer list-windows",
+        "computer get-app-state",
+        "computer click",
+        "computer perform-secondary-action",
+        "computer scroll",
+        "computer drag",
+        "computer type-text",
+        "computer press-key",
+        "computer hotkey",
+        "computer paste-text",
+        "computer set-value",
+        "agent hooks prepare-codex",
+        "agent hooks status",
+        "agent hooks off",
+        "agent hooks on",
+        "diagnostics memory",
+        "agent-context",
+        "host list",
+        "environment add",
+        "environment list",
+        "environment show",
+        "environment rm",
+        "linear save-issue",
+        "linear list-issues",
+        "linear relation add",
+        "linear relation remove",
+        "linear issue",
+        "linear search",
+        "linear team list",
+        "linear team members",
+        "linear team states",
+        "linear team labels",
+        "linear project list",
+        "linear list",
+        "linear status set",
+        "linear assignee set",
+        "linear assignee clear",
+        "linear priority set",
+        "linear priority clear",
+        "linear estimate set",
+        "linear estimate clear",
+        "linear due-date set",
+        "linear due-date clear",
+        "linear label add",
+        "linear label remove",
+        "linear label set",
+        "linear comment add",
+        "linear attach",
+        "linear create",
+        "vm recipe doctor",
+        "emulator list",
+        "emulator devices",
+        "emulator attach",
+        "emulator tap",
+        "emulator type",
+        "emulator gesture",
+        "emulator button",
+        "emulator rotate",
+        "emulator exec",
+        "emulator kill",
+        "emulator shutdown",
+        "emulator install",
+        "emulator launch",
+        "emulator permissions",
+        "emulator ax",
+        "emulator logcat"
+      ],
+      "sourceEvidence": [
+        {
+          "path": "src/cli/browser-format.ts",
+          "line": 1,
+          "sha256": "b8cfb19f688f2d5dd6755a0a299ad42ba0d3dcecde44c3f00eb5d128f4b7bc2a"
+        },
+        {
+          "path": "src/cli/computer-format.ts",
+          "line": 1,
+          "sha256": "cd26b0993398d11d489519465d17c9bab7197b39f7a214ed215907a4eec12ae3"
+        },
+        {
+          "path": "src/cli/linear-format.ts",
+          "line": 1,
+          "sha256": "b190df9a9b1c382b40b5cc4ebe7e1e398e5afcb45d033469cab0c2e99e2cc002"
+        },
+        {
+          "path": "src/cli/automation-format.ts",
+          "line": 1,
+          "sha256": "301cb3a49e995e0ed1883dda625cfe49c9dcaa217226156d2c543ebb762cba15"
+        },
+        {
+          "path": "src/cli/project-format.ts",
+          "line": 1,
+          "sha256": "23283f5ccda28ee097db5f35816769f0db14282f963f7d95b0b5a2e4d7c0df9b"
+        },
+        {
+          "path": "src/cli/handlers/orchestration/worker-output.ts",
+          "line": 1,
+          "sha256": "1dc67e59a50eba8ac5906f5111e5a43d8142498102a4fb1b6ed68866ca211712"
+        },
+        {
+          "path": "src/shared/orchestration-check-output.ts",
+          "line": 1,
+          "sha256": "c8e6442712e4309a818711d85f6460e3d175383c0087aa36ac6043b4ce51c4fd"
+        }
+      ],
+      "acceptance": "Review affected formatters/result shapes and retain null/absent/false, warning and JSON envelope exceptions as distinct contracts."
+    }
+  ],
+  "dependencyInventory": "command-map.json.boundarySources: 75 exact boundary source files; discovery/hash list, not 75 new capability groups or 75 proven defects",
+  "sourceTests": {
+    "manifest": "source-tests.json",
+    "cliFiles": 111,
+    "adjacentBoundaryFiles": 39,
+    "executedHere": 0,
+    "fullBodyReads": 3,
+    "partialBodyReads": 1,
+    "assertionAcceptance": "pending; retain accepted complete source-suite map and runner plan"
+  },
+  "executionDebt": [
+    "Run all applicable original tests from accepted manifest using verified isolated runner/environment, with versions and actual receipts.",
+    "Port assertions before feature implementation; demonstrate behavioral RED and GREEN, never setup failures or skipped tests as success.",
+    "Execute first-token/leading-flag passthrough, aliases/hidden/retired, stdout/stderr/exit and packaged launcher cases named in report.md.",
+    "Compare both remote version skews and OS/SSH/folder boundaries; preserve pending operation identity and live/unverifiable/exited distinctions.",
+    "Validate real provider/runtime/application behavior and installed preview only in the authorized implementation phase."
+  ],
+  "futureAcceptanceCommands": [
+    "node docs/migration/audit-closure/e4-cli/reconcile-cli.mjs",
+    "python3 docs/migration/audit-closure/e4-cli/finalize-report.py",
+    "In authorized disposable source baseline: pnpm exec vitest run --config config/vitest.config.ts src/cli",
+    "In authorized disposable source baseline: pnpm exec vitest run --config config/vitest.config.ts src/main/startup/cli-launch-redirect.test.ts src/shared/cli-argument-boundary.test.ts",
+    "Run every additional exact source-tests.json.tests path with its retained runner membership as part of full accepted baseline plan."
+  ],
+  "auditProgress": {
+    "estimatePercent": 60,
+    "confidence": "medium-low",
+    "denominator": "7/12 accepted unweighted groups",
+    "acceptedGroupDelta": 0,
+    "nextMilestone": "root reviews full reconciliation and resolves E4-S1 through E4-S5",
+    "deadlineRisk24h": "high for full-fidelity rewrite; target flexible",
+    "testMigrationDelta": "no pass or migration progress claimed",
+    "productFidelityDelta": "none claimed"
+  },
+  "artifacts": [
+    {
+      "path": "docs/migration/audit-closure/e4-cli/report.md",
+      "line": 1,
+      "sha256": "cf6d5770647e5ac9d0233b21f1bd16674035d0ad24f418f1d128ad8853b729c7"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/command-map.json",
+      "line": 1,
+      "sha256": "a3c64286270a4cf46d8d0dfd19f05bff069fc84ebbb31765f17a9c6d63314686"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/source-tests.json",
+      "line": 1,
+      "sha256": "8fe4f6d75f52400420dadf2a51d3ba61553385a70d6cfb17836414329908ba4e"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/verification.json",
+      "line": 1,
+      "sha256": "f3e2cb3c35eeb80af5c60c4dfe111f23b9ab8779232a97500a3fcbd971fa86e8"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/reconcile-cli.mjs",
+      "line": 1,
+      "sha256": "fec356ff10e3cf31c486fc941a6937fcc946c73aba20f7a38fb8e8dc4d927d4b"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/finalize-report.py",
+      "line": 1,
+      "sha256": "539071de6eefa16cbee90327b26f4897a5786e394dd1bc1374981cdf9b7d072d"
+    },
+    {
+      "path": "docs/migration/audit-closure/e4-cli/source-LICENSE",
+      "line": 1,
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+    }
+  ],
+  "acceptanceAuthority": "external root coordinator; no shared ledger modified"
+}

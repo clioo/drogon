@@ -1,0 +1,65 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Node24.19.0 and original installed Vitest4.1.11. Minimal node config omits DOM, aliases, host-port setup, feature-wall define, GC/WebStorage flags and extended timeout. No full original config equivalence claimed."
+  ],
+  "capsuleId": "electron-proxy-request-guard",
+  "description": "Whole original five-case proxy request guard suite, with in-memory Session methods; actual proxy queue and state machine execute.",
+  "entryTestFile": "src/main/network/electron-proxy-request-guard.test.ts",
+  "files": [
+    {
+      "path": "src/main/network/electron-proxy-request-guard.test.ts",
+      "role": "test",
+      "sha256": "716d917ed09324c5a73d138c0286fe4d29f106ef95c6c5bf0f291345c0b1c308"
+    },
+    {
+      "path": "src/main/network/electron-proxy-request-guard.ts",
+      "role": "module",
+      "sha256": "e10661d2d96ec7c36d5860c067a46d6d39bbdeeb6039e28c6e271fed57989783"
+    },
+    {
+      "path": "src/main/network/proxy-settings.ts",
+      "role": "module",
+      "sha256": "ca8355af218f3db372be3c80e077c902403ea6f9f4939df34402a92d27322ef5"
+    },
+    {
+      "path": "src/main/network/electron-proxy-credentials.ts",
+      "role": "module",
+      "sha256": "437af182cf304e7582a5ac35cb2eefa9fbe4abf73143545e877a0a9304523035"
+    },
+    {
+      "path": "src/main/network/bounded-proxy-application.ts",
+      "role": "module",
+      "sha256": "1278a0176320fb01e98ac567b063960e6ff4950d964206e60c70631d9a715abf"
+    },
+    {
+      "path": "src/main/network/electron-default-proxy-session.ts",
+      "role": "module",
+      "sha256": "06f3e3a5d0e45ec44e1cc5983d3b39690efa20ad4106cf29dc6bcb6447fec6df"
+    },
+    {
+      "path": "src/main/network/proxy-policy-resolution.ts",
+      "role": "module",
+      "sha256": "37b4794c2ff751ad9d53f075f6f0d712fd3f4555539760f0abaa55c4b2d0a1f0"
+    },
+    {
+      "path": "src/shared/network-proxy.ts",
+      "role": "module",
+      "sha256": "571b552e900ea306fe00eb6a4683bf5b77f260316d9ac3b3a3895fc1d02ea14a"
+    }
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 5
+  },
+  "isolationRationale": "Complete original test and eight-file closure read. Electron imports are type-only. No installed default-session resolver; each test passes synthetic Session with mocked resolveProxy/setProxy/closeAllConnections/listener. Explicit empty env, synthetic URL only; no socket, credentials, shell, Electron or network operation. Actual retry timers and queue/state logic run.",
+  "testEvidenceBoundary": "Five original delayed/retry/failure/retirement assertions, not real Electron listener registration, login challenge, native partition lifetime or candidate parity."
+}

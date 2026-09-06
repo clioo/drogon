@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 2,
+  "reviewedFiles": [
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/cli-contract.test.mjs"
+  ],
+  "newFiles": [
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/result-shape-review.md",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/result-shape-review.json"
+  ],
+  "sourceRevisionUnchanged": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "priorEvidenceUnchanged": [
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/manifest.json",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/evidence.json",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/store.ts",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/launch-drogon-bot-session.ts",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/standins/agent-catalog.ts",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/runner-review.md",
+    "tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/runner-review.json"
+  ],
+  "preservedFileSha256": {
+    "method": "shasum -a 256, computed after all edits in this review, from tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/ as cwd",
+    "manifest.json": "187454eaab1ce24841a466131f8e99d81f1768866f930c10b1b48a580e0fb1e3",
+    "evidence.json": "999124fea7d298a8c479523e5de4ddffccf7053fe990c1003a0eb469f8fe0436",
+    "standins/store.ts": "f4887c12d29ff3535d5fbc392736dcacc3df5b808ef55b7680f0adb4e423ffca",
+    "standins/launch-drogon-bot-session.ts": "4b97a9d76cc0c4d09c05ff1bcb72f7f24b8afd16b496711cbd81ff93b99662ac",
+    "standins/agent-catalog.ts": "43e90d99bba9fe4db0387dfb6de60824a6ae4ec8454c6475f15da249abf8aa2d",
+    "runner-review.md": "07451c936d5f97e25866c96b61fe55684eafab840ff0120d5f5b948cff46d1f8",
+    "runner-review.json": "24a5a1426be20c1d7cf0d9f303ef927ba0795cb8e3c944a257f4bdff9fde08fa",
+    "note": "manifest.json's hash (187454ea...) matches the manifestSha256 already recorded in the admitted evidence.json and reproduced by run-baseline.mjs's own readManifestDigest(manifestPath) at run time -- an independent confirmation these files were not touched."
+  },
+  "parentReviewCorrectionPass": {
+    "finding": "Parent review of the first result-shape pass found normalizeResultCases returned without a resultSchemaError in two cases it should have flagged: (1) a file object that omitted `assertionResults` entirely (undefined) was silently tolerated (`if (assertionResultsRaw === undefined) return`), and (2) a case object whose `status` was missing, null, non-string, or an empty string was pushed into `cases` with no schema error recorded at all. This contradicted the function's own stated contract (and the doc comment, which already claimed missing/malformed assertionResults was flagged) even though classifyExecution's independent, pre-existing per-case status check still correctly forced setup_block downstream -- the diagnostic just wasn't structured/attributable at the normalizeResultCases layer.",
+    "fix": [
+      "Removed the special-cased `if (assertionResultsRaw === undefined) return` early exit; a missing assertionResults now falls into the same `!Array.isArray(assertionResultsRaw)` branch as any other non-array value, with a reason distinguishing 'is missing' (when actually undefined) from 'is not an array' (any other non-array value, e.g. `{}`) so the two remain separately greppable while sharing one code path.",
+      "Added an explicit `isValidStatus(value) => typeof value === 'string' && value.length > 0` check on every valid case object; a missing/null/non-string/empty status now records a resultSchemaError with reason `...status is missing or invalid` and a `{ type, value? }` detail (the raw string value is included only when the status IS a string, so an empty string is distinguishable from 'no status at all' or a wrong type).",
+      "The case is still pushed into `cases` with its raw status preserved (not nulled out) in both the missing-assertionResults-tolerant-before and invalid-status paths, so no safe raw evidence is dropped -- only the file-level assertionResults-missing/non-array case and the case-level null/non-object case (both pre-existing behavior, unchanged) skip pushing a case, and the latter still substitutes a safe all-null placeholder as before.",
+      "classifyExecution, runExecute, parseResultsFile, and every other prior gate/behavior are unchanged in this pass -- only normalizeResultCases's internal validation was tightened."
+    ],
+    "verification": "The one pre-existing test that asserted the now-corrected (wrong) tolerant behavior -- 'tolerates a case missing its required status field as no schema error' -- was updated to assert the corrected behavior (resultSchemaError now set, case still preserved) and retitled to note the correction. No other existing test's expected outcome changed."
+  },
+  "boundedDefect": {
+    "description": "runExecute built the per-case list with `(results?.testResults ?? []).flatMap(file => (file.assertionResults ?? []).map(testCase => ({ ...testCase.status, ... })))` before assembling raw process evidence. Valid, successfully-parsed JSON with a wrong shape -- `testResults` as a non-array (e.g. an object), a null entry inside `testResults`, `assertionResults` as a non-array, or a null entry inside `assertionResults` -- would throw a TypeError (`.flatMap`/`.map` is not a function on a non-array, or 'Cannot read properties of null') instead of producing a diagnosed setup_block. Separately, `parseResultsFile`'s `readFileSync(resultsPath, 'utf8')` call was outside its try/catch, so a filesystem-read failure on an existing-but-unreadable path (e.g. a directory) would escape as an unstructured, uncaught error instead of becoming structured evidence alongside the existing JSON-parse diagnostic.",
+    "riskWithoutFix": "A malformed-but-successfully-parsed Vitest reporter output, or a results path that exists but cannot be read, could crash runExecute with an unhandled exception instead of producing a report at all -- the opposite of the fail-closed, always-diagnosable contract the runner is supposed to guarantee."
+  },
+  "fix": {
+    "parseResultsFile": "Split into two independent try/catches: the `readFileSync` call is now wrapped and failures become a `resultsReadError: { message, code, path }`, distinct and mutually exclusive from the pre-existing `resultsParseError` (a `JSON.parse` failure on bytes that were read successfully). A missing file still yields all three (`results`, `resultsReadError`, `resultsParseError`) null.",
+    "normalizeResultCases": "Pure function (not a test-only reimplementation -- runExecute calls this exact function) that walks parsed `results.testResults` -> per-file `assertionResults` -> per-case entries, validating each level's shape before touching it: a missing/non-array `testResults`, a null/non-object file entry, a missing/null/non-array `assertionResults`, a null/non-object case entry, or a case whose `status` is missing/null/non-string/empty are each recorded as a single structured `resultSchemaError` (the first one encountered, with a human-readable `reason` and a `{ type, value? }` detail) instead of throwing. A null/malformed case entry is replaced with a safe all-null placeholder case; a case with an invalid status is still pushed with its raw status preserved. The returned `cases` array is always a plain array of plain objects, never containing `null`. See parentReviewCorrectionPass above for the fix to the missing-assertionResults/invalid-status gap found by parent review.",
+    "classifyExecution": "Gained two new early gates, `if (execution.resultsReadError) return 'setup_block'` and `if (execution.resultSchemaError) return 'setup_block'`, placed alongside the pre-existing `resultsParseError` gate. Existing gates, the count/denominator/pending-todo/per-case checks, and the source_pass/source_behavioral_failure split are all unchanged.",
+    "runExecute": "Now calls `const { results, resultsReadError, resultsParseError } = parseResultsFile(resultsPath)` followed by `const { cases, resultSchemaError } = normalizeResultCases(results)`, replacing the inline `.flatMap`/`.map` chain entirely. The `execution` object and the `--execute` JSON report both gained `resultsReadError` and `resultSchemaError` fields (mirroring the existing `resultsParseError` field), each null unless its specific failure occurred. Raw spawn evidence (`report.spawn`), raw counts (`report.rawCounts`), and the full per-case list (`report.cases`) are unchanged in shape and are still populated whenever the underlying data allows it, independent of classification.",
+    "noDuplication": "cli-contract.test.mjs imports and calls the real, exported normalizeResultCases/parseResultsFile/classifyExecution -- it does not reimplement any normalization or classification logic for testing."
+  },
+  "preservedContract": {
+    "allPriorRegressionsStillPassOrWereIntentionallyCorrected": true,
+    "coveredUnchanged": [
+      "signal (SIGKILL) cases",
+      "pending/todo full-total cases",
+      "timeout (ETIMEDOUT-keyed) cases",
+      "null-or-missing-exitCode cases",
+      "root's blocking matrix (full 8/6/2 failed JSON under unclean spawn-level evidence, 5 cases)",
+      "full valid passing control (source_pass)",
+      "full valid failing control (source_behavioral_failure)"
+    ],
+    "intentionallyCorrectedTests": [
+      "'tolerates a case missing its required status field as no schema error' (normalizeResultCases unit) -- retitled to 'treats a case missing its required status field as a schema error while preserving the case as safe raw evidence (previously tolerated silently -- corrected)' and its expected resultSchemaError changed from null to set, per parentReviewCorrectionPass above. Its expected `cases` output (the preserved case with the raw status) is unchanged.",
+      "'a case missing its required status field never throws and classifies setup_block across the real chain' (wiring) -- unchanged expected classification (setup_block), gained an added assertion that resultSchemaError is now also set.",
+      "'treats assertionResults as an object ({}) as a schema error' and 'assertionResults as an object ({}) never throws and classifies setup_block' -- unchanged expectations; the reason-string check now explicitly distinguishes this ({}) case from the new missing-assertionResults (undefined) case, which uses a different reason string ('is missing' vs 'is not an array')."
+    ],
+    "changeToBaseExecutionFixtureInExistingTests": "baseExecution() in cli-contract.test.mjs now also defaults resultsReadError: null and resultSchemaError: null (alongside the pre-existing resultsParseError: null), matching the new execution shape. This is additive and does not change any existing assertion's expected classification.",
+    "changeToTwoExistingParseResultsFileAssertions": "The two pre-existing exact-shape `toEqual(...)` assertions on parseResultsFile's return value (well-formed file, missing file) were updated to include the new `resultsReadError: null` field; their pass/fail expectations are unchanged.",
+    "changeToRunChainHelperInWiringTests": "The wiring block's runChain helper now returns { classification, resultSchemaError } instead of only the classification string, so every wiring test could assert both. All pre-existing wiring test bodies were updated to destructure outcome.classification instead of comparing the return value directly; no expected classification changed."
+  },
+  "executionSemanticsUnchangedExcept": "The only behavioral change to --execute is fail-closed structured normalization: a run that previously would have thrown a TypeError (malformed results shape) or let an fs error escape (unreadable results path) now instead produces a normal JSON report with classification: setup_block and a structured resultSchemaError/resultsReadError field. Every other code path (staging, supplemental runtime, standins, execution config, the spawnSync call and its args/env/timeout, spawn-evidence capture, evaluateExecution, rawCounts, cases for well-formed input, limitations) is untouched.",
+  "newTestsAdded": {
+    "note": "This lists tests added across both result-shape passes; entries marked [pass 2] are new in this correction pass.",
+    "parseResultsFile": [
+      "catches a filesystem-read failure (results path is a directory, not a file) into resultsReadError, distinct from resultsParseError, never throwing"
+    ],
+    "normalizeResultCases": [
+      "well-formed full-passing shape: no schema error, correct cases",
+      "well-formed full-failing shape: no schema error, correct cases",
+      "null/undefined results: no cases, no schema error",
+      "[pass 2] testResults entirely missing (results = {}): schema error (type: 'undefined'), never throws",
+      "testResults as an object ({}): schema error (type: 'object'), never throws",
+      "null file entry inside testResults: schema error, never throws",
+      "[pass 2] assertionResults entirely missing from a file object: schema error (reason 'is missing', type: 'undefined'), never throws -- corrects the gap parent review found",
+      "assertionResults as an object ({}): schema error (reason 'is not an array'), never throws",
+      "null assertion-case entry: schema error + safe placeholder case, never throws",
+      "case missing its required status field: schema error (type: 'undefined') while the case is still preserved as safe raw evidence -- corrects the gap parent review found",
+      "[pass 2] case with a null status: schema error (type: 'null'), case preserved",
+      "[pass 2] case with a non-string status (number): schema error (type: 'number'), case preserved",
+      "[pass 2] case with an empty-string status: schema error (type: 'string', value: ''), case preserved",
+      "[pass 2] multiple invalid-status cases: only the first schema problem is recorded, all cases still preserved"
+    ],
+    "classifyExecution": [
+      "resultsReadError present: setup_block",
+      "resultSchemaError present: setup_block"
+    ],
+    "actualHelperWiringEndToEnd": [
+      "full valid passing fixture (real file on disk): source_pass, resultSchemaError null, never throws across parseResultsFile -> normalizeResultCases -> classifyExecution",
+      "full valid failing fixture (real file on disk): source_behavioral_failure, resultSchemaError null, never throws",
+      "unreadable results path (a real throwaway directory used as the path): setup_block, never throws",
+      "malformed JSON (real file on disk): setup_block, never throws",
+      "[pass 2] testResults entirely missing (real file on disk): setup_block with resultSchemaError asserted (type: 'undefined'), never throws",
+      "testResults as an object ({}) (real file on disk): setup_block with resultSchemaError asserted, never throws",
+      "null file entry in testResults (real file on disk): setup_block with resultSchemaError asserted, never throws",
+      "[pass 2] assertionResults entirely missing from a file object (real file on disk): setup_block with resultSchemaError asserted (reason 'is missing'), never throws",
+      "assertionResults as an object ({}) (real file on disk): setup_block with resultSchemaError asserted, never throws",
+      "null assertion-case entry (real file on disk): setup_block with resultSchemaError asserted, never throws",
+      "case missing its required status field (real file on disk): setup_block with resultSchemaError asserted, never throws",
+      "[pass 2] case with a null status (real file on disk): setup_block with resultSchemaError asserted (type: 'null'), never throws",
+      "[pass 2] case with a non-string status (real file on disk): setup_block with resultSchemaError asserted (type: 'number'), never throws",
+      "[pass 2] case with an empty-string status (real file on disk): setup_block with resultSchemaError asserted (type: 'string', value: ''), never throws"
+    ]
+  },
+  "commandsRun": [
+    {
+      "purpose": "static syntax check of the edited runner",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs",
+      "exitCode": 0
+    },
+    {
+      "purpose": "static syntax check of the updated test suite",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/cli-contract.test.mjs",
+      "exitCode": 0
+    },
+    {
+      "purpose": "focused unit + CLI-contract test suite (Node24 on PATH, installed apps/desktop vitest)",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "PATH=\"/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH\" apps/desktop/node_modules/.bin/vitest run tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/cli-contract.test.mjs --root . --dir tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page",
+      "nodeVersion": "v24.19.0",
+      "vitestVersion": "vitest/5.0.0 darwin-arm64 node-v24.19.0",
+      "result": "Test Files  1 passed (1) / Tests  91 passed (91)",
+      "exitCode": 0
+    },
+    {
+      "purpose": "manual smoke: default (no args) is read-only check mode, unaffected by the result-shape fix (--check never calls parseResultsFile/normalizeResultCases)",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs",
+      "exitCode": 0,
+      "reportMode": "check",
+      "reportOk": true
+    },
+    {
+      "purpose": "manual smoke: --check explicit",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs --check",
+      "exitCode": 0
+    },
+    {
+      "purpose": "manual smoke: importing the module executes/stages nothing",
+      "cwd": "/Users/carlos/Documents/Drogon-rewrite",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --input-type=module -e \"import('./tests/parity/ports/WP-CAP-BOTS/source-baselines/bots-page/run-baseline.mjs')\"",
+      "exitCode": 0,
+      "stdout": ""
+    }
+  ],
+  "manualSideEffectSpotCheck": {
+    "method": "counted entries under .preflight/parity-baseline immediately before and after the manual smoke commands above, as a spot check only",
+    "before": 146,
+    "after": 146,
+    "result": "unchanged"
+  },
+  "notExecuted": {
+    "note": "The costly real UI baseline (--execute against the pinned Drogon-mentu-session source, spawning the real Vitest suite) was not rerun as part of this review. The frozen evidence.json (source_behavioral_failure, 6 passed / 2 failed of 8) is unchanged and remains the admitted execute-mode evidence. Its shape is compatible with the new report.resultsReadError/report.resultSchemaError fields, which would simply add two more null-valued fields alongside the already-recorded exitCode/signal/resultsParseError on a future rerun, since that admitted run's results.json was well-formed."
+  },
+  "caseCounts": {
+    "cli-contract.test.mjs": {
+      "testFiles": 1,
+      "tests": 91,
+      "passed": 91,
+      "failed": 0,
+      "breakdown": {
+        "parseCliArgs": 9,
+        "main() dispatch boundary": 7,
+        "read-only helpers against injected throwaway roots": 7,
+        "deriveTimedOut": 3,
+        "parseResultsFile": 4,
+        "normalizeResultCases": 14,
+        "classifyExecution (general)": 21,
+        "classifyExecution (root's blocking matrix)": 5,
+        "actual helper wiring (parseResultsFile -> normalizeResultCases -> classifyExecution, real fixture files)": 14,
+        "narrow real default/check smoke": 7
+      },
+      "breakdownSumCheck": "9+7+7+3+4+14+21+5+14+7 = 91"
+    }
+  },
+  "limitations": [
+    "This is result-shape/normalization hardening only, never a candidate parity result or a re-run of the admitted evidence.json baseline.",
+    "The wiring tests exercise the real parseResultsFile/normalizeResultCases/classifyExecution chain against real throwaway fixture files, but do not spawn a real vitest process; the spawnSync/staging portions of runExecute are unchanged and remain covered only by the frozen evidence.json admitted run plus the pre-existing spawn-evidence unit tests (signal/timeout/spawnError) against hand-built execution objects.",
+    "normalizeResultCases records only the first schema problem encountered per call (problems[0]) rather than an exhaustive list, matching the existing single-shot diagnostic style of resultsParseError/resultsReadError."
+  ]
+}

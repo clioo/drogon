@@ -1,0 +1,66 @@
+{
+  "capsuleId": "serve-signal-exit-diagnostic",
+  "description": "Unchanged original foreground serve signal and late handoff write-failure cases; all runtime imports independently read.",
+  "entryTestFile": "src/cli/runtime/serve-signal-exit-diagnostic.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 12
+  },
+  "files": [
+    {
+      "path": "src/cli/runtime/serve-signal-exit-diagnostic.test.ts",
+      "role": "test",
+      "sha256": "c7ca934c0a85a35859b876546a61dea1e4a12b46cdaabdd4f18e7afe61705c3b"
+    },
+    {
+      "path": "src/cli/runtime/serve-signal-exit-diagnostic.ts",
+      "role": "module",
+      "sha256": "7dcc3238d2f2eb57fbcf90899fb77eec43df3d9aad659c5cc3a5615dc5d5ac20"
+    },
+    {
+      "path": "src/cli/runtime/serve-update-supervisor.ts",
+      "role": "module",
+      "sha256": "3cd094753949093437e00688f2b2289813c2e6a8e85a41be50e46d2156d7de15"
+    },
+    {
+      "path": "src/cli/runtime/mac-app-update-bundle.ts",
+      "role": "module",
+      "sha256": "ba270a94a7fc01d8614d036820967eaaf50869817b1cac76a49e877fb0277ca3"
+    },
+    {
+      "path": "src/cli/runtime/types.ts",
+      "role": "module",
+      "sha256": "6c6c7bc9eb6c934cc06517026d54321a0abc9a5b6ee759d96cdeb243d8dcee70"
+    },
+    {
+      "path": "src/shared/serve-update-handoff.ts",
+      "role": "module",
+      "sha256": "b7f2c4a93a7ce10890f948cbd549d9cc0f50b2ea11f4fcd7550652e66bae39d6"
+    },
+    {
+      "path": "src/shared/quit-teardown-deadline.ts",
+      "role": "module",
+      "sha256": "55f56117cc92be5d660fa748733bfaade1dffe3c958009a999cf7fb97e20eb48"
+    },
+    {
+      "path": "src/shared/orchestration-compatibility-evidence.ts",
+      "role": "module",
+      "sha256": "a1ebea9d09839845e279ce9e62a81985f5af9c58f3ea004556ec5bc9374bc0ef"
+    }
+  ],
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "isolationRationale": "Vitest fake EventEmitter child and fake timers; process.emit targets only the isolated test process listeners, not OS signals. Fake kill never signals a real process. One test creates then deletes its own mkdtemp directory and verifies failure writing within that now-missing directory. No real Electron, child spawn, model, service, network or user data access in these cases. Runtime imports include mac bundle polling but no test reaches it; type-only runtime-rpc-envelope is erased. Minimal config is not a general sandbox.",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 with Node24.19.0 on macOS arm64, minimal node config. Original aliases/setupFiles/feature-wall define/GC-webstorage/platform-worker settings are not used by reviewed runtime closure. No full configuration or typecheck equivalence claimed.",
+    "Tests simulate Linux/Windows platform property and timers; no native Linux/Windows execution. Original assertions, fake children, and imports unchanged. Default per-case timeout and outer30s."
+  ],
+  "testEvidenceBoundary": "12 original unit cases only. No installed bundle update, real signal delivery, launchd lifetime, Electron teardown, SSH host, candidate parity or live version-skew proof."
+}

@@ -1,0 +1,833 @@
+{
+  "schema": "drogon.parity-mobile-method-review/1",
+  "status": "coordinator-bounded-call-flow-reviewed",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "afterCommit": "b09e289",
+  "runtimeAcceptance": "unproven",
+  "scope": "All31 remaining syntax candidates attributed by receiver/caller source review. Static name lower bound, not exhaustive type-resolved application call graph, host handler compatibility, UI execution or audit completion.",
+  "supersedes": "parity-mobile-method-flow.json leaf25-name delta and188-name lower-bound calculation; raw leaf report retained for provenance.",
+  "counts": {
+    "remainingSyntaxSites": 31,
+    "rpcWrapperSites": 19,
+    "transportForwardingSites": 8,
+    "nonRpcCallbackSites": 4,
+    "priorDirectNames": 156,
+    "priorConditionalAdditions": 7,
+    "priorLowerBound": 163,
+    "wrapperResolvedDistinctNames": 72,
+    "wrapperNamesAbsentFromPrior": 45,
+    "leafReportedNewNames": 25,
+    "additionalNamesMissedByLeaf": 20,
+    "memberCallFlowLowerBound": 208,
+    "separateBareCapabilityAdditions": 1,
+    "combinedKnownLowerBound": 209
+  },
+  "candidates": [
+    {
+      "id": 1,
+      "file": "mobile/src/browser/use-mobile-browser-request.ts",
+      "line": 41,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "browser.mouseClick",
+        "browser.keyboardInsertText",
+        "browser.keypress",
+        "browser.dialogAccept",
+        "browser.dialogDismiss",
+        "browser.goto",
+        "browser.back",
+        "browser.forward",
+        "browser.reload"
+      ],
+      "sourcePointers": [
+        "mobile/src/browser/use-mobile-browser-request.ts:24-69",
+        "mobile/src/browser/use-mobile-browser-commands.ts:102-237",
+        "mobile/src/browser/MobileBrowserPane.tsx:199-310",
+        "mobile/src/browser/use-mobile-browser-stream.ts:107-115,282",
+        "mobile/src/browser/use-mobile-browser-interactions.ts:93-114"
+      ]
+    },
+    {
+      "id": 2,
+      "file": "mobile/src/files/mobile-file-mutation-ownership.ts",
+      "line": 74,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "status.get",
+        "worktree.show",
+        "ssh.getState"
+      ],
+      "sourcePointers": [
+        "mobile/src/files/mobile-file-mutation-ownership.ts:35-82"
+      ]
+    },
+    {
+      "id": "3-6",
+      "file": "mobile/src/files/mobile-file-preview-request.ts",
+      "lines": [
+        94,
+        106,
+        187,
+        207
+      ],
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "files.read",
+        "files.readPreview",
+        "files.readTerminalArtifact",
+        "files.readTerminalArtifactPreview"
+      ],
+      "sourcePointers": [
+        "mobile/src/files/mobile-file-preview-request.ts:54-110,174-210"
+      ]
+    },
+    {
+      "id": 7,
+      "file": "mobile/src/host-screen/use-host-repo-metadata.ts",
+      "line": 20,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "ssh.listTargetSummaries",
+        "settings.get",
+        "host.platform"
+      ],
+      "sourcePointers": [
+        "mobile/src/host-screen/use-host-repo-metadata.ts:18-26,121-126"
+      ]
+    },
+    {
+      "id": "8-9",
+      "file": "mobile/src/session/github-pr-mutations.ts",
+      "lines": [
+        23,
+        58
+      ],
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "github.mergePR",
+        "github.updatePRTitle",
+        "github.setPRAutoMerge",
+        "github.updatePRState",
+        "github.requestPRReviewers",
+        "github.removePRReviewers",
+        "github.addPRReviewCommentReply",
+        "github.addIssueComment",
+        "github.resolveReviewThread",
+        "github.project.updateIssueCommentBySlug",
+        "github.project.deleteIssueCommentBySlug",
+        "github.rerunPRChecks"
+      ],
+      "sourcePointers": [
+        "mobile/src/session/github-pr-mutations.ts:17-329"
+      ]
+    },
+    {
+      "id": 10,
+      "file": "mobile/src/session/github-pr-rpc.ts",
+      "line": 95,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "github.repoSlug",
+        "hostedReview.forBranch",
+        "github.prForBranch",
+        "github.workItemDetails",
+        "github.prChecks",
+        "github.prCheckDetails",
+        "github.listAssignableUsers"
+      ],
+      "sourcePointers": [
+        "mobile/src/session/github-pr-rpc.ts:87-258"
+      ]
+    },
+    {
+      "id": 11,
+      "file": "mobile/src/session/mobile-structured-agent-session-rpc.ts",
+      "line": 41,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "agentSession.hold",
+        "agentSession.release",
+        "agentSession.history",
+        "agentSession.options",
+        "agentSession.send",
+        "agentSession.cancel",
+        "agentSession.respondToApproval",
+        "agentSession.respondToQuestion",
+        "agentSession.setOption"
+      ],
+      "sourcePointers": [
+        "mobile/src/session/mobile-structured-agent-session-rpc.ts:34-48,98-151",
+        "mobile/src/session/use-mobile-structured-agent-state.ts:104-170",
+        "mobile/src/session/use-mobile-structured-agent-options.ts:63,95-99",
+        "mobile/src/session/use-mobile-structured-agent-session.ts:85-136,174-184,208-236,255-265"
+      ],
+      "reviewNote": "Correction: hold/release are not the only callers. requestStructuredAgentSessionMutation forwards method through callAgentSession. Option, history, send, cancel, approval and question paths are traced. respondTo:approval/question are payload fingerprint labels, NOT wire methods."
+    },
+    {
+      "id": 12,
+      "file": "mobile/src/session/use-mobile-diff-review-git-actions.ts",
+      "line": 32,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "git.stage",
+        "git.unstage",
+        "git.discard"
+      ],
+      "sourcePointers": [
+        "mobile/src/session/use-mobile-diff-review-git-actions.ts:23-50",
+        "mobile/src/session/mobile-diff-review-screen-model.ts:53"
+      ],
+      "reviewNote": "Correction: git.unstage and git.discard were absent from the prior163, despite the leaf's already-known claim."
+    },
+    {
+      "id": "13-15",
+      "file": "mobile/src/session/use-mobile-native-chat-terminal-stream.ts",
+      "lines": [
+        174,
+        194,
+        205
+      ],
+      "disposition": "non-rpc-subscribe-lookalike",
+      "resolvedMethods": [],
+      "sourcePointers": [
+        "mobile/src/session/use-mobile-native-chat-terminal-stream.ts:28,165-205",
+        "mobile/src/session/use-mobile-session-terminal-stream-display.ts:26-39",
+        "mobile/src/session/use-mobile-session-terminal-subscription.ts:43-108",
+        "mobile/src/session/mobile-terminal-stream-subscribe.ts:3-17"
+      ],
+      "reviewNote": "Not three arbitrary subscription method names. args.subscribe takes a terminal handle. It is bound to subscribeToTerminal, which calls subscribeMobileTerminalSafely and then literal terminal.subscribe (already counted). Local callback has downstream network effect but is not directly an RPC subscribe method call."
+    },
+    {
+      "id": 16,
+      "file": "mobile/src/session/use-mobile-session-content-create-actions.ts",
+      "line": 137,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "browser.back",
+        "browser.forward",
+        "browser.reload"
+      ],
+      "sourcePointers": [
+        "mobile/src/session/use-mobile-session-content-create-actions.ts:128-153"
+      ]
+    },
+    {
+      "id": 17,
+      "file": "mobile/src/source-control/mobile-hosted-review-git-preparation.ts",
+      "line": 36,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "git.bulkStage",
+        "git.push"
+      ],
+      "sourcePointers": [
+        "mobile/src/source-control/mobile-hosted-review-git-preparation.ts:29-45",
+        "mobile/src/source-control/mobile-hosted-review-create-intent.ts:109-117",
+        "mobile/src/source-control/mobile-hosted-review-remote-prerequisite.ts:17-54"
+      ],
+      "reviewNote": "Correction: git.bulkStage was absent from the prior163; git.push was present. Transport ok and nested commit success are distinct checks in this file."
+    },
+    {
+      "id": 18,
+      "file": "mobile/src/source-control/use-mobile-git-requests.ts",
+      "line": 25,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "git.commit",
+        "git.upstreamStatus",
+        "git.status",
+        "git.fetch",
+        "git.pull",
+        "git.push",
+        "git.bulkStage",
+        "git.bulkUnstage",
+        "git.localBranches",
+        "git.checkout",
+        "git.abortMerge",
+        "git.abortRebase",
+        "git.rebaseFromBase",
+        "git.fastForward",
+        "git.stage",
+        "git.unstage",
+        "git.discard"
+      ],
+      "sourcePointers": [
+        "mobile/src/source-control/use-mobile-git-requests.ts:20-78",
+        "mobile/src/source-control/use-mobile-source-control-state.ts:173-194,220-237,313",
+        "mobile/src/source-control/use-mobile-source-control-runners.ts:138-185,231,274-305",
+        "mobile/src/source-control/use-mobile-source-control-action-sheet-runners.ts:43-81",
+        "mobile/src/source-control/use-mobile-source-control-commit-runners.ts:142-155",
+        "mobile/src/source-control/use-mobile-source-control-action-sheet.ts:43-57",
+        "mobile/src/source-control/mobile-source-control-primary-action.ts:220-251",
+        "mobile/src/source-control/MobileSourceControlFileRows.tsx:88,106",
+        "mobile/src/source-control/MobileSourceControlModals.tsx:59-62"
+      ],
+      "reviewNote": "Correction: exported sendGitRequest is passed from state into workflow/commit/action-sheet runners. Only looking at its own six callers misses action/sequence builders and file-row/modal callbacks. These produce17 distinct Git names,13 absent from prior163."
+    },
+    {
+      "id": 19,
+      "file": "mobile/src/tasks/use-mobile-tasks-hosted-metadata-actions.tsx",
+      "line": 130,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "gitlab.updateIssue",
+        "gitlab.updateMR"
+      ],
+      "sourcePointers": [
+        "mobile/src/tasks/use-mobile-tasks-hosted-metadata-actions.tsx:92-135"
+      ]
+    },
+    {
+      "id": 20,
+      "file": "mobile/src/tasks/use-mobile-tasks-project-file-merge-actions.tsx",
+      "line": 273,
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "github.updateIssue",
+        "github.updatePRState"
+      ],
+      "sourcePointers": [
+        "mobile/src/tasks/use-mobile-tasks-project-file-merge-actions.tsx:251-280"
+      ]
+    },
+    {
+      "id": "21-22",
+      "file": "mobile/src/transport/direct-rpc-client.ts",
+      "lines": [
+        137,
+        146
+      ],
+      "disposition": "transport-forwarding",
+      "resolvedMethods": [],
+      "sourcePointers": [
+        "mobile/src/transport/direct-rpc-client.ts:24-69,132-147"
+      ]
+    },
+    {
+      "id": 23,
+      "file": "mobile/src/transport/mobile-relay-rpc-session.ts",
+      "line": 109,
+      "disposition": "transport-forwarding",
+      "resolvedMethods": [],
+      "sourcePointers": [
+        "mobile/src/transport/mobile-relay-rpc-session.ts:59-63,97-110"
+      ]
+    },
+    {
+      "id": "24-26",
+      "file": "mobile/src/transport/pairing-relay-candidate.ts",
+      "lines": [
+        28,
+        89,
+        111
+      ],
+      "disposition": "transport-forwarding",
+      "resolvedMethods": [],
+      "sourcePointers": [
+        "mobile/src/transport/pairing-relay-candidate.ts:10-151"
+      ],
+      "reviewNote": "Forwarding only. Only failed status.get is eligible for director recovery; journal persistence precedes adopting a moved relay. Detailed auth/persistence/expiry/race behavior and full dependency closure are not accepted here."
+    },
+    {
+      "id": "27-28",
+      "file": "mobile/src/transport/request-single-flight.ts",
+      "lines": [
+        50,
+        96
+      ],
+      "disposition": "rpc-wrapper-traced",
+      "resolvedMethods": [
+        "stats.summary",
+        "accounts.list",
+        "settings.get",
+        "preflight.check",
+        "linear.status",
+        "worktree.ps"
+      ],
+      "sourcePointers": [
+        "parity-mobile-request-contracts.md:MREQ-1,MREQ-2; source hashes and unchanged baseline at b09e289"
+      ]
+    },
+    {
+      "id": 29,
+      "file": "mobile/src/transport/stable-logical-rpc-client.ts",
+      "line": 95,
+      "disposition": "transport-forwarding",
+      "resolvedMethods": [],
+      "sourcePointers": [
+        "mobile/src/transport/stable-logical-rpc-client.ts:63-114",
+        "parity-mobile-request-contracts.md:MREQ-3"
+      ]
+    },
+    {
+      "id": 30,
+      "file": "mobile/src/transport/stable-logical-rpc-client.ts",
+      "line": 285,
+      "disposition": "non-rpc-subscribe-lookalike",
+      "resolvedMethods": [],
+      "sourcePointers": [
+        "mobile/src/transport/stable-logical-rpc-client.ts:78,285",
+        "mobile/src/transport/logical-client-connection-path.ts:63-84"
+      ],
+      "reviewNote": "Local connection-path observer only; no RPC method."
+    },
+    {
+      "id": 31,
+      "file": "mobile/src/transport/stable-logical-rpc-client.ts",
+      "line": 308,
+      "disposition": "transport-forwarding",
+      "resolvedMethods": [],
+      "sourcePointers": [
+        "mobile/src/transport/stable-logical-rpc-client.ts:117-141,303-319"
+      ]
+    }
+  ],
+  "newNames": [
+    "accounts.list",
+    "agentSession.cancel",
+    "agentSession.history",
+    "agentSession.hold",
+    "agentSession.options",
+    "agentSession.release",
+    "agentSession.respondToApproval",
+    "agentSession.respondToQuestion",
+    "agentSession.send",
+    "agentSession.setOption",
+    "browser.back",
+    "browser.dialogAccept",
+    "browser.dialogDismiss",
+    "browser.forward",
+    "browser.goto",
+    "browser.keyboardInsertText",
+    "browser.keypress",
+    "browser.mouseClick",
+    "browser.reload",
+    "files.readTerminalArtifact",
+    "files.readTerminalArtifactPreview",
+    "git.abortMerge",
+    "git.abortRebase",
+    "git.bulkStage",
+    "git.bulkUnstage",
+    "git.checkout",
+    "git.discard",
+    "git.fastForward",
+    "git.fetch",
+    "git.localBranches",
+    "git.pull",
+    "git.rebaseFromBase",
+    "git.unstage",
+    "git.upstreamStatus",
+    "github.prCheckDetails",
+    "github.prForBranch",
+    "github.removePRReviewers",
+    "github.setPRAutoMerge",
+    "github.updatePRState",
+    "github.updatePRTitle",
+    "gitlab.updateMR",
+    "host.platform",
+    "hostedReview.forBranch",
+    "ssh.listTargetSummaries",
+    "stats.summary"
+  ],
+  "separateBareCalls": [
+    {
+      "method": "runtime.clientCapabilities.update",
+      "sourcePointers": [
+        "mobile/src/transport/mobile-runtime-capability-negotiation.ts:19-22",
+        "mobile/src/transport/mobile-runtime-client-capabilities.ts:12-13"
+      ],
+      "evidence": "parity-mobile-request-contracts.md; unchanged five-case baseline at b09e289 (temporal limits documented)."
+    }
+  ],
+  "coordinatorReads": [
+    {
+      "file": "mobile/src/session/github-pr-mutations.ts",
+      "tier": "full-body",
+      "sha256": "7d7b7bf2cad4891167f2bf34a07ddbe481ff556004dc748f38d19563f9aa9d14",
+      "lineCount": 329
+    },
+    {
+      "file": "mobile/src/session/github-pr-rpc.ts",
+      "tier": "full-body",
+      "sha256": "103152076c493f7253c51003c39874ef78e20fd688c12c9f8cd0e9b98440bf18",
+      "lineCount": 258
+    },
+    {
+      "file": "mobile/src/browser/use-mobile-browser-request.ts",
+      "tier": "full-body",
+      "sha256": "88f92c83acf00dce760397e03267da185b1c9b0e3a92744490a7fb2ab9b3c629",
+      "lineCount": 67
+    },
+    {
+      "file": "mobile/src/browser/use-mobile-browser-commands.ts",
+      "tier": "full-body",
+      "sha256": "96b693e8f88122d54f85dce5f08f37dfb5b16dba68b9e4734ca7cabad133e8d1",
+      "lineCount": 248
+    },
+    {
+      "file": "mobile/src/files/mobile-file-mutation-ownership.ts",
+      "tier": "full-body",
+      "sha256": "2b2b85e26d15900face118925623b18509592a619ce56f002d53d5e77b77fd3e",
+      "lineCount": 81
+    },
+    {
+      "file": "mobile/src/session/use-mobile-diff-review-git-actions.ts",
+      "tier": "full-body",
+      "sha256": "715351e68030ba18540ba0b4be931bf3b3053c83c56b67ffed39f7e85030a058",
+      "lineCount": 88
+    },
+    {
+      "file": "mobile/src/source-control/use-mobile-git-requests.ts",
+      "tier": "full-body",
+      "sha256": "79c1a917a87a6480e7fe39a3ddf4d728681bd3f380948dab4d55d4db9e06461e",
+      "lineCount": 79
+    },
+    {
+      "file": "mobile/src/source-control/mobile-hosted-review-git-preparation.ts",
+      "tier": "full-body",
+      "sha256": "c0a91ae4f485b34ec59166d6410f424ba8fa4f09418b4e50020cf424033bc1a5",
+      "lineCount": 67
+    },
+    {
+      "file": "mobile/src/source-control/mobile-hosted-review-remote-prerequisite.ts",
+      "tier": "full-body",
+      "sha256": "71bdf420a36663dc6cd9a3ab72cc9ed1e9e37c63bf47c7a64793e75a7c744927",
+      "lineCount": 55
+    },
+    {
+      "file": "mobile/src/session/mobile-structured-agent-session-rpc.ts",
+      "tier": "full-body",
+      "sha256": "570998e5eae0226d466d2932fc5d9a47353c5b7298a90cf70a00bcc3861947a9",
+      "lineCount": 152
+    },
+    {
+      "file": "mobile/src/session/use-mobile-structured-agent-state.ts",
+      "tier": "full-body",
+      "sha256": "854c1195ed7f10b1dcdc7810da6070fe576473de141eea9dafd961597802b000",
+      "lineCount": 198
+    },
+    {
+      "file": "mobile/src/session/use-mobile-structured-agent-options.ts",
+      "tier": "full-body",
+      "sha256": "fd823d657b0988265095b90b684887cc404d36d28fbea854cad6f1fe8d1eff55",
+      "lineCount": 161
+    },
+    {
+      "file": "mobile/src/source-control/use-mobile-source-control-runners.ts",
+      "tier": "full-body",
+      "sha256": "50d0673f85353a1de61f9b561fc002671a0f8a028610c99d2fd08abb05d86fe8",
+      "lineCount": 322
+    },
+    {
+      "file": "mobile/src/browser/MobileBrowserPane.tsx",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          330
+        ]
+      ],
+      "sha256": "979a45c293564bc7fbfd801df23d0660314dff78bd31f3a7513b3f5109cc1796",
+      "lineCount": 368
+    },
+    {
+      "file": "mobile/src/browser/use-mobile-browser-stream.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          90,
+          122
+        ],
+        [
+          272,
+          283
+        ]
+      ],
+      "sha256": "c16283f9c9d3177339e9e2490c55cb44457b5d7f3e7e0998a74c5e31b7998ccb",
+      "lineCount": 283
+    },
+    {
+      "file": "mobile/src/browser/use-mobile-browser-interactions.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          90,
+          123
+        ]
+      ],
+      "sha256": "acbd1a6508b97fc139c5eb6961372dd5f3c062df47f5d88a6ee2eb318ece35a7",
+      "lineCount": 290
+    },
+    {
+      "file": "mobile/src/source-control/mobile-hosted-review-create-intent.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          155
+        ]
+      ],
+      "sha256": "730dd001b1332407ba9560fa41230f6152d4a1709c01062e3f427e129302e21e",
+      "lineCount": 260
+    },
+    {
+      "file": "mobile/src/session/mobile-diff-review-screen-model.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          40,
+          65
+        ]
+      ],
+      "sha256": "fd3c3150e63ead65d9fa5f3b8e9897e968f854c8eded196cd36810fa8704425a",
+      "lineCount": 119
+    },
+    {
+      "file": "mobile/src/source-control/use-mobile-source-control-action-sheet-runners.ts",
+      "tier": "full-body",
+      "sha256": "ada42d9f4950406ea55260f4031d68eec4b19a7c0ce4e5887aac1a296bb8a54b",
+      "lineCount": 91
+    },
+    {
+      "file": "mobile/src/session/use-mobile-structured-agent-session.ts",
+      "tier": "full-body",
+      "sha256": "a776d7b9667efa307a3937e514e87022c1a3c8f1bb7cb3f9af584ebdaab8c90c",
+      "lineCount": 315
+    },
+    {
+      "file": "mobile/src/source-control/use-mobile-source-control-action-sheet.ts",
+      "tier": "full-body",
+      "sha256": "dd2e6b832b2a9b94a0a450c064fad5bcfe3285f12c2fdf839dda89fb71efc1a1",
+      "lineCount": 84
+    },
+    {
+      "file": "mobile/src/source-control/MobileSourceControlModals.tsx",
+      "tier": "full-body",
+      "sha256": "acfa6c811b1ab052e439e2f11c9f317a87844c01955a76e8394a4b67ffdf2e2b",
+      "lineCount": 112
+    },
+    {
+      "file": "mobile/src/transport/pairing-relay-candidate.ts",
+      "tier": "full-body",
+      "sha256": "472e6f53e076c20931642a89a3c076cc3563dd51ef8bc3561c5af370dca15aa1",
+      "lineCount": 170
+    },
+    {
+      "file": "mobile/src/transport/logical-client-connection-path.ts",
+      "tier": "full-body",
+      "sha256": "c259ea0ecacb423f86e700507f4446174bdda2f868e4cccbeae641606086527a",
+      "lineCount": 84
+    },
+    {
+      "file": "mobile/src/session/use-mobile-session-terminal-stream-display.ts",
+      "tier": "full-body",
+      "sha256": "24ade07b71144780617a58387531a90cc8873b1801252007e3943bf59903b2bc",
+      "lineCount": 83
+    },
+    {
+      "file": "mobile/src/session/mobile-terminal-stream-subscribe.ts",
+      "tier": "full-body",
+      "sha256": "7a012a06396bde62f4176ddc7c80a4ed4a5f52750f4d5e5e9955c1aa28fcaedd",
+      "lineCount": 17
+    },
+    {
+      "file": "mobile/src/files/mobile-file-preview-request.ts",
+      "tier": "full-body",
+      "sha256": "30155ce1b46ecd5c6258e64f0d58cf57c9c2038017ad03ead6eb4a75c0a05f59",
+      "lineCount": 259
+    },
+    {
+      "file": "mobile/src/session/use-mobile-session-content-create-actions.ts",
+      "tier": "full-body",
+      "sha256": "8889292eea7065a657ff7cce108561396e710f1bdd4a8d9a96349b7b4ba7c283",
+      "lineCount": 162
+    },
+    {
+      "file": "mobile/src/source-control/use-mobile-source-control-commit-runners.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          135,
+          155
+        ]
+      ],
+      "sha256": "29360a3f5be68eb6bf8490b0678db877a4d78d333bba1f7dc60343db085deaee",
+      "lineCount": 158
+    },
+    {
+      "file": "mobile/src/source-control/use-mobile-source-control-state.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          165,
+          200
+        ],
+        [
+          210,
+          250
+        ],
+        [
+          300,
+          317
+        ]
+      ],
+      "sha256": "c1de8375d16a710cf58ca9961544e419658f9053112fe5ff25b8235eb7cd68ad",
+      "lineCount": 317
+    },
+    {
+      "file": "mobile/src/source-control/mobile-source-control-primary-action.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          208,
+          252
+        ]
+      ],
+      "sha256": "af84d5bf5b4de1dd1f8f33e2e12fe7695e34713de59818182283a029da56a613",
+      "lineCount": 252
+    },
+    {
+      "file": "mobile/src/source-control/MobileSourceControlFileRows.tsx",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          118
+        ]
+      ],
+      "sha256": "dc0c40416937981f43f2416e9740bcff960a620a037579c7d6d76c072e39aaf3",
+      "lineCount": 252
+    },
+    {
+      "file": "mobile/src/transport/direct-rpc-client.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          160
+        ]
+      ],
+      "sha256": "f9b6f8eff39fcaf724570d1be62e53c6b4eb3892a82b8d361f7398579d62218a",
+      "lineCount": 323
+    },
+    {
+      "file": "mobile/src/transport/mobile-relay-rpc-session.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          120
+        ]
+      ],
+      "sha256": "e5078b295f5a41647f892dcfd24c50233fc8e11773a46417c2c9fcab13c55885",
+      "lineCount": 302
+    },
+    {
+      "file": "mobile/src/transport/stable-logical-rpc-client.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          155
+        ],
+        [
+          270,
+          338
+        ]
+      ],
+      "sha256": "e993541c1df724a5f185cbeff622d035f286f515d412752851d5879a944d3f48",
+      "lineCount": 340
+    },
+    {
+      "file": "mobile/src/session/use-mobile-native-chat-terminal-stream.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          62
+        ],
+        [
+          145,
+          215
+        ]
+      ],
+      "sha256": "77456c6956c979d9937366b83d4862d2f92afe5659b88af7dc045d94cc9634da",
+      "lineCount": 233
+    },
+    {
+      "file": "mobile/src/session/use-mobile-session-terminal-subscription.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          130
+        ]
+      ],
+      "sha256": "0d58cefb45510376b245767a7185ad0f52d94a82915981d7e3acc3fc19eb4707",
+      "lineCount": 285
+    },
+    {
+      "file": "mobile/src/tasks/use-mobile-tasks-hosted-metadata-actions.tsx",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          85,
+          142
+        ]
+      ],
+      "sha256": "81e30bef3ffb7fab4b61815e9335d3b8d1825e7f592565143ab4d1f1b5483dc7",
+      "lineCount": 218
+    },
+    {
+      "file": "mobile/src/tasks/use-mobile-tasks-project-file-merge-actions.tsx",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          227,
+          285
+        ]
+      ],
+      "sha256": "e10199faefc105da96e67942ca45b3702a1447b1ce734f9e7194f2f26e8ac910",
+      "lineCount": 299
+    },
+    {
+      "file": "mobile/src/host-screen/use-host-repo-metadata.ts",
+      "tier": "partial-body",
+      "intervals": [
+        [
+          1,
+          30
+        ],
+        [
+          110,
+          140
+        ]
+      ],
+      "sha256": "4f4cf8e57bf6538a97a912e7a874602ef56b198658f32cf375a7903c0bd03ba6",
+      "lineCount": 151
+    }
+  ],
+  "priorEvidence": [
+    "parity-wire-call-sites.json",
+    "parity-relay-mobile-wire-contracts.json:g14_mobileOutgoingSurface.methodsListed and coordinatorConditionalResolutions (historical163-name basis)",
+    "parity-mobile-request-contracts.md (b09e289)"
+  ],
+  "gaps": [
+    {
+      "owner": "WP-CAP-MOBILE",
+      "gap": "Additional wrappers or computed calls outside the scoped member-call census remain possible;209 is a lower bound, not a full-mobile closure claim."
+    },
+    {
+      "owner": "WP-CAP-MOBILE",
+      "gap": "Port original assertion suites and add missing characterization; no component/transport/host behavior executed by this source review. Original 9037 test-path obligations unchanged."
+    },
+    {
+      "owner": "WP-ENG-REMOTE",
+      "gap": "Actual host method schemas/response compatibility, authentication, pairing journal persistence, relay migrations, liveness and mixed-version execution remain required."
+    },
+    {
+      "owner": "coordinator",
+      "gap": "E1-E5 audit gates and future Sol-lead transition remain open. This review closes the31-site attribution slice only."
+    }
+  ]
+}

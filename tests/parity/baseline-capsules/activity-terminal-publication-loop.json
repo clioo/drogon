@@ -1,0 +1,39 @@
+{
+  "capsuleId": "activity-terminal-publication-loop",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/renderer/src/components/activity/activity-terminal-portal-publication-loop.react185.test.tsx",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 1
+  },
+  "rendererRuntime": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "happy-dom": "20.11.8"
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "files": [
+    {
+      "path": "src/renderer/src/components/activity/activity-terminal-portal-publication-loop.react185.test.tsx",
+      "role": "test",
+      "sha256": "9d9233336368365b9acf1a0c2b1ef8e8157684452e4ba4b6ef6150ec2eb94a9b"
+    },
+    {
+      "path": "src/renderer/src/components/activity/activity-terminal-portal.ts",
+      "role": "module",
+      "sha256": "20c3840da57b65636bf8c22e67991a7d3bbf328155d61a8ab12366b217b45149"
+    }
+  ],
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Only selected original test and production module; no global source setup hooks or aliases.",
+    "Automatic JSX from config/tsconfig.web.json; test-local happy-dom annotation preserved.",
+    "Three declared runtime package links to installed source versions. Package metadata and link targets checked, not a hermetic dependency tree or security sandbox."
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "schema": "drogon.cloud-gcloud-source-baseline/1",
+  "date": "2026-09-06",
+  "scope": "Two unchanged original source assertions; not full suite, cloud authorization or candidate parity.",
+  "report": {
+    "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned test capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+    "capsuleId": "cloud-gcloud-client",
+    "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/cloud-gcloud-client-L1k0U3",
+    "stage": {
+      "ok": true,
+      "stagedFiles": [
+        {
+          "path": "cloud/apps/relay-ops/src/gcloud-client.test.ts",
+          "role": "test",
+          "sha256": "19255160dbb2eedc6849abb0c1f857170764b96301484949bf2707ddee383a74",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/cloud-gcloud-client-L1k0U3/cloud/apps/relay-ops/src/gcloud-client.test.ts"
+        },
+        {
+          "path": "cloud/apps/relay-ops/src/gcloud-client.ts",
+          "role": "module",
+          "sha256": "5babd097efc869108d072b78e9ccda980eec63b93648bcc69f30025ad1890666",
+          "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/cloud-gcloud-client-L1k0U3/cloud/apps/relay-ops/src/gcloud-client.ts"
+        }
+      ],
+      "license": {
+        "path": "LICENSE",
+        "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/cloud-gcloud-client-L1k0U3/LICENSE",
+        "spdxId": "MIT",
+        "copyright": "Copyright (c) 2026 Lovecast Inc."
+      }
+    },
+    "sourceVitestVersion": "4.1.9",
+    "sourceVitestConfigFile": null,
+    "sourceVitestConfigDifferences": [
+      "The relay-ops package invokes Vitest without a custom configuration. Capsule uses an explicit Node environment and exact original test path; root desktop setup and other suites are not loaded.",
+      "Vitest4.1.9, Vite8.0.16, esbuild0.28.1, tsx4.22.4 and @types/node24.13.2 match the cloud lockfile's inspected runner versions. Installed in a separate disposable tool directory with lifecycle scripts disabled; its newly resolved transitive lockfile is recorded separately, not claimed byte-equivalent to the complete cloud lockfile.",
+      "Original whole test/module files are unchanged. Both tests inject tokenCommand; neither invokes the default gcloud process function, network, real tokens, file writes or user profiles. Node24 execution is explicitly selected."
+    ],
+    "execution": {
+      "mode": "execute",
+      "ok": true,
+      "problems": [],
+      "approvedManifestSha256": "511e7f708f71867f3660a1aba2070947eac3a6d04e3a1f0218d91892bc65dc32",
+      "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "vitestEntry": "/Users/carlos/Documents/Drogon-rewrite/.preflight/cloud-vitest419-Ob8yAJ/node_modules/vitest/vitest.mjs",
+      "installedVitestVersion": "vitest/4.1.9 darwin-arm64 node-v24.19.0",
+      "timedOut": false,
+      "exitCode": 0,
+      "signal": null,
+      "testCounts": {
+        "numTotalTests": 2,
+        "numPassedTests": 2,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numTodoTests": 0,
+        "numFailedTestSuites": 0,
+        "success": true
+      },
+      "expectedTestCounts": {
+        "files": 1,
+        "tests": 2
+      }
+    }
+  },
+  "independentReview": {
+    "stageReceipt": {
+      "path": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/cloud-gcloud-client-L1k0U3/stage-receipt.json",
+      "sha256": "7a672d33ba6f6c03d76b4b837501cc3b94480715e0e65d8031c8deeb1984f9a5"
+    },
+    "results": {
+      "path": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/cloud-gcloud-client-L1k0U3/vitest-results.json",
+      "sha256": "b7370361a7cf8a04e82abd98c615c86496da9de487ffcb71889029d8be8e9f93"
+    },
+    "assertions": [
+      {
+        "name": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/cloud-gcloud-client-L1k0U3/cloud/apps/relay-ops/src/gcloud-client.test.ts",
+        "status": "passed",
+        "assertions": [
+          {
+            "fullName": "createGcloudClient shares and caches one credential refresh across concurrent readers",
+            "status": "passed"
+          },
+          {
+            "fullName": "createGcloudClient caches bounded identity tokens by audience",
+            "status": "passed"
+          }
+        ]
+      }
+    ],
+    "stagedModuleTestAndLicenseHashesRechecked": true
+  },
+  "toolchain": {
+    "directory": "/Users/carlos/Documents/Drogon-rewrite/.preflight/cloud-vitest419-Ob8yAJ",
+    "packageSha256": "fcdb93e12f466177df2ccca5d15b9bcd08f38e0681f09265a3ccc90cd6d3b9fa",
+    "lockfileSha256": "98127cea8788c7c10fbab2935825462cf1a3be8b9f8f1e785cd90e64ca4853c2",
+    "declared": {
+      "@types/node": "24.13.2",
+      "esbuild": "0.28.1",
+      "tsx": "4.22.4",
+      "vite": "8.0.16",
+      "vitest": "4.1.9"
+    },
+    "resolved": {
+      "vitest": "4.1.9",
+      "vite": "8.0.16",
+      "esbuild": "0.28.1",
+      "tsx": "4.22.4",
+      "@types/node": "24.13.2"
+    },
+    "trackedManifest": "tests/parity/toolchains/cloud-vitest419/package.json",
+    "trackedLockfile": "tests/parity/toolchains/cloud-vitest419/pnpm-lock.yaml",
+    "install": {
+      "packageManager": "pnpm11.19.0",
+      "node": "26.0.0",
+      "flags": [
+        "--ignore-workspace",
+        "--ignore-scripts"
+      ],
+      "directory": "/Users/carlos/Documents/Drogon-rewrite/.preflight/cloud-vitest419-Ob8yAJ",
+      "lifecycleScripts": false,
+      "rootOrSourceManifestChanged": false
+    },
+    "executionNode": "24.19.0",
+    "limitation": "The five explicitly pinned runner/support versions match inspected cloud lockfile entries. This isolated generated lock is not the complete original cloud workspace lock; no full locked-cloud baseline is claimed."
+  },
+  "sourceInterpretation": [
+    "Access-token assertion checks equal returned values, concurrent request count and a cached read; it does not assert access-token command arguments.",
+    "Identity-token assertion checks the exact audience/include-email argument array and a second cached read.",
+    "Injected synthetic tokenCommand prevents the default gcloud subprocess invocation in both cases. Expiry, authenticity, default process execution, concurrent identity requests and candidate implementation remain unproved."
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "workPackage": "WP-ENG-RUNTIME",
+  "boundedAssignment": "identity-leases",
+  "allocationManifest": {
+    "path": "docs/migration/parity-test-work-packages.json",
+    "sha256": "e1ffc0deee15b2b8ae0a7a0ca91ef624384b3903d7c92f2606df423282e83d9a"
+  },
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "totals": {
+    "assignedOriginalSuites": 3,
+    "portedSuites": 3,
+    "originalTestCases": 7,
+    "originalExpectCallSites": 18,
+    "originalAssertionEvaluations": 18,
+    "candidateBoundSuites": 0,
+    "candidateBehavioralRedSuites": 0,
+    "candidateGreenSuites": 0,
+    "skippedSuites": 0,
+    "admittedSourceBaselineSuites": 0
+  },
+  "statusMeaning": {
+    "ported": "Every original test body and assertion is frozen under this bounded assignment; only documented provenance or import-only normalization may differ.",
+    "blocked_binding": "The test runner cannot collect the suite because a genuine candidate interface is absent; no test body ran, so this is not behavioral RED.",
+    "source_baseline_not_established": "The retained source inventory proves path/hash/runner membership, not execution; the read-only source checkout was not used as an accepted runner cwd."
+  },
+  "suites": [
+    {
+      "sourcePath": "src/main/runtime/agent-session-claim-identity.test.ts",
+      "sourceSha256": "d4d84f3cc3f85b03347a0d645e8672997710cb58afb55797e305839bfe3fe28d",
+      "cases": 3,
+      "expectCallSites": 7,
+      "assertionEvaluations": 7,
+      "portPath": "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/claim-identity/agent-session-claim-identity.contract.test.ts",
+      "detailMap": "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/claim-identity/assertion-map.json",
+      "preservation": "literal_source_body_after_provenance_and_direct_import_normalization",
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePaths": [
+        "apps/desktop/src/main/runtime/agent-session-claim-identity.ts"
+      ],
+      "candidateExecution": "exit_1_collection_error_zero_tests_not_behavioral_red",
+      "sourceBaseline": "not_established; retained inventory is static only"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-lease-renewal.test.ts",
+      "sourceSha256": "901b96b322a1f040fe6dd037fd4ab0d12de9b6210ba982485a4c3800155d530d",
+      "cases": 2,
+      "expectCallSites": 7,
+      "assertionEvaluations": 7,
+      "portPath": "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/lease-renewal/agent-session-lease-renewal.contract.test.ts",
+      "detailMap": "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/lease-renewal/assertion-map.json",
+      "preservation": "literal_source_body_after_provenance_and_direct_import_normalization",
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePaths": [
+        "apps/desktop/src/shared/agent-session-record.ts",
+        "apps/desktop/src/main/runtime/agent-session-record-store.ts",
+        "apps/desktop/src/main/runtime/agent-session-record-store-file.ts"
+      ],
+      "candidateExecution": "exit_1_collection_error_zero_tests_not_behavioral_red",
+      "sourceBaseline": "not_established; retained inventory is static only"
+    },
+    {
+      "sourcePath": "src/main/runtime/agent-session-provider-handle-transition.test.ts",
+      "sourceSha256": "90affd020385be83ca5fe351272219710d4734f1bee163ff1085a6e9345138f1",
+      "cases": 2,
+      "expectCallSites": 4,
+      "assertionEvaluations": 4,
+      "portPath": "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/provider-transition/src/main/runtime/agent-session-provider-handle-transition.test.ts",
+      "detailMap": "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/provider-transition/assertion-map.json",
+      "preservation": "byte_identical",
+      "bindingStatus": "blocked_binding",
+      "missingCandidatePaths": [
+        "apps/desktop/src/main/runtime/agent-session-provider-handle-transition.ts",
+        "apps/desktop/src/shared/agent-session-provider-handle.ts",
+        "apps/desktop/src/shared/agent-session-record.ts",
+        "apps/desktop/src/shared/agent-session-record.test-fixture.ts"
+      ],
+      "candidateExecution": "exit_1_collection_error_zero_tests_not_behavioral_red",
+      "sourceBaseline": "not_established/admitted; child source-cwd rerun violated scope and is excluded"
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "capsuleId": "wp-cap-bots-bot-schemas",
+  "description": "Unchanged original Bot IPC schema tests (bot-schemas.test.ts); zod parsing boundary only, no IPC channel, no persistence, no process or network operation.",
+  "entryTestFile": "src/main/ipc/bot-schemas.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 3,
+    "plainIt": 3,
+    "tableRows": 0
+  },
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "files": [
+    {
+      "path": "src/main/ipc/bot-schemas.test.ts",
+      "role": "test",
+      "sha256": "ceeed197fc9ed3d6835a6d089d918f1140d7e6c94d142e0a8a3aae373ce284f6"
+    },
+    {
+      "path": "src/main/ipc/bot-schemas.ts",
+      "role": "module",
+      "sha256": "6f3316eea51381dc341b772278a43afaa3f0c80d82fe092e27a355731b3f14d5"
+    },
+    {
+      "path": "src/shared/drogon-bot-contract.ts",
+      "role": "module",
+      "sha256": "870600454e28b6f51ed73017b6c8d390f8bdc0ba3a0ed61509982c6cef7cfd66"
+    },
+    {
+      "path": "src/shared/tui-agent-config.ts",
+      "role": "module",
+      "sha256": "192226db679f6241bc68a3093b4aac2e8922d11079beeb16cddc26698b4f1b7f"
+    },
+    {
+      "path": "src/shared/orca-cli-command-name.ts",
+      "role": "module",
+      "sha256": "c90b037ec7a6143770a40dd907bf9d053fb2cede21128b60b78a78671c0780c0"
+    },
+    {
+      "path": "src/shared/tui-agent.ts",
+      "role": "module",
+      "sha256": "7c470c858ddc10988ea2b7e230d127a8d9bc70acf03e8dc8226d799749ce023b"
+    },
+    {
+      "path": "src/shared/automations-types.ts",
+      "role": "module",
+      "sha256": "ac7b60881d60f8bd777b56bacb99de3c3661ea26ed77cb8f233f8375956761e9"
+    },
+    {
+      "path": "src/shared/mentu-run-contract.ts",
+      "role": "module",
+      "sha256": "29a1ee32ef1352166322a1390c12191a38b37d3d6506afe0ea4c7d5e18ef4988"
+    },
+    {
+      "path": "src/shared/worktree/create-types.ts",
+      "role": "module",
+      "sha256": "f6052e0a1d84eb3f24a2a90e012ae0bef2de9026ba29d507dd0728ce7b30dbed"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "transportRuntime": {
+    "ws": {
+      "version": "8.21.3",
+      "treeSha256": "aad13c0d5b988c454b067e8f6d9d0e8ed938293ec60989a2207cf8614ef9a4a0"
+    },
+    "tweetnacl": {
+      "version": "1.0.3",
+      "treeSha256": "79d76ce10a07a02d66cba99b0f11b00724e8095e0a5004ed62c8bc2f43183793"
+    },
+    "zod": {
+      "version": "4.5.4",
+      "treeSha256": "8675df81babc63b169f49743e654198f574342b364a9bf831eb39f4e881ba63f"
+    }
+  },
+  "isolationRationale": "Leaf read all 3 original assertion bodies and the 5-file runtime import closure. bot-schemas.test.ts calls only exported parse functions with inline object literals. bot-schemas.ts parses with zod schemas; drogon-bot-contract.ts contributes one runtime import (isTuiAgent); tui-agent-config.ts builds a static config record from string data at module load and orca-cli-command-name.ts is a pure platform-string function; neither touches filesystem, process, network, credentials or timers. The 4 additional staged files (tui-agent, automations-types, mentu-run-contract, worktree/create-types) are reached only through `import type` chains and are erased by the TypeScript transform; they are staged for provenance of the direct type-only boundary of drogon-bot-contract.ts. Their deeper type-only chains (task-source-context, execution-host, folder-workspace-types, mentu-recipe-contract, workspace-source, lineage-types) are type-only as well and are neither staged nor typechecked. No Electron IPC registration, no main-process wiring and no renderer behavior is reached: passing proves only the pure parsing contract at the schema boundary. ws and tweetnacl are staged solely because the reviewed transport package-runtime helper requires its full pinned closure (ws, tweetnacl, optional zod) to stage zod; the executed suite imports only zod from node_modules, and ws/tweetnacl are never loaded. No actual IPC channel, persistence, scheduler, agent launch or inference operation is exercised. Staging/runner writes only in a fresh canonical fixture under .preflight/parity-baseline. This is not a general sandbox.",
+  "runtimeImports": [
+    "vitest original installed 4.1.11 (pinned entry /Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs)",
+    "zod 4.5.4 (pinned via transportRuntime tree digest, symlinked from source node_modules)",
+    "ws 8.21.3 and tweetnacl 1.0.3 staged only as required by the reviewed transport helper closure; never imported by the suite",
+    "relative runtime imports are all within the 5 pinned runtime files"
+  ],
+  "typeOnlyImports": [
+    "drogon-bot-contract.ts: ./tui-agent, ./automations-types, ./mentu-run-contract, ./worktree/create-types (erased at transform)",
+    "tui-agent-config.ts: ./tui-agent (erased at transform)",
+    "deeper type-only chains of the staged type files are not staged or typechecked"
+  ],
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Both configurations use node. Explicit Node24 (v24.19.0, /Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node) and original installed Vitest 4.1.11 (pinned source entry) are required and recorded; no dependencies are installed.",
+    "Minimal capsule config omits renderer aliases (@renderer, @), the ORCA_FEATURE_WALL_ENABLED define and the happy-dom/host-port setup scripts. This runtime closure uses none of those symbols, aliases, DOM or host-port facilities; no .tsx files are involved.",
+    "Root GC/webstorage execArgv (--no-experimental-webstorage, --expose-gc), the Windows maxWorkers override and 60s/30s hook/test timeouts are omitted. The 3 tests are synchronous pure parses with no GC/webstorage assertions, no OS-specific branches and no timed waits; default Vitest timeouts and the runner's outer bound apply. Not full source-environment equivalence.",
+    "Source include glob src/**/*.test.ts would run the whole source suite; the capsule executes only the pinned entry test file, as declared."
+  ],
+  "testEvidenceBoundary": "3 declared cases inspected in src/main/ipc/bot-schemas.test.ts:5-80 (bounded Bot create with harness-default model policy; rejection of unsupported harnesses and undeclared payload fields; responsibility trigger semantics at the IPC boundary). Passing does not prove Electron IPC registration, main-process wiring, renderer behavior or any live bot operation. Preserve exact original test bytes; assertions are not replaced."
+}

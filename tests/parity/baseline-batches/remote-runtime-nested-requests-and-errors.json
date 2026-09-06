@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "capsules": [
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-transport-error-agreement.json",
+      "approvedManifestSha256": "653dee90d1f469f4541269eb54145208e852ae01affafd32eed35ef3fdace742"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-subscription-request.json",
+      "approvedManifestSha256": "fac4c72cd57a6e7a4905fafce5a1ac59deca058b68293e898a967a6cf7ceaddd"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-tailscale-hint.json",
+      "approvedManifestSha256": "86b1a2208cb7768b0c09e99ae8cbe187098c64a1fd2667931a86ba4fde2fcdad"
+    }
+  ]
+}

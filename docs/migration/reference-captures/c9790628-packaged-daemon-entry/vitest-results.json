@@ -1,0 +1,88 @@
+{
+  "numTotalTestSuites": 2,
+  "numPassedTestSuites": 2,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 4,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1788672002948,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "verify-packaged-daemon-entry"
+          ],
+          "fullName": "verify-packaged-daemon-entry throws when the unpacked daemon entry is missing",
+          "status": "passed",
+          "title": "throws when the unpacked daemon entry is missing",
+          "duration": 2.3032089999999954,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "verify-packaged-daemon-entry"
+          ],
+          "fullName": "verify-packaged-daemon-entry passes when the packaged entry loads and reaches argv parsing",
+          "status": "passed",
+          "title": "passes when the packaged entry loads and reaches argv parsing",
+          "duration": 33.080332999999996,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "verify-packaged-daemon-entry"
+          ],
+          "fullName": "verify-packaged-daemon-entry fails when the packaged entry cannot resolve its module graph",
+          "status": "passed",
+          "title": "fails when the packaged entry cannot resolve its module graph",
+          "duration": 33.40412500000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "verify-packaged-daemon-entry"
+          ],
+          "fullName": "verify-packaged-daemon-entry fails when the packaged entry never reaches argv parsing",
+          "status": "passed",
+          "title": "fails when the packaged entry never reaches argv parsing",
+          "duration": 28.138000000000005,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1788672003046,
+      "endTime": 1788672003143.138,
+      "status": "passed",
+      "message": "",
+      "name": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-packaged-daemon-entry-kfU3U0/config/scripts/verify-packaged-daemon-entry.test.mjs"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/preload/renderer-restart-wiring.test.ts",
+  "sourceSha256": "1f09c2e6e60a5449ae9d332d9b24b0c331e1f9c01409753d2368e1d357f482fe",
+  "portPath": "tests/parity/ports/WP-UI-PRELOAD/authority-recovery/renderer-restart/renderer-restart-wiring.contract.test.ts",
+  "portMethod": "literal test body with provenance header and import-only candidate path rewrites",
+  "sourceCases": 3,
+  "sourceExpectCallSites": 10,
+  "sourceAssertionEvaluations": 10,
+  "architectureDisposition": "Electron IPC channel registration and DOM EventTarget names are current-architecture-coupled; status/abort/unload relay effects and checkpoint-before-install ordering are portable lifecycle invariants",
+  "binding": {
+    "status": "blocked_missing_candidate_interfaces",
+    "expectedPaths": [
+      "apps/desktop/src/preload/renderer-restart-wiring.ts",
+      "apps/desktop/src/shared/renderer-shutdown-events.ts",
+      "apps/desktop/src/shared/updater-renderer-events.ts"
+    ],
+    "candidateBindingCreated": false,
+    "runnerClassification": "collection_failure_not_behavioral_red"
+  },
+  "cases": [
+    {
+      "id": "restart-relays",
+      "title": "relays updater status, aborted installs, and prevented unload events",
+      "sourceLines": "13-40",
+      "assertionLines": [35, 36, 37, 38, 39],
+      "assertionEvaluations": 5,
+      "obligations": ["three IPC listeners registered", "status forwarded unchanged", "quit/install abort relayed", "unload-prevented event dispatched", "app-restart-aborted event dispatched"],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "prepare-before-invoke-and-abort",
+      "title": "marks preparation before invoking main and aborts on IPC failure",
+      "sourceLines": "42-64",
+      "assertionLines": [57, 63],
+      "assertionEvaluations": 2,
+      "obligations": ["IPC failure is rethrown", "ordering is started event, durable checkpoint, relay prepared, IPC invoked, relay aborted"],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "checkpoint-failure-fences-install",
+      "title": "never installs the update when the shutdown checkpoint fails to persist",
+      "sourceLines": "66-79",
+      "assertionLines": [71, 77, 78],
+      "assertionEvaluations": 3,
+      "obligations": ["checkpoint rejection is propagated", "install IPC is not invoked", "prepared state is not marked"],
+      "portStatus": "preserved_blocked_binding"
+    }
+  ]
+}

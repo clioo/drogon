@@ -1,0 +1,55 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Node24.19.0 and original installed Vitest4.1.11. Minimal node config omits DOM, aliases, host-port setup, feature-wall define, GC/WebStorage flags and extended timeout. No full original config equivalence claimed."
+  ],
+  "capsuleId": "linear-team-pagination",
+  "description": "Complete unchanged original teams suite. SDK client/token store/concurrency are mocked by the original assertions; actual pagination and projection bodies execute without network or credentials.",
+  "entryTestFile": "src/main/linear/teams.test.ts",
+  "files": [
+    {
+      "path": "src/main/linear/teams.test.ts",
+      "role": "test",
+      "sha256": "cd5528c5f72ee4d20573618d9f275c969ed2f9fa75469fbe0942b7f2f34be54f"
+    },
+    {
+      "path": "src/main/linear/teams.ts",
+      "role": "module",
+      "sha256": "7bdd8865b90390ced804b4353abd6530c3a025845f879c45b686e2ecc1f68cc6"
+    },
+    {
+      "path": "src/main/linear/linear-team-pages.ts",
+      "role": "module",
+      "sha256": "31dddb6b5391067562bb41da7d2d3207f89795311e4213c822ed65c6b478c90d"
+    },
+    {
+      "path": "src/main/linear/linear-request-concurrency.ts",
+      "role": "module",
+      "sha256": "1d1d990c36e56eb3171160cbe0ec46530b0c6eed5954bb508034c828116f9d32"
+    },
+    {
+      "path": "src/shared/linear/links.ts",
+      "role": "module",
+      "sha256": "cbc3a8826561513025e5b14b70c73ce1bd719c54ecb1c2362bce38aeaff5b3e6"
+    },
+    {
+      "path": "src/shared/integration-credential-errors.ts",
+      "role": "module",
+      "sha256": "ac278223d1d5921c21c55a9babdc66123405f1da316e4992660736a9364349d8"
+    }
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 10
+  },
+  "isolationRationale": "Read complete test and executable source modules. Original vi.mock factories replace client, token store and concurrency; @linear/sdk/client/workspace imports used only as types are erased. Actual teams/page/link transforms use in-memory synthetic objects, URLs, promises and mock console output. No provider client initialization, credentials, native Electron, subprocess or inference.",
+  "testEvidenceBoundary": "Original pagination/projection/error-policy assertions only; mocked permit timing does not prove real concurrency or hosted-provider delivery."
+}

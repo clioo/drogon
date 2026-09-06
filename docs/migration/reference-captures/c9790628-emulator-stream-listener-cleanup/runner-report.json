@@ -1,0 +1,85 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned test capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "emulator-stream-listener-cleanup",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/main/ipc/emulator-stream-listener-cleanup.test.ts",
+        "role": "test",
+        "sha256": "541d98239085904de6430588a8d21c1b11ef7df451df22c5b6ac892dadb01565",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn/src/main/ipc/emulator-stream-listener-cleanup.test.ts"
+      },
+      {
+        "path": "src/main/ipc/emulator-frame-stream.ts",
+        "role": "module",
+        "sha256": "57b5c5eed134bc0336e751edff935e8809ae9f71795225301da07b293e68eff9",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn/src/main/ipc/emulator-frame-stream.ts"
+      },
+      {
+        "path": "src/main/ipc/emulator-video-stream.ts",
+        "role": "module",
+        "sha256": "936b78190ba8d972f8370493107f900a9ec0f852413196493f0ca1d14e8c4823",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn/src/main/ipc/emulator-video-stream.ts"
+      },
+      {
+        "path": "src/main/emulator/mjpeg-frame-stream.ts",
+        "role": "module",
+        "sha256": "11124c0db3f64df1638ff8b1a372dd8c681bf1e10d9b900ff5b0054406f5cda4",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn/src/main/emulator/mjpeg-frame-stream.ts"
+      },
+      {
+        "path": "src/main/emulator/scrcpy-video-registry.ts",
+        "role": "module",
+        "sha256": "6548a16d2d8f4d4a90eede0b0eef039d8f045622238c1111b6b1083cc0120294",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn/src/main/emulator/scrcpy-video-registry.ts"
+      },
+      {
+        "path": "src/main/emulator/emulator-probe.ts",
+        "role": "module",
+        "sha256": "2fba16f1b4a8d97686f41cc9a707d19f942c7173ab9dd6b4fd2950ec07c09568",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn/src/main/emulator/emulator-probe.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-emulator-stream-cleanup-vM39pn/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Use original installed Vitest4.1.11 with Node24, no installation or reference-tree writes.",
+    "Minimal node config omits original renderer aliases, DOM/host-port setup, feature-wall define, execArgv and broader includes/timeouts. This reviewed closure exercises in-memory IPC handler functions with original hoisted dependency mocks, not a running app; no full config or typecheck equivalence claimed."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "b61d7c774e7f0c14915297020cd2209ee3d36f6079d6d5008d74596eb0f9affb",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 3,
+      "numPassedTests": 3,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 3
+    }
+  }
+}

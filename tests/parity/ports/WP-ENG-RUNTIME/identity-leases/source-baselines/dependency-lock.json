@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Pre-execution byte freeze for the complete third-party runtime closure reached by agent-session-lease-renewal.test.ts.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "captureMethod": "scripts/transport-capsule-runtime.mjs snapshotTransportPackage, read-only; the packages are not copied, installed, or changed.",
+  "sourcePackageJson": {
+    "path": "/Users/carlos/Documents/Drogon-mentu-session/package.json",
+    "sha256": "b8dbb3ab7d5f5709dc71780675c91c69f323851a1c71e09711a2d2db0a794810"
+  },
+  "sourceLockfile": {
+    "path": "/Users/carlos/Documents/Drogon-mentu-session/pnpm-lock.yaml",
+    "sha256": "07bca88035d301cf5c136c82cda5ec96e4e749ce005de087c93abc45074570a2"
+  },
+  "sourceVitestConfig": {
+    "path": "/Users/carlos/Documents/Drogon-mentu-session/config/vitest.config.ts",
+    "sha256": "19d14b8f028a84ff3401534c22f3241d4ed5695fea5c5df3a140ba2c9f3c0880"
+  },
+  "packages": [
+    {
+      "name": "proper-lockfile",
+      "version": "4.1.2",
+      "packageJsonPath": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/package.json",
+      "snapshot": {
+        "files": [
+          {
+            "path": "CHANGELOG.md",
+            "sha256": "37051b812af873c8bbac52b2843ca46bc8d9383e5996c802ee0a8b4f85d3591f"
+          },
+          {
+            "path": "LICENSE",
+            "sha256": "aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1"
+          },
+          {
+            "path": "README.md",
+            "sha256": "756c5b948b90a3bb26fe62b6001a6a1903ea9605cfbcac9f4cc9c9d9ef878eda"
+          },
+          {
+            "path": "index.js",
+            "sha256": "c11869aa340b61757c2e7a6739a1d423495fe627ac0a54cb44f8c47c393e2fdd"
+          },
+          {
+            "path": "lib/adapter.js",
+            "sha256": "c95e2408b91b70e02c625a9b1a42e0c793140dbe6c1bff8cc183bb88bc267c6c"
+          },
+          {
+            "path": "lib/lockfile.js",
+            "sha256": "c517a976f7a31c8b1768cb8e7ac9936aee70299ae762548495016a79d64a6434"
+          },
+          {
+            "path": "lib/mtime-precision.js",
+            "sha256": "eb5adf91a21715b50f39438cdcda52043d551ccb5fe530681364c474c7206218"
+          },
+          {
+            "path": "package.json",
+            "sha256": "23888ecc7abd83a8e98e132da556eda2172792cc04c4e6d157b590667802bd2a"
+          }
+        ],
+        "treeSha256": "66a84de4a8cde95150e47ee645e5a73bb321471d5a6e38cb9867c4881c044b39",
+        "totalBytes": 29875
+      }
+    },
+    {
+      "name": "graceful-fs",
+      "version": "4.2.11",
+      "packageJsonPath": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/package.json",
+      "snapshot": {
+        "files": [
+          {
+            "path": "LICENSE",
+            "sha256": "f65c5d9f22a317b2a10803bd1868461ce6499c2ed7217bc80c0cc772a748789c"
+          },
+          {
+            "path": "README.md",
+            "sha256": "1c8169c6bd7d7c966616574b9b7479c9890193ff6c5af98faa28672a1d429382"
+          },
+          {
+            "path": "clone.js",
+            "sha256": "7258eca52e65d69845759503f9fdd66c252f40e5eafb76db5d481172e31ac9ed"
+          },
+          {
+            "path": "graceful-fs.js",
+            "sha256": "7da35669b6b6b0e4aafee31674c033f2cebb0c8f9ae010f709dcc185d3f17786"
+          },
+          {
+            "path": "legacy-streams.js",
+            "sha256": "60a6a7ecf7c3e55a3ffaae13433b6cff388b7205bba6daf393c863f77a949e36"
+          },
+          {
+            "path": "package.json",
+            "sha256": "5747d4ba6b17165c6ecac30ab3a331715f41c7ad546e1f1574dab1bdcb116181"
+          },
+          {
+            "path": "polyfills.js",
+            "sha256": "66ea1687ed5edf39d67296d26edccc8da695d9a869303a78d0e580cd770aca27"
+          }
+        ],
+        "treeSha256": "f93f2f807b003f41e3d2decde69fb2052b5187d81147f0b7c421ee10dc9d3f29",
+        "totalBytes": 32535
+      }
+    },
+    {
+      "name": "retry",
+      "version": "0.12.0",
+      "packageJsonPath": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/.pnpm/retry@0.12.0/node_modules/retry/package.json",
+      "snapshot": {
+        "files": [
+          {
+            "path": ".npmignore",
+            "sha256": "c78685538298801f126456b97d27a6331eabb4045b50b154abc5aff275780b94"
+          },
+          {
+            "path": ".travis.yml",
+            "sha256": "ed9b99c44bd141e35532a275c55bd59990a16da4e67ceaa93b1021e524fc7e69"
+          },
+          {
+            "path": "License",
+            "sha256": "01ad164273e8e095abc9dbd1c21e194594a671af7d528cb43ee7b4c903ba7da3"
+          },
+          {
+            "path": "Makefile",
+            "sha256": "7ca871146d4f446b640251fdee4e8b7e002c5cf502c924343764d076c5e2622e"
+          },
+          {
+            "path": "README.md",
+            "sha256": "7f39755e8946f5cac7dea12c7a39717b966b319201562e09cf937fdcaa6cfb1f"
+          },
+          {
+            "path": "equation.gif",
+            "sha256": "ea0b38ba378f11e2adb20e868061ded1bf0b4973c92aa3317bf2710724343c38"
+          },
+          {
+            "path": "example/dns.js",
+            "sha256": "1ed998627ee1df8b49c48d158a0bda6c582c2f11b364c64b949cc3486a563e62"
+          },
+          {
+            "path": "example/stop.js",
+            "sha256": "32b9c02ccb7d4fa1beaa7411b4804204d0927cd91a36a28f052bdd9a61233ad2"
+          },
+          {
+            "path": "index.js",
+            "sha256": "003f04e5fb5913675c886ac938e9b7bbd33754eb17ee8f00e074e1bf888bec1e"
+          },
+          {
+            "path": "lib/retry.js",
+            "sha256": "4388d78729faa0dea430e2a7fa572aee6a15a407da05097b41ee44106d336616"
+          },
+          {
+            "path": "lib/retry_operation.js",
+            "sha256": "eaca13037da35523326c8870e39c4fd236c4f38b5822a2af0f33d0f4e0b21d02"
+          },
+          {
+            "path": "package.json",
+            "sha256": "c0733eb226e2a6572c7c9c2bc8b4a0efabe233971b0dee1e6d62c6898257e1da"
+          },
+          {
+            "path": "test/common.js",
+            "sha256": "009708c033e269c1d8537cc3289b033ae5008f6c34ae55b944d7c906de89c0da"
+          },
+          {
+            "path": "test/integration/test-forever.js",
+            "sha256": "6f1a7d7f2a6ddad485f3bd868b18cfbc3f0244094a0b8e37db4ac5d73fdbfce8"
+          },
+          {
+            "path": "test/integration/test-retry-operation.js",
+            "sha256": "86c1befd397771ac1d8f588d330429efe34f5161c88420667f0ae7e2de038a7f"
+          },
+          {
+            "path": "test/integration/test-retry-wrap.js",
+            "sha256": "1983c1e30c0c1df29e306a44a856f6471a50f167862acaa402ef29d5b961066b"
+          },
+          {
+            "path": "test/integration/test-timeouts.js",
+            "sha256": "48c08ff322d155dc9e2b33344429996d73da9335e6ca6056d778cc02e0fb71c6"
+          }
+        ],
+        "treeSha256": "94b8d923e550fb52dfd4e0eced11beb264269f39a5c24c2eae890f028cd748db",
+        "totalBytes": 32210
+      }
+    },
+    {
+      "name": "signal-exit",
+      "version": "3.0.7",
+      "packageJsonPath": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/.pnpm/signal-exit@3.0.7/node_modules/signal-exit/package.json",
+      "snapshot": {
+        "files": [
+          {
+            "path": "LICENSE.txt",
+            "sha256": "e05b1eaf5b5f99b7ad75cd1f38858ff9a311780b97715ead67936d60bf96aa7e"
+          },
+          {
+            "path": "README.md",
+            "sha256": "8db9ead38fd25b61abbe81cae8934eeaeb303ab52266305e09b617a352cc9e98"
+          },
+          {
+            "path": "index.js",
+            "sha256": "7cc6f6a1e14dec79dc23f6afd7caca1319189747144e1a33af77616c21d9e9de"
+          },
+          {
+            "path": "package.json",
+            "sha256": "cec1bba4c97e0cf653c13c8c79f745aac2232131ee718c93c4236c1b9577a201"
+          },
+          {
+            "path": "signals.js",
+            "sha256": "ae538fdae683d6fa2e14579da06df10fb7a66378cfa50971956fb68c2c86c727"
+          }
+        ],
+        "treeSha256": "f6c8f8c63f91b87109a3be978f081a5ec5094cb7533e973043b991ec56e97621",
+        "totalBytes": 9958
+      }
+    }
+  ],
+  "runtimeNotes": [
+    "proper-lockfile is the only non-Vitest third-party import in the first-party runtime closure.",
+    "proper-lockfile requires graceful-fs, retry, and signal-exit; the four complete resolved package trees are captured above.",
+    "signal-exit registration is a module-load side effect; proper-lockfile also creates test-owned lock directories and unref'd renewal timers while a lock is held.",
+    "The baseline runner binds Git-tracked first-party source and license bytes. This separate snapshot records the installed third-party closure; it does not extend the runner's receipt binding or claim a generic package sandbox."
+  ]
+}

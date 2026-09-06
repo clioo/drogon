@@ -1,0 +1,35 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Node24.19.0 and original installed Vitest4.1.11. Minimal node config omits DOM, aliases, host-port setup, feature-wall define, GC/WebStorage flags and extended timeout. No full original config equivalence claimed."
+  ],
+  "capsuleId": "shell-startup-env",
+  "description": "Complete unchanged static shell startup environment suite; filesystem calls mocked by original tests.",
+  "entryTestFile": "src/main/pty/shell-startup-env.test.ts",
+  "files": [
+    {
+      "path": "src/main/pty/shell-startup-env.test.ts",
+      "role": "test",
+      "sha256": "f25019baf3d3c2b89cdbf26fb7700fe789a862202541c633583f5cc8646b13a3"
+    },
+    {
+      "path": "src/main/pty/shell-startup-env.ts",
+      "role": "module",
+      "sha256": "e2e5017d59033dd9c8c3cdbb7c6de8e16a514d718c3eff2e1e874a31555c7d4c"
+    }
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 50
+  },
+  "isolationRationale": "Read complete original test and executable module. vi.mock replaces fs reads/listing/existence; process-local HOME/SHELL/XDG/platform substitutions are restored by original hooks. Only pure static parsing/path selection and cache execute; no actual shell launch, personal startup-file read, credentials or provider calls.",
+  "testEvidenceBoundary": "Mocked static parsing and per-session source routing; simulated platforms are not native Windows or real shell precedence proof."
+}

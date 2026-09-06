@@ -1,0 +1,35 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Original installed Vitest4.1.11 with Node24.19.0. Minimal node config omits renderer aliases, DOM/host-port setup, feature-wall define, GC/WebStorage flags and extended timeouts. Full original-suite config equivalence is not claimed."
+  ],
+  "capsuleId": "codex-rate-limit-window-classification",
+  "description": "Original classification percentage assertions only; no full window mapping, reset timestamps, credits, RPC/backend requests, credential access or rewritten-product parity.",
+  "entryTestFile": "src/main/rate-limits/codex-rate-limit-window-classification.test.ts",
+  "files": [
+    {
+      "path": "src/main/rate-limits/codex-rate-limit-window-classification.ts",
+      "role": "module",
+      "sha256": "5d90c65f6a092a25a2699624b5809c5d7ff5b2d2c9f34638196902a7068e12cb"
+    },
+    {
+      "path": "src/main/rate-limits/codex-rate-limit-window-classification.test.ts",
+      "role": "test",
+      "sha256": "aae42d56a8093a3357b3e6173488e7125544ca3846107de99d29c1cdd4c20a05"
+    }
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 14
+  },
+  "isolationRationale": "Both complete source files were read by root: only pure transformations, built-in Error/Date/Response objects and original Vitest assertions. No side-effecting dependency imports, network, filesystem, process, Electron or inference operations.",
+  "testEvidenceBoundary": "Original classification percentage assertions only; no full window mapping, reset timestamps, credits, RPC/backend requests, credential access or rewritten-product parity."
+}

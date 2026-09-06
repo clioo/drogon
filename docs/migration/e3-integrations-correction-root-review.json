@@ -1,0 +1,141 @@
+{
+  "schema": "drogon.audit.e3-integrations-correction-root-review.v1",
+  "date": "2026-09-06",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "decision": "Accept the finite95-method owning-body correction with root qualifications. This supersedes the95-method evidence rejection, not whole264-method integrations or E3/E5 acceptance.",
+  "candidate": {
+    "json": "docs/migration/audit-closure/e3-bridge/result-integrations/source-fidelity-corrections.json",
+    "sha256": "1626700bb49932e718c362ea4fb5a3ed2d57c385de5b7fdaab9ebc0d7b26f27d",
+    "markdown": "docs/migration/audit-closure/e3-bridge/result-integrations/source-fidelity-corrections.md",
+    "markdownSha256": "fcffa7188286d19062004147b7ad324c6fc0ee2c9da10916b9ca33b4d303cdb1"
+  },
+  "verification": {
+    "command": "node scripts/verify-e3-integrations-source.mjs /Users/carlos/Documents/Drogon-mentu-session --corrections",
+    "originalReportMethods": 264,
+    "originalReportRanges": 1253,
+    "combinedPinnedFiles": 787,
+    "correctedMethods": 95,
+    "overlayRanges": 434,
+    "borrowedRanges": 78,
+    "explicitBorrowedRefs": 76,
+    "newOrRereadRanges": 356,
+    "previousCoverage": {
+      "fullBody": 66,
+      "partial": 19,
+      "wrongSymbol": 10
+    },
+    "frozenSnapshots": 4,
+    "originalFiles": 9037,
+    "originalPackages": 46,
+    "limits": "Byte/pointer/identity and retained-assertion verification only. Method narratives and independent source samples supply semantic review; no complete personal reread of787 files claimed."
+  },
+  "rootSourceReads": [
+    {
+      "path": "src/main/jira/client.ts",
+      "start": 1,
+      "end": 198
+    },
+    {
+      "path": "src/main/jira/jira-issue-mutations.ts",
+      "start": 86,
+      "end": 168
+    },
+    {
+      "path": "src/main/jira/site-credential-store.ts",
+      "scope": "complete"
+    },
+    {
+      "path": "src/main/gitlab/merge-request-update.ts",
+      "scope": "complete"
+    },
+    {
+      "path": "src/main/gitlab/gitlab-auth-and-rate-limit.ts",
+      "scope": "complete"
+    },
+    {
+      "path": "src/main/github/client/merge/pr-auto-merge.ts",
+      "scope": "complete"
+    },
+    {
+      "path": "src/main/github/rate-limit.ts",
+      "start": 155,
+      "end": 331
+    },
+    {
+      "path": "src/main/github/project-view/project-view-discovery.ts",
+      "scope": "complete"
+    },
+    {
+      "path": "src/main/runtime/runtime-github-repository-query-commands.ts",
+      "start": 143,
+      "end": 147
+    },
+    {
+      "path": "src/main/runtime/rpc/methods/gitlab.ts",
+      "start": 284,
+      "end": 289
+    },
+    {
+      "path": "src/main/runtime/runtime-gitlab-mutation-commands.ts",
+      "start": 206,
+      "end": 222
+    }
+  ],
+  "qualifications": [
+    {
+      "id": "IC-ROOT-NULL-LOCATION",
+      "detail": "Both corrected hashes are valid. The old nulls are in contracts.json#/methods/126/leafSourceEvidence/1 and #/methods/256/leafSourceEvidence/2. Overlay previousLedger instead names aggregate sourceEvidence entries already carrying valid hashes. Preserve frozen bytes; use these exact null locations."
+    },
+    {
+      "id": "IC-ROOT-DISCOVERY-CAP",
+      "detail": "Nested organization GraphQL requests ask first20; the local loop permits up to40 valid entries per organization if a response exceeds requested size. Viewer40 and organization20 are local counters. Do not turn a server request size into independently enforced response validation. Preserve no per-org continuation and synthetic '*' partial failure."
+    },
+    {
+      "id": "IC-ROOT-STORAGE",
+      "detail": "Jira uses plaintext fallback if encryption is unavailable; requested0600 does not repair preexisting mode or prove Windows ACL security. Stored presence is not usable credentials. Cache mutation can precede site-file failure; no personal credential reads/writes occurred."
+    },
+    {
+      "id": "IC-ROOT-MUTATION",
+      "detail": "GitLab empty update returns before acquire only after project resolution. GitHub merge-queue auto-merge can merge immediately; GraphQL branch requests auto-merge. Command success is not server result validation, and parse failure after remote write is not rollback."
+    },
+    {
+      "id": "IC-ROOT-BASELINE",
+      "detail": "Prior Linear correction stays authoritative: await acquire exists; missing await on returned fetch promise releases early and bypasses asynchronous catch. Existing10 original plus4 supplement results are not rerun or counted as new tests."
+    }
+  ],
+  "reconciliation": {
+    "accountPreparation": "AL-C01–10 and AR-C01–09 are accepted under the separate root reviews; the earlier two generation-method account dependency is delivered, not active. Their caller/result composition still belongs final integrations reconciliation.",
+    "platform": "PI-JOIN-RUNTIME and PI-JOIN-REQUEST-GUARD now accepted. Do not relaunch accepted account/provider auditors.",
+    "remaining": "Root final cross-area source reconciliation for47 groups/601 assigned methods plus14 reused Mentu methods, and E5 FG-UN4/AO decisions. No fresh audit census authorized by this record."
+  },
+  "execution": {
+    "testsRun": 0,
+    "sourceModulesExecuted": 0,
+    "providerRequests": 0,
+    "productChanged": false,
+    "installedPreviewChanged": false,
+    "wholeE3Accepted": false,
+    "wholeE5Accepted": false,
+    "fullAuditAccepted": false,
+    "candidateParity": false
+  },
+  "lifecycle": {
+    "task": "task_acb9d86696bd",
+    "dispatch": "ctx_72a82ca34450",
+    "done": "msg_24d78f6628a6",
+    "delivery": "delivery_a315326ab56f",
+    "releaseReceipt": "10510812-4cdc-4910-9fee-ea65c5fad147",
+    "release": "retained external terminal; no process action",
+    "ackReceipt": "6ce41b6f-7f58-4ca5-bdd8-524f727327a6",
+    "childrenCreated": 0
+  },
+  "progress": {
+    "accepted": 10,
+    "total": 12,
+    "percentage": 83.3,
+    "delta": 0,
+    "confidence": "medium-low",
+    "next": "Final E3/E5 source reconciliation; actual Sol implementation follows full root acceptance.",
+    "deadlineRisk": "Flexible24-hour full-fidelity target high risk; no defensible ETA."
+  }
+}

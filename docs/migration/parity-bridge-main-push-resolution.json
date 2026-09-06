@@ -1,0 +1,1762 @@
+{
+  "schema": "drogon.parity-bridge-main-push-resolution/2",
+  "status": "coordinator-reviewed-static-linkage",
+  "statusNote": "Exact frozen census cohort and producer call syntax verified independently. Per-row sender/caller prose remains worker trace except coordinator-reviewed corrections below. No producer invocation, behavioral test, payload-completeness or runtime delivery proof. Missing exact literals do not prove absence of dynamic or external senders.",
+  "source": {
+    "root": "/Users/carlos/Documents/Drogon-mentu-session",
+    "gitHead": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "bridgeInventory": "docs/migration/parity-source-bridges.json",
+    "bridgeField": "pushEventChannelToProducerMapping (96 push-producer-unresolved entries)"
+  },
+  "factories": {
+    "F-runtime-notifier": "send() from createRuntimeRendererNotificationSender bound to the main-window webContents (runtime-window-lifecycle.ts:32-37); suspend-on-failure with reload/process-gone lifecycle (runtime-renderer-notification-sender.ts:37-78); invoked as runtime-notifier callbacks by OrcaRuntimeService",
+    "F-main-window": "Main-window webContents sends; guards vary per site. openSkillShare and toggleStatusBar use optional chaining, not an explicit destroyed guard.",
+    "F-trusted-ui": "sendToTrustedUIRenderer: exact registered trusted webContents id, null/destroyed-guarded, optional sender exclusion (src/main/ipc/ui.ts:8-40)",
+    "F-guest-renderer": "resolveRenderer(browserTabId) from tabId->webContentsId registry map via webContents.fromId, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+    "F-subscriber-reply": "Invoking/subscribing renderer sends, except dashboard:snapshot also publishes to the popout window; inspect each site for lifetime guards.",
+    "F-watch-fanout": "fan-out to registered watcher listener webContents, destroyed-skipped",
+    "F-owner-stream": "subscribing owner WebContents (BrowserWindow-gated at subscribe), destroyed-guarded, per-stream ownership",
+    "F-runtime-method": "direct method-level sends: authoritative window, service-owned webContents, mainWindowRef, target-or-main window, menu-owner webContents, registration host, failure sink",
+    "F-request-relay": "request/response relay with requestId, 5-minute confirm plus 5s grace, sender-fenced replies, renderer-liveness guards",
+    "producer-not-found-in-bounded-search": "Preload subscriber identified; no producer found in bounded exact-literal search. Dynamic/out-of-tree producers remain unproven."
+  },
+  "counts": {
+    "total": 96,
+    "resolved": 94,
+    "byFactory": {
+      "F-guest-renderer": 32,
+      "F-main-window": 7,
+      "F-owner-stream": 5,
+      "F-request-relay": 1,
+      "F-runtime-method": 13,
+      "F-runtime-notifier": 20,
+      "F-subscriber-reply": 8,
+      "F-trusted-ui": 7,
+      "F-watch-fanout": 1,
+      "producer-not-found-in-bounded-search": 2
+    },
+    "unresolved": 2
+  },
+  "fileHashesSha256": {
+    "src/main/automations/service.ts": "12478582cb4375d1b883a16d271abab302696dfee6b65fc5371d30c64b28a257",
+    "src/main/browser/browser-guest-context-menu.ts": "0f81c14e4759269da1920eba8dd45b3d6d34e450f21689165ea975826a8d4b20",
+    "src/main/browser/browser-guest-grab-shortcuts.ts": "42d3add97e911fa0fd822bff1b2b9b618544b5486fa5943c59c468a73e2bca19",
+    "src/main/browser/browser-guest-shortcut-dispatch.ts": "8685673326c331a686f1eb9c74e576962d64e3cbe8e7cf19dbd8be97cdce2fe4",
+    "src/main/browser/browser-guest-shortcut-forwarding.ts": "f372ff9fbe26d0a9967f4c02848dbe82b5b70de279730678880f5c6bbd1032d9",
+    "src/main/browser/browser-guest-wheel-zoom.ts": "1a1069e5dd941e6ea41e72d06092d4d73ba80d7d79cc6ceb52a5afc3684b262e",
+    "src/main/browser/browser-manager-download-lifecycle.ts": "42383139175bff89494546cd7f283205c418a93cf256b563cc8284dbf8ab6e72",
+    "src/main/browser/browser-manager-event-forwarding.ts": "bc2e8760cee60de2a5fd2f2bf4f55b843df41015fea7fffd2eef17bcb63e619b",
+    "src/main/browser/browser-manager-final.ts": "a14196cc34d392178db3b01e506bfd05c6b735bf1ea7045418b3a29a2dc91cf7",
+    "src/main/browser/browser-manager-queries.ts": "d9e916138fe0315d74cb0e790062850175480cb1352482afc91963dc4a2c5c67",
+    "src/main/browser/browser-webauthn-account-picker.ts": "96ca8e58e995bd71b0dea66398864d4ff4fbadda97fe3f50300713e16d22644f",
+    "src/main/github/pr-refresh-event-publisher.ts": "ed2be274fa3efc115d9fc503a2ad16ea3b6a814d8c29155151bf865a6d35a0fe",
+    "src/main/index.ts": "72de2fa85b91d94e53573e706f7281216925b0d652d16e072f9f02e26e7d7c46",
+    "src/main/ipc/dashboard-popout.ts": "0bfd0a52da2c44d6b1a5ed0ce13de115afe24b1d4942807668d224a4168666b1",
+    "src/main/ipc/emulator-frame-stream.ts": "57b5c5eed134bc0336e751edff935e8809ae9f71795225301da07b293e68eff9",
+    "src/main/ipc/emulator-video-stream.ts": "936b78190ba8d972f8370493107f900a9ec0f852413196493f0ca1d14e8c4823",
+    "src/main/ipc/ephemeral-vm.ts": "ea16d41c0ac66562166ec9fa3c1d5229f64d377bef760ef514f0aa277b2b16c9",
+    "src/main/ipc/filesystem-watcher-local-events.ts": "313ee87e43f9f7330e955a22327c69c31b804e3c490b531f8e584050099a34e8",
+    "src/main/ipc/filesystem-watcher-local-removal.ts": "89c0731760a9677f62584355002288c1435a6954cfc165a29d71c2ce3903066d",
+    "src/main/ipc/filesystem-watcher-remote-install.ts": "9816a11493b10931e6e0f74c2ed5dd8e1c169c8acd567d67e7dcca95ed4e81bf",
+    "src/main/ipc/filesystem-watcher-remote-resync.ts": "fac6c093580350db1417bbe09b4b592e76a52fc936d2253eeedcf13fdfdb3e66",
+    "src/main/ipc/filesystem-watcher-remote-retry.ts": "02e53871ec56235dec70167afd2dc556c07ff48d5c9bf1a424e05c630d60cc41",
+    "src/main/ipc/github-work-item-mutation-events.ts": "cdc929f57929dfc30c06df7461c1a195ba72ce4eb69a77cfbdc5fa5d7a35bcd0",
+    "src/main/ipc/local-log-tail.ts": "6c7b9912fdab5be8b219eacc5000f2e11097219832212ec2f532879222292c02",
+    "src/main/ipc/native-chat.ts": "a7c2b036f4755e9f99ce0c706325c870d7bf89929d583a4b0613f252e63317e7",
+    "src/main/ipc/repos/nested-repo-scan-ipc.ts": "316f6a6e7d8d763da50225a4420bfbf2b71a94cedae532c561ba0fbd5194ec3e",
+    "src/main/ipc/skill-install-progress-ipc.ts": "02320cbe4f2ebacd4454157da8e52807c86f049deed9bbd35a957cd43f10fddd",
+    "src/main/ipc/terminal-preview-output-stream.ts": "c977189907948b9775b1e70e05efbe94ea90c9d07e824d88dfc87dc9907ad686",
+    "src/main/ipc/workspace-cleanup.ts": "99b365c713d7eeb5bc9c59fda44d5a62d5c0ac676cc55fbd63f1b88ad421ff15",
+    "src/main/ipc/workspace-ports.ts": "b9a45c6c483fdacea5711e46a4c768cf99df13753e44f1a687ec2d41a8713cef",
+    "src/main/ipc/workspace-space.ts": "4f15aaf2ea7757803b290b904624fb9740e456cf8c33e360cf27302566fda9ab",
+    "src/main/runtime/orca-runtime-emulator.ts": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb",
+    "src/main/runtime/orca-runtime-tests/terminal-side-effect-facts-part-02.spec.ts": "880c8a980817fd7c2a97f11cb088cc73545e6bcbc4d4f6b3bb10f54285ff8233",
+    "src/main/startup/main-process-i18n-menu.ts": "a7d6c82312d984c056e6b273b4271b72952a8f61840a4dd572f0f37747d72d5a",
+    "src/main/startup/main-process-runtime-launch.ts": "72d5290c5b3f5092ce8a6040d1d62185d6998371cd73eb8b31d59abfa40f1f37",
+    "src/main/startup/main-window-actions.ts": "5ef169bcc90cbac4e3538e9e0f813be156c9b820ea0c8c7614e4e31196a87a9c",
+    "src/main/startup/main-window-agent-status.ts": "3444975c0234852bdbbd2682ac2517d68470c7d47128b25edffc9c5819cea22c",
+    "src/main/updater/updater-nudge.ts": "bad412316d1554312de449ca8502f1f9556cd7255050e7b384ee9c794a517d46",
+    "src/main/updater/updater-status.ts": "623fd08b2045bf783f8d8bb34a3841c2e42ff3e7486c8a50bccd64a687b0e96a",
+    "src/main/window/dashboard-popout-window.ts": "3feed015f8136d5972d49a700b1b5b38e8e8b4ccf5916fa024603b439282f69a",
+    "src/main/window/editable-context-menu.ts": "7df79ce71d9187510c33302204621f0124011ffb5edde4bb3d993bccfc50bd67",
+    "src/main/window/runtime-window-lifecycle.ts": "f0a4377c92d93c836f40b4975f9a22eb6a9f1b18825ecdb7b75400c87d1f652d",
+    "src/main/window/session-tab-close-request-relay.ts": "4a86342ebbb3ac06e7feccd556ab377143daaec67a8e8931267eb8891001ff3d",
+    "src/preload/api/ui-bridge-tab-and-browser-commands.ts": "2b4f21ccc5330fe82c72c5af1bdf1329db4a3da7c9286861eb744effec3c55b2",
+    "src/preload/api/ui-bridge-terminal-and-session-tabs.ts": "db6d1270cf86b2a162ff1842db3c4ed420ea58c9c5f1ad0949f2f6e9eefe6588",
+    "src/shared/doc-preview-scheme.ts": "b96e527031adcaee27e8269919dc8b19625710706750fb8e692cf08da12d3976",
+    "src/shared/rich-markdown-context-menu.ts": "921b3d5e1ae88b83a5662d3f9cfa5a358bd0d2555fd613c309724e9def727536",
+    "src/main/window/runtime-renderer-notification-sender.ts": "b0bd6d24d973eec1ceaf00f2e30108dac2b69b883195a0bbda984f86cf00d20c",
+    "src/main/browser/browser-guest-renderer-target.ts": "b0bd0b7335e37c9b333dc2dce9aaaa97a4a74a1711471e766c22db34239a3285",
+    "src/main/ipc/ui.ts": "aadfa925fddb25149df924c9d95cf1495dfd6931f05ef8be4241001b10c64aba",
+    "src/main/browser/doc-preview-guest-policy.ts": "736ab6b8cee9064349074694f97f3dfd57aa80ae1f715c18afb49ba425c4a6c2",
+    "src/main/browser/doc-preview-failure-notice.ts": "f0b188bcb3be4104797b1ec999405c2c0f17837a6e029f5c8be636372df1f393"
+  },
+  "rows": [
+    {
+      "channel": "agentStatus:clear",
+      "status": "resolved",
+      "factory": "F-main-window",
+      "producers": [
+        {
+          "file": "src/main/startup/main-window-agent-status.ts",
+          "lines": [
+            117,
+            122
+          ],
+          "sender": "mainWindow + dashboard-popout webContents.send (destroy-guarded)",
+          "caller": "agentHookServer.setPaneStatusClearListener"
+        }
+      ]
+    },
+    {
+      "channel": "agentStatus:legacyWorkerTerminalRecovery",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            146,
+            147
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "agentStatus:migrationUnsupported",
+      "status": "resolved",
+      "factory": "F-main-window",
+      "producers": [
+        {
+          "file": "src/main/startup/main-window-agent-status.ts",
+          "lines": [
+            124,
+            129
+          ],
+          "sender": "state.mainWindow?.webContents.send (destroy-guarded)",
+          "caller": "setMigrationUnsupportedPtyListener, event.type set branch"
+        }
+      ]
+    },
+    {
+      "channel": "agentStatus:migrationUnsupportedClear",
+      "status": "resolved",
+      "factory": "F-main-window",
+      "producers": [
+        {
+          "file": "src/main/startup/main-window-agent-status.ts",
+          "lines": [
+            124,
+            131,
+            133
+          ],
+          "sender": "state.mainWindow?.webContents.send (destroy-guarded)",
+          "caller": "same listener, clear branch with ptyId"
+        }
+      ]
+    },
+    {
+      "channel": "agentStatus:set",
+      "status": "resolved",
+      "factory": "F-main-window",
+      "producers": [
+        {
+          "file": "src/main/startup/main-window-agent-status.ts",
+          "lines": [
+            48,
+            66
+          ],
+          "sender": "state.mainWindow?.webContents.send (destroy-guarded)",
+          "caller": "agentHookServer.setListener providerSessionOnly branch"
+        },
+        {
+          "file": "src/main/startup/main-window-agent-status.ts",
+          "lines": [
+            101
+          ],
+          "sender": "state.mainWindow?.webContents.send (destroy-guarded)",
+          "caller": "agentHookServer.setListener full statusEvent"
+        },
+        {
+          "file": "src/main/startup/main-window-agent-status.ts",
+          "lines": [
+            103
+          ],
+          "sender": "getDashboardPopoutWindow()?.webContents.send (suppression-aware)",
+          "caller": "same listener, popout mirror unless synthetic-title suppressed"
+        }
+      ],
+      "testPointers": [
+        {
+          "file": "src/main/runtime/orca-runtime-tests/terminal-side-effect-facts-part-02.spec.ts",
+          "lines": [
+            551,
+            562
+          ],
+          "executed": false,
+          "note": "Mock order-tracker; not a producer or behavior proof."
+        }
+      ]
+    },
+    {
+      "channel": "automations:changed",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            47
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "automations:dispatchRequested",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/automations/service.ts",
+          "lines": [
+            329,
+            341
+          ],
+          "sender": "service-owned webContents (optional); skipped with skipped_unavailable when no dispatch host",
+          "caller": "run dispatch path with idempotency token"
+        }
+      ]
+    },
+    {
+      "channel": "browser:certificate-failure-changed",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-manager-queries.ts",
+          "lines": [
+            90,
+            108
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "cert failure path; offscreen guests divert to state notify"
+        }
+      ]
+    },
+    {
+      "channel": "browser:context-menu-dismissed",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-context-menu.ts",
+          "lines": [
+            61,
+            80
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "before-mouse-event mouseDown (non-right) while menu open"
+        }
+      ]
+    },
+    {
+      "channel": "browser:context-menu-requested",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-context-menu.ts",
+          "lines": [
+            14,
+            44
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "guest context-menu event; Kagi token redacted"
+        }
+      ]
+    },
+    {
+      "channel": "browser:download-finished",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-manager-download-lifecycle.ts",
+          "lines": [
+            95,
+            107
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "settle path"
+        }
+      ]
+    },
+    {
+      "channel": "browser:download-progress",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-manager-download-lifecycle.ts",
+          "lines": [
+            81,
+            93
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "progress path"
+        }
+      ]
+    },
+    {
+      "channel": "browser:download-requested",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-manager-download-lifecycle.ts",
+          "lines": [
+            56,
+            79
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "started once via startedSent flag"
+        }
+      ]
+    },
+    {
+      "channel": "browser:grabActionShortcut",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-grab-shortcuts.ts",
+          "lines": [
+            13,
+            34
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "bare C/S keyDown during active grab pick"
+        }
+      ]
+    },
+    {
+      "channel": "browser:grabModeToggle",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-grab-shortcuts.ts",
+          "lines": [
+            60,
+            70
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "grabElement chord with non-editable focus"
+        }
+      ]
+    },
+    {
+      "channel": "browser:guest-load-failed",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-manager-event-forwarding.ts",
+          "lines": [
+            98,
+            123
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "queued per guest, flushed on tab bind; Kagi redacted"
+        }
+      ]
+    },
+    {
+      "channel": "browser:open-link-in-orca-tab",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-manager-final.ts",
+          "lines": [
+            6,
+            21
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "validated non-blank navigation URL only"
+        }
+      ]
+    },
+    {
+      "channel": "browser:permission-denied",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-manager-event-forwarding.ts",
+          "lines": [
+            40,
+            60
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "flushed per guest"
+        }
+      ]
+    },
+    {
+      "channel": "browser:popup",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-manager-event-forwarding.ts",
+          "lines": [
+            62,
+            96
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "queued max 5 per guest until tab binds"
+        }
+      ]
+    },
+    {
+      "channel": "browser:webauthn-account-request-closed",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-webauthn-account-picker.ts",
+          "lines": [
+            25,
+            42
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "settle/timeout/unavailable paths; 60s timer"
+        }
+      ]
+    },
+    {
+      "channel": "browser:webauthn-account-requested",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-webauthn-account-picker.ts",
+          "lines": [
+            44,
+            103
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "renderer context from browserManager.getRendererContextForGuest"
+        }
+      ]
+    },
+    {
+      "channel": "dashboard:popoutOpenChanged",
+      "status": "resolved",
+      "factory": "F-trusted-ui",
+      "producers": [
+        {
+          "file": "src/main/window/dashboard-popout-window.ts",
+          "lines": [
+            93,
+            99
+          ],
+          "sender": "sendToTrustedUIRenderer + in-process listener fan-out",
+          "caller": "broadcastPopoutOpenChanged on open/close transitions"
+        }
+      ]
+    },
+    {
+      "channel": "dashboard:snapshot",
+      "status": "resolved",
+      "factory": "F-subscriber-reply",
+      "producers": [
+        {
+          "file": "src/main/ipc/dashboard-popout.ts",
+          "lines": [
+            80,
+            96
+          ],
+          "sender": "dashboard popout window webContents; malformed snapshots rejected, icon map carried",
+          "caller": "snapshot publish path"
+        },
+        {
+          "file": "src/main/ipc/dashboard-popout.ts",
+          "lines": [
+            100,
+            105
+          ],
+          "sender": "requesting popout renderer (event.sender) after popout+dashboard gates",
+          "caller": "dashboard:requestSnapshot cache replay"
+        }
+      ]
+    },
+    {
+      "channel": "dashboard:snapshotRequested",
+      "status": "resolved",
+      "factory": "F-trusted-ui",
+      "producers": [
+        {
+          "file": "src/main/ipc/dashboard-popout.ts",
+          "lines": [
+            100,
+            108
+          ],
+          "sender": "sendToTrustedUIRenderer after popout-gated cache replay",
+          "caller": "dashboard:requestSnapshot handler (popout renderer, dashboard enabled)"
+        }
+      ]
+    },
+    {
+      "channel": "docPreview:externalLink",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/browser/doc-preview-guest-policy.ts",
+          "lines": [
+            239
+          ],
+          "sender": "registration.host.send",
+          "caller": "reportDocPreviewLinkClick after grant + URL checks; target registration.host (constant-send evidence)"
+        }
+      ],
+      "constantBinding": {
+        "name": "DOC_PREVIEW_EXTERNAL_LINK_CHANNEL",
+        "definitionFile": "src/shared/doc-preview-scheme.ts",
+        "definitionLine": 15
+      }
+    },
+    {
+      "channel": "docPreview:loadFailure",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/browser/doc-preview-failure-notice.ts",
+          "lines": [
+            30
+          ],
+          "sender": "sink.send",
+          "caller": "publishDocPreviewFailure (constant-send evidence)"
+        }
+      ],
+      "constantBinding": {
+        "name": "DOC_PREVIEW_LOAD_FAILURE_CHANNEL",
+        "definitionFile": "src/shared/doc-preview-scheme.ts",
+        "definitionLine": 22
+      }
+    },
+    {
+      "channel": "emulator:frameStreamError",
+      "status": "resolved",
+      "factory": "F-owner-stream",
+      "producers": [
+        {
+          "file": "src/main/ipc/emulator-frame-stream.ts",
+          "lines": [
+            31,
+            60
+          ],
+          "sender": "subscribing owner WebContents (BrowserWindow-gated at start), destroyed-guarded",
+          "caller": "MjpegFrameStream onError"
+        }
+      ]
+    },
+    {
+      "channel": "emulator:frameStreamFrame",
+      "status": "resolved",
+      "factory": "F-owner-stream",
+      "producers": [
+        {
+          "file": "src/main/ipc/emulator-frame-stream.ts",
+          "lines": [
+            31,
+            60
+          ],
+          "sender": "same owner stream (ArrayBuffer-copied JPEG bytes)",
+          "caller": "MjpegFrameStream onFrame"
+        }
+      ]
+    },
+    {
+      "channel": "emulator:pane-focus",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/runtime/orca-runtime-emulator.ts",
+          "lines": [
+            324,
+            336
+          ],
+          "sender": "same sendToRenderer helper",
+          "caller": "helper definition (comment at :192 is not a send site)"
+        }
+      ],
+      "callerAnchors": [
+        {
+          "file": "src/main/runtime/orca-runtime-emulator.ts",
+          "lines": [
+            183,
+            188
+          ]
+        }
+      ]
+    },
+    {
+      "channel": "emulator:videoStreamFrame",
+      "status": "resolved",
+      "factory": "F-owner-stream",
+      "producers": [
+        {
+          "file": "src/main/ipc/emulator-video-stream.ts",
+          "lines": [
+            30,
+            79
+          ],
+          "sender": "subscribing owner WebContents (BrowserWindow-gated), per-streamId ownership enforced",
+          "caller": "scrcpy registry frame units"
+        }
+      ]
+    },
+    {
+      "channel": "emulator:videoStreamMeta",
+      "status": "resolved",
+      "factory": "F-owner-stream",
+      "producers": [
+        {
+          "file": "src/main/ipc/emulator-video-stream.ts",
+          "lines": [
+            30,
+            79
+          ],
+          "sender": "same owner stream",
+          "caller": "scrcpy registry meta units"
+        }
+      ]
+    },
+    {
+      "channel": "ephemeralVm:provisionEvent",
+      "status": "resolved",
+      "factory": "F-subscriber-reply",
+      "producers": [
+        {
+          "file": "src/main/ipc/ephemeral-vm.ts",
+          "lines": [
+            133,
+            146
+          ],
+          "sender": "invoking renderer, provisionId-gated; diagnostic text redacted",
+          "caller": "recipe provision stdout/stderr stream"
+        }
+      ]
+    },
+    {
+      "channel": "export:requestPdf",
+      "status": "producer-not-found-in-bounded-search",
+      "factory": "producer-not-found-in-bounded-search",
+      "producers": [],
+      "subscriberAnchors": [
+        {
+          "file": "src/preload/api/ui-bridge-tab-and-browser-commands.ts",
+          "lines": [
+            157,
+            158
+          ]
+        }
+      ],
+      "searchEvidence": {
+        "method": "Exact literal rg across src/main src/preload src/shared src/renderer src/relay src/cli",
+        "matches": "Only preload on/removeListener calls at subscriberAnchors",
+        "limitation": "Does not resolve aliases, computed names, generated code or external senders."
+      }
+    },
+    {
+      "channel": "fs:changed",
+      "status": "resolved",
+      "factory": "F-watch-fanout",
+      "producers": [
+        {
+          "file": "src/main/ipc/filesystem-watcher-local-events.ts",
+          "lines": [
+            88,
+            99
+          ],
+          "sender": "registered root listeners fan-out, destroyed-skipped (overflow path)",
+          "caller": "emitOverflowPayload"
+        },
+        {
+          "file": "src/main/ipc/filesystem-watcher-local-events.ts",
+          "lines": [
+            101,
+            165
+          ],
+          "sender": "same fan-out (coalesced batch path)",
+          "caller": "flushBatch"
+        },
+        {
+          "file": "src/main/ipc/filesystem-watcher-local-removal.ts",
+          "lines": [
+            120,
+            143
+          ],
+          "sender": "suspended listeners re-subscribed then overflow-sent",
+          "caller": "restoreLocalWatcherAfterFailedRemoval"
+        },
+        {
+          "file": "src/main/ipc/filesystem-watcher-remote-resync.ts",
+          "lines": [
+            15,
+            44
+          ],
+          "sender": "desired remote-watcher listeners fan-out with warn-on-failure",
+          "caller": "SSH watcher resync"
+        },
+        {
+          "file": "src/main/ipc/filesystem-watcher-remote-retry.ts",
+          "lines": [
+            76
+          ],
+          "sender": "remote listener retry path (single-line send site; surrounding retry logic unread this pass)",
+          "caller": "remote retry (bounded detail: gap)"
+        },
+        {
+          "file": "src/main/ipc/filesystem-watcher-remote-install.ts",
+          "lines": [
+            171
+          ],
+          "sender": "remote listener install path (single-line send site; surrounding install logic unread this pass)",
+          "caller": "remote install (bounded detail: gap)"
+        }
+      ]
+    },
+    {
+      "channel": "fs:localLogTailChanged",
+      "status": "resolved",
+      "factory": "F-subscriber-reply",
+      "producers": [
+        {
+          "file": "src/main/ipc/local-log-tail.ts",
+          "lines": [
+            67,
+            86
+          ],
+          "sender": "invoking renderer keyed by sender.id+subscriptionId; rotation emits rename",
+          "caller": "fs.watch change/error callbacks"
+        }
+      ]
+    },
+    {
+      "channel": "gh:prRefreshEvent",
+      "status": "resolved",
+      "factory": "F-trusted-ui",
+      "producers": [
+        {
+          "file": "src/main/github/pr-refresh-event-publisher.ts",
+          "lines": [
+            36,
+            42
+          ],
+          "sender": "sendToTrustedUIRenderer (exact registered webContents, destroyed-guarded)",
+          "caller": "PRRefreshPublisher.broadcast with sequence"
+        }
+      ]
+    },
+    {
+      "channel": "gh:workItemMutated",
+      "status": "resolved",
+      "factory": "F-trusted-ui",
+      "producers": [
+        {
+          "file": "src/main/ipc/github-work-item-mutation-events.ts",
+          "lines": [
+            10,
+            15
+          ],
+          "sender": "sendToTrustedUIRenderer with senderId exclusion",
+          "caller": "broadcastGitHubWorkItemMutation"
+        }
+      ]
+    },
+    {
+      "channel": "mobile:relayStatusChanged",
+      "status": "resolved",
+      "factory": "F-main-window",
+      "producers": [
+        {
+          "file": "src/main/startup/main-process-runtime-launch.ts",
+          "lines": [
+            244,
+            254
+          ],
+          "sender": "state.mainWindow?.webContents.send (destroy-guarded)",
+          "caller": "DesktopRelayService onStatus, only when cloudAuth.configured"
+        }
+      ]
+    },
+    {
+      "channel": "nativeChat:appended",
+      "status": "resolved",
+      "factory": "F-subscriber-reply",
+      "producers": [
+        {
+          "file": "src/main/ipc/native-chat.ts",
+          "lines": [
+            187,
+            244
+          ],
+          "sender": "subscribing renderer WebContents (IPC invoke sender), isDestroyed-guarded per callback",
+          "caller": "onTranscriptPending/onInitialSnapshot/onReplace/onAppend transcript subscription frames"
+        }
+      ]
+    },
+    {
+      "channel": "projectGroups:scanNestedProgress",
+      "status": "resolved",
+      "factory": "F-subscriber-reply",
+      "producers": [
+        {
+          "file": "src/main/ipc/repos/nested-repo-scan-ipc.ts",
+          "lines": [
+            160,
+            182
+          ],
+          "sender": "invoking renderer; scanId-gated with abort supersede",
+          "caller": "nested scan onProgress"
+        }
+      ]
+    },
+    {
+      "channel": "rich-markdown:context-command",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/window/editable-context-menu.ts",
+          "lines": [
+            29
+          ],
+          "sender": "webContents.send",
+          "caller": "markdownCommandItem click with table target (constant-send evidence)"
+        }
+      ],
+      "constantBinding": {
+        "name": "richMarkdownContextMenuCommandChannel",
+        "definitionFile": "src/shared/rich-markdown-context-menu.ts",
+        "definitionLine": 42
+      }
+    },
+    {
+      "channel": "runtime:browserDriverChanged",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            213
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "runtime:browserRemoteViewersChanged",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            215
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "runtime:clientHostedBrowserRowsChanged",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            216
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "runtime:nativeChatLaunchDraftResolved",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            211
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "runtime:terminalDriverChanged",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            209
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "runtime:terminalFitOverrideChanged",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            207
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "skills:installProgress",
+      "status": "resolved",
+      "factory": "F-subscriber-reply",
+      "producers": [
+        {
+          "file": "src/main/ipc/skill-install-progress-ipc.ts",
+          "lines": [
+            5,
+            28
+          ],
+          "sender": "invoking renderer (event.sender), destroyed-guarded; bundle variant maps to skill shape",
+          "caller": "sendSkillInstallProgress / sendBundleInstallProgress"
+        }
+      ]
+    },
+    {
+      "channel": "terminalPreview:data",
+      "status": "resolved",
+      "factory": "F-owner-stream",
+      "producers": [
+        {
+          "file": "src/main/ipc/terminal-preview-output-stream.ts",
+          "lines": [
+            172,
+            184
+          ],
+          "sender": "bound preview WebContents; dispose-on-destroyed with backpressure accounting",
+          "caller": "preview batch drain"
+        }
+      ]
+    },
+    {
+      "channel": "ui:ackDashboardAgent",
+      "status": "resolved",
+      "factory": "F-trusted-ui",
+      "producers": [
+        {
+          "file": "src/main/ipc/dashboard-popout.ts",
+          "lines": [
+            116,
+            129
+          ],
+          "sender": "sendToTrustedUIRenderer after paneKey validation",
+          "caller": "dashboardPopout:ackAgent handler"
+        }
+      ]
+    },
+    {
+      "channel": "ui:browserHistoryNavigate",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            153,
+            158
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "browser.back/forward chords"
+        }
+      ]
+    },
+    {
+      "channel": "ui:closeActiveTab",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            159,
+            166
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "tab.close chord, non-floating; carries page id"
+        }
+      ]
+    },
+    {
+      "channel": "ui:closeFloatingItem",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            159,
+            166
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "tab.close chord on floating guest"
+        }
+      ]
+    },
+    {
+      "channel": "ui:closeSessionTab",
+      "status": "producer-not-found-in-bounded-search",
+      "factory": "producer-not-found-in-bounded-search",
+      "producers": [],
+      "subscriberAnchors": [
+        {
+          "file": "src/preload/api/ui-bridge-terminal-and-session-tabs.ts",
+          "lines": [
+            173,
+            174
+          ]
+        }
+      ],
+      "searchEvidence": {
+        "method": "Exact literal rg across src/main src/preload src/shared src/renderer src/relay src/cli",
+        "matches": "Only preload on/removeListener calls at subscriberAnchors",
+        "limitation": "Does not resolve aliases, computed names, generated code or external senders."
+      }
+    },
+    {
+      "channel": "ui:closeTerminal",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            201
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:createTerminal",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            63,
+            117
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:ctrlTabKeyDown",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-forwarding.ts",
+          "lines": [
+            79
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "guest key shadow path"
+        }
+      ]
+    },
+    {
+      "channel": "ui:ctrlTabKeyUp",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-forwarding.ts",
+          "lines": [
+            87
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "guest key shadow path"
+        }
+      ]
+    },
+    {
+      "channel": "ui:editableContextPaste",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/window/editable-context-menu.ts",
+          "lines": [
+            34,
+            49
+          ],
+          "sender": "menu-owner webContents param (shared renderer-ownership comment)",
+          "caller": "editableContextPasteItem click"
+        }
+      ]
+    },
+    {
+      "channel": "ui:emulatorAutoAttach",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/runtime/orca-runtime-emulator.ts",
+          "lines": [
+            338,
+            340
+          ],
+          "sender": "this.sendToRenderer -> authoritative-window webContents.send; best-effort try/catch at325-331",
+          "caller": "notifyRendererEmulatorAutoAttach after bridge.registerActiveEmulator"
+        }
+      ],
+      "callerAnchors": [
+        {
+          "file": "src/main/runtime/orca-runtime-emulator.ts",
+          "lines": [
+            183,
+            188
+          ]
+        }
+      ]
+    },
+    {
+      "channel": "ui:focusBrowserAddressBar",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            135,
+            139
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "browser.focusAddressBar chord"
+        }
+      ]
+    },
+    {
+      "channel": "ui:focusEditorTab",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            167
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:hardReloadBrowserPage",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            140,
+            142
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "browser.hardReload chord"
+        }
+      ]
+    },
+    {
+      "channel": "ui:moveSessionTab",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            170,
+            171
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:newBrowserTab",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            122,
+            123
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "tab.newBrowser chord"
+        }
+      ]
+    },
+    {
+      "channel": "ui:newMarkdownTab",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            130,
+            131
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "tab.newMarkdown chord"
+        }
+      ]
+    },
+    {
+      "channel": "ui:newSimulatorTab",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            124,
+            129
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "tab.newSimulator chord, darwin + emulator enabled"
+        }
+      ]
+    },
+    {
+      "channel": "ui:newTerminalTab",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            132,
+            134
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "tab.newTerminal chord"
+        }
+      ]
+    },
+    {
+      "channel": "ui:openCrashReport",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/startup/main-window-actions.ts",
+          "lines": [
+            141,
+            147
+          ],
+          "sender": "targetWindow ?? mainWindow webContents (destroy-guarded)",
+          "caller": "sendOpenCrashReport"
+        }
+      ]
+    },
+    {
+      "channel": "ui:openDiffFromMobile",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            179,
+            180
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:openFeatureTour",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/startup/main-window-actions.ts",
+          "lines": [
+            125,
+            131
+          ],
+          "sender": "same target-or-main pattern",
+          "caller": "sendOpenFeatureTour"
+        }
+      ]
+    },
+    {
+      "channel": "ui:openFileFromMobile",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            172,
+            173
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:openSetupGuide",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/startup/main-window-actions.ts",
+          "lines": [
+            133,
+            139
+          ],
+          "sender": "same target-or-main pattern",
+          "caller": "sendOpenSetupGuide"
+        }
+      ]
+    },
+    {
+      "channel": "ui:openSkillShare",
+      "status": "resolved",
+      "factory": "F-main-window",
+      "producers": [
+        {
+          "file": "src/main/index.ts",
+          "lines": [
+            29
+          ],
+          "sender": "state.mainWindow?.webContents.send",
+          "caller": "skill-share deep-link handler (see os-opened wiring)"
+        }
+      ]
+    },
+    {
+      "channel": "ui:reloadBrowserPage",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            143,
+            145
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "browser.reload chord"
+        }
+      ]
+    },
+    {
+      "channel": "ui:renameTerminal",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            164
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:resumeSleepingAgents",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            205
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:scrollBrowserPage",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-wheel-zoom.ts",
+          "lines": [
+            92,
+            113
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "emulated-viewport pan deltas, finite-guarded"
+        }
+      ]
+    },
+    {
+      "channel": "ui:selectFloatingIndex",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            195,
+            201
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "floating index chords (2 sites)"
+        }
+      ]
+    },
+    {
+      "channel": "ui:sessionTabCloseRequest",
+      "status": "resolved",
+      "factory": "F-request-relay",
+      "producers": [
+        {
+          "file": "src/main/window/session-tab-close-request-relay.ts",
+          "lines": [
+            14,
+            67
+          ],
+          "sender": "mainWindow webContents; request/response with requestId, 5-min confirm + 5 s grace, sender-fenced replies",
+          "caller": "requestSessionTabCloseFromRenderer (runtime notifier closeSessionTab at lifecycle:168-169)"
+        }
+      ]
+    },
+    {
+      "channel": "ui:sleepDashboardWorkspace",
+      "status": "resolved",
+      "factory": "F-trusted-ui",
+      "producers": [
+        {
+          "file": "src/main/ipc/dashboard-popout.ts",
+          "lines": [
+            166,
+            175
+          ],
+          "sender": "sendToTrustedUIRenderer after sleep-args validation",
+          "caller": "dashboardPopout:sleepWorkspace handler"
+        }
+      ]
+    },
+    {
+      "channel": "ui:sleepWorktree",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            204
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:spawnDashboardAgent",
+      "status": "resolved",
+      "factory": "F-trusted-ui",
+      "producers": [
+        {
+          "file": "src/main/ipc/dashboard-popout.ts",
+          "lines": [
+            155,
+            164
+          ],
+          "sender": "sendToTrustedUIRenderer after spawn-args validation",
+          "caller": "dashboardPopout:spawnAgent handler"
+        }
+      ]
+    },
+    {
+      "channel": "ui:splitTerminal",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            152,
+            153
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "ui:switchTab",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            167,
+            172
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "tab.next/previousSameType chords"
+        }
+      ]
+    },
+    {
+      "channel": "ui:switchTabAcrossAllTypes",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            87
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "switch-all-types direction path"
+        }
+      ]
+    },
+    {
+      "channel": "ui:switchTerminalTab",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-dispatch.ts",
+          "lines": [
+            109,
+            114
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "tab.next/previousTerminal chords"
+        }
+      ]
+    },
+    {
+      "channel": "ui:toggleStatusBar",
+      "status": "resolved",
+      "factory": "F-main-window",
+      "producers": [
+        {
+          "file": "src/main/startup/main-process-i18n-menu.ts",
+          "lines": [
+            74,
+            78
+          ],
+          "sender": "state.mainWindow?.webContents.send",
+          "caller": "onToggleAppearance statusBarVisible branch; renderer owns the flip"
+        }
+      ]
+    },
+    {
+      "channel": "ui:zoomBrowserPage",
+      "status": "resolved",
+      "factory": "F-guest-renderer",
+      "producers": [
+        {
+          "file": "src/main/browser/browser-guest-shortcut-forwarding.ts",
+          "lines": [
+            55
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "guest key shadow path"
+        },
+        {
+          "file": "src/main/browser/browser-guest-wheel-zoom.ts",
+          "lines": [
+            83,
+            91
+          ],
+          "sender": "resolveRenderer(browserTabId) -> webContents.fromId registry map, null/destroyed-guarded (browser-guest-renderer-target.ts:5-18)",
+          "caller": "consumed wheel-zoom direction"
+        }
+      ]
+    },
+    {
+      "channel": "updater:clearDismissal",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/updater/updater-nudge.ts",
+          "lines": [
+            35,
+            56
+          ],
+          "sender": "mainWindowRef webContents when a nudge applies (pending/dismissed ids consulted)",
+          "caller": "nudge check before background update check"
+        }
+      ]
+    },
+    {
+      "channel": "updater:status",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/updater/updater-status.ts",
+          "lines": [
+            164,
+            178
+          ],
+          "sender": "this.mainWindowRef?.webContents.send; pending-check branch publishes only if forced; normal path publishes changed status or any forced status",
+          "caller": "status publish branches at165-177; non-forced identical status suppressed at173-175"
+        }
+      ]
+    },
+    {
+      "channel": "workspaceCleanup:scanProgress",
+      "status": "resolved",
+      "factory": "F-subscriber-reply",
+      "producers": [
+        {
+          "file": "src/main/ipc/workspace-cleanup.ts",
+          "lines": [
+            69,
+            83
+          ],
+          "sender": "invoking renderer, destroyed-guarded; scanId-gated; abort on destroy",
+          "caller": "fleet scan onProgress"
+        }
+      ]
+    },
+    {
+      "channel": "workspacePorts:advertised-url-changed",
+      "status": "resolved",
+      "factory": "F-runtime-method",
+      "producers": [
+        {
+          "file": "src/main/ipc/workspace-ports.ts",
+          "lines": [
+            81,
+            95
+          ],
+          "sender": "broadcast to all non-destroyed BrowserWindows webContents",
+          "caller": "broadcastWorkspacePortAdvertisedUrlChanged"
+        }
+      ]
+    },
+    {
+      "channel": "workspaceSpace:progress",
+      "status": "resolved",
+      "factory": "F-subscriber-reply",
+      "producers": [
+        {
+          "file": "src/main/ipc/workspace-space.ts",
+          "lines": [
+            60,
+            79
+          ],
+          "sender": "invoking renderer, destroyed-guarded; first/terminal/throttled emission",
+          "caller": "fleet scan progress callback"
+        }
+      ]
+    },
+    {
+      "channel": "worktree:baseStatus",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            44
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    },
+    {
+      "channel": "worktree:remoteBranchConflict",
+      "status": "resolved",
+      "factory": "F-runtime-notifier",
+      "producers": [
+        {
+          "file": "src/main/window/runtime-window-lifecycle.ts",
+          "lines": [
+            45
+          ],
+          "sender": "send() bound to mainWindow webContents via createRuntimeRendererNotificationSender (suspend-on-failure)",
+          "caller": "runtime-notifier callback invoked by OrcaRuntimeService"
+        }
+      ]
+    }
+  ],
+  "gaps": [
+    "Two bounded-search producer gaps remain; no source absence established.",
+    "Payload structures, runtime delivery, complete caller registration and exhaustive failure/recovery paths remain execution/contract work.",
+    "Per-row sender/caller prose is a worker trace, not independently accepted behavioral assertions. Main independently checked common notification/trusted-target/guest-target helpers, close relay, constant sends, emulator wrapper, and specific update/skill-share/menu corrections.",
+    "fs:changed remote retry/install surrounding logic was not read; only send-site syntax verified."
+  ],
+  "review": {
+    "sourceTestsExecuted": 0,
+    "sourceModulesImported": 0,
+    "scope": "94 channels linked to source send calls; two unresolved. This does not close the audit.",
+    "lineConvention": "lines gives an inclusive min..max source range; it is not a list of send sites. sourceCalls emitted by the independent AST checker identify exact call starts.",
+    "corrections": [
+      "Mock test moved out of producers",
+      "Three channel constants now link to actual imported-constant send sites",
+      "Emulator caller anchors separated from producer definitions",
+      "No universal destroyed-guard claim for main-window sends",
+      "updater:status is not forced-only",
+      "gh:prRefreshEvent passes no sender exclusion; gh:workItemMutated does",
+      "fs:changed has six recorded send sites, not seven",
+      "Unknowns no longer assert no sender in tree"
+    ]
+  }
+}

@@ -1,0 +1,552 @@
+{
+  "schema": "drogon.audit.parity-bridge-delegated-resolution.v2",
+  "status": "coordinator-reviewed-static-linkage",
+  "statusNote": "Exactly11 delegated method facts plus dynamic channel and unresolved disposer facts, the latter two on one method:12 distinct records. Seven delegated project functions, four built-in calls, one inline dynamic subscription. Source linkage resolved for this bounded cohort, no runtime execution or universal disposer/liveness correctness claim. Original census unchanged;54request/12send/96push main-side cohort separate.",
+  "source": {
+    "root": "/Users/carlos/Documents/Drogon-mentu-session",
+    "pinnedSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "verifiedHeadShaMatchesPinned": true
+  },
+  "inputDocument": {
+    "path": "docs/migration/parity-source-bridges.json",
+    "schema": "drogon.inventory.source-bridges.v2",
+    "mutated": false,
+    "countsAtTimeOfThisAudit": {
+      "delegatedUnresolvedMethods": 11,
+      "unresolvedDynamicChannelRefs": 1,
+      "subscriptionsWithUnresolvedDisposerPairing": 1,
+      "requestChannelsUnresolvedAgainstHandler": 54,
+      "fireAndForgetChannelsUnresolvedAgainstListener": 12,
+      "pushEventChannelsUnresolvedAgainstProducer": 96
+    }
+  },
+  "scope": {
+    "inScopeThisSlice": [
+      "The 11 bridges[].exported[].methods[] entries with resolution === 'delegated-unresolved'",
+      "The 1 bridges[].exported[].methods[] entry with an ipcCalls[].channel.kind === 'unresolved-identifier-ref' (dynamic channel)",
+      "The 1 bridges[].exported[].methods[] entry with disposerPairing.status === 'unresolved-disposer-pairing' (same method as the dynamic channel entry, per direct JSON inspection this pass -- one record covers both facets)"
+    ],
+    "explicitlyOutOfScopeNextSlice": [
+      "requestChannelToHandlerMapping's 54 unresolved request-channel-to-main-handler entries (main-side invoke cohort)",
+      "fireAndForgetChannelToListenerMapping's 12 unresolved send-channel-to-main-listener entries (main-side send cohort)",
+      "pushEventChannelToProducerMapping's 96 unresolved push-event-channel-to-producer entries (main-side push cohort)",
+      "Any rework of the census/generator script that produced parity-source-bridges.json"
+    ]
+  },
+  "methodology": "Coordinator checked all12 exact census selectors/names/origin anchors and all20 hash occurrences across16 unique files. Read delegated bodies and subscription implementations. Corrected worker count, anchor and semantics errors, notably per-call unsubscribe vs last-listener teardown. Source linkage evidence, not runtime proof.",
+  "counts": {
+    "totalRecordsInThisSlice": 12,
+    "delegatedUnresolvedMethodsInScope": 11,
+    "dynamicChannelRefsInScope": 1,
+    "disposerPairingUnresolvedInScope": 1,
+    "totalUnresolvedFactsClosed": 13,
+    "recordsResolvedToRealProjectFunction": 7,
+    "recordsResolvedToBuiltinApi": 4,
+    "recordsThatAreNotIpcAtAll": 7,
+    "recordsWithLiteralChannel": 4,
+    "recordsWithGenuinelyDynamicChannel": 1,
+    "recordsWithSubscriptionDisposalSemantics": 3,
+    "recordsSourceResolved": 12,
+    "recordsStillUnknown": 0,
+    "recordsResolvedInline": 1
+  },
+  "records": [
+    {
+      "id": "PBR-001",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 4,
+        "exportedIndex": 0,
+        "methodIndex": 6,
+        "bridgeFile": "src/preload/api/app-bridge.ts",
+        "methodName": "awaitBeforeUnloadCheckpoint",
+        "originFile": "src/preload/api/app-bridge.ts",
+        "originAnchor": 43,
+        "delegatedCallees": [
+          "awaitBeforeUnloadCheckpoint"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/app-bridge.ts:11 (import), :43 (call site: `awaitBeforeUnloadCheckpoint: () => awaitBeforeUnloadCheckpoint()`)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/app-bridge.ts",
+          "lines": 79,
+          "sha256": "feaa5897704e3b104e911b405040f389d9616234a5f7cfb9e47cb416def53050"
+        },
+        {
+          "path": "src/preload/preload-runtime-support.ts",
+          "lines": 165,
+          "sha256": "af169b11746f5a5f30de11e8a0c6c1826a93d7ef2823c90d075614ec6141583c"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "awaitBeforeUnloadCheckpoint",
+        "delegateFile": "src/preload/preload-runtime-support.ts",
+        "delegateAnchor": "20-27",
+        "channel": "app:await-before-unload-checkpoint",
+        "channelKind": "literal",
+        "ipcShape": "invoke (request-response, renderer awaits reply)",
+        "semantics": "Invokes app:await-before-unload-checkpoint with no arguments, awaits result and requires result?.ok === true; extra response fields are not rejected. Otherwise throws 'Failed to persist renderer state before unload.' Returns Promise<void>, no subscription."
+      },
+      "whyCensusMarkedUnresolved": "Recorded delegated callee resolves by import to the implementation below."
+    },
+    {
+      "id": "PBR-002",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 8,
+        "exportedIndex": 0,
+        "methodIndex": 1,
+        "bridgeFile": "src/preload/api/browser-bridge.ts",
+        "methodName": "readClientHostId",
+        "originFile": "src/preload/api/browser-bridge-guest-registration-and-downloads.ts",
+        "originAnchor": 13,
+        "delegatedCallees": [
+          "readBrowserClientHostIdArgument"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/browser-bridge-guest-registration-and-downloads.ts:7 (import), :13 (call site: `readClientHostId: (): string | null => readBrowserClientHostIdArgument(process.argv)`)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/browser-bridge-guest-registration-and-downloads.ts",
+          "lines": 198,
+          "sha256": "e3ef767225d4e15338a85f76788b59ac2fee3cd384607f0cff136cdc44e15efd"
+        },
+        {
+          "path": "src/shared/browser-client-host-id-argument.ts",
+          "lines": 25,
+          "sha256": "9a41ecfa0125fcd2dbb76cec4f32ff73d70682e03c8cfd343b9675bcf4d21d53"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "readBrowserClientHostIdArgument",
+        "delegateFile": "src/shared/browser-client-host-id-argument.ts",
+        "delegateAnchor": "18-24",
+        "channel": null,
+        "channelKind": "not-ipc",
+        "ipcShape": "n/a -- local synchronous computation, no ipcRenderer call at all",
+        "semantics": "Reads `process.argv` in the preload process and returns the value of a `--orca-browser-client-host-id=<id>` argument (or null if absent/empty). Source comments (browser-client-host-id-argument.ts:5-11) document WHY this is an argv read rather than a synchronous IPC call: Electron does not reliably answer a `sendSync` that arrives before its main-process listener registers (observed on Electron 43), leaving the renderer permanently blocked; an argv value is present from process birth. This method has no request/response and no subscription semantics whatsoever -- it is a pure local read."
+      },
+      "whyCensusMarkedUnresolved": "Recorded delegated callee resolves by import to the implementation below."
+    },
+    {
+      "id": "PBR-003",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 17,
+        "exportedIndex": 0,
+        "methodIndex": 7,
+        "bridgeFile": "src/preload/api/crash-reports-bridge.ts",
+        "methodName": "readHeapStatistics",
+        "originFile": "src/preload/api/crash-reports-bridge.ts",
+        "originAnchor": 30,
+        "delegatedCallees": [
+          "readRendererHeapStatistics"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/crash-reports-bridge.ts:12 (import), :30 (call site: `readHeapStatistics: (): RendererHeapStatistics | null => readRendererHeapStatistics()`)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/crash-reports-bridge.ts",
+          "lines": 32,
+          "sha256": "74c795bfbb4df687a43d6d878fd58d3d408836c866ca0a6c3086ad1654a6dacf"
+        },
+        {
+          "path": "src/preload/renderer-heap-statistics-reader.ts",
+          "lines": 37,
+          "sha256": "3f533f4065b858f20206483af54522c8a1c1aa31c75c8cd3dbfba79e5eae43bd"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "readRendererHeapStatistics",
+        "delegateFile": "src/preload/renderer-heap-statistics-reader.ts",
+        "delegateAnchor": "10-37",
+        "channel": null,
+        "channelKind": "not-ipc",
+        "ipcShape": "n/a -- local synchronous computation, no ipcRenderer call",
+        "semantics": "Calls `process.getHeapStatistics()` and (in a SEPARATE try/catch, deliberately, per the source's own comment: 'Blink's number is supplementary; losing it must not discard the exact V8 read') `process.getBlinkMemoryInfo()`, both available in a sandboxed, context-isolated preload without node:os. Returns null on any getHeapStatistics() failure (fail-safe for diagnostics); blinkAllocatedKB is independently optional. No channel, no subscription, no disposer."
+      },
+      "whyCensusMarkedUnresolved": "Recorded delegated callee resolves by import to the implementation below."
+    },
+    {
+      "id": "PBR-004",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 17,
+        "exportedIndex": 0,
+        "methodIndex": 8,
+        "bridgeFile": "src/preload/api/crash-reports-bridge.ts",
+        "methodName": "readProcessMemory",
+        "originFile": "src/preload/api/crash-reports-bridge.ts",
+        "originAnchor": 31,
+        "delegatedCallees": [
+          "readRendererProcessMemory"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/crash-reports-bridge.ts:13 (import), :31 (call site: `readProcessMemory: (): Promise<RendererProcessMemory | null> => readRendererProcessMemory()`)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/crash-reports-bridge.ts",
+          "lines": 32,
+          "sha256": "74c795bfbb4df687a43d6d878fd58d3d408836c866ca0a6c3086ad1654a6dacf"
+        },
+        {
+          "path": "src/preload/renderer-process-memory-reader.ts",
+          "lines": 30,
+          "sha256": "323525e4c476110b2a5d3a416e988c408b93af743874885e45846f10a53f4dad"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "readRendererProcessMemory",
+        "delegateFile": "src/preload/renderer-process-memory-reader.ts",
+        "delegateAnchor": "10-26",
+        "channel": null,
+        "channelKind": "not-ipc",
+        "ipcShape": "n/a -- local async computation via `await process.getProcessMemoryInfo()`, no ipcRenderer call",
+        "semantics": "Awaits `process.getProcessMemoryInfo()`; returns null if `info.private` is not a finite non-negative number (isFiniteKilobytes guard) or if the call throws. `residentKB` is included only when `info.residentSet` also passes that guard -- source comment: 'Chromium reports no resident set on macOS', so residentKB is genuinely, platform-conditionally absent from the return shape, not an oversight. No channel, no subscription, no disposer."
+      },
+      "whyCensusMarkedUnresolved": "Recorded delegated callee resolves by import to the implementation below."
+    },
+    {
+      "id": "PBR-005",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 54,
+        "exportedIndex": 0,
+        "methodIndex": 0,
+        "bridgeFile": "src/preload/api/platform-bridge.ts",
+        "methodName": "get",
+        "originFile": "src/preload/api/platform-bridge.ts",
+        "originAnchor": 27,
+        "delegatedCallees": [
+          "resolvePlatformInfo"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/platform-bridge.ts:10 (definition), :27 (call)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/platform-bridge.ts",
+          "lines": 28,
+          "sha256": "1e6f47c095863111e2b5e930740b2e3a0105c542d536e005358bedc95d762fe9"
+        },
+        {
+          "path": "src/preload/preload-runtime-support.ts",
+          "lines": 165,
+          "sha256": "af169b11746f5a5f30de11e8a0c6c1826a93d7ef2823c90d075614ec6141583c"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "resolvePlatformInfo",
+        "delegateFile": "src/preload/api/platform-bridge.ts",
+        "delegateAnchor": "10-23",
+        "channel": null,
+        "channelKind": "not-ipc",
+        "ipcShape": "n/a -- local synchronous computation, memoized once per process lifetime",
+        "semantics": "Lazily memoizes a frozen platform/osRelease/arch/shell/displayServer object in module state. Reads process platform/arch; optional getSystemVersion defaults empty; SHELL trim then ComSpec trim then empty. getLinuxDisplayServer at preload-runtime-support.ts:31-43 returns null for non-Linux, wayland for WAYLAND_DISPLAY or case-normalized XDG_SESSION_TYPE/ELECTRON_OZONE_PLATFORM_HINT wayland, otherwise x11 if DISPLAY exists, else null. No IPC."
+      },
+      "whyCensusMarkedUnresolved": "Recorded delegated callee resolves to a same-file function declaration."
+    },
+    {
+      "id": "PBR-006",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 59,
+        "exportedIndex": 0,
+        "methodIndex": 14,
+        "bridgeFile": "src/preload/api/pty-bridge.ts",
+        "methodName": "getPtyDataListenerCount",
+        "originFile": "src/preload/api/pty-bridge-session-control.ts",
+        "originAnchor": 130,
+        "delegatedCallees": [
+          ".listenerCount"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/pty-bridge-session-control.ts:130 (call site: `getPtyDataListenerCount: (): number => ipcRenderer.listenerCount('pty:data')`)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/pty-bridge-session-control.ts",
+          "lines": 208,
+          "sha256": "a8d1d69428d7c71ec9a7e6d79aee43106b2a4d52fc3c42af3bfd7c3b099ceec7"
+        },
+        {
+          "path": "src/preload/api/pty-bridge.ts",
+          "lines": 8,
+          "sha256": "0e2351ca0b56a590866758901e0990bb0b8524e3c2f45ecddf22ef40fb289b1f"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "ipcRenderer.listenerCount (Electron built-in EventEmitter-style method, not a project-defined function)",
+        "delegateFile": "electron (built-in, no project source file)",
+        "delegateAnchor": "n/a",
+        "channel": "pty:data",
+        "channelKind": "literal",
+        "ipcShape": "introspection -- queries this renderer process's OWN local listener registry for the 'pty:data' push-event channel; not itself a request, subscription, or disposal action",
+        "semantics": "Returns the current count of listeners this renderer has registered for 'pty:data' (the terminal output push-event channel, registered/removed elsewhere in this same bridge file). Used for local diagnostics/assertions about listener leakage, not for driving any IPC traffic itself."
+      },
+      "whyCensusMarkedUnresolved": "Recorded callee terminates at an Electron/JavaScript built-in; no further project function definition."
+    },
+    {
+      "id": "PBR-007",
+      "category": "dynamic-channel-and-disposer",
+      "censusRecord": {
+        "bridgeIndex": 64,
+        "exportedIndex": 0,
+        "methodIndex": 3,
+        "bridgeFile": "src/preload/api/runtime-bridge.ts",
+        "methodName": "subscribe",
+        "originFile": "src/preload/api/runtime-bridge.ts",
+        "originAnchor": 20,
+        "unresolvedFacets": [
+          "ipcCalls[0].channel.kind = unresolved-identifier-ref (refName: channel), anchor 28",
+          "ipcCalls[2].channel.kind = unresolved-identifier-ref (refName: channel), anchor 32",
+          "ipcCalls[3].channel.kind = unresolved-identifier-ref (refName: channel), anchor 37",
+          "disposerPairing.status = unresolved-disposer-pairing (onAnchors: [28], removeAnchors: [32, 37])"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/runtime-bridge.ts:20-45",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/runtime-bridge.ts",
+          "lines": 145,
+          "sha256": "670533856326cd427516f3f56f6d3aa752f8e1ee38538605ef4fee7a9e8b21c3"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "n/a -- inline in runtime-bridge.ts, not delegated to another file",
+        "delegateFile": "src/preload/api/runtime-bridge.ts",
+        "delegateAnchor": "20-45",
+        "channel": "`runtime:subscription:${subscriptionId}` where subscriptionId = `desktop-${crypto.randomUUID()}` (line 22-23)",
+        "channelKind": "template-literal, per-call-instance unique -- NOT a static string literal by design, not merely un-analyzed",
+        "ipcShape": "on(dynamicChannel,listener) before invoke(runtime:subscribe,{subscriptionId,...args}); remove same listener on rejected invoke. Returned unsubscribe removes same listener then sends runtime:unsubscribe. sendBinary throws unsupported-local-input error.",
+        "semantics": "Each call creates desktop-UUID subscriptionId and runtime:subscription:<id>. Both remove sites share exact lexical channel/listener bindings. This resolves source pairing, not whole lifecycle or exactly-once teardown: repeated unsubscribe still sends repeated unsubscribe messages; no terminal-frame cleanup is implemented in this body. Main-side handling and actual execution remain separate."
+      },
+      "whyCensusMarkedUnresolved": "Recorded channel identifier holds a runtime UUID template, not a static literal. Source on/removeListener sites share lexical channel/listener bindings. No generator algorithm diagnosis claimed."
+    },
+    {
+      "id": "PBR-008",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 65,
+        "exportedIndex": 0,
+        "methodIndex": 13,
+        "bridgeFile": "src/preload/api/runtime-environments-bridge.ts",
+        "methodName": "subscribe",
+        "originFile": "src/preload/api/runtime-environments-bridge.ts",
+        "originAnchor": 78,
+        "delegatedCallees": [
+          "subscribeRuntimeEnvironmentFromPreload"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/runtime-environments-bridge.ts:9 (import), :78-93 (call site inside the `subscribe` method)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/runtime-environments-bridge.ts",
+          "lines": 94,
+          "sha256": "3d496d0e9f53fe2b2554a26ddc70e10831b4451c19f9b3846f36bcd96bd80e58"
+        },
+        {
+          "path": "src/preload/runtime-environment-subscriptions.ts",
+          "lines": 162,
+          "sha256": "96600d829b4d7c3997e55e52701b58a14fe19331ae6934e628eb74abac5b9802"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "subscribeRuntimeEnvironmentFromPreload",
+        "delegateFile": "src/preload/runtime-environment-subscriptions.ts",
+        "delegateAnchor": "125-162",
+        "channel": "runtimeEnvironments:subscriptionEvent (push), runtimeEnvironments:subscribe (invoke), runtimeEnvironments:unsubscribe (invoke), runtimeEnvironments:subscriptionBinary (send)",
+        "channelKind": "literal (all three channels are plain string literals, unlike PBR-007's design)",
+        "ipcShape": "compound, but architecturally DIFFERENT from runtime-bridge.ts's own `subscribe` (PBR-007): ONE shared listener on the single static channel `runtimeEnvironments:subscriptionEvent` is created lazily (getOrCreateDispatcher, line 80-111) and multiplexes ALL concurrent subscriptions by a `subscriptionId` key in an in-memory Map, rather than one dedicated channel+listener per subscription.",
+        "semantics": "WeakMap keyed by IPC instance owns one dispatcher and callback map keyed by subscriptionId. Callbacks inserted BEFORE invoke; mismatched response ID or invoke rejection removes current map entry. Response/binary route to callbacks; error is non-terminal and retains entry. Close deletes entry and releases idle listener BEFORE calling onClose. unsubscribe always invokes runtimeEnvironments:unsubscribe for its ID even if already removed; only local dispatcher/listener removal waits for the last map entry. sendBinary sends subscriptionBinary. ID uses crypto.randomUUID, with Date.now/Math.random fallback. Source behavior only, not proof remote errors/cancellation handled end-to-end."
+      },
+      "whyCensusMarkedUnresolved": "Recorded delegated callee resolves by import to the implementation below."
+    },
+    {
+      "id": "PBR-009",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 69,
+        "exportedIndex": 0,
+        "methodIndex": 19,
+        "bridgeFile": "src/preload/api/skills-bridge.ts",
+        "methodName": "deleteSupported",
+        "originFile": "src/preload/api/skills-bridge.ts",
+        "originAnchor": 91,
+        "delegatedCallees": [
+          ".resolve"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/skills-bridge.ts:90-91 (call site: `// Desktop always registers the delete IPC handlers in its own main process.\\n  deleteSupported: (): Promise<boolean> => Promise.resolve(true)`)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/skills-bridge.ts",
+          "lines": 130,
+          "sha256": "49781b1fd9076e2281dc90cb552fe4afd8d36e2617d9845683d05c7d5dd8214b"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "Promise.resolve (JS built-in, not a project function or an IPC call)",
+        "delegateFile": "n/a -- language built-in",
+        "delegateAnchor": "n/a",
+        "channel": null,
+        "channelKind": "not-ipc",
+        "ipcShape": "n/a -- a hardcoded constant-true resolved Promise, no ipcRenderer usage at all",
+        "semantics": "Always returns Promise<true> for the desktop preload target. The adjacent source comment states the reason explicitly: 'Desktop always registers the delete IPC handlers in its own main process' -- this is a capability-availability flag, not a request to main; desktop unconditionally supports skill deletion, so no round-trip is needed to ask. (The delegated-methods census cohort this task owns does not include the web-mode preload's own web-fallback-api projection of this same capability flag, which may differ -- out of scope here.)"
+      },
+      "whyCensusMarkedUnresolved": "Recorded callee terminates at an Electron/JavaScript built-in; no further project function definition."
+    },
+    {
+      "id": "PBR-010",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 76,
+        "exportedIndex": 0,
+        "methodIndex": 95,
+        "bridgeFile": "src/preload/api/ui-bridge.ts",
+        "methodName": "onFileDrop",
+        "originFile": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts",
+        "originAnchor": 123,
+        "delegatedCallees": [
+          "subscribeNativeFileDrop"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts:15 (import), :123-124 (call site)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts",
+          "lines": 202,
+          "sha256": "a9af96d3c4f1d54b1079976c00e5ba1bffe91b6c3dd4a828ab15289f859ce156"
+        },
+        {
+          "path": "src/preload/preload-runtime-support.ts",
+          "lines": 165,
+          "sha256": "af169b11746f5a5f30de11e8a0c6c1826a93d7ef2823c90d075614ec6141583c"
+        },
+        {
+          "path": "src/preload/api/ui-bridge.ts",
+          "lines": 12,
+          "sha256": "6b26ca4843dda574c03819cb6d9ceb4b3e86dff33272278de2e4b968a7cca52c"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "subscribeNativeFileDrop",
+        "delegateFile": "src/preload/preload-runtime-support.ts",
+        "delegateAnchor": "55-71",
+        "channel": "terminal:file-drop",
+        "channelKind": "literal",
+        "ipcShape": "subscription (main->renderer push) with explicit disposer",
+        "semantics": "Push callback to module array; attach one shared terminal:file-drop listener when not registered. Events iterate Array.from(callbacks). Disposer uses indexOf(callback) then splice one matching entry, removes shared listener only when empty. It is not a unique registration token: if identical function is registered repeatedly, a repeated disposer can remove another matching entry. Do not infer exactly-once/idempotent per-registration disposal."
+      },
+      "whyCensusMarkedUnresolved": "Recorded delegated callee resolves by import to the implementation below."
+    },
+    {
+      "id": "PBR-011",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 76,
+        "exportedIndex": 0,
+        "methodIndex": 96,
+        "bridgeFile": "src/preload/api/ui-bridge.ts",
+        "methodName": "getZoomLevel",
+        "originFile": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts",
+        "originAnchor": 125,
+        "delegatedCallees": [
+          ".getZoomLevel"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts:1 (import of `webFrame`), :125 (call site: `getZoomLevel: (): number => webFrame.getZoomLevel()`)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts",
+          "lines": 202,
+          "sha256": "a9af96d3c4f1d54b1079976c00e5ba1bffe91b6c3dd4a828ab15289f859ce156"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "webFrame.getZoomLevel (Electron built-in, not a project-defined function)",
+        "delegateFile": "electron (built-in, no project source file)",
+        "delegateAnchor": "n/a",
+        "channel": null,
+        "channelKind": "not-ipc",
+        "ipcShape": "n/a -- local synchronous call on the imported Electron `webFrame` module",
+        "semantics": "Returns this renderer's current zoom level directly from Electron's webFrame API. No IPC round-trip, no channel, no subscription, no disposer."
+      },
+      "whyCensusMarkedUnresolved": "Recorded callee terminates at an Electron/JavaScript built-in; no further project function definition."
+    },
+    {
+      "id": "PBR-012",
+      "category": "delegated-unresolved",
+      "censusRecord": {
+        "bridgeIndex": 76,
+        "exportedIndex": 0,
+        "methodIndex": 97,
+        "bridgeFile": "src/preload/api/ui-bridge.ts",
+        "methodName": "setZoomLevel",
+        "originFile": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts",
+        "originAnchor": 126,
+        "delegatedCallees": [
+          ".setZoomLevel"
+        ]
+      },
+      "sourceAnchor": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts:1 (import of `webFrame`), :126 (call site: `setZoomLevel: (level: number): void => webFrame.setZoomLevel(level)`)",
+      "sourceHashes": [
+        {
+          "path": "src/preload/api/ui-bridge-clipboard-and-window-controls.ts",
+          "lines": 202,
+          "sha256": "a9af96d3c4f1d54b1079976c00e5ba1bffe91b6c3dd4a828ab15289f859ce156"
+        }
+      ],
+      "resolution": "source-resolved",
+      "resolvedImplementation": {
+        "delegateFunction": "webFrame.setZoomLevel (Electron built-in, not a project-defined function)",
+        "delegateFile": "electron (built-in, no project source file)",
+        "delegateAnchor": "n/a",
+        "channel": null,
+        "channelKind": "not-ipc",
+        "ipcShape": "n/a -- local synchronous call on the imported Electron `webFrame` module",
+        "semantics": "Sets this renderer's zoom level directly via Electron's webFrame API, given a caller-supplied numeric level. No IPC round-trip, no channel, no subscription, no disposer."
+      },
+      "whyCensusMarkedUnresolved": "Recorded callee terminates at an Electron/JavaScript built-in; no further project function definition."
+    }
+  ],
+  "crossValidation": {
+    "hashesIndependentlyVerifiedAgainstCensus": [
+      {
+        "path": "src/preload/api/app-bridge.ts",
+        "matched": true
+      },
+      {
+        "path": "src/preload/api/runtime-bridge.ts",
+        "matched": true
+      },
+      {
+        "path": "src/preload/api/platform-bridge.ts",
+        "matched": true
+      }
+    ],
+    "note": "The census's fileHashesSha256 map only covers bridge/api-type files it directly scanned; the delegated-TARGET files this slice needed to open (e.g. preload-runtime-support.ts, runtime-environment-subscriptions.ts) are not in that map at all -- their hashes here are independently computed for the first time by this slice, not cross-checked against a prior value.",
+    "coordinator": {
+      "recordSelectorsChecked": 12,
+      "uniqueSourceFilesHashed": 16,
+      "hashOccurrencesCheckedBeforeAddingExistingSupportReference": 20,
+      "executedTests": 0,
+      "trackedSourceClean": true
+    }
+  },
+  "notCoveredByThisDocument": [
+    "54request/12send/96push main-side attribution cohort, other bridge method contracts and full runtime parity are outside this slice.",
+    "Built-in call bodies are not verified Electron internals; source describes their invocations only.",
+    "Source pairing is not universal cleanup/idempotence proof. Original behavior retained as characterization; no change proposed here."
+  ]
+}

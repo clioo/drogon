@@ -1,0 +1,45 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/main/ipc/bot-schemas.test.ts",
+  "sourceSha256": "ceeed197fc9ed3d6835a6d089d918f1140d7e6c94d142e0a8a3aae373ce284f6",
+  "portPath": "tests/parity/ports/WP-CAP-BOTS/bot-schemas/bot-schemas.contract.test.ts",
+  "portMethod": "literal assertions; provenance header and import-only binding seam",
+  "sourceCases": 3,
+  "sourceExpectCallSites": 6,
+  "sourceAssertionEvaluations": 6,
+  "binding": {
+    "status": "blocked_missing_candidate_interface",
+    "expectedPath": "apps/desktop/src/main/bots/bot-schemas.ts",
+    "seam": "tests/parity/ports/WP-CAP-BOTS/bot-schemas/candidate-binding.ts",
+    "runnerResult": "setup_failed_not_behavioral_red"
+  },
+  "cases": [
+    {
+      "id": "schema-create",
+      "title": "accepts a bounded Bot create payload with harness-default model policy",
+      "sourceLines": "5-19",
+      "assertionLines": [6],
+      "assertionEvaluations": 1,
+      "obligations": ["samwell accepted", "defaultHarness codex preserved", "explicitModel null preserved"],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "schema-rejections",
+      "title": "rejects unsupported harnesses and undeclared payload fields",
+      "sourceLines": "21-49",
+      "assertionLines": [21, 29, 39],
+      "assertionEvaluations": 3,
+      "obligations": ["unsupported session harness throws", "privileged create field throws", "renderer-invented responsibilities throw"],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "responsibility-trigger-semantics",
+      "title": "validates responsibility trigger semantics at the IPC boundary",
+      "sourceLines": "51-79",
+      "assertionLines": [52, 66],
+      "assertionEvaluations": 2,
+      "obligations": ["scheduled payload and projectId accepted", "reactive payload carrying schedule throws"],
+      "portStatus": "preserved_blocked_binding"
+    }
+  ]
+}

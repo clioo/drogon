@@ -1,0 +1,23 @@
+{
+  "name": "drogon-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @drogon/desktop dev",
+    "build": "cargo build --workspace --locked && pnpm --filter @drogon/desktop build",
+    "typecheck": "pnpm --filter @drogon/desktop typecheck",
+    "test": "cargo test --workspace --locked && pnpm --filter @drogon/desktop test",
+    "accept:core-cli": "node scripts/accept-core-cli.mjs",
+    "accept:desktop": "node scripts/accept-desktop.mjs",
+    "test:renderer-contracts": "node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-UI-PRELOAD/implementation-checks tests/parity/ports/WP-UI-PRELOAD/authority-recovery/browser-window-close tests/parity/ports/WP-UI-PRELOAD/authority-recovery/close-active-tab tests/parity/ports/WP-UI-PRELOAD/authority-recovery/renderer-restart tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts tests/parity/ports/WP-UI-PRELOAD/shutdown-checkpoint",
+    "typecheck:renderer-contracts": "node apps/desktop/node_modules/typescript/bin/tsc --noEmit --skipLibCheck false -p tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts/tsconfig.json"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "prettier": "3.9.6"
+  }
+}

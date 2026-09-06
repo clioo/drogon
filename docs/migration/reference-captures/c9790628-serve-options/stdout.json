@@ -1,0 +1,79 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned pure-function capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "serve-options",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-options-GaLHX9",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/main/startup/serve-options.test.ts",
+        "role": "test",
+        "sha256": "42a71540ea34d9124308e7ec8c86252c94cfed5276b30086fdf64efc504cd307",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-options-GaLHX9/src/main/startup/serve-options.test.ts"
+      },
+      {
+        "path": "src/main/startup/serve-options.ts",
+        "role": "module",
+        "sha256": "6e4a281d7f0c3f6e58f1ae8ed7950589aaa3401181f2d6c8fb4c7023b323d245",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-options-GaLHX9/src/main/startup/serve-options.ts"
+      },
+      {
+        "path": "src/main/startup/serve-mode-argv.ts",
+        "role": "module",
+        "sha256": "6c84e4b3836bdf97ed00f53905334caf1a4675e8aba21868190c41eee4dfbd1c",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-options-GaLHX9/src/main/startup/serve-mode-argv.ts"
+      },
+      {
+        "path": "src/shared/serve-option-validation.ts",
+        "role": "module",
+        "sha256": "a7608c057da35b51c59494b4475cb91b63ba0009ac912dfe2720b60e742600be",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-options-GaLHX9/src/shared/serve-option-validation.ts"
+      },
+      {
+        "path": "src/shared/edit-distance.ts",
+        "role": "module",
+        "sha256": "0abe56302e2732dac5a58ae30003df3117b8d53bf0edf8553c4f153e024e4d06",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-options-GaLHX9/src/shared/edit-distance.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/coordinator-serve-options-GaLHX9/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Original installed Vitest4.1.11 using Node24.19.0 on macOS. Minimal node config omits original aliases, setupFiles, feature-wall define, GC/webstorage and platform worker settings. Complete reviewed closure does not use these; no full-config/typecheck equivalence claim.",
+    "Default unit timeout instead of original30s/60s; outer timeout30s; fresh owned stage, no installs."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "82298baec17f7ac48656e8ca439e9d7e3c58208bca08e23d714c5339a9db3fa4",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 16,
+      "numPassedTests": 16,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 16
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "capsuleId": "shutdown-checkpoint-persist",
+  "description": "Unchanged original suite against pinned source bytes, executed inside a nonce capsule (source checkout never the cwd).",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "entryTestFile": "src/renderer/src/app-shell/shutdown-checkpoint-persist.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 12
+  },
+  "files": [
+    {
+      "path": "src/renderer/src/app-shell/shutdown-checkpoint-persist.test.ts",
+      "role": "test",
+      "sha256": "4e85369dc16d2ec30c595020c4d20b1950d098bf73c168a33a2b2da3990b71db"
+    },
+    {
+      "path": "src/renderer/src/app-shell/shutdown-checkpoint-persist.ts",
+      "role": "module",
+      "sha256": "4516edf3690549c7f3051bad200c4d5dae229cd2c27995831041f5ea8389cb9e"
+    },
+    {
+      "path": "src/renderer/src/lib/crash-breadcrumb-recorder.ts",
+      "role": "module",
+      "sha256": "aa4602d1e2162e49249b9cb0e6f785b4a51326526593722b136e1e1b47fdd15a"
+    },
+    {
+      "path": "src/shared/renderer-shutdown-events.ts",
+      "role": "module",
+      "sha256": "bdd87131e559f09a968a947cbc6099c2b640dc460bed0f4d3ed7c391f75f5362"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "sourceVitestVersion": "4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Minimal node environment with per-file @vitest-environment overrides; source setup files, aliases, feature-wall defines and extended timeouts omitted.",
+    "Type-only local imports are erased by the transform and are not staged (3 transitive type-only files recorded in the closure note)."
+  ],
+  "isolationRationale": "Pinned-byte capsule under .preflight/parity-baseline; no network, services, or credentials.",
+  "typeOnlyClosureFiles": [
+    "src/renderer/src/lib/workspace-session-host-persistence.ts",
+    "src/shared/crash-reporting.ts",
+    "src/shared/persisted-ui-state-types.ts"
+  ]
+}

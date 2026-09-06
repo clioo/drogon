@@ -1,0 +1,36 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "mobile/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use the original repository root installed Vitest4.1.11 with Node24.19.0; mobile/node_modules/vitest is absent. No installation or source-tree writes.",
+    "Minimal node config omits mobile setupFiles (only sets IS_REACT_ACT_ENVIRONMENT=true), react-test-renderer warning filter, TSX inclusion and oxc.tsconfig=false. Reviewed closure has no React/TSX, app tsconfig or runtime aliases. No full mobile configuration or typecheck equivalence claimed."
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 5
+  },
+  "capsuleId": "mobile-request-single-flight",
+  "description": "Five unchanged original mobile request coalescing and failure isolation cases.",
+  "entryTestFile": "mobile/src/transport/request-single-flight.test.ts",
+  "files": [
+    {
+      "path": "mobile/src/transport/request-single-flight.test.ts",
+      "role": "test",
+      "sha256": "b1974e06331ba16d6ad3d123d38eed4e1394725b36ff2530ceb512c547626c8d"
+    },
+    {
+      "path": "mobile/src/transport/request-single-flight.ts",
+      "role": "module",
+      "sha256": "a492c36e03191751cb20d0aa8911b7aadddf6b220b550096f870c7520593618f"
+    }
+  ],
+  "isolationRationale": "All runtime bodies read. In-memory WeakMap, deferred Promises and fake sendRequest only. RpcClient/RpcResponse imports are type-only and erased; no actual transport, filesystem, service or model calls. Minimal config is not a sandbox.",
+  "testEvidenceBoundary": "Original five cases, not candidate parity or mobile end-to-end. Latest-params-wins, synchronous throws and triggers during a trailing request are source contracts not separately asserted here."
+}

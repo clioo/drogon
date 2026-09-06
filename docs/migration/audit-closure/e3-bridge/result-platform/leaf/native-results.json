@@ -1,0 +1,1199 @@
+{
+  "schemaVersion": "drogon.audit.e3-result-platform-leaf/1",
+  "taskId": "task_ee79699b5b27",
+  "dispatchId": "ctx_efe9c82c3ce0",
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "leaf": "result-platform/leaf (native-results)",
+  "auditOnly": true,
+  "notE5Continuation": true,
+  "scope": {
+    "assignedGroups": [
+      "DR-COMPUTER_METHODS (15)",
+      "DR-SPEECH_METHODS (8)",
+      "DR-EMULATOR_METHODS (19)"
+    ],
+    "totalMethods": 42,
+    "groupMethodCounts": {
+      "DR-COMPUTER_METHODS": 15,
+      "DR-SPEECH_METHODS": 8,
+      "DR-EMULATOR_METHODS": 19
+    },
+    "leadCoversRemainingMethods": 84,
+    "rootAuditIndex": "10/12 = 83.3%, not parity",
+    "noRecursiveImportCensus": true,
+    "noTestsRun": true,
+    "noModelInference": true
+  },
+  "inputsRead": [
+    {
+      "path": "docs/migration/e3-result-audit-partition.json",
+      "note": "confirms platform assignment owns these 3 DR groups among 21 platform-group contracts"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/followup-domain-ownership.json",
+      "note": "rpcOwnershipContracts (3 matching entries) + rpcRows (42 matching entries, indices 281-295, 524-531, 576-594)"
+    },
+    {
+      "path": "docs/migration/audit-closure/e3-bridge/followup-final-boundaries.json",
+      "note": "rpcRows at the same 42 indices for handler literal text, namedSchemaRefs, originalTests, remainingAcceptance, receiverFixture"
+    }
+  ],
+  "owningContractsReadFirst": [
+    {
+      "id": "S5-computer",
+      "ref": "docs/migration/audit-closure/e4-cli/followup-cli-boundaries.json#/contracts/16"
+    },
+    {
+      "id": "E4-F07",
+      "ref": "docs/migration/audit-closure/e4-cli/followup-final-boundaries.json#/boundaries/6"
+    },
+    {
+      "id": "RP-M2",
+      "ref": "docs/migration/audit-closure/e5-platform/followup-remaining-platform.json#/contracts/6"
+    },
+    {
+      "id": "PUI-CONN-003",
+      "ref": "docs/migration/audit-closure/e1-ui/closure.json#/cards/26"
+    }
+  ],
+  "wholeFileSha256": {
+    "src/main/runtime/rpc/methods/computer.ts": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319",
+    "src/main/runtime/rpc/methods/speech.ts": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02",
+    "src/main/runtime/rpc/methods/emulator.ts": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2",
+    "src/main/computer/sidecar-client.ts": "3ad4259f6d7fd39e5e3d259f8478c8d4fb44956d75a43c0af5a24b5b9389ad54",
+    "src/main/computer/macos-computer-use-permissions.ts": "9727bd0ca107fbaa6b30253c469b44bd3e2ac1c2f2d5ca25cc5844d768129dc4",
+    "src/main/computer/macos-computer-use-permission-status.ts": "83ea94c983419796fdc0984d921beeeb1b52ea3b115058474e66759c747df43d",
+    "src/main/computer/computer-action-verification-normalization.ts": "d774a429abd864b4c5296efcc17191cc31216638cb7169c19c79d9db88c1a159",
+    "src/main/computer/computer-sidecar-paste-validation.ts": "39b12973b1abbfb21187cd7e46d73256e2553db056cadc1823be57b03898bc55",
+    "src/main/computer/runtime-client-error.ts": "f4d011837b8dd7190484dd8c1a8bf2838dfd8d2945448e712cf693db039146e1",
+    "src/main/runtime/runtime-service-command-surface.ts": "aeeb863fb234298e73a0fe5434effa7cc40d7b4301f9f59a443375a9700090db",
+    "src/main/runtime/runtime-mobile-speech-catalog.ts": "2f17aecf8ddfefae88792f9d764bd8cbfc0028fd3f868d6b39fb597e310e2ca5",
+    "src/main/runtime/runtime-mobile-dictation-controller.ts": "b22a9223974b2b1a3220095acda140a0ff274aeef4bb9bf3b30da8238c640c69",
+    "src/main/runtime/orca-runtime-emulator.ts": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb",
+    "src/main/emulator/emulator-errors.ts": "67b603a05d8642563075046aff881205391ce0a1632528e39c73933493a003cf"
+  },
+  "methods": [
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.capabilities",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 32,
+        "endLine": 38,
+        "rangeSha256": "05ed875896522f64f947786af19a8c1f0ad0156413cab0a57a977f4eeaddfc99",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarCapabilities() [src/main/computer/sidecar-client.ts]"
+      ],
+      "resultShape": "ComputerProviderCapabilities (typed only, not read) returned verbatim from the sidecar IPC response `result` field.",
+      "absentNullUndefinedCoercion": "params: z.object({}) -- no fields; handler ignores params entirely.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError via the sidecar IPC boundary (timeout/child-exit/spawn-error).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.listApps",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 39,
+        "endLine": 45,
+        "rangeSha256": "6b9d1a4caff20af779e6e2f1465fd9c670cc71ac59fc7f31e8d72b5cb5497a7c",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarListApps() [src/main/computer/sidecar-client.ts]"
+      ],
+      "resultShape": "ComputerListAppsResult (typed only, not read) returned verbatim from sidecar IPC.",
+      "absentNullUndefinedCoercion": "params schema ListApps (computer-schemas.ts, outside assigned set, not read); handler passes {} to the sidecar regardless of parsed params.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError via the sidecar IPC boundary.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.permissions",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 46,
+        "endLine": 54,
+        "rangeSha256": "11483d1ce3e2c12a1e9312b795d93f4652df07b433b8613896c78ac7fdd79d05",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "openComputerUsePermissions(params.id) [src/main/computer/macos-computer-use-permissions.ts, dynamic import]"
+      ],
+      "resultShape": "ComputerUsePermissionSetupResult: {platform, helperAppPath, permissionId, openedSettings, launchedHelper, permissions:[{id,status}], nextStep}. Non-darwin: fixed stub, helperAppPath:null, both permissions 'unsupported', nextStep:null, openedSettings:false, launchedHelper:false. Darwin no-op (no permissionId and no nextStep): openedSettings:false, launchedHelper:false. Darwin action case: openedSettings=(permissionId!==undefined), launchedHelper:true.",
+      "absentNullUndefinedCoercion": "params.id (permissionId) optional/undefined; echoed verbatim in result.permissionId, no coercion.",
+      "stateChanges": "Darwin action path: kills existing permission-helper processes via pkill (closeExistingPermissionHelpers), then spawns+unrefs a new detached helper process via /usr/bin/open -- a real OS process-table side effect outside the Node process.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error','Orca Computer Use.app was not found') if the helper app is missing; RuntimeClientError('accessibility_error', status.helperUnavailableReason) if the status probe reports unavailable.",
+      "partialSuccess": "None observed (single synchronous decision tree).",
+      "hostVersionPlatformBranches": "Explicit process.platform !== 'darwin' branch returns a fixed non-macOS stub before any native call.",
+      "boundary": "Real OS boundary: node:child_process spawn('/usr/bin/open') + spawnSync('/usr/bin/pkill') on darwin. Helper-app path resolution (resolveMacOSComputerUseAppPath, macos-native-provider-paths.ts) is outside this leaf's assigned set, not read."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.permissionsStatus",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 55,
+        "endLine": 63,
+        "rangeSha256": "2793291a95793b0949150f49e5fa15ba048435b268c925d53412adf84927f0f4",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "getComputerUsePermissionStatus() [src/main/computer/macos-computer-use-permission-status.ts, dynamic import]"
+      ],
+      "resultShape": "ComputerUsePermissionStatusResult: {platform, helperAppPath, helperUnavailableReason, permissions:[{id:'accessibility'|'screenshots', status}]}. Non-darwin: helperAppPath:null, helperUnavailableReason:null, both 'unsupported'. Helper-app missing: helperUnavailableReason set, helperAppPath:null, both 'not-granted'. Executable missing: helperUnavailableReason set, helperAppPath set, both 'not-granted'. Success: helperUnavailableReason:null, statuses parsed from helper JSON.",
+      "absentNullUndefinedCoercion": "raw.accessibility / raw.screenshots each use `?? 'not-granted'` -- an absent/undefined key in the helper's JSON output coerces to 'not-granted' rather than erroring.",
+      "stateChanges": "Spawns a detached per-call helper process; writes/reads/removes a temp status file under os.tmpdir() (mkdtemp then rm recursive+force in a finally block).",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error','Timed out checking permissions') after a 50x100ms(5s) poll budget; RuntimeClientError('accessibility_error','Timed out launching permission helper') on a separate 5s launch timeout that kills the helper; RuntimeClientError('accessibility_error','Could not check permissions: failed to launch helper') on a spawn error event; RuntimeClientError('accessibility_error','Could not check permissions: <stderr|stdout|exit code>') on non-zero helper exit.",
+      "partialSuccess": "None -- a single status object is returned or the call throws; no partial permission list.",
+      "hostVersionPlatformBranches": "Explicit process.platform !== 'darwin' branch short-circuits before any native call.",
+      "boundary": "Real OS boundary: spawn('/usr/bin/open') launching a macOS helper .app, polled via a temp JSON status file. helperAppPath/executablePath resolution (macos-native-provider-paths.ts) outside assigned set, not read."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.listWindows",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 64,
+        "endLine": 70,
+        "rangeSha256": "167334d41ae3d3872c4f83fe699476d7a28b588073b0067d82404079d23fa1c6",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarListWindows(params) [src/main/computer/sidecar-client.ts]"
+      ],
+      "resultShape": "ComputerListWindowsResult (typed only, not read) returned verbatim from sidecar IPC.",
+      "absentNullUndefinedCoercion": "params schema ListWindows (outside assigned set, not read); passed through unmodified to the sidecar.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError via the sidecar IPC boundary.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.getAppState",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 71,
+        "endLine": 77,
+        "rangeSha256": "27bf6010778ab8febab2684ce116508424cd03705bbd7a2a92f633f85a0adf43",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarSnapshot(params) [src/main/computer/sidecar-client.ts]"
+      ],
+      "resultShape": "ComputerSnapshotResult (typed only, not read) returned verbatim from sidecar IPC.",
+      "absentNullUndefinedCoercion": "params schema ComputerObserveTarget (outside assigned set, not read); passed through unmodified.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError via the sidecar IPC boundary.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.click",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 78,
+        "endLine": 84,
+        "rangeSha256": "d6df22725aca449c8a5fd7bb21dd38bb5b3d98f4df31f8c0f06f7bc352dd1dd0",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('click', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched.",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.performSecondaryAction",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 85,
+        "endLine": 91,
+        "rangeSha256": "5a5b7afc5599354d1d396a0ec1148c412840f85d5cd07b4b2710862f7f5d5d15",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('performSecondaryAction', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched.",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.scroll",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 92,
+        "endLine": 98,
+        "rangeSha256": "96c8dfe05a1edc12207da70f8e36727f24c066271be605c17df6b68511ce4182",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('scroll', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched.",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.drag",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 99,
+        "endLine": 105,
+        "rangeSha256": "7301ac082e9be6a054ba080c72dc0474a6efc87092a04e976c8daeebc330ac4a",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('drag', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched.",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.typeText",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 106,
+        "endLine": 112,
+        "rangeSha256": "a1e9517fc380939ce6b14d2e343821131ba66a5f02493804e31857ec4195d8ab",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('typeText', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched.",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.pressKey",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 113,
+        "endLine": 119,
+        "rangeSha256": "efd7114cb61338b43517a09f063d74f8adb667c81af71f641111bf78822ea851",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('pressKey', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched.",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.hotkey",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 120,
+        "endLine": 126,
+        "rangeSha256": "ce6818b51f5a4471e62a9fdc696b451d76bfad243f6d0206b796d389827da2d7",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('hotkey', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched.",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.pasteText",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 127,
+        "endLine": 133,
+        "rangeSha256": "6755ed779285a663fc9d70979cd8195d4f80f45a40b75de6f7269c72b76f2a77",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('pasteText', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]",
+        "validateComputerSidecarPasteText [src/main/computer/computer-sidecar-paste-validation.ts] -> validateComputerClipboardPasteTextWithBoundedYield (outside assigned set, not read)"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched. pasteText additionally: if params.text is not a string, validateComputerSidecarPasteText is a no-op (does not throw, does not validate).",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape. pasteText: validateComputerClipboardPasteTextWithBoundedYield may also throw/reject before the sidecar call is even made (function body outside assigned set, not read -- residual).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-COMPUTER_METHODS",
+      "name": "computer.setValue",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/computer.ts",
+        "startLine": 134,
+        "endLine": 140,
+        "rangeSha256": "d1c2b2089609b6dce69572fa548b1ee67be46435649578c54425bc8a5bf8b94e",
+        "wholeFileSha256": "44c114115da2d619ce61ac41b70a8abe80a84c262c8ddfaec6fcd47f6dfb9319"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "callComputerSidecarAction('setValue', params) [src/main/computer/sidecar-client.ts]",
+        "normalizeComputerActionResult [src/main/computer/computer-action-verification-normalization.ts]"
+      ],
+      "resultShape": "ComputerActionResult (shared/runtime-types.ts, typed only, not read). normalizeComputerActionResult injects action.verification={state:'unverified',reason} when action.path in {synthetic,clipboard,accessibility} and verification absent; unchanged if action falsy or verification already present.",
+      "absentNullUndefinedCoercion": "No coercion at this layer beyond the normalization pass; `action` absent (falsy) short-circuits normalization untouched.",
+      "stateChanges": "None in this leaf's read files; the sidecar child process holds an internal request-id/queue-generation counter not exposed to callers.",
+      "errorsThrownVsReturned": "Thrown only: RuntimeClientError('accessibility_error'|'action_timeout', message) from the sidecar IPC layer (timeout/child-exit/spawn-error/queue-invalidation/IPC-unavailable). Never returns an {ok:false} shape.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer; any platform dispatch lives inside computer-sidecar.js, not read.",
+      "boundary": "Real native/provider boundary: src/main/computer/sidecar-client.ts ComputerSidecarProcess.call() forks a separate Node child process (out/main/computer-sidecar.js, ELECTRON_RUN_AS_NODE=1), talks over child.send/'message' IPC with a 60s per-call timeout and a FIFO request queue keyed by a generation counter. computer-sidecar.js itself is outside this leaf's assigned file set and was not read -- no recursive import census performed."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.models.list",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 52,
+        "endLine": 56,
+        "rangeSha256": "cdadedfb9a85d5843c3dbd585d4655afaa558691b6adafe594eedc3ce6680d15",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeMobileSpeechCatalog.list() [src/main/runtime/runtime-mobile-speech-catalog.ts]"
+      ],
+      "resultShape": "RuntimeSpeechSetupState: {enabled, selectedModelId, dictationMode:'toggle'|'hold', models:[{id,label,provider:'openai'|'local',sizeBytes:number|null,recommended:boolean,status,progress:number|null}]}. voice settings default via getDefaultVoiceSettings() when store.getSettings().voice is absent.",
+      "absentNullUndefinedCoercion": "Per-manifest state lookup absent -> status:'not-downloaded', progress:null (explicit ?? defaults). voice.sttModel absent -> selectedModelId:''. voice.dictationMode not 'hold' -> 'toggle' (ternary, treats any non-'hold' value including undefined as 'toggle').",
+      "stateChanges": "None (read-only projection).",
+      "errorsThrownVsReturned": "Thrown only: Error('voice_dictation_unavailable') if store is absent (this.getStore() returns null).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None.",
+      "boundary": "getSpeechModelManager(store).getModelStates() [src/main/speech/speech-runtime-service.ts, signature-level peek only] -- real native STT/model boundary, not read further; SPEECH_MODEL_CATALOG/getCatalogModel [src/main/speech/model-catalog.ts] referenced by name, not read."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.models.download",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 57,
+        "endLine": 61,
+        "rangeSha256": "a1f3cac6f34739bbfff6c953a5348a3e5dff9bc95ed0b0e07cb6653a6d796464",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeMobileSpeechCatalog.download(modelId) [src/main/runtime/runtime-mobile-speech-catalog.ts]"
+      ],
+      "resultShape": "{started:true} literal, returned immediately without waiting for the download to complete.",
+      "absentNullUndefinedCoercion": "None beyond the fixed literal return.",
+      "stateChanges": "Triggers getSpeechModelManager(store).downloadModel(modelId) fire-and-forget (void-called promise).",
+      "errorsThrownVsReturned": "Thrown only (pre-download-start): Error('voice_model_not_downloadable') if the manifest is missing or !isLocalSpeechModel(manifest) (e.g. an 'openai'-provider model can't be locally downloaded).",
+      "partialSuccess": "Fire-and-forget contract: a download failure after the {started:true} response is only console.error-logged ('[runtime] mobile speech model download failed') and never surfaces to the RPC caller -- genuine silent partial-failure shape at the API boundary, not yet confirmed by a test-body read whether this is asserted anywhere.",
+      "hostVersionPlatformBranches": "None.",
+      "boundary": "getSpeechModelManager(store).downloadModel [src/main/speech/speech-runtime-service.ts, signature-level peek only] -- real native model-download boundary, not read further."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.models.delete",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 62,
+        "endLine": 66,
+        "rangeSha256": "5db17a705ac23801f39570bfdc94621d7b41dbd8755f23d06f90642d2e02a247",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeMobileSpeechCatalog.delete(modelId) [src/main/runtime/runtime-mobile-speech-catalog.ts]"
+      ],
+      "resultShape": "RuntimeSpeechSetupState (same shape as speech.models.list), returned via this.list() after a successful delete.",
+      "absentNullUndefinedCoercion": "None beyond .list()'s own defaults.",
+      "stateChanges": "deleteLocalSpeechModel (src/main/speech/speech-model-deletion.ts, outside assigned set, not read) performs the actual model-file removal and settings update through a store adapter object constructed inline.",
+      "errorsThrownVsReturned": "Thrown only: Error(getSpeechModelDeletionErrorCode(error) ?? 'voice_model_delete_failed') -- wraps whatever deleteLocalSpeechModel throws through an unread code-mapping helper, falling back to a fixed code if that mapper returns falsy.",
+      "partialSuccess": "None observed (delete is fully awaited before responding).",
+      "hostVersionPlatformBranches": "None.",
+      "boundary": "deleteLocalSpeechModel/getSpeechModelDeletionErrorCode [src/main/speech/speech-model-deletion.ts] and getSpeechModelManager/getSpeechSttService [speech-runtime-service.ts] -- both outside assigned set / signature-only peek, real native model-storage boundary, not read further."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.setup",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 67,
+        "endLine": 76,
+        "rangeSha256": "d3ecda1d3c1f5cbfbd384d42c6a5890420d33c0da6770f4847ddb374d531c9f9",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeMobileSpeechCatalog.configure(params) [src/main/runtime/runtime-mobile-speech-catalog.ts]"
+      ],
+      "resultShape": "RuntimeSpeechSetupState, returned via this.list() after updating settings.",
+      "absentNullUndefinedCoercion": "nextVoice is built by spreading current settings then only the explicitly-provided (!== undefined) fields from params -- an absent field in params leaves the existing setting untouched rather than resetting to a default. The RPC handler itself (speech.ts:70-75) also rebuilds this same '!== undefined -> include' object before calling configure(), so the undefined-filtering happens twice (handler layer, then catalog layer) -- redundant but not contradictory.",
+      "stateChanges": "store.updateSettings?.({voice:nextVoice},{notifyListeners:true}) -- a real settings-store write-through with listener notification.",
+      "errorsThrownVsReturned": "Thrown only: Error('voice_model_unknown') if params.modelId is a non-empty string not present in the catalog (getCatalogModel lookup); Error('voice_dictation_unavailable') if the store lacks getSettings/updateSettings (requireWritableStore).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None.",
+      "boundary": "getCatalogModel [src/main/speech/model-catalog.ts, referenced by name, not read]."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.start",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 77,
+        "endLine": 82,
+        "rangeSha256": "25cb3712036f9966a346ecdde9e147c703128ff73a17f17621ffe7d3e39f65e9",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeMobileDictationController.start(params) [src/main/runtime/runtime-mobile-dictation-controller.ts]"
+      ],
+      "resultShape": "{dictationId, modelId} on success, where modelId is the resolved model (params.modelId || voice.sttModel).",
+      "absentNullUndefinedCoercion": "params.modelId falsy (undefined or '') falls back to voice.sttModel via `||` (empty string is treated the same as undefined, not preserved as an explicit empty selection); if that is also falsy, throws rather than silently defaulting to any specific model.",
+      "stateChanges": "Sets the single module-level `session` field to a new MobileDictationSession (state:'starting') before awaiting startDictation, transitions it to 'active' on success, or clears it back to null if this call's session is still the current one at failure time.",
+      "errorsThrownVsReturned": "Thrown only, checked in this order: Error('voice_dictation_disabled') if !voice.enabled; Error('voice_model_not_selected') if no modelId resolves; Error(`voice_model_not_ready:${modelState.status}`) if getModelState(modelId).status !== 'ready' (interpolates live model state into the message string itself, not a separate field); Error('dictation_requires_mobile_client') if !params.clientId; Error('dictation_already_active') if a session already exists (hard single-session invariant, not a queue); Error('dictation_canceled') if a concurrent call replaced this.session mid-await; any startDictation() rejection re-thrown verbatim.",
+      "partialSuccess": "A concurrent start() racing another start()/cancel() can observe its own just-created session silently replaced mid-flight and throw 'dictation_canceled' even though the underlying startDictation() call itself succeeded -- an explicit non-silent race guard, not a defect per se, but a partial-success shape worth a dedicated test.",
+      "hostVersionPlatformBranches": "None.",
+      "boundary": "getSpeechModelManager(store).getModelState(modelId) and getSpeechSttService(store).startDictation(modelId, eventCallback, undefined, owner) [speech-runtime-service.ts, signature-level peek only] -- real native STT engine boundary, not read further."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.chunk",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 83,
+        "endLine": 88,
+        "rangeSha256": "5d32f0681c4a55acb1a52fd471c7371911524913f4d0963b8784826f4a7445fe",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeMobileDictationController.feed(params) [src/main/runtime/runtime-mobile-dictation-controller.ts] (synchronous method, not async -- the RPC handler itself is also non-async, unlike every other speech.* handler)"
+      ],
+      "resultShape": "{dictationId} literal on success.",
+      "absentNullUndefinedCoercion": "audioBase64 is decoded via Buffer.from(...,'base64') then reinterpreted as 16-bit-PCM-LE samples via Math.floor(pcm.length/2) samples -- a malformed/odd-length base64 payload is silently truncated by the floor division rather than raising a decode error at this layer (the Zod schema's isValidAudioBase64/length checks, already read in speech.ts, are the only upstream guard).",
+      "stateChanges": "Calls getSpeechSttService(store).feedAudio(samples, sampleRate, session.owner) synchronously (fire-and-forget from this method's perspective -- no await, no promise returned to track completion).",
+      "errorsThrownVsReturned": "Thrown only: Error('dictation_stream_not_started') / Error('dictation_owner_mismatch') from requireOwnedSession (session absent, wrong dictationId, missing/mismatched clientId, mismatched connectionId when one was set on the session); Error('dictation_stream_closing') if session.state !== 'active'; Error(session.errors[0]) if a prior async STT-worker error was recorded on the session (rethrows the STT engine's own error text verbatim, discarding it from the session's error queue only implicitly via later reads -- errors array itself is never spliced/cleared in the read source).",
+      "partialSuccess": "None observed (fully synchronous decision).",
+      "hostVersionPlatformBranches": "None.",
+      "boundary": "getSpeechSttService(store).feedAudio [speech-runtime-service.ts, signature-level peek only] -- real native STT engine audio-ingest boundary, not read further."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.finish",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 89,
+        "endLine": 94,
+        "rangeSha256": "f11fd3ec61072edb18fc7a3ddc1d6c7b098524c94ea575d63d75c5a114851a04",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeMobileDictationController.finish(params) [src/main/runtime/runtime-mobile-dictation-controller.ts]"
+      ],
+      "resultShape": "{dictationId, text} where text = [...session.finalTexts, session.partialText].join(' ').trim() -- the trailing partial (never-finalized) text is always appended.",
+      "absentNullUndefinedCoercion": "Empty finalTexts + empty partialText yields text:'' (empty string, never null/undefined).",
+      "stateChanges": "session.state set to 'closing' before awaiting stopDictation; the `finally` block clears this.session (sets to null) if it still matches this session, regardless of whether the subsequent errors-check throws.",
+      "errorsThrownVsReturned": "Thrown only: same ownership errors as .chunk via requireOwnedSession; Error(session.errors[0]) if any STT-worker error was recorded, checked AFTER awaiting stopDictation completes -- so a stop that itself succeeds but had an earlier recorded worker error still throws that recorded error and discards the accumulated transcript text on that path.",
+      "partialSuccess": "session is always cleared in the finally block even on the errors-check throw path -- no stuck session, but the transcribed text is unreturned/discarded when an error was recorded.",
+      "hostVersionPlatformBranches": "None.",
+      "boundary": "getSpeechSttService(store).stopDictation(session.owner) [speech-runtime-service.ts, signature-level peek only] -- real native STT engine boundary, not read further."
+    },
+    {
+      "id": "DR-SPEECH_METHODS",
+      "name": "speech.dictation.cancel",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/speech.ts",
+        "startLine": 95,
+        "endLine": 100,
+        "rangeSha256": "80b7b23cfdaacce688de155428118e301b493ab80a436a67cf8542c9ae2bd0f6",
+        "wholeFileSha256": "262f3c307f0bfda0c2c26ff2f48325dca67754cbb97e3866c0aa65b21e8ddf02"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeMobileDictationController.cancel(params) [src/main/runtime/runtime-mobile-dictation-controller.ts]"
+      ],
+      "resultShape": "{dictationId} literal, always returned regardless of whether an actual session was canceled.",
+      "absentNullUndefinedCoercion": "If session is absent, or dictationId/clientId/connectionId don't match ownership, cancel() is a complete no-op that still returns {dictationId} as if it had canceled something -- absent-session and successful-cancel are indistinguishable from the return value alone.",
+      "stateChanges": "On a matched session: sets state to 'closing', awaits stopDictation, then clears this.session in a finally block only if it still matches the session captured at call start (a session replaced mid-cancel by a fresh concurrent start() is NOT cleared by this stale cancel call, avoiding cross-session clobber).",
+      "errorsThrownVsReturned": "No throw path in the read source for ownership mismatch (unlike .chunk/.finish, cancel silently no-ops instead of throwing). stopDictation()'s own rejection is awaited but not caught here -- it would propagate as a rejected promise from this async method despite no explicit throw statement in the read source.",
+      "partialSuccess": "See absentNullUndefinedCoercion -- the no-op case is the partial-success/ambiguity case for this method.",
+      "hostVersionPlatformBranches": "None.",
+      "boundary": "getSpeechSttService(store).stopDictation [speech-runtime-service.ts, signature-level peek only] -- real native STT engine boundary, not read further."
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.list",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 159,
+        "endLine": 163,
+        "rangeSha256": "1aa3193304c2affdf63d1ca3ff3f14a597c9c23219282bdcebb24088f5473b3b",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorList(_params={}) -> bridge.listRunningHelpers() [src/main/runtime/orca-runtime-emulator.ts:196-199]"
+      ],
+      "resultShape": "Whatever bridge.listRunningHelpers() returns, verbatim (return type 'unknown' -- no local shape asserted).",
+      "absentNullUndefinedCoercion": "_params defaults to {} via a JS default parameter (not just optional schema field) -- the only method in this leaf using a default-parameter rather than relying solely on Zod optionality.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active', 'No emulator session is active') from requireEmulatorBridge() if no bridge is active.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer (platform dispatch lives inside EmulatorBridge, not read).",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 196,
+        "endLine": 199,
+        "rangeSha256": "bc34a7abf7f26a3bb9d5bd29d746ccd477bd4b78b1252eb0da756802e5d0a08d",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.attach",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 164,
+        "endLine": 168,
+        "rangeSha256": "7b6a1c170a9786d6476e60c866c88c5b8b50f0ad106259b4362f8ce0fd3b54dc",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorAttach(params) -> Promise<{attached:boolean, info?:EmulatorSessionInfo}> [src/main/runtime/orca-runtime-emulator.ts:125-194]"
+      ],
+      "resultShape": "{attached:true, info} on every successful path (reused/freshly-attached/newly-acquired); no {attached:false} shape exists in the read source -- every non-success path throws instead of returning attached:false.",
+      "absentNullUndefinedCoercion": "params.device ?? settings.mobileEmulatorDefaultDeviceUdid ?? undefined is a three-level fallback; if still absent, resolveDefaultAttachDevice(bridge) [emulator-default-attach-device.ts, outside assigned set] is awaited as a fourth fallback before throwing.",
+      "stateChanges": "Mutates the bridge's per-worktree active-session registry (bridge.registerActiveEmulator) on the newly-acquired path. Sends two best-effort renderer IPC notifications (ui:emulatorAutoAttach, emulator:pane-focus via webContents.send wrapped in a bare try/catch) that are NOT reflected in the RPC return value -- a caller cannot detect renderer-delivery failure from the response alone.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_disabled','Mobile Emulator is disabled in Settings.') if settings.mobileEmulatorEnabled===false; EmulatorError('emulator_device_not_found',...) if no device resolves via the full fallback chain; EmulatorError('emulator_no_active','The workspace changed while the emulator was starting. Reattach the emulator.') on a detected worktree-switch race (this exact message is reused for two distinct trigger conditions: an explicit selector_not_found and a raw currentWorktreeId mismatch); any other error from the workspace-id re-resolution re-throws verbatim after the lease is released.",
+      "partialSuccess": "Explicit compensating rollback on a detected race: if the resolved worktree changes while a slow device boot is in flight, the just-acquired helper lease is released (lease.release({cleanupIfUnused:true}), release errors swallowed via .catch(()=>{})) before re-throwing -- a genuine partial-success/rollback path, not silent state loss.",
+      "hostVersionPlatformBranches": "None at this layer (platform dispatch lives inside EmulatorBridge, not read).",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 125,
+        "endLine": 194,
+        "rangeSha256": "dfb2247cc63618a9039a515def65c4ed809e1d9b35fc3a1a540a8ad4ce61b769",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.tap",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 169,
+        "endLine": 173,
+        "rangeSha256": "a9695ad0330d97c1a8681a7efdf1ec25a8013e314743dc315212b84223f1d766",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorTap(params) -> bridge.tap(x,y,{device,worktreeId}) [src/main/runtime/orca-runtime-emulator.ts:50-57]"
+      ],
+      "resultShape": "Fixed literal {ok:true} (RuntimeEmulatorCommands.OK, a shared static instance reused across all 'ok'-shaped emulator methods -- source comment: RPC envelopes require a serializable result field, so void/undefined would break CLI schema validation).",
+      "absentNullUndefinedCoercion": "device resolved as params.device ?? params.emulator (precedence fallback, not type coercion) collapsed into a single `device` option key before being passed to the bridge.",
+      "stateChanges": "None beyond the shared OK literal.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...) if no bridge; any error from bridge.tap()/resolveWorktreeId() propagates unmodified (not caught in this method).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 50,
+        "endLine": 57,
+        "rangeSha256": "dd9cd5aade8070eef0db5cad58c3523bdd0fc88d360cfa8793976a1cc7460dd5",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.gesture",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 174,
+        "endLine": 178,
+        "rangeSha256": "1384d8899054f287719ba115d147aba136cf0f47059031b1ac9bd9992871b0d0",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorGesture(params) -> bridge.gesture(points,{device,worktreeId}) [src/main/runtime/orca-runtime-emulator.ts:59-69]"
+      ],
+      "resultShape": "Fixed literal {ok:true} (shared OK instance).",
+      "absentNullUndefinedCoercion": "Same device precedence as .tap; the points array (2-64 entries, Zod-bounded upstream) is passed through unmodified, no re-validation here.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...); bridge.gesture()/resolveWorktreeId() errors propagate unmodified.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 59,
+        "endLine": 69,
+        "rangeSha256": "ae043fa8a69162807079e53b96ad4ca369603b9ac2717b477df6099d60d0779b",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.type",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 179,
+        "endLine": 183,
+        "rangeSha256": "8d059380fd16eca08f3ca6a3804f89650eb63b1bafea735fca695849ec9f3269",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorType(params) -> bridge.type(text,{device,worktreeId}) [src/main/runtime/orca-runtime-emulator.ts:71-81]"
+      ],
+      "resultShape": "Fixed literal {ok:true}.",
+      "absentNullUndefinedCoercion": "Same device precedence; text forwarded verbatim including an empty string.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...); bridge.type() errors propagate unmodified.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 71,
+        "endLine": 81,
+        "rangeSha256": "6dc89417558779a416dde1b64828622ecbf187dab7d6c3855584ab79458dcf48",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.button",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 184,
+        "endLine": 188,
+        "rangeSha256": "5a6e024ed0ceeb466fc09e4464e2d67b33852fdfe0752108c8b35409b1f2924d",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorButton(params) -> bridge.button(name,{device,worktreeId}) [src/main/runtime/orca-runtime-emulator.ts:83-93]"
+      ],
+      "resultShape": "Fixed literal {ok:true}.",
+      "absentNullUndefinedCoercion": "Same device precedence.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...); bridge.button() errors propagate unmodified.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 83,
+        "endLine": 93,
+        "rangeSha256": "deb8bfca42b40bfa31f2cd8a7b565bba5efca756e6ac1b6ef3610cbbc83ff15d",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.rotate",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 189,
+        "endLine": 193,
+        "rangeSha256": "d2af853f5093a3c3d7b1bed49cbc270cd7e388a89fdc02e8039a70b2d1c3478f",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorRotate(params) -> bridge.rotate(orientation,{device,worktreeId}) [src/main/runtime/orca-runtime-emulator.ts:95-108]"
+      ],
+      "resultShape": "Fixed literal {ok:true}.",
+      "absentNullUndefinedCoercion": "orientation is a closed Zod enum upstream (portrait/portrait_upside_down/landscape_left/landscape_right) but is typed and forwarded as a plain `string` at this layer -- widened from the enum, no re-validation.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...); bridge.rotate() errors propagate unmodified.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 95,
+        "endLine": 108,
+        "rangeSha256": "b31bd6e40f15cf7a8439ffa9462bf9c7d0f708b653222c109d7aac9155f93401",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.exec",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 194,
+        "endLine": 198,
+        "rangeSha256": "87f6ee2b91679148cedd0b571806f7852ffdb55cce2355842286155b8772a6da",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorExec(params) -> bridge.exec(command,{device,emulator,worktreeId}) [src/main/runtime/orca-runtime-emulator.ts:110-123]"
+      ],
+      "resultShape": "Whatever bridge.exec() returns, verbatim (return type 'unknown' -- one of only two action methods, alongside .ax, whose result is not the fixed OK literal).",
+      "absentNullUndefinedCoercion": "Passes BOTH params.device and params.emulator as two separate keys (unlike tap/gesture/type/button/rotate, which collapse them into one `device` key via ??) -- a distinct, narrower parameter-forwarding contract than its sibling action methods.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...); bridge.exec() errors propagate unmodified, including whatever the underlying adb/simctl shell command itself raises.",
+      "partialSuccess": "Residual: since the return shape is 'unknown' and delegated entirely to bridge.exec(), a shell command that exits non-zero at the OS level is not characterized without reading EmulatorBridge.exec()/the backend.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 110,
+        "endLine": 123,
+        "rangeSha256": "68816c16892816a738e242bf39f9036d3ccd662a7192daf8cd49e5fceaac4ea9",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.kill",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 199,
+        "endLine": 203,
+        "rangeSha256": "7d7e60da5bcf41082cef63d57999922b6add9f9f2cad70b2230c638031582fcd",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorKill(params) -> bridge.kill(device,worktreeId) [src/main/runtime/orca-runtime-emulator.ts:297-306]"
+      ],
+      "resultShape": "{ok:true, deviceUdid} where deviceUdid is always a plain string (not optional) -- distinct from .shutdown's optional deviceUdid.",
+      "absentNullUndefinedCoercion": "device resolved as params.device ?? params.emulator; worktreeId resolved via resolveCleanupWorktreeId -- the cleanup-specific resolver, distinct from resolveWorktreeId used by tap/gesture/type/button/rotate/exec/attach.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...); bridge.kill() errors propagate unmodified.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 297,
+        "endLine": 306,
+        "rangeSha256": "29e01ab5a5945fdf086681f209e1588b9c978cc0759429dd09e1c19e9ed752c0",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.shutdown",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 204,
+        "endLine": 208,
+        "rangeSha256": "7481bb884e76c45a1453a06877efdf83187a5def2042a9ebfa3463350acf3816",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorShutdown(params) -> one of two distinct bridge calls depending on params.managedOnly [src/main/runtime/orca-runtime-emulator.ts:308-322]"
+      ],
+      "resultShape": "{ok:true, deviceUdid?} where deviceUdid CAN be undefined (`?? undefined` coercion) on the managedOnly branch if shutdownActiveManagedForWorktree returns null -- distinct optionality from .kill's always-string deviceUdid.",
+      "absentNullUndefinedCoercion": "The managedOnly branch is only taken if params.managedOnly is truthy AND worktreeId resolved AND neither params.device nor params.emulator was supplied -- a 4-way AND gate; any single condition failing falls through to the general bridge.shutdown(device,worktreeId) path.",
+      "stateChanges": "None beyond the branch-dependent deviceUdid optionality.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...); bridge.shutdownActiveManagedForWorktree()/bridge.shutdown() errors propagate unmodified.",
+      "partialSuccess": "The managedOnly branch is a genuine behavioral fork ('shutdown only what this workspace's automation manages' vs. 'shutdown whatever device is specified/resolved'), not a defect.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 308,
+        "endLine": 322,
+        "rangeSha256": "72deaa05f7375d566251c5e04cf3cb844ab6b6e905068e9ab42f5d2520110bba",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.listSimulators",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 209,
+        "endLine": 213,
+        "rangeSha256": "2efcbe33e808a08afd07be7f80d68b876a9efd5a8c59c223bbfed949156e380d",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorListSimulators(_params={}) -> bridge.listSimulators() [src/main/runtime/orca-runtime-emulator.ts:210-217]"
+      ],
+      "resultShape": "SimulatorDevice[] (typed, not read) verbatim -- source comment states this intentionally includes Shutdown-state devices (not just booted ones) to support the 'New Mobile Emulator' auto-flow.",
+      "absentNullUndefinedCoercion": "worktree param is accepted by the schema but explicitly documented as ignored ('simulators are host-local, not per-worktree') -- confirmed dead parameter per the inline source comment, not an oversight.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...) -- notably this still requires an active bridge despite being host-local/not worktree-scoped.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None explicit at this layer (macOS-only surface implied by 'simulators' terminology, but no process.platform check visible here -- platform gating, if any, lives in EmulatorBridge/backends, not read).",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 210,
+        "endLine": 217,
+        "rangeSha256": "c75c0f25a19fb44092fa64dda32adafe18fc8e7fa72195a28de9bdc18c6f4c8c",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.availability",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 214,
+        "endLine": 218,
+        "rangeSha256": "e8831fc00d553b6ecd37ea3b80bce3164221fb26551a9695e527d0fbed22402f",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorAvailability(_params={}) -> inspectEmulatorAvailability(requireEmulatorBridge()) [src/main/runtime/orca-runtime-emulator.ts:219-221]"
+      ],
+      "resultShape": "EmulatorAvailability (typed, not read) returned verbatim from inspectEmulatorAvailability [src/main/emulator/emulator-availability.ts, outside assigned set, not read this pass].",
+      "absentNullUndefinedCoercion": "worktree param accepted but unused (same dead-parameter pattern as .listSimulators).",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 219,
+        "endLine": 221,
+        "rangeSha256": "8faacb706ae5fbd0169de73579c55c40290e7bd9bca55e1aeffc5b98ac94f2d0",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.listDevices",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 219,
+        "endLine": 223,
+        "rangeSha256": "d1801da25339330c078b93df1281df64a2b7c0d1f05efa5f5371b9ad3f85629a",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorListDevices(_params={}) -> requireEmulatorBridge().listAllDevices() [src/main/runtime/orca-runtime-emulator.ts:225-227]"
+      ],
+      "resultShape": "EmulatorDevice[] (typed, not read) verbatim -- source comment states this unifies iOS simulators + Android devices/AVDs across backends for the cross-platform 'orca emulator devices' CLI command.",
+      "absentNullUndefinedCoercion": "worktree param accepted but unused.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 225,
+        "endLine": 227,
+        "rangeSha256": "e45f29786df461f04449ee7222b151ca0dc13b720c87b3c265be0369b43ad111",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.install",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 224,
+        "endLine": 228,
+        "rangeSha256": "129af6ffedb03f02ed41772c2df69695b5696d925d61f6541f57fa2c87c2f25f",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorInstall(params) -> bridge.runCapability('install',{device,worktreeId},(backend,device)=>backend.installApp!(device,params.path,{reinstall})) [src/main/runtime/orca-runtime-emulator.ts:237-247]"
+      ],
+      "resultShape": "Fixed literal {ok:true} -- the non-null assertion on backend.installApp! means a backend lacking this capability would throw at the callback-invocation site inside the unread runCapability, not via a typed EmulatorError from this file (residual).",
+      "absentNullUndefinedCoercion": "params.reinstall is optional; forwarded as-is (undefined passthrough) into the backend call's options object. path absoluteness is enforced by the Zod schema in emulator.ts (already read), not re-checked here.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...) plus whatever runCapability/backend.installApp throws (not read -- residual).",
+      "partialSuccess": "None observed at this layer.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 237,
+        "endLine": 247,
+        "rangeSha256": "056216dcf263788ea556f637959077f9362b887c134bfb255e0ed357f02183a2",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.launch",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 229,
+        "endLine": 233,
+        "rangeSha256": "5365449ef11f8ee503163a2d3e4316310bbb948ab05d0302256bc3212817d693",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorLaunch(params) -> bridge.runCapability('launch',{device,worktreeId},(backend,device)=>backend.launchApp!(device,params.package,params.activity)) [src/main/runtime/orca-runtime-emulator.ts:249-259]"
+      ],
+      "resultShape": "Fixed literal {ok:true}.",
+      "absentNullUndefinedCoercion": "params.activity is optional; forwarded as-is (undefined passthrough).",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...) plus whatever runCapability/backend.launchApp throws (not read -- residual).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 249,
+        "endLine": 259,
+        "rangeSha256": "b18cf5b9274934df24db7ebd2f1aab1953ef8e92c9dc5b0dd76d4fd1a6882192",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.permissions",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 234,
+        "endLine": 238,
+        "rangeSha256": "2356f2398cdac3f88ca06f2ff3d316dd6b4d0b2887981bc366314cdf879fe141",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorPermissions(params) -> bridge.runCapability('permissions',{device,worktreeId},(backend,device)=>backend.setPermission!(device,params.op,params.package??'',params.permission)) [src/main/runtime/orca-runtime-emulator.ts:261-276]"
+      ],
+      "resultShape": "Fixed literal {ok:true}.",
+      "absentNullUndefinedCoercion": "params.package ?? '' -- an absent package name coerces to an empty string before being forwarded to the backend (the only method in this leaf with an explicit empty-string coercion on a conditionally-required field); params.permission forwarded as-is, can be undefined (the 'reset' op's Zod superRefine, already read, forbids package/permission entirely for that op).",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...) plus whatever runCapability/backend.setPermission throws (not read -- residual). This handler performs no re-validation of its own beyond what the already-read Zod superRefine enforces upstream.",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 261,
+        "endLine": 276,
+        "rangeSha256": "8fc4bc608ad5996be38618bc146bf1e125edb1eec48bd296cc02bcfd7dbe9d76",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.ax",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 239,
+        "endLine": 243,
+        "rangeSha256": "f7754ceace4682147a01af72fb8b7123eee635183e9f217e210457488664fe81",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorAx(params) -> requireEmulatorBridge().accessibilityTree({device,worktreeId}) [src/main/runtime/orca-runtime-emulator.ts:278-284]"
+      ],
+      "resultShape": "Whatever bridge.accessibilityTree() returns, verbatim (untyped 'unknown').",
+      "absentNullUndefinedCoercion": "device resolved as params.device ?? params.emulator (same precedence pattern as tap/gesture/type/button/rotate).",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...); bridge.accessibilityTree() errors propagate unmodified.",
+      "partialSuccess": "Residual: accessibility-tree extraction failures are entirely characterized by the unread EmulatorBridge/backends.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 278,
+        "endLine": 284,
+        "rangeSha256": "fd486c3df7caa623165500c6f1285b4c34375d871b6aac21770edf51d94c03ab",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.logcat",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 244,
+        "endLine": 248,
+        "rangeSha256": "3cd85fcfccfdefba4312b93344c3a671feadeb9188ec3fe18dcc8f313c9b02cc",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorLogcat(params) -> bridge.runCapability('logcat',{device,worktreeId},(backend,device)=>backend.logcat!(device,{lines,filters})) [src/main/runtime/orca-runtime-emulator.ts:286-295]"
+      ],
+      "resultShape": "Whatever runCapability/backend.logcat() returns, verbatim (untyped 'unknown') -- unlike install/launch/permissions, this method does NOT wrap the result in a fixed {ok:true}; it passes the capability callback's return value straight through to the RPC caller.",
+      "absentNullUndefinedCoercion": "params.lines and params.filters are both optional and forwarded as-is (undefined passthrough) into the backend call options.",
+      "stateChanges": "None.",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...) plus whatever runCapability/backend.logcat throws (not read -- residual).",
+      "partialSuccess": "None observed.",
+      "hostVersionPlatformBranches": "None explicit at this layer (logcat is conventionally Android-only; no platform branch is visible here -- residual, would need EmulatorBridge/backends).",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 286,
+        "endLine": 295,
+        "rangeSha256": "34fff203bd9556f209dadec88ca2ff253751905c6ce009b1d5f04f0acad557de",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    },
+    {
+      "id": "DR-EMULATOR_METHODS",
+      "name": "emulator.unregisterActive",
+      "source": {
+        "file": "src/main/runtime/rpc/methods/emulator.ts",
+        "startLine": 249,
+        "endLine": 253,
+        "rangeSha256": "9348e585e57aeffc25ae083bc92cc90fba52104644098b475999029642b1fecc",
+        "wholeFileSha256": "6fb458a3bd9806ae82a8e028027d4b90870a6becef183b84ed6053961076c3e2"
+      },
+      "readDepth": "full",
+      "immediateCallees": [
+        "RuntimeEmulatorCommands.emulatorUnregisterActive(params) -> conditionally bridge.unregisterActiveEmulator(worktreeId) [src/main/runtime/orca-runtime-emulator.ts:201-208]"
+      ],
+      "resultShape": "Fixed literal {ok:true} -- returned unconditionally, even on the branch where the conditional unregister call is skipped entirely.",
+      "absentNullUndefinedCoercion": "worktreeId resolved via resolveCleanupWorktreeId(params.worktree); if params.worktree is absent, worktreeId is undefined, the `if (worktreeId)` guard is false, and bridge.unregisterActiveEmulator is never called -- the method still returns {ok:true} as if it had unregistered something. Absent-worktree and successful-unregister are indistinguishable from the return value alone (same class of return-value ambiguity as speech.dictation.cancel).",
+      "stateChanges": "unregisterActiveEmulator's own return value (if any) is discarded (call-site does not capture it).",
+      "errorsThrownVsReturned": "Thrown only: EmulatorError('emulator_no_active',...) from requireEmulatorBridge() -- confirmed this method DOES require an active bridge (the call is present at the top of the method body) despite its worktree-conditional body.",
+      "partialSuccess": "None observed beyond the absent-worktree no-op ambiguity noted above.",
+      "hostVersionPlatformBranches": "None at this layer.",
+      "boundary": "Real native/provider boundary: EmulatorBridge [src/main/emulator/emulator-bridge.ts, 356 lines, signature-level grep only -- confirmed bridge.exec() at line 196 delegates to a `backend` object] and its per-platform backends [src/main/emulator/backends/*, not in this leaf's assigned set]. Real adb/simctl/Android-AVD native process execution happens there, not read further, no recursive import census performed.",
+      "implementationSource": {
+        "file": "src/main/runtime/orca-runtime-emulator.ts",
+        "startLine": 201,
+        "endLine": 208,
+        "rangeSha256": "0959ae39b592420d6a1022d26e063c7c3fe415f5163a1adfc66865e95498bb74",
+        "wholeFileSha256": "cf49cfc40d0deb5697d836d19a632747d25df72a10b3ef79e1fa8a201ab2d3eb"
+      }
+    }
+  ],
+  "testAssociations": {
+    "sharedRouteAssertionFiles": [
+      "src/main/ipc/runtime.test.ts",
+      "src/main/ipc/runtime-subscribe-lifecycle.test.ts",
+      "src/main/runtime/rpc/dispatcher-request-parsing.test.ts",
+      "src/main/ipc/runtime-environments-call-routing.test.ts",
+      "src/renderer/src/runtime/runtime-rpc-client.test.ts"
+    ],
+    "sharedRouteAssertionFilesReadDepth": "pointer-only (route evidence only, per followup-final-boundaries.json's own 'limit' field; not method-specific behavior coverage; not opened this pass)",
+    "directMethodAssertionRefs": "none populated in followup-domain-ownership.json/followup-final-boundaries.json for any of the 42 rows",
+    "confirmedExistingButUnreadTestFiles": [
+      "src/main/runtime/rpc/methods/speech.test.ts (existence confirmed via grep this pass, not opened/read)"
+    ],
+    "unconfirmedTestFileExistence": [
+      "src/main/runtime/rpc/methods/computer.test.ts",
+      "src/main/runtime/rpc/methods/emulator.test.ts",
+      "runtime-mobile-dictation-controller.test.ts",
+      "runtime-mobile-speech-catalog.test.ts",
+      "orca-runtime-emulator.test.ts"
+    ],
+    "originalSourceTestWorkPackages": [
+      {
+        "id": "WP-ENG-NATIVE",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/17/files"
+      },
+      {
+        "id": "WP-CAP-MOBILE",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/7/files"
+      },
+      {
+        "id": "WP-CAP-DEVICE",
+        "ref": "docs/migration/parity-test-work-packages.json#/packages/2/files"
+      }
+    ],
+    "inheritedRemainingAcceptance": [
+      "F-RPC-SCHEMA",
+      "F-RPC-ROUTE",
+      "F-RPC-HOST",
+      "F-RPC-RESULT",
+      "F-EXTERNAL"
+    ]
+  },
+  "sourceResiduals": [
+    "computer-sidecar.js (compiled entry point) and whatever OS automation library it wraps -- real native boundary, outside assigned set, never read",
+    "src/main/computer/computer-clipboard-paste-validation.ts (validateComputerClipboardPasteTextWithBoundedYield) -- outside assigned set, gates computer.pasteText only",
+    "src/main/computer/macos-native-provider-paths.ts (resolveMacOSComputerUseAppPath/resolveMacOSComputerUseExecutablePath) -- outside assigned set",
+    "src/main/computer/computer-schemas.ts -- outside assigned set; actual Zod param shapes for all 15 computer methods",
+    "src/main/speech/speech-runtime-service.ts (signature-level peek only) and factory-resolved ModelManager/SttService implementations",
+    "src/main/speech/model-catalog.ts, src/main/speech/speech-model-deletion.ts -- referenced by name, not read",
+    "src/main/emulator/emulator-bridge.ts (356 lines, signature-level grep only) and src/main/emulator/backends/* -- real adb/simctl native-process boundary",
+    "src/main/emulator/emulator-availability.ts, emulator-default-attach-device.ts, android/android-sdk-host-discovery.ts, simctl-simulator-devices.ts -- referenced by imports, not read",
+    "Method-specific behavioral test files -- existence/content not fully confirmed this pass; highest-value next step"
+  ],
+  "precedence": "Candidate leaf contribution for lead review/integration alongside the lead's other 84 methods in this partition. Not E3 closure, not parity, not a claim that provider-side (sidecar/STT/adb/simctl) behavior was verified. Source counts/hashes are provenance, not behavior proof. No tests run, no model inference used to fill any identified gap."
+}

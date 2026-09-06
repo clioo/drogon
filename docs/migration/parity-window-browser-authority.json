@@ -1,0 +1,688 @@
+{
+  "schema": "drogon.parity-window-browser-authority/2",
+  "status": "coordinator-reviewed-bounded-source-contracts",
+  "auditClosed": false,
+  "runtimeAcceptanceProven": false,
+  "sourceRoot": "/Users/carlos/Documents/Drogon-mentu-session",
+  "sourceReadOnly": true,
+  "sourceSha": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "method": "Leaf Muse task_d474323a72d6 / ctx_bf30aa048ee3 followed by independent coordinator review at8cf48eb. Direct read bounds recorded below.47 unchanged original cases executed in five isolated capsules. No app/window/server/model/network or candidate executed; no screenshots or source edits. Audit remains open.",
+  "acceptedInputsReused": [
+    "parity-source-bridges.json: dashboardApi 16 methods (openPopout, publishSnapshot, getPopoutOpen, onPopoutOpenChanged, onSnapshotRequested, onRevealAgent, onAckAgent, onSpawnAgent, onSleepWorkspace, requestSnapshot, onSnapshot, onViewRequested, revealAgent, ackAgent, spawnAgent, sleepWorkspace)",
+    "parity-bridge-delegated-resolution.json + parity-bridge-main-push-resolution.json: browser.readClientHostId argument reader and push-producer linkage (not lease semantics)"
+  ],
+  "docsRead": [
+    {
+      "path": "docs/reference/remote-wire-compatibility.md",
+      "sha256": "1259e994b5986bad07ac4ae2e8b7111955d66f8dd33f197156ff33ce09e2706c",
+      "lines": 249,
+      "bodyRead": true,
+      "relevance": "mixed versions normal; optional-field safety for lease protocol-version negotiation"
+    },
+    {
+      "path": "docs/reference/ssh-execution-boundary.md",
+      "sha256": "eb661689226400969cfa8e2418de3acc171cbb5f66ce7fbabf92aec8539938b2",
+      "lines": 102,
+      "bodyRead": true,
+      "relevance": "live/unverifiable/exited liveness; execution-host ownership for remote-placed pages"
+    },
+    {
+      "path": "docs/reference/ssh-reconnect-source-recovery.md",
+      "sha256": "91061bbace27bc323b6473200ef56f2f600529d721ac56c128b64e3f64bdfd1c",
+      "lines": 147,
+      "bodyRead": true,
+      "relevance": "reconnect repaint is byte-tail, not source recovery; stale-client state must not be trusted"
+    }
+  ],
+  "g17": {
+    "scope": "Dashboard/popout window placement persistence and main/popout authority",
+    "sourceTransitionsBodyRead": [
+      {
+        "file": "src/main/window/dashboard-popout-window.ts",
+        "sha256": "3feed015f8136d5972d49a700b1b5b38e8e8b4ccf5916fa024603b439282f69a",
+        "lines": 305,
+        "transitions": [
+          {
+            "lines": "27,145-156",
+            "transition": "Singleton restores minimized existing window and optionally sends explicit view. Focus is conditional on !isBackgroundLaunch(), not unconditional; getDashboardPopoutWindow separately rejects destroyed webContents."
+          },
+          {
+            "lines": "113-132",
+            "transition": "restore: dashboardPopoutBounds reused only if >=480x360 AND rectHasVisibleAreaOnAnyDisplay overlap >=240x180; else discarded with console.warn and defaults 960x720 without x/y"
+          },
+          {
+            "lines": "254-284",
+            "transition": "persist: 500ms-debounced save of getBounds() on resize/move; skipped when closing/destroyed/minimized/fullscreen or below minimum; close and app before-quit freeze the timer"
+          },
+          {
+            "lines": "285-292",
+            "transition": "close: singleton nulled only if identical instance; zoom listener unsubscribed; open=false broadcast"
+          },
+          {
+            "lines": "298-305",
+            "transition": "main-close authority: closeDashboardPopout() closes popout so it never orphans without the main window"
+          },
+          {
+            "lines": "180-186",
+            "transition": "identity: popout uses isolated partition, webviewTag false, and is deliberately NOT stamped with a browser-host id; every client-placed page is a mirror to this renderer"
+          },
+          {
+            "lines": "200-219",
+            "transition": "zoom authority: popout follows app-wide uiZoomLevel changes but keeps window-local zoom until the app level actually changes"
+          },
+          {
+            "lines": "187-196",
+            "transition": "Isolated session receives privileged navigation policy plus explicit deny permission-request and permission-check handlers. Existing mocked assertion body invokes both deny callbacks. No actual Electron permission validation executed."
+          }
+        ]
+      },
+      {
+        "file": "src/main/ipc/dashboard-popout.ts",
+        "sha256": "0bfd0a52da2c44d6b1a5ed0ce13de115afe24b1d4942807668d224a4168666b1",
+        "lines": 176,
+        "transitions": [
+          {
+            "lines": "26,45-58",
+            "transition": "snapshot cache cleared on popout close and when experimentalAgentDashboardPopout is disabled (which also force-closes the popout)"
+          },
+          {
+            "lines": "60-70",
+            "transition": "open admitted only from trusted main renderer, feature enabled, view board/map/undefined"
+          },
+          {
+            "lines": "73-96",
+            "transition": "publish: malformed snapshots rejected with warn; repoIconsByRepoId carried from cache when omitted; forwarded only to live popout"
+          },
+          {
+            "lines": "100-108",
+            "transition": "mount: popout gets cached snapshot replay plus a nudge to the main renderer for a fresh publish"
+          },
+          {
+            "lines": "118-175",
+            "transition": "popout-to-main relay: ack/reveal/spawn/sleep admitted only from live popout renderer with validated args; revealAgent raises the main window via safelyRevealWindow"
+          }
+        ]
+      },
+      {
+        "file": "src/main/window/window-bounds-validation.ts",
+        "sha256": "917c4f010a6cead1dd61c023743a847fbf94bd77402d2278aada6884071f7b75",
+        "lines": 35,
+        "bodyRead": true,
+        "transition": "overlap of workArea (dock/menu excluded) required on some attached display; screen-API throw treated as off-screen, never as visible"
+      },
+      {
+        "file": "src/main/window/main-window-state-lifecycle.ts",
+        "sha256": "e2232bc818040277d9bdc086d88654fdadaec739956f6e52542cd0371cc4974a",
+        "lines": 156,
+        "transitions": [
+          {
+            "lines": "20-73",
+            "transition": "dom-ready reapplies zoom and Mac traffic-light placement; initial reveal is one-shot, preserves windowless launch, restores savedMaximized. Win/Linux10s fallback and optional did-finish-load path share guard. Not actual GPU/reveal proof."
+          },
+          {
+            "lines": "75-104",
+            "transition": "500ms debounce, skip when closing/destroyed/fullscreen. Maximized updates only windowMaximized:true; near-min updates only windowMaximized:false, preserving previous bounds. Valid nonmaximized state updates flag and bounds in one Store mutation; no disk-atomicity proof. Coordinator checked this source block."
+          },
+          {
+            "lines": "116-136",
+            "transition": "maximize/unmaximize immediately persist maximized flag and emit window:maximize-changed; unmaximize re-guards near-min teardown bounds"
+          },
+          {
+            "lines": "138-144",
+            "transition": "fullscreen transitions emit but never persist bounds"
+          },
+          {
+            "lines": "75-156",
+            "transition": "Main save path does not explicitly skip minimized state (unlike popout). freeze/resume are explicit lifecycle hooks; dispose removes before-quit listener while caller clears initial-reveal timer. Near-min preserves prior bounds, not resetting them."
+          }
+        ]
+      },
+      {
+        "file": "src/main/window/createMainWindow.ts",
+        "sha256": "4dccd02003f0365f723154654a25d6e80595d95014c6cf678a358d9ae3f72160",
+        "lines": 204,
+        "transition": "Main restore requires width>600,height>400 and >=300x200 workArea overlap, unlike popout >=480x360/240x180. Fallback primary workArea size, then1200x800 on screen failure. Main stamps host-id at creation; sets trusted renderer, closes popout and disposes lifecycle/resume hooks on closed. All204 lines read; imported lifecycle internals not thereby all reviewed.",
+        "bodyRead": true
+      },
+      {
+        "file": "src/shared/persisted-ui-state-types.ts",
+        "sha256": "b7162f2c1982b2353d4cc6db11c68077909236546e3414509e96f3c057434244",
+        "lines": 228,
+        "linesRead": "80-96,168-184",
+        "transition": "Direct type neighborhoods: uiZoomLevel:number; windowBounds?/dashboardPopoutBounds? nullable rectangles; windowMaximized?:boolean is optional NOT nullable. Not the whole schema or persistence implementation."
+      }
+    ],
+    "assertionBodiesRead": [
+      {
+        "file": "src/main/window/dashboard-popout-window.test.ts",
+        "sha256": "e79d4b76aa7a2bd1b8dbebf8ad4ea0ac450bae12ca379d3bf6d5c496482d56ed",
+        "lines": 477,
+        "bodiesRead": "all 19 its lines 189-476 (mocked BrowserWindow + mock store)",
+        "notProved": "mocked window only; no rendered reopen, monitor-loss, DPI, or restart proof",
+        "assertionsRead": "native-frame opts incl. partition/no-webview/no-host-id-stamp (189-220); ready-to-show (222-228); prod/dev load paths (230-253); singleton focus (255-262); view switch (264-272); renderer trust incl. destroyed (274-280); minimized restore (282-289); bounds restore (291-301); off-screen discard to defaults (303-315); debounced persist + near-min guard (317-338); close (340-344); zoom apply/follow/unsubscribe (347-369); focused-only zoom stepping incl. clamp (371-391); keyboard/wheel/override zoom routing (393-476)",
+        "execution": "not executed in this review"
+      }
+    ],
+    "declarationOnly": [
+      {
+        "file": "src/main/ipc/dashboard-popout.test.ts",
+        "sha256": "71693769fee3a23fcecd63e76090cdfae809309723a2fd67edbd243676ec1773",
+        "lines": 294,
+        "titles": [
+          "117 opens only for the trusted main renderer while the feature is enabled",
+          "141 auto-closes the popout when the feature is disabled",
+          "146 caches and forwards only valid trusted snapshots",
+          "163 keeps publishing the board when one card is invalid, and says so",
+          "183 logs when a snapshot is rejected outright",
+          "195 replays the cached snapshot only to the popout and nudges only the trusted main renderer",
+          "208 replays the last repo icons when the cached snapshot omitted them",
+          "231 reports open state only to the trusted main renderer",
+          "239 relays valid seen acknowledgements from only the popout",
+          "252 relays only valid agent launches from the popout",
+          "265 relays only valid sleep requests from the popout",
+          "277 reveals an agent in only the trusted main window"
+        ]
+      }
+    ],
+    "unknowns": [
+      {
+        "unknown": "DPI/scale-factor handling: no scaleFactor/DPI code found in src/main/window (grep, not proof of absence)",
+        "ownedFollowup": "WP-UI-SHELL-WIN: search display-metric handling for popout/main restore and add rendered DPI/move-across-displays cases"
+      },
+      {
+        "unknown": "Monitor-loss and restart rendered behavior for both windows",
+        "ownedFollowup": "WP-UI-SHELL-WIN/WP-UI-STATE: rendered reopen, monitor-detach, and restart journeys with the real store"
+      }
+    ]
+  },
+  "g18": {
+    "scope": "browser.clientHost lease acquisition/renewal/expiry/reassignment across runtime and UI",
+    "sourceTransitionsBodyRead": [
+      {
+        "file": "src/shared/browser-client-host-id-argument.ts",
+        "sha256": "9a41ecfa0125fcd2dbb76cec4f32ff73d70682e03c8cfd343b9675bcf4d21d53",
+        "lines": 25,
+        "bodyRead": true,
+        "transition": "main stamps the renderer id via --orca-browser-client-host-id= argv (sync-IPC deemed unsafe pre-listener on Electron 43); read returns null for unstamped renderers (web client, popout, guests)"
+      },
+      {
+        "file": "src/renderer/src/runtime/browser-client-host-identity.ts",
+        "sha256": "1aaea803fa2975c33879d17fd861f75e90a97be624f31dbc636a278f7950bf87",
+        "lines": 32,
+        "bodyRead": true,
+        "transition": "readBrowserClientHostId caches only real ids; null (unavailable-yet) is re-read every call so an early caller is never told never (17-28)"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-records.ts",
+        "sha256": "10427380f682497fbf235ca319e5e9fa4793d96fbc4f6849b8d09798af4bdf36",
+        "lines": 107,
+        "bodyRead": true,
+        "transitions": [
+          {
+            "lines": "10-45",
+            "transition": "lease shape: authorityRuntimeId+epoch, clientId, generation, connectionId, pairedDeviceId, capabilities, five optional protocol versions; state status active|reconnecting with token, connectionToken, two fences, routes, grants, ledger"
+          },
+          {
+            "lines": "70-94",
+            "transition": "admission: same-client re-attach allowed; >=1 lease per connection throws browser_host_connection_capacity; >=4 per paired device throws browser_host_device_capacity"
+          },
+          {
+            "lines": "96-107",
+            "transition": "stale-client refusal: command results rejected with browser_host_lease_stale on connectionId mismatch, browser_host_command_protocol_required without ledger"
+          }
+        ]
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-registry.ts",
+        "sha256": "c17e22da1e1ec0e4d0359d4c4605e4d55a7afd68b6211480fe33dc0a8a312e15",
+        "lines": 325,
+        "bodyRead": true,
+        "transitions": [
+          {
+            "lines": "106-132",
+            "transition": "attach first snapshots/validates inventory and protocol dependencies, then checks foreign device/admission. Restore calls observeInventory; replacement allocates a global host generation, fences old, creates/registers state. Detailed imported ledger/tunnel/reconciliation internals remain owned review debt."
+          },
+          {
+            "lines": "134-143",
+            "transition": "select: only active leases are selectable (reconnecting hidden as browser_host_unavailable per test body)"
+          }
+        ]
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-reconnect.ts",
+        "sha256": "246a5b2f12562ab058708782a9489f6e12aa7e5b7817d712b95db31ec372e36c",
+        "lines": 127,
+        "bodyRead": true,
+        "transitions": [
+          {
+            "lines": "50-83",
+            "transition": "restore requires active/reconnecting, reconnect v1 both sides, equal command/reconciliation versions and capability arrays equal by LENGTH+ORDER (not set equality). Active restore fences routes/detaches delivery. Swaps connection fence/token; replaces inventory with newly supplied snapshot or empty array, not old inventory. File channel renegotiated independently. Same epoch/generation retained."
+          },
+          {
+            "lines": "93-114",
+            "transition": "disconnect: no-op unless registry-current, token-current, and active; legacy (no reconnect v1) fences immediately; else reconnecting + reconciliation fenced + routes fenced + grace timer armed (default 15000ms at registry.ts:98) ending in fence released"
+          },
+          {
+            "lines": "116-120",
+            "transition": "release: explicit revocation fences only the token-current lease; terminal for that generation"
+          },
+          {
+            "lines": "29-35,116-127",
+            "transition": "graceMs must be positive integer. Old handle release checks connection token; final registry-current token guard lives in fence dispatch/fencing. First fence reason wins. Loss of a lease is authority revocation, not proof of guest/process exit."
+          }
+        ]
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-state-resolution.ts",
+        "sha256": "6498394bff11da8d71c4ad9d3ed2325b1bdc9f32f3b16ba5d28e31dc2826968a",
+        "lines": 25,
+        "bodyRead": true,
+        "transition": "every guarded call re-checks epoch, client registration, generation+device, and active status; failures throw browser_host_lease_stale / lease_required / lease_reconnecting"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-fence.ts",
+        "sha256": "40783a92e66e0a6f889e5850cab8c42a63eecce7e4d28778ba1479b33f4becdf",
+        "lines": 24,
+        "bodyRead": true,
+        "transition": "fence reasons replaced|released|lease_released|lease_replaced; single-settle guard so first reason wins"
+      },
+      {
+        "file": "src/main/browser/browser-client-host-authority-replacement.ts",
+        "sha256": "06b1b65da5f4ab9ca8365d5b6d833e9f01b9c0ed2e46874d1f17618d61b306d8",
+        "lines": 22,
+        "bodyRead": true,
+        "transition": "Classifier accepts Error instances only: exact structured code OR exact legacy error.message; non-Error/plain object and substring matches rejected. This function does not observe guest liveness or itself retire/recover anything."
+      },
+      {
+        "file": "src/main/browser/browser-client-host-authority-replacement-wait.ts",
+        "sha256": "22587d511aa86b1132e030726c0ca3f9db9ee7e394093b87442a4e170c9c6de7",
+        "lines": 36,
+        "bodyRead": true,
+        "transition": "45s default timer, first arm/deadline wins while armed, cancel clears, rearm after cancel/expiry allowed; timer unref. It invokes injected expire callback, not retirement itself. Full source and14 classifier/timer test bodies read; none executed here."
+      },
+      {
+        "file": "src/main/browser/browser-client-host-placement-preparation.ts",
+        "sha256": "d015f71b9a1d407263f2369623c4cd4a9dd659a67423efb3b443bb26257d6f20",
+        "lines": 98,
+        "transition": "Server fallback only disabled/server preference, non-ok status RESPONSE or eligibility false. Thrown status/startHost errors propagate. Status runtimeId must match envelope; pairing checked before/after status and after startHost; ready graph required for eligible host. Post-start resolveEnvironment occurs OUTSIDE cleanup try; caught pairing/authority mismatches closeHost best-effort then rethrow.12 mocked original cases pass, not every failure branch.",
+        "bodyRead": true
+      },
+      {
+        "file": "src/main/runtime/browser-host-client-page-adoption.ts",
+        "sha256": "04e3b126fae556bfd4c827aa2a16f0def68760de2d6a0ce5d1b6d9a765b28b17",
+        "lines": 169,
+        "transition": "Candidacy rejects nonactive, workspaceId===undefined, foreign client, current-runtime or already tracked entries; input schema validation is upstream, not implemented here. Intents sort by reported generation, allocate above max, use current per-workspace execution key and omit reclaimFrom: restart may close/restore guest, not preserve DOM. Missing current key drops intent. Async adoption retains per-intent grants, catches reconcile rejection and settles by committed client placement/page generation+no existing grant; partial successes remain.14 pure and8 mocked original cases pass.",
+        "bodyRead": true
+      },
+      {
+        "file": "src/main/runtime/runtime-browser-client-page-recovery.ts",
+        "sha256": "70d95810c1b480b5be592bcc0dca8c1c2ab359709f41d1ff199c2e93a4cdc9bb",
+        "bodyRead": true,
+        "transition": "Requires reconciliation/inventory v1 plus inventory; excludes adopted/already exact-active pages; retained current-client older generations recover, restored records use pairedDevice identity. Four workers maximum; cancellation stops taking new entries, not already in-flight operations. Restored keys re-resolved: workspace-gone releases optional record, unresolved route retains it. Placement authority checked before close/retire/create and after command. Updated same-current-host placement can be adopted without recreate. URL prefers inventory currentUrl. Per-page failure logs and releases only if placement absent; healthy siblings remain. Full source read, tests not executed."
+      }
+    ],
+    "assertionBodiesRead": [
+      {
+        "file": "src/renderer/src/runtime/browser-client-host-identity.test.ts",
+        "sha256": "b5cc055e5b2062574f56c148ec4545fd9932fd05ed9a507a88fd3bcca13fa354",
+        "lines": 60,
+        "bodiesRead": "Full60 lines:6 cases after expanding three it.each rows (not worker-reported4).",
+        "assertionsRead": "bridge id returned (13-17); single bridge call then cache (21-30); null for missing api/stamp (32-40); null/throw never cached, keeps asking (44-59)",
+        "execution": "6 unchanged original cases passed in isolated capsule."
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-registry.test.ts",
+        "sha256": "4eb74bf4aaca638c9a7de58d5e6edad05abc5901f2969b9d8d2ff509c64efa2d",
+        "lines": 780,
+        "bodiesRead": "4 cases lines 102-186,298-369",
+        "assertionsRead": "grace: lease unavailable yet placement kept, route fenced lease_released, unfenced until restore with exact epoch+generation and new connectionId (102-155); negotiation change replaces with generation+1 and fences old as replaced (157-186); grace expiry at 1000ms fences released while legacy disconnect fences immediately (298-330); foreign-device attach throws identity_conflict, explicit release fences released and terminal, late attach takes generation+1 (332-369)",
+        "execution": "not executed in this review"
+      },
+      {
+        "file": "src/shared/browser-client-host-id-argument.test.ts",
+        "sha256": "57186d324fcabcba5a88915b5354d48161b7b09a319225f69b816ab72567f88c",
+        "bodiesRead": "full",
+        "caseCount": 7,
+        "assertionsRead": "first stamp/decoy/middle/empty exact-prefix cases",
+        "execution": "7 original cases passed in isolated capsule"
+      },
+      {
+        "file": "src/main/runtime/browser-host-client-page-adoption.test.ts",
+        "sha256": "71d82095bbb4fee393ba3c00d8e97b95b1f38deee271b758bab668b9047ebecc",
+        "bodiesRead": "full",
+        "caseCount": 14,
+        "assertionsRead": "candidacy and generated intent invariants",
+        "execution": "14 original cases passed in isolated capsule"
+      },
+      {
+        "file": "src/main/runtime/browser-host-client-page-adoption-grants.test.ts",
+        "sha256": "d5d872f77ce30af5e95d23d37ffe87b8399c415ebc4ba99913a526e3e401fb27",
+        "bodiesRead": "full",
+        "caseCount": 8,
+        "assertionsRead": "injected grant/committed-placement settlement incl partial rejection",
+        "execution": "8 original cases passed in isolated capsule"
+      },
+      {
+        "file": "src/main/browser/browser-client-host-placement-preparation.test.ts",
+        "sha256": "d6c8c370f21756169cb933dc1ad10cdfeba24b901e76d8bf82cace32ab44d743",
+        "bodiesRead": "full",
+        "caseCount": 12,
+        "assertionsRead": "mocked exact-host selection, capability/mobile fallback, pairing drift and response errors",
+        "execution": "12 original cases passed in isolated capsule"
+      },
+      {
+        "file": "src/main/browser/browser-client-host-authority-replacement.test.ts",
+        "sha256": "eb68168edb7cfd03ea68a1b44740e5131bc6f047104dddceab080c173b31ee3f",
+        "bodiesRead": "full",
+        "caseCount": 14,
+        "assertionsRead": "strict typed/legacy error classification and fake-timer deadline/cancel/rearm assertions",
+        "execution": "not executed; schema import closure not staged"
+      }
+    ],
+    "declarationOnly": [
+      {
+        "file": "src/main/runtime/browser-host-lease-registry.test.ts",
+        "lines": 780,
+        "titles": [
+          "16 requires reconciliation dependencies before retaining the negotiated lease",
+          "41 rejects incomplete, duplicate, and foreign-client inventory before replacing a lease",
+          "79 retains an immutable inventory snapshot on the authenticated lease",
+          "188 never emits reconciliation commands to a legacy page-command lease",
+          "237 restores exact authority when reattach arrives before old connection cleanup",
+          "371 restores a lease whose reconnect renegotiates the file channel",
+          "399 replaces reconnecting authority on a capability mismatch",
+          "426 selects only an exact host when more than one lease is live",
+          "450 fences a same-device replacement without letting old cleanup remove it",
+          "479 admits only one distinct browser host per authenticated connection",
+          "507 bounds distinct browser hosts per paired device without starving another device",
+          "545 allocates monotonic page generations and rejects a stale host generation",
+          "588 retires closed page placement without reusing its generation",
+          "607 fences outstanding outcomes at exact placement retirement",
+          "649 does not let late cleanup retire a replacement or server placement",
+          "673 binds tunnel generations to the lease and fences replaced routes",
+          "699 grants one exact execution host without letting old cleanup remove a replacement",
+          "733 invalidates execution-host grants with their exact lease generation"
+        ]
+      }
+    ],
+    "unknowns": [
+      {
+        "unknown": "Full recovery/registry/reconciliation tests and runtime effects remain unexecuted; placement and adoption test bodies are now reviewed and47 selected cases pass.",
+        "ownedFollowup": "WP-ENG-BROWSER/WP-ENG-REMOTE: full assertions, actual registry and per-page recovery, failure paths including post-start environment resolution, caller retirement callback, partial failure and cancellation."
+      },
+      {
+        "unknown": "Preload identity group wiring is source-read, not runtime validated; complete merged bridge and actual guest/main/popout identity across launch still owed.",
+        "ownedFollowup": "WP-ENG-BROWSER/WP-UI-BROWSER: actual preload/main stamps and mirror metadata authority tests. No synchronous IPC substitution."
+      },
+      {
+        "unknown": "Concurrent-ownership contention and both version skews at runtime",
+        "ownedFollowup": "WP-ENG-REMOTE: executed disconnect/reconnect/expiry/contention/stale-refusal runs old-host and new-host (T4)"
+      }
+    ],
+    "coordinatorCorrections": [
+      "Restore inventory is refreshed from reattach, not carried from the old lease; capabilities are order-sensitive.",
+      "Lease revocation/expiry != proof of process death. Authority replacement classifier/timer are helpers, not guest liveness witnesses.",
+      "Adoption intent does not reclaim a live DOM across a route-key change. It emits restore intent; claim actual close/restore only after downstream execution.",
+      "Grant settlement checks kind, page generation and existing map, not full client/host identity at this layer; caller/registry fencing must be preserved.",
+      "Recovery source now read rather than grep-only; its cancellation and unavailable-route retention boundaries are explicit."
+    ]
+  },
+  "unexecutedRenderedObligations": [
+    "G17: rendered reopen, monitor-detach, DPI change, and restart journeys for main + popout with the real store",
+    "G18: executed lease disconnect/reconnect/expiry, concurrent ownership, stale-client refusal, file-channel renegotiation, adoption-after-restart, both version skews"
+  ],
+  "coordBoundary": [
+    "Audit remains open; no hierarchy or feature wave launched.",
+    "Accepted source/test slices do not substitute for complete source suite, candidate parity or live rendered/skew journeys.",
+    "Other dirty product changes and the two remaining wire drafts preserved; no source/product edits or install.",
+    "Mentu upstream PR route unchanged."
+  ],
+  "coordinatorReview": {
+    "baseRevision": "8cf48eb",
+    "directReads": [
+      {
+        "file": "src/main/window/dashboard-popout-window.ts",
+        "sha256": "3feed015f8136d5972d49a700b1b5b38e8e8b4ccf5916fa024603b439282f69a",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/ipc/dashboard-popout.ts",
+        "sha256": "0bfd0a52da2c44d6b1a5ed0ce13de115afe24b1d4942807668d224a4168666b1",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/window/window-bounds-validation.ts",
+        "sha256": "917c4f010a6cead1dd61c023743a847fbf94bd77402d2278aada6884071f7b75",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/window/main-window-state-lifecycle.ts",
+        "sha256": "e2232bc818040277d9bdc086d88654fdadaec739956f6e52542cd0371cc4974a",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/window/createMainWindow.ts",
+        "sha256": "4dccd02003f0365f723154654a25d6e80595d95014c6cf678a358d9ae3f72160",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/shared/persisted-ui-state-types.ts",
+        "sha256": "b7162f2c1982b2353d4cc6db11c68077909236546e3414509e96f3c057434244",
+        "bodyRead": "80-96,168-184"
+      },
+      {
+        "file": "src/shared/browser-client-host-id-argument.ts",
+        "sha256": "9a41ecfa0125fcd2dbb76cec4f32ff73d70682e03c8cfd343b9675bcf4d21d53",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/renderer/src/runtime/browser-client-host-identity.ts",
+        "sha256": "1aaea803fa2975c33879d17fd861f75e90a97be624f31dbc636a278f7950bf87",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-records.ts",
+        "sha256": "10427380f682497fbf235ca319e5e9fa4793d96fbc4f6849b8d09798af4bdf36",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-registry.ts",
+        "sha256": "c17e22da1e1ec0e4d0359d4c4605e4d55a7afd68b6211480fe33dc0a8a312e15",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-reconnect.ts",
+        "sha256": "246a5b2f12562ab058708782a9489f6e12aa7e5b7817d712b95db31ec372e36c",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-state-resolution.ts",
+        "sha256": "6498394bff11da8d71c4ad9d3ed2325b1bdc9f32f3b16ba5d28e31dc2826968a",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-fence.ts",
+        "sha256": "40783a92e66e0a6f889e5850cab8c42a63eecce7e4d28778ba1479b33f4becdf",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/browser/browser-client-host-authority-replacement.ts",
+        "sha256": "06b1b65da5f4ab9ca8365d5b6d833e9f01b9c0ed2e46874d1f17618d61b306d8",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/browser/browser-client-host-authority-replacement-wait.ts",
+        "sha256": "22587d511aa86b1132e030726c0ca3f9db9ee7e394093b87442a4e170c9c6de7",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/browser/browser-client-host-placement-preparation.ts",
+        "sha256": "d015f71b9a1d407263f2369623c4cd4a9dd659a67423efb3b443bb26257d6f20",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-client-page-adoption.ts",
+        "sha256": "04e3b126fae556bfd4c827aa2a16f0def68760de2d6a0ce5d1b6d9a765b28b17",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/runtime-browser-client-page-recovery.ts",
+        "sha256": "70d95810c1b480b5be592bcc0dca8c1c2ab359709f41d1ff199c2e93a4cdc9bb",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/window/dashboard-popout-window.test.ts",
+        "sha256": "e79d4b76aa7a2bd1b8dbebf8ad4ea0ac450bae12ca379d3bf6d5c496482d56ed",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/renderer/src/runtime/browser-client-host-identity.test.ts",
+        "sha256": "b5cc055e5b2062574f56c148ec4545fd9932fd05ed9a507a88fd3bcca13fa354",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-registry.test.ts",
+        "sha256": "4eb74bf4aaca638c9a7de58d5e6edad05abc5901f2969b9d8d2ff509c64efa2d",
+        "bodyRead": "102-186,298-369"
+      },
+      {
+        "file": "src/shared/browser-client-host-id-argument.test.ts",
+        "sha256": "57186d324fcabcba5a88915b5354d48161b7b09a319225f69b816ab72567f88c",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-client-page-adoption.test.ts",
+        "sha256": "71d82095bbb4fee393ba3c00d8e97b95b1f38deee271b758bab668b9047ebecc",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-client-page-adoption-grants.test.ts",
+        "sha256": "d5d872f77ce30af5e95d23d37ffe87b8399c415ebc4ba99913a526e3e401fb27",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/browser/browser-client-host-placement-preparation.test.ts",
+        "sha256": "d6c8c370f21756169cb933dc1ad10cdfeba24b901e76d8bf82cace32ab44d743",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/browser/browser-client-host-authority-replacement.test.ts",
+        "sha256": "eb68168edb7cfd03ea68a1b44740e5131bc6f047104dddceab080c173b31ee3f",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/shared/protocol-version.ts",
+        "sha256": "e21f10647fe18df2b31e84c2a8d596c083e8ae52714829890969a1b65286803a",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/shared/browser-client-host-protocol.ts",
+        "sha256": "712fe3eaed30c2de322466f316c966e526dcb60cf387cc0f6ba48012c70a7956",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/shared/browser-client-hosting-eligibility.ts",
+        "sha256": "2ce030bff76cae04665294ea7672c8954185c4e5aa8535919e7e9f5374846b9a",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/shared/remote-server-update.ts",
+        "sha256": "c7384b964a0bfaa1573cd00761c5e2d29143c591cb1b4cd6ee1b0db464110d12",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/shared/skill-install-capability.ts",
+        "sha256": "4dae209e014524ad9bd1f72f8366a78f80720546d36e19adbc299d3d7da1ff19",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-attachment.ts",
+        "sha256": "990d1964182ef78a2404a1f03d2a4ad54f57e31f605ab9fb474fbc878b3e1e74",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-fence-dispatch.ts",
+        "sha256": "23dd27bc673ac865501c251c5be373e686d309e2a5bc04e953cd4838657629b0",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/preload/api/browser-api.ts",
+        "sha256": "bb946facbc4f141f45d2d50da2d1661bf971296ca0906aa80fd3e50094ee9a1b",
+        "bodyRead": "1-72"
+      },
+      {
+        "file": "src/preload/api/browser-bridge-guest-registration-and-downloads.ts",
+        "sha256": "e3ef767225d4e15338a85f76788b59ac2fee3cd384607f0cff136cdc44e15efd",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/window/main-window-visual-lifecycle.ts",
+        "sha256": "6bcda2671a7b6e2c5c9099f98c4b24fa5e987c96b51495660e420ea18923973f",
+        "bodyRead": "105-120"
+      },
+      {
+        "file": "src/main/runtime/browser-host-lease-fencing.ts",
+        "sha256": "41f0aea86e5ec77ac72b74213b12e366d2f4b6d3c7147a0bce3e02511031e9dc",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/main/runtime/browser-host-page-inventory-snapshot.ts",
+        "sha256": "f2ac9fc0e97e655dc3a015d1a2e71e92eaa388bbe374fca56c9b78878dc0f802",
+        "bodyRead": "full"
+      },
+      {
+        "file": "src/preload/api/browser-bridge.ts",
+        "sha256": "5697184ce635e80f0b9250fda147cd67a391ef1189378ef5d4819c7544e66df1",
+        "bodyRead": "full"
+      }
+    ],
+    "evidenceBoundary": "Only five capsule closures executed; other imported runtime/IPC/Electron dependencies not fully traversed or executed by source reads.19 mocked popout and4 registry assertion bodies independently read, not run; declaration-only registry/dashboard tests remain lower-tier pointers. Docs read3 complete."
+  },
+  "executedCapsules": [
+    {
+      "id": "browser-client-host-identity",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "manifest": "tests/parity/baseline-capsules/browser-client-host-identity.json",
+      "manifestSha256": "21e43d1debbd1fe9942c4ae1a4b4be880cab4a25461b4f2ab9ccb42edc982db1",
+      "evidence": "reference-captures/c9790628-browser-client-host-identity/README.md"
+    },
+    {
+      "id": "browser-client-host-id-argument",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "manifest": "tests/parity/baseline-capsules/browser-client-host-id-argument.json",
+      "manifestSha256": "e90487cdde0c9804b87cf50d5f6ec553fe85f2eb5f13753933d9c44f63baef30",
+      "evidence": "reference-captures/c9790628-browser-client-host-id-argument/README.md"
+    },
+    {
+      "id": "browser-host-client-page-adoption",
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "manifest": "tests/parity/baseline-capsules/browser-host-client-page-adoption.json",
+      "manifestSha256": "c77abda1d0ca3e704a05e06ab28a67bdb300461eb11dc86bcfe23278c699e961",
+      "evidence": "reference-captures/c9790628-browser-host-client-page-adoption/README.md"
+    },
+    {
+      "id": "browser-host-client-page-adoption-grants",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "manifest": "tests/parity/baseline-capsules/browser-host-client-page-adoption-grants.json",
+      "manifestSha256": "ffa8d91760812fd7af30a41b3b63d9abd4943001c14e231cebde9b3e846f18ae",
+      "evidence": "reference-captures/c9790628-browser-host-client-page-adoption-grants/README.md"
+    },
+    {
+      "id": "browser-client-host-placement-preparation",
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "manifest": "tests/parity/baseline-capsules/browser-client-host-placement-preparation.json",
+      "manifestSha256": "a357a5f05537b64544273a69f0f2d7d3a3a13e2a7484e6f72dbf159e7732bec5",
+      "evidence": "reference-captures/c9790628-browser-client-host-placement-preparation/README.md"
+    }
+  ]
+}

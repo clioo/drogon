@@ -1,0 +1,270 @@
+{
+  "schema": "drogon.rate-limit-source-review/1",
+  "date": "2026-09-06",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "scope": "P-ACCOUNT-STATE local service cycle/cache/publication join; raw provider parsing and external behavior not certified",
+  "auditClosed": false,
+  "reviewedSourceFiles": [
+    {
+      "path": "src/main/rate-limits/service-refresh-orchestration.test.ts",
+      "role": "test",
+      "sha256": "4924cd05e8704adb35f68bfd2bc12ad1be17802458ce5711bf49a2cf532db080"
+    },
+    {
+      "path": "src/main/rate-limits/rate-limit-service-test-harness.ts",
+      "role": "module",
+      "sha256": "52189ad16b711c3f2253b182fa0ead37c7dca471bd7e8ee975691140c5f26d1b"
+    },
+    {
+      "path": "src/main/rate-limits/service.ts",
+      "role": "module",
+      "sha256": "ca6ac43533bc479d3a48fabe453ab4b0ff289452dce01df2bc3d114d59231f5e"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-state.ts",
+      "role": "module",
+      "sha256": "dfa36fe5b8be05a00634d54a5ac021764fcd666b757b5ccfd33352573d861da7"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-account-refresh.ts",
+      "role": "module",
+      "sha256": "2dbf82de770226ad908245a74f5fd3f6383aa86d3a245a7acbd0966b56866b7d"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-result-policy.ts",
+      "role": "module",
+      "sha256": "c4a4398f66c2cf230eb557a97f0cebb11e3e3fc084daaaa6f149e7fa59767343"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-full-cycle-application.ts",
+      "role": "module",
+      "sha256": "2441fabc8f5f6a0c2a764cc083a2527da2ec6136171ee1117b9aac683f025eec"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-provider-cycles.ts",
+      "role": "module",
+      "sha256": "2e53ffb91bfeece73726daffeca1157439e280445ef90267d95eb6c9340730a2"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-inactive-accounts.ts",
+      "role": "module",
+      "sha256": "8f789f49e4dcd38c54792ab8416871f44057816d80b85b8e8b4887933406a870"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-fetch-control.ts",
+      "role": "module",
+      "sha256": "f1bb006cc82991377f1f273e9129c27bfccc867d10c588d4de58a9981f649c80"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-fetch-policy.ts",
+      "role": "module",
+      "sha256": "20c2b699f26a906f35eaa497e9ae0cfeded21e3ed3bcdf1539b34bb6643ac23e"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-fetch-queue.ts",
+      "role": "module",
+      "sha256": "69801f8ad8de7d0133b4408d015e464ae0523030434e2d709364a72c9361d150"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-full-cycle-preparation.ts",
+      "role": "module",
+      "sha256": "c1f1b4792f5d74b6d5535751c2b7aa2a4ef265073d89dac0c2e182d04ef23f14"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-fetch-targets.ts",
+      "role": "module",
+      "sha256": "75f0b6bc0e1669e2dfe0412c096f641d677af7a80834c0295ee49985f5e89b55"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-types.ts",
+      "role": "module",
+      "sha256": "02f467d328902a6c1cb8d74bf3e56a236b6fe5a494a9d931654aadc8b9da5811"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-polling.ts",
+      "role": "module",
+      "sha256": "a4d6ba8a090090de8642df05ac5992b6b3c4fc201b2e8fb504e05b8d826b9d8b"
+    },
+    {
+      "path": "src/main/rate-limits/service/service-configuration.ts",
+      "role": "module",
+      "sha256": "158257b4874109e66ec7175bf15488672a1d2dd29cd9abf1a8db18c19426f31c"
+    },
+    {
+      "path": "src/main/rate-limits/claude-usage-window.ts",
+      "role": "module",
+      "sha256": "77e85290d6c42505ba5e8901df6d08945c795df9cd13c2673429e11cb2360508"
+    },
+    {
+      "path": "src/main/rate-limits/antigravity-usage-mirror.ts",
+      "role": "module",
+      "sha256": "0a00856d7f84acdb486b21b428ba85e80fa5b7e4d2f1fb0674da8123bb956621"
+    },
+    {
+      "path": "src/main/claude-accounts/runtime-selection.ts",
+      "role": "module",
+      "sha256": "fed23a04cf160d0c8eb73e417babd43cc72923bbdd7116ef45c6c59945e62c61"
+    },
+    {
+      "path": "src/main/codex-accounts/runtime-selection.ts",
+      "role": "module",
+      "sha256": "370be038141ec7fffed7cdc8907fe6890edc41d8935d1cf1f1971068633be889"
+    },
+    {
+      "path": "src/shared/codex-selection-lane.ts",
+      "role": "module",
+      "sha256": "0a2b193931ae81dcc62756ccc1ffa31522d6b77f4f6afe03d064c06aee6458b3"
+    },
+    {
+      "path": "src/shared/rate-limit-types.ts",
+      "role": "module",
+      "sha256": "456b32b23c91972e5910be9b11efa9ec7b55276873e388e892eb0d717236446c"
+    }
+  ],
+  "execution": {
+    "node": "v24.19.0",
+    "vitest": "4.1.11",
+    "host": "darwin-arm64",
+    "originalEntry": "src/main/rate-limits/service-refresh-orchestration.test.ts",
+    "manifest": "tests/parity/baseline-capsules/rate-limit-refresh-orchestration.json",
+    "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "manifestSha256": "19f41200c0ae97e98dd4850316fccaf1eddd33043fb1925921b75b2ceaf6e687",
+    "capsuleRoot": ".preflight/parity-baseline/rate-limit-refresh-orchestration-ImbI9g",
+    "stagedOriginalAndLicenseHashes": 33,
+    "errors": [],
+    "original": {
+      "counts": {
+        "total": 17,
+        "passed": 17,
+        "failed": 0,
+        "pending": 0,
+        "todo": 0
+      },
+      "assertions": [
+        {
+          "name": "RateLimitService does not reread Grok auth when callers read state snapshots",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService refreshes Grok without refreshing other providers",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService does not refetch Claude when a Codex account switch is queued during fetchAll",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService keeps recent stale data across repeated failures",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService bypasses the debounce for explicit manual refreshes",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService does not refetch fresh provider data for replayed mobile subscriptions",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService does not queue a follow-up fetch when a mobile subscription replays mid-fetch",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService waits for a queued explicit refresh when another fetch is already in flight",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService publishes non-Grok provider results before a slow Grok fetch completes",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService aborts the active fetch cycle and clears queued refreshes on stop",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService fetches Gemini and OpenCode Go alongside Claude and Codex",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService passes the resolved Kimi home into each fetch cycle",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService reads the host Kimi home when no resolver is wired",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService preserves Gemini buckets through getState after fetch",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService isolates provider failures so one error does not block others",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService discards stale data when a provider becomes unavailable",
+          "status": "passed"
+        },
+        {
+          "name": "RateLimitService discards stale data when Workspace ID override is changed",
+          "status": "passed"
+        }
+      ]
+    },
+    "supplement": {
+      "total": 1,
+      "passed": 1,
+      "failed": 0,
+      "pending": 0,
+      "assertions": [
+        {
+          "name": "pinned source queue characterization, not intended rewrite behavior leaves a forced Codex follow-up pending after a queued full cycle",
+          "status": "passed"
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": ".preflight/parity-baseline/rate-limit-refresh-orchestration-ImbI9g/stage-receipt.json",
+        "sha256": "705106d5ceddfe01675cd4b3e929ad2fd0818ad40f3756658277d8b15ed19705"
+      },
+      {
+        "path": ".preflight/parity-baseline/rate-limit-refresh-orchestration-ImbI9g/vitest-results.json",
+        "sha256": "c579ef69554ed56d0d5cda8eb912632f19780f1454b1a521fe9cc4db05d75780"
+      },
+      {
+        "path": ".preflight/parity-baseline/rate-limit-refresh-orchestration-ImbI9g/queue-characterization-results.json",
+        "sha256": "e83b9a6d6c5fe3d05a5e387a5caaacc28419509a5ceeb9b1c71613227822c7ce"
+      },
+      {
+        "path": ".preflight/parity-baseline/rate-limit-refresh-orchestration-ImbI9g/queue-characterization.vitest.config.mjs",
+        "sha256": "32208c1648100a12e9d08a04dc9cc18d281adadff3f2f40095bc8302bce21727"
+      },
+      {
+        "path": "tests/parity/source-supplements/rate-limit-queue-characterization.test.ts",
+        "sha256": "5d30cd334e569c62112db4560e03797f3ef4f45f7e6368bf035a5329cf7b0737"
+      }
+    ]
+  },
+  "defect": {
+    "id": "RATE-QUEUE-001",
+    "status": "reproduced-in-original-queue-with-deferred-cycle-spies",
+    "source": "src/main/rate-limits/service/service-fetch-queue.ts:67",
+    "sequence": [
+      "Start forced Codex-only refresh with first cycle deferred.",
+      "Queue forced full refresh and another forced Codex-only refresh.",
+      "Resolve first Codex cycle, then resolve full cycle.",
+      "Original initiating call finishes while codexOnlyFetchQueued remains true, isFetching false and both queued waiters remain unresolved.",
+      "stop clears queue and resolves waiters, which the test verifies during cleanup."
+    ],
+    "meaning": "The passing supplementary test asserts the old defect. It is not intended rewrite acceptance, not an original test, and not candidate RED/GREEN.",
+    "correctionObligation": "Retain the characterization; add separate desired-behavior tests that drain every queued provider/full request and settle all waiters across equivalent orderings, rejected cycles and stop. Implement only in its assigned Sol feature wave."
+  },
+  "limits": [
+    "Original17 cases run complete and unchanged, but their original nine external provider/auth/cookie modules remain mocked.",
+    "Supplement spies only runFetchCodexOnlyCycle and runFetchAllCycle to control order; original queue and stop/waiter logic execute unchanged.",
+    "The33 original/license staged hashes remain unchanged after adding a separate supplementary file/config/result.",
+    "No real account, credential, provider request, reset credit, native host, model inference or installed-product operation.",
+    "Provider-specific raw result construction remains a named source-input boundary, separate from this reviewed service publication policy."
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "disclaimer": "PILOT EVIDENCE ONLY. This is not a full-suite or full feature-parity result. It validates a single, pinned pure-function capsule in isolation and does not establish that the source project's full test suite passes, nor that this feature is at parity in the rewrite. Execution approval below is a caller-supplied digest binding, not independent proof that a human reviewed the manifest.",
+  "capsuleId": "browser-client-host-id-argument",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "capsuleRoot": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-browser-client-host-id-argument-tmbct9",
+  "stage": {
+    "ok": true,
+    "stagedFiles": [
+      {
+        "path": "src/shared/browser-client-host-id-argument.test.ts",
+        "role": "test",
+        "sha256": "57186d324fcabcba5a88915b5354d48161b7b09a319225f69b816ab72567f88c",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-browser-client-host-id-argument-tmbct9/src/shared/browser-client-host-id-argument.test.ts"
+      },
+      {
+        "path": "src/shared/browser-client-host-id-argument.ts",
+        "role": "module",
+        "sha256": "9a41ecfa0125fcd2dbb76cec4f32ff73d70682e03c8cfd343b9675bcf4d21d53",
+        "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-browser-client-host-id-argument-tmbct9/src/shared/browser-client-host-id-argument.ts"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+      "target": "/Users/carlos/Documents/Drogon-rewrite/.preflight/parity-baseline/audit-browser-client-host-id-argument-tmbct9/LICENSE",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 Lovecast Inc."
+    }
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferences": [
+    "Original installed Vitest4.1.11 with Node24.19.0/macOS arm64. Minimal node config omits original aliases/setupFiles/feature-wall define/GC-webstorage/platform-worker settings unused by reviewed closure; no full-config/typecheck equivalence claim.",
+    "Default unit timeout instead of original30s/60s; outer timeout30s. No installs, only a fresh owned stage."
+  ],
+  "execution": {
+    "mode": "execute",
+    "ok": true,
+    "problems": [],
+    "approvedManifestSha256": "e90487cdde0c9804b87cf50d5f6ec553fe85f2eb5f13753933d9c44f63baef30",
+    "nodeBin": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "vitestEntry": "/Users/carlos/Documents/Drogon-mentu-session/node_modules/vitest/vitest.mjs",
+    "installedVitestVersion": "vitest/4.1.11 darwin-arm64 node-v24.19.0",
+    "timedOut": false,
+    "exitCode": 0,
+    "signal": null,
+    "testCounts": {
+      "numTotalTests": 7,
+      "numPassedTests": 7,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numFailedTestSuites": 0,
+      "success": true
+    },
+    "expectedTestCounts": {
+      "files": 1,
+      "tests": 7
+    }
+  }
+}

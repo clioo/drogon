@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06",
+  "workPackage": "WP-CAP-BOTS",
+  "candidateRunner": {
+    "node": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "nodeVersion": "v24.19.0",
+    "vitestEntry": "apps/desktop/node_modules/vitest/vitest.mjs",
+    "vitestVersion": "5.0.0",
+    "platform": "darwin-arm64"
+  },
+  "commands": [
+    {
+      "suite": "bot-reactive-dispatch",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-CAP-BOTS/reactive-dispatch/bot-reactive-dispatch.contract.test.ts --environment node --reporter dot",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "ERR_MODULE_NOT_FOUND: apps/desktop/src/main/bots/bot-reactive-dispatch",
+      "classification": "blocked_binding_not_behavioral_red"
+    },
+    {
+      "suite": "bot-responsibility-owner",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-CAP-BOTS/responsibility-owner/src/main/bots/bot-responsibility-owner.test.ts --environment node --reporter dot",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "ERR_MODULE_NOT_FOUND: ./bot-responsibility-owner",
+      "classification": "blocked_binding_not_behavioral_red"
+    },
+    {
+      "suite": "bot-schemas",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-CAP-BOTS/bot-schemas/bot-schemas.contract.test.ts --environment node --reporter dot",
+      "exitCode": 1,
+      "testFiles": "1 failed",
+      "tests": "no tests",
+      "error": "ERR_MODULE_NOT_FOUND: apps/desktop/src/main/bots/bot-schemas",
+      "classification": "blocked_binding_not_behavioral_red"
+    },
+    {
+      "suite": "BotsPage",
+      "command": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-CAP-BOTS/bots-page/BotsPage.contract.test.tsx --reporter dot",
+      "exitCode": 1,
+      "testFiles": "no tests",
+      "tests": "no tests",
+      "error": "Vitest pool could not start because package happy-dom is not installed; static binding inspection also found the candidate component and contract absent",
+      "classification": "blocked_test_environment_and_binding_not_behavioral_red"
+    }
+  ],
+  "preservationVerification": [
+    {"suite":"bot-reactive-dispatch","method":"normalized diff allowing only provenance header and import seam","exitCode":0},
+    {"suite":"bot-responsibility-owner","method":"byte comparison against pinned source","exitCode":0},
+    {"suite":"bot-schemas","method":"normalized diff allowing only provenance header and import seam","exitCode":0},
+    {"suite":"BotsPage","method":"normalized diff allowing only provenance header and combined import seam","exitCode":0}
+  ],
+  "sourceBaselineReuse": {
+    "bot-reactive-dispatch": "docs/migration/source-regression-node-20260906.json: 29/29 on Vitest 4.1.11 / Node 24.19.0",
+    "bot-responsibility-owner": "docs/migration/source-regression-node-20260906.json: 11/11 on Vitest 4.1.11 / Node 24.19.0",
+    "bot-schemas": "none established",
+    "BotsPage": "none established"
+  },
+  "verdict": "All four original suites are frozen as port artifacts; all four candidate bindings remain blocked, so there is no behavioral RED, GREEN, or candidate parity evidence."
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "capsules": [
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-shared-control-subscriptions.json",
+      "approvedManifestSha256": "13d3f84d5e092795b32a059ad13d0af440abcbdbe02a08551119fa7c23c13774"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-shared-control-subscription-close.json",
+      "approvedManifestSha256": "b8ae85b02b51f81a2cb581b79a45fd73b4bb682a3b9db7a89f668d2f076ceb52"
+    },
+    {
+      "manifestPath": "tests/parity/baseline-capsules/remote-runtime-shared-control-keepalive-refresh.json",
+      "approvedManifestSha256": "fc1dc585275c02970d067e3f70021f69781450293dc6193c31c870116539fa7d"
+    }
+  ]
+}

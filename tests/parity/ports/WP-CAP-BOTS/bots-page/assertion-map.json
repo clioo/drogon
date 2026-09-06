@@ -1,0 +1,70 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/renderer/src/components/bots/BotsPage.test.tsx",
+  "sourceSha256": "bd056caf58c50dc0f3f09ebc9729db05153bd15d48d5cc9a1481a544739d264f",
+  "portPath": "tests/parity/ports/WP-CAP-BOTS/bots-page/BotsPage.contract.test.tsx",
+  "portMethod": "literal assertions; provenance header and import-only binding seam",
+  "sourceCases": 8,
+  "sourceExpectCallSites": 13,
+  "sourceAssertionEvaluations": 15,
+  "binding": {
+    "status": "blocked_missing_test_environment_and_candidate_interfaces",
+    "expectedComponentPath": "apps/desktop/src/renderer/src/components/bots/BotsPage.tsx",
+    "expectedContractPath": "apps/desktop/src/shared/drogon-bot-contract.ts",
+    "missingInstalledTestPackages": ["happy-dom", "@testing-library/react"],
+    "seam": "tests/parity/ports/WP-CAP-BOTS/bots-page/candidate-binding.ts",
+    "runnerResult": "setup_failed_not_behavioral_red"
+  },
+  "cases": [
+    {
+      "id": "description-fallbacks",
+      "title": "renders the Bot description fallback: $expected",
+      "sourceLines": "50-64",
+      "dataRows": 3,
+      "assertionLines": [62],
+      "assertionEvaluations": 3,
+      "obligations": ["title wins", "instructions fallback", "Ready for a purpose fallback"],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "actionable-empty-state",
+      "title": "renders an actionable empty state",
+      "sourceLines": "66-70",
+      "assertionLines": [68, 69],
+      "assertionEvaluations": 2,
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "model-and-character-preset",
+      "title": "keeps model selection at the harness default and applies a real character preset",
+      "sourceLines": "72-86",
+      "assertionLines": [80, 81, 83],
+      "assertionEvaluations": 3,
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "no-invented-harness",
+      "title": "does not invent a harness when discovery returns none",
+      "sourceLines": "88-99",
+      "assertionLines": [94, 95, 98],
+      "assertionEvaluations": 3,
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "responsibility-owner-routing",
+      "title": "runs a responsibility through the Bot card that owns it",
+      "sourceLines": "101-125",
+      "assertionLines": [120],
+      "assertionEvaluations": 1,
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "recoverable-error-state",
+      "title": "renders a recoverable error state",
+      "sourceLines": "127-138",
+      "assertionLines": [135, 136, 137],
+      "assertionEvaluations": 3,
+      "portStatus": "preserved_blocked_binding"
+    }
+  ]
+}

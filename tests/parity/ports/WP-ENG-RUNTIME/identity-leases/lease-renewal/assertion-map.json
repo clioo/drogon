@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourcePath": "src/main/runtime/agent-session-lease-renewal.test.ts",
+  "sourceSha256": "901b96b322a1f040fe6dd037fd4ab0d12de9b6210ba982485a4c3800155d530d",
+  "portPath": "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/lease-renewal/agent-session-lease-renewal.contract.test.ts",
+  "portMethod": "literal source suite with provenance header and direct candidate import normalization only",
+  "sourceCases": 2,
+  "sourceExpectCallSites": 7,
+  "sourceAssertionEvaluations": 7,
+  "binding": {
+    "status": "blocked_missing_candidate_interfaces",
+    "expectedPaths": [
+      "apps/desktop/src/shared/agent-session-record.ts",
+      "apps/desktop/src/main/runtime/agent-session-record-store.ts",
+      "apps/desktop/src/main/runtime/agent-session-record-store-file.ts"
+    ],
+    "bindingArtifactCreated": false,
+    "runnerResult": "collection_failed_zero_tests_not_behavioral_red"
+  },
+  "sourceBaseline": {
+    "status": "not_established",
+    "inventoryEvidence": "docs/migration/parity-source-tests.json",
+    "note": "The retained source inventory records the suite bytes and runner membership but not an execution result; the read-only reference was not executed from its cwd."
+  },
+  "cases": [
+    {
+      "id": "stale-fence-single-renewal",
+      "title": "refuses a stale fence without changing the record",
+      "sourceLines": "78-87",
+      "sourceAssertionLines": [81, 86],
+      "portLines": "80-89",
+      "portAssertionLines": [83, 88],
+      "assertionEvaluations": 2,
+      "obligations": [
+        "renewing with a stale fence rejects with agent_session_checkpoint_stale",
+        "the rejected renewal does not change lastRenewedAt"
+      ],
+      "portStatus": "preserved_blocked_binding"
+    },
+    {
+      "id": "atomic-batch-rollback-and-durability",
+      "title": "leaves every session durable when a later renewal was superseded",
+      "sourceLines": "89-119",
+      "sourceAssertionLines": [100, 107, 108, 110, 116],
+      "portLines": "91-121",
+      "portAssertionLines": [102, 109, 110, 112, 118],
+      "assertionEvaluations": 5,
+      "obligations": [
+        "a later stale renewal rejects the whole batch with agent_session_checkpoint_stale",
+        "the earlier in-memory record is rolled back exactly",
+        "the durable store bytes remain unchanged",
+        "reopening retains both session ids",
+        "reopening retains a non-empty provider handle chain for every record"
+      ],
+      "portStatus": "preserved_blocked_binding"
+    }
+  ]
+}

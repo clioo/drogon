@@ -1,0 +1,36 @@
+{
+  "capsuleId": "packaged-daemon-entry",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "description": "4 unchanged original packaging contract cases.",
+  "entryTestFile": "config/scripts/verify-packaged-daemon-entry.test.mjs",
+  "files": [
+    {
+      "path": "config/scripts/verify-packaged-daemon-entry.test.mjs",
+      "role": "test",
+      "sha256": "f678f254a12f37056ccf37010a6f7028863002c9863aea7d934799dfb80327ee"
+    },
+    {
+      "path": "config/scripts/verify-packaged-daemon-entry.cjs",
+      "role": "module",
+      "sha256": "05e0cf0d9e2e88338837853ac19a2519de310155efad92d076037e47ade6624c"
+    }
+  ],
+  "license": {
+    "path": "LICENSE",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Use original installed Vitest4.1.11 with Node24.19.0; no installation or original-tree writes.",
+    "Minimal node config includes only the declared test extension (.test.ts or .test.mjs); omits renderer aliases, feature-wall define, DOM/host-port setup, execArgv and original extended timeouts. Reviewed closure does not depend on those facilities. No full-config or typecheck equivalence claimed."
+  ],
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 4
+  },
+  "isolationRationale": "Creates only owned temporary package directories. Spawns short Node children containing fixed test snippets: emit usage then exit1, require a deliberately absent package, or exit0. No real daemon, PTY or service. Original cleanup removes owned directories only.",
+  "testEvidenceBoundary": "Verifier unit behavior, not boot of a real packaged service. No executable architecture, OS, timeout/signal, credential or module-closure completeness proof."
+}
