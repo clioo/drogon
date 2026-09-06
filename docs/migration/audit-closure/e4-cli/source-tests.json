@@ -1,0 +1,3613 @@
+{
+  "schema": "drogon.e4.source-test-debt/1",
+  "sourceManifest": "docs/migration/parity-source-tests.json",
+  "sourceManifestSha256": "85ac41eb43641abd6aff44ce1640e217b00e22ccfbf59eb6832a3ffb0f5caf83",
+  "scope": "All test/spec paths under src/cli plus same-stem tests for reached CLI/shared boundary source modules, selected from accepted manifest; no marker recount. Per-command associations are discovery only. Full shared/runtime and script runner debt remains in accepted full manifest.",
+  "counts": {
+    "cli": 111,
+    "adjacentBoundary": 39
+  },
+  "executed": 0,
+  "tests": [
+    {
+      "path": "src/cli/agent-context.test.ts",
+      "sha256": "09afd9477fcc186cb7164f381aef3b3be885a97f5e535a15e10d66fd28f81acf",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 9,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/args.test.ts",
+      "sha256": "9117c4ed93977f6a774f58a3f91126a87019c61fae0c1cff5537144e7ec0c3a2",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 32,
+        "each": 3,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/automation-format.test.ts",
+      "sha256": "7a23802e9b010d5ad1676863663f134fec2968d3cdaacadac8417cfc5855bbfc",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/automation-owner-conflict-recovery.test.ts",
+      "sha256": "4a30e1bf8ed7c3c0900ee2b2eae7af31a1c0f408bf51f4332b97eaa8f7adf5dd",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/base64-payload-byte-count.test.ts",
+      "sha256": "8735ecf9ce0c147f2c29f6db7d9317751156b25195045ba85dc96c3bbdbdbd9e",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/browser-cookie-credentials-empty-value.test.ts",
+      "sha256": "f3756a9f25c4530e16f4327ea7f67defdb3d07f7b9308594fedee5a48c3fd576",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/browser-storage-empty-value.test.ts",
+      "sha256": "6063e695a07ffa76391d00cf64b604c077ea460956a007c9d018282d91a361dd",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/browser.test.ts",
+      "sha256": "31c049c1ee37fb7e916b3098649cb966e5d2d91c873cd18d6c5621cb25d211f5",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 31,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/cli-command-name-parity.test.ts",
+      "sha256": "15bd3fbb3ce124895ca350d906bbc44f69340df8c56bfdfa1e8588bee3dd4fa0",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/cli-version.test.ts",
+      "sha256": "76bba7e39bfacd917192012183de62a3007c8ee96a5c70f870f5dc16eb322e6d",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/codex-command-classification.test.ts",
+      "sha256": "a9749727d78603ada1ed327b43b839960d50af7be3ff00b5e637d8c0e7fea337",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/command-suggestion.test.ts",
+      "sha256": "7f13bdf45d2b892aa66f647333eec00f2520cf35af65f30deab4cbc3167be8b6",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 18,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/computer-format.test.ts",
+      "sha256": "8961f05977a66ad87daf510052a529bef84e87e474d1652f06bcecc7cc300212",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/emulator-logcat-format.test.ts",
+      "sha256": "76cac0bcc0a26c8baa4aa41d75a8a6716e51f3629abf3a678835fdd0f96ff73b",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/execution-host-flag.test.ts",
+      "sha256": "7aa57b2017439e9027f8c6ae818a059a1a951e491d3e994c4b3297c245aa2282",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 23,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/flags.test.ts",
+      "sha256": "9b7e7283b1be15ade295971b6dcd795755b33488eb1add7213ec859fc72f95c8",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/format-recovery.test.ts",
+      "sha256": "db97854d4f0273aa4fe694ea369c5f1800ab3f517d0902c9c0971709ffbdaeeb",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/format.test.ts",
+      "sha256": "08051f144d39aa4c0a56fe2fba3952b256f4b6943026453c0ea7454b3a7a6700",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 23,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handler-group-manifest.test.ts",
+      "sha256": "07f0f36fdca72e6b2657f92f6cca91f9b0530668cbfe0707f10da256a3641c69",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 11,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": "full",
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/account.test.ts",
+      "sha256": "b8569095f24ea1c9a0d99320e8037ee468a3a33ebfa0771e9f344d76b27d2b16",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 23,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/agent-hooks.test.ts",
+      "sha256": "449164532c0e178a83eb84a5801ccc351977eed98002f0f68c0b08427f132443",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 9,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/artifacts.test.ts",
+      "sha256": "85b8e2db598242ec934a6dfaea7c7c5f7f7ab04cd85da6b19f232a31780f6297",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 4,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/automation-destination-fencing.test.ts",
+      "sha256": "f9d09aea9f79ff2f44de6303856f1a385171612407df71c84bfbde6a0d54a3e2",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 8,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/automation-owner-fencing.test.ts",
+      "sha256": "6147c16bc6dba99facc32e18c4a8d0e334fbc89e4b3589fc36fc34feedb0a16c",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/computer-action-routing.test.ts",
+      "sha256": "9d4c296d5ef776c2abd6905edf7167b8ccb581a754283de928612bec0b65e839",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/computer-action-validation.test.ts",
+      "sha256": "0a850698cb78fed3e1b90652c8c9e7929a491cf3908f96ac483cadbd1f46c3c2",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 17,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/computer-state-formatting.test.ts",
+      "sha256": "616337b0fe99090bc4f70290b041a1f2d8fc89f7e3f5ee4279bab67b68644547",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/computer.test.ts",
+      "sha256": "66339c191eb5142c0f280fa308f2eadba7f94466c1da9ff95b048f431e7efdc3",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 14,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/core.test.ts",
+      "sha256": "f6edb456c39582b5050d202e8f379bd19ed50f79c1ff20f3a74ddd5f0cfce024",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 0,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": "full",
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/emulator.test.ts",
+      "sha256": "ffb119b7e50ae7b01a374bbe806f874150850b9fd0803c2d790dcac333f32d96",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 9,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/file-absolute-paths.test.ts",
+      "sha256": "f462cffd7b63c6d24cc16c9e93e11d495554194aff342c2b4fd1f56ef6c20a6c",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 18,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/file.test.ts",
+      "sha256": "3c60417974b9455bdec42a1cbf63b65b411e8b03610b721a1d70587f1d081441",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 12,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/interactive-login-interruption.test.ts",
+      "sha256": "9ffe8271083dc9273a407ed99e79fb0a2e8a8b8286bc0670b4316c685911862e",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/linear.test.ts",
+      "sha256": "436dbe1d83884f5160eb7102fd0f888d84966ab3a9b5e84c528186f297404969",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 23,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-check-identity.test.ts",
+      "sha256": "6225ad4b3990cea227c0e2377ed6de8991e12ccb73adfac9c502901125eed83d",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-federated-legacy-settlement.test.ts",
+      "sha256": "dcd99d3c66a319745737c9cef00f964559fdbc161bad977451e9acafb0c28a71",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-gate-cli.test.ts",
+      "sha256": "55a86112bcf4b4f0d4e26f40830442c5b100188ed20311d9fdf5c6f368f313a2",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-legacy-read-only.test.ts",
+      "sha256": "b9fad19ec81beb67fb51fb62d5a2f40b4551a5199aa61f47a9129fc5a8bba292",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-lifecycle-json-rejection.test.ts",
+      "sha256": "ebd5144e3ec109a3ed6327251beadb01f7636ec63b3fa71deb49ab7a2048b540",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-lifecycle-rejection.test.ts",
+      "sha256": "154d4a07cabdd1eaea1755fdeea4594413da69aa5b17f851524e5edefd1bc7da",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 10,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-migration.test.ts",
+      "sha256": "94f97fe9cf40efa90fb300baba6d5bdb09134d79b8ca38cd0e8a875a250bc19b",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 0,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-module-boundaries.test.ts",
+      "sha256": "457be69f8a81098e45ad565a02e5ccc75831c095ac59c8fa6730abb2853fbf8e",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 8,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-request-show-cli.test.ts",
+      "sha256": "5fec130163c7191cc880f725e0d7e6e1ba6deca70217617c255724266d3654a5",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-run-cli.test.ts",
+      "sha256": "09f1455e7aaa2c4c1e1f7f9fe81e21c7b88ddae4a582b7584139f5f1c5c6f2e4",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 10,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-send-receipt-warnings.test.ts",
+      "sha256": "9209192ecb573e7ae00d21d7fa15fa6c0754529cec40279d2ef6ac382bd6f34a",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-task-create-cli.test.ts",
+      "sha256": "0ebcf9c8b7d11874f23201eaebc2e613da6aae6e698a9e71c5f29e52d99387bf",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-timeout-cli.test.ts",
+      "sha256": "82fa0e12e12631b4f8f33460cf0013c518598943979bf3aa8c12556743af07b1",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 8,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-timeout.test.ts",
+      "sha256": "dadb31a4e44531215b45f790988b3e3e21cdb96f8707650c497cb4a9fd34d81f",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 4,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-windows-ask-cli.test.ts",
+      "sha256": "242dc570843aa4d8286c9356b9c81af2250fa2843734389af8af1d653e8060aa",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-worker-cli.test.ts",
+      "sha256": "ea7030a14b2dd68cb034d0a030cb8c5c025a8eb0c63991f14e41e1173dce429f",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 9,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration-worker-show-wait-cli.test.ts",
+      "sha256": "7a3d43373ddf7f971c6d7b2bb1216e863d9e2afd7a4d5f8e8ec9a3eb29a6427b",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/orchestration.test.ts",
+      "sha256": "96c2751213dd032777d0fa4e40f9d301996a96032ee50a2cd8fcfa91a04371ab",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 32,
+        "each": 4,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/skill-sharing.test.ts",
+      "sha256": "7fb2a54a7cafd0c126cbd1752c89c106e40a51138987bd735ce09d230a588cce",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/handlers/terminal.test.ts",
+      "sha256": "106f621279b8823237d6a92abc0b997360295ad5eb639e02c07eb349f511418f",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 13,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/host-selector-alternatives.test.ts",
+      "sha256": "cd113c247df1359fcda2d0b8509ddb032469fd9eeaa1219f0b060ee28aa2c547",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 18,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-automation-identifiers.test.ts",
+      "sha256": "a6d1b044810527d3ada6f3d937a32454021e9709915da7db0c41367469e57dfb",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-automation-schedule.test.ts",
+      "sha256": "d13e1d9779a098c40245187a6e3dc8cb94948132a2a0f11e206ec56935cd72db",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-automation-session-reuse.test.ts",
+      "sha256": "36e0bbeeafd7749f3c9b487de61d87d1e944d2e38e654118d2197b83d9b5af06",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-automation-source-context.test.ts",
+      "sha256": "5236c91873c9afbb7c8bf2fda93b99403cb3d721c44062ec26d28d4b83f695f0",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-automation-target.test.ts",
+      "sha256": "44893f78a541d2603ed67a3e3f2f199352bf95ae9c1dd886e935e526d65afb20",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-device-commands.test.ts",
+      "sha256": "168c15e24b5c979eefc68079e943e210a08cf3c30e8d5da5e9108c387af3ef6a",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-environment-commands.test.ts",
+      "sha256": "187a9ccdbbc5b8e0c548e7feb67a6bad0d10894a9da78b4ef9fba91a0e451f51",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-local-command-routing-flags.test.ts",
+      "sha256": "90885d65719072f5d187d10e27e4f0f5beff35beb03651045639fe1c76aa2f7c",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-memory-diagnostics.test.ts",
+      "sha256": "631f464639acb9d0f65eac07a622489a94db7cebbc268f1e64e4d612afcf452d",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-omitted-host-scope-selectors.test.ts",
+      "sha256": "f884fcbe4fd33e4cf77cc06f5eb758ce451214c6f538d9f0acfba89221d34cc2",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-orchestration.test.ts",
+      "sha256": "026ebb4c03e112d26123615e2b3f0d0e2c5ef1d79d3503fb97b908559a2b3c93",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-project-setup.test.ts",
+      "sha256": "44f8250493762d3449578907d12e824ad07070d0c930beedb23fd1797b4ab0fd",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 21,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-serve-command.test.ts",
+      "sha256": "922c3c3e032debfea17aa9c0dd2fa21fc9a552010f5d438e13bdde690f631035",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 8,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-terminal-commands.test.ts",
+      "sha256": "21ea2104cc0e8854e382ed86c58f78941ab47e43d47b6dcc51ea34c530bcb0ad",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 18,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-terminal-list-host-scope.test.ts",
+      "sha256": "593400f4fcaaac4a85d4ae947b630f728889a50856f594dd1b4a01fc571a3090",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-vm-recipe-doctor.test.ts",
+      "sha256": "23d0917d109e8c54a2478c961729f94d5f7e16f5b753864365292ba4d78a1697",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-worktree-create-agent.test.ts",
+      "sha256": "80b64e3308698afb8b3930e5f8169ce4b7289b76bac39670d4fbdd8cb5fc2a5f",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-worktree-create-linear.test.ts",
+      "sha256": "7594703fefc29be7b0e98bdb8e53aefff8b1a10e626bcd10bf465856c7a35363",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-worktree-create-parent.test.ts",
+      "sha256": "08ed55c850e1c2065ebb40d88cda30776041115f1f5dd1c7c6da96a15025d855",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 11,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-worktree-create-target.test.ts",
+      "sha256": "9aca03e9dc5ce790c724b98ad868ac349c3df526512e5e676e50ee52acf910df",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-worktree-selector-resolution.test.ts",
+      "sha256": "34ac5a1cd5031da2b88c6714f749107f70e3081dbe179bea33377705d4531bd9",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": "partial:100-250",
+      "executed": false
+    },
+    {
+      "path": "src/cli/index-worktree-set.test.ts",
+      "sha256": "19749559f8560e7212b90b57d695acfa427c901e897456f060423855f7abb694",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 10,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/index.test.ts",
+      "sha256": "8f26914ea7a83cf930051c55dda96f5679c67ba5d6c91d79f8e9c3e829d6d8db",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 23,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/linear-format.test.ts",
+      "sha256": "5037e1db59792332e2c9f97e36754e7488905f977c3a6f03b6e6f6ed12274d9e",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/main-module-bundle-parity.test.ts",
+      "sha256": "66526e536579f61f6cf530ab9b794a58f9c059ae50749a51aea68c61051a9401",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/orchestration-mutation-recovery.test.ts",
+      "sha256": "3cadce1666eb86c76a453e5a7768f852c75144cd50a38aa1aca177556940bbfc",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 9,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/quote-stripped-json-flag.test.ts",
+      "sha256": "b8109fb2d2f024c56a3354724dfac192401217e3d11ed0489d0816cd58796148",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/registry-parity.test.ts",
+      "sha256": "29ff9b3b5775bcabe3b3c85211215086df6b7d9b419ceedee8ad8ca2d283a809",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": "full",
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime-client-deferral.test.ts",
+      "sha256": "85283d05cb162cdd122b2506b7d6ae19d59dc342baec9792f3d3eae4369d5736",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 3,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime-client.test.ts",
+      "sha256": "0fef562127e07eb327ba8b373e1ca45cb12b284c34e50337c9064cf023daa8da",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 15,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/client-recovery.test.ts",
+      "sha256": "7d82881c7b01e2c6fa42c4975b9b83e1dfc49ecf84c89e690f9e864bf56b7fd0",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/client-timeout-policy.test.ts",
+      "sha256": "0eda528779fc6ad5010b1d282a3577bcc4710de399b332df43a8adf3c7410bd5",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/envelope-schema.test.ts",
+      "sha256": "4cdeb2d325114e2e6b6f0f40c4ea879556160658ab6148a4c209b9cf632b3c06",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 16,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/environments.test.ts",
+      "sha256": "35b97a4d126d44e0e40a8a279dac72c5030eb95f608f28648c589ef1733df0ea",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/launch.test.ts",
+      "sha256": "e9e9a5ec06dc6ca373c7603fe0787dfb3f9cc40561fcade81ab0607eed56d87d",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 11,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/orchestration-recovery-command.test.ts",
+      "sha256": "359edcb11e836fb884fe651bd3d4b8f93bd68d2d500ef7fcd0dc776aceec6c45",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 3,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/serve-signal-exit-diagnostic.test.ts",
+      "sha256": "c7ca934c0a85a35859b876546a61dea1e4a12b46cdaabdd4f18e7afe61705c3b",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 12,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/status.test.ts",
+      "sha256": "64b1e5a28f626a624dce03264f1373187126f283295d38e2dd9ac1b1473844cd",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/transport.test.ts",
+      "sha256": "8c02e5f805b9bc7f517a034898a1c3800b07ea43105313ce436b013b917d0d96",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/types.test.ts",
+      "sha256": "d1daf682022e3488ba2c5b03abfdefbc5bc6ac931fb5beb451727ff7203c0a9d",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/websocket-transport-error.test.ts",
+      "sha256": "479c2a5603a57c226f4887a868c23aaa19556670a8061cb1f158ce9896d977b4",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/runtime/websocket-transport.test.ts",
+      "sha256": "d553058518b83321199616cde805acd8ae92d72d9d726a55a78a69dc95f566c8",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 8,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/serve-electron-flag-parity.test.ts",
+      "sha256": "1d403040e03a6cca43589caf21e0eaf7cb1f5635074134d4ec8b0d97dedf1dad",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/shell-command-quote.test.ts",
+      "sha256": "baf4756c1bd68033ffc3492b6444a78827398b993f7883c13f903d8963cf20f1",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/skills.test.ts",
+      "sha256": "ce2533c4841b2b0869b986a5a96c5bd6a99c5d68e951750c6cb794463fd03ecd",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 46,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/specs/account.test.ts",
+      "sha256": "0ec32d43c771c7777224ed95a052cba60b145c1fa562928a622d841072ada2c6",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/specs/bundled-guide-flags.test.ts",
+      "sha256": "f4c5a86df0b7f1c816c82ff6639b40783e6e7302c5b4c1d8ed08e11cdae15645",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/specs/computer.test.ts",
+      "sha256": "2f68a73be74e81f1d32c8c2fb6d8fa1a98dbcf83c66f4c3c33980f5764eb8396",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/specs/orchestration.test.ts",
+      "sha256": "e5a5cfbdfeaa97522fe47ec73acf36c5b1ad231bd5ef2819f439f8157fb74195",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/specs/skills.test.ts",
+      "sha256": "a3ba05d0ea754ed0d3aad846ae1dadb302d49933baad8c41594402d88184d682",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/terminal-format-draft.test.ts",
+      "sha256": "203e5a93bfdd989f4cd238d2c219b03a8c55814768855352661123d95fe3a2ef",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/terminal-format.test.ts",
+      "sha256": "ae8305abe969bb11118cdbf4f0ab535a23ba0fb98bf266c709d059cf5b846ef3",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/terminal-list-host-scope-format.test.ts",
+      "sha256": "48a9a60e4958b1112da140eca88e62969818811b7d8ba5286b226ea7e518d94f",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/terminal-read-screen.test.ts",
+      "sha256": "f8de895b38c8b7745e3639cef47a45a9a84e0f537a3de33e25a02b493c186146",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/vocabulary-policy.test.ts",
+      "sha256": "94462c0f2923a90620104c8455debb6b4fcdffae04e11772d2ecc82ea390084e",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/cli/worktree-selector-wsl-posix-path.test.ts",
+      "sha256": "659581f53b712f6ea1111567489cdaf2c5b00e3f01b52ac4bdbc928db32c92c0",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 3,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/main/agent-hooks/managed-agent-hook-controls.test.ts",
+      "sha256": "1b8be4292b17659d7d5942d9d1ebfbac23432765944133ba2289b098ca3d1cb2",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 18,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/main/claude-accounts/keychain.test.ts",
+      "sha256": "d6983cd7a5bb0f90a0a33050552cc8771b3f494997258bf2827a62a7fc654402",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 9,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/main/startup/cli-launch-redirect.test.ts",
+      "sha256": "847917fa425db607aed69a7e7c24c1c2d08a56d45b42675c01f3266c3576842d",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 22,
+        "each": 3,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/agent-feature-install-commands.test.ts",
+      "sha256": "685da3d8cce40c4e391a44376de6c5d095d9a243ba15c0b64f2eecaface1b9b8",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 11,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/agent-skill-sharing-gate.test.ts",
+      "sha256": "43571fc7c365c52b699e85edda41e08e3f3ba5a3783a49802972d4f8de61bc61",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/artifact-sharing-gate.test.ts",
+      "sha256": "e64df0eae6cc3d03c6f913c2c5b03ee766aa00a5f6927e2130bcb1aeb63107d0",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/automation-run-identity.test.ts",
+      "sha256": "d8ab1bab4508c205335ce6ca3dc048cb7e2411f1149a2f1c1ba75e14631127bd",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/automation-schedules.test.ts",
+      "sha256": "573a3392f0c9a8423d9fdde33a23fb4d87ae1e9d86bf9e4759590572f3ddcb72",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 23,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/child-process/run-process.test.ts",
+      "sha256": "b1d59954a7aad0561502ea7762e40f4b5f67299a402e8df65815c27f71984c3d",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 15,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/child-process/windows-command-line.test.ts",
+      "sha256": "bc358a0abc0f6cc33f5d39326dab247c040b53013c031a5a22c9e997185b0fca",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 7,
+        "each": 3,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/cli-argument-boundary.test.ts",
+      "sha256": "21e67e48b2e4e79aef903c1a81685034a447bad497a6a7808ca55201a7cd4e17",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 1,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/computer-use-error-recovery.test.ts",
+      "sha256": "3e8a81b8b1b13cec06c7f60fafe67a63727346bc2f718a6ba46e7a8589412df4",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/computer-use-key-spec.test.ts",
+      "sha256": "37fa85fceb97056c0a1657e0ee5adb24277194b931dcecf0f47e571ed8352ffc",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/constants.test.ts",
+      "sha256": "20d597f09ab8c611f35668daacec20077eccefefc03b3f9242815657aca95379",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 30,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/cross-platform-path.test.ts",
+      "sha256": "f497e1c980c4d027f20b3fea1873c52c3e334e36c526be9afaa3a2e8c2ea8f60",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 17,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/ephemeral-vm-recipe-doctor.test.ts",
+      "sha256": "caf6b0920e7f27e55746cb9113f71e450752982852c737a18b6f9670b1b0577c",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/ephemeral-vm-recipes.test.ts",
+      "sha256": "60fddcc33d9d4e8d51f8d1e24b96c1e4b1f9b2a63b05842657d042937b214b86",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 12,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/execution-host.test.ts",
+      "sha256": "50b1cf28114e5c7848fd731bd60b5fac9d1ddf434139276813c9858de65c669c",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 12,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/linear/links.test.ts",
+      "sha256": "4f7de87029d6c905b53b5660e87e300f86472cf31e5b968e8a154f9b29a2e011",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 16,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/orchestration-ask-timeout.test.ts",
+      "sha256": "37286eff3fb99e7a1e854854c2638ccc4a5e963edc176babc9e773d15299d13b",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/orchestration-check-output.test.ts",
+      "sha256": "51b6c06cc807b41d63920a1ae237ab33a673adff2814b8ee9df28f41091b47b2",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 1,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/orchestration-compatibility-evidence.test.ts",
+      "sha256": "07d6393305fc25e5ba9e0fb0c0bf89f39ef730a423d822d758781b75652a90d8",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/orchestration-rpc-contract.test.ts",
+      "sha256": "973b56523857ef620a97930a9dd579da8ffe067fe6fdcd67ee53ce30bd61334a",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/orchestration-task-summary.test.ts",
+      "sha256": "fa0934dd078056b6513a506cd51fcd4badfce4d13c0385b996bd1c849abbc6dc",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/orchestration-timing-budgets.test.ts",
+      "sha256": "5f1a902d15ea40a266b29fe55dbc142d49527dd2a9104e14b06f4f7a6f22746c",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 4,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/pairing.test.ts",
+      "sha256": "a6d7e18cb846443eb366903d22f86c8852dc78a0a6bb279fb6beb92e59fb82a9",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 18,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/powershell-native-argument.test.ts",
+      "sha256": "b57d94c9db112b5404e3f7e2ded781728160ccc1f3253ab5fea26a23500141fc",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 2,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/protocol-compat.test.ts",
+      "sha256": "e6c5842c4c4099e5a02fc49d780d0cf72cfe8ef4e7fbdb097cdc2810bb3cebac",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 16,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/runtime-environment-store.test.ts",
+      "sha256": "29c8fe83fee2baa5548c01dc2ff0bc43849cc9c981c13835a74e3899774b746b",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 8,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/serve-option-validation.test.ts",
+      "sha256": "cfbb3119085a98a80890dabf3eccfcba6616d10f9213e0699c5815d1d31967bc",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 2,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/skill-bundle-name.test.ts",
+      "sha256": "82e92f960ea1c8e14b89c0a9152152862a098dc5d07c7455253369b391388d2c",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/skills-cli-agent-keys.test.ts",
+      "sha256": "52b3655ed762152ceb3c2af80a395239154aead4d4219f241ef06891aa7da89b",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/task-source-context.test.ts",
+      "sha256": "53744895fd9e802a03a3a8a2e0738f6034e6ee633c4b1920fae0c9d6a9a69e53",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 13,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/timer-delay.test.ts",
+      "sha256": "78cd05f25efa711d4c37bb411be1b60fc280e0d823a2e07111d98b82fe40bbfe",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 0,
+        "each": 6,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/tui-agent-config.test.ts",
+      "sha256": "74282f5c88bfd28b892031161c5709bdfc64bad38d27fc3c217385109aa109d6",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 3,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/tui-agent-selection.test.ts",
+      "sha256": "13ed10e999e411f2fdf94f5e6bffd6a5bf7660df060b047a8933937332cc1554",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 6,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/windows-console-input.test.ts",
+      "sha256": "569b8eafe134ec06e62324c58ceb56661dbf6c699c160a407d46e30d44021b91",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/windows-terminal-shell.test.ts",
+      "sha256": "e3cea6984f193a053a6727e0c2009552f154642381281dfb06cf19b778db16df",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 5,
+        "each": 0,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    },
+    {
+      "path": "src/shared/wsl-paths.test.ts",
+      "sha256": "ecd1e17a28127b544685cfc8c5b838abfe28adc2f32af84708bb37054c1a9e88",
+      "runner": "vitest (config/vitest.config.ts)",
+      "membership": [
+        {
+          "config": "config/vitest.config.ts",
+          "kind": "vitest-include",
+          "include": "src/**/*.test.ts",
+          "interpretation": "package-root-relative (repo root owns this config)",
+          "inference": "static-glob-match",
+          "verified": false
+        }
+      ],
+      "caseMarkers": {
+        "cases": 18,
+        "each": 3,
+        "skip": 0,
+        "todo": 0,
+        "only": 0
+      },
+      "bodyRead": false,
+      "executed": false
+    }
+  ]
+}

@@ -77,12 +77,13 @@
     },
     {
       "id": "E4",
+      "status": "accepted-source-characterization",
       "owner": [
         "WP-ENG-CLI"
       ],
       "evidence": "parity-cli-argument-contract.json + parity-source-contracts.json + parity-cli-skills-contracts.json coordinator-reviewed v2 + parity-cli-terminal-contracts.json coordinator-reviewed v2 + parity-cli-workspace-contracts.json coordinator-reviewed v2 (13 repo/worktree/folder-setup commands)",
-      "resolution": "Previous30 skills/terminal/workspace contracts retained. Root now accepts the bounded S1 CLI handler/request-builder mapping for204 remaining commands in audit-closure/e4-cli/followup-command-semantics.json:234 unique canonical rows, zero name or literal-flag omissions,74 pinned source hashes checked and independent source samples recorded in audit-root-followup-review.md. This closes the finite S1 source map, not E4 or runtime acceptance. Preserve all per-row branches, shared/factory contracts and unrun assertion obligations; do not repeat accepted censuses.",
-      "proofStillOwed": "E4-S2 validators, S3 transport/protocol, S4 local effects, S5 formatter semantics in the live followup-cli-boundaries task; original CLI baseline and candidate dual-target results without weakening assertions. Source mapping is not all-command test coverage."
+      "resolution": "Root accepts E4 source characterization: previous30 skills/terminal/workspace contracts plus204 S1 handler mappings cover234 canonical commands;22 S2-S5 helper contracts and the exact30 frozen downstream paths are reconciled in audit-closure/e4-cli/followup-final-boundaries.json. Final review verified136 pinned/working source/assertion fingerprints and136 ranges,14 preserved artifacts, exact path order, seven original gap classes and77 existing baseline suite paths. Independent source samples and correction decisions are in audit-root-followup-review.md. E3/E5 shared source obligations remain open with their owners; no requirement or test was dropped.",
+      "proofStillOwed": "T1-T4 remain mandatory: review every referenced original assertion body, execute77 prepared isolated baseline invocations and full allocated source suites, port unchanged assertions before each implementation wave, prove behavioral RED then integrated GREEN and real provider/OS/SSH/skew behavior. D-ACL/D-BARRIER/D-PHASE and other source findings require separate characterization and intended-correction tests. Source mapping is not all-command test coverage; no source test ran in this final review."
     },
     {
       "id": "E5",
@@ -118,7 +119,7 @@
     {
       "id": "T5",
       "owner": "Coordinator",
-      "evidenceNeeded": "Finite ownership/acceptance per Dispatch. Latest user direction permits five Astra E1-E5 leads during audit, superseding post-audit-only Sol scheduling. See audit-closure-coordination.md for actual Task/Dispatch IDs and depth prerequisite. Verify a real child lifecycle before calling the three-level hierarchy active; never bypass runtime nesting guards. Test-first/product acceptance gates remain unchanged."
+      "evidenceNeeded": "Finite ownership/acceptance per Dispatch. Five temporary Astra E1-E5 leads are audit-only; after complete source-audit acceptance, root Astra coordinates Sol implementation leads and approved disjoint leaf workers. See audit-closure-coordination.md and audit-semantic-followups.md for actual Task/Dispatch/depth and verified child lifecycle evidence. Never bypass runtime nesting guards or relabel an Astra process as Sol. Test-first/product acceptance gates remain unchanged."
     }
   ],
   "finalAcceptance": {
