@@ -44,6 +44,7 @@
   "enumerationFollowUps": [
     {
       "id": "E1",
+      "status": "accepted-source-characterization",
       "owner": [
         "WP-UI-CORE",
         "WP-UI-SETTINGS",
@@ -52,7 +53,8 @@
       ],
       "evidence": "parity-ui-capability-cards.json remainingGapsNotCarded/testFilesVerifiedButNotCarded; parity-ui-remaining-surface-cards.json; parity-ui-surface-reconciliation.json corrected pointers-only review (14 existing IDs,6gap/5test pointers); parity-ui-evidence-corrections.json; parity-drogon-ui-state-contracts.json coordinator-reviewed v3",
       "resolution": "The45-state Bots/Mentu/Meetings set is now bounded source/assertion-characterized with42 fingerprints, replacing inaccurate leaf v2. Keep original Bot drift assertions separate from current-form obligations. Backend pointers now distinguish flush spies from disk persistence, resume argv from executed retry, record-derived status from live process proof, and temporary-file meeting discovery from UI copy. No tests executed for this review. Do not repeat these bounded contracts; the remaining14 existing surfaces now have a corrected6-gap/5-test pointer map. Preserve per-state body/execution obligations and assign ownership, without repeating named discovery.",
-      "proofStillOwed": "Remaining14 surface pointers reconciled without blanket state closure:187 named declarations plus41 line-only entries are not assertion bodies. Rendered actions, screenshots and source tests belong execution waves."
+      "sourceGateDecision": "Root accepts E1 source reconciliation through audit-closure/e1-ui/followup-final-source-gaps.md/json, qualified by audit-root-followup-review.md. All152 ordered initial obligations have explicit dispositions across22 new contracts plus accepted caller/web/settings contracts;50 features,42 original cards,8 supplemental surfaces,19 invariants,104 original test records and16 full allocation references survive. Root verified342 distinct current/pinned file hashes,169 inclusive-range hashes and20 input bindings, including one exact historical document revision. Preserved initial OPEN strings describe earlier evidence, not current source status. This is source characterization at named owning boundaries, not full algorithm or runtime certification.",
+      "proofStillOwed": "T1-T4: every allocated original assertion and added contract obligation, isolated source baselines, assertion-preserving ports and behavioral RED-GREEN, all rendered actions/screenshots/journeys, real OS/SSH/folder/version boundaries and recovery. Keep separate characterization/correction regressions for source defects. E3 backend and E5 service/platform/assets obligations remain with those open groups. E1-FG-22 HTTPS and creation-mode wording is qualified by root source review; no production upload or privacy guarantee is inferred."
     },
     {
       "id": "E2",

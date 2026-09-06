@@ -22,7 +22,11 @@ E1 retains `task_544ba69fa3ba / ctx_d78d71a450c6` for final UI source gaps. E3 r
 
 ### Subsequent assets handoff checkpoint
 
-`task_421ba7560bf2 / ctx_e269f89983b0` has completed and received the official release result retained/external_terminal/processAction none, receipt `1e4d5ab2-41b8-4ff2-8951-3450825c639f`. Its17 finite assets/observability source records are independently accepted with explicit AO obligations, not full E5 or publication acceptance. It has no new Task. The other four rows/assignments above remain active; their latest completions must be checked through Orca before reuse. The audit-to-Sol gate is unchanged. Root's independent review and lifecycle correction are recorded in audit-root-followup-review.md and audit-semantic-followups.md.
+`task_421ba7560bf2 / ctx_e269f89983b0` has completed and received the official release result retained/external_terminal/processAction none, receipt `1e4d5ab2-41b8-4ff2-8951-3450825c639f`. Its17 finite assets/observability source records are independently accepted with explicit AO obligations, not full E5 or publication acceptance. It has no new Task. E1 `task_544ba69fa3ba / ctx_d78d71a450c6` is also complete, officially released (receipt `4ca0b6c6-4cf2-4a7d-9aaf-4562325b2f48`, retained/external_terminal/processAction none), and now source-accepted with root qualifications; no new Task. E3 domain/usage and E5 configuration/services remain the three audit assignments; check their latest completions through Orca before reuse. The audit-to-Sol gate is unchanged. Root's independent reviews and lifecycle evidence are recorded in audit-root-followup-review.md and audit-semantic-followups.md.
+
+### Subsequent domain/configuration deliveries
+
+E3 domain/usage and E5 config/CI have now delivered and been officially released, respectively receipts `40c4a41d-eb58-42fd-a848-78973d27a91f` and `838f83cb-ef52-452f-bbc3-8da939df4cd8`, both retained/external_terminal/processAction none. Their reports await root acceptance; E3 explicitly lists residual source work. E5 services is the only remaining active assignment at this checkpoint. Any follow-up requires a fresh Task/Dispatch; a source gap is not authority to keep using a completed Dispatch.
 
 ## Initial ownership and bounded deliverables
 

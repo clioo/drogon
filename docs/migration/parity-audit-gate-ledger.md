@@ -5,9 +5,10 @@ obsolete assignments, accepted metadata and future execution debt. This is
 a current decision ledger, not a claim of a fully enumerated product.
 The machine record contains exact owners, artifacts and remaining evidence.
 
-Latest bounded review: `parity-audit-wave-review.md` records supervisor12-case
-source acceptance and mobile/relay/packaging leaf reports still pending full
-independent review. Those reports do not close E1–E5 or the execution gates.
+Latest source decisions: E1/E2/E4 are accepted in
+`audit-root-followup-review.md`, with corrections and execution obligations
+preserved. E3/E5 remain open. Stable audit index is10/12 (83.3%, medium-low
+confidence), not product or test completion. Earlier wave reports are history.
 
 ## Accepted metadata — do not repeat completed censuses
 
@@ -28,10 +29,10 @@ from one specialized probe registry are not 26 missing harnesses.
 
 | ID | Required resolution | Owner |
 | --- | --- | --- |
-| E1 | Reconcile remaining named UI surfaces and correct unsupported behavioral claims before freezing cards. | UI package leads; coordinator acceptance |
-| E2 | SP01–SP13 and all214 routing rows mapped with explicit evidence tiers;180 inherited classifications retain semantic uncertainty. Preserve platform/dynamic shortcut boundaries. | UI-SETTINGS + ENG-SHARED |
+| E1 | Source gate accepted:152 original obligations reconciled,50 features and19 invariants retained. All test/rendered/platform obligations remain. | UI package leads; coordinator acceptance |
+| E2 | Source gate accepted:214 fields, SP01–SP13, SK01–SK16 and88 action handlers with explicit exceptions. Tests and integration remain. | UI-SETTINGS + ENG-SHARED |
 | E3 | Delegated12 and main54request/12send linked;94/96 push producers identified. Two legacy identities stay unresolved; current close/PDF alternate paths characterized separately. Remaining payload/state contracts owed. | ENG-IPC |
-| E4 | Six skills,11 terminal and13 workspace handlers characterized; remaining per-command contracts and passthrough dispatch still owed. | ENG-CLI |
+| E4 | Source gate accepted:234 commands,22 helpers and30 final boundary paths. Full original baselines and candidate parity remain. | ENG-CLI |
 | E5 | Existing G1–G20 reconciled in parity-platform-gap-reconciliation.json, each with owners and acceptance; complete the specific open source reviews and remaining journey reconciliation. | Coordinator + named package owners |
 
 These five rows group existing obligations; they are not an exact count of
@@ -48,9 +49,10 @@ The JSON references the concrete source inventories and unresolved entries.
   wave; behavioral RED then GREEN. Import/build failures are not behavioral RED.
 - Source/candidate comparisons, both remote version skews, OS/SSH/folder
   boundaries, rendered journeys, screenshots, recovery and performance.
-- Latest scheduling instruction permits five Astra area leads during audit,
-  with bounded leaves only when runtime depth permits; this supersedes the old
-  post-audit Sol hierarchy. Each dispatch needs finite ownership and acceptance.
+- Latest scheduling instruction permits five temporary Astra area leads during
+  audit, with bounded leaves only when runtime depth permits. After complete
+  audit acceptance, actual Sol implementation leads own approved leaf workers.
+  This does not replace that Sol phase. Each dispatch needs finite ownership and acceptance.
   See `audit-closure-coordination.md`; actual child lifecycle is still required
   before reporting full hierarchy activation. Product/test gates do not change.
 - Final product acceptance requires the full original experience and existing
