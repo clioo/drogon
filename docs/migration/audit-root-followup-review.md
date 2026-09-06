@@ -35,8 +35,6 @@ Confirmed distinct shell-escaping contracts: terminal wrappers double percent si
 
 **Disposition:** accept the finite R1–R4/B1–B2/L1–L2 source-entrypoint characterization with all stated downstream boundaries and unrun assertions intact. No whole-directory, platform, signing, installation or build acceptance. G7 U1–U3, remaining config/build/cloud/assets/infra and named O3–O5 helper semantics remain open and assigned/separate.
 
-## Migration decisions and phase boundary
-
 ## E2 field reconciliation and explicit source exceptions
 
 Root accepts the bounded214-field source routing reconciliation in `audit-closure/e2-settings/closure.json`, not the complete E2 gate. Names are unique, match canonical declaration order exactly, and every row has a contract, source anchor and remaining acceptance obligation. All271 source-file hashes match both pinned Git blobs and working bytes. Independent samples confirmed startup's actual legacy keybinding getter (before file-existence migration checks), dedicated cached file authority, temp-write/rename without fsync, Claude teams mode launch consumption, PTY history isolation defaulting true and sidebar migration preferring an explicit UI boolean.
@@ -51,7 +49,21 @@ Sources independently reviewed in this follow-up include `src/shared/default-glo
 
 E2-O01/O02 source dispositions accepted; live true/false behavior, persistence, host/OS and candidate correction proofs stay T1–T4 debt. E2-O03's88-action semantics and SK boundary acceptance are still required before E2 closure. Root sent this disposition to the current E2 Dispatch in `msg_71e1f96369f5`; no duplicate scan or leaf is requested.
 
-## Migration decisions and phase boundary (continued)
+## E3 Bots/Mentu21: accepted bounded source characterization
+
+Root verified all78 declared source hashes against pinned Git blobs and working bytes. The21 unique callback rows contain input/result descriptions, source anchors and explicit missing-acceptance obligations. Full original Bots and Mentu registration modules independently confirm the7+14 identity set, trusted-renderer guard, outer cast-only argument forwarding, Mentu remove/re-register and Bots direct registration. Typed Mentu arguments are not runtime validation.
+
+Independent source sampling read complete `src/main/ipc/bot-schemas.ts`, `bot-schemas.test.ts`, `src/main/persistence/loading-store/write-flush-barriers.ts`, `src/main/mentu/mentu-session-execution.ts`, `mentu-session-recovery.ts` and `mentu-run-evidence.ts`:
+
+- Bot schema really permits only null explicit models/session models and omits recipe in the strict responsibility object. The existing three tests cover bounded default creation, unsupported/undeclared inputs and mixed trigger refusal, not nonnull model or recipe support through actual registered IPC. Do not weaken intended capabilities to reproduce this mismatch.
+- The flush wrapper catches primary and active-view errors and returns early after finalization; a successful in-memory Bot write cannot be reported as durable merely because it calls flush. Actual durable primitive evidence remains separate.
+- Review/approval/completed/in-flight/controller state lives in Maps. Cancel requests an abort; it is not descendant exit proof. Completed-result caching and concurrent request coalescing are not cross-process restart guarantees.
+- Recovery digest binds run/recipe and step label/backend/model, not outcomes, variables, attempts or full optional state. Absent recipe_ref is admitted; retry label may come from optional state. Preserve these as explicit gaps to test/fix, not comprehensive recovery identity.
+- Evidence reader derives live/exited from stored status, verifies the primary run ID but not every optional record identity, and overwrites duplicate output labels. No process probe or formal Commitment Protocol record exists in that path. Migration must distinguish stored outcome from real host observation.
+
+**Disposition:** accept the21 callback source/payload/state map in `audit-closure/e3-bridge/followup-bots-mentu.md/json` with its BM-AUTH through BM-EVIDENCE obligations unchanged. This is neither native Mentu-internal review nor proof of actual callback/runner/renderer execution. E3's remaining45 callbacks, RPC/push consumers and explicitly unknown legacy producers remain separate. No group percentage increase or product implementation follows from this scoped acceptance.
+
+## Migration decisions and phase boundary
 
 Preserve workflow capabilities and the actual user experience, not unsafe interpretations of source comments. Drogon's eventual publication proof must cover **every** publishing path; asset presence alone must never be described as verified signatures, compatible binaries or successful prior tests. Unknown process contact must not justify deleting/replacing owned resources. Source defects get explicit characterization and intended-behavior regression tests during implementation, not silent deletion of capabilities or claims that the source already satisfies these invariants.
 
