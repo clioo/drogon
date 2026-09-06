@@ -42,3 +42,32 @@ Audit remains 11/12 (91.7%, medium confidence, delta 0); E5 publication/resource
 is the next audit closure milestone. Full-fidelity 24-hour delivery remains
 high risk. Native record integration, lease/store policy and runtime tests are
 still incomplete, not waived by this finite correction.
+
+## Independent original-source oracle, 17:54 UTC
+
+Root added and ran `scripts/verify-native-provider-source-boundaries.mjs`.
+It reuses the admitted `eng-identity-provider-20260906-a1-p6nXh6` capsule,
+checks the exact source manifest plus all six source/license entries, bundles
+only allowlisted first-party inputs in memory, and rejects external imports.
+The existing source esbuild 0.25.12 is used as the transformer; this local
+verifier requires that retained capsule/runtime and is not portable CI evidence.
+
+Node 24.19.0 execution produced 266 actual-source validator cases, 163 accepted
+and 103 rejected, digest
+`e942e2f26becdcf9d8a29418fc949aadb8f8dd76eddb9ec67be282dc18f323c0`.
+Root additionally asserted selected outcomes for numeric schema version 2.0,
+process PID 1.0, rejected minimum-i64 observation time, accepted NEL-boundary
+handle and rejected FEFF-boundary handle. The command writes no files and
+does not execute native candidate tests.
+
+Use `--fixtures` to emit the bounded records including each `rawJson` string;
+the default prints only the summary. Preserve those strings when replaying
+through serde: a JavaScript parse/stringify round-trip would erase the numeric
+representation cases. Besides the complete numeric field matrix, the oracle
+covers selected Unicode/UTF-16 boundaries, unvalidated minimumNextFence, and
+missing/null lease fields. This supplements, not replaces, the original suites.
+
+Guidance `msg_f01878eea0f5` and one parent-terminal nudge assign candidate replay
+to the current Kimi correction `task_496eabe1ef0c / ctx_16049bee8b80` under
+Sol; its earlier 46-case result was not accepted as the numeric fix. No duplicate
+worker was launched and no root-written candidate policy was substituted.
