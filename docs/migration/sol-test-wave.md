@@ -45,6 +45,16 @@ remain required before describing the transfers as launched.
 
 ### Current integration checkpoint: 15:35 UTC
 
+Root regression follow-up (15:40 UTC): `cargo test -p drogon-core --lib --locked`
+passes 4/4; `cargo test -p drogon-core --locked --test engine --test session-persistence
+--test exit-observation` passes 16 + 2 + 2 = 20/20. These test real PTYs and isolated
+SQLite failure fixtures, request reuse, cancellation isolation, exact incarnation,
+exit observation and recovery. They describe the current working tree, including
+pre-existing uncommitted foundation corrections, not HEAD-only or cross-platform
+acceptance. The unregistered in-progress claim module is not part of this result.
+CAP's newest delegated Sonnet correction is `task_0c89fbad5f94 / ctx_8b25853f9f53`;
+the previous correction was reviewed but still insufficient, not final acceptance.
+
 Root accepted the UI module delivery at `bb85b83` after independent 33/33 and
 both scoped/desktop typechecks, preserving its missing historical behavioral RED
 and absent live wiring as explicit limitations. Sol-UI now directs actual Electron
