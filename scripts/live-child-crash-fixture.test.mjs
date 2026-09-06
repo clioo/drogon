@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -98,10 +98,15 @@ function connectRaw(controlPath) {
   };
 }
 
-async function spawnFixture(controlPath, nonce, deadlineMs = 30_000) {
+async function spawnFixture(
+  controlPath,
+  nonce,
+  deadlineMs = 30_000,
+  extra = {},
+) {
   const child = spawn(
     process.execPath,
-    ["-e", buildFixtureProgram({ controlPath, nonce, deadlineMs })],
+    ["-e", buildFixtureProgram({ controlPath, nonce, deadlineMs, ...extra })],
     { stdio: "ignore", shell: false },
   );
   child.spawnError = null;
@@ -638,4 +643,151 @@ test("cleanup verdict: forced observer or daemon cleanup fails the run", () => {
     false,
     "An observer that could not be stopped must fail the run",
   );
+});
+
+test("close() disposes tracked sockets left open after the bound instead of leaving the owning process alive, without changing the immutable proof", async () => {
+  // Directly-owned Node subprocess regression against the real helper (no
+  // shell PID wrapper, no raw PID signal): before the fix, this subprocess
+  // never exits on its own because the dangling connection's open handle
+  // keeps its event loop alive past close()'s bound, and the bounded
+  // runAcceptanceProcess timeout below has to kill it, proving the hang.
+  const moduleUrl = new URL("./live-child-crash-fixture.mjs", import.meta.url)
+    .href;
+  const script = `
+import { startControlServer } from ${JSON.stringify(moduleUrl)};
+import { createConnection } from "node:net";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { randomBytes } from "node:crypto";
+const dir = await mkdtemp(path.join(tmpdir(), "dg-close-hang-"));
+const controlPath = path.join(dir, "control.sock");
+const nonce = randomBytes(32).toString("hex");
+const control = await startControlServer({ controlPath, nonce });
+const dangling = createConnection(controlPath);
+await new Promise((resolve, reject) => {
+  dangling.once("connect", resolve);
+  dangling.once("error", reject);
+});
+const proof = await control.close(300);
+console.log(JSON.stringify(proof));
+`;
+  const { stdout } = await runAcceptanceProcess(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    { timeout: 4000 },
+  );
+  const proof = JSON.parse(stdout.trim().split("\n").pop());
+  assert.equal(
+    proof.closed,
+    false,
+    "Disposal must never fabricate a closed proof",
+  );
+  assert.equal(
+    proof.openSockets,
+    1,
+    "Immutable proof: the tracked-but-never-closed count is unchanged by disposal",
+  );
+});
+
+test("a control-socket error racing an already-selected finish() must not override its exit code", async () => {
+  // Real generated fixture source (buildFixtureProgram) run through an
+  // isolated, controlled test-only seam (raceControlErrorAfterFinishMs) —
+  // not a separate mock model — deterministically races a control error
+  // into finish()'s own 25ms flush window.
+  await withControlServer(async ({ control, controlPath, nonce }) => {
+    const child = await spawnFixture(controlPath, nonce, 30_000, {
+      raceControlErrorAfterFinishMs: 5,
+    });
+    try {
+      const hello = await control.waitForHello(5000);
+      control.requestShutdown(hello.instanceId, 0);
+      const exit = await waitChildExit(child, 5000);
+      assert.equal(
+        exit.code,
+        0,
+        "The shutdown-selected exit code must survive the raced control error",
+      );
+      assert.equal(exit.signal, null);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill("SIGKILL");
+      await waitChildExit(child, 3000).catch(() => {});
+    }
+  });
+});
+
+test("probeExitObserver preserves the structured unsupported reason instead of a generic nonzero-exit message", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "dg-fake-observer-"));
+  try {
+    const scriptPath = path.join(dir, "fake-unsupported.py");
+    await writeFile(
+      scriptPath,
+      "#!/usr/bin/env python3\n" +
+        "import json, sys\n" +
+        'print(json.dumps({"type": "unsupported", "reason": "synthetic-test-reason"}))\n' +
+        "sys.exit(2)\n",
+      { mode: 0o755 },
+    );
+    const result = await probeExitObserver(scriptPath, 2000);
+    assert.equal(result.supported, false);
+    assert.equal(
+      result.reason,
+      "synthetic-test-reason",
+      "The structured reason must survive, not collapse into a generic exit-code message",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("probeExitObserver still fails a nonzero exit from a capable reply", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "dg-fake-observer-"));
+  try {
+    const scriptPath = path.join(dir, "fake-capable-badexit.py");
+    await writeFile(
+      scriptPath,
+      "#!/usr/bin/env python3\n" +
+        "import json, sys\n" +
+        'print(json.dumps({"type": "capable", "mode": "kqueue-proc"}))\n' +
+        "sys.exit(1)\n",
+      { mode: 0o755 },
+    );
+    const result = await probeExitObserver(scriptPath, 2000);
+    assert.equal(
+      result.supported,
+      false,
+      "A capable reply with an unexpected nonzero exit must not be accepted",
+    );
+    assert.match(result.reason, /probe exited with code 1/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("kernel exit observer stop() while still watching a live owned child stops via SIGTERM, not force", async () => {
+  const target = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], {
+    stdio: "ignore",
+    shell: false,
+  });
+  try {
+    const observer = await startExitObserver(target.pid, {
+      scriptPath: observerScript,
+      deadlineMs: 20_000,
+    });
+    // Neither timed out nor exited yet: the observer is still watching.
+    assert.equal(observer.settled, false);
+    const stopped = await observer.stop(3000);
+    assert.equal(stopped.stopped, true);
+    assert.equal(
+      stopped.forced,
+      false,
+      "A live observer must stop via SIGTERM, not a forced SIGKILL",
+    );
+    assert.equal(stopped.via, "stopped");
+  } finally {
+    if (target.exitCode === null && target.signalCode === null)
+      target.kill("SIGKILL");
+    await waitChildExit(target, 3000).catch(() => {});
+  }
 });

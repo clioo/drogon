@@ -1,5 +1,126 @@
 # Live-child crash admission
 
+## Root integration verification — 2026-09-06 21:53 UTC
+
+All three independent PR6 reviews settled against clean a6ea55c. Root
+accepted the bounded-control-close leak, first-exit-code race and lost
+unsupported diagnostics, then delegated corrections separately. Root read
+the actual three-file change, formatted the JavaScript and independently
+ran all26 fixture tests successfully. Existing21 assertions remain.
+
+Root merged current main f9a1f87 (integration merge6546909), rebuilt locked
+and offline, and ran379 Rust tests, strict all-target Clippy, rustfmt and
+diff checks successfully. One marker test remains deliberately ignored in
+ordinary enumeration and invoked by its owning test. The real macOS
+acceptance again passed15 checks with a live child after service death,
+kernel-observed eventual child exit, unforced observer/service cleanup and
+zero open control sockets. Receipt:
+`.preflight/acceptance/live-child-crash-1788731454646-44b40db2-9a86-428a-ac7f-1e88d0f31a2d.json`.
+
+The two defensive failed-reap branches now also unref their exact owned
+ChildProcess after disposing local pipes: pipe disposal alone does not
+release the process handle from Node's event loop. This does not assert
+the process exited; the result stays unverifiable/failed. An actual
+unkillable-process test is not claimed.
+
+CI workflow34060706206 already proved the pre-correction a6ea55c version
+on both Linux pidfd and macOS kqueue:21 fixture tests and15 actual checks
+on each. New-head CI after these corrections is required before merge.
+Both observed child survival; neither proves the alternative child-exits-
+at-crash branch. Historical Linux-pending statements below are superseded
+only for those observed paths, not Windows or PTY reattachment.
+
+## Root-triaged lifecycle corrections — 2026-09-06 (addendum)
+
+Direct depth-1 leaf implementation under `task_207458e48fb1` /
+`ctx_81a4fa7a992c`, scoped to root's PR6 triage
+(`/tmp/drogon-pr6-triage.mdHiRQ/report.md`). Own files only:
+`scripts/live-child-crash-fixture.mjs`,
+`scripts/live-child-crash-fixture.test.mjs`,
+`scripts/accept-live-child-crash.mjs` (unmodified — its existing
+`evaluateCleanupProof`/report-status wiring already consumes an unclosed
+`controlCloseProof` as FAILED-with-retained-fixture; no change was needed
+there), this doc. No Git mutations, no dependency/global-config changes, no
+real daemon run, no user-service or PID signaling. This addendum does not
+alter or supersede the historical **21/21** / **15/15** counts above; it adds
+5 new tests on top of the unchanged 21 (26/26).
+
+**P1 — `startControlServer.close()` left owned sockets undisposed, hanging the caller.**
+`close()` only *measured* whether tracked sockets closed within its bound; it
+never disposed a straggler, so any socket that missed the bound kept the
+Node event loop alive forever (`accept-live-child-crash.mjs` never calls
+`process.exit()`, relying on natural exit).
+- RED (real helper, no shell/PID wrapper): spawned a directly-owned Node
+  subprocess (`runAcceptanceProcess`) that imports the real
+  `startControlServer`, opens a dangling raw connection, and calls
+  `control.close(300)`. Before the fix this subprocess never exited and
+  `runAcceptanceProcess`'s bounded 4s timeout had to SIGTERM-kill it
+  (`error.killed === true`), proving the hang.
+- Fix: `close()` now destroys every still-tracked socket *after* the
+  immutable `closeProof` is captured, so disposal can never flip
+  `closed`/`openSockets` or stand in for fixture-child exit evidence.
+- GREEN: same subprocess now exits on its own and prints
+  `{"closed":false,"openSockets":1,...}` — proof unchanged, process no
+  longer hangs. Permanent regression: `live-child-crash-fixture.test.mjs`
+  → "close() disposes tracked sockets left open after the bound...".
+- Same audit applied to `startExitObserver`'s `stop()` and
+  `probeExitObserver`'s `cleanup()`: if SIGKILL does not produce a confirmed
+  reap within their bounds, only the local pipe handles this process owns
+  are now destroyed to release the event loop; `stopped`/`supported` still
+  report `false`/"unverifiable" — disposal never claims the remote process
+  exited. This specific branch (SIGKILL failing to reap at all) could not be
+  reproduced deterministically without an artificially unkillable process,
+  so it is hardened defensively without its own RED/GREEN pair.
+
+**P2 — a raced control-socket error could override an already-selected exit code.**
+`ctl.on("error")` unconditionally called `process.exit(controlLost)`, even
+after `finish()` had already chosen and sent a different terminal code
+(shutdown/deadline/sigterm/sigint) and was mid-flush.
+- RED (real generated fixture source, isolated controlled seam, not a
+  separate mock): added a test-only `raceControlErrorAfterFinishMs` param to
+  `buildFixtureProgram` (`null`/unused in production) that races a forced
+  control error into `finish()`'s 25ms flush window. Spawned the real
+  generated program, sent `shutdown`, and observed exit code **93**
+  (`controlLost`) instead of the selected **0** — confirmed against the
+  unfixed source.
+- Fix: `ctl.on("error")` now returns early if `settled` is already true.
+- GREEN: same script now exits **0** as selected. Permanent regression:
+  "a control-socket error racing an already-selected finish() must not
+  override its exit code".
+
+**P2 — unsupported-probe diagnostics were replaced by a generic nonzero-exit message.**
+`probeExitObserver` treated any nonzero exit (including the documented
+unsupported/register-error contract, code 2) as an opaque failure, discarding
+`message.reason`.
+- RED: pointed `probeExitObserver` at a real, minimal Python `--probe`
+  script emitting `{"type":"unsupported","reason":"synthetic-test-reason"}`
+  and exiting 2; got back `{"reason":"probe exited with code 2"}` — the
+  structured reason was lost.
+- Fix: when `message.type === "unsupported"` and `exit.code === 2`, the
+  parsed `reason` is preserved as-is; any other combination (including a
+  `"capable"` reply with a nonzero exit) still fails via the existing
+  `cleanup()` path.
+- GREEN: unsupported case now returns `{"reason":"synthetic-test-reason"}`;
+  a synthetic `"capable"` reply exiting 1 still correctly returns
+  `supported:false` with a code-based failure reason. Permanent
+  regressions: "probeExitObserver preserves the structured unsupported
+  reason..." and "...still fails a nonzero exit from a capable reply".
+
+**Coverage (NIT, straightforward only).** Added "kernel exit observer
+stop() while still watching a live owned child stops via SIGTERM, not
+force" — the existing suite only exercised `stop()` after the observer had
+already settled. Did not add a deterministic contradictory-channels
+(kernel-exit-then-later-pong) test: constructing that race without touching
+`classifyChildState`'s own timing would be speculative rather than
+straightforward, so it is left as an open coverage gap, not implemented here.
+
+Commands run (this worktree, `a6ea55c` base, no daemon):
+`node --test scripts/live-child-crash-fixture.test.mjs` → 21/21 before any
+edit (unchanged baseline), 26/26 after all four fixes and their regressions
+were added. Isolated RED/GREEN checks for each item were run as standalone
+`node` invocations against the real exported helpers before being folded
+into the permanent suite, per item above.
+
 ## Root verification — 2026-09-06 21:16 UTC
 
 After worker settlement, root reproduced an additional behavioral failure:

@@ -34,12 +34,17 @@ export function buildFixtureProgram({
   controlPath,
   nonce,
   deadlineMs = DEFAULT_FIXTURE_DEADLINE_MS,
+  // Test-only seam (unset in production/acceptance use): forces a control
+  // socket error this many ms after finish() has already selected the exit
+  // code, to deterministically prove the error path cannot override it.
+  raceControlErrorAfterFinishMs = null,
 }) {
   return `(() => {
   const net = require("node:net");
   const { randomUUID } = require("node:crypto");
   const CONTROL = ${JSON.stringify(controlPath)};
   const NONCE = ${JSON.stringify(nonce)};
+  const RACE_CONTROL_ERROR_MS = ${JSON.stringify(raceControlErrorAfterFinishMs)};
   const instanceId = randomUUID();
   const timers = new Set();
   let settled = false;
@@ -52,6 +57,14 @@ export function buildFixtureProgram({
     settled = true;
     for (const t of timers) clearTimeout(t);
     send({ type: "bye", code, reason });
+    if (RACE_CONTROL_ERROR_MS !== null) {
+      // Seam: race a control-socket error into the already-selected exit
+      // window below, proving ctl.on("error") cannot override it once
+      // settled.
+      setTimeout(() => {
+        if (ctl && !ctl.destroyed) ctl.destroy(new Error("seam-forced-control-error"));
+      }, RACE_CONTROL_ERROR_MS);
+    }
     // Bounded flush window; the kernel observer plus the control close are
     // the exit/cleanup evidence, so this cannot hang cleanup.
     setTimeout(() => process.exit(code), 25);
@@ -109,6 +122,10 @@ export function buildFixtureProgram({
   });
   ctl.setNoDelay(true);
   ctl.on("error", () => {
+    // A terminal exit code was already selected (e.g. shutdown/deadline);
+    // that choice is the recorded evidence and must never be replaced by a
+    // later, unrelated control error racing the same flush window.
+    if (settled) return;
     // No control channel: this fixture can prove nothing about itself and
     // must not linger silently — die loudly with a distinct code.
     process.exit(${FIXTURE_EXIT.controlLost});
@@ -354,12 +371,21 @@ export async function startControlServer({ controlPath, nonce }) {
         resolve();
       });
     });
+    // Proof is captured here, before any disposal below, so freeing leftover
+    // handles can never retroactively turn a FAILED proof into a PASSED one
+    // or stand in for fixture-child exit evidence.
     closeProof = {
       closed: allSockets.size === 0,
       openSockets: allSockets.size,
       childHandshakes: children.size,
       rejectedHandshakes,
     };
+    // Every socket still tracked missed the bound above; destroying our own
+    // owned handles here only releases the calling process from an
+    // indefinite hang (an open handle keeps the event loop alive forever) —
+    // it is disposal of resources we own, not a claim about the remote
+    // fixture child's state.
+    for (const socket of [...allSockets]) socket.destroy();
     await rm(controlPath, { force: true });
     return closeProof;
   };
@@ -432,6 +458,15 @@ export async function probeExitObserver(scriptPath, timeoutMs = 8000) {
       }
     }
     const exit = await waitChildExit(child, 2000);
+    if (!exit) {
+      // SIGKILL did not produce a confirmed reap within the bound: destroy
+      // only the pipe handles this process owns so a stuck probe cannot
+      // hang the caller. This never claims the probe process itself exited
+      // — the reason below still says "unverifiable".
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+    }
     return {
       supported: false,
       reason: exit ? reason : `${reason}; probe cleanup unverifiable`,
@@ -472,12 +507,25 @@ export async function probeExitObserver(scriptPath, timeoutMs = 8000) {
   if (!exit) {
     return cleanup("probe process did not exit after reporting");
   }
-  if (exit.code !== 0) {
-    return cleanup(`probe exited with code ${exit.code}`);
+  if (message.type === "unsupported") {
+    // Exit code 2 is the documented unsupported/register-error contract
+    // (see live-child-exit-observer.py); preserve the structured reason
+    // instead of collapsing it into the generic nonzero-exit message below.
+    if (exit.code !== 2)
+      return cleanup(
+        `probe reported unsupported but exited with code ${exit.code}`,
+      );
+    return { supported: false, reason: message.reason ?? "unsupported" };
   }
-  return message.type === "capable"
-    ? { supported: true, mode: message.mode }
-    : { supported: false, reason: message.reason ?? message.type };
+  if (message.type !== "capable" || exit.code !== 0) {
+    return cleanup(
+      `probe exited with code ${exit.code}` +
+        (message.type !== "capable"
+          ? ` (unexpected type ${message.type})`
+          : ""),
+    );
+  }
+  return { supported: true, mode: message.mode };
 }
 
 /**
@@ -651,6 +699,16 @@ export async function startExitObserver(
       // already gone
     }
     const forcedExit = await waitChildExit(child, 1500);
+    if (!forcedExit) {
+      // Even SIGKILL did not produce a confirmed reap within the bound:
+      // destroy only the pipe handles this process owns so a stuck observer
+      // cannot hang the caller. This never claims the observer process
+      // itself exited — `stopped` below stays false ("unverifiable").
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.stdin?.destroy();
+      child.unref();
+    }
     return {
       stopped: Boolean(forcedExit),
       forced: true,
