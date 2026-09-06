@@ -1,0 +1,67 @@
+{
+  "capsuleId": "bot-reactive-dispatch",
+  "description": "Original bot reactive-dispatch foundation tests: deterministic admission, dedupe, ambiguity lifecycle and failure preservation, with in-test fakes only.",
+  "entryTestFile": "src/main/bots/bot-reactive-dispatch.test.ts",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 29,
+    "plainIt": 17,
+    "tableRows": 12
+  },
+  "files": [
+    {
+      "path": "src/main/bots/bot-reactive-dispatch.test.ts",
+      "role": "test",
+      "sha256": "ad6eddd2749c20af80665b57410ed67f3ae3776831bded290091cc0349e8a0a0"
+    },
+    {
+      "path": "src/main/bots/bot-reactive-dispatch.ts",
+      "role": "module",
+      "sha256": "43ad3926aeafe84c2cb287f4f80ceb03916a014c92996ff1a58fedb1c34553dc"
+    },
+    {
+      "path": "src/main/bots/bot-reactive-dispatch-validation.ts",
+      "role": "module",
+      "sha256": "ea5d16be75dcf15792e18459c1f7ca494658905fdce07cea9ba8fcd3f7d25d99"
+    },
+    {
+      "path": "src/main/runtime/runtime-async-boundaries.ts",
+      "role": "module",
+      "sha256": "f4c248ceffd819eb3f7ea324fc149e53e9a8ff14c0a983a6d47b58ef17d5630c"
+    },
+    {
+      "path": "src/shared/promise-timeout-fallback.ts",
+      "role": "module",
+      "sha256": "8c2b96e58c220a70f5237eedb779f45c56e39995b29ce57f1fb8be4c9c78eaa9"
+    },
+    {
+      "path": "src/main/bots/bot-reactive-dispatch-types.ts",
+      "role": "module",
+      "sha256": "5e37ffc6b2983c671ddc34007cbd5eaf5f5bab5791a39db213dcd827a1f96da8"
+    }
+  ],
+  "isolationRationale": "Coordinator read the complete test and four runtime implementation files plus the dispatch type definitions. Runtime chain is pure admission/dedupe/state logic over Maps/Sets, Date.now, node:crypto randomUUID and bounded real timers. Original in-test repository and gateway fakes are unchanged; no real dispatch, persistence, process, socket, filesystem, Electron, provider or credential operation is reached. MentuHostObservation is imported only as a type and erased; its source and further type-only dependencies are deliberately not staged. This is not a typecheck or a complete type import closure. No fake timer installation occurs; one test manually injects now().",
+  "license": {
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT"
+  },
+  "runtimeImports": [
+    "node:crypto (randomUUID)",
+    "../runtime/runtime-async-boundaries (withTimeoutResult)",
+    "./bot-reactive-dispatch-validation (values)"
+  ],
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Both configurations use node. Execute this capsule with an explicit original installed Vitest 4.1.11 entry; runner receipts record the actual version/path.",
+    "The minimal capsule omits root renderer aliases, ORCA_FEATURE_WALL_ENABLED and the three DOM/host-port setup files; none is referenced by this source closure.",
+    "The capsule omits root execArgv webstorage/GC options and the Windows maxWorkers override, and uses default timeouts rather than root 30s test/60s hook timeouts. The 10/20ms real timers complete far inside any default. No webstorage, DOM, GC assertion or platform-dependent branch occurs in these files. This does not establish full source-environment equivalence."
+  ],
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestVersion": "^4.1.11",
+  "typeOnlyImports": [
+    "bot-reactive-dispatch-types imports MentuHostObservation from mentu-run-contract with import type; not loaded or staged. No typecheck claim."
+  ],
+  "dependencyClosureNote": "Original test has 17 direct it() calls plus 12 actual table rows, independently counted by coordinator AST traversal before execution. Worker draft incorrectly counted 13 rows and used unsupported role:type plus no expectedTestCounts.tests; corrected before staging. Source assertions were never changed."
+}

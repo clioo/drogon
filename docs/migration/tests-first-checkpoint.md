@@ -485,6 +485,41 @@ The other 26 agents are not registered in this specific probe registry; that
 does not prove they lack model discovery elsewhere. No model/agent was run.
 All audit dispatches from this wave are now settled; no nested wave started.
 
+## CLI parser and reactive Bot baselines (2026-09-06 UTC)
+
+The next three flat audit Tasks settled successfully and were released before
+mail acknowledgement: CLI argument contract `task_84e6de16239f`, UI-card gap
+inspection `task_27b8e733c55c`, and Bot capsule preparation `task_96e5f215086b`.
+External terminals were retained by Orca without process actions. No active
+writer was moved to a worktree, and no Sol hierarchy was launched.
+
+Coordinator independently rehashed all seven CLI contract source citations,
+parsed the 41 boolean declarations and reconciled all 236 distinct allowed
+flag names across the 234-command catalog into disjoint categories. This
+accepts bounded parser metadata, not required/default/type semantics in every
+command handler. The independently executed original CLI argument capsule
+passed **38/38**, with every assertion result and all eight staged hashes
+checked. Receipts: `reference-captures/c9790628-cli-arguments/`.
+
+Bot capsule review caught a draft count error (17 direct + 12 table cases,
+not 13), unsupported manifest roles and an overstated type import closure.
+These were corrected before execution without changing source assertions.
+The reviewed six-file runtime capsule passed **29/29** using the original
+Vitest 4.1.11 and Node 24.19.0. All 29 results and six staged hashes were
+independently checked. Receipts:
+`reference-captures/c9790628-bot-reactive-dispatch/`.
+
+Both test children used allowlisted environments and disposable HOME/temp.
+They invoked no product handlers, real Bot gateway, remote service or model.
+These are original baseline results, not candidate RED/GREEN or end-to-end
+feature acceptance. The UI-card follow-up remains pending coordinator review;
+its absence-of-test claims and expanded counts are not yet accepted.
+
+Audit closure still requires an enumerable observable surface with owned
+omissions. As `parity-work-packages.md` §5 specifies, full baseline execution,
+test-port validation and runtime proof remain test-wave gates; they must not
+be mistaken for already-completed audit evidence or silently waived.
+
 ## Still not proven
 
 No full Orca suite run, no full test migration, no rewrite rendered acceptance,

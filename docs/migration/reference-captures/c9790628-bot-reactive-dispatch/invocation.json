@@ -1,0 +1,38 @@
+{
+  "startedAt": "2026-09-06T00:34:05.115Z",
+  "endedAt": "2026-09-06T00:34:05.798Z",
+  "command": [
+    "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "/Users/carlos/Documents/Drogon-rewrite/scripts/run-parity-baseline-capsule.mjs",
+    "--manifest",
+    "/Users/carlos/Documents/Drogon-rewrite/tests/parity/baseline-capsules/bot-reactive-dispatch.json",
+    "--source-root",
+    "/Users/carlos/Documents/Drogon-mentu-session",
+    "--execute",
+    "--timeout-ms",
+    "30000",
+    "--approved-manifest-sha256",
+    "422265b4a5100f523f569c6c6ddda7d1241080419401a03c7f11d055cdff19d8",
+    "--node-bin",
+    "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "--vitest-entry",
+    "/Users/carlos/Documents/Drogon-rewrite/.preflight/reference-cli-cRLmbn/source/node_modules/vitest/vitest.mjs",
+    "--label",
+    "coordinator-bot-dispatch"
+  ],
+  "env": {
+    "PATH": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "HOME": "/Users/carlos/Documents/Drogon-rewrite/.preflight/reference-cli-cRLmbn/bots-run-T97Ciu/home",
+    "USERPROFILE": "/Users/carlos/Documents/Drogon-rewrite/.preflight/reference-cli-cRLmbn/bots-run-T97Ciu/home",
+    "TMPDIR": "/Users/carlos/Documents/Drogon-rewrite/.preflight/reference-cli-cRLmbn/bots-run-T97Ciu/temp",
+    "XDG_CACHE_HOME": "/Users/carlos/Documents/Drogon-rewrite/.preflight/reference-cli-cRLmbn/bots-run-T97Ciu/home/.cache",
+    "XDG_CONFIG_HOME": "/Users/carlos/Documents/Drogon-rewrite/.preflight/reference-cli-cRLmbn/bots-run-T97Ciu/home/.config",
+    "LANG": "en_US.UTF-8",
+    "CI": "1",
+    "NO_COLOR": "1"
+  },
+  "status": 0,
+  "signal": null,
+  "error": null,
+  "manifestSha256": "422265b4a5100f523f569c6c6ddda7d1241080419401a03c7f11d055cdff19d8"
+}
