@@ -43,3 +43,12 @@ blocking discriminator in the negative compile fixture. The envelope now aliases
 the exported `ShutdownCheckpointPersistDeps` generic directly. Fixture presence
 is not proof those tests pass; final leaf/lead results and root admission remain
 pending. No candidate contract files are committed by this review checkpoint.
+
+Root subsequently ran both checks from the rewrite with the same Node24:
+
+- `apps/desktop/node_modules/typescript/bin/tsc --noEmit --skipLibCheck false -p tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts/tsconfig.json`: exit 0.
+- `apps/desktop/node_modules/vitest/vitest.mjs run tests/parity/ports/WP-UI-PRELOAD/persisted-renderer-contracts tests/parity/ports/WP-UI-PRELOAD/shutdown-checkpoint`: five files, **39/39 tests**, exit 0.
+
+These independently verify the current fixtures, unchanged policy regressions
+and strict library checking. They still do not prove runtime checkpoint
+serialization, host authority, durable storage or the packaged Electron flow.
