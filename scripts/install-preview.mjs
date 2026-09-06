@@ -5,12 +5,10 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  open,
   readFile,
   realpath,
   rename,
   symlink,
-  unlink,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -23,6 +21,7 @@ import {
   verifySealedBundle,
 } from "./desktop-artifacts.mjs";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
+import { acquirePreviewInstallLock } from "./preview-install-lock.mjs";
 
 const args = process.argv.slice(2);
 assert.equal(
@@ -81,12 +80,7 @@ assert.ok(
   (await lstat(builds)).isDirectory(),
   "Refuse a redirected build archive",
 );
-const lockPath = path.join(builds, "install.lock");
-const lock = await open(lockPath, "wx", 0o600);
-const lockIdentity = await lock.stat();
-await lock.writeFile(
-  JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
-);
+const installLock = await acquirePreviewInstallLock(builds);
 const current = path.join(applications, "Drogon.app");
 let previous = null;
 try {
@@ -168,11 +162,5 @@ try {
     }),
   );
 } finally {
-  await lock.close();
-  const currentLock = await lstat(lockPath).catch(() => null);
-  if (
-    currentLock?.ino === lockIdentity.ino &&
-    currentLock?.dev === lockIdentity.dev
-  )
-    await unlink(lockPath);
+  await installLock.release();
 }
