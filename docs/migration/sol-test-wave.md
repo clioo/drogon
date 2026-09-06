@@ -101,6 +101,24 @@ tasks preserve the full session model and do not redefine parity around the shel
 
 ### User correction: leads delegate execution
 
+Reaffirmed at 17:30 UTC: root removed the contradictory legacy manual-fallback
+sentence in `AGENTS.md` and sent priority guidance to the current ENG and CAP
+Dispatches (`msg_4d3c72202bab`, `msg_492af5a1c033`). A quota or delegation failure
+requires escalation, not Sol implementing the worker's slice. Leaf-native forks
+are also outside the authorized two-level tree. Source preparation, test writing,
+test execution and debugging remain leaf work; Sol provides direction and focused
+evidence review. Audit remains 11/12 (91.7%, medium confidence, delta 0); E5
+resources/publication is the next closure milestone, and full-fidelity 24-hour
+delivery remains high risk.
+
+At this checkpoint UI's delegated GLM policy port has settled, with final
+integration acceptance still pending. Root requested release of its Sol Dispatch;
+Orca retained the externally owned terminal without process action. ENG's Kimi
+correction is live at depth 2 (`task_409e1056b0a9 / ctx_09689a2eb286`). CAP's
+Sonnet remains subject to the bounded fork-provenance gate: its internal fork
+completed but was not Orca-orchestrated, and the lead is gathering the final
+effect inventory before resuming. No completed work is rerun solely for attribution.
+
 Carlos clarified that Sol must conserve OpenAI usage by directing non-OpenAI
 workers, rather than manually implementing or running extended preparation/debug
 loops. Root sent high-priority guidance to all three live leads. The earlier
