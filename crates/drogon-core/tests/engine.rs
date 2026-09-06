@@ -360,12 +360,9 @@ fn handle_loss_then_reopen_marks_prior_sessions_unverifiable_and_never_respawns(
     // same store finding rows whose in-memory handles it does not have; it
     // is NOT real process death and is not crash-recovery proof. A fixture
     // where the spawning process actually dies remains an open follow-up.
-    let original = Engine::open(dir.path()).unwrap();
+    let original = std::sync::Arc::new(Engine::open(dir.path()).unwrap());
     let workspace_id = register_workspace(&original, dir.path(), "ws-1");
-    // Long-lived on purpose: its reader thread must stay blocked in
-    // read() for the rest of this test so it cannot reap and persist a
-    // real exit after the assertions below have already been made against
-    // the restarted engine's view.
+    // Keep the child alive so the poller cannot persist an exit during handle-loss assertions.
     let session = ok(
         &original,
         "session.start",
@@ -374,6 +371,11 @@ fn handle_loss_then_reopen_marks_prior_sessions_unverifiable_and_never_respawns(
     );
     let session_id = session["id"].as_str().unwrap().to_string();
     let incarnation = session["incarnation"].as_str().unwrap().to_string();
+    let _guard = SessionGuard {
+        engine: original.clone(),
+        session_id: session_id.clone(),
+        incarnation: incarnation.clone(),
+    };
 
     // A second Engine over the same store has no access to `original`'s
     // in-memory handle; opening it runs the prior-instance sweep.
@@ -804,7 +806,7 @@ fn unknown_session_ids_are_not_found_while_recovered_ones_are_unverifiable() {
     // not outlive the test. The second Engine below has no access to this
     // engine's in-memory handles; that is the prior-instance model here,
     // not real process death.
-    let original = Engine::open(dir.path()).unwrap();
+    let original = std::sync::Arc::new(Engine::open(dir.path()).unwrap());
     let workspace_id = register_workspace(&original, dir.path(), "ws-1");
     let session = ok(
         &original,
@@ -814,6 +816,11 @@ fn unknown_session_ids_are_not_found_while_recovered_ones_are_unverifiable() {
     );
     let session_id = session["id"].as_str().unwrap().to_string();
     let incarnation = session["incarnation"].as_str().unwrap().to_string();
+    let _guard = SessionGuard {
+        engine: original.clone(),
+        session_id: session_id.clone(),
+        incarnation: incarnation.clone(),
+    };
 
     // Sweeps the row to `unverifiable`: this engine holds no handle for it.
     let engine = Engine::open(dir.path()).unwrap();
@@ -1051,6 +1058,36 @@ impl Drop for SessionGuard {
             json!({ "sessionId": self.session_id, "incarnation": self.incarnation }),
         ));
     }
+}
+
+#[test]
+fn fixture_guard_stops_the_exact_session_during_unwind() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(Engine::open(dir.path()).unwrap());
+    let workspace_id = register_workspace(&engine, dir.path(), "ws-1");
+    let session = ok(
+        &engine,
+        "session.start",
+        "start-1",
+        json!({ "workspaceId": workspace_id, "command": "/bin/sh", "args": ["-c", "exec sleep 30"] }),
+    );
+    let guard = SessionGuard {
+        engine: engine.clone(),
+        session_id: session["id"].as_str().unwrap().to_string(),
+        incarnation: session["incarnation"].as_str().unwrap().to_string(),
+    };
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _guard = guard;
+        panic!("intentional fixture assertion failure");
+    }));
+    assert!(unwind.is_err());
+    let read = ok(
+        &engine,
+        "session.read",
+        "read-after-unwind",
+        json!({ "sessionId": session["id"], "incarnation": session["incarnation"], "cursor": 0 }),
+    );
+    assert_eq!(read["session"]["verdict"], "exited");
 }
 
 #[test]

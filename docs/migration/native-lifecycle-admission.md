@@ -1,5 +1,22 @@
 # Native lifecycle admission — correction evidence (2026-09-06)
 
+## PR review correction: unwind cleanup
+
+Three independent read-only reviews completed on clean candidate 7844fb3
+(https://github.com/clioo/drogon/pull/4#issuecomment-5561787356). Muse found
+that the guard claim below was inaccurate: only the large-write test created
+a SessionGuard, while both handle-loss fixtures stopped their children only
+on success. Root now retains the original Engine through that same guard in
+both fixtures, preserving every existing assertion and explicit success cleanup.
+The reaping comment now correctly refers to the poller, not the reader.
+
+An additive test intentionally unwinds with an owned live session and verifies
+the exact session is exited afterward. Its first assertion used the wrong
+response nesting (null versus exited); that was a test-authoring error, not
+product RED. With the actual session.read contract, the engine test file passes
+**18 tests, 0 failures, 1 ignored marker-gated probe**. No real process-death or
+cross-platform runtime proof is inferred from this fixture.
+
 ## Root verification after worker settlement
 
 Root independently ran the full Rust workspace: **231 passed, 0 failed,
