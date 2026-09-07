@@ -25,6 +25,9 @@ use crate::error;
 #[path = "requests_atomic_tests.rs"]
 mod requests_atomic_tests;
 
+#[path = "requests_staged.rs"]
+mod staged;
+
 type ReceiptOutcome = Result<Value, RpcError>;
 type PersistedReceipt = (String, ReceiptOutcome);
 
