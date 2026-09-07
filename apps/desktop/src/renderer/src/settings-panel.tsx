@@ -3,8 +3,16 @@
 // source of truth; this component drives it through props, never holds its
 // own copy of the setting values. Keybinding editing is deferred to a later
 // checkpoint.
+//
+// ROOT HELD the prior build (msg_82afd72eee69): aria-modal="true" on a plain
+// absolutely-positioned div has no real focus trap or inert background, so
+// keyboard focus could leave the dialog while it claimed to be modal. This
+// version uses a native <dialog> opened with showModal(): the browser itself
+// supplies focus-into-dialog on open, Tab/Shift+Tab trapping, an inert
+// background and native Escape-to-close, so no custom JS trap is needed or
+// implemented here.
 import { useEffect, useRef } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
+import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import { Button } from "./components/ui/button";
 import type { Theme } from "./settings-store";
 
@@ -44,15 +52,110 @@ export function handleInspectorCheckboxChange(
   onInspectorChange(checked);
 }
 
-/** What the dialog's onKeyDown wires to: Escape closes, everything else is inert. */
-export function handleSettingsKeyDown(
-  event: { key: string; preventDefault: () => void },
+export type DialogLike = {
+  open: boolean;
+  showModal: () => void;
+  close: () => void;
+  addEventListener: (type: "close", listener: () => void) => void;
+  removeEventListener: (type: "close", listener: () => void) => void;
+};
+
+export type FocusableLike = { focus: () => void };
+
+/**
+ * Wires the native modal lifecycle for the settings dialog: opens it as a
+ * real modal (the browser supplies focus-into-dialog, Tab/Shift+Tab trapping
+ * and inert background) and calls `onClose` whenever the dialog's native
+ * "close" event fires — which is the browser's single funnel for Escape,
+ * outside-backdrop dismissal and the panel's own Close button (all of which
+ * call the dialog's `.close()` method rather than reimplementing dismissal).
+ * The returned cleanup closes a still-open dialog and restores focus to the
+ * opener, matching the pre-existing openerRef contract.
+ */
+export function attachSettingsDialogLifecycle(
+  dialog: DialogLike,
+  opener: FocusableLike | null,
   onClose: () => void,
-): void {
-  if (event.key !== "Escape") return;
-  event.preventDefault();
-  onClose();
+): () => void {
+  const handleClose = () => onClose();
+  dialog.addEventListener("close", handleClose);
+  dialog.showModal();
+  return () => {
+    dialog.removeEventListener("close", handleClose);
+    if (dialog.open) dialog.close();
+    opener?.focus();
+  };
 }
+
+/**
+ * A native <dialog>'s ::backdrop is not part of the DOM, so an outside click
+ * lands on the dialog element itself; a click on any real control inside
+ * lands on that control. This is what the dialog's onClick wires to for
+ * truthful outside-interaction dismissal (no synthetic overlay div).
+ */
+export function isSettingsBackdropClick(
+  event: { target: unknown },
+  dialog: unknown,
+): boolean {
+  return event.target === dialog;
+}
+
+/**
+ * Canonical 12/13/14px type scale and the source floating/popover layer tier
+ * (z-index: 10, matching --shadow-floating usage elsewhere in main.css).
+ * TODO(pending leader CSS handoff integration): move into main.css as a
+ * regular class once the appearance-panel style-block relocation lands;
+ * kept inline here for now since main.css is out of this dispatch's scope.
+ */
+export const SETTINGS_PANEL_STYLES = `
+  .settings-panel {
+    position: absolute;
+    top: 48px;
+    right: 16px;
+    z-index: 10;
+    width: min(260px, calc(100vw - 32px));
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--popover);
+    color: var(--popover-foreground);
+    box-shadow: var(--shadow-floating);
+  }
+  .settings-panel::backdrop {
+    background: transparent;
+  }
+  .settings-panel h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .settings-panel fieldset {
+    margin: 0;
+    padding: 0;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .settings-panel legend {
+    padding: 0 0 4px;
+    font-size: 12px;
+    color: var(--muted-foreground);
+  }
+  .settings-panel label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .settings-panel .settings-panel-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+`;
 
 export type SettingsPanelProps = {
   theme: Theme;
@@ -65,9 +168,10 @@ export type SettingsPanelProps = {
 };
 
 /**
- * Dismissible dialog, not a route: mounted/unmounted directly by App.tsx.
- * Opening moves focus into the dialog (mount effect); closing (unmount)
- * returns focus to the opener via `openerRef`.
+ * Dismissible native modal dialog, not a route: mounted/unmounted directly by
+ * App.tsx. showModal() moves focus in and traps Tab/Shift+Tab (browser-native,
+ * see attachSettingsDialogLifecycle); closing (Escape, outside click, the
+ * Close button, or unmount) returns focus to the opener via `openerRef`.
  */
 export function SettingsPanel({
   theme,
@@ -77,73 +181,27 @@ export function SettingsPanel({
   onClose,
   openerRef,
 }: SettingsPanelProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
-    panelRef.current?.focus();
-    return () => {
-      openerRef.current?.focus();
-    };
-  }, [openerRef]);
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    return attachSettingsDialogLifecycle(dialog, openerRef.current, onClose);
+    // Runs once per mount: the panel is mounted/unmounted directly by
+    // App.tsx rather than toggled via a prop, so a re-open always means a
+    // fresh mount with the current onClose/openerRef.
+  }, []);
 
   return (
-    <div
-      ref={panelRef}
-      tabIndex={-1}
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      ref={dialogRef}
       aria-label="Settings"
       className="settings-panel"
-      onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) =>
-        handleSettingsKeyDown(event, onClose)
-      }
+      onClick={(event: ReactMouseEvent<HTMLDialogElement>) => {
+        if (isSettingsBackdropClick(event, dialogRef.current)) onClose();
+      }}
     >
-      <style>{`
-        .settings-panel {
-          position: absolute;
-          top: 48px;
-          right: 16px;
-          z-index: 20;
-          width: 260px;
-          padding: 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          border-radius: var(--radius-md);
-          border: 1px solid var(--border);
-          background: var(--popover);
-          color: var(--popover-foreground);
-          box-shadow: var(--shadow-floating);
-        }
-        .settings-panel h2 {
-          margin: 0;
-          font-size: 0.9rem;
-          font-weight: 600;
-        }
-        .settings-panel fieldset {
-          margin: 0;
-          padding: 0;
-          border: none;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .settings-panel legend {
-          padding: 0 0 4px;
-          font-size: 0.8rem;
-          color: var(--muted-foreground);
-        }
-        .settings-panel label {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 0.85rem;
-        }
-        .settings-panel .settings-panel-actions {
-          display: flex;
-          justify-content: flex-end;
-        }
-      `}</style>
+      <style>{SETTINGS_PANEL_STYLES}</style>
       <h2>Settings</h2>
       <fieldset>
         <legend>Theme</legend>
@@ -176,10 +234,14 @@ export function SettingsPanel({
         Show session details
       </label>
       <div className="settings-panel-actions">
-        <Button size="sm" variant="outline" onClick={onClose}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => dialogRef.current?.close()}
+        >
           Close
         </Button>
       </div>
-    </div>
+    </dialog>
   );
 }

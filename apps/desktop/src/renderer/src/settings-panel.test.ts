@@ -1,21 +1,52 @@
 // Pure-logic tests for the SettingsPanel wiring. This vitest project has no
 // jsdom/happy-dom and no @testing-library (verified absent repo-wide), so DOM
-// rendering/event-dispatch cannot be exercised here. The exported handlers
-// below are exactly what the component's radio/checkbox/dialog onChange and
-// onKeyDown wire to, so testing them directly covers the real interaction
-// logic; only the actual DOM event dispatch is left to CDP. Real-browser
-// persistence (select dark, reload, .dark applied, localStorage updated) is
-// verified separately by a throwaway CDP script (see worker_done report).
+// rendering/real focus/Tab dispatch cannot be exercised here. The panel is a
+// native <dialog>.showModal(): the browser itself supplies focus-into-dialog,
+// Tab/Shift+Tab trapping and inert background, so attachSettingsDialogLifecycle
+// below is the entire seam our own code owns for that behavior, and it is
+// exercised against a fake dialog that mimics the real showModal/close/event
+// contract. Real-browser confirmation of the native trap/outside-dismiss/
+// Escape/focus-restore behavior is left to the CDP harness (out of this
+// dispatch's file scope). The exported handlers below are exactly what the
+// component's radio/checkbox/dialog wiring uses, so testing them directly
+// covers the real interaction logic. Real-browser persistence (select dark,
+// reload, .dark applied, localStorage updated) is verified separately by a
+// throwaway CDP script (see worker_done report).
 import { describe, expect, it, vi } from "vitest";
 import {
+  attachSettingsDialogLifecycle,
   buildThemeOptionsState,
   handleInspectorCheckboxChange,
-  handleSettingsKeyDown,
   handleThemeRadioChange,
+  isSettingsBackdropClick,
+  SETTINGS_PANEL_STYLES,
   THEME_OPTIONS,
 } from "./settings-panel";
 import { SettingsStore } from "./settings-store";
 import type { StorageLike, Theme } from "./settings-store";
+
+/** Minimal fake satisfying the slice of HTMLDialogElement the lifecycle uses. */
+class FakeDialog {
+  open = false;
+  private listeners = new Map<string, Set<() => void>>();
+  showModal = vi.fn(() => {
+    this.open = true;
+  });
+  close = vi.fn(() => {
+    this.open = false;
+    this.dispatch("close");
+  });
+  addEventListener = vi.fn((type: string, listener: () => void) => {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(listener);
+  });
+  removeEventListener = vi.fn((type: string, listener: () => void) => {
+    this.listeners.get(type)?.delete(listener);
+  });
+  dispatch(type: string): void {
+    for (const listener of this.listeners.get(type) ?? []) listener();
+  }
+}
 
 class MemoryStorage implements StorageLike {
   private map = new Map<string, string>();
@@ -86,21 +117,96 @@ describe("handleInspectorCheckboxChange", () => {
   });
 });
 
-describe("handleSettingsKeyDown", () => {
-  it("Escape calls onClose and prevents default", () => {
-    const onClose = vi.fn();
-    const preventDefault = vi.fn();
-    handleSettingsKeyDown({ key: "Escape", preventDefault }, onClose);
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(preventDefault).toHaveBeenCalledOnce();
+describe("attachSettingsDialogLifecycle (native modal open/close/focus-restore)", () => {
+  it("opens the dialog as a real modal on attach, so the browser moves focus in and traps Tab/Shift+Tab", () => {
+    const dialog = new FakeDialog();
+    const opener = { focus: vi.fn() };
+    attachSettingsDialogLifecycle(dialog, opener, vi.fn());
+    expect(dialog.showModal).toHaveBeenCalledOnce();
+    expect(dialog.open).toBe(true);
   });
-  it("any other key does not call onClose or preventDefault", () => {
+
+  it("native Escape/cancel firing the dialog's close event calls onClose exactly once", () => {
+    const dialog = new FakeDialog();
     const onClose = vi.fn();
-    const preventDefault = vi.fn();
-    handleSettingsKeyDown({ key: "Enter", preventDefault }, onClose);
-    handleSettingsKeyDown({ key: "a", preventDefault }, onClose);
+    attachSettingsDialogLifecycle(dialog, { focus: vi.fn() }, onClose);
+    // Escape triggers the browser's native cancel -> close default action;
+    // simulated here by dispatching the resulting native "close" event.
+    dialog.dispatch("close");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("cleanup closes an still-open dialog and restores focus to the opener", () => {
+    const dialog = new FakeDialog();
+    const opener = { focus: vi.fn() };
+    const cleanup = attachSettingsDialogLifecycle(dialog, opener, vi.fn());
+    cleanup();
+    expect(dialog.close).toHaveBeenCalledOnce();
+    expect(opener.focus).toHaveBeenCalledOnce();
+  });
+
+  it("cleanup does not re-close an already-closed dialog, but still restores focus", () => {
+    const dialog = new FakeDialog();
+    const opener = { focus: vi.fn() };
+    const onClose = vi.fn();
+    const cleanup = attachSettingsDialogLifecycle(dialog, opener, onClose);
+    dialog.close(); // e.g. user pressed Escape before unmount
+    cleanup();
+    expect(dialog.close).toHaveBeenCalledOnce();
+    expect(opener.focus).toHaveBeenCalledOnce();
+  });
+
+  it("cleanup restores focus even with no opener (defensive: opener may be unmounted)", () => {
+    const dialog = new FakeDialog();
+    expect(() =>
+      attachSettingsDialogLifecycle(dialog, null, vi.fn())(),
+    ).not.toThrow();
+  });
+
+  it("cleanup removes the close listener so a later native close does not call onClose again", () => {
+    const dialog = new FakeDialog();
+    const onClose = vi.fn();
+    const cleanup = attachSettingsDialogLifecycle(
+      dialog,
+      { focus: vi.fn() },
+      onClose,
+    );
+    cleanup();
+    onClose.mockClear();
+    dialog.dispatch("close");
     expect(onClose).not.toHaveBeenCalled();
-    expect(preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe("isSettingsBackdropClick (outside-interaction dismissal)", () => {
+  it("is true when the click target is the dialog element itself (native ::backdrop click)", () => {
+    const dialog = {};
+    expect(isSettingsBackdropClick({ target: dialog }, dialog)).toBe(true);
+  });
+  it("is false when the click target is a control inside the dialog", () => {
+    const dialog = {};
+    const innerButton = {};
+    expect(isSettingsBackdropClick({ target: innerButton }, dialog)).toBe(
+      false,
+    );
+  });
+});
+
+describe("SETTINGS_PANEL_STYLES (canonical type scale, layer tier, narrow viewport)", () => {
+  it("uses only the documented 12/13/14px type scale, not invented rem sizes", () => {
+    expect(SETTINGS_PANEL_STYLES).not.toMatch(/0?\.\d+rem/);
+    expect(SETTINGS_PANEL_STYLES).toMatch(/font-size:\s*14px/);
+    expect(SETTINGS_PANEL_STYLES).toMatch(/font-size:\s*13px/);
+    expect(SETTINGS_PANEL_STYLES).toMatch(/font-size:\s*12px/);
+  });
+  it("uses the source floating/popover layer tier (z-index: 10), not an invented 20", () => {
+    expect(SETTINGS_PANEL_STYLES).toMatch(/z-index:\s*10\b/);
+    expect(SETTINGS_PANEL_STYLES).not.toMatch(/z-index:\s*20\b/);
+  });
+  it("clamps width to the viewport so a narrow window doesn't overflow off-screen", () => {
+    expect(SETTINGS_PANEL_STYLES).toMatch(
+      /width:\s*min\(260px,\s*calc\(100vw - 32px\)\)/,
+    );
   });
 });
 
