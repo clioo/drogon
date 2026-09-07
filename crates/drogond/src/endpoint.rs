@@ -81,6 +81,32 @@ fn canonical_for_hash(data_dir: &Path) -> String {
     strip_verbatim_prefix(&canonical.to_string_lossy())
 }
 
+/// Builds the Windows named-pipe DACL's SDDL string given the creating
+/// process's `TokenUser` SID, already rendered in its canonical `S-1-...`
+/// string form (see `windows_pipe::token_user_sid_string`, `cfg(windows)`
+/// only, for how that string is obtained). Protected (`P`, no inherited
+/// ACEs); Generic-All to the named SID and to Local System (`SY`).
+///
+/// Deliberately takes the SID as a string rather than resolving it itself,
+/// so this — the only actual SID/DACL *selection* logic here, as opposed to
+/// the FFI calls that resolve the caller's real SID or install the
+/// resulting descriptor — is pure string formatting and can be unit-tested
+/// on every host, not only wherever `cfg(windows)` happens to compile. This
+/// intentionally never emits the `OW` ("the object's owner") trustee: a
+/// process's `TOKEN_OWNER` — which becomes a new object's default owner
+/// whenever no owner is explicitly set — is documented to be settable to
+/// either the user's own SID or one of the user's group SIDs, and
+/// `TOKEN_OWNER` is a distinct token field from `TOKEN_USER`; an `OW`-keyed
+/// ACE can therefore silently grant a group the caller merely belongs to,
+/// not "this same user," in any token shape where `TOKEN_OWNER` is a group.
+/// Naming the actual queried `TokenUser` SID here instead sidesteps having
+/// to separately prove `owner == TokenUser` holds for every valid token
+/// shape.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn dacl_sddl_for_user_sid(user_sid: &str) -> String {
+    format!("D:P(A;;GA;;;{user_sid})(A;;GA;;;SY)")
+}
+
 /// Pure state machine behind `NamedPipeConnection`'s (`cfg(windows)`, below)
 /// shared shutdown/disconnect bookkeeping. A named-pipe instance can be
 /// referenced by several distinct duplicate handle values at once
@@ -350,9 +376,11 @@ pub use unix::{SOCKET_FILE_NAME, establish};
 ///
 /// Still hand-written, not moved to `windows-sys` (nothing there could
 /// replace them; they are this crate's own logic sitting on top of the raw
-/// bindings, not FFI declarations): the same-user SDDL string, the
-/// `SecurityDescriptorGuard` RAII wrapper around `LocalFree`, and the
-/// `to_wide` UTF-16 helper. No other hand-written FFI was added.
+/// bindings, not FFI declarations): the explicit-DACL SID/SDDL-selection
+/// logic (`dacl_sddl_for_user_sid`, `token_user_sid_string`), the
+/// `SecurityDescriptorGuard`/`HandleGuard` RAII wrappers around
+/// `LocalFree`/`CloseHandle`, and the `to_wide` UTF-16 helper. No other
+/// hand-written FFI was added.
 #[cfg(windows)]
 mod windows_pipe {
     use std::cell::Cell;
@@ -369,8 +397,12 @@ mod windows_pipe {
         FALSE, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
         TRUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
+    use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
     use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
-    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, IsValidSid, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+        TokenUser,
+    };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
         PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
@@ -381,19 +413,8 @@ mod windows_pipe {
         PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
     };
     use windows_sys::Win32::System::Threading::{
-        CreateEventW, GetCurrentProcess, INFINITE, WaitForSingleObject,
+        CreateEventW, GetCurrentProcess, INFINITE, OpenProcessToken, WaitForSingleObject,
     };
-
-    /// Same-user pipe DACL. Protected (`P`, no inherited ACEs), Generic-All to
-    /// the pipe's Owner (the creating process's user) and to Local System.
-    /// Passing `NULL` security attributes instead would use CreateNamedPipeW's
-    /// *default* descriptor, which Microsoft documents as granting read access
-    /// to the Everyone group and the anonymous account — the opposite of
-    /// same-user. Built via `ConvertStringSecurityDescriptorToSecurityDescriptorW`
-    /// rather than manual SID/ACL construction, to keep the unverified
-    /// surface area small. Kept hand-written (not a `windows-sys` type):
-    /// it is data this crate owns, not an FFI declaration.
-    const SAME_USER_SDDL: &str = "D:P(A;;GA;;;OW)(A;;GA;;;SY)";
 
     fn to_wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -411,9 +432,142 @@ mod windows_pipe {
         }
     }
 
+    /// Closes a `HANDLE` on drop. Used only for the process token handle in
+    /// `token_user_sid_string`, whose several early-return error paths would
+    /// otherwise each need their own `CloseHandle` call.
+    struct HandleGuard(HANDLE);
+
+    impl Drop for HandleGuard {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    /// Reads a NUL-terminated wide (UTF-16) string starting at `ptr`, e.g.
+    /// the buffer `ConvertSidToStringSidW` fills on success.
+    ///
+    /// Safety: `ptr` must be non-null and point at a valid NUL-terminated
+    /// UTF-16 string that outlives this call.
+    unsafe fn wide_nul_terminated_to_string(ptr: *const u16) -> String {
+        let mut len = 0usize;
+        // Safety: caller guarantees `ptr` points at a NUL-terminated string.
+        while unsafe { *ptr.add(len) } != 0 {
+            len += 1;
+        }
+        // Safety: `len` was just measured up to (not including) the NUL.
+        let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+        String::from_utf16_lossy(slice)
+    }
+
+    /// Queries the calling process's real `TokenUser` SID — always a user
+    /// SID, never a group, unlike `TOKEN_OWNER`/`OW` (see
+    /// `same_user_security_attributes`'s doc) — and renders it as its
+    /// canonical `S-1-...` string form via `ConvertSidToStringSidW`, so it
+    /// can be embedded directly into the pipe's DACL SDDL in place of the
+    /// old `OW` placeholder. Fails closed (returns `Err`) on any step's
+    /// failure, including a SID that fails `IsValidSid` — never silently
+    /// falls back to `OW` or an unrestricted descriptor.
+    fn token_user_sid_string() -> io::Result<String> {
+        let mut token: HANDLE = std::ptr::null_mut();
+        // Safety: `GetCurrentProcess` is a pseudo-handle needing no
+        // separate close; `token` is an out-param filled on success.
+        let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let _token_guard = HandleGuard(token);
+
+        let mut needed: u32 = 0;
+        // Safety: the documented zero-length probe call to learn the
+        // required buffer size; this always "fails" this way once `token`
+        // is valid, so its `BOOL` result is intentionally ignored here.
+        unsafe {
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        }
+        if needed == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut buf = vec![0u8; needed as usize];
+        // Safety: `buf` is exactly `needed` bytes, the size the probe call
+        // above just reported; `needed` is reused as the out-param for the
+        // actual bytes written, which this does not need to inspect.
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buf.as_mut_ptr() as *mut c_void,
+                needed,
+                &mut needed,
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // Safety: `buf` was just filled by a successful `GetTokenInformation`
+        // call for `TokenUser`, which per its contract writes a `TOKEN_USER`
+        // at the start of the buffer.
+        let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+        let sid: PSID = token_user.User.Sid;
+        // Safety: `sid` points inside `buf`, still alive here; `IsValidSid`
+        // only reads it.
+        if unsafe { IsValidSid(sid) } == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "process TokenUser SID failed IsValidSid; refusing to build a pipe DACL from it",
+            ));
+        }
+        let mut sid_string: *mut u16 = std::ptr::null_mut();
+        // Safety: `sid` was just validated above; `sid_string` is an
+        // out-param the API fills on success, allocated via `LocalAlloc`
+        // per its contract and freed below with `LocalFree`.
+        let ok = unsafe { ConvertSidToStringSidW(sid, &mut sid_string) };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // Safety: `sid_string` was just set by the successful call above.
+        let sid_str = unsafe { wide_nul_terminated_to_string(sid_string) };
+        unsafe {
+            LocalFree(sid_string as *mut c_void);
+        }
+        Ok(sid_str)
+    }
+
+    /// Explicit-DACL pipe security attributes: Protected (`P`, no inherited
+    /// ACEs), Generic-All to the creating process's real `TokenUser` SID and
+    /// to Local System. Passing `NULL` security attributes instead would use
+    /// `CreateNamedPipeW`'s *default* descriptor, which Microsoft documents
+    /// as granting read access to the Everyone group and the anonymous
+    /// account.
+    ///
+    /// This deliberately does not use the `OW` ACE trustee ("the object's
+    /// owner") to grant access, even though `OW` was this function's prior
+    /// approach: a process's `TOKEN_OWNER` — which in turn becomes a new
+    /// object's default owner whenever no owner is explicitly set, as is the
+    /// case here — is documented to be settable to *either* the user's own
+    /// SID *or* one of the user's group SIDs, and `TOKEN_OWNER` is a field
+    /// distinct from `TOKEN_USER`. An `OW`-keyed ACE can therefore silently
+    /// grant access to a group the caller merely belongs to, rather than
+    /// "this same user," in any token shape where `TOKEN_OWNER` is a group —
+    /// the opposite of `protocol-v1.md`'s same-user requirement, and not
+    /// detectable from the SDDL string alone. Rather than attempt to prove
+    /// `owner == TokenUser` holds for every valid token shape (a harder,
+    /// more failure-prone claim to stand behind), this queries `TokenUser`
+    /// directly (`token_user_sid_string`, above) and plugs its string SID
+    /// into the DACL (`dacl_sddl_for_user_sid`, top of this file) in place
+    /// of `OW`. If that query fails for any reason, pipe creation fails
+    /// closed (propagates the error) rather than falling back to `OW`,
+    /// `NULL` security attributes, or any other default.
+    ///
+    /// Still built via `ConvertStringSecurityDescriptorToSecurityDescriptorW`
+    /// rather than manual SID/ACL construction, to keep the unverified FFI
+    /// surface area small — only the trustee naming the SID changed. See
+    /// the evidence doc's ACL section for the full before/after.
     fn same_user_security_attributes() -> io::Result<(SECURITY_ATTRIBUTES, SecurityDescriptorGuard)>
     {
-        let sddl = to_wide(SAME_USER_SDDL);
+        let user_sid = token_user_sid_string()?;
+        let sddl = to_wide(&super::dacl_sddl_for_user_sid(&user_sid));
         let mut sd: *mut c_void = std::ptr::null_mut();
         // Safety: `sddl` is a NUL-terminated wide string alive for the call;
         // `sd` is an out-param the API fills on success.
@@ -590,25 +744,23 @@ mod windows_pipe {
     ) -> io::Result<(u32, bool)> {
         let mut call = OverlappedCall::new()?;
         let started = issue(call.ptr());
-        finish_overlapped_call(handle, &call.overlapped, timeout, started)
+        // Safety: captured immediately alongside `issue`, per the Win32
+        // immediate-capture contract — dropping to a helper call first
+        // risks an intervening call resetting this thread's last-error.
+        let issue_err = (started == 0).then(|| unsafe { GetLastError() });
+        finish_overlapped_call(handle, &call.overlapped, timeout, started, issue_err)
     }
 
     /// Issues `issue` only if `shared` is not already closed, checking and
     /// issuing atomically under `shared`'s lock — released immediately
-    /// after, before the wait/cancel/reap step below, exactly like
-    /// `run_overlapped`. This closes the race the previous
-    /// drop-the-lock-before-issuing shape left open: `shutdown_both` now
-    /// also holds this same lock across its own mark-closed-and-cancel step
-    /// (see its doc), so the two can never interleave as "this check
-    /// observes open, `shutdown_both` marks closed and cancels nothing
-    /// (nothing pending yet), then this call issues an operation
-    /// `shutdown_both` already believes it accounted for." Either
-    /// `shutdown_both` completes its whole locked step first (so this
-    /// call's check observes closed and never issues), or this call's
-    /// locked step completes first (so the operation is genuinely pending
-    /// in the kernel by the time `shutdown_both` computes its
-    /// `live_handles()` snapshot and `CancelIoEx`s it) — never a partial
-    /// interleaving of the two.
+    /// after, before the wait/cancel/reap step below. This closes the race
+    /// the previous drop-the-lock-before-issuing shape left open:
+    /// `shutdown_both` holds this same lock across its own
+    /// mark-closed-and-cancel step, so either it completes first (this
+    /// call's check observes closed and never issues) or this call's
+    /// locked step completes first (the operation is genuinely pending by
+    /// the time `shutdown_both` snapshots `live_handles()` and cancels it)
+    /// — never a partial interleaving.
     fn run_overlapped_guarded(
         shared: &Mutex<super::SharedTransportState<usize>>,
         handle: HANDLE,
@@ -616,7 +768,7 @@ mod windows_pipe {
         issue: impl FnOnce(*mut OVERLAPPED) -> i32,
     ) -> io::Result<(u32, bool)> {
         let mut call = OverlappedCall::new()?;
-        let started = {
+        let (started, issue_err) = {
             let guard = shared.lock().unwrap();
             if guard.is_closed() {
                 return Err(io::Error::new(
@@ -624,49 +776,48 @@ mod windows_pipe {
                     "named pipe connection was shut down",
                 ));
             }
-            issue(call.ptr())
+            let started = issue(call.ptr());
+            // Safety: captured here, still under `guard` — dropping the
+            // guard or calling `finish_overlapped_call` first could reset
+            // this thread's last-error before it is read.
+            let issue_err = (started == 0).then(|| unsafe { GetLastError() });
+            (started, issue_err)
             // `guard` drops here, before the wait/cancel/reap step below —
             // a blocking wait must never happen while holding this lock.
         };
-        finish_overlapped_call(handle, &call.overlapped, timeout, started)
+        finish_overlapped_call(handle, &call.overlapped, timeout, started, issue_err)
     }
 
     /// Shared wait/cancel/reap mechanics behind every overlapped call once
-    /// it has already been issued — the mechanics `run_overlapped` and
-    /// `run_overlapped_guarded` above both delegate to after their
-    /// different issue steps. `issue` starts the operation and returns
-    /// exactly what the Win32 call returned; this function does the rest:
-    /// wait on `overlapped.hEvent` up to `timeout` (`None` waits
-    /// indefinitely), and on every exit path once the operation is
-    /// `ERROR_IO_PENDING` (not only the timeout path — see the `_` wait arm
-    /// below), `CancelIoEx` the specific handle before reaping the result —
-    /// a pending operation's `OVERLAPPED`, event and caller-provided buffer
-    /// are all still owned by the kernel until reaped via
-    /// `GetOverlappedResult`, per the Win32 contract; returning early while
-    /// that ownership is outstanding leaves the kernel free to write into
-    /// the caller's `OverlappedCall` and a closed event handle after both
-    /// are gone.
+    /// it has already been issued. `started` is exactly what the Win32
+    /// call returned; `issue_err` is `GetLastError()` as captured by the
+    /// caller immediately alongside `issue` (used only when
+    /// `started == 0`, since this function's own subsequent calls would
+    /// otherwise risk observing a last-error already reset by the guard
+    /// drop or the call into this function). On every exit path once the
+    /// operation is `ERROR_IO_PENDING` (not only the timeout path — see
+    /// the `_` wait arm below), `CancelIoEx` the specific handle before
+    /// reaping via `GetOverlappedResult` — a pending operation's
+    /// `OVERLAPPED`, event and buffer are all still kernel-owned until
+    /// reaped, per the Win32 contract.
     ///
     /// Returns `(bytes_transferred, timed_out)`. `ERROR_PIPE_CONNECTED`
-    /// (a client connected between instance creation and this call, so the
-    /// "connect" was already complete before it was even issued) is folded
-    /// into an ordinary immediate success with `0` bytes transferred,
-    /// matching `ConnectNamedPipe`'s documented special case. On the
-    /// timeout path, `CancelIoEx` racing a real completion is resolved in
-    /// favor of the completion: if `GetOverlappedResult` reports the
-    /// operation actually finished (a client connected, or bytes were
-    /// transferred, right at the timeout boundary), that success is
-    /// returned — never collapsed into `timed_out` — because it exists
-    /// exactly once and can never be redelivered on this about-to-be-
-    /// dropped `OVERLAPPED`.
+    /// (a client connected before the call was even issued) folds into an
+    /// ordinary immediate success with `0` bytes, matching
+    /// `ConnectNamedPipe`'s documented special case. On the timeout path,
+    /// a `GetOverlappedResult` success racing `CancelIoEx` wins over
+    /// `timed_out`, since that completion exists exactly once and can
+    /// never be redelivered on this about-to-be-dropped `OVERLAPPED`.
     fn finish_overlapped_call(
         handle: HANDLE,
         overlapped: &OVERLAPPED,
         timeout: Option<Duration>,
         started: i32,
+        issue_err: Option<u32>,
     ) -> io::Result<(u32, bool)> {
         if started == 0 {
-            let err = unsafe { GetLastError() };
+            let err =
+                issue_err.expect("issue_err must be captured by the caller when started == 0");
             if err == ERROR_PIPE_CONNECTED {
                 return Ok((0, false));
             }
@@ -1081,6 +1232,42 @@ mod windows_pipe {
             super::super::windows_pipe_name(&super::super::canonical_for_hash(dir))
         }
 
+        /// Regression test for the immediate-capture fix: `finish_overlapped_call`
+        /// must resolve its `started == 0` branch from the `issue_err` its
+        /// caller captured, never a fresh `GetLastError()` call of its own —
+        /// the whole point of the fix is that nothing after `issue` (a
+        /// dropped lock guard, a helper call) may be trusted to leave the
+        /// thread's last-error untouched. Windows-gated like every other
+        /// test in this module (the function itself only exists under
+        /// `cfg(windows)`), but needs no real pipe or kernel I/O: `started`
+        /// is nonzero-failure (`0`) with a synthetic `issue_err`, so the
+        /// function returns immediately without touching `handle` or
+        /// `overlapped`, keeping this deterministic and host-independent
+        /// once compiled.
+        #[test]
+        fn finish_overlapped_call_resolves_from_the_captured_issue_error() {
+            let overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+            let err = finish_overlapped_call(
+                INVALID_HANDLE_VALUE,
+                &overlapped,
+                None,
+                0,
+                Some(ERROR_ACCESS_DENIED),
+            )
+            .unwrap_err();
+            assert_eq!(err.raw_os_error(), Some(ERROR_ACCESS_DENIED as i32));
+
+            let ok = finish_overlapped_call(
+                INVALID_HANDLE_VALUE,
+                &overlapped,
+                None,
+                0,
+                Some(ERROR_PIPE_CONNECTED),
+            )
+            .unwrap();
+            assert_eq!(ok, (0, false));
+        }
+
         /// Fix 1 (cancel-and-reap on every post-issue exit path, not only
         /// the timeout path): several consecutive timed-out accepts reuse
         /// the same pending instance and handle (`NamedPipeListener::accept`'s
@@ -1337,6 +1524,123 @@ mod windows_pipe {
                 CloseHandle(client_key as HANDLE);
             }
         }
+
+        /// The ACL correction this module exists for (ROOT seq 3304):
+        /// inspects the *actual* security descriptor Windows attached to a
+        /// freshly created pipe instance and asserts its DACL names this
+        /// process's real `TokenUser` SID — obtained independently here via
+        /// the same `token_user_sid_string` production code path — as an
+        /// explicit trustee, rather than only asserting the SDDL string we
+        /// built contains the expected substring. A string-only assertion
+        /// could pass even if `ConvertStringSecurityDescriptorToSecurityDescriptorW`
+        /// or `CreateNamedPipeW` silently mishandled the descriptor; reading
+        /// the DACL back via `GetSecurityInfo`/`GetAce` instead exercises
+        /// the real kernel-attached object, which is the only thing that
+        /// determines who can actually open this pipe.
+        #[test]
+        fn created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder() {
+            use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
+            use windows_sys::Win32::Security::{
+                ACCESS_ALLOWED_ACE, ACL, DACL_SECURITY_INFORMATION, GetAce, PSECURITY_DESCRIPTOR,
+            };
+
+            // The real Win32 `ACCESS_ALLOWED_ACE_TYPE` (`WinNT.h`) value;
+            // not imported from `windows-sys` because it lives behind the
+            // `Win32_System_SystemServices` feature, which is not one of
+            // `drogond`'s enabled `windows-sys` features and this task may
+            // not add. `ACE_HEADER::AceType` is a stable, documented wire
+            // value (0), not something the underlying Windows ABI can
+            // change without breaking every existing DACL on disk.
+            const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+
+            let dir = tempfile::tempdir().unwrap();
+            let listener = establish(dir.path()).unwrap();
+            let handle = listener
+                .pending
+                .expect("establish() leaves exactly one pending, not-yet-connected instance");
+
+            let expected_sid = token_user_sid_string()
+                .expect("querying this test process's own TokenUser SID must succeed");
+
+            let mut owner: PSID = std::ptr::null_mut();
+            let mut group: PSID = std::ptr::null_mut();
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            let mut sacl: *mut ACL = std::ptr::null_mut();
+            let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+            // Safety: `handle` is the live pipe instance handle owned by
+            // `listener`, valid for the duration of this call; every
+            // out-param below is filled only on success.
+            let status = unsafe {
+                GetSecurityInfo(
+                    handle,
+                    SE_KERNEL_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    &mut owner,
+                    &mut group,
+                    &mut dacl,
+                    &mut sacl,
+                    &mut sd,
+                )
+            };
+            assert_eq!(
+                status, 0,
+                "GetSecurityInfo must succeed reading back the freshly created pipe's DACL"
+            );
+            assert!(
+                !dacl.is_null(),
+                "the pipe must carry an explicit DACL, never a NULL (fully unrestricted) one"
+            );
+
+            // Safety: `dacl` is non-null per the check above and was just
+            // filled by the successful `GetSecurityInfo` call.
+            let acl = unsafe { &*dacl };
+            let mut names_expected_sid = false;
+            for index in 0..u32::from(acl.AceCount) {
+                let mut ace_ptr: *mut c_void = std::ptr::null_mut();
+                // Safety: `dacl` is valid and `index` is within
+                // `acl.AceCount`, per the loop bound above.
+                assert_ne!(
+                    unsafe { GetAce(dacl, index, &mut ace_ptr) },
+                    0,
+                    "every ACE index below AceCount must be readable"
+                );
+                // Safety: `GetAce` just returned this pointer as a valid ACE
+                // for the duration of `dacl`'s lifetime.
+                let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
+                if ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE {
+                    continue;
+                }
+                // Safety: for an `ACCESS_ALLOWED_ACE`, the trustee SID
+                // begins in-place at `SidStart`, per the Win32 contract.
+                let sid: PSID = std::ptr::addr_of!(ace.SidStart) as PSID;
+                // Safety: `sid` points inside the live `dacl` buffer.
+                if unsafe { IsValidSid(sid) } == 0 {
+                    continue;
+                }
+                let mut sid_string: *mut u16 = std::ptr::null_mut();
+                // Safety: `sid` was just validated above.
+                if unsafe { ConvertSidToStringSidW(sid, &mut sid_string) } == 0 {
+                    continue;
+                }
+                // Safety: `sid_string` was just set by the successful call
+                // above.
+                let sid_str = unsafe { wide_nul_terminated_to_string(sid_string) };
+                unsafe {
+                    LocalFree(sid_string as *mut c_void);
+                }
+                if sid_str == expected_sid {
+                    names_expected_sid = true;
+                }
+            }
+            unsafe {
+                LocalFree(sd as *mut c_void);
+            }
+            assert!(
+                names_expected_sid,
+                "the created pipe's DACL must explicitly name this process's real \
+                 TokenUser SID ({expected_sid}), not rely on OW or any other placeholder"
+            );
+        }
     }
 }
 
@@ -1416,6 +1720,34 @@ mod tests {
         );
         assert_eq!(name, windows_pipe_name("/home/tester/.local/share/drogon"));
         assert_ne!(name, windows_pipe_name("/home/other/.local/share/drogon"));
+    }
+
+    /// Host-agnostic unit test for the pure DACL-selection logic behind
+    /// the Windows named-pipe ACL correction (ROOT seq 3304): given a
+    /// `TokenUser` SID string, the SDDL must name that exact SID as the
+    /// Generic-All trustee, never the old `OW` ("object owner") placeholder
+    /// — see `dacl_sddl_for_user_sid`'s doc for why `OW` was replaced. This
+    /// runs on every host, including this one, because it exercises only
+    /// string formatting; the real Windows kernel-DACL behavior (that the
+    /// created pipe's actual security descriptor names this SID) is
+    /// separately covered by
+    /// `windows_pipe::tests::created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder`,
+    /// which is Windows-gated because it calls real Win32 APIs.
+    #[test]
+    fn dacl_sddl_for_user_sid_names_the_given_sid_directly_never_ow() {
+        let sid = "S-1-5-21-111111111-222222222-333333333-1001";
+        let sddl = dacl_sddl_for_user_sid(sid);
+        assert_eq!(sddl, format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)"));
+    }
+
+    #[test]
+    fn dacl_sddl_for_user_sid_differs_across_distinct_sids() {
+        let a = dacl_sddl_for_user_sid("S-1-5-21-1-1-1-1000");
+        let b = dacl_sddl_for_user_sid("S-1-5-21-2-2-2-1001");
+        assert_ne!(
+            a, b,
+            "the DACL must name the specific SID it was given, not a fixed/shared string"
+        );
     }
 
     /// Cross-checks this crate's independent SHA-256 against the exact

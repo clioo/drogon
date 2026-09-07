@@ -1189,3 +1189,260 @@ first time. All prior passes' own remaining blockers (the staged `sha2`/
 feature-gap ask, the `server.rs` accept-loop generalization now already
 applied, etc.) are unaffected by this pass and still stand as recorded
 above.
+
+## GetLastError immediate-capture correction (root review `msg_fcb8dbc8ebc0`
+## of committed `7f39ff6`, not integrated)
+
+Root's review of the "Race" pass above (commit `7f39ff6`, its
+`finish_overlapped_call` extraction) found one further defect before
+accepting it, at `endpoint.rs:627` vs `669`: `run_overlapped_guarded`
+called `issue(call.ptr())` inside the `shared`-lock guard, let the guard
+drop, then called `finish_overlapped_call`, which only then read
+`GetLastError()` — after both the guard's `Drop` and the call into
+`finish_overlapped_call` itself, either of which the Win32 immediate-
+capture contract does not promise leaves the thread's last-error slot
+untouched. `run_overlapped` (used by `accept`) shares `finish_overlapped_call`
+and has the identical gap between its own `issue()` call and the read.
+
+**Fixed:** both `run_overlapped` and `run_overlapped_guarded` now call
+`GetLastError()` themselves, immediately alongside `issue(call.ptr())` —
+inside the lock guard in the guarded case — and pass the captured `DWORD`
+into `finish_overlapped_call` as a new `issue_err: Option<u32>` parameter
+(`Some` exactly when `started == 0`, `None` otherwise, since the value is
+only meaningful on the failure/pending path). `finish_overlapped_call`'s
+`started == 0` branch now reads that captured value instead of calling
+`GetLastError()` itself. The function's later `GetLastError()` calls (after
+`GetOverlappedResult` on the timeout and wait-failure paths) are untouched:
+each of those already reads immediately after its own preceding Win32 call,
+with no guard-drop or helper-call gap in between, so they were never the
+defect. No cancel-then-reap ownership changed: every `ERROR_IO_PENDING`
+path still `CancelIoEx`s and reaps via `GetOverlappedResult` before
+returning, unchanged from the prior pass. The long production comments
+`7f39ff6` added to these three functions are trimmed to concise form in
+this pass; no documented behavior changed.
+
+**Test added:** `finish_overlapped_call_resolves_from_the_captured_issue_error`,
+inside `windows_pipe::tests` (Windows-gated — the function itself only
+exists under `cfg(windows)`, so a host-agnostic test is not possible; but
+the test needs no real pipe, handle or kernel I/O, since a `started == 0`
+call returns immediately once `issue_err` is not `ERROR_IO_PENDING`, before
+touching `handle`/`overlapped` at all). Calls `finish_overlapped_call`
+directly with `started = 0` and a synthetic `issue_err`, asserting the
+returned error/success comes from that captured value
+(`ERROR_ACCESS_DENIED` → `Err` with that raw OS error; `ERROR_PIPE_CONNECTED`
+→ `Ok((0, false))`) rather than from any `GetLastError()` the function
+might otherwise call itself.
+
+**Build verification, precisely:** `cargo test -p drogond --locked`: 23 lib
+unit tests + 6 + 12 + 10 + 3 integration tests = 54 total, all pass, 0
+failed, 0 ignored (unchanged count from the prior pass — the new test is
+Windows-gated and does not run or count on this host). `cargo test -p
+drogon-harness --locked`: 23 tests, all pass, unaffected by this pass.
+`cargo clippy -p drogond -p drogon-harness --all-targets --locked -- -D
+warnings` (exit 0). `cargo fmt --all -- --check` (exit 0). Same standing
+constraint as every prior pass: no Windows Rust target exists on this host,
+so this correction, including its new test, remains compiler-unverified —
+never to be confused with the macOS gates above, which cover only the
+host-agnostic code paths — until V5's isolated Windows runner builds and
+runs the `cfg(windows)` module for the first time.
+
+**Remaining blockers (this pass):** identical to every prior pass — no
+Windows Rust target on this host; this fix and its test join the rest of
+the `cfg(windows)` module as compiler-unverified until V5's runner builds
+it. All prior passes' remaining blockers stand unaffected.
+
+## ACL correction (root seq 3304): TokenUser explicit DACL replaces `OW`
+
+Root security review held that `SAME_USER_SDDL`
+(`D:P(A;;GA;;;OW)(A;;GA;;;SY)`, present in every prior pass above) rests on
+an unproven assumption: it grants Generic-All to `OW` ("the object's
+owner") and treats that as equivalent to "the creating process's user."
+Windows does not guarantee that equivalence. A process's `TOKEN_OWNER` —
+which becomes a new object's default owner whenever no owner is explicitly
+set, exactly the case here, since `same_user_security_attributes` never
+called `SetSecurityDescriptorOwner` — is documented (`GetTokenInformation`,
+`TokenOwner`) to be settable to *either* the user's own SID *or* one of the
+user's group SIDs, and `TOKEN_OWNER` is a field distinct from `TOKEN_USER`.
+An `OW`-keyed ACE can therefore silently grant access to a group the caller
+merely belongs to, not "this same user" — the opposite of
+`protocol-v1.md`'s requirement — in any token shape where `TOKEN_OWNER`
+happens to be a group, and this is not detectable from the SDDL string
+alone (`OW` is a placeholder the OS resolves at object-creation time, not a
+literal SID). This section fixes it, per the two required outcomes:
+
+**Chosen fix: query and name the real `TokenUser` SID, not a proof that
+`owner == TokenUser`.** The task offered two paths — build an explicit DACL
+naming the actual `TokenUser` SID, or formally prove `owner == TokenUser`
+holds for every valid token shape and fail closed where unprovable. The
+first is strictly the safer engineering choice: `TOKEN_USER` is documented
+to always be a user SID, never a group, so naming it directly sidesteps the
+entire "is `TOKEN_OWNER` a group in this shape" question rather than
+requiring an exhaustive, Windows-version-sensitive proof over every valid
+token configuration (impersonation, restricted tokens, UAC-filtered admin
+tokens, etc.) that a later Windows change could silently invalidate. If the
+`TokenUser` query fails for any reason, pipe creation now fails closed
+(propagates the `io::Error`) rather than falling back to `OW`, `NULL`
+security attributes, or any other default — matching the task's fail-closed
+requirement without needing the proof path at all.
+
+**What changed, in `crates/drogond/src/endpoint.rs` only, all inside the
+DACL region** (`SAME_USER_SDDL` and everything between `to_wide` and
+`same_user_security_attributes`; no other function, no `Cargo.toml`/
+`Cargo.lock` edit):
+
+- `SAME_USER_SDDL` (the fixed `D:P(A;;GA;;;OW)(A;;GA;;;SY)` constant) is
+  deleted.
+- New `dacl_sddl_for_user_sid(user_sid: &str) -> String` (top-level in
+  `endpoint.rs`, **not** inside `#[cfg(windows)]`, mirroring
+  `windows_pipe_name`/`canonical_for_hash`'s existing pattern of keeping
+  pure logic host-agnostic): `format!("D:P(A;;GA;;;{user_sid})(A;;GA;;;SY)")`.
+  This is the only actual SID/DACL *selection* logic in the fix — everything
+  else is FFI plumbing to obtain or apply the SID — and it is the piece the
+  task specifically asked to be unit-tested host-agnostically. It compiles
+  and is exercised on this (Unix) host today.
+- New `windows_pipe::token_user_sid_string() -> io::Result<String>`
+  (`cfg(windows)` only): `OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY,
+  ..)` → `GetTokenInformation(token, TokenUser, ..)` (two-call
+  size-probe-then-fill pattern) → `IsValidSid` on the returned `TOKEN_USER`'s
+  `Sid` (fails closed, does not proceed on an invalid SID) →
+  `ConvertSidToStringSidW` to render it as `S-1-...`. Every failing step
+  returns `Err` immediately; nothing here falls back to a default.
+- `same_user_security_attributes` now calls `token_user_sid_string()?` and
+  `dacl_sddl_for_user_sid(&user_sid)` instead of the old fixed constant; its
+  own structure (build the wide SDDL string, call
+  `ConvertStringSecurityDescriptorToSecurityDescriptorW`, wrap the result in
+  `SecurityDescriptorGuard`) is otherwise unchanged — the fix is scoped to
+  *which* SID the DACL names, not the mechanism that installs it.
+- New small helpers, both `cfg(windows)`: `HandleGuard` (closes the process
+  token handle on every return path, including the early-error ones) and
+  `wide_nul_terminated_to_string` (reads `ConvertSidToStringSidW`'s output
+  buffer; shared by the production code and the new DACL-inspection test
+  below, so the NUL-scanning logic exists exactly once).
+
+**No new dependency, confirmed by reading the installed crate source, not
+assumed.** `crates/drogond/Cargo.toml`'s existing
+`[target.'cfg(windows)'.dependencies]` line already enables
+`Win32_Security`, `Win32_Security_Authorization` and `Win32_System_Threading`
+(added across the two prior passes above). Every symbol this fix needs is
+already reachable under those three features — verified by grepping
+`~/.cargo/registry/src/index.crates.io-*/windows-sys-0.61.2/src` directly:
+`OpenProcessToken` (`Win32::System::Threading`, gated with the rest of that
+module's calls), `GetTokenInformation`, `TokenUser`, `TOKEN_USER`,
+`TOKEN_QUERY`, `IsValidSid`, `PSID` (all `Win32::Security`), and
+`ConvertSidToStringSidW` (`Win32::Security::Authorization`, alongside the
+already-used `ConvertStringSecurityDescriptorToSecurityDescriptorW`). No
+`Cargo.toml`/`Cargo.lock` edit was made or is needed for the production fix.
+
+**Test-only exception, one local constant instead of a feature-list ask:**
+the DACL-inspection test below needs the real Win32 `ACCESS_ALLOWED_ACE_TYPE`
+value to distinguish allow-ACEs from deny/audit ACEs while walking the
+DACL. That symbol lives behind `Win32_System_SystemServices`
+(`windows-sys` source, confirmed by grep), a feature not currently enabled
+and not requested here — this task's constraint is "add NO dependency," and
+a new feature flag is a `Cargo.toml` edit either way. Since
+`ACCESS_ALLOWED_ACE_TYPE`'s wire value (`0`, from `WinNT.h`) is a stable,
+documented part of the on-disk/on-wire ACE format that Windows cannot change
+without breaking every existing DACL, the test instead declares
+`const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;` locally, scoped to the test module,
+with a comment explaining why it is not imported. This is the only
+deviation from "reuse existing features, add nothing."
+
+**Test 1 (required, host-agnostic, pure logic):**
+`dacl_sddl_for_user_sid_names_the_given_sid_directly_never_ow` and
+`dacl_sddl_for_user_sid_differs_across_distinct_sids`, in the bottom-level
+`#[cfg(test)] mod tests` (no `cfg(windows)` gate — same placement pattern as
+`strip_verbatim_prefix_*` above). The first asserts the built SDDL is
+exactly `D:P(A;;GA;;;{sid})(A;;GA;;;SY)` for a sample `S-1-5-21-...` string
+(so it can never regress to naming `OW` again without failing this
+assertion); the second asserts two different SIDs produce different SDDL
+strings, guarding against an accidentally hardcoded trustee. Both pass on
+this (Unix) host as part of `cargo test -p drogond --locked` today.
+
+**Test 2 (required, Windows-gated, real DACL inspection, not string-only):**
+`created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder`, inside
+`windows_pipe::tests` (same host-gating as every other real-`HANDLE` test in
+that module). It does **not** assert anything about the SDDL string that
+was built; it creates a real pipe instance via `establish()`, then reads
+back the *actual* security descriptor the OS attached to it —
+`GetSecurityInfo(handle, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, ..)` —
+and walks its `ACL` via `GetAce`, extracting each `ACCESS_ALLOWED_ACE`'s SID
+(`ace.SidStart`, per the Win32 variable-length-ACE contract) and converting
+it back to a string with `ConvertSidToStringSidW` for comparison against an
+independently-obtained `token_user_sid_string()` result. This exercises the
+real kernel object, not just the SDDL text this process happened to build —
+a string-only assertion could pass even if
+`ConvertStringSecurityDescriptorToSecurityDescriptorW` or
+`CreateNamedPipeW` silently mishandled the descriptor on the way in; reading
+the DACL back is the only way to confirm the pipe Windows actually created
+grants access to the right SID.
+
+**Rebased onto another worker's uncommitted immediate-capture fix in the
+same file, touching only the DACL region.** At the start of this pass,
+`endpoint.rs` already carried the "GetLastError immediate-capture
+correction" section's uncommitted changes (`run_overlapped`/
+`run_overlapped_guarded`/`finish_overlapped_call`'s `issue_err` parameter,
+documented above). This pass's edits are confined to `SAME_USER_SDDL`
+through `same_user_security_attributes` (now replaced), the new
+`dacl_sddl_for_user_sid` top-level function, and one new test appended
+inside `windows_pipe::tests` and one pair of tests appended inside the
+bottom-level `mod tests` — none of the immediate-capture fix's functions,
+tests or doc comments were touched, moved, or reordered. `git diff --stat`
+for this pass therefore should show only additions/deletions inside those
+regions layered on top of the existing uncommitted diff, not a rewrite of
+it.
+
+**One pre-existing doc inaccuracy noticed, not fixed (out of this task's
+file scope):** the `mod windows_pipe` top-of-module doc comment (above the
+`use windows_sys::...` block) still says "`windows-sys` is **not yet a
+dependency of `drogond`**" — that was true when originally written, but has
+been false since the "Completion" pass above, where root committed the
+`[target.'cfg(windows)'.dependencies]` line. Flagging for whoever next
+touches that specific doc comment, since fixing it is outside "only the
+DACL section" for this pass.
+
+### GREEN gate for this pass
+
+```
+cargo fmt --all -- --check                                        # clean (after cargo fmt --all reordered two new `use` lines)
+cargo test  -p drogond --locked                                    # 25 lib unit tests (23 pre-existing + 2 new dacl_sddl_for_user_sid_* tests) + 6 + 12 + 10 + 3 integration tests = 56 total, all pass, 0 failed, 0 ignored
+cargo clippy -p drogond --all-targets --locked -- -D warnings      # clean
+```
+
+Both new host-agnostic tests (`dacl_sddl_for_user_sid_names_the_given_sid_directly_never_ow`,
+`dacl_sddl_for_user_sid_differs_across_distinct_sids`) are confirmed passing
+individually, not just counted in the aggregate above. `cargo fmt`/`cargo
+clippy` both ran on the whole `drogond` crate, i.e. cover this pass's edits
+plus every prior pass's uncommitted state in the same file.
+
+**Not run this pass, no regression risk:** `drogon-harness` (untouched by
+this pass) and `cargo build --workspace --locked` — this pass's file scope
+is exactly the two files listed at this section's top, neither of which any
+other crate depends on for its own build.
+
+### Fix/proof verdict, tests, remaining (summary)
+
+- **Verdict:** fix applied (explicit `TokenUser`-named DACL), not the
+  formal-proof alternative — see "Chosen fix" above for why. `OW` no longer
+  appears anywhere in the DACL construction path.
+- **Tests added:** 2 host-agnostic pure-logic tests (GREEN on this host,
+  part of the `cargo test -p drogond --locked` count above) + 1
+  Windows-gated real-kernel-DACL-inspection test (syntactically complete,
+  compiler-unverified on this host, per the standing constraint recorded in
+  every prior section of this doc — no Windows Rust target exists here).
+- **Gates:** `cargo test -p drogond --locked`, `cargo clippy -p drogond
+  --all-targets --locked -- -D warnings` and `cargo fmt --all -- --check`
+  all clean on this host, as shown above. None of these three gates
+  actually compiles or lints anything under `cfg(windows)` — that entire
+  module is cfg-stripped before name resolution on a non-Windows host, per
+  every prior pass's identical caveat — so this fix's real FFI code
+  (`token_user_sid_string`, the updated `same_user_security_attributes`,
+  and the new DACL-inspection test) is verified only by hand against the
+  installed `windows-sys-0.61.2` source tree (exact function signatures,
+  struct layouts and feature gates, cited above), not by any compiler here.
+- **What remains:** V5's isolated Windows runner is still the first
+  compiler/runtime this fix (like every other `cfg(windows)` line in this
+  file) will ever see — needed to confirm
+  `created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder`
+  actually passes, not merely compiles, and to confirm none of the
+  hand-verified FFI signatures above has a subtle mismatch this review
+  could not catch without a real toolchain.
