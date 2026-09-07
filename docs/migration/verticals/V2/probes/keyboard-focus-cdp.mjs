@@ -416,8 +416,14 @@ try {
   assert.equal(await filesButton.isDisabled(), true);
   assert.match((await filesButton.getAttribute("title")) ?? "", /files\.v1/);
   assert.equal(await page.locator('section[aria-label="Files"]').count(), 0);
+  const botsButton = page.getByRole("button", { name: "Bots", exact: true });
+  await botsButton.waitFor();
+  assert.equal(await botsButton.isDisabled(), true);
+  assert.match((await botsButton.getAttribute("title")) ?? "", /bot\.snapshot\.v1/);
+  assert.equal(await page.locator('section[aria-label="Bots"]').count(), 0);
   assert.equal(await page.getByRole("tab").count(), 2);
   report.checks.push("hidden-files-mount-stays-disabled-with-reason");
+  report.checks.push("hidden-bots-mount-stays-disabled-with-reason");
   await page.screenshot({ path: path.join(shots, "panels-hidden-mount.png") });
 
   // 6. Layout matrix: responsive shell invariants at 1440x1000 and 760x600
