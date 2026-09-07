@@ -24,5 +24,8 @@ icu_collator = "=2.2.1"
 icu_locale = "=2.2.0"
 cap-std = "=4.0.3"
 
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
