@@ -547,7 +547,8 @@ describe("BotsPanel styling contract (admitted tokens/primitives only)", () => {
     );
     const runButtonMarkup = markup.slice(runButtonStart, runButtonEnd + 1);
     expect(runButtonMarkup).toContain('data-slot="button"');
-    expect(runButtonMarkup).toContain("size-8");
+    // Source-reconciled icon recipe (orca-drogon button.tsx): size-9.
+    expect(runButtonMarkup).toContain("size-9");
     expect(runButtonMarkup).toContain('data-bot-id="bot-1"');
     expect(runButtonMarkup).toContain('data-responsibility-id="resp-1"');
   });

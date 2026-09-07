@@ -148,6 +148,15 @@ and the Landing star button in `features/landing/github-star.tsx` port Orca's
 `components/worktree-list/listing/EmptyState.tsx` and `components/Landing.tsx`,
 all at the pinned source revision above. Each ported file keeps the MIT notice.
 
+The UI primitives in `apps/desktop/src/renderer/src/components/ui/` and
+`lib/utils.ts` port Orca's `src/renderer/src/components/ui/*.tsx` (badge, card,
+checkbox, collapsible, context-menu, dialog, dropdown-menu, hover-card, label,
+popover, progress, scroll-area, select, separator, sheet, switch, tabs,
+textarea, toggle, toggle-group, tooltip, command, accordion, button-group,
+button, input) and `src/renderer/src/lib/utils.ts`, all at the pinned source
+revision above; each ported file keeps the MIT notice. `tw-animate-css` (MIT)
+is a packaged dependency imported by main.css as the source does.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
