@@ -4,7 +4,7 @@
 // seams (start/stop), never raw SIGKILL. Shots go to gitignored
 // .preflight/v2-kbd-<ts>/; the JSON report prints to stdout.
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -494,6 +494,40 @@ try {
   );
   report.checks.push("inspector-toggle-works-below-1101");
   await assertLayout("1000-inspector-closed", { withTargets: false });
+
+  // Static CSS evidence only; rendered Files acceptance remains a separate gate.
+  const cssAssets = path.join(appDir, "out", "renderer", "assets");
+  const cssFile = (await readdir(cssAssets)).find((f) => f.endsWith(".css"));
+  assert.ok(cssFile, "built renderer CSS not found - run electron-vite build");
+  const builtCss = await readFile(path.join(cssAssets, cssFile), "utf8");
+  const count = (needle) => builtCss.split(needle).length - 1;
+  const cssNeedles = [
+    // Token values as emitted by the build (light value minifies #ffffff -> #fff,
+    // same color; the byte-identical source form is asserted in review).
+    ["editor-surface-token-dark", "--editor-surface: #1e1e1e;", 2],
+    ["editor-surface-token-light", "--editor-surface: #fff;", 2],
+    ["files-panel-split", ".files-panel {", 2],
+    ["workspace-explorer-tree", ".workspace-explorer {", 2],
+    ["editor-pane-canvas", ".editor-pane {", 1],
+    ["editor-pane-header", ".editor-pane-header {", 2],
+    ["tree-fixed-240px", "width: 240px;", 1],
+    // color-mix borders ship as progressive enhancement: var() fallback plus
+    // an @supports-wrapped color-mix override per the build pipeline.
+    ["color-mix-border", "color-mix(in srgb, var(--border) 72%, transparent)", 3],
+    [
+      "color-mix-supports-guard",
+      "@supports (color: color-mix(in lab, red, red))",
+      1,
+    ],
+  ];
+  for (const [name, needle, min] of cssNeedles) {
+    const hits = count(needle);
+    assert.ok(
+      hits >= min,
+      `files-split css missing ${name}: ${hits} < ${min} hits for ${JSON.stringify(needle)}`,
+    );
+    report.checks.push(`files-split-css-${name}(hits=${hits})`);
+  }
 
   report.status = "PASSED";
 } finally {

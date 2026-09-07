@@ -19,6 +19,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
+  --color-editor-surface: var(--editor-surface);
   --radius-md: calc(var(--radius) * 0.8);
 }
 :root {
@@ -44,6 +45,7 @@
   --destructive: #e40014;
   --sidebar: #fafafa;
   --sidebar-accent: #f5f5f5;
+  --editor-surface: #ffffff;
   /* Floating menus/popovers that escape the editor surface, per the source style guide. */
   --shadow-floating: 0 10px 24px rgb(0 0 0 / 0.18);
   color-scheme: light;
@@ -67,6 +69,7 @@
     --destructive: #ff6568;
     --sidebar: #171717;
     --sidebar-accent: #262626;
+    --editor-surface: #1e1e1e;
     color-scheme: dark;
   }
 }
@@ -90,6 +93,7 @@
   --destructive: #ff6568;
   --sidebar: #171717;
   --sidebar-accent: #262626;
+  --editor-surface: #1e1e1e;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -111,6 +115,7 @@
     --destructive: #e40014;
     --sidebar: #fafafa;
     --sidebar-accent: #f5f5f5;
+    --editor-surface: #ffffff;
     color-scheme: light;
   }
 }
@@ -488,6 +493,62 @@ h2 {
   flex-direction: row !important;
   align-items: center;
   gap: 6px !important;
+}
+/* Files split (contrast-report.md Follow-up B, V2-owned half): the panel
+   mounts session-less; tree fixed 240px, editor canvas flexes on
+   --editor-surface (values byte-identical to the frozen source anchors).
+   Narrow widths stack tree-over-editor at the inspector breakpoint. */
+.files-panel {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace-explorer {
+  width: 240px;
+  flex-shrink: 0;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid
+    color-mix(in srgb, var(--border) 72%, transparent);
+}
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--editor-surface);
+}
+.editor-pane-header {
+  min-height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--editor-surface);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--border) 72%, transparent);
+}
+.editor-pane-header .path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 1100px) {
+  .files-panel {
+    flex-direction: column;
+  }
+  .workspace-explorer {
+    width: auto;
+    max-height: 40%;
+    border-right: 0;
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--border) 72%, transparent);
+  }
 }
 @media (max-width: 1100px) {
   .session-details {
