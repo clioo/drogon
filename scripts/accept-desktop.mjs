@@ -226,13 +226,30 @@ try {
     })),
     { require: "undefined", process: "undefined" },
   );
-  await page
-    .getByRole("button", { name: "Create workspace", exact: true })
-    .last()
+  // Add Project dialog (ported folder picker): registers the folder as a
+  // project AND its implicit workspace, so the sidebar renders its row
+  // with one card — the legacy path form registered a bare workspace
+  // that never appeared as a card.
+  await page.getByRole("button", { name: "Add Project", exact: true }).click();
+  const addDialog = page.getByRole("dialog", { name: "Add Project" });
+  await addDialog.getByLabel("Folder or repository path").fill(workspace);
+  await addDialog
+    .getByRole("button", { name: "Add Project", exact: true })
     .click();
-  await page.getByLabel("Folder path").fill(workspace);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
+  // The folder project renders one row with its implicit-workspace card,
+  // and selecting the card selects that workspace.
+  await page.locator(".shell-project-row", { hasText: "folder" }).waitFor();
+  await page.getByRole("button", { name: "Select folder" }).waitFor();
+  report.checks.push("folder-project-renders-row-with-implicit-card");
+  // New-workspace composer (Projects header "+"): for a folder project
+  // the composer opens the implicit workspace straight away.
+  await page.getByRole("button", { name: "New workspace", exact: true }).click();
+  const composer = page.getByRole("dialog", { name: "Create workspace" });
+  await composer.locator("#composer-project").selectOption({ label: "folder" });
+  await composer.getByRole("button", { name: "Create workspace" }).click();
+  await page.getByRole("heading", { name: "Start a session" }).waitFor();
+  report.checks.push("composer-opens-folder-implicit-workspace");
   registered = await page.evaluate(async () => {
     const response = await window.drogon.workspaces();
     if (!response.ok) throw new Error(response.error.message);
@@ -369,6 +386,50 @@ try {
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   assert.equal(await page.getByRole("tab").count(), 0);
   report.checks.push("explicitly-closed-tabs-stay-dismissed-after-reload");
+  // Git project journey: the composer creates a real worktree through
+  // `worktree.create` and selects it; the sidebar gains a second card.
+  const gitDir = path.join(fixture, "repo");
+  await mkdir(gitDir);
+  const gitIdentity = [
+    "-c",
+    "user.email=acceptance@drogon.local",
+    "-c",
+    "user.name=Drogon Acceptance",
+    "-c",
+    "init.defaultBranch=main",
+  ];
+  await runAcceptanceProcess("git", [...gitIdentity, "init"], {
+    cwd: gitDir,
+  });
+  await writeFile(path.join(gitDir, "notes.txt"), "composer fixture\n");
+  await runAcceptanceProcess("git", [...gitIdentity, "add", "notes.txt"], {
+    cwd: gitDir,
+  });
+  await runAcceptanceProcess("git", [...gitIdentity, "commit", "-m", "composer fixture"], {
+    cwd: gitDir,
+  });
+  await page.getByRole("button", { name: "Add project", exact: true }).click();
+  const addGitDialog = page.getByRole("dialog", { name: "Add Project" });
+  await addGitDialog.getByLabel("Folder or repository path").fill(gitDir);
+  await addGitDialog
+    .getByRole("button", { name: "Add Project", exact: true })
+    .click();
+  // A git project has no workspace until its first worktree exists, so
+  // the composer (not the project row) is the way to its first card.
+  await page.getByRole("button", { name: "New workspace", exact: true }).click();
+  const worktreeComposer = page.getByRole("dialog", {
+    name: "Create workspace",
+  });
+  await worktreeComposer.locator("#composer-project").selectOption({ label: "repo" });
+  const gitComposer = page.getByRole("dialog", { name: "Create worktree" });
+  await gitComposer.getByLabel("Branch name").fill("demo-a");
+  await gitComposer.getByRole("button", { name: "Create worktree" }).click();
+  await page.getByRole("button", { name: "Select demo-a" }).waitFor();
+  await page.locator(".shell-project-row", { hasText: "repo" }).waitFor();
+  report.checks.push("composer-creates-git-worktree-and-selects-it");
+  // Later probes address the folder workspace, so select its card again.
+  await page.getByRole("button", { name: "Select folder" }).click();
+  await page.getByRole("heading", { name: "Start a session" }).waitFor();
   if (withFiles) {
     report.checks.push(
       ...(await probeRenderedFiles({ page, workspace, output })),

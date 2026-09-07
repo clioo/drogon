@@ -27,7 +27,6 @@ import type {
   Workspace,
 } from "../../shared/session-contract";
 import { Button } from "./components/ui/button";
-import { Input } from "./components/ui/input";
 import {
   isSessionDismissed,
   loadDismissedSessions,
@@ -35,6 +34,7 @@ import {
 } from "./dismissed-sessions";
 import { HarnessLaunchMenu } from "./HarnessLaunchMenu";
 import { Sidebar } from "./features/shell/Sidebar";
+import { NewWorkspaceComposerModal } from "./features/new-workspace/NewWorkspaceComposerModal";
 import { TabBar } from "./features/shell/TabBar";
 import { TitlebarLeftControls } from "./features/shell/TitlebarLeftControls";
 import {
@@ -350,8 +350,6 @@ export function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [folderPath, setFolderPath] = useState("");
   const [inspector, setInspector] = useState(() =>
     resolveInspectorDefault(
       matchMedia("(min-width: 1101px)").matches,
@@ -390,12 +388,17 @@ export function App() {
   // advertises them (project-adapter falls back to the Workspace list
   // until then, so this is never empty while workspaces exist).
   const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([]);
-  // Sidebar project/worktree dialogs (add project, new worktree, remove
-  // worktree). Null means none open; the palette opens the worktree form
-  // through the same state.
+  // Sidebar project dialogs (add project, remove worktree). Null means
+  // none open.
   const [projectAction, setProjectAction] = useState<ProjectAction | null>(
     null,
   );
+  // New-workspace composer modal (Landing, Cmd+N, palette, Projects
+  // header "+"). A project id preselects the composer; null leaves the
+  // selector on the first listed project.
+  const [composer, setComposer] = useState<{
+    initialProjectId: string | null;
+  } | null>(null);
   // Quick-open reveal cell: the Files descriptor is registered once (see
   // filesBaseRegistry), so the request travels through this stable cell
   // and a re-render tick rather than a re-registration (which would
@@ -1125,15 +1128,24 @@ export function App() {
     setViewHistory(next);
     applyViewEntry(next.present);
   };
-  // Add-project entry point shared by the sidebar, the landing empty state
-  // and the workspace.create (Cmd+N) chord.
+  // Add-project entry point shared by the sidebar and the landing empty
+  // state. Every project — git repo or plain folder — registers through
+  // `project.add`, so the sidebar always renders its row and cards.
   const requestAddProject = () => {
     if (
       isProjectsAvailable(liveCapabilities) &&
       typeof windowProjectBridge(window.drogon).projectAdd === "function"
     )
       setProjectAction({ kind: "add" });
-    else setAdding((value) => !value);
+    else
+      setError("Projects unavailable: service does not advertise project.v1");
+  };
+  // Create-workspace entry point shared by Landing, the workspace.create
+  // (Cmd+N) chord, the palette and the Projects header "+": opens the
+  // new-workspace composer, which creates a worktree for git projects or
+  // opens the implicit workspace for folder projects.
+  const requestCreateWorkspace = (initialProjectId: string | null = null) => {
+    setComposer({ initialProjectId });
   };
   // Project/worktree RPCs behind the sidebar dialogs. Each submit resolves
   // a verbatim daemon error for the form, or null on success (the dialog
@@ -1190,6 +1202,7 @@ export function App() {
       return "Could not create the worktree. Retry the connection.";
     }
     setProjectAction(null);
+    setComposer(null);
     await refresh();
     selectWorkspaceId(workspaceId);
     return null;
@@ -1231,18 +1244,15 @@ export function App() {
     }
   };
   // Palette "New worktree" target: the git project owning the selected
-  // workspace, else the first git project in the view.
+  // workspace, else the first git project in the view. The composer
+  // preselects it; with no git project yet the composer opens
+  // unselected so the user picks (or adds) a project there.
   const newWorktreeTarget = () =>
     gitProjectForWorkspace(projectGroups, selected) ??
     projectGroups.find((group) => group.project.kind === "git")?.project ??
     null;
-  const openNewWorktreeForm = () => {
-    const target = newWorktreeTarget();
-    if (!target) {
-      setError("No git project selected: add a repository project first.");
-      return;
-    }
-    setProjectAction({ kind: "worktree", projectId: target.id });
+  const openComposerForNewWorktree = () => {
+    requestCreateWorkspace(newWorktreeTarget()?.id ?? null);
   };
   // Quick-open reveal: records the request for the Files panel and routes
   // there. The panel applies it when its workspace matches (see
@@ -1377,17 +1387,6 @@ export function App() {
       setSessions(applied.sessions);
       setActive(applied.active);
     });
-  const add = () =>
-    action(async () => {
-      const result = checked(await window.drogon.addWorkspace(folderPath));
-      setWorkspaces((items) => [
-        ...items.filter((item) => item.id !== result.id),
-        result,
-      ]);
-      setSelected(result.id);
-      setAdding(false);
-      setFolderPath("");
-    });
   useEffect(() => {
     const platform = navigator.userAgent.includes("Mac") ? "darwin" : "other";
     const isDisabled = () => !selected || !status || busy || loadingSessions;
@@ -1404,13 +1403,14 @@ export function App() {
       chord: "CmdOrCtrl+,",
       handler: () => openSettings(),
     });
-    // R6-A source chords (definitions-core-1/3): Cmd+N creates a workspace,
-    // Cmd+K clears the focused terminal pane (reserved: never the palette),
-    // Cmd+B toggles the sidebar, Mod+Alt+arrows walk the view history.
+    // R6-A source chords (definitions-core-1/3): Cmd+N opens the
+    // new-workspace composer, Cmd+K clears the focused terminal pane
+    // (reserved: never the palette), Cmd+B toggles the sidebar,
+    // Mod+Alt+arrows walk the view history.
     registry.register({
       id: "workspace.create",
       chord: "CmdOrCtrl+N",
-      handler: guardHandler(requestAddProject, () => busy),
+      handler: guardHandler(() => requestCreateWorkspace(), () => busy),
     });
     registry.register({
       id: "terminal.clear",
@@ -1518,68 +1518,16 @@ export function App() {
           addDisabled={!status || busy}
           onSelectWorkspace={selectWorkspaceId}
           onAddProject={requestAddProject}
+          onCreateWorkspace={(projectId) =>
+            requestCreateWorkspace(projectId ?? null)
+          }
           worktreesAvailable={isWorktreesAvailable(liveCapabilities)}
           projectAction={projectAction}
           onOpenProjectAction={setProjectAction}
           onCloseProjectAction={() => setProjectAction(null)}
           onBrowseProject={browseProject}
           onSubmitAddProject={submitAddProject}
-          onSubmitWorktree={submitWorktree}
           onSubmitRemoveWorktree={submitRemoveWorktree}
-          addSlot={
-            <>
-          {adding && (
-            <form
-              className="folder-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void add();
-              }}
-            >
-              <label htmlFor="folder-path">Folder path</label>
-              <Input
-                id="folder-path"
-                autoFocus
-                value={folderPath}
-                onChange={(event) => setFolderPath(event.target.value)}
-                disabled={busy}
-              />
-              <div className="form-actions">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() =>
-                    void action(async () => {
-                      const value = await window.drogon.chooseFolder();
-                      if (value) setFolderPath(value);
-                    })
-                  }
-                >
-                  Browse
-                </Button>
-                <Button size="sm" disabled={busy || !folderPath.trim()}>
-                  Add
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setAdding(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          )}
-          {!workspaces.length && !adding && (
-            <p className="sidebar-empty">
-              Open a folder or repository to begin.
-            </p>
-          )}
-            </>
-          }
           serviceLabel={
             status ? `Service ${status.version}` : "Service unavailable"
           }
@@ -1597,7 +1545,7 @@ export function App() {
             <Landing
               hasProjects={false}
               onAddProject={requestAddProject}
-              onCreateWorkspace={() => setAdding(true)}
+              onCreateWorkspace={() => requestCreateWorkspace()}
             />
           ) : (
             <>
@@ -1772,7 +1720,9 @@ export function App() {
                         size="sm"
                         disabled={busy || loadingSessions}
                         onClick={() =>
-                          current ? void create() : setAdding(true)
+                          current
+                            ? void create()
+                            : requestCreateWorkspace()
                         }
                       >
                         New terminal
@@ -1812,10 +1762,12 @@ export function App() {
                       <Button
                         disabled={busy || loadingSessions}
                         onClick={() =>
-                          current ? void create() : setAdding(true)
+                          current
+                            ? void create()
+                            : requestCreateWorkspace()
                         }
                       >
-                        {current ? "New terminal" : "Add workspace"}
+                        {current ? "New terminal" : "Create workspace"}
                       </Button>
                     ) : (
                       <Button disabled={busy} onClick={() => void refresh()}>
@@ -2063,7 +2015,7 @@ export function App() {
         harnessAvailable={harnessCapability}
         worktreesAvailable={isWorktreesAvailable(liveCapabilities)}
         canCreateWorktree={newWorktreeTarget() !== null}
-        onNewWorktree={openNewWorktreeForm}
+        onNewWorktree={openComposerForNewWorktree}
         theme={theme}
         connected={status !== null}
         busy={busy}
@@ -2081,9 +2033,24 @@ export function App() {
         onToggleInspector={toggleInspector}
         onOpenSettings={() => openSettings()}
         onSetTheme={changeTheme}
-        onAddWorkspace={() => setAdding(true)}
+        onAddWorkspace={() => requestCreateWorkspace()}
         onOpenFile={openFileInFiles}
       />
+      {composer && (
+        <NewWorkspaceComposerModal
+          groups={projectGroups}
+          workspaces={workspaces}
+          initialProjectId={composer.initialProjectId}
+          disabled={busy}
+          onSubmitWorktree={submitWorktree}
+          onSelectWorkspace={selectWorkspaceId}
+          onAddProject={() => {
+            setComposer(null);
+            requestAddProject();
+          }}
+          onClose={() => setComposer(null)}
+        />
+      )}
       <StatusBar terminalCount={sessions.length} onOpenSettings={() => openSettings()} />
     </Tooltip.Provider>
   );

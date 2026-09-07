@@ -1,4 +1,14 @@
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
+   src/renderer/src/components/sidebar/AddProjectFromFolderDialog.tsx
+   (adapter: MVP subset — local folder or local repo path only, no
+   clone/remote/SSH steps; the daemon classifies git vs folder by `.git`
+   presence, so one path covers both. The path stays an editable input —
+   not just the native picker — so keyboard entry and scripted
+   acceptance can drive the same dialog. Submits to `project.add`;
+   daemon errors surface verbatim, client pre-checks first.) */
 import { useState } from "react";
+import { FolderPlus, X } from "lucide-react";
+import { Dialog } from "radix-ui";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import {
@@ -6,11 +16,6 @@ import {
   validateProjectPath,
 } from "./project-forms";
 
-/**
- * Add-project dialog (journey J1): path picker via the existing Electron
- * dialog bridge when available, else a validated path input. Submits to
- * `project.add`; daemon errors surface verbatim, client pre-checks first.
- */
 export function AddProjectDialog({
   disabled,
   onBrowse,
@@ -55,59 +60,111 @@ export function AddProjectDialog({
     }
   };
   return (
-    <form
-      className="shell-dialog"
-      aria-label="Add project"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
       }}
     >
-      <label htmlFor="shell-add-project-path">Folder or repository path</label>
-      <Input
-        id="shell-add-project-path"
-        autoFocus
-        value={path}
-        onChange={(event) => setPath(event.target.value)}
-        disabled={busy}
-        placeholder="/path/to/repo"
-      />
-      <label htmlFor="shell-add-project-name">
-        Name <span className="shell-optional">(optional)</span>
-      </label>
-      <Input
-        id="shell-add-project-name"
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        disabled={busy}
-        placeholder="Derived from the folder when blank"
-      />
-      {error && (
-        <p className="shell-form-error" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="form-actions">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={busy}
-          onClick={() =>
-            void onBrowse().then((value) => {
-              if (value) setPath(value);
-            })
-          }
+      <Dialog.Portal>
+        <Dialog.Overlay className="composer-overlay" />
+        <Dialog.Content
+          className="composer-content"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            document
+              .getElementById("shell-add-project-path")
+              ?.focus({ preventScroll: true });
+          }}
         >
-          Browse
-        </Button>
-        <Button type="submit" size="sm" disabled={busy || !path.trim()}>
-          Add
-        </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </form>
+          <div className="composer-header">
+            <div className="composer-heading">
+              <Dialog.Title className="composer-title">
+                Add Project
+              </Dialog.Title>
+              <Dialog.Description className="composer-description">
+                Add this folder as a project.
+              </Dialog.Description>
+            </div>
+            <Dialog.Close
+              className="shell-icon-button"
+              aria-label="Close"
+            >
+              <X size={15} />
+            </Dialog.Close>
+          </div>
+          <form
+            className="composer-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <div className="composer-section">
+              <label
+                className="composer-label"
+                htmlFor="shell-add-project-path"
+              >
+                Folder or repository path
+              </label>
+              <Input
+                id="shell-add-project-path"
+                value={path}
+                onChange={(event) => setPath(event.target.value)}
+                disabled={busy}
+                placeholder="/path/to/repo"
+              />
+            </div>
+            <div className="composer-section">
+              <label
+                className="composer-label"
+                htmlFor="shell-add-project-name"
+              >
+                Name <span className="shell-optional">(optional)</span>
+              </label>
+              <Input
+                id="shell-add-project-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                disabled={busy}
+                placeholder="Derived from the folder when blank"
+              />
+            </div>
+            {error && (
+              <p className="shell-form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="form-actions composer-actions">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  void onBrowse().then((value) => {
+                    if (value) setPath(value);
+                  })
+                }
+              >
+                Browse
+              </Button>
+              <Button type="submit" size="sm" disabled={busy || !path.trim()}>
+                <FolderPlus size={14} />
+                Add Project
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={onClose}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
