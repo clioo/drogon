@@ -23,6 +23,9 @@ import {
   bootstrapNativeRuntime,
   spawnDetachedDaemon,
 } from "./native-runtime-bootstrap";
+// R1-A: self-registering usage IPC (snapshot/refresh/awake); the module owns
+// its channels and validation, this line only loads it.
+import { registerUsageIpc } from "./usage/service";
 
 // Bounds one probe connection attempt within the overall bootstrap budget
 // below; not a substitute for it (the overall budget is what actually
@@ -286,6 +289,7 @@ if (!holdsSingleInstanceLock) {
       ]),
     );
     registerBridge();
+    registerUsageIpc();
     await bootstrapDaemon();
     createWindow();
     app.on("activate", () => {
