@@ -99,11 +99,11 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 
 | Journey | Ola | Dueño | Estado | PR |
 |---|---|---|---|---|
-| J1 contratos, worktrees, estado | R1 | Sonnet | contratos en main (#18); RPC y CLI en curso | #18 |
+| J1 contratos, worktrees, estado | R1 | Sonnet | fusionada; falta needs_input por hooks de Claude | #18, #25 |
 | J12 barra inferior | R1 | Muse A | fusionada | #19 |
 | J5 paleta | R1 | Muse B | fusionada; falta revelar archivo desde quick open | #17 |
 | J2 Git review | R1 | Muse C | fusionada | #21 |
-| J8 Bots | R2 | Sonnet | pendiente | |
+| J8 Bots | R2 | Sonnet | en curso | |
 | J1 sidebar y pestañas | R2 | Muse A | fusionada; estado de agente real llega con R1-S | #22 |
 | J7 Automations | R2 | Muse B | en curso | |
 | J4 Browser | R2 | Muse C | en curso (pane; CLI browser en R3) | |
