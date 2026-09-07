@@ -1,5 +1,17 @@
 # Five-vertical execution window
 
+## Latest staffing correction — 08:49 UTC
+
+Carlos changed all five leaders to **Pi / `muse-code` / `muse-spark-1.3`**.
+The repeated five-leader instruction governs the one later reference to three.
+Coding leaves may use Sonnet 5, GLM-5.3-Flash and Muse Spark 1.3, with load
+distributed by each leader. This supersedes all Sonnet-as-leader language below,
+not the five verticals, closure-first order, two generations or clock anchor.
+The installed Pi catalog lists the exact provider/model; actual tool use,
+Orca child dispatch and completion must still pass a bounded smoke.
+Use explicit per-invocation provider/model, never Pi's default Qwen or a silent
+Contributor variant. Pi/Qwen and experimental inference remain suspended.
+
 Carlos authorized this organization on 2026-09-07, after receiving
 [the complete vertical handoff](five-vertical-handoff.md). This overrides its
 proposal-only staffing and the earlier three-direct-worker limit for the new wave.
