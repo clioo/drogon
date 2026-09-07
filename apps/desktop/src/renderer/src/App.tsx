@@ -377,6 +377,9 @@ export function App() {
     let cancelled = false;
     async function run() {
       if (route !== BOTS_ROUTE_ID || !botsAvailable || !botsScope) return;
+      // Clear the previous result first: the UI shows in-progress instead
+      // of a stale error while the fresh request is pending.
+      setBotsLoad(null);
       const result = await loadBotSnapshot(botsGatedBridge, botsScope);
       if (!cancelled) setBotsLoad(result);
     }
@@ -385,24 +388,33 @@ export function App() {
       cancelled = true;
     };
   }, [route, botsAvailable, botsScopeHost, botsScopeWorkspace, botsScopeLocale, botsReload]);
+  // Stable files base: Bots snapshot refreshes must never reset the Files
+  // descriptor identity (mounted editor drafts/attempts). The bots layer
+  // rebuilds on snapshot change; the files base below never does.
+  const filesBaseRegistry = useMemo(
+    () =>
+      registerFilesRoute(
+        createRouteRegistry({
+          capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY],
+          fallbackId: BOTS_ROUTE_ID,
+        }),
+        filesGatedBridge,
+      ),
+    [filesGatedBridge],
+  );
   const panelRegistry = useMemo(() => {
-    const base = createRouteRegistry({
-      capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY],
-      fallbackId: BOTS_ROUTE_ID,
-    });
-    const withFiles = registerFilesRoute(base, filesGatedBridge);
     if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
       return registerBotsRoute(
-        withFiles,
+        filesBaseRegistry,
         botsGatedBridge,
         buildBotsPanelProps(botsLoad.snapshot),
       );
-    return withFiles;
-  }, [botsLoad, botsScopeHost, botsScopeWorkspace, botsScopeLocale]);
+    return filesBaseRegistry;
+  }, [filesBaseRegistry, botsGatedBridge, botsLoad, botsScopeHost, botsScopeWorkspace, botsScopeLocale]);
   const filesAvailable =
     isFilesAvailable(liveCapabilities) &&
     checkAvailability(
-      resolveRoute(panelRegistry, FILES_ROUTE_ID),
+      resolveRoute(filesBaseRegistry, FILES_ROUTE_ID),
       liveCapabilities,
     ) === "available";
   const lastPropsRef = useRef<{
@@ -444,11 +456,17 @@ export function App() {
           ? botsSectionRef.current
           : null;
     if (route !== null && target && prevRouteRef.current !== route) {
-      applyPanelFocus(resolveRoute(panelRegistry, route), target);
+      applyPanelFocus(
+        resolveRoute(
+          route === BOTS_ROUTE_ID ? panelRegistry : filesBaseRegistry,
+          route,
+        ),
+        target,
+      );
       target.focus();
     }
     prevRouteRef.current = route;
-  }, [route, panelRegistry]);
+  }, [route, panelRegistry, filesBaseRegistry]);
   // Bots keep-alive mirrors files: survives switches and transients,
   // unmounts on explicit withhold or settled workspace loss. The Bots
   // panel is read-only (no drafts), so remounts on snapshot refresh are
@@ -1094,7 +1112,7 @@ export function App() {
                 }}
               >
                 <MountedPanel
-                  descriptor={resolveRoute(panelRegistry, FILES_ROUTE_ID)}
+                  descriptor={resolveRoute(filesBaseRegistry, FILES_ROUTE_ID)}
                   workspace={filesProps.workspace}
                   status={filesProps.status}
                 />
