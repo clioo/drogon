@@ -142,3 +142,33 @@ pub(crate) fn get_path(
     .map_err(error::from_sqlite)?
     .ok_or_else(|| error::not_found("workspace not found"))
 }
+
+pub(crate) fn owned_path(
+    conn: &Connection,
+    current_host_id: &str,
+    workspace_id: &str,
+    requested_host_id: &str,
+) -> Result<String, drogon_protocol::RpcError> {
+    if requested_host_id != current_host_id {
+        return Err(drogon_protocol::RpcError::new(
+            "unsupported_host",
+            "Request belongs to another execution host",
+        ));
+    }
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT path, host_id FROM workspaces WHERE id = ?1",
+            [workspace_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(error::from_sqlite)?;
+    let (path, owner) = row.ok_or_else(|| error::not_found("workspace not found"))?;
+    if owner != current_host_id {
+        return Err(drogon_protocol::RpcError::new(
+            "unsupported_host",
+            "Workspace belongs to another execution host",
+        ));
+    }
+    Ok(path)
+}

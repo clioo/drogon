@@ -4,6 +4,7 @@
 //! auth and the transport; this crate never sees a raw socket.
 
 pub mod automations;
+mod bot_snapshot_rpc;
 pub mod bots;
 pub mod claim_identity;
 mod coordination_access;
@@ -306,6 +307,7 @@ impl Engine {
             "status" => Ok(self.status()),
             "runtime.shutdown" => self.do_runtime_shutdown(request),
             "harness.list" => Ok(self.harness_list()),
+            "bot.snapshot" => self.bot_snapshot(&request.params),
             "harness.start" => self.mutating(request, Self::do_harness_start),
             "workspace.register" => self.mutating(request, Self::do_workspace_register),
             "workspace.list" => {
