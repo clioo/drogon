@@ -48,6 +48,31 @@ pub enum Verdict {
     Exited,
 }
 
+/// Mirrors `session-contract.ts`'s `AgentState`. `NeedsInput` has no
+/// producer in the service yet (Claude Code hook wiring is not implemented),
+/// but decodes and displays like any other value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentState {
+    Working,
+    Idle,
+    NeedsInput,
+    Exited,
+    Unknown,
+}
+
+impl AgentState {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            AgentState::Working => "working",
+            AgentState::Idle => "idle",
+            AgentState::NeedsInput => "needs_input",
+            AgentState::Exited => "exited",
+            AgentState::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
@@ -63,6 +88,64 @@ pub struct Session {
     pub exit_code: Option<i64>,
     #[serde(deserialize_with = "require_rfc3339")]
     pub created_at: String,
+    pub agent_state: AgentState,
+    pub agent_state_at: Option<String>,
+}
+
+/// A git repository or a plain folder that owns Worktrees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectKind {
+    Folder,
+    Git,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub id: String,
+    pub host_id: String,
+    pub path: String,
+    pub name: String,
+    pub kind: ProjectKind,
+    pub default_base_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectList {
+    pub projects: Vec<Project>,
+}
+
+/// A git worktree, or (for a folder Project) the implicit single worktree
+/// that is the folder itself — `branch`/`head` are then empty strings, never
+/// null (the wire type keeps them non-nullable; `baseRef` is the nullable
+/// field).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Worktree {
+    pub id: String,
+    pub project_id: String,
+    pub workspace_id: String,
+    pub path: String,
+    pub branch: String,
+    pub head: String,
+    pub base_ref: Option<String>,
+    #[serde(deserialize_with = "require_rfc3339")]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeList {
+    pub worktrees: Vec<Worktree>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Removed {
+    pub id: String,
+    pub removed: bool,
 }
 
 impl Workspace {
@@ -70,6 +153,15 @@ impl Workspace {
         match self.kind {
             WorkspaceKind::Folder => "folder",
             WorkspaceKind::Git => "git",
+        }
+    }
+}
+
+impl Project {
+    pub fn kind_str(&self) -> &'static str {
+        match self.kind {
+            ProjectKind::Folder => "folder",
+            ProjectKind::Git => "git",
         }
     }
 }
@@ -309,8 +401,56 @@ pub fn check_workspace_list(list: &WorkspaceList) -> Result<(), String> {
     Ok(())
 }
 
+pub fn check_project(project: &Project) -> Result<(), String> {
+    require_nonempty("id", &project.id)?;
+    require_nonempty("hostId", &project.host_id)?;
+    require_nonempty("path", &project.path)?;
+    require_nonempty("name", &project.name)?;
+    Ok(())
+}
+
+pub fn check_project_list(list: &ProjectList) -> Result<(), String> {
+    for project in &list.projects {
+        check_project(project).map_err(|err| format!("project {}: {err}", project.id))?;
+    }
+    Ok(())
+}
+
+/// `branch`/`head` are not required nonempty here: a folder Project's
+/// implicit worktree reports both as `""`, which is valid, not malformed.
+pub fn check_worktree(worktree: &Worktree) -> Result<(), String> {
+    require_nonempty("id", &worktree.id)?;
+    require_nonempty("projectId", &worktree.project_id)?;
+    require_nonempty("workspaceId", &worktree.workspace_id)?;
+    require_nonempty("path", &worktree.path)?;
+    Ok(())
+}
+
+pub fn check_worktree_list(list: &WorktreeList) -> Result<(), String> {
+    for worktree in &list.worktrees {
+        check_worktree(worktree).map_err(|err| format!("worktree {}: {err}", worktree.id))?;
+    }
+    Ok(())
+}
+
+pub fn check_removed(removed: &Removed, expected_id: &str) -> Result<(), String> {
+    if removed.id != expected_id {
+        return Err(format!(
+            "removed id {:?} does not match requested {:?}",
+            removed.id, expected_id
+        ));
+    }
+    if !removed.removed {
+        return Err("removed must be true".to_string());
+    }
+    Ok(())
+}
+
 /// Session identities and PTY geometry must be real: empty ids and
 /// out-of-range dimensions are structurally decodable but not actionable.
+/// Also pins the agent-state/verdict/timestamp cross-field invariants the
+/// service actually implements: an exited session is always agentState
+/// `exited`, and only `working`/`idle` ever carry a non-null `agentStateAt`.
 pub fn check_session(session: &Session) -> Result<(), String> {
     require_nonempty("id", &session.id)?;
     require_nonempty("workspaceId", &session.workspace_id)?;
@@ -321,6 +461,30 @@ pub fn check_session(session: &Session) -> Result<(), String> {
     }
     if !(1..=1000).contains(&session.rows) {
         return Err(format!("rows must be 1..=1000, got {}", session.rows));
+    }
+    if session.verdict == Verdict::Exited && session.agent_state != AgentState::Exited {
+        return Err(format!(
+            "verdict exited must pair with agentState exited, got {:?}",
+            session.agent_state
+        ));
+    }
+    match session.agent_state {
+        AgentState::Working | AgentState::Idle => {
+            if session.agent_state_at.is_none() {
+                return Err(format!(
+                    "agentState {:?} must carry a non-null agentStateAt",
+                    session.agent_state
+                ));
+            }
+        }
+        AgentState::Exited | AgentState::Unknown | AgentState::NeedsInput => {
+            if session.agent_state_at.is_some() {
+                return Err(format!(
+                    "agentState {:?} must not carry an agentStateAt",
+                    session.agent_state
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -631,7 +795,8 @@ mod tests {
             "id": "s1", "workspaceId": "w1", "hostId": "h1",
             "incarnation": "inc", "command": "sh", "args": [],
             "cols": 80, "rows": 24, "verdict": "live", "exitCode": null,
-            "createdAt": "yesterday"
+            "createdAt": "yesterday",
+            "agentState": "unknown", "agentStateAt": null
         }));
         assert!(
             session.is_err(),
@@ -646,6 +811,7 @@ mod tests {
             "incarnation": "inc", "command": "sh", "args": [],
             "cols": 80, "rows": 24, "verdict": "unverifiable", "exitCode": null,
             "createdAt": "2026-09-05T12:00:00Z",
+            "agentState": "unknown", "agentStateAt": null,
             "futureField": 7
         }))
         .unwrap();
@@ -766,7 +932,8 @@ mod harness_tests {
             "id": "s1", "workspaceId": "w1", "hostId": "host-1",
             "incarnation": "tok", "command": "/usr/bin/pi", "args": [],
             "cols": 80, "rows": 24, "verdict": "live", "exitCode": null,
-            "createdAt": "2026-09-05T12:00:00Z"
+            "createdAt": "2026-09-05T12:00:00Z",
+            "agentState": "unknown", "agentStateAt": null
         }))
         .unwrap();
         assert!(check_session(&session).is_ok());

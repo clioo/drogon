@@ -18,6 +18,7 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{Value, json};
 
+use crate::agent_state::{self, Activity, AgentState};
 use crate::error;
 use crate::ring::RingBuffer;
 
@@ -57,6 +58,10 @@ pub(crate) struct SessionHandle {
     /// Set by the reader thread when the PTY read side reached EOF or an
     /// unrecoverable read error — i.e. the drain phase is over.
     reader_done: AtomicBool,
+    /// Monotonic instant of the most recent PTY output chunk, paired with the
+    /// wall-clock stamp captured at the same moment (an `Instant` cannot be
+    /// rendered as `agentStateAt`). `None` until the first chunk arrives.
+    last_activity: Mutex<Option<(Instant, String)>>,
     db: Arc<Mutex<Connection>>,
 }
 
@@ -94,6 +99,7 @@ impl SessionHandle {
             size: Mutex::new((cols, rows)),
             exit_code: Mutex::new(None),
             reader_done: AtomicBool::new(false),
+            last_activity: Mutex::new(None),
             db,
         })
     }
@@ -234,7 +240,11 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
-                Ok(n) => handle.ring.lock().unwrap().push(&buf[..n]),
+                Ok(n) => {
+                    handle.ring.lock().unwrap().push(&buf[..n]);
+                    *handle.last_activity.lock().unwrap() =
+                        Some((Instant::now(), crate::now_rfc3339()));
+                }
                 Err(_) => break,
             }
         }
@@ -489,8 +499,25 @@ pub(crate) fn snapshot(handle: &SessionHandle) -> Value {
     to_json(handle, &verdict, code)
 }
 
+/// Exit takes precedence over the raw activity clock (see
+/// `agent_state::derive`): a caller here already knows whether the session
+/// exited via its own `verdict`, so this never re-reaps `exit_code` itself.
+fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, Option<String>) {
+    let (activity, wall_clock_at) = match &*handle.last_activity.lock().unwrap() {
+        None => (Activity::NeverObserved, None),
+        Some((instant, at)) => (Activity::LastActiveAgo(instant.elapsed()), Some(at.clone())),
+    };
+    let state = agent_state::derive(verdict == "exited", activity);
+    let at = match state {
+        AgentState::Working | AgentState::Idle => wall_clock_at,
+        AgentState::Exited | AgentState::Unknown | AgentState::NeedsInput => None,
+    };
+    (state.as_wire(), at)
+}
+
 pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i64>) -> Value {
     let (cols, rows) = *handle.size.lock().unwrap();
+    let (agent_state, agent_state_at) = agent_state_fields(handle, verdict);
     json!({
         "id": handle.session_id,
         "workspaceId": handle.workspace_id,
@@ -503,6 +530,8 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "verdict": verdict,
         "exitCode": exit_code,
         "createdAt": handle.created_at,
+        "agentState": agent_state,
+        "agentStateAt": agent_state_at,
     })
 }
 

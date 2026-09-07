@@ -105,8 +105,7 @@ mod tests {
 
     #[test]
     fn remove_params_default_force_to_false() {
-        let params: WorktreeRemoveParams =
-            serde_json::from_value(json!({"id": "w1"})).unwrap();
+        let params: WorktreeRemoveParams = serde_json::from_value(json!({"id": "w1"})).unwrap();
         assert!(!params.force);
         let forced: WorktreeRemoveParams =
             serde_json::from_value(json!({"id": "w1", "force": true})).unwrap();

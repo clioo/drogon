@@ -5,8 +5,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::client::{
-    HarnessCatalog, MethodResult, ReadResult, Session, SessionList, StatusResult, Workspace,
-    WorkspaceList, WriteResult,
+    HarnessCatalog, MethodResult, Project, ProjectList, ReadResult, Removed, Session, SessionList,
+    StatusResult, Workspace, WorkspaceList, Worktree, WorktreeList, WriteResult,
 };
 
 pub fn status_line(result: &StatusResult) -> String {
@@ -51,11 +51,89 @@ pub fn workspace_list(list: &WorkspaceList) -> String {
         .join("\n")
 }
 
+pub fn project_added(project: &Project) -> String {
+    format!(
+        "Registered project {} [{}] \"{}\" -> {}{}",
+        project.id,
+        project.kind_str(),
+        project.name,
+        project.path,
+        project
+            .default_base_ref
+            .as_deref()
+            .map(|r| format!(" (default base {r})"))
+            .unwrap_or_default()
+    )
+}
+
+pub fn project_list(list: &ProjectList) -> String {
+    if list.projects.is_empty() {
+        return "No projects registered.".into();
+    }
+    list.projects
+        .iter()
+        .map(|project| {
+            format!(
+                "{} [{}] \"{}\" -> {}",
+                project.id,
+                project.kind_str(),
+                project.name,
+                project.path
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn worktree_created(worktree: &Worktree) -> String {
+    format!(
+        "Created worktree {} for project {} on branch {} -> {} (head {})",
+        worktree.id, worktree.project_id, worktree.branch, worktree.path, worktree.head
+    )
+}
+
+pub fn worktree_list(list: &WorktreeList) -> String {
+    if list.worktrees.is_empty() {
+        return "No worktrees.".into();
+    }
+    list.worktrees
+        .iter()
+        .map(|worktree| {
+            format!(
+                "{} branch={} head={} -> {}{}",
+                worktree.id,
+                if worktree.branch.is_empty() {
+                    "-"
+                } else {
+                    &worktree.branch
+                },
+                if worktree.head.is_empty() {
+                    "-"
+                } else {
+                    &worktree.head
+                },
+                worktree.path,
+                worktree
+                    .base_ref
+                    .as_deref()
+                    .map(|r| format!(" (base {r})"))
+                    .unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn worktree_removed(removed: &Removed) -> String {
+    format!("Removed worktree {}.", removed.id)
+}
+
 pub fn session_started(session: &Session) -> String {
     format!(
-        "Started session {} [{}] incarnation={} argv={:?} ({}x{})",
+        "Started session {} [{}] agent={} incarnation={} argv={:?} ({}x{})",
         session.id,
         session.verdict_str(),
+        session.agent_state.as_wire(),
         session.incarnation,
         session.argv(),
         session.cols,
@@ -75,9 +153,10 @@ pub fn session_list(list: &SessionList) -> String {
                 .map(|code| format!(" exit={code}"))
                 .unwrap_or_default();
             format!(
-                "{} [{}] ws={} incarnation={} argv={:?} {}x{}{}",
+                "{} [{}] agent={} ws={} incarnation={} argv={:?} {}x{}{}",
                 session.id,
                 session.verdict_str(),
+                session.agent_state.as_wire(),
                 session.workspace_id,
                 session.incarnation,
                 session.argv(),
@@ -94,9 +173,10 @@ pub fn session_list(list: &SessionList) -> String {
 /// the wire `dataBase64`/cursor fields untouched.
 pub fn session_read(result: &ReadResult) -> String {
     let header = format!(
-        "session {} [{}] cursor {}..{} truncated={}",
+        "session {} [{}] agent={} cursor {}..{} truncated={}",
         result.session.id,
         result.session.verdict_str(),
+        result.session.agent_state.as_wire(),
         result.start_cursor,
         result.next_cursor,
         result.truncated
@@ -192,11 +272,17 @@ mod tests {
     use serde_json::json;
 
     fn sample_session(verdict: &str) -> Session {
+        let agent_state = if verdict == "exited" {
+            "exited"
+        } else {
+            "unknown"
+        };
         serde_json::from_value(json!({
             "id": "s1", "workspaceId": "w1", "hostId": "h1",
             "incarnation": "tok", "command": "sh", "args": ["-c", "echo hi"],
             "cols": 80, "rows": 24, "verdict": verdict,
-            "exitCode": null, "createdAt": "2026-09-05T12:00:00Z"
+            "exitCode": null, "createdAt": "2026-09-05T12:00:00Z",
+            "agentState": agent_state, "agentStateAt": null
         }))
         .unwrap()
     }
@@ -220,14 +306,15 @@ mod tests {
             "session": {
                 "id": "s1", "workspaceId": "w1", "hostId": "h1", "incarnation": "tok",
                 "command": "sh", "args": [], "cols": 80, "rows": 24,
-                "verdict": "live", "exitCode": null, "createdAt": "2026-09-05T12:00:00Z"
+                "verdict": "live", "exitCode": null, "createdAt": "2026-09-05T12:00:00Z",
+                "agentState": "unknown", "agentStateAt": null
             },
             "dataBase64": STANDARD.encode("héllo\n"),
             "startCursor": 0, "nextCursor": 7, "truncated": false
         }))
         .unwrap();
         let text = session_read(&read);
-        assert!(text.starts_with("session s1 [live] cursor 0..7 truncated=false\n"));
+        assert!(text.starts_with("session s1 [live] agent=unknown cursor 0..7 truncated=false\n"));
         assert!(text.contains("héllo"));
     }
 
@@ -244,6 +331,63 @@ mod tests {
         let mut session = sample_session("exited");
         session.exit_code = Some(3);
         assert!(session_closed(&session).contains("exit=3"));
+    }
+
+    #[test]
+    fn project_rendering_shows_kind_name_path_and_optional_base_ref() {
+        let project: Project = serde_json::from_value(json!({
+            "id": "p1", "hostId": "h1", "path": "/repo", "name": "repo",
+            "kind": "git", "defaultBaseRef": "main"
+        }))
+        .unwrap();
+        let added = project_added(&project);
+        assert!(added.contains("p1"));
+        assert!(added.contains("[git]"));
+        assert!(added.contains("/repo"));
+        assert!(added.contains("main"));
+
+        let list = project_list(&ProjectList {
+            projects: vec![project],
+        });
+        assert!(list.contains("\"repo\""));
+
+        assert_eq!(
+            project_list(&ProjectList { projects: vec![] }),
+            "No projects registered."
+        );
+    }
+
+    #[test]
+    fn worktree_rendering_shows_dash_for_a_folder_projects_empty_branch_and_head() {
+        let implicit: Worktree = serde_json::from_value(json!({
+            "id": "p1", "projectId": "p1", "workspaceId": "ws1", "path": "/f",
+            "branch": "", "head": "", "baseRef": null, "createdAt": "2026-09-05T12:00:00Z"
+        }))
+        .unwrap();
+        let text = worktree_list(&WorktreeList {
+            worktrees: vec![implicit],
+        });
+        assert!(text.contains("branch=- head=-"));
+
+        let created: Worktree = serde_json::from_value(json!({
+            "id": "w1", "projectId": "p1", "workspaceId": "ws2", "path": "/f/w1",
+            "branch": "feature", "head": "abc123", "baseRef": "main",
+            "createdAt": "2026-09-05T12:00:00Z"
+        }))
+        .unwrap();
+        assert!(worktree_created(&created).contains("feature"));
+        assert!(
+            worktree_removed(&Removed {
+                id: "w1".into(),
+                removed: true
+            })
+            .contains("w1")
+        );
+
+        assert_eq!(
+            worktree_list(&WorktreeList { worktrees: vec![] }),
+            "No worktrees."
+        );
     }
 }
 

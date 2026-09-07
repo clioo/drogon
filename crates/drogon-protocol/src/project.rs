@@ -106,8 +106,7 @@ mod tests {
         let err = serde_json::from_value::<ProjectAddParams>(json!({"name": "x"})).unwrap_err();
         assert!(err.to_string().contains("path"));
 
-        let params: ProjectAddParams =
-            serde_json::from_value(json!({"path": "/repo"})).unwrap();
+        let params: ProjectAddParams = serde_json::from_value(json!({"path": "/repo"})).unwrap();
         assert_eq!(params.path, "/repo");
         assert_eq!(params.name, None);
     }

@@ -9,11 +9,15 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-use crate::cli::{Cli, Command, HarnessAction, TerminalAction, WorkspaceAction};
+use crate::cli::{
+    Cli, Command, HarnessAction, ProjectAction, TerminalAction, WorkspaceAction, WorktreeAction,
+};
 use crate::client::{
-    CallOk, Client, HarnessCatalog, ReadResult, Session, SessionList, StatusResult, Verdict,
-    Workspace, WorkspaceList, WriteResult, check_harness_catalog, check_read, check_session,
-    check_session_list, check_status, check_workspace, check_workspace_list, check_write,
+    CallOk, Client, HarnessCatalog, Project, ProjectList, ReadResult, Removed, Session,
+    SessionList, StatusResult, Verdict, Workspace, WorkspaceList, Worktree, WorktreeList,
+    WriteResult, check_harness_catalog, check_project, check_project_list, check_read,
+    check_removed, check_session, check_session_list, check_status, check_workspace,
+    check_workspace_list, check_worktree, check_worktree_list, check_write,
 };
 use crate::error::{CliError, method_not_found};
 use crate::output;
@@ -75,6 +79,8 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
                 emit(call, json, || output::workspace_list(&list), 0, None)
             }
         },
+        Command::Project { action } => project(&client, &request_id, json, action).await,
+        Command::Worktree { action } => worktree(&client, &request_id, json, action).await,
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Orchestration { command } => {
@@ -240,6 +246,82 @@ async fn terminal(
                     )
                 }
             }
+        }
+    }
+}
+
+async fn project(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &ProjectAction,
+) -> Result<RunOutcome, CliError> {
+    match action {
+        ProjectAction::Add { path, name } => {
+            let resolved = resolve_path_argument(path)?;
+            let mut params = json!({ "path": resolved });
+            if let Some(name) = name {
+                params["name"] = json!(name);
+            }
+            let call = client
+                .call("project.add", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let project: Project = Client::decode_checked(&call, "project.add", check_project)?;
+            emit(call, json, || output::project_added(&project), 0, None)
+        }
+        ProjectAction::List => {
+            let call = client
+                .call("project.list", json!({}), request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let list: ProjectList =
+                Client::decode_checked(&call, "project.list", check_project_list)?;
+            emit(call, json, || output::project_list(&list), 0, None)
+        }
+    }
+}
+
+async fn worktree(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &WorktreeAction,
+) -> Result<RunOutcome, CliError> {
+    match action {
+        WorktreeAction::Create {
+            project,
+            name,
+            base,
+        } => {
+            let mut params = json!({ "projectId": project, "name": name });
+            if let Some(base) = base {
+                params["baseRef"] = json!(base);
+            }
+            let call = client
+                .call("worktree.create", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let worktree: Worktree =
+                Client::decode_checked(&call, "worktree.create", check_worktree)?;
+            emit(call, json, || output::worktree_created(&worktree), 0, None)
+        }
+        WorktreeAction::List { project } => {
+            let params = json!({ "projectId": project });
+            let call = client
+                .call("worktree.list", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let list: WorktreeList =
+                Client::decode_checked(&call, "worktree.list", check_worktree_list)?;
+            emit(call, json, || output::worktree_list(&list), 0, None)
+        }
+        WorktreeAction::Rm { id, force } => {
+            let params = json!({ "id": id, "force": force });
+            let call = client
+                .call("worktree.remove", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let requested_id = id.clone();
+            let removed: Removed = Client::decode_checked(&call, "worktree.remove", |removed| {
+                check_removed(removed, &requested_id)
+            })?;
+            emit(call, json, || output::worktree_removed(&removed), 0, None)
         }
     }
 }
