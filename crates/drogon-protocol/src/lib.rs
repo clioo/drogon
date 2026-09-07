@@ -9,7 +9,9 @@ pub mod orchestration_run;
 pub mod orchestration_scope;
 pub mod orchestration_task;
 pub mod orchestration_worker;
+pub mod project;
 pub mod workspace_files;
+pub mod worktree;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;

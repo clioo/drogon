@@ -9,6 +9,30 @@ export type Workspace = {
   kind: "folder" | "git";
   hostId: string;
 };
+/** A git repository or a plain folder that owns Worktrees (journey J1). */
+export type Project = {
+  id: string;
+  hostId: string;
+  path: string;
+  name: string;
+  kind: "git" | "folder";
+  defaultBaseRef: string | null;
+};
+/**
+ * A git worktree (or, for a folder Project, the implicit single worktree
+ * that is the folder itself) that a Session attaches to as a Workspace.
+ */
+export type Worktree = {
+  id: string;
+  projectId: string;
+  workspaceId: string;
+  path: string;
+  branch: string;
+  head: string;
+  baseRef: string | null;
+  createdAt: string;
+};
+export type AgentState = "working" | "idle" | "needs_input" | "exited" | "unknown";
 export type Session = {
   id: string;
   workspaceId: string;
@@ -21,6 +45,13 @@ export type Session = {
   verdict: Verdict;
   exitCode: number | null;
   createdAt: string;
+  /**
+   * Always present on the wire (`session.list`/`session.read`/CLI output);
+   * optional here only so this additive field never breaks an existing
+   * renderer `Session` literal that predates it.
+   */
+  agentState?: AgentState;
+  agentStateAt?: string | null;
 };
 export type Status = {
   hostId: string;
