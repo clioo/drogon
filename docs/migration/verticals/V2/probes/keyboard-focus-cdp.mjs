@@ -113,6 +113,50 @@ try {
   await page.screenshot({ path: path.join(shots, "theme-light.png") });
   report.checks.push("system-theme-toggles-dark-class");
 
+  // 4. Explicit-theme palette matrix: theme choice x OS scheme asserts
+  // computed custom properties + color-scheme, not just the .dark class.
+  const DARK = { background: "#0a0a0a", foreground: "#fafafa", scheme: "dark" };
+  const LIGHT = { background: "#fff", foreground: "#0a0a0a", scheme: "light" };
+  const matrix = [
+    ["system", "dark", DARK],
+    ["system", "light", LIGHT],
+    ["dark", "dark", DARK],
+    ["dark", "light", DARK],
+    ["light", "dark", LIGHT],
+    ["light", "light", LIGHT],
+  ];
+  for (const [theme, os, expected] of matrix) {
+    await page.evaluate((value) => {
+      window.localStorage.setItem("drogon:settings:ui", JSON.stringify({ settings: value }));
+    }, { theme });
+    await page.reload();
+    await page.getByText("Service 0.1.0", { exact: true }).waitFor();
+    await page.emulateMedia({ colorScheme: os });
+    await page.waitForFunction(
+      (want) => {
+        const style = getComputedStyle(document.documentElement);
+        return (
+          style.getPropertyValue("--background").trim() === want.background &&
+          style.getPropertyValue("--foreground").trim() === want.foreground &&
+          style.colorScheme === want.scheme
+        );
+      },
+      expected,
+      { timeout: 10000 },
+    );
+    const actual = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      return {
+        background: style.getPropertyValue("--background").trim(),
+        foreground: style.getPropertyValue("--foreground").trim(),
+        scheme: style.colorScheme,
+      };
+    });
+    assert.deepEqual(actual, expected, `theme=${theme} os=${os}`);
+    report.checks.push(`theme-matrix-${theme}-on-${os}-os`);
+  }
+  await page.screenshot({ path: path.join(shots, "theme-matrix-done.png") });
+
   report.status = "PASSED";
 } finally {
   if (browser) await browser.close().catch(() => {});
