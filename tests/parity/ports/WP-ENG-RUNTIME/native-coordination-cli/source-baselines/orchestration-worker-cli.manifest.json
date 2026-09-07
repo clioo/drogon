@@ -1,0 +1,744 @@
+{
+  "capsuleId": "native-coord-worker-cli",
+  "description": "Baseline capsule for the original source test src/cli/handlers/orchestration-worker-cli.test.ts at the pinned revision: Worker lifecycle CLI contract: worker-start full creation payload + retry-request receipt binding, launch-preferences capability gate, incompatible_runtime refusal, exit code on unknown outcome, Structured Chat recovery copy, reveal/manual-stop warnings, worker-read zero cursor and opaque cursors.",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "transportRuntime": {
+    "ws": {
+      "version": "8.21.3",
+      "treeSha256": "aad13c0d5b988c454b067e8f6d9d0e8ed938293ec60989a2207cf8614ef9a4a0"
+    },
+    "tweetnacl": {
+      "version": "1.0.3",
+      "treeSha256": "79d76ce10a07a02d66cba99b0f11b00724e8095e0a5004ed62c8bc2f43183793"
+    },
+    "zod": {
+      "version": "4.5.4",
+      "treeSha256": "8675df81babc63b169f49743e654198f574342b364a9bf831eb39f4e881ba63f"
+    }
+  },
+  "entryTestFile": "src/cli/handlers/orchestration-worker-cli.test.ts",
+  "files": [
+    {
+      "path": "src/cli/args.ts",
+      "role": "module",
+      "sha256": "3d6362e8910aa57796a0d2bdce2acd7cdf8e3bb69a710235c7364158381e8e77"
+    },
+    {
+      "path": "src/cli/automation-format.ts",
+      "role": "module",
+      "sha256": "301cb3a49e995e0ed1883dda625cfe49c9dcaa217226156d2c543ebb762cba15"
+    },
+    {
+      "path": "src/cli/automation-owner-conflict-recovery.ts",
+      "role": "module",
+      "sha256": "9cc403f5a7cb84bea26b72a126f3840ee23fd0a8afa871794954ae8173875f96"
+    },
+    {
+      "path": "src/cli/base64-payload-byte-count.ts",
+      "role": "module",
+      "sha256": "476e6fd238f90d9eb38189b3d0861aca16e9241b662b5620b904b54a03236078"
+    },
+    {
+      "path": "src/cli/browser-format.ts",
+      "role": "module",
+      "sha256": "b8cfb19f688f2d5dd6755a0a299ad42ba0d3dcecde44c3f00eb5d128f4b7bc2a"
+    },
+    {
+      "path": "src/cli/command-spec.ts",
+      "role": "module",
+      "sha256": "6686b3e57543b6f6473f2d62b883e07827dbbedbec14b0b302d6c0cd0f78d5c7"
+    },
+    {
+      "path": "src/cli/command-suggestion.ts",
+      "role": "module",
+      "sha256": "f2afbb89f8239311c0234ca3a5a6a26d46fae31fb9e6315220d8cfe78dfcaaec"
+    },
+    {
+      "path": "src/cli/computer-format.ts",
+      "role": "module",
+      "sha256": "cd26b0993398d11d489519465d17c9bab7197b39f7a214ed215907a4eec12ae3"
+    },
+    {
+      "path": "src/cli/flags.ts",
+      "role": "module",
+      "sha256": "c7bf17b2fafbd379b4de4a1353b2ed934eb3ef0482df14a3ad25e11afbabcb83"
+    },
+    {
+      "path": "src/cli/format.ts",
+      "role": "module",
+      "sha256": "a4ba264d88340fc580c35c691f7f04ffdc7a72e1a3095432340aa49745d9fe43"
+    },
+    {
+      "path": "src/cli/handlers/orchestration-worker-cli.test.ts",
+      "role": "test",
+      "sha256": "ea7030a14b2dd68cb034d0a030cb8c5c025a8eb0c63991f14e41e1173dce429f"
+    },
+    {
+      "path": "src/cli/handlers/orchestration-worker-settlement.ts",
+      "role": "module",
+      "sha256": "8d2569f3015a6c1147c1aefd4f3e6683423deb1c6144773c6154bda6454384e4"
+    },
+    {
+      "path": "src/cli/handlers/orchestration.ts",
+      "role": "module",
+      "sha256": "22fa3781048c0077ebf6d7deec1b10cc1629c1a2ad0eab70766946d551154c8b"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/check-keepalive.ts",
+      "role": "module",
+      "sha256": "8efb86b8dc07e14e63abb0e2999848f2d6d625f04f04ec6c3bdad716c1cacb8b"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/dispatch-handlers.ts",
+      "role": "module",
+      "sha256": "3532dc8e28859a609f7a5d80fd929d93d47939e4eeba78f1e9b41268ad83e94a"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/gate-handlers.ts",
+      "role": "module",
+      "sha256": "5c87c56df4060eac7f3708fbe9533c221015d627dc5f33e8ba8ef1da0f6f5c81"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/message-check-handler.ts",
+      "role": "module",
+      "sha256": "c7dbff8b2261757dd09b353441b7ffaf65baac7645015facacf0a960ba7354fa"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/message-inbox-handlers.ts",
+      "role": "module",
+      "sha256": "049ae8d586dbee22e0716c60e1855b86cc81a55c9db2bdb840a731b88b29909d"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/message-payload.ts",
+      "role": "module",
+      "sha256": "c27711a5b5f875ec5e93d9eaa0ba4fb23b679596f4ff9d7375fea80cf02db33c"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/message-send-handler.ts",
+      "role": "module",
+      "sha256": "b78b7774f952e2c57090224f9393c0448d9441cb0775d19f701f9a7062f1729e"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/mutation-request-show-handler.ts",
+      "role": "module",
+      "sha256": "66a907a2193da3be14664a91e6ff2d20635303f0ec459705232fb03a88454cbd"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/mutation-request.ts",
+      "role": "module",
+      "sha256": "e44f1f6575597a6a102255ee49467f90ea27051c32a64f5b05cd95cf339aa13d"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/numeric-flags.ts",
+      "role": "module",
+      "sha256": "4597506912c474a62f22a2e09d7e9d002adb9a154c7cfffc427c01c3c2159841"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/question-handler.ts",
+      "role": "module",
+      "sha256": "f997f50832dd13717d8ee83c2bf831a979235e9f81bf7bb68f23c660dd6c09bf"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/reset-handler.ts",
+      "role": "module",
+      "sha256": "46c1aeb2d4ef3d21cf050deeaf45a32cce0d052032930c6c7ba35432ec53cc73"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/run-handlers.ts",
+      "role": "module",
+      "sha256": "e3fc8c08902ab75df2fbaccc2be5ab30f182decb71f5d5e7d13fb8b282ed4086"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/runtime-compatibility.ts",
+      "role": "module",
+      "sha256": "a102ef1800a19043e2f39efcc12d44d67b8c038ec010fca91e8fa541ec3b19b7"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/task-handlers.ts",
+      "role": "module",
+      "sha256": "352e334ae0381bf7de2341237a83e17ebc6ca04ff72d980de0e44c4468799141"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/terminal-identity.ts",
+      "role": "module",
+      "sha256": "1a7fea34b5269c86a1c9aa256446fe1e4e32f410238c39300adf880daba29718"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/worker-launch-handler.ts",
+      "role": "module",
+      "sha256": "d985b68d9781b693a56de4e37c402ede184a817b4d922f719de55a72f79ff9a3"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/worker-observation-handlers.ts",
+      "role": "module",
+      "sha256": "9e19cbdaa41c0b82d28667a23e115aaff0aeab135f9f44df5ec4011c3a982049"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/worker-output.ts",
+      "role": "module",
+      "sha256": "1dc67e59a50eba8ac5906f5111e5a43d8142498102a4fb1b6ed68866ca211712"
+    },
+    {
+      "path": "src/cli/handlers/orchestration/worker-terminal-handlers.ts",
+      "role": "module",
+      "sha256": "da3ee739d34b71cec693dd58adb2e8f82bb53d2d16b8f680c6528ca30f20a1ac"
+    },
+    {
+      "path": "src/cli/host-selector-alternatives.ts",
+      "role": "module",
+      "sha256": "eeab678c758d64fd8babfc719607c1769fd18df9114e5821254c475e683a7d6b"
+    },
+    {
+      "path": "src/cli/omitted-host-scope-selectors.ts",
+      "role": "module",
+      "sha256": "f7ff764140a9c2a21b3641765ea5f49a1d774303cb8f80402b2aa06a89555ec3"
+    },
+    {
+      "path": "src/cli/orchestration-mutation-recovery.ts",
+      "role": "module",
+      "sha256": "0f73d39af508b20ae6e9b3d79b841a5f6320634e13ca58d8ce484e09a1c23cf9"
+    },
+    {
+      "path": "src/cli/project-format.ts",
+      "role": "module",
+      "sha256": "23283f5ccda28ee097db5f35816769f0db14282f963f7d95b0b5a2e4d7c0df9b"
+    },
+    {
+      "path": "src/cli/quote-stripped-json-flag.ts",
+      "role": "module",
+      "sha256": "aa7345c8de7e9fd4a75003d1642b01249f4bfe0ad2c464a8ab78c3fe1da7cff1"
+    },
+    {
+      "path": "src/cli/runtime-client.ts",
+      "role": "module",
+      "sha256": "d3adc4b381983f4816f83faf489d503f6790e469cb621ccbd396a6f43839ef02"
+    },
+    {
+      "path": "src/cli/runtime/client-error-recovery.ts",
+      "role": "module",
+      "sha256": "3f228cdb67af05edad816c2691c2c6819d8c0687b4daa223b6bc91dc89147b42"
+    },
+    {
+      "path": "src/cli/runtime/client.ts",
+      "role": "module",
+      "sha256": "74c546a02194b46c697cec8c06f2db4f3e77f44c6d60f60cc90c526c46b37367"
+    },
+    {
+      "path": "src/cli/runtime/envelope-schema.ts",
+      "role": "module",
+      "sha256": "f61bf6f224272f9dc6cd1782215b3a98345300a84adb6126c350d7176ed6bcd4"
+    },
+    {
+      "path": "src/cli/runtime/environments.ts",
+      "role": "module",
+      "sha256": "1c51c7ace0e1f4e9ad66cf8e2f85031b4be6bc9e4d009144a7529f458b9d48bd"
+    },
+    {
+      "path": "src/cli/runtime/index.ts",
+      "role": "module",
+      "sha256": "0f2aa249de7c88dd3ebb7dea681863bccc984cd1ca4c331590d5d5e552ef89ca"
+    },
+    {
+      "path": "src/cli/runtime/launch.ts",
+      "role": "module",
+      "sha256": "90db4d11f26034cda4019d433335773c57906544c261659b2e4691f398176771"
+    },
+    {
+      "path": "src/cli/runtime/mac-app-update-bundle.ts",
+      "role": "module",
+      "sha256": "ba270a94a7fc01d8614d036820967eaaf50869817b1cac76a49e877fb0277ca3"
+    },
+    {
+      "path": "src/cli/runtime/metadata.ts",
+      "role": "module",
+      "sha256": "59e760b8753a6e0b2f4df2acfa0af6abce1834ec92a2b812b935330887c6371f"
+    },
+    {
+      "path": "src/cli/runtime/orchestration-compatibility-envelope.ts",
+      "role": "module",
+      "sha256": "94462f66970139ab12622862263a0f3c772a6202cca52c3fa09402de7bd5a138"
+    },
+    {
+      "path": "src/cli/runtime/orchestration-recovery-command.ts",
+      "role": "module",
+      "sha256": "ea13a8eb3a74889f7ca0d0d174e7f5645ad3c9716688846e5abaf503fd977c03"
+    },
+    {
+      "path": "src/cli/runtime/remote-runtime-compat-gate.ts",
+      "role": "module",
+      "sha256": "91c24cd9f17aefe3ae51a8a3502b269a7abc39e1c019e66033d36a8c6a2fd82a"
+    },
+    {
+      "path": "src/cli/runtime/runtime-request-timeout.ts",
+      "role": "module",
+      "sha256": "93d55d2806a9725e5f426ed4b966d170215bdfa913cb64913de82def5bddb222"
+    },
+    {
+      "path": "src/cli/runtime/serve-signal-exit-diagnostic.ts",
+      "role": "module",
+      "sha256": "7dcc3238d2f2eb57fbcf90899fb77eec43df3d9aad659c5cc3a5615dc5d5ac20"
+    },
+    {
+      "path": "src/cli/runtime/serve-update-supervisor.ts",
+      "role": "module",
+      "sha256": "3cd094753949093437e00688f2b2289813c2e6a8e85a41be50e46d2156d7de15"
+    },
+    {
+      "path": "src/cli/runtime/status.ts",
+      "role": "module",
+      "sha256": "16152f122bb6f0db675c29e8c4978b4bb1039a868f1a432de4159515dbee82a9"
+    },
+    {
+      "path": "src/cli/runtime/transport.ts",
+      "role": "module",
+      "sha256": "5834b4bc0c66d43eb01ccc89ae1569e5df4e7d9ef371ba9ded7b261dcddb0cc0"
+    },
+    {
+      "path": "src/cli/runtime/types.ts",
+      "role": "module",
+      "sha256": "6c6c7bc9eb6c934cc06517026d54321a0abc9a5b6ee759d96cdeb243d8dcee70"
+    },
+    {
+      "path": "src/cli/runtime/websocket-transport.ts",
+      "role": "module",
+      "sha256": "f6de5b70ae9968291609c20bd9905083588eb448c9ba6f62c7c1973f2dbb7bd1"
+    },
+    {
+      "path": "src/cli/selectors.ts",
+      "role": "module",
+      "sha256": "c3627f26f9bb2c2ed21ca7854869517ecc4c113e6f7ecea3e34888461c1a0cc5"
+    },
+    {
+      "path": "src/cli/shell-command-quote.ts",
+      "role": "module",
+      "sha256": "fcb9eb7bcdba0f41ced8122443aca6abd3d4cc2e5ffc5f1e8e1a417c56fe1138"
+    },
+    {
+      "path": "src/cli/terminal-format.ts",
+      "role": "module",
+      "sha256": "30b3fc671f3d57c48b911130c32c4937ac78aa8893ff66aa80b060fc57ef65e3"
+    },
+    {
+      "path": "src/cli/workspace-format.ts",
+      "role": "module",
+      "sha256": "ac51e8742a71a8a6b77641f57f278a289d7ce2cb9669f255c17faea4254fef42"
+    },
+    {
+      "path": "src/shared/abort-signal-reason.ts",
+      "role": "module",
+      "sha256": "ef979f2aa87e3d6712dc80abb4d86a8c6e0fa7a1d807cfa1bf35c82b362b7455"
+    },
+    {
+      "path": "src/shared/agent-session-pty-write-refusal-copy.ts",
+      "role": "module",
+      "sha256": "be4b7bce343385be8e2d1c74911ec7964f10c6652e2848098d7422852fb2c2e7"
+    },
+    {
+      "path": "src/shared/automation-cron-occurrence.ts",
+      "role": "module",
+      "sha256": "4a0fd4d64f73ffa89f8acb5c6d7ba9605c4bf051a3313f5f871fb6c903e2739c"
+    },
+    {
+      "path": "src/shared/automation-owner-conflict.ts",
+      "role": "module",
+      "sha256": "9903735cf22f838bb78eebed0b501480fc95ec008fcca7db39c209f4f1d8d360"
+    },
+    {
+      "path": "src/shared/automation-precheck.ts",
+      "role": "module",
+      "sha256": "42462487a0dec1f9f90da9952f76c5adfd30861de38b759badcb27b4597caacc"
+    },
+    {
+      "path": "src/shared/automation-run-identity.ts",
+      "role": "module",
+      "sha256": "b64a34ad6c69c962e145877eec8840c39524b3b4f2be914eb59b63c6d80ab3d9"
+    },
+    {
+      "path": "src/shared/automation-schedule-parsing.ts",
+      "role": "module",
+      "sha256": "5153712011896febbc704e9a6f24bc3b47447096e9d8a45094aa9d9f1a78e22c"
+    },
+    {
+      "path": "src/shared/automation-schedules.ts",
+      "role": "module",
+      "sha256": "95ec1c35a41da572481b24c8c0c857176af51693cac1cb4254b3646e59255514"
+    },
+    {
+      "path": "src/shared/bounded-secure-json-file.ts",
+      "role": "module",
+      "sha256": "cf2eb752f6c003a0accd7bce441b00b3718b59a86b68ce184f9e6b0214ec1bb5"
+    },
+    {
+      "path": "src/shared/child-process/bounded-output-sink.ts",
+      "role": "module",
+      "sha256": "61dadf3460a93ddb11f888d0dc9669fe7d6c7adb876f353dd3eb8b6a83019fb2"
+    },
+    {
+      "path": "src/shared/child-process/child-termination-reporter.ts",
+      "role": "module",
+      "sha256": "d91ff09b26c9a23e26c2a2f92b129879cd6d0bddea14cd3bcac5d4489fecfca0"
+    },
+    {
+      "path": "src/shared/child-process/process-spec.ts",
+      "role": "module",
+      "sha256": "97e52b5e320da1eed4cfb2c0b73a88696b62f355eb4b5fe0df5389764afb8289"
+    },
+    {
+      "path": "src/shared/child-process/process-tree-kill-observer.ts",
+      "role": "module",
+      "sha256": "7054160933554fbd46e0d1f9ff29c166c69b2e3155440c93c44a129158d50ad9"
+    },
+    {
+      "path": "src/shared/child-process/process-tree-termination.ts",
+      "role": "module",
+      "sha256": "895ce42b138caeac7cb04f59d14f49767393707d769d32094b665c0dc3f84e01"
+    },
+    {
+      "path": "src/shared/child-process/run-process.ts",
+      "role": "module",
+      "sha256": "4ddddae3012551a036a30634dc60b87746a1d1136ca40af16236875b55359f86"
+    },
+    {
+      "path": "src/shared/child-process/windows-command-line.ts",
+      "role": "module",
+      "sha256": "54731fb25c5c31786080f830e355cc805bf1235d7a71a49927e72faf5465fbea"
+    },
+    {
+      "path": "src/shared/cli-app-status-projection.ts",
+      "role": "module",
+      "sha256": "93945724d004916c101988be0da4f5ae37c9760c1c236dacc8a90df93d2e79c8"
+    },
+    {
+      "path": "src/shared/cli-argument-boundary.ts",
+      "role": "module",
+      "sha256": "ea0e0bd3c21b26c6506ee8b9d636874cd329783275d3139a50fe3bc7a7fcea01"
+    },
+    {
+      "path": "src/shared/clipboard-text.ts",
+      "role": "module",
+      "sha256": "50f3155063244d6d12ac1493c80029a75df256c031f986f76da64a94152d0c38"
+    },
+    {
+      "path": "src/shared/computer-use-error-recovery.ts",
+      "role": "module",
+      "sha256": "7ccf7009369bef52694a114029906f7d9ee3991b79eb9a50b9e1cb957bf311ba"
+    },
+    {
+      "path": "src/shared/cross-platform-path.ts",
+      "role": "module",
+      "sha256": "eea78e4490a9ae0f190bd94ba1b9d07ac62ffb51361aa85868f872ed5212c270"
+    },
+    {
+      "path": "src/shared/e2ee-crypto.ts",
+      "role": "module",
+      "sha256": "0f187808227a77b9e3d6799741d2145e205820f6c5119db9b39c3e218bbfecc4"
+    },
+    {
+      "path": "src/shared/edit-distance.ts",
+      "role": "module",
+      "sha256": "0abe56302e2732dac5a58ae30003df3117b8d53bf0edf8553c4f153e024e4d06"
+    },
+    {
+      "path": "src/shared/ephemeral-vm-recipes.ts",
+      "role": "module",
+      "sha256": "9d472582d8186f16c2c3e305e4c2617f1a5508eaf7ce34e9bbf3226be2bc617b"
+    },
+    {
+      "path": "src/shared/event-loop-yield.ts",
+      "role": "module",
+      "sha256": "d291b71f09eb88f24a849d0ae310f946deb7f93b0b6b490b6ea5a605ab7a53cf"
+    },
+    {
+      "path": "src/shared/execution-host.ts",
+      "role": "module",
+      "sha256": "b50beb1c179026e1457e490455fdcad1ebfa500b714635b598aa52dd6e55247a"
+    },
+    {
+      "path": "src/shared/json-text-structure-limit.ts",
+      "role": "module",
+      "sha256": "d2c02e311eda500d935589f167106890cec715a141d4976dc89860c0dc6b6bfd"
+    },
+    {
+      "path": "src/shared/mobile-pairing-protocol-limits.ts",
+      "role": "module",
+      "sha256": "c42b2db0fa40439b20d89b5cb347632c8cb2790d410385646d45c127938c80e8"
+    },
+    {
+      "path": "src/shared/mobile-relay-pairing-offer.ts",
+      "role": "module",
+      "sha256": "1cfbe7fea9552e2982f1a18300502421064cedac8d45857a11dc14e76366c09d"
+    },
+    {
+      "path": "src/shared/node-bounded-file-reader.ts",
+      "role": "module",
+      "sha256": "2cffa451b72d059226e0c2d4b6d2a5203cb8ddafb358d5e828dcd3436d197ecb"
+    },
+    {
+      "path": "src/shared/node-bounded-json-stringify.ts",
+      "role": "module",
+      "sha256": "fcadabc537aa3125d1ee514026ecca5b8e2a76aabca7e29f08d3d35008001622"
+    },
+    {
+      "path": "src/shared/orchestration-ask-timeout.ts",
+      "role": "module",
+      "sha256": "6f6cafcfd2e4133736d3f861c728db98dad615e23e54cf6b3925c76c5579f930"
+    },
+    {
+      "path": "src/shared/orchestration-check-output.ts",
+      "role": "module",
+      "sha256": "c8e6442712e4309a818711d85f6460e3d175383c0087aa36ac6043b4ce51c4fd"
+    },
+    {
+      "path": "src/shared/orchestration-compatibility-evidence.ts",
+      "role": "module",
+      "sha256": "a1ebea9d09839845e279ce9e62a81985f5af9c58f3ea004556ec5bc9374bc0ef"
+    },
+    {
+      "path": "src/shared/orchestration-rpc-contract.ts",
+      "role": "module",
+      "sha256": "3edd233e3a74ee0feed025257a2dbe65f70c6894f0e7ac54ec7b173d6519ae86"
+    },
+    {
+      "path": "src/shared/orchestration-run-pagination.ts",
+      "role": "module",
+      "sha256": "4820765fd7cf28e09b1f623c7f674a1a619f56828eb9ea05105b64380490fc23"
+    },
+    {
+      "path": "src/shared/orchestration-task-summary.ts",
+      "role": "module",
+      "sha256": "71564bbb614278f5cc0882c08e0d255696b1333dc42174471c64f0777e9ea288"
+    },
+    {
+      "path": "src/shared/orchestration-timing-budgets.ts",
+      "role": "module",
+      "sha256": "2811cec2916c4ece210f02de22d760670abd0cdd955724ffc54c45c1df29b592"
+    },
+    {
+      "path": "src/shared/pairing.ts",
+      "role": "module",
+      "sha256": "317c379092775af3766e226620031bb5bea81ee5d7f4b131a05cd4f7eb42d742"
+    },
+    {
+      "path": "src/shared/powershell-native-argument.ts",
+      "role": "module",
+      "sha256": "f3c6c8c629b74b3e9c62fb4b3e8b16021a8f03c0b38cc30cea38fff3231749b2"
+    },
+    {
+      "path": "src/shared/protocol-compat.ts",
+      "role": "module",
+      "sha256": "ca88e9ca8c9a9926184d709b2de8f8ec179dfa2186f1b8b45edc9ad2248d3c7d"
+    },
+    {
+      "path": "src/shared/protocol-version.ts",
+      "role": "module",
+      "sha256": "e21f10647fe18df2b31e84c2a8d596c083e8ae52714829890969a1b65286803a"
+    },
+    {
+      "path": "src/shared/pty-liveness-verdict.ts",
+      "role": "module",
+      "sha256": "f56a5f48829cfe498c920333dd18229f1eb89692665e0f668628a0fb8cec420f"
+    },
+    {
+      "path": "src/shared/quit-teardown-deadline.ts",
+      "role": "module",
+      "sha256": "55f56117cc92be5d660fa748733bfaade1dffe3c958009a999cf7fb97e20eb48"
+    },
+    {
+      "path": "src/shared/remote-pairing-address.ts",
+      "role": "module",
+      "sha256": "dcdfce5217f6e558ba8c6a58131c0683d58812b3389ec6cf937a10c3add5e014"
+    },
+    {
+      "path": "src/shared/remote-runtime-client-capabilities.ts",
+      "role": "module",
+      "sha256": "f41ea998bdd4a3621f3f06eb1c11dd6b2c6678efe5808f93be1518a50eed938a"
+    },
+    {
+      "path": "src/shared/remote-runtime-client-error.ts",
+      "role": "module",
+      "sha256": "593ff4ee6466c4b18b69f65a20631967205fb8e1bd5e46239cf7f526b764156a"
+    },
+    {
+      "path": "src/shared/remote-runtime-client-handshake.ts",
+      "role": "module",
+      "sha256": "9d4a4be03e74f7cabaa4c3db9bd4c10d349dfb41ae5852ac2862f38f02492c30"
+    },
+    {
+      "path": "src/shared/remote-runtime-client.ts",
+      "role": "module",
+      "sha256": "12e81120eb151d3ae8e61b2f9ab3a5aa4560f8a43d39e5c6386d3e5f2a02e18b"
+    },
+    {
+      "path": "src/shared/remote-runtime-memory-limits.ts",
+      "role": "module",
+      "sha256": "862a317d7f564a2cc54cfa60b6c093de5dc8a61714eac45daa178608c1f6acb1"
+    },
+    {
+      "path": "src/shared/remote-runtime-prepared-request-admission.ts",
+      "role": "module",
+      "sha256": "ceebb01eb75df7f29d1d3e0d2ee6ceb72a0188666a85a462d53e4b3bc84a6c90"
+    },
+    {
+      "path": "src/shared/remote-runtime-request-frames.ts",
+      "role": "module",
+      "sha256": "ace20e1a4cd69329e9210cb0f42ecdc4b0c0f02d1eaf3435187edd952c2db1c3"
+    },
+    {
+      "path": "src/shared/remote-runtime-request-response-router.ts",
+      "role": "module",
+      "sha256": "c658708e63a12e998d1d1bfbcbd77a59447a4d1c23989e548cbd47776462024f"
+    },
+    {
+      "path": "src/shared/remote-runtime-request-socket.ts",
+      "role": "module",
+      "sha256": "6c0b1d7c90789b16de40fcc5658dfedff3a0ce1a16040b9de19606b14966106e"
+    },
+    {
+      "path": "src/shared/remote-runtime-socket-liveness.ts",
+      "role": "module",
+      "sha256": "cd183251d2970e69493c841c8e9464c5af5eccda4948b30c0747b51329b8e91d"
+    },
+    {
+      "path": "src/shared/remote-runtime-subscription-frame-router.ts",
+      "role": "module",
+      "sha256": "854b12a5936eca99f14ed6701e282bdc2cd4ea66cb632428f36089df2d01bd79"
+    },
+    {
+      "path": "src/shared/remote-runtime-subscription-outbound.ts",
+      "role": "module",
+      "sha256": "b7a2d04c5071a6ed6aac8e375305ec76a2acc8c24e547ba29460919c7fb65402"
+    },
+    {
+      "path": "src/shared/remote-runtime-subscription-request-channel.ts",
+      "role": "module",
+      "sha256": "c6297d9ab6486e6aa931809778d5093b68c0f883493f87d7bbbe1dadad122cb0"
+    },
+    {
+      "path": "src/shared/remote-runtime-subscription-transport.ts",
+      "role": "module",
+      "sha256": "51019065291ee52fa66aec2f144a69287ea60080e23f921d31796e4abeadf318"
+    },
+    {
+      "path": "src/shared/remote-server-update.ts",
+      "role": "module",
+      "sha256": "c7384b964a0bfaa1573cd00761c5e2d29143c591cb1b4cd6ee1b0db464110d12"
+    },
+    {
+      "path": "src/shared/runtime-bootstrap.ts",
+      "role": "module",
+      "sha256": "2d4c007c16e199a53d839fdc7604cefea21b6798f37e231c31cc1dae1cc52947"
+    },
+    {
+      "path": "src/shared/runtime-environment-store.ts",
+      "role": "module",
+      "sha256": "2e09aab22fa5711f769cdaf93682cc158c8d0323e6f5c085d1557a9a24f88876"
+    },
+    {
+      "path": "src/shared/runtime-environments.ts",
+      "role": "module",
+      "sha256": "db40dd4aa44d45f796ec34fd2daf5413e1ec51b07b19772ba86edb276558bc54"
+    },
+    {
+      "path": "src/shared/runtime-host-connection-state.ts",
+      "role": "module",
+      "sha256": "5a902bda67b8f5a8c0b8519aba376d8f61390c6e54bbec53fc37e22fe286e656"
+    },
+    {
+      "path": "src/shared/runtime-rpc-envelope.ts",
+      "role": "module",
+      "sha256": "a46eba9fcef5a7490b9717059357cd2d0dcabe6472ba630c316ac5280edd4f83"
+    },
+    {
+      "path": "src/shared/runtime-rpc-error-code.ts",
+      "role": "module",
+      "sha256": "1fa7751ab065c0396491d92af2a0e2ef8308810934b3349645051053be05a3ea"
+    },
+    {
+      "path": "src/shared/runtime-workspace-window-availability.ts",
+      "role": "module",
+      "sha256": "e5a0b3e08a8078837651c649a86576c1041926df40545fb256559654d21c2c18"
+    },
+    {
+      "path": "src/shared/secure-file.ts",
+      "role": "module",
+      "sha256": "f02391ba9d6040d8dd97f4ee5aff2620ab72bc3a5cffb18987c9362cfdd0d34b"
+    },
+    {
+      "path": "src/shared/secure-path-hardening-cache.ts",
+      "role": "module",
+      "sha256": "06ce6342d4cacf1b436ccb0886506da1ae09ad4d7f91cc54233f9c005ff0be7d"
+    },
+    {
+      "path": "src/shared/secure-path-windows-acl.ts",
+      "role": "module",
+      "sha256": "9348091f365c613f86da01beffd0ead49c5e1f8d6468a41518f846899e619802"
+    },
+    {
+      "path": "src/shared/serve-update-handoff.ts",
+      "role": "module",
+      "sha256": "b7f2c4a93a7ce10890f948cbd549d9cc0f50b2ea11f4fcd7550652e66bae39d6"
+    },
+    {
+      "path": "src/shared/skill-install-capability.ts",
+      "role": "module",
+      "sha256": "4dae209e014524ad9bd1f72f8366a78f80720546d36e19adbc299d3d7da1ff19"
+    },
+    {
+      "path": "src/shared/ssh-types.ts",
+      "role": "module",
+      "sha256": "8c93a968578a8eaa0c1541b936cc8f5ae00dac5e522e24b6b282215ad911f18a"
+    },
+    {
+      "path": "src/shared/tailnet-address.ts",
+      "role": "module",
+      "sha256": "db5f70f7c2c6ada2809c77b9a94505d0d04bb260ecc48e367d0ef965d44843fb"
+    },
+    {
+      "path": "src/shared/timer-delay.ts",
+      "role": "module",
+      "sha256": "7e529ed30d1b25521f5d72d7c2a6d05d16efe66faf2619b859d67b330cca767f"
+    },
+    {
+      "path": "src/shared/utf8-byte-limits.ts",
+      "role": "module",
+      "sha256": "07427f715975095184f81bcd1677808da82a6734e02cedc86c5b8fdee053ace3"
+    },
+    {
+      "path": "src/shared/windows-terminal-shell.ts",
+      "role": "module",
+      "sha256": "a321d23cb7fad1aae2b1e063fbc0009a6db2e27db83856b9fc99292406498316"
+    },
+    {
+      "path": "src/shared/ws-outbound-backpressure-queue.ts",
+      "role": "module",
+      "sha256": "73bf7ff3c10c42ada557045ac4be57f7676b87678984985f2dfe1b99a6e23e17"
+    },
+    {
+      "path": "src/shared/wsl-paths.ts",
+      "role": "module",
+      "sha256": "1d9dcf5a1ff6693c02ff60a6b074eb2ebb7e83bda12aceba7e0b208d410b6d1a"
+    }
+  ],
+  "dependencyClosureNote": "Runtime import closure computed with the legacy source's own installed esbuild 0.25.12 metafile (bundle of the entry test at the pinned revision, platform node, format esm, vitest external), not a hand-written import regex. The prior regex-based closure missed (a) the multi-line import of src/shared/cli-argument-boundary.ts in src/cli/args.ts, which failed the first run-cli capsule before any test ran (preparation failure, retained as .preflight/parity-baseline/native-coord-run-cli-WvW5x8 with its stage receipt and failed vitest-results.json), and (b) the statically reachable zod / ws / tweetnacl imports via src/shared/runtime-rpc-envelope.ts, src/shared/runtime-environments.ts, src/shared/mobile-relay-pairing-offer.ts, src/shared/ephemeral-vm-recipes.ts, src/shared/remote-runtime-request-socket.ts, src/shared/remote-runtime-subscription-outbound.ts, src/shared/remote-runtime-subscription-transport.ts and src/shared/e2ee-crypto.ts. The staged set is the full runtime-reachable first-party closure of the entry test (type-only imports are erased by the TS transform exactly as at runtime; '.js' specifiers resolve to their '.ts' files; vi.mock literal targets resolve to files already in the closure). All other externals are node: builtins plus vitest itself; the three pinned third-party packages are declared in transportRuntime below and staged by the capsule runner as verified junction links into the legacy source's already-installed node_modules (read-only), with WS_NO_BUFFER_UTIL=1 and WS_NO_UTF_8_VALIDATE=1 so ws's optional native peer modules stay out of the pinned closure. The first-party file list was additionally confirmed empirically: the capsule executes with no missing-module error under the source's own pinned vitest.",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 9
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "source test.environment is 'node' (matches capsule; no difference here)",
+    "source defines a global constant ORCA_FEATURE_WALL_ENABLED='true' at build time; the capsule's generated config defines nothing, since the pinned files never reference it",
+    "source registers three setupFiles (config/scripts/happy-dom-offscreen-canvas.ts, config/scripts/happy-dom-mutation-observer-retention.ts, config/scripts/vitest-host-ports-setup.ts); the capsule registers none, since the pinned files touch no DOM/canvas/host-port surface",
+    "source sets hookTimeout=60000ms and testTimeout=30000ms for its full, heavier suite; the capsule uses Vitest's built-in defaults",
+    "source passes execArgv ['--no-experimental-webstorage','--expose-gc'] to the worker process for retention tests elsewhere in the suite; the capsule passes none, since the pinned files allocate nothing that a GC-timing test would observe",
+    "the capsule executes the source project's own installed vitest 4.1.11 entry module (node_modules/vitest/vitest.mjs, read-only) under Node 24.19.0, so the earlier pilot's vitest 5.0.0 major-version compatibility gap does not apply to this capsule; the generated capsule config remains intentionally minimal as listed above"
+  ],
+  "isolationRationale": "The pinned handler modules are pure flag/RPC-payload mapping and output-formatting logic: no filesystem, network, child-process or timer side effects execute under these assertions. The transport client is an inline object supplied by the original source test itself (`client: { call: callMock }`), and five of the entry tests additionally vi.mock the sibling output/selector modules exactly as the original file does -- these are the source tests' own dependency substitutions at the CLI->transport and CLI->console seams, not mocks of the code under test. Every handler assertion runs against the real, unmodified handler modules. The pinned third-party transport packages (ws, tweetnacl, zod) load from junction links the runner creates into the legacy source's already-installed node_modules, read-only, with ws optional-native peers disabled via environment; no package is copied, installed or written. This is isolation by staging, not a security sandbox."
+}
