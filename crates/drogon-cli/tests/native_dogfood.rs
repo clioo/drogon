@@ -735,6 +735,8 @@ fn real_model_probe_reaches_a_daemon_spawned_session() {
             &ws_id,
             "--",
             "claude",
+            "--model",
+            "claude-sonnet-5",
             "--print",
             "--output-format",
             "json",
@@ -746,10 +748,11 @@ fn real_model_probe_reaches_a_daemon_spawned_session() {
     let incarnation = text_field(&created, "/result/incarnation").to_string();
 
     // The session is tracked from creation and closed on every path: the
-    // explicit close below observes its end, and the guard closes it during
-    // any unwind (assertion failure or timeout) while the daemon is still
-    // alive — a leaked live PTY session must be impossible, including on the
-    // failure paths that skip the explicit close.
+    // explicit close below asserts its observed end, and the guard's
+    // best-effort unwind close (assertion failure or timeout) runs while the
+    // daemon is still alive and reports honestly whether closure was proven
+    // — it cannot assert, so a failed unwind close is reported as
+    // unverifiable/cleanup-failed, never silently claimed.
     let mut session_guard = Some(SessionGuard {
         data_dir: data_dir.clone(),
         session_id: session_id.clone(),
@@ -860,9 +863,11 @@ fn real_model_probe_reaches_a_daemon_spawned_session() {
     drop(scratch);
 }
 
-/// Closes the tracked real-model session exactly once, unless the explicit
-/// close already observed its end. The best-effort drop path never panics
-/// (unwinding must not abort) and runs while the daemon is still alive.
+/// Tracks the real-model session and closes it exactly once: `close` asserts
+/// the daemon-observed end on the happy path; `Drop` is the best-effort
+/// unwind path — it never panics (a panic in drop aborts the process), runs
+/// while the daemon is still alive, and REPORTS whether closure was actually
+/// proven instead of claiming it.
 struct SessionGuard {
     data_dir: PathBuf,
     session_id: String,
@@ -896,22 +901,46 @@ impl SessionGuard {
 
 impl Drop for SessionGuard {
     fn drop(&mut self) {
-        if !self.closed {
-            let _ = run_cli(
-                &self.data_dir,
-                &[
-                    "--json",
-                    "terminal",
-                    "close",
-                    "--session",
-                    &self.session_id,
-                    "--incarnation",
-                    &self.incarnation,
-                ],
-            );
+        if self.closed {
+            return;
+        }
+        // Inspect, don't assert: closure is PROVEN only when the CLI exited
+        // successfully AND the daemon observed `exited`. Anything else is
+        // reported as unverifiable/cleanup-failed so a failed unwind close
+        // is never silently claimed as a clean release.
+        let out = run_cli(
+            &self.data_dir,
+            &[
+                "--json",
+                "terminal",
+                "close",
+                "--session",
+                &self.session_id,
+                "--incarnation",
+                &self.incarnation,
+            ],
+        );
+        let text = stdout(&out);
+        let verdict = serde_json::from_str::<Value>(&text).ok().and_then(|value| {
+            value["result"]["verdict"]
+                .as_str()
+                .map(std::string::ToString::to_string)
+        });
+        if out.status.success() && verdict.as_deref() == Some("exited") {
             eprintln!(
-                "closed real-model session {} on the unwind path",
+                "closed real-model session {} on the unwind path \
+                 (daemon observed exited)",
                 self.session_id
+            );
+        } else {
+            eprintln!(
+                "WARNING: real-model session {} unwind closure is \
+                 unverifiable/cleanup-failed (cli exit ok: {}, observed \
+                 verdict: {:?}, stdout: {text:?}, stderr: {:?})",
+                self.session_id,
+                out.status.success(),
+                verdict,
+                stderr(&out)
             );
         }
     }

@@ -422,3 +422,100 @@ cache reads). All default/negative runs spent nothing.
 What remains: nothing for this checkpoint; both corrections' gates are
 green (`cargo test -p drogon-cli --locked` full-suite result recorded
 below in the final gate run).
+
+---
+
+## Checkpoint 4 (task_71f48cb1b328): ROOT final-review fixes — no paid rerun
+
+Scope: `crates/drogon-cli/tests/native_dogfood.rs` only (+ this section).
+No opted-in run was performed (`DROGON_DOGFOOD_REAL_MODEL` never set); the
+only real-model spend remains Checkpoint 3's two disclosed calls.
+
+1. **Honest SessionGuard::Drop — DONE.** The unwind-path close now inspects
+   its outcome: closure is reported as proven only when the CLI exited
+   successfully AND the daemon observed `exited`; any other outcome prints
+   an explicit "unverifiable/cleanup-failed" warning including the CLI exit
+   flag, observed verdict, stdout and stderr. The false
+   "leaked live PTY session must be impossible" comments were replaced with
+   the accurate best-effort semantics (the drop path cannot assert — a
+   panic in drop would abort the process — so it reports rather than
+   guarantees).
+2. **Approved model lane pinned — DONE.** The real-model `terminal create`
+   child argv now carries `--model claude-sonnet-5` before `--print`, so the
+   bounded test cannot drift onto an unapproved or default model lane and
+   stays repeatable.
+3. **Shared helpers reused, no new shared code — DONE.** The happy-path
+   close keeps `coordinator_call`/`assert_ok`; the unwind path uses the
+   file's existing `run_cli`/`stdout`/`stderr` helpers (it cannot use
+   `coordinator_call` there because a panic during unwinding would abort).
+   An interim extracted helper was removed again rather than ship new shared
+   code; no scope widened.
+
+### Commands run (no opted-in run)
+
+- `cargo test -p drogon-cli --test native_dogfood --locked`:
+  **3 passed / 0 failed** (fixture leg green; real-model leg skipped with
+  note; negative gate test green). Zero spend.
+- `cargo test -p drogon-cli --locked`: all 9 targets green (lib 53, main 0,
+  argument_parity 22, integration 49, native_dogfood 3, orchestration_auth
+  6, orchestration_commands 52, parser 7, doc 0).
+- `cargo clippy -p drogon-cli --all-targets --locked -- -D warnings`: clean.
+- `cargo fmt -p drogon-cli -- --check`: clean.
+
+What remains: combined verification (including a fresh opted-in real-model
+pass under the pinned `claude-sonnet-5` lane) is explicitly deferred to
+ROOT's later dispatch, per this checkpoint's no-paid-rerun constraint.
+
+---
+
+## Checkpoint 5 (task_cba1294c6ccf): closure review — exact diff of the held files vs HEAD, zero code changes
+
+Read-only closure review; no hunk was provably wrong, so neither held file's
+content was modified by this checkpoint (this appendix is the only addition).
+
+### Exact-diff hunk verdicts
+
+`crates/drogon-cli/tests/native_dogfood.rs` (4 hunks, +50/−21 vs HEAD —
+Checkpoint 3's changes are already in HEAD; this delta is exactly the
+Checkpoint 4 fix set):
+
+| Hunk | Content | Verdict |
+| --- | --- | --- |
+| 1 | `--model claude-sonnet-5` inserted into the real-model `terminal create` child argv (after `claude`, before `--print`, inside the post-`--` passthrough) | **accept** — the approved lane pin from the final review; position is correct (it is the child's own flag) and matches Checkpoint 4's recorded evidence |
+| 2 | Test-body comment rewritten: the false "leaked live PTY session must be impossible" claim replaced with the accurate best-effort wording (guard reports proven/unverifiable, cannot assert) | **accept** — now consistent with the actual `Drop` behavior in hunk 4 |
+| 3 | `SessionGuard` struct doc rewritten with the same honest close/drop split | **accept** — documentation-only, accurate |
+| 4 | `Drop` rewrite: early-return when already closed; unwind-safe close via the file's existing `run_cli`; closure PROVEN only on CLI success + daemon-observed `exited`; otherwise a WARNING carrying cli-exit flag, observed verdict, stdout and stderr | **accept** — matches the review requirement (inspect, report, never claim), never panics during unwind (parse failures are `.ok()`-handled), reuses existing helpers, no new shared code |
+
+`docs/migration/verticals/V1/dogfood-evidence.md` (1 hunk, +43):
+
+| Hunk | Content | Verdict |
+| --- | --- | --- |
+| 5 | Checkpoint 4 appendix (per-fix verdicts, commands, gates, deferred paid pass) | **accept** — every recorded number was re-verified against this checkpoint's fresh runs (identical counts) and the spend disclosure is consistent with Checkpoint 3 |
+
+### Fresh gate results (this checkpoint's own runs)
+
+- `cargo test -p drogon-cli --test native_dogfood --locked`:
+  **3 passed / 0 failed** (fixture leg, real-model leg skipped with note,
+  negative gate test) — skip path, zero spend, 1.75s.
+- `cargo test -p drogon-cli --locked`: all 9 targets green — lib 53, main 0,
+  argument_parity 22, integration 49, native_dogfood 3, orchestration_auth
+  6, orchestration_commands 52, parser 7, doc 0. **0 failed.**
+- `cargo fmt --all -- --check`: **exit 0**.
+- `cargo clippy -p drogon-cli --all-targets --locked -- -D warnings`:
+  **exit 0**.
+
+### Spend confirmation
+
+`DROGON_DOGFOOD_REAL_MODEL` was NOT set at any point in this checkpoint;
+the fresh runs exercised only the skip path and the fixture leg. Real-model
+spend attributable to the dogfood work remains exactly Checkpoint 3's two
+disclosed calls (second metered at $0.0203).
+
+### Commit-readiness verdict for ROOT
+
+Both held files are **commit-ready**: the delta vs HEAD is exactly the
+reviewed Checkpoint 4 fix set, every hunk is accepted, every gate is green
+on fresh runs, the evidence appendix is consistent with the recorded runs,
+and nothing was changed by this closure review beyond this appendix. The
+final paid-model pass under the pinned `claude-sonnet-5` lane remains
+ROOT's own deferred step, as recorded in Checkpoint 4.
