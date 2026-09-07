@@ -121,10 +121,12 @@ export function createShortcutRegistry(): ShortcutRegistry {
 }
 
 /**
- * Palette/tab shortcut vocabulary (journey J5). Ids are stable action names;
- * handlers attach at mount (the palette host owns them) via `register()`,
- * keeping the existing guardHandler semantics — registration here is only
- * the id+chord table, never the behavior.
+ * Palette/tab shortcut vocabulary. Ids follow the Orca source registry
+ * (src/shared/keybindings/definitions-core-1.ts: `worktree.palette` on
+ * Mod+J, `worktree.quickOpen` on Mod+P; `terminal.clear` on Mod+K is
+ * terminal-scoped and registered by App, never here). Handlers attach at
+ * mount (the palette host owns them) via `register()` — registration here
+ * is only the id+chord table, never the behavior.
  */
 export interface PaletteShortcutDef {
   id: string;
@@ -136,8 +138,8 @@ function tabSelectDef(index: number): PaletteShortcutDef {
 }
 
 export const PALETTE_SHORTCUTS: readonly PaletteShortcutDef[] = [
-  { id: "palette.openCommands", chord: "CmdOrCtrl+K" },
-  { id: "palette.openQuickOpen", chord: "CmdOrCtrl+P" },
+  { id: "worktree.palette", chord: "CmdOrCtrl+J" },
+  { id: "worktree.quickOpen", chord: "CmdOrCtrl+P" },
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(tabSelectDef),
   { id: "tabs.prev", chord: "CmdOrCtrl+Shift+[" },
   { id: "tabs.next", chord: "CmdOrCtrl+Shift+]" },

@@ -13,10 +13,10 @@ export type ShortcutListEntry = {
 };
 
 function paletteTitle(id: string): { title: string; group: ShortcutGroup } {
-  if (id === "palette.openCommands")
-    return { title: "Open command palette", group: "Commands" };
-  if (id === "palette.openQuickOpen")
-    return { title: "Quick open workspace or session", group: "Commands" };
+  if (id === "worktree.palette")
+    return { title: "Switch worktree", group: "Commands" };
+  if (id === "worktree.quickOpen")
+    return { title: "Go to File", group: "Commands" };
   const tabSelect = /^tabs\.select([1-9])$/.exec(id);
   if (tabSelect)
     return { title: `Select tab ${tabSelect[1]}`, group: "Tabs" };
@@ -33,10 +33,40 @@ const WINDOW_SHORTCUTS: ShortcutListEntry[] = [
     group: "Settings",
   },
   {
+    id: "workspace.create",
+    title: "Create workspace",
+    chord: "CmdOrCtrl+N",
+    group: "Commands",
+  },
+  {
     id: "workspace.newTerminal",
     title: "New terminal",
     chord: "CmdOrCtrl+Shift+N",
     group: "Terminals",
+  },
+  {
+    id: "terminal.clear",
+    title: "Clear active pane",
+    chord: "CmdOrCtrl+K",
+    group: "Terminals",
+  },
+  {
+    id: "sidebar.left.toggle",
+    title: "Toggle Sidebar",
+    chord: "CmdOrCtrl+B",
+    group: "Commands",
+  },
+  {
+    id: "worktree.history.back",
+    title: "Worktree History Back",
+    chord: "CmdOrCtrl+Alt+ArrowLeft",
+    group: "Commands",
+  },
+  {
+    id: "worktree.history.forward",
+    title: "Worktree History Forward",
+    chord: "CmdOrCtrl+Alt+ArrowRight",
+    group: "Commands",
   },
 ];
 
@@ -78,11 +108,22 @@ export function formatChordForPlatform(
   return labels;
 }
 
-/** Single-char keys render uppercased; named keys keep a capitalised form. */
+/**
+ * Single-char keys render uppercased; arrow keys render as glyphs; other
+ * named keys keep a capitalised form.
+ */
 export function displayKey(key: string): string {
   const trimmed = key.trim();
   if (trimmed === "") return key;
   if (trimmed.length === 1) return trimmed.toUpperCase();
+  const arrows: Record<string, string> = {
+    arrowleft: "←",
+    arrowright: "→",
+    arrowup: "↑",
+    arrowdown: "↓",
+  };
+  const arrow = arrows[trimmed.toLowerCase()];
+  if (arrow) return arrow;
   return trimmed[0].toUpperCase() + trimmed.slice(1).toLowerCase();
 }
 

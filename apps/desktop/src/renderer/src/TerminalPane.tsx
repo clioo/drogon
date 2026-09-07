@@ -4,6 +4,13 @@ import { FitAddon } from "@xterm/addon-fit";
 import { TerminalInputQueue } from "./terminal-input-queue";
 import type { Session } from "../../shared/session-contract";
 
+/**
+ * Dispatched by the App-level `terminal.clear` chord (Cmd+K, source id from
+ * definitions-core-3.ts). App only dispatches while focus is inside the
+ * active session panel, so this listener clears unconditionally.
+ */
+export const TERMINAL_CLEAR_EVENT = "drogon:terminal-clear";
+
 export function TerminalPane({
   session,
   fontSize,
@@ -22,6 +29,11 @@ export function TerminalPane({
   const fontSizeRef = useRef(fontSize);
   fontSizeRef.current = fontSize;
   const live = useRef<{ terminal: Terminal; fit: FitAddon } | null>(null);
+  useEffect(() => {
+    const onClear = () => live.current?.terminal.clear();
+    window.addEventListener(TERMINAL_CLEAR_EVENT, onClear);
+    return () => window.removeEventListener(TERMINAL_CLEAR_EVENT, onClear);
+  }, []);
   // Applies a later settings change without remounting the session: the
   // creation effect below stays keyed on session identity only.
   useEffect(() => {

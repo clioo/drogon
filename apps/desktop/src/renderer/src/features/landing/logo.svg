@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 256 256"
+  role="img"
+  aria-labelledby="drogon-logo-title"
+>
+  <title id="drogon-logo-title">Drogon</title>
+  <path
+    fill="#ffffff"
+    fill-rule="evenodd"
+    d="M48 32h72c60 0 102 38 102 96s-42 96-102 96H48c17-19 24-42 24-70v-52c0-28-7-51-24-70Zm71 183c11-28 12-53-1-69-10-12-23-17-38-14l-16-11 20-8-8-14 27 4c10-2 17-9 20-20l3-24 15 17c9-15 22-27 40-36-4 18-13 30-25 40 18 6 32 18 42 35-20-9-37-8-52 0 15 15 21 34 17 54-5 22-22 38-44 46Zm-28-98 5-4 5 4-5 4-5-4Z"
+  />
+</svg>

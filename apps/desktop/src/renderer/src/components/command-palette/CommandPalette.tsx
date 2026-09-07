@@ -92,9 +92,11 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
     resolvePaletteFocusRestoreTarget(openerRef.current)?.focus();
   };
 
-  // Global chords: Cmd+K / Cmd+P toggle or switch modes, Cmd+1..9 select a
-  // tab, Cmd+Shift+[ / ] move across tabs. Tab chords stay out of editable
-  // fields and out of the way while the palette itself is open.
+  // Global chords: Cmd+J (worktree.palette) / Cmd+P (worktree.quickOpen)
+  // toggle or switch modes, Cmd+1..9 select a tab, Cmd+Shift+[ / ] move
+  // across tabs. Tab chords stay out of editable fields and out of the way
+  // while the palette itself is open. Cmd+K is terminal.clear, never the
+  // palette.
   useEffect(() => {
     const platform = navigator.userAgent.includes("Mac") ? "darwin" : "other";
     const registry = createShortcutRegistry();
@@ -114,11 +116,11 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
       onSelectSession(sessions[next].id);
     };
     const handlers: Record<string, () => void> = {
-      "palette.openCommands": () => {
+      "worktree.palette": () => {
         if (state().open && state().mode === "commands") closePalette();
         else openPalette("commands");
       },
-      "palette.openQuickOpen": () => {
+      "worktree.quickOpen": () => {
         if (state().open && state().mode === "quick") closePalette();
         else openPalette("quick");
       },

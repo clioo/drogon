@@ -1,210 +1,163 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/sidebar/SidebarNav.tsx (adapter: Orca's
-   zustand view store becomes props; only Search/Tasks/Automations rows
-   plus the live panel routes are kept). */
-import { useState } from "react";
+   zustand view store becomes props; the Tasks provider-shortcut chips and
+   the setup-guide/agent-dashboard entries are out of MVP scope; Meetings
+   and Mobile rows stay in the code behind the product-mode gate, hidden).
+   In the source Files and Changes live in the right-sidebar activity bar
+   and Browser opens as a tab: they are not nav rows. Until that
+   restructure lands, Sessions routes to the terminals view and
+   Files/Changes/Browser stay reachable from the command palette. */
 import {
   Bot,
   CalendarClock,
-  Folder,
-  GitCompareArrows,
-  Globe,
-  ListTodo,
+  CalendarDays,
+  List,
   Search,
-  TerminalSquare,
+  Smartphone,
+  SquareTerminal,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
-import { BROWSER_ROUTE_ID } from "../../browser-mount";
 import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
-import { CHANGES_ROUTE_ID } from "../../changes-mount";
-import { FILES_ROUTE_ID } from "../../files-mount";
 import { TASKS_ROUTE_ID } from "../../tasks-mount";
+import { isDrogonProductSurfaceVisible } from "./product-mode";
 
-export type ShellPlaceholder = "automations" | null;
+function rowClass(active: boolean): string {
+  return `flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors ${
+    active
+      ? "bg-worktree-sidebar-accent text-worktree-sidebar-accent-foreground"
+      : "text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-foreground/8"
+  }`;
+}
 
-/**
- * Top nav rows: Search opens the existing command palette; Terminals /
- * Files / Bots / Tasks switch the live panel routes; Automations is an
- * honest placeholder (journey J7 owner) that surfaces a "coming soon"
- * empty state instead of a fake page.
- */
+function rowIconClass(active: boolean): string {
+  return `size-4 shrink-0${active ? "" : " text-worktree-sidebar-foreground/30"}`;
+}
+
+function isMacPlatform(): boolean {
+  return (
+    typeof navigator !== "undefined" && navigator.userAgent.includes("Mac")
+  );
+}
+
+/** Modifier chips for the worktree palette chord (⌘J on macOS). */
+function PaletteHint(): React.JSX.Element {
+  const keys = isMacPlatform() ? ["\u2318", "J"] : ["Ctrl", "Shift", "J"];
+  return (
+    <span className="pointer-events-none hidden shrink-0 items-center gap-1 group-hover:flex group-focus-within:flex">
+      {keys.map((key) => (
+        <kbd
+          key={key}
+          className="inline-flex gap-0.5 min-w-4 border-worktree-sidebar-border/80 bg-worktree-sidebar-foreground/8 px-1 py-px text-[9px] text-worktree-sidebar-foreground/55 shadow-none"
+        >
+          {key}
+        </kbd>
+      ))}
+    </span>
+  );
+}
+
+function ProductNavButton({
+  label,
+  active,
+  icon: Icon,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  icon: LucideIcon;
+  onClick: () => void;
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      className={rowClass(active)}
+    >
+      <Icon
+        className={rowIconClass(active)}
+        strokeWidth={active ? 2.25 : 1.75}
+      />
+      <span className="flex-1">{label}</span>
+    </button>
+  );
+}
+
 export function SidebarNav({
   route,
-  panelsDisabled,
-  filesAvailable,
-  changesAvailable,
-  botsAvailable,
-  browserEnabled,
-  automationsAvailable,
   onSelectRoute,
   onOpenPalette,
 }: {
   route: string | null;
-  panelsDisabled: boolean;
-  filesAvailable: boolean;
-  changesAvailable: boolean;
-  botsAvailable: boolean;
-  browserEnabled: boolean;
-  automationsAvailable: boolean;
   onSelectRoute: (route: string | null) => void;
   onOpenPalette: () => void;
-}) {
-  const [placeholder, setPlaceholder] = useState<ShellPlaceholder>(null);
-  const row = (current: boolean) => ({
-    className: "workspace-row",
-    "data-current": current,
-  });
+}): React.JSX.Element {
+  const sessionsActive = route === null;
+  const botsActive = route === BOTS_ROUTE_ID;
+  const tasksActive = route === TASKS_ROUTE_ID;
+  const automationsActive = route === AUTOMATIONS_ROUTE_ID;
   return (
-    <div className="shell-nav">
+    <div className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
       <button
         type="button"
-        {...row(false)}
-        aria-label="Search workspaces and sessions"
-        onClick={() => {
-          setPlaceholder(null);
-          onOpenPalette();
-        }}
+        onClick={onOpenPalette}
+        aria-label="Search worktrees and browser tabs"
+        className="group flex w-full items-center gap-2 rounded-md bg-worktree-sidebar-foreground/5 px-2 py-1.5 text-left text-[13px] font-medium tracking-tight text-worktree-sidebar-foreground/60 transition-colors hover:bg-worktree-sidebar-foreground/8"
       >
-        <Search size={16} />
-        <span>Search</span>
+        <Search
+          className="size-4 shrink-0 text-worktree-sidebar-foreground/30"
+          strokeWidth={1.75}
+        />
+        <span className="flex-1">Search</span>
+        <PaletteHint />
       </button>
-      <button
-        type="button"
-        {...row(route === null)}
-        aria-current={route === null ? "page" : undefined}
-        disabled={panelsDisabled}
-        onClick={() => {
-          setPlaceholder(null);
-          onSelectRoute(null);
-        }}
-      >
-        <TerminalSquare size={16} />
-        <span>Terminals</span>
-      </button>
-      <button
-        type="button"
-        {...row(route === FILES_ROUTE_ID)}
-        aria-current={route === FILES_ROUTE_ID ? "page" : undefined}
-        disabled={panelsDisabled || !filesAvailable}
-        title={
-          filesAvailable
-            ? "Files"
-            : "Files unavailable: service does not advertise files.v1"
-        }
-        onClick={() => {
-          setPlaceholder(null);
-          onSelectRoute(FILES_ROUTE_ID);
-        }}
-      >
-        <Folder size={16} />
-        <span>Files</span>
-      </button>
-      <button
-        type="button"
-        {...row(route === CHANGES_ROUTE_ID)}
-        aria-current={route === CHANGES_ROUTE_ID ? "page" : undefined}
-        disabled={panelsDisabled || !changesAvailable}
-        title={
-          changesAvailable
-            ? "Changes"
-            : "Changes unavailable: service does not advertise git.v1"
-        }
-        onClick={() => {
-          setPlaceholder(null);
-          onSelectRoute(CHANGES_ROUTE_ID);
-        }}
-      >
-        <GitCompareArrows size={16} />
-        <span>Changes</span>
-      </button>
-      <button
-        type="button"
-        {...row(route === BOTS_ROUTE_ID)}
-        aria-current={route === BOTS_ROUTE_ID ? "page" : undefined}
-        disabled={panelsDisabled || !botsAvailable}
-        title={
-          botsAvailable
-            ? "Bots"
-            : "Bots unavailable: service does not advertise bot.snapshot.v1"
-        }
-        onClick={() => {
-          setPlaceholder(null);
-          onSelectRoute(BOTS_ROUTE_ID);
-        }}
-      >
-        <Bot size={16} />
-        <span>Bots</span>
-      </button>
-      <button
-        type="button"
-        {...row(route === BROWSER_ROUTE_ID)}
-        aria-current={route === BROWSER_ROUTE_ID ? "page" : undefined}
-        disabled={panelsDisabled || !browserEnabled}
-        title="Browser"
-        onClick={() => {
-          setPlaceholder(null);
-          onSelectRoute(BROWSER_ROUTE_ID);
-        }}
-      >
-        <Globe size={16} />
-        <span>Browser</span>
-      </button>
-      {/* Tasks is project-scoped, not session-scoped: it stays enabled
-          with no workspace selected so the first task can create the
-          first worktree. The page itself reports withheld capability,
-          folder projects and missing gh. */}
-      <button
-        type="button"
-        {...row(route === TASKS_ROUTE_ID)}
-        aria-current={route === TASKS_ROUTE_ID ? "page" : undefined}
-        onClick={() => {
-          setPlaceholder(null);
-          onSelectRoute(TASKS_ROUTE_ID);
-        }}
-      >
-        <ListTodo size={16} />
-        <span>Tasks</span>
-      </button>
-      <button
-        type="button"
-        {...row(
-          automationsAvailable
-            ? route === AUTOMATIONS_ROUTE_ID
-            : placeholder === "automations",
-        )}
-        aria-current={
-          (automationsAvailable
-            ? route === AUTOMATIONS_ROUTE_ID
-            : placeholder === "automations")
-            ? "page"
-            : undefined
-        }
-        disabled={automationsAvailable && panelsDisabled}
-        title={
-          automationsAvailable
-            ? "Automations"
-            : "Automations unavailable: service does not advertise automation.v1"
-        }
-        onClick={() => {
-          if (automationsAvailable) {
-            setPlaceholder(null);
-            onSelectRoute(AUTOMATIONS_ROUTE_ID);
-            return;
-          }
-          setPlaceholder((value) =>
-            value === "automations" ? null : "automations",
-          );
-        }}
-      >
-        <CalendarClock size={16} />
-        <span>Automations</span>
-      </button>
-      {placeholder !== null && (
-        <p className="shell-coming-soon" role="status">
-          Automations are coming soon (journey J7): scheduled agent runs with
-          history.
-        </p>
-      )}
+      {isDrogonProductSurfaceVisible("sessions") ? (
+        <div className="space-y-0.5">
+          <ProductNavButton
+            label="Sessions"
+            active={sessionsActive}
+            icon={SquareTerminal}
+            onClick={() => onSelectRoute(null)}
+          />
+          {isDrogonProductSurfaceVisible("bots") ? (
+            <ProductNavButton
+              label="Bots"
+              active={botsActive}
+              icon={Bot}
+              onClick={() => onSelectRoute(BOTS_ROUTE_ID)}
+            />
+          ) : null}
+          {isDrogonProductSurfaceVisible("meetings") ? (
+            <ProductNavButton
+              label="Meetings"
+              active={route === "meetings"}
+              icon={CalendarDays}
+              onClick={() => onSelectRoute("meetings")}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      <ProductNavButton
+        label="Tasks"
+        active={tasksActive}
+        icon={List}
+        onClick={() => onSelectRoute(TASKS_ROUTE_ID)}
+      />
+      <ProductNavButton
+        label="Automations"
+        active={automationsActive}
+        icon={CalendarClock}
+        onClick={() => onSelectRoute(AUTOMATIONS_ROUTE_ID)}
+      />
+      {isDrogonProductSurfaceVisible("mobile") ? (
+        <ProductNavButton
+          label="Drogon Mobile"
+          active={route === "mobile"}
+          icon={Smartphone}
+          onClick={() => onSelectRoute("mobile")}
+        />
+      ) : null}
     </div>
   );
 }
