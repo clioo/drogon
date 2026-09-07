@@ -175,6 +175,11 @@ commit-action-menu, bulk-action-bar, commit-notices, discard-dialog,
 compare-summary and their helpers), all at the pinned source revision above.
 Each ported file keeps the MIT notice.
 
+The browser tab chrome in `apps/desktop/src/renderer/src/features/browser/`
+ports Orca's `src/renderer/src/components/browser-pane/assemble-chrome/{browser-navigation-control-row,browser-reload-control,BrowserAddressBar,BrowserAddressBarSuggestionList,browser-address-bar-edit-session,browser-address-bar-suggestions,BrowserToolbarMenu,browser-toolbar-menu-dropdown,BrowserFind,browser-page-context-menu,browser-page-chrome-banners,browser-page-viewport-overlays,browser-chrome-address-slot,browser-chrome-toolbar,use-browser-page-chrome-focus,use-browser-page-find-shortcuts}.ts(x)`
+and `browser-pane/navigate/**` helpers, all at the pinned source revision above.
+Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

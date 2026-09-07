@@ -19,6 +19,7 @@ function fakeBridge(
   overrides: Partial<BrowserBridge> = {},
 ): BrowserBridge {
   const nope = () => Promise.resolve({ ok: false, error: { code: "x", message: "x", retryable: false } }) as Promise<Result<never>>;
+  const okNull = () => Promise.resolve({ ok: true, result: null }) as Promise<Result<null>>;
   return {
     createTab: nope as BrowserBridge["createTab"],
     closeTab: nope as BrowserBridge["closeTab"],
@@ -30,6 +31,15 @@ function fakeBridge(
     setBounds: () => Promise.resolve({ ok: true, result: null }),
     snapshot: nope as BrowserBridge["snapshot"],
     onState: () => () => {},
+    hardReload: nope as BrowserBridge["hardReload"],
+    zoomIn: nope as BrowserBridge["zoomIn"],
+    zoomOut: nope as BrowserBridge["zoomOut"],
+    zoomReset: nope as BrowserBridge["zoomReset"],
+    findInPage: okNull as BrowserBridge["findInPage"],
+    stopFind: okNull as BrowserBridge["stopFind"],
+    openDevTools: okNull as BrowserBridge["openDevTools"],
+    onFindResult: () => () => {},
+    onContextMenu: () => () => {},
     ...overrides,
   };
 }

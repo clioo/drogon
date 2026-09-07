@@ -24,6 +24,9 @@ describe("browser host state", () => {
         canGoBack: false,
         canGoForward: false,
         error: null,
+        loadError: null,
+        committed: false,
+        zoomPercent: 100,
       },
     ]);
   });

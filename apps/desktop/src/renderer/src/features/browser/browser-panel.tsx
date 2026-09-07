@@ -1,13 +1,25 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Browser pane chrome ported from the Orca reference (read-only):
+//   src/renderer/src/components/browser-pane/assemble-chrome/browser-page-toolbar.tsx
+//   (toolbar composition: history + address slot + reload control + menu)
+//   src/renderer/src/components/browser-pane/assemble-chrome/browser-navigation-control-row.tsx
+//   src/renderer/src/components/browser-pane/assemble-chrome/browser-reload-control.tsx
+//   src/renderer/src/components/browser-pane/assemble-chrome/BrowserAddressBar.tsx
+//   src/renderer/src/components/browser-pane/assemble-chrome/BrowserToolbarMenu.tsx
+//   src/renderer/src/components/browser-pane/assemble-chrome/BrowserFind.tsx
+//   src/renderer/src/components/browser-pane/assemble-chrome/browser-page-context-menu.tsx
+//   src/renderer/src/components/browser-pane/assemble-chrome/browser-page-chrome-banners.tsx
+//   src/renderer/src/components/browser-pane/assemble-chrome/browser-page-viewport-overlays.tsx
+//   src/renderer/src/components/browser-pane/assemble-chrome/browser-page-pane.tsx
+//   (pane composition + Mod+L/Mod+R/Mod+F scope)
+// Adapted: the guest is the existing main-process WebContentsView (never DOM),
+// so chrome state comes from the browser bridge, not webview refs; the data
+// layer below is Drogon's, the DOM/copy/keyboard/ARIA above is the source's.
+// Not ported: profiles/user agents, egress indicator, import hint, mobile
+// driver overlay, SSH routing, downloads/permissions notices, annotate,
+// describe-page, stream-remote.
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Globe,
-  Plus,
-  RotateCw,
-  Square,
-  X,
-} from "lucide-react";
+import { Plus, X } from "lucide-react";
 import type {
   BrowserStateEvent,
   BrowserTabState,
@@ -17,24 +29,82 @@ import {
   readCaptureWindowOpen,
   writeCaptureWindowOpen,
 } from "./browser-bridge";
+import { windowShellOpenExternal } from "../landing/github-star";
+import BrowserAddressBar from "./browser-address-bar";
+import { BrowserNavigationControlRow } from "./browser-navigation-control-row";
+import { BrowserReloadControl } from "./browser-reload-control";
+import { BrowserToolbarMenu } from "./browser-toolbar-menu";
+import BrowserFind from "./browser-find-bar";
+import {
+  BrowserPageContextMenu,
+  type BrowserPageMenuState,
+} from "./browser-page-context-menu";
+import {
+  BrowserChromeBanners,
+  type BrowserChromeBanner,
+} from "./browser-chrome-banners";
+import {
+  BrowserViewportOverlays,
+  type BrowserViewportState,
+} from "./browser-viewport-overlays";
+import {
+  browserReloadButtonLabel,
+  resolveBrowserReloadButtonLabelKind,
+  resolveBrowserReloadIntent,
+  type BrowserReloadTrigger,
+} from "./browser-reload-state";
+import { matchBrowserPaneChord } from "./browser-pane-keyboard";
+import {
+  getBrowserDisplayTitle,
+  getOpenableExternalUrl,
+  hostOfUrl,
+  isBlankBrowserUrl,
+  toDisplayUrl,
+} from "./browser-url-display";
+import {
+  readBrowserRecentUrls,
+  recordBrowserRecentUrl,
+  type BrowserRecentUrl,
+} from "./browser-recent-urls";
 
 function workspaceTabs(event: BrowserStateEvent, workspaceId: string): BrowserTabState[] {
   return event.tabs.filter((tab) => tab.workspaceId === workspaceId);
 }
 
 function tabLabel(tab: BrowserTabState): string {
-  if (tab.title) return tab.title;
+  const title = getBrowserDisplayTitle(tab.title, tab.url);
+  if (title !== "New Tab") return title;
   try {
     return new URL(tab.url).host || tab.url;
   } catch {
-    return tab.url || "New tab";
+    return tab.url || "New Tab";
+  }
+}
+
+function isMacPlatform(): boolean {
+  return (
+    typeof navigator !== "undefined" && navigator.userAgent.includes("Mac")
+  );
+}
+
+function copyText(text: string): Promise<boolean> {
+  try {
+    const clipboard = navigator.clipboard;
+    if (!clipboard) return Promise.resolve(false);
+    return clipboard.writeText(text).then(
+      () => true,
+      () => false,
+    );
+  } catch {
+    return Promise.resolve(false);
   }
 }
 
 /**
- * Browser pane: address bar, back/forward/reload/stop, per-workspace tab
- * strip and a placeholder rect the main-process guest view is positioned
- * over. The page itself renders in a sandboxed WebContentsView, never in
+ * Browser pane: reference chrome (navigation row, address bar, reload
+ * control, toolbar menu, banners, find bar, context menu, viewport
+ * overlays) over the main-process guest view. The page itself renders in a
+ * sandboxed WebContentsView positioned over the placeholder rect, never in
  * this DOM — this component is chrome plus honest loading/error/blocked
  * states mirrored from host events.
  */
@@ -59,11 +129,31 @@ export function BrowserPanel({
   const controlled = controlledTabId !== undefined;
   const [address, setAddress] = useState("");
   const [notice, setNotice] = useState("");
+  const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const [capture, setCapture] = useState(() => readCaptureWindowOpen());
+  const [recentUrls, setRecentUrls] = useState<BrowserRecentUrl[]>(() =>
+    readBrowserRecentUrls(workspaceId),
+  );
+  const [findOpen, setFindOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<BrowserPageMenuState | null>(null);
+  const [reloadMenuOpen, setReloadMenuOpen] = useState(false);
+  const [zoomFlash, setZoomFlash] = useState<number | null>(null);
   const placeholderRef = useRef<HTMLDivElement>(null);
+  const addressInputRef = useRef<HTMLInputElement | null>(null);
+  const dismissSuggestionsRef = useRef<(() => void) | null>(null);
   const activeTabIdRef = useRef<string | null>(null);
   const workspaceRef = useRef(workspaceId);
   workspaceRef.current = workspaceId;
+  const recordedRef = useRef(new Set<string>());
+  const zoomFlashTimer = useRef<number | null>(null);
+
+  const refreshRecents = useCallback(() => {
+    setRecentUrls(readBrowserRecentUrls(workspaceRef.current));
+  }, []);
+
+  useEffect(() => {
+    refreshRecents();
+  }, [workspaceId, refreshRecents]);
 
   useEffect(
     () =>
@@ -108,8 +198,63 @@ export function BrowserPanel({
   const activeKey = active?.tabId ?? null;
   const activeUrl = active?.url ?? "";
   useEffect(() => {
-    setAddress(activeUrl);
+    setAddress(toDisplayUrl(activeUrl));
   }, [activeKey, activeUrl]);
+
+  // A new blank tab lands in the address bar with its text selected, like
+  // the source: one-shot per tab, so revisiting never steals focus back.
+  const lastFocusedBlank = useRef<string | null>(null);
+  useEffect(() => {
+    if (!active || !isBlankBrowserUrl(active.url)) return;
+    if (lastFocusedBlank.current === active.tabId) return;
+    lastFocusedBlank.current = active.tabId;
+    const id = window.requestAnimationFrame(() => {
+      addressInputRef.current?.focus();
+      addressInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [active]);
+
+  // Committed pages join the workspace recents the suggestions read.
+  useEffect(() => {
+    if (!active || active.loading || active.error) return;
+    if (!/^https?:\/\//i.test(active.url)) return;
+    const key = `${workspaceId}:${active.url}`;
+    if (recordedRef.current.has(key)) return;
+    recordedRef.current.add(key);
+    recordBrowserRecentUrl({ workspaceId, url: active.url, title: active.title });
+    refreshRecents();
+  }, [active, workspaceId, refreshRecents]);
+
+  // Guest context-menu requests land on the active tab's menu; a late event
+  // for a closed or background tab is dropped by identity.
+  useEffect(
+    () =>
+      bridge.onContextMenu((event) => {
+        if (event.tabId !== activeTabIdRef.current) return;
+        setContextMenu({
+          x: event.x,
+          y: event.y,
+          linkUrl: event.linkUrl,
+          pageUrl: event.pageUrl,
+          selectionText: event.selectionText,
+        });
+      }),
+    [bridge],
+  );
+
+  // Tab switches and unmount close the transient chrome.
+  useEffect(() => {
+    setFindOpen(false);
+    setContextMenu(null);
+    setReloadMenuOpen(false);
+  }, [activeKey]);
+  useEffect(
+    () => () => {
+      if (zoomFlashTimer.current !== null) window.clearTimeout(zoomFlashTimer.current);
+    },
+    [],
+  );
 
   const reportBounds = useCallback(() => {
     const element = placeholderRef.current;
@@ -169,6 +314,8 @@ export function BrowserPanel({
     const url = value.trim();
     if (!url) return;
     setNotice("");
+    setDismissedBanner(null);
+    dismissSuggestionsRef.current?.();
     if (!active) {
       void bridge
         .createTab({ workspaceId, url })
@@ -185,6 +332,91 @@ export function BrowserPanel({
           setNotice(result.error.message);
       })
       .catch(() => setNotice("The navigation could not be delivered."));
+  };
+
+  const submitAddressBar = () => go(address);
+  const navigateToUrl = (url: string) => {
+    setAddress(toDisplayUrl(url));
+    go(url);
+  };
+  const revertAddressBar = () => {
+    setAddress(toDisplayUrl(active?.url ?? ""));
+  };
+
+  const runReloadTrigger = (trigger: BrowserReloadTrigger) => {
+    if (!active) return;
+    setReloadMenuOpen(false);
+    const intent = resolveBrowserReloadIntent(trigger, {
+      loading: active.loading,
+      hasLoadError: active.error !== null,
+    });
+    if (intent === "stop") {
+      void bridge.stop({ tabId: active.tabId }).catch(() => {});
+      return;
+    }
+    if (intent === "retry-load") {
+      const retryUrl = active.loadError?.url || active.url;
+      if (!retryUrl || isBlankBrowserUrl(retryUrl)) return;
+      // Why navigate and not reload: after an error the guest sits on its
+      // own failure state, and reload() would only refresh that — a fresh
+      // loadURL back to the attempted URL is the retry.
+      go(retryUrl);
+      return;
+    }
+    const action =
+      intent === "hard-reload"
+        ? bridge.hardReload({ tabId: active.tabId })
+        : bridge.reload({ tabId: active.tabId });
+    void action
+      .then((result) => {
+        if (!result.ok) setNotice(result.error.message);
+      })
+      .catch(() => setNotice("The page could not be reloaded."));
+  };
+
+  const flashZoom = (percent: number | undefined) => {
+    if (percent === undefined) return;
+    setZoomFlash(percent);
+    if (zoomFlashTimer.current !== null) window.clearTimeout(zoomFlashTimer.current);
+    zoomFlashTimer.current = window.setTimeout(() => setZoomFlash(null), 1200);
+  };
+
+  const zoomBy = (step: "in" | "out" | "reset") => {
+    if (!active) return;
+    const action =
+      step === "in"
+        ? bridge.zoomIn({ tabId: active.tabId })
+        : step === "out"
+          ? bridge.zoomOut({ tabId: active.tabId })
+          : bridge.zoomReset({ tabId: active.tabId });
+    void action
+      .then((result) => {
+        if (result.ok) flashZoom(result.result.zoomPercent);
+        else setNotice(result.error.message);
+      })
+      .catch(() => setNotice("The page zoom could not be changed."));
+  };
+
+  const openExternalUrl = (url: string) => {
+    const openable = getOpenableExternalUrl(url);
+    if (!openable) {
+      setNotice("Only https URLs can leave the app.");
+      return;
+    }
+    const open = windowShellOpenExternal(window.drogon);
+    if (!open) {
+      setNotice("The system browser is not available.");
+      return;
+    }
+    void Promise.resolve(open(openable)).catch(() =>
+      setNotice("The system browser could not be opened."),
+    );
+  };
+
+  const copyAddress = (text: string) => {
+    void copyText(text).then((copied) => {
+      if (!copied) setNotice("Copy failed: clipboard unavailable.");
+    });
   };
 
   const closeTab = (tabId: string) => {
@@ -212,8 +444,43 @@ export function BrowserPanel({
     writeCaptureWindowOpen(next);
   };
 
+  // Reference keyboard, scoped to the active browser tab: the pane container
+  // owns Mod+L (address bar), Mod+R (reload) and Mod+F (find) exactly like
+  // the terminal owns its chords — preventDefault plus stopPropagation so
+  // the window-level registry (Mod+L toggles the right sidebar) never sees
+  // them while the user is in the page chrome.
+  const onPaneKeyDown = (event: React.KeyboardEvent) => {
+    const chord = matchBrowserPaneChord(event, isMacPlatform());
+    if (!chord || !active) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (chord === "focus-address-bar") {
+      dismissSuggestionsRef.current?.();
+      addressInputRef.current?.focus();
+      addressInputRef.current?.select();
+    } else if (chord === "reload") {
+      void runReloadTrigger("button");
+    } else {
+      setFindOpen(true);
+    }
+  };
+
+  const reloadKind = resolveBrowserReloadButtonLabelKind({
+    loading: active?.loading ?? false,
+    hasLoadError: active !== null && active.error !== null,
+  });
+  const reloadLabel = browserReloadButtonLabel(reloadKind);
+  const isMac = isMacPlatform();
+  const reloadShortcut = isMac ? "⌘R" : "Ctrl+R";
+
+  const externalUrl = active ? getOpenableExternalUrl(active.url) : null;
+  const zoomPercent = active?.zoomPercent ?? 100;
+
+  const banner = bannerFor({ active, notice, dismissedBanner });
+  const viewport = viewportFor({ active, externalUrl });
+
   return (
-    <div className="browser-pane" data-testid="browser-pane">
+    <div className="browser-pane" data-testid="browser-pane" onKeyDown={onPaneKeyDown}>
       {!hideTabStrip && (
       <div
         className="browser-tabstrip"
@@ -268,105 +535,172 @@ export function BrowserPanel({
         </button>
       </div>
       )}
-      <form
-        className="browser-bar"
-        onSubmit={(event) => {
+      <BrowserNavigationControlRow
+        controls={{
+          canGoBack: active?.canGoBack ?? false,
+          canGoForward: active?.canGoForward ?? false,
+          loading: active?.loading ?? false,
+          goBack: () => {
+            if (!active) return;
+            void bridge
+              .back({ tabId: active.tabId })
+              .then((result) => {
+                if (!result.ok) setNotice(result.error.message);
+              })
+              .catch(() => setNotice("The page could not go back."));
+          },
+          goForward: () => {
+            if (!active) return;
+            void bridge
+              .forward({ tabId: active.tabId })
+              .then((result) => {
+                if (!result.ok) setNotice(result.error.message);
+              })
+              .catch(() => setNotice("The page could not go forward."));
+          },
+          reload: () => runReloadTrigger("button"),
+          navigate: navigateToUrl,
+        }}
+        addressSlot={
+          <BrowserAddressBar
+            value={address}
+            onChange={setAddress}
+            onSubmit={submitAddressBar}
+            onNavigate={navigateToUrl}
+            inputRef={addressInputRef}
+            dismissSuggestionsRef={dismissSuggestionsRef}
+            recentUrls={recentUrls}
+            editSessionTabId={active?.tabId ?? null}
+            onRevert={revertAddressBar}
+          />
+        }
+        reloadControl={
+          <BrowserReloadControl
+            menuOpen={reloadMenuOpen}
+            onMenuOpenChange={setReloadMenuOpen}
+            label={reloadLabel}
+            loading={active?.loading ?? false}
+            showShortcutHint={reloadKind === "reload"}
+            reloadShortcut={reloadShortcut}
+            hardReloadShortcut=""
+            onPrimary={() => runReloadTrigger("button")}
+            onReload={() => runReloadTrigger("reload")}
+            onHardReload={() => runReloadTrigger("hard-reload")}
+          />
+        }
+        reloadLabel={reloadLabel}
+      >
+        {zoomFlash !== null ? (
+          <span
+            role="status"
+            aria-live="polite"
+            className="shrink-0 rounded-md border border-border bg-popover/95 px-2 py-0.5 text-xs font-medium text-popover-foreground"
+          >
+            {zoomFlash}%
+          </span>
+        ) : null}
+        <BrowserToolbarMenu
+          pageUrl={active?.url ?? ""}
+          externalUrl={externalUrl}
+          zoomPercent={zoomPercent}
+          onReload={() => runReloadTrigger("reload")}
+          onZoomIn={() => zoomBy("in")}
+          onZoomOut={() => zoomBy("out")}
+          onZoomReset={() => zoomBy("reset")}
+          onFind={() => setFindOpen(true)}
+        />
+      </BrowserNavigationControlRow>
+      <BrowserChromeBanners
+        banner={banner}
+        onRetry={() => {
+          if (!active) return;
+          setDismissedBanner(null);
+          runReloadTrigger("button");
+        }}
+        onCopyAddress={() => active && copyAddress(active.url)}
+        onOpenExternal={() => active && openExternalUrl(active.url)}
+        onDismiss={() => {
+          if (notice) {
+            setNotice("");
+            return;
+          }
+          if (active?.error) setDismissedBanner(`${active.tabId}:${active.error}`);
+        }}
+      />
+      {findOpen && active ? (
+        <div className="flex shrink-0 justify-end border-b border-border/70 bg-background/95 px-3 py-1.5">
+          <BrowserFind
+            tabId={active.tabId}
+            bridge={bridge}
+            isOpen={findOpen}
+            onClose={() => setFindOpen(false)}
+            docked
+          />
+        </div>
+      ) : null}
+      <div
+        ref={placeholderRef}
+        className="browser-viewport"
+        onContextMenu={(event) => {
+          // DOM-area right-clicks (blank/error states where the guest is
+          // hidden). Right-clicks on a live page arrive from the guest over
+          // the bridge instead — the guest is native and owns its rect.
+          if (!active) return;
           event.preventDefault();
-          go(address);
+          setContextMenu({
+            x: event.clientX,
+            y: event.clientY,
+            linkUrl: "",
+            pageUrl: active.url,
+            selectionText: "",
+          });
         }}
       >
-        <button
-          type="button"
-          className="browser-icon-button"
-          aria-label="Back"
-          title="Back"
-          disabled={!active?.canGoBack}
-          onClick={() => active && void bridge.back({ tabId: active.tabId })}
-        >
-          <ArrowLeft size={15} />
-        </button>
-        <button
-          type="button"
-          className="browser-icon-button"
-          aria-label="Forward"
-          title="Forward"
-          disabled={!active?.canGoForward}
-          onClick={() => active && void bridge.forward({ tabId: active.tabId })}
-        >
-          <ArrowRight size={15} />
-        </button>
-        <button
-          type="button"
-          className="browser-icon-button"
-          aria-label="Reload"
-          title="Reload"
-          disabled={!active}
-          onClick={() => active && void bridge.reload({ tabId: active.tabId })}
-        >
-          <RotateCw size={14} />
-        </button>
-        <button
-          type="button"
-          className="browser-icon-button"
-          aria-label="Stop"
-          title="Stop"
-          disabled={!active?.loading}
-          onClick={() => active && void bridge.stop({ tabId: active.tabId })}
-        >
-          <Square size={13} />
-        </button>
-        <input
-          className="browser-address"
-          aria-label="Address"
-          placeholder="Search or enter a URL"
-          value={address}
-          onChange={(event) => setAddress(event.target.value)}
+        <BrowserViewportOverlays
+          viewport={viewport}
+          onRetry={() => {
+            if (!active) return;
+            setDismissedBanner(null);
+            runReloadTrigger("button");
+          }}
+          onCopyAddress={() => active && copyAddress(active.url)}
+          onOpenExternal={() => active && openExternalUrl(active.url)}
         />
-      </form>
-      {notice && (
-        <p className="browser-notice" role="status">
-          {notice}
-        </p>
-      )}
-      <div ref={placeholderRef} className="browser-viewport">
-        {!active || active.error || active.url === "about:blank" ? (
-          <div className="browser-status" role="status">
-            {active?.loading ? (
-              <>
-                <Globe size={28} />
-                <h1>Loading…</h1>
-                <p>{active.url}</p>
-              </>
-            ) : active?.error ? (
-              <>
-                <Globe size={28} />
-                <h1>
-                  {active.error.startsWith("Blocked")
-                    ? "Blocked navigation"
-                    : "This page could not be shown"}
-                </h1>
-                <p>{active.error}</p>
-                <button
-                  type="button"
-                  className="browser-retry"
-                  onClick={() => active && void bridge.reload({ tabId: active.tabId })}
-                >
-                  Retry
-                </button>
-              </>
-            ) : (
-              <>
-                <Globe size={28} />
-                <h1>Browse inside Drogon</h1>
-                <p>
-                  Enter a URL above. Pages render sandboxed in this pane;
-                  downloads and permissions are denied.
-                </p>
-              </>
-            )}
-          </div>
-        ) : null}
       </div>
+      <BrowserPageContextMenu
+        menu={contextMenu}
+        canGoBack={active?.canGoBack ?? false}
+        canGoForward={active?.canGoForward ?? false}
+        onClose={() => setContextMenu(null)}
+        onBack={() => {
+          if (!active) return;
+          void bridge.back({ tabId: active.tabId }).catch(() => {});
+        }}
+        onForward={() => {
+          if (!active) return;
+          void bridge.forward({ tabId: active.tabId }).catch(() => {});
+        }}
+        onReload={() => runReloadTrigger("reload")}
+        onOpenLinkInPane={(url) => {
+          void bridge
+            .createTab({ workspaceId, url })
+            .then((result) => {
+              if (!result.ok) setNotice(result.error.message);
+            })
+            .catch(() => setNotice("The link could not be opened."));
+        }}
+        onOpenExternal={openExternalUrl}
+        onCopyText={copyAddress}
+        onInspect={() => {
+          if (!active) return;
+          void bridge
+            .openDevTools({ tabId: active.tabId })
+            .then((result) => {
+              if (!result.ok) setNotice(result.error.message);
+            })
+            .catch(() => setNotice("Devtools could not be opened."));
+        }}
+      />
       <label className="browser-capture" title="Route terminal link-opens into this pane">
         <input
           type="checkbox"
@@ -377,4 +711,56 @@ export function BrowserPanel({
       </label>
     </div>
   );
+}
+
+export function bannerFor(input: {
+  active: BrowserTabState | null;
+  notice: string;
+  dismissedBanner: string | null;
+}): BrowserChromeBanner | null {
+  const { active, notice, dismissedBanner } = input;
+  if (notice) return { kind: "notice", text: notice };
+  if (!active || !active.error) return null;
+  if (dismissedBanner === `${active.tabId}:${active.error}`) return null;
+  // Blocked navigations read as policy, never as a broken page.
+  if (active.error.startsWith("Blocked")) {
+    return { kind: "blocked", reason: active.error };
+  }
+  const host = hostOfUrl(active.loadError?.url || active.url);
+  return {
+    kind: "failed",
+    title: host ? `Can't reach ${host}` : "Can't load this page",
+    description: active.loadError?.description || active.error,
+    canOpenExternal: getOpenableExternalUrl(active.loadError?.url || active.url) !== null,
+  };
+}
+
+export function viewportFor(input: {
+  active: BrowserTabState | null;
+  externalUrl: string | null;
+}): BrowserViewportState {
+  const { active, externalUrl } = input;
+  if (!active) return { kind: "blank" };
+  // Why error first: a failed load must read as failed even if the URL the
+  // host reports is still blank — "New Tab" would hide the failure.
+  if (active.error) {
+    const host = hostOfUrl(active.loadError?.url || active.url);
+    return {
+      kind: "failed",
+      title: active.error.startsWith("Blocked")
+        ? "Blocked navigation"
+        : host
+          ? `Can't reach ${host}`
+          : "Can't load this page",
+      description: active.error,
+      canOpenExternal: externalUrl !== null,
+    };
+  }
+  if (isBlankBrowserUrl(active.url)) return { kind: "blank" };
+  // Committed pages stay visible under the guest while reloading (old
+  // content, standard behavior); only a never-committed load shows progress.
+  if (active.loading && !(active.committed ?? false)) {
+    return { kind: "loading", url: active.url };
+  }
+  return { kind: "page" };
 }

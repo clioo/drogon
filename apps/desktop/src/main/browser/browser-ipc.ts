@@ -4,6 +4,7 @@
 import { ipcMain, WebContentsView, type BrowserWindow } from "electron";
 import {
   browserCreateTabSchema,
+  browserFindInPageSchema,
   browserIpcChannels,
   browserNavigateSchema,
   browserSetBoundsSchema,
@@ -105,6 +106,10 @@ export function registerBrowserIpc(
     [browserIpcChannels.forward, (tabId: string) => host.forward(tabId)],
     [browserIpcChannels.reload, (tabId: string) => host.reload(tabId)],
     [browserIpcChannels.stop, (tabId: string) => host.stop(tabId)],
+    [browserIpcChannels.hardReload, (tabId: string) => host.hardReload(tabId)],
+    [browserIpcChannels.zoomIn, (tabId: string) => host.zoomIn(tabId)],
+    [browserIpcChannels.zoomOut, (tabId: string) => host.zoomOut(tabId)],
+    [browserIpcChannels.zoomReset, (tabId: string) => host.zoomReset(tabId)],
   ] as const) {
     ipcMain.handle(channel, async (event, input: unknown) => {
       const window = getWindow();
@@ -112,6 +117,50 @@ export function registerBrowserIpc(
       const validated = browserTabRefSchema.safeParse(input);
       if (!validated.success) return invalid;
       return describe(run(validated.data.tabId));
+    });
+  }
+  // Additive (R11-B chrome): find/stopFind/devtools return fixed-shape
+  // results that never echo guest content across the boundary.
+  ipcMain.handle(browserIpcChannels.findInPage, async (event, input: unknown) => {
+    const window = getWindow();
+    if (!window || !mainFrameOnly(event, window)) return invalid;
+    const validated = browserFindInPageSchema.safeParse(input);
+    if (!validated.success) return invalid;
+    const result = host.findInPage(validated.data.tabId, validated.data.query, {
+      forward: validated.data.forward,
+      findNext: validated.data.findNext,
+    });
+    if ("blocked" in result)
+      return {
+        ok: false as const,
+        error: {
+          code: result.code ?? "browser_blocked",
+          message: result.blocked,
+          retryable: false,
+        },
+      };
+    return { ok: true as const, result: null };
+  });
+  for (const [channel, run] of [
+    [browserIpcChannels.stopFind, (tabId: string) => host.stopFind(tabId)],
+    [browserIpcChannels.openDevTools, (tabId: string) => host.openDevTools(tabId)],
+  ] as const) {
+    ipcMain.handle(channel, async (event, input: unknown) => {
+      const window = getWindow();
+      if (!window || !mainFrameOnly(event, window)) return invalid;
+      const validated = browserTabRefSchema.safeParse(input);
+      if (!validated.success) return invalid;
+      const result = run(validated.data.tabId);
+      if ("blocked" in result)
+        return {
+          ok: false as const,
+          error: {
+            code: result.code ?? "browser_blocked",
+            message: result.blocked,
+            retryable: false,
+          },
+        };
+      return { ok: true as const, result: null };
     });
   }
   ipcMain.handle(browserIpcChannels.closeTab, async (event, input: unknown) => {

@@ -60,6 +60,8 @@ export type GuestContentsLike = {
   goBack(): void;
   goForward(): void;
   reload(): void;
+  /** Additive (R11-B chrome): cache-bypassing reload for the menu entry. */
+  reloadIgnoringCache(): void;
   getURL(): string;
   getTitle(): string;
   executeJavaScript(code: string): Promise<unknown>;
@@ -69,6 +71,16 @@ export type GuestContentsLike = {
     handler: (details: { url: string }) => { action: "deny" },
   ): void;
   on(event: string, listener: (...args: never[]) => void): void;
+  // Additive (R11-B chrome): zoom/find/devtools/context-menu surface used by
+  // the pane chrome. Real WebContents provides all of these.
+  getZoomLevel(): number;
+  setZoomLevel(level: number): void;
+  findInPage(
+    text: string,
+    options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean },
+  ): number;
+  stopFindInPage(action: "clearSelection" | "keepSelection" | "activateSelection"): void;
+  openDevTools(options?: { mode?: string }): void;
 };
 
 export type GuestViewLike = {
@@ -90,6 +102,31 @@ export type BrowserParentWindowLike = {
 export type BrowserHostEvents = {
   onPopupRouted?: (tab: BrowserTabState) => void;
 };
+
+/** Subset of Electron's `context-menu` params the pane menu needs. */
+export type GuestContextMenuParams = {
+  x: number;
+  y: number;
+  linkURL: string;
+  pageURL: string;
+  selectionText?: string;
+};
+
+/** Subset of Electron's `found-in-page` result the find bar needs. */
+export type GuestFoundInPageResult = {
+  requestId: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  finalUpdate: boolean;
+};
+
+/** Chromium zoom: level 0 is 100%, each level multiplies by 1.2. */
+export function zoomPercentForLevel(level: number): number {
+  return Math.round(100 * 1.2 ** level);
+}
+
+const MIN_ZOOM_LEVEL = -7;
+const MAX_ZOOM_LEVEL = 8;
 
 /**
  * Creates one guest view with the locked-down preferences. Exported so
@@ -182,6 +219,25 @@ export class BrowserHost {
   }
 
   /**
+   * Additive (R11-B chrome): forwards one guest event to the renderer pane.
+   * Coordinates for the context menu reuse the same 1:1 assumption the
+   * setBounds path uses (renderer CSS px == view DIP): the click lands at
+   * the placeholder origin plus the guest offset, and the pane clamps/flips
+   * the menu before paint.
+   */
+  private sendGuestEvent(channel: string, payload: unknown): void {
+    this.getWindow()?.webContents.send(channel, payload);
+  }
+
+  private contextMenuPoint(params: GuestContextMenuParams): { x: number; y: number } {
+    const origin = this.lastRect ?? { x: 0, y: 0, width: 0, height: 0 };
+    return {
+      x: Math.round(origin.x + params.x),
+      y: Math.round(origin.y + params.y),
+    };
+  }
+
+  /**
    * The guest view paints over the renderer, so DOM loading/error/blocked
    * states only show when the view is hidden: fresh tabs (nothing
    * committed yet) and failed/blocked navigations hide it; committed
@@ -257,11 +313,14 @@ export class BrowserHost {
       return { action: "deny" };
     });
     contents.on("did-start-loading", () => {
-      // Before commit getURL() is still the previous (possibly empty)
-      // URL; the requested URL was already recorded by createTab/navigate,
-      // so an empty read must never clobber it.
+      // Before commit getURL() is still the previous (possibly empty or
+      // about:blank) URL; the requested URL was already recorded by
+      // createTab/navigate, so a blank read must never clobber it back —
+      // an unsafe-port failure would otherwise strand the tab on
+      // about:blank with an error for another URL.
       const url = contents.getURL();
-      if (url) this.update({ type: "load-started", tabId, url });
+      if (url && url !== "about:blank")
+        this.update({ type: "load-started", tabId, url });
     });
     contents.on("did-stop-loading", () => {
       this.update({ type: "load-stopped", tabId, url: contents.getURL() });
@@ -271,10 +330,13 @@ export class BrowserHost {
       "did-fail-load",
       (_event: never, errorCode: never, errorDescription: never, validatedURL: never, isMainFrame: never) => {
         if (!isMainFrame) return;
+        const code = errorCode as number;
+        const description = errorDescription as string;
+        const failedUrl = validatedURL as string;
         const message = mapGuestLoadError({
-          errorCode: errorCode as number,
-          errorDescription: errorDescription as string,
-          validatedURL: validatedURL as string,
+          errorCode: code,
+          errorDescription: description,
+          validatedURL: failedUrl,
         });
         // Abort (-3) is a caller-initiated stop: report the stop, no error.
         if (message === null) {
@@ -285,11 +347,41 @@ export class BrowserHost {
           });
           return;
         }
-        this.update({ type: "load-failed", tabId, message });
+        this.update({
+          type: "load-failed",
+          tabId,
+          message,
+          loadError: { kind: "failed", code, description, url: failedUrl },
+        });
       },
     );
     contents.on("page-title-updated", (_event: never, title: never) => {
       this.update({ type: "title-changed", tabId, title: title as string });
+    });
+    // Additive (R11-B chrome): guest find matches and context-menu requests
+    // are forwarded to the pane that owns this tab; the payload carries the
+    // tab id so a late event for a closed tab is dropped by identity.
+    contents.on("found-in-page", (_event: never, result: never) => {
+      const found = result as GuestFoundInPageResult;
+      this.sendGuestEvent(browserIpcChannels.findResult, {
+        tabId,
+        requestId: found.requestId,
+        activeMatchOrdinal: found.activeMatchOrdinal,
+        matches: found.matches,
+        finalUpdate: found.finalUpdate,
+      });
+    });
+    contents.on("context-menu", (_event: never, params: never) => {
+      const menu = params as GuestContextMenuParams;
+      const point = this.contextMenuPoint(menu);
+      this.sendGuestEvent(browserIpcChannels.contextMenu, {
+        tabId,
+        x: point.x,
+        y: point.y,
+        linkUrl: menu.linkURL ?? "",
+        pageUrl: menu.pageURL ?? contents.getURL() ?? "",
+        selectionText: menu.selectionText ?? "",
+      });
     });
     window.contentView.addChildView(view as WebContentsView);
     this.views.set(tabId, view);
@@ -307,6 +399,11 @@ export class BrowserHost {
   closeTab(tabId: string): boolean {
     const view = this.viewFor(tabId);
     if (!view) return false;
+    try {
+      (view.webContents as GuestContentsLike).stopFindInPage("clearSelection");
+    } catch {
+      // The guest can be mid-teardown; close proceeds regardless.
+    }
     this.getWindow()?.contentView.removeChildView(view as WebContentsView);
     const contents = view.webContents as unknown as {
       close?: () => void;
@@ -375,6 +472,100 @@ export class BrowserHost {
     if (!contents) return { blocked: "Tab is not open." };
     contents.stop();
     return this.describe(tabId);
+  }
+
+  /**
+   * Additive (R11-B chrome): cache-bypassing reload for the reload control's
+   * right-click menu. A failed load retries through `navigate` instead —
+   * `reload()` on a guest error page only refreshes the error.
+   */
+  hardReload(tabId: string): BrowserTabState | { blocked: string } {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open." };
+    contents.reloadIgnoringCache();
+    return this.describe(tabId);
+  }
+
+  private applyZoom(tabId: string, level: number): BrowserTabState | { blocked: string } {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open." };
+    const clamped = Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, level));
+    contents.setZoomLevel(clamped);
+    this.update({
+      type: "zoom-changed",
+      tabId,
+      zoomPercent: zoomPercentForLevel(contents.getZoomLevel()),
+    });
+    return this.describe(tabId);
+  }
+
+  /** Additive (R11-B chrome): one zoom step in from the guest's level. */
+  zoomIn(tabId: string): BrowserTabState | { blocked: string } {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open." };
+    return this.applyZoom(tabId, contents.getZoomLevel() + 1);
+  }
+
+  /** Additive (R11-B chrome): one zoom step out from the guest's level. */
+  zoomOut(tabId: string): BrowserTabState | { blocked: string } {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open." };
+    return this.applyZoom(tabId, contents.getZoomLevel() - 1);
+  }
+
+  /** Additive (R11-B chrome): back to the 100 default (level 0). */
+  zoomReset(tabId: string): BrowserTabState | { blocked: string } {
+    return this.applyZoom(tabId, 0);
+  }
+
+  /**
+   * Additive (R11-B chrome): starts or advances a guest find session.
+   * `findNext: false` keeps the session open across follow-up requests
+   * (Enter/arrows); the first request for a query passes `findNext: true`.
+   * Empty queries never reach the guest — the pane stops instead.
+   */
+  findInPage(
+    tabId: string,
+    query: string,
+    options?: { forward?: boolean; findNext?: boolean },
+  ): { requestId: number } | { blocked: string; code?: string } {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open.", code: "browser_no_tab" };
+    if (!query) return { blocked: "Nothing to find.", code: "invalid_argument" };
+    let requestId = 0;
+    try {
+      requestId = contents.findInPage(query, {
+        forward: options?.forward ?? true,
+        findNext: options?.findNext ?? true,
+      });
+    } catch {
+      return { blocked: "The page refused find-in-page.", code: "browser_blocked" };
+    }
+    return { requestId };
+  }
+
+  /** Additive (R11-B chrome): clears the guest find selection. */
+  stopFind(tabId: string): { stopped: true } | { blocked: string; code?: string } {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open.", code: "browser_no_tab" };
+    try {
+      contents.stopFindInPage("clearSelection");
+    } catch {
+      return { blocked: "The page refused find-in-page.", code: "browser_blocked" };
+    }
+    return { stopped: true };
+  }
+
+  /** Additive (R11-B chrome): guest devtools for the page context menu. */
+  openDevTools(tabId: string): { opened: true } | { blocked: string; code?: string } {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open.", code: "browser_no_tab" };
+    try {
+      contents.openDevTools({ mode: "detach" });
+    } catch {
+      return { blocked: "Devtools could not be opened.", code: "browser_blocked" };
+    }
+    return { opened: true };
   }
 
   focusTab(tabId: string): boolean {
