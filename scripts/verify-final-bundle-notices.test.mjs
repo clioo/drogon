@@ -355,3 +355,176 @@ test("byte-shifted negative: a genuine mutation after a non-ASCII preamble is st
   assert.equal(result.ok, false);
   assert.ok(result.changed.some((c) => c.key === "__root_preamble__"));
 });
+
+// --- Separator-byte bypass regressions (ROOT-reproduced defect, msg_39667384a338) ---
+// parseNoticeSections excludes exactly one byte before every heading match
+// as "the join" without ever checking its value or count, so every
+// inter-section grammar byte was excluded from all hashed spans and could be
+// mutated, added, or removed without detection. Fixtures below are built
+// from small inline literal texts with shas computed directly via
+// node:crypto — never derived from the verifier module or generator output.
+
+// root="ROOT-LICENSE-TEXT" + one package section, matching the leader's
+// independent repro shape exactly.
+function buildRootPackageFixture() {
+  const rootText = "ROOT-LICENSE-TEXT";
+  const pkgKey = "foo@1";
+  const pkgElement = "\n\n## foo@1 — MIT\n### LICENSE\nabc";
+  const rootBytes = Buffer.from(rootText, "utf8");
+  const pkgBytes = Buffer.from(pkgElement, "utf8");
+  const expectedManifest = {
+    schema: "drogon.release.final-bundle-notices.v1",
+    sections: [
+      { key: "__root_preamble__", text: rootText, sha256: sha256(rootBytes) },
+      { key: pkgKey, text: pkgElement, sha256: sha256(pkgBytes) },
+    ],
+  };
+  return { rootBytes, pkgBytes, expectedManifest, pkgKey };
+}
+
+test("sanity: root/package fixture with a valid single-LF separator verifies GREEN", () => {
+  const { rootBytes, pkgBytes, expectedManifest } = buildRootPackageFixture();
+  const validBytes = Buffer.concat([rootBytes, Buffer.from("\n"), pkgBytes]);
+  const result = verifyFinalBundleNotices({ shippedBytes: validBytes, expectedManifest });
+  assert.deepEqual(result, {
+    ok: true,
+    errors: [],
+    missing: [],
+    changed: [],
+    extra: [],
+    duplicates: [],
+    corpusIncomplete: [],
+  });
+});
+
+test("root/package separator mutation ('\\n'->'X') is caught, not a vacuous pass", () => {
+  const { rootBytes, pkgBytes, expectedManifest } = buildRootPackageFixture();
+  const mutatedBytes = Buffer.concat([rootBytes, Buffer.from("X"), pkgBytes]);
+  const result = verifyFinalBundleNotices({ shippedBytes: mutatedBytes, expectedManifest });
+  assert.equal(result.ok, false, "a mutated separator byte must not verify OK");
+  assert.ok(
+    result.errors.some((e) => /separator/i.test(e)) || result.changed.length > 0,
+    "must name the cause instead of silently passing",
+  );
+});
+
+test("root/package separator removal is caught, not a vacuous pass", () => {
+  const { rootBytes, pkgBytes, expectedManifest } = buildRootPackageFixture();
+  const removedBytes = Buffer.concat([rootBytes, pkgBytes]);
+  const result = verifyFinalBundleNotices({ shippedBytes: removedBytes, expectedManifest });
+  assert.equal(result.ok, false, "a removed separator byte must not verify OK");
+  assert.ok(
+    result.errors.some((e) => /separator/i.test(e)) || result.changed.length > 0,
+    "must name the cause instead of silently passing",
+  );
+});
+
+// Two package sections, so the mutated/removed join sits entirely between
+// two package spans rather than at the preamble/package boundary.
+function buildPackagePackageFixture() {
+  const rootText = "ROOT";
+  const pkg1Key = "alpha@1";
+  const pkg2Key = "beta@2";
+  const pkg1Element = "\n\n## alpha@1 — MIT\n### LICENSE\nalpha body";
+  const pkg2Element = "\n\n## beta@2 — MIT\n### LICENSE\nbeta body";
+  const rootBytes = Buffer.from(rootText, "utf8");
+  const pkg1Bytes = Buffer.from(pkg1Element, "utf8");
+  const pkg2Bytes = Buffer.from(pkg2Element, "utf8");
+  const expectedManifest = {
+    schema: "drogon.release.final-bundle-notices.v1",
+    sections: [
+      { key: "__root_preamble__", text: rootText, sha256: sha256(rootBytes) },
+      { key: pkg1Key, text: pkg1Element, sha256: sha256(pkg1Bytes) },
+      { key: pkg2Key, text: pkg2Element, sha256: sha256(pkg2Bytes) },
+    ],
+  };
+  return { rootBytes, pkg1Bytes, pkg2Bytes, expectedManifest, pkg1Key, pkg2Key };
+}
+
+test("sanity: two-package fixture with valid single-LF separators verifies GREEN", () => {
+  const { rootBytes, pkg1Bytes, pkg2Bytes, expectedManifest } = buildPackagePackageFixture();
+  const validBytes = Buffer.concat([rootBytes, Buffer.from("\n"), pkg1Bytes, Buffer.from("\n"), pkg2Bytes]);
+  const result = verifyFinalBundleNotices({ shippedBytes: validBytes, expectedManifest });
+  assert.deepEqual(result, {
+    ok: true,
+    errors: [],
+    missing: [],
+    changed: [],
+    extra: [],
+    duplicates: [],
+    corpusIncomplete: [],
+  });
+});
+
+test("package/package separator mutation ('\\n'->'X') is caught, not a vacuous pass", () => {
+  const { rootBytes, pkg1Bytes, pkg2Bytes, expectedManifest } = buildPackagePackageFixture();
+  const mutatedBytes = Buffer.concat([rootBytes, Buffer.from("\n"), pkg1Bytes, Buffer.from("X"), pkg2Bytes]);
+  const result = verifyFinalBundleNotices({ shippedBytes: mutatedBytes, expectedManifest });
+  assert.equal(result.ok, false, "a mutated inter-package separator byte must not verify OK");
+  assert.ok(
+    result.errors.some((e) => /separator/i.test(e)) || result.changed.length > 0,
+    "must name the cause instead of silently passing",
+  );
+});
+
+test("package/package separator removal is caught, not a vacuous pass", () => {
+  const { rootBytes, pkg1Bytes, pkg2Bytes, expectedManifest } = buildPackagePackageFixture();
+  const removedBytes = Buffer.concat([rootBytes, Buffer.from("\n"), pkg1Bytes, pkg2Bytes]);
+  const result = verifyFinalBundleNotices({ shippedBytes: removedBytes, expectedManifest });
+  assert.equal(result.ok, false, "a removed inter-package separator byte must not verify OK");
+  assert.ok(
+    result.errors.some((e) => /separator/i.test(e)) || result.changed.length > 0,
+    "must name the cause instead of silently passing",
+  );
+});
+
+// Unicode adjacency: preamble ends in a multi-byte char (©) and the package
+// body also starts with one, right across the boundary being validated.
+function buildUnicodeBoundaryFixture() {
+  const preambleText = "Copyright ©";
+  const pkgKey = "demo-pkg@1.0.0";
+  const pkgElement = `\n\n## ${pkgKey} — MIT\n### LICENSE\n©2026 example body.\n`;
+  const preambleBytes = Buffer.from(preambleText, "utf8");
+  const pkgBytes = Buffer.from(pkgElement, "utf8");
+  const expectedManifest = {
+    schema: "drogon.release.final-bundle-notices.v1",
+    sections: [
+      { key: "__root_preamble__", text: preambleText, sha256: sha256(preambleBytes) },
+      { key: pkgKey, text: pkgElement, sha256: sha256(pkgBytes) },
+    ],
+  };
+  return { preambleText, preambleBytes, pkgElement, pkgBytes, expectedManifest, pkgKey };
+}
+
+test("Unicode adjacency: valid separator between multi-byte-ending preamble and multi-byte-starting package stays byte-correct", () => {
+  const { preambleBytes, pkgBytes, expectedManifest, pkgKey } = buildUnicodeBoundaryFixture();
+  const validBytes = Buffer.concat([preambleBytes, Buffer.from("\n"), pkgBytes]);
+  const result = verifyFinalBundleNotices({ shippedBytes: validBytes, expectedManifest });
+  assert.deepEqual(result, {
+    ok: true,
+    errors: [],
+    missing: [],
+    changed: [],
+    extra: [],
+    duplicates: [],
+    corpusIncomplete: [],
+  });
+  const sections = parseNoticeSections(validBytes);
+  const preamble = sections.find((s) => s.key === "__root_preamble__");
+  const pkg = sections.find((s) => s.key === pkgKey);
+  assert.equal(preamble.start, 0);
+  assert.equal(preamble.end, preambleBytes.length);
+  assert.equal(pkg.start, preambleBytes.length + 1);
+  assert.equal(pkg.end, validBytes.length);
+});
+
+test("Unicode adjacency: mutated separator between multi-byte-ending preamble and multi-byte-starting package is caught", () => {
+  const { preambleBytes, pkgBytes, expectedManifest } = buildUnicodeBoundaryFixture();
+  const mutatedBytes = Buffer.concat([preambleBytes, Buffer.from("X"), pkgBytes]);
+  const result = verifyFinalBundleNotices({ shippedBytes: mutatedBytes, expectedManifest });
+  assert.equal(result.ok, false, "a mutated separator adjacent to multi-byte chars must not verify OK");
+  assert.ok(
+    result.errors.some((e) => /separator/i.test(e)) || result.changed.length > 0,
+    "must name the cause instead of silently passing",
+  );
+});
