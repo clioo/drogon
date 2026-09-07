@@ -143,3 +143,164 @@ fn client_folder_override_is_rejected() {
         "invalid_argument"
     );
 }
+
+/// P2-2 regression (a): a bot with an excessive number of history rows must
+/// be rejected as `snapshot_too_large` from a cheap row-count probe, before
+/// any row is fetched and parsed into a `HistoryEntry`. Every seeded row's
+/// `payload_json` is deliberately not valid `ResponsibilityRun` JSON: if the
+/// implementation ever fell through to real materialization (`history_for_bot`
+/// parsing each row), it would instead surface `storage_error` on the first
+/// malformed row, not `snapshot_too_large` -- so this distinguishes "rejected
+/// by the preflight" from "rejected after fully reading every row".
+#[test]
+fn excess_history_rows_trigger_snapshot_too_large_without_full_materialization() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("b1", host, folder);
+
+    let conn = fx.conn();
+    let tx = conn.unchecked_transaction().unwrap();
+    for i in 0..5001 {
+        tx.execute(
+            "INSERT INTO bot_responsibility_runs (id, bot_id, automation_run_id, started_at, payload_json)
+             VALUES (?1, 'b1', NULL, ?2, 'not-valid-json')",
+            rusqlite::params![format!("garbage-{i}"), i as f64],
+        )
+        .unwrap();
+    }
+    tx.commit().unwrap();
+
+    let result = call(&fx.engine, "bot.snapshot", fx.scope());
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("snapshot_too_large"),
+        "{result:?}"
+    );
+}
+
+/// P2-2 regression (b), automation side: a bot with very few, tiny history
+/// rows must still be rejected as `snapshot_too_large` when a row's linked
+/// `automations` record is itself oversized -- the byte budget must account
+/// for linked automation payloads, not just the `bots`/`bot_responsibility_runs`
+/// rows directly in scope.
+#[test]
+fn oversized_linked_automation_record_hits_the_byte_budget() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("b1", host, folder);
+
+    let conn = fx.conn();
+    let huge = json!("x".repeat(600_000)).to_string();
+    conn.execute(
+        "INSERT INTO automations (id, bot_id, payload_json) VALUES ('big-auto', NULL, ?1)",
+        rusqlite::params![huge],
+    )
+    .unwrap();
+    let run = json!({
+        "id":"run1","botId":"b1","responsibilityId":"r1",
+        "automationId":"big-auto","automationRunId":null,
+        "startedAt":1.0,"endedAt":null,"recipe":null,"hostObservation":null,
+    })
+    .to_string();
+    conn.execute(
+        "INSERT INTO bot_responsibility_runs (id, bot_id, automation_run_id, started_at, payload_json)
+         VALUES ('run1', 'b1', NULL, 1.0, ?1)",
+        rusqlite::params![run],
+    )
+    .unwrap();
+
+    let result = call(&fx.engine, "bot.snapshot", fx.scope());
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("snapshot_too_large"),
+        "{result:?}"
+    );
+}
+
+/// P2-2 regression (b), automation-run side: same as above but the
+/// oversized linked record is an `automation_runs` row reached via
+/// `automationRunId` rather than `automations` via `automationId`.
+#[test]
+fn oversized_linked_automation_run_record_hits_the_byte_budget() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("b1", host, folder);
+
+    let conn = fx.conn();
+    let huge = json!("x".repeat(600_000)).to_string();
+    conn.execute(
+        "INSERT INTO automation_runs (id, automation_id, payload_json) VALUES ('big-run', 'some-auto', ?1)",
+        rusqlite::params![huge],
+    )
+    .unwrap();
+    let run = json!({
+        "id":"run1","botId":"b1","responsibilityId":"r1",
+        "automationId":null,"automationRunId":"big-run",
+        "startedAt":1.0,"endedAt":null,"recipe":null,"hostObservation":null,
+    })
+    .to_string();
+    conn.execute(
+        "INSERT INTO bot_responsibility_runs (id, bot_id, automation_run_id, started_at, payload_json)
+         VALUES ('run1', 'b1', 'big-run', 1.0, ?1)",
+        rusqlite::params![run],
+    )
+    .unwrap();
+
+    let result = call(&fx.engine, "bot.snapshot", fx.scope());
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("snapshot_too_large"),
+        "{result:?}"
+    );
+}
+
+/// P2-2 regression (c): a request authenticated as a worker (not the
+/// coordinator's service credential) must be denied for `bot.snapshot` --
+/// this method is not on the worker allowlist, so it must fail with
+/// `unauthorized` through `dispatch_authenticated`, never return real Bot
+/// data and never leak a generic `method_not_found` that would suggest the
+/// allowlist was bypassed.
+#[test]
+fn authenticated_worker_credential_is_denied_for_bot_snapshot_not_given_data() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("ours", host, folder);
+
+    let request = drogon_protocol::Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: uuid::Uuid::new_v4().to_string(),
+        auth: Some("some-worker-credential-not-the-service-secret".to_string()),
+        method: "bot.snapshot".into(),
+        params: fx.scope(),
+    };
+    let result = fx
+        .engine
+        .dispatch_authenticated(request, "the-real-service-credential");
+    assert!(!result.ok, "{result:?}");
+    assert_eq!(result.error.unwrap().code, "unauthorized");
+}
+
+/// P2-2 regression (d): an unsupported/invalid locale tag must map to
+/// `invalid_argument` (the existing `snapshot_error` LocaleOrdering branch),
+/// preserving the current malformed-store-vs-locale error distinction rather
+/// than collapsing both into the generic `storage_error`.
+#[test]
+fn unsupported_locale_maps_to_invalid_argument_not_storage_error() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("ours", host, folder);
+
+    let mut scope = fx.scope();
+    scope["locale"] = json!("not a locale!!");
+    let result = call(&fx.engine, "bot.snapshot", scope);
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("invalid_argument"),
+        "{result:?}"
+    );
+}
