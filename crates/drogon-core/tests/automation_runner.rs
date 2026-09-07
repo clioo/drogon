@@ -539,7 +539,7 @@ fn happy_path_dispatches_through_the_seam_with_expected_params_and_records_live_
         assert_eq!(calls[0].0, expected_request_id);
     }
 
-    record_run_outcome(&c, &plan, &outcome).unwrap();
+    record_run_outcome(&c, &plan, &outcome, 100.0).unwrap();
 
     let history = bstorage::history_for_bot(&c, HOST, FOLDER, "b1").unwrap();
     assert_eq!(history.len(), 1);
@@ -589,7 +589,7 @@ fn exited_verdict_closes_ended_at_and_records_host_observation_exited() {
         }));
 
     let outcome = dispatch_run_plan(&seam, &plan);
-    record_run_outcome(&c, &plan, &outcome).unwrap();
+    record_run_outcome(&c, &plan, &outcome, 100.0).unwrap();
 
     let history = bstorage::history_for_bot(&c, HOST, FOLDER, "b1").unwrap();
     assert_eq!(
@@ -635,7 +635,7 @@ fn harness_start_failure_is_recorded_with_no_observation_and_never_polls_session
     assert_eq!(outcome, RunnerOutcome::DispatchFailed(seam_error));
     assert_eq!(seam.session_read_call_count(), 0);
 
-    record_run_outcome(&c, &plan, &outcome).unwrap();
+    record_run_outcome(&c, &plan, &outcome, 100.0).unwrap();
 
     let history = bstorage::history_for_bot(&c, HOST, FOLDER, "b1").unwrap();
     assert_eq!(history.len(), 1);
@@ -690,7 +690,7 @@ fn session_read_failure_after_successful_start_is_recorded_as_unverifiable() {
         }
     );
 
-    record_run_outcome(&c, &plan, &outcome).unwrap();
+    record_run_outcome(&c, &plan, &outcome, 100.0).unwrap();
 
     let history = bstorage::history_for_bot(&c, HOST, FOLDER, "b1").unwrap();
     assert_eq!(
@@ -978,12 +978,12 @@ fn record_run_outcome_reopened_db_is_idempotent() {
         verdict: "live".to_string(),
         exit_code: None,
     };
-    record_run_outcome(&primary, &plan, &outcome).unwrap();
+    record_run_outcome(&primary, &plan, &outcome, 100.0).unwrap();
     drop(primary);
 
     // A genuinely reopened connection, replaying the identical event.
     let reopened = Connection::open(&path).unwrap();
-    record_run_outcome(&reopened, &plan, &outcome).unwrap();
+    record_run_outcome(&reopened, &plan, &outcome, 100.0).unwrap();
 
     let automation_run_id = automation_run_id_for(&plan.request_id);
     let run_count: i64 = reopened
@@ -1043,6 +1043,7 @@ fn automation_run_exited_is_never_regressed_by_a_later_stale_live_observation() 
             verdict: "live".to_string(),
             exit_code: None,
         },
+        100.0,
     )
     .unwrap();
 
@@ -1056,6 +1057,7 @@ fn automation_run_exited_is_never_regressed_by_a_later_stale_live_observation() 
             verdict: "exited".to_string(),
             exit_code: Some(0),
         },
+        150.0,
     )
     .unwrap();
     let after_exit = automations::storage::get_automation_run(&c, &automation_run_id)
@@ -1074,6 +1076,7 @@ fn automation_run_exited_is_never_regressed_by_a_later_stale_live_observation() 
             verdict: "live".to_string(),
             exit_code: None,
         },
+        200.0,
     )
     .unwrap();
 
@@ -1111,6 +1114,7 @@ fn observation_failure_after_admit_records_session_linkage_distinct_from_dispatc
             incarnation: "inc-1".to_string(),
             error: observation_error.clone(),
         },
+        100.0,
     )
     .unwrap();
     let observed_run = automations::storage::get_automation_run(
@@ -1146,6 +1150,7 @@ fn observation_failure_after_admit_records_session_linkage_distinct_from_dispatc
         &c,
         &failed_plan,
         &RunnerOutcome::DispatchFailed(dispatch_error.clone()),
+        200.0,
     )
     .unwrap();
     let failed_run = automations::storage::get_automation_run(
@@ -1181,6 +1186,7 @@ fn automation_run_error_is_verbatim_for_both_failure_kinds() {
             incarnation: "inc-1".to_string(),
             error: observation_error.clone(),
         },
+        100.0,
     )
     .unwrap();
     let observed_run = automations::storage::get_automation_run(
@@ -1204,6 +1210,7 @@ fn automation_run_error_is_verbatim_for_both_failure_kinds() {
         &c,
         &failed_plan,
         &RunnerOutcome::DispatchFailed(dispatch_error.clone()),
+        200.0,
     )
     .unwrap();
     let failed_run = automations::storage::get_automation_run(
@@ -1229,6 +1236,7 @@ fn automation_run_error_is_verbatim_for_both_failure_kinds() {
             verdict: "live".to_string(),
             exit_code: None,
         },
+        300.0,
     )
     .unwrap();
     let ok_run =
@@ -1253,6 +1261,7 @@ fn record_run_outcome_retry_preserves_created_started_and_session_identity() {
             verdict: "live".to_string(),
             exit_code: None,
         },
+        100.0,
     )
     .unwrap();
     let automation_run_id = automation_run_id_for(&first_plan.request_id);
@@ -1261,6 +1270,7 @@ fn record_run_outcome_retry_preserves_created_started_and_session_identity() {
         .expect("row must exist");
     assert_eq!(first.created_at, 100.0);
     assert_eq!(first.started_at, Some(100.0));
+    assert_eq!(first.dispatched_at, Some(100.0));
     assert_eq!(first.run_number, None);
 
     // A retry of the SAME event (same request_id), observed again later, at
@@ -1280,6 +1290,7 @@ fn record_run_outcome_retry_preserves_created_started_and_session_identity() {
             verdict: "live".to_string(),
             exit_code: None,
         },
+        200.0,
     )
     .unwrap();
 
@@ -1294,6 +1305,12 @@ fn record_run_outcome_retry_preserves_created_started_and_session_identity() {
         retried.started_at,
         Some(100.0),
         "started_at must be preserved from the first insert, not overwritten by the retry"
+    );
+    assert_eq!(
+        retried.dispatched_at,
+        Some(100.0),
+        "dispatched_at is the FIRST dispatch time, frozen forever -- the retry's own \
+         (later) attempt_at must never rewrite it"
     );
     assert_eq!(retried.run_number, None, "run_number must stay untouched");
     assert_eq!(retried.terminal_session_id.as_deref(), Some("s1"));
@@ -1310,5 +1327,197 @@ fn record_run_outcome_retry_preserves_created_started_and_session_identity() {
     assert_eq!(
         retried.last_occurrence_at, None,
         "retries must not touch last_occurrence_at"
+    );
+}
+
+// --- V4-A5b: responsibility projection from the ACCEPTED row -------------
+//
+// Reproduces the ROOT-gating regression this module previously had:
+// `record_run_outcome` used to build `ResponsibilityRun.host_observation`/
+// `ended_at` straight from the incoming `outcome`, not from the ACCEPTED,
+// already-terminal-guarded `AutomationRun` row -- so a later stale
+// live/unverifiable replay for the same (already `Completed`) incarnation
+// regressed the responsibility row back off `Exited`, with `ended_at`
+// left inconsistently `Some` by `bots_storage::record_responsibility_run`'s
+// own null-merge. Both sequences below assert BOTH durable rows (via
+// `automations::storage::get_automation_run` and `history_for_bot`) never
+// regress, that `dispatched_at` stays frozen at the very first dispatch
+// despite later replays supplying later `plan.attempt_at`s, and that
+// `observed_at` on the accepted row equals exactly the observation time
+// each call injected (proving the new explicit parameter, distinct from
+// `plan.attempt_at`, is what is actually threaded through).
+
+#[test]
+fn live_then_exited_then_stale_live_never_regresses_either_row() {
+    let c = conn();
+    seed_scheduled_bot(&c);
+    let plan = prepare(&c, "due-100", 100.0);
+    let automation_run_id = automation_run_id_for(&plan.request_id);
+
+    // 1) live, observed at t=10 (dispatch attempt itself is t=100).
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            verdict: "live".to_string(),
+            exit_code: None,
+        },
+        10.0,
+    )
+    .unwrap();
+
+    // 2) exited, observed at t=20 -- proven terminal.
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            verdict: "exited".to_string(),
+            exit_code: Some(0),
+        },
+        20.0,
+    )
+    .unwrap();
+
+    // 3) a later, stale "live" for the SAME incarnation, observed at t=30.
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            verdict: "live".to_string(),
+            exit_code: None,
+        },
+        30.0,
+    )
+    .unwrap();
+
+    let automation_run = automations::storage::get_automation_run(&c, &automation_run_id)
+        .unwrap()
+        .expect("row must exist");
+    assert_eq!(
+        automation_run.status,
+        AutomationRunStatus::Completed,
+        "a proven Exited AutomationRun must never be regressed by a later stale live observation"
+    );
+    assert_eq!(automation_run.exit_code, Some(0));
+    assert_eq!(
+        automation_run.observed_at,
+        Some(20.0),
+        "the terminal guard freezes observed_at at the real exit's own injected time"
+    );
+    assert_eq!(
+        automation_run.dispatched_at,
+        Some(100.0),
+        "dispatched_at stays the FIRST dispatch's plan.attempt_at, never a later replay's"
+    );
+
+    let history = bstorage::history_for_bot(&c, HOST, FOLDER, "b1").unwrap();
+    let run = &history
+        .iter()
+        .find(|h| h.responsibility_run.id == plan.request_id)
+        .unwrap()
+        .responsibility_run;
+    assert_eq!(
+        run.host_observation,
+        Some(HostObservation::Exited),
+        "a stale live replay after a proven exit must never regress the responsibility row off Exited"
+    );
+    assert_eq!(
+        run.ended_at,
+        Some(20.0),
+        "ended_at must follow the accepted AutomationRun's own observed_at, staying consistent \
+         with host_observation=Exited rather than dangling from a stale re-derivation"
+    );
+}
+
+#[test]
+fn live_then_exited_then_stale_unverifiable_never_regresses_either_row() {
+    let c = conn();
+    seed_scheduled_bot(&c);
+    let plan = prepare(&c, "due-100", 100.0);
+    let automation_run_id = automation_run_id_for(&plan.request_id);
+
+    // 1) live, observed at t=10.
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            verdict: "live".to_string(),
+            exit_code: None,
+        },
+        10.0,
+    )
+    .unwrap();
+
+    // 2) exited, observed at t=20 -- proven terminal.
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            verdict: "exited".to_string(),
+            exit_code: Some(0),
+        },
+        20.0,
+    )
+    .unwrap();
+
+    // 3) a later, stale failed poll for the SAME incarnation, at t=30.
+    let poll_error = DispatchSeamError {
+        code: "unverifiable".to_string(),
+        message: "lost contact".to_string(),
+    };
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::ObservationFailed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            error: poll_error,
+        },
+        30.0,
+    )
+    .unwrap();
+
+    let automation_run = automations::storage::get_automation_run(&c, &automation_run_id)
+        .unwrap()
+        .expect("row must exist");
+    assert_eq!(
+        automation_run.status,
+        AutomationRunStatus::Completed,
+        "a proven Exited AutomationRun must never be regressed by a later stale failed poll"
+    );
+    assert_eq!(automation_run.exit_code, Some(0));
+    assert_eq!(automation_run.observed_at, Some(20.0));
+    assert_eq!(
+        automation_run.dispatched_at,
+        Some(100.0),
+        "dispatched_at stays the FIRST dispatch's plan.attempt_at, never a later replay's"
+    );
+
+    let history = bstorage::history_for_bot(&c, HOST, FOLDER, "b1").unwrap();
+    let run = &history
+        .iter()
+        .find(|h| h.responsibility_run.id == plan.request_id)
+        .unwrap()
+        .responsibility_run;
+    assert_eq!(
+        run.host_observation,
+        Some(HostObservation::Exited),
+        "a stale failed-poll replay after a proven exit must never regress the responsibility \
+         row to Unverifiable"
+    );
+    assert_eq!(
+        run.ended_at,
+        Some(20.0),
+        "ended_at must stay consistent with host_observation=Exited"
     );
 }
