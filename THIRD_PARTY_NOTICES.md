@@ -118,6 +118,13 @@ ports Orca's `src/renderer/src/components/automations/{AutomationsPageSurface,Au
 `automation-page-parts.tsx` and `src/shared/{automation-schedules,automation-schedule-occurrences}.ts`,
 all at the pinned source revision above. Each ported file keeps the MIT notice.
 
+The terminal pane in `apps/desktop/src/renderer/src/features/terminal/` and
+`assets/terminal.css` port Orca's `src/renderer/src/assets/terminal.css` and its
+asset tests, `components/{TerminalSearch}.tsx`, `terminal-search-safe-find.ts`,
+`lib/find-query-bounds.ts`, and `components/terminal-pane/{terminal-appearance,useTerminalFontZoom,terminal-renderer-policy,terminal-http-url-extraction,terminal-http-link-limits,terminal-web-link-click,terminal-link-activation,terminal-file-link-actions,terminal-selection-copy,terminal-handle-copy,osc52-clipboard,terminal-process-exit-restart}.ts`,
+`TerminalContextMenu.tsx` and `TerminalProcessExitOverlay.tsx`, all at the pinned
+source revision above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
