@@ -67,7 +67,7 @@ impl Engine {
         if let Some(path) = &hook_settings
             && let Err(err) = crate::hooks::write_settings_file(
                 path,
-                &crate::hooks::cli_command(),
+                &crate::session_env::cli_command_for_hooks(&self.data_dir),
                 prepared.session_id(),
                 prepared.incarnation(),
             )
@@ -81,16 +81,20 @@ impl Engine {
             );
             return Err(err);
         }
-        let (session_id, handle, session_json) =
-            match session_admission::launch_reserved(self.db.clone(), prepared, None) {
-                Ok(launched) => launched,
-                Err(err) => {
-                    if let Some(path) = &hook_settings {
-                        crate::hooks::remove_settings_file(path);
-                    }
-                    return Err(err);
+        let (session_id, handle, session_json) = match session_admission::launch_reserved(
+            self.db.clone(),
+            &self.data_dir,
+            prepared,
+            None,
+        ) {
+            Ok(launched) => launched,
+            Err(err) => {
+                if let Some(path) = &hook_settings {
+                    crate::hooks::remove_settings_file(path);
                 }
-            };
+                return Err(err);
+            }
+        };
         if let Some(path) = hook_settings {
             handle.set_hook_settings_file(path);
         }

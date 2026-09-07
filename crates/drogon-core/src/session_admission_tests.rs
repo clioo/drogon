@@ -18,12 +18,18 @@ use crate::session;
 
 const READ_BUDGET: Duration = Duration::from_secs(5);
 
+/// Scratch data dir for launches whose test never inspects the session
+/// environment: it only feeds env strings and the shim-dir PATH entry.
+fn no_dir() -> &'static std::path::Path {
+    std::path::Path::new("/tmp")
+}
+
 #[test]
 fn launch_refuses_an_open_transaction_before_spawning() {
     let db = Arc::new(open_fixture());
     let plan = reserve_committed(&db, "/tmp", "/bin/echo", &["must-not-launch".into()]);
     db.lock().unwrap().execute_batch("BEGIN IMMEDIATE").unwrap();
-    let result = launch_reserved(db.clone(), plan, None);
+    let result = launch_reserved(db.clone(), no_dir(), plan, None);
     db.lock().unwrap().execute_batch("ROLLBACK").unwrap();
     if let Ok((_, handle, _)) = &result {
         stop_quietly(handle);
@@ -45,7 +51,7 @@ fn launch_refuses_changed_creation_identity() {
             [plan.session_id()],
         )
         .unwrap();
-    let result = launch_reserved(db, plan, None);
+    let result = launch_reserved(db, no_dir(), plan, None);
     if let Ok((_, handle, _)) = &result {
         stop_quietly(handle);
     }
@@ -203,7 +209,7 @@ fn rollback_reservation_spawns_no_child() {
         .expect("reserve")
         // No commit: the transaction rolls back when `tx` drops here.
     };
-    let outcome = launch_reserved(Arc::new(db), plan, None);
+    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None);
     match outcome {
         Err(err) => assert_eq!(err.code, "unverifiable"),
         Ok((_, handle, _)) => {
@@ -222,7 +228,7 @@ fn launch_returns_exact_reserved_identity() {
     let expected_incarnation = plan.incarnation().to_string();
     let expected_workspace = plan.workspace_id().to_string();
     let expected_host = plan.host_id().to_string();
-    let (id, handle, _) = launch_reserved(db.clone(), plan, None).expect("launch");
+    let (id, handle, _) = launch_reserved(db.clone(), no_dir(), plan, None).expect("launch");
     let _guard = ChildGuard { handle: &handle };
     assert_eq!(id, expected_id);
     assert_eq!(handle.session_id, expected_id);
@@ -251,7 +257,7 @@ fn recovered_unverifiable_row_never_launches() {
             [&plan.session_id().to_string()],
         )
         .expect("sweep");
-    let outcome = launch_reserved(Arc::new(db), plan, None);
+    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None);
     match outcome {
         Err(err) => assert_eq!(err.code, "unverifiable"),
         Ok((_, handle, _)) => {
@@ -280,7 +286,7 @@ fn altered_row_never_launches() {
             [&plan.session_id().to_string()],
         )
         .expect("alter");
-    let outcome = launch_reserved(Arc::new(db), plan, None);
+    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None);
     match outcome {
         Err(_) => {}
         Ok((_, handle, _)) => {
@@ -298,6 +304,7 @@ fn default_spawn_matches_reserve_commit_launch() {
     let db = Arc::new(open_fixture());
     let (id, handle, _) = session::spawn(
         db,
+        no_dir(),
         "host-1".into(),
         "ws-1".into(),
         "/tmp",
@@ -336,7 +343,8 @@ fn private_child_sees_scoped_context_without_leaks() {
     let secret = credential.as_secret_str().to_string();
     let data_dir = dir.path().to_str().expect("utf8 dir").to_string();
     let env = worker_env(&plan, dir.path(), credential);
-    let (id, handle, session_json) = launch_reserved(db.clone(), plan, Some(env)).expect("launch");
+    let (id, handle, session_json) =
+        launch_reserved(db.clone(), dir.path(), plan, Some(env)).expect("launch");
     let _guard = ChildGuard { handle: &handle };
     assert_eq!(id, expected_id);
 
@@ -393,7 +401,7 @@ fn worker_env_debug_and_errors_omit_secret() {
     // Context bound to another reservation is refused before any effect,
     // without echoing the refused material.
     let other = reserve_committed(&db, "/tmp", "/bin/echo", &[]);
-    let err = match launch_reserved(Arc::new(db), other, Some(env)) {
+    let err = match launch_reserved(Arc::new(db), no_dir(), other, Some(env)) {
         Err(err) => err,
         Ok(_) => panic!("mismatched context must be refused"),
     };
@@ -404,11 +412,15 @@ fn worker_env_debug_and_errors_omit_secret() {
 }
 
 #[test]
-fn default_child_inherits_no_control_env() {
-    // Regardless of ambient environment, an ordinary session's child sees no
-    // ORCA_* or DROGON_* variables: inheritance is stripped and nothing is
-    // injected without an explicit worker context. The end marker proves the
-    // whole environment was read, not just its head.
+fn default_child_sees_session_env_but_no_control_inheritance() {
+    // Regardless of ambient environment, an ordinary session's child sees
+    // exactly the session-safe subset: the shim dir first on PATH plus
+    // DROGON_DATA_DIR / DROGON_WORKSPACE_ID / DROGON_SESSION_ID /
+    // DROGON_TERMINAL=1 and TERM_PROGRAM=Drogon. Inherited ORCA_* and any
+    // other DROGON_* (worker scope, credentials, a parent session's
+    // identity) are stripped, never passed through. The end marker proves
+    // the whole environment was read, not just its head.
+    let dir = tempfile::tempdir().expect("isolated dir");
     let db = Arc::new(open_fixture());
     let plan = reserve_committed(
         &db,
@@ -416,18 +428,46 @@ fn default_child_inherits_no_control_env() {
         "/bin/sh",
         &["-c".into(), "env; echo ENV-PROBE-DONE".into()],
     );
-    let (_, handle, _) = launch_reserved(db, plan, None).expect("launch");
+    let expected_session = plan.session_id().to_string();
+    let expected_data = dir.path().to_string_lossy().into_owned();
+    let (_, handle, _) = launch_reserved(db, dir.path(), plan, None).expect("launch");
     let _guard = ChildGuard { handle: &handle };
     let text = read_text(&handle, "ENV-PROBE-DONE");
     assert!(
         text.contains("ENV-PROBE-DONE"),
         "full environment must be read"
     );
-    let leaked = text.lines().any(|line| {
-        let upper = line.to_ascii_uppercase();
-        upper.starts_with("ORCA_") || upper.starts_with("DROGON_")
+    let line = |name: &str| {
+        text.lines()
+            .find(|line| line.starts_with(&format!("{name}=")))
+            .unwrap_or_else(|| panic!("session env must carry {name}"))
+            .to_string()
+    };
+    assert_eq!(
+        line("DROGON_DATA_DIR"),
+        format!("DROGON_DATA_DIR={expected_data}")
+    );
+    assert_eq!(line("DROGON_WORKSPACE_ID"), "DROGON_WORKSPACE_ID=ws-1");
+    assert_eq!(
+        line("DROGON_SESSION_ID"),
+        format!("DROGON_SESSION_ID={expected_session}")
+    );
+    assert_eq!(line("DROGON_TERMINAL"), "DROGON_TERMINAL=1");
+    assert_eq!(line("TERM_PROGRAM"), "TERM_PROGRAM=Drogon");
+    let path_line = line("PATH");
+    assert!(
+        path_line.starts_with(&format!("PATH={expected_data}/bin")),
+        "shim dir must lead PATH: {path_line}"
+    );
+    let leaked = text.lines().any(|text_line| {
+        let upper = text_line.to_ascii_uppercase();
+        (upper.starts_with("ORCA_") || upper.starts_with("DROGON_"))
+            && !text_line.starts_with("DROGON_DATA_DIR=")
+            && !text_line.starts_with("DROGON_WORKSPACE_ID=")
+            && !text_line.starts_with("DROGON_SESSION_ID=")
+            && !text_line.starts_with("DROGON_TERMINAL=")
     });
-    assert!(!leaked, "control variables must not reach the child");
+    assert!(!leaked, "no other control variables must reach the child");
     stop_quietly(&handle);
 }
 
@@ -467,8 +507,8 @@ fn seeded_inherited_controls_stripped_in_isolated_subprocess() {
         return;
     }
     // Inner probe, running only inside the seeded child above: the seeds are
-    // present here, and the PTY grandchild must not see them (or any other
-    // control variables).
+    // present here, and the PTY grandchild must not see them. The session's
+    // own safe subset (DROGON_DATA_DIR and friends) is still injected fresh.
     assert_eq!(std::env::var(SEED_ORCA).as_deref(), Ok("1"));
     assert_eq!(std::env::var(SEED_DROGON).as_deref(), Ok("1"));
     let db = Arc::new(open_fixture());
@@ -478,7 +518,7 @@ fn seeded_inherited_controls_stripped_in_isolated_subprocess() {
         "/bin/sh",
         &["-c".into(), "env; echo ENV-PROBE-DONE".into()],
     );
-    let (_, handle, _) = launch_reserved(db, plan, None).expect("launch");
+    let (_, handle, _) = launch_reserved(db, no_dir(), plan, None).expect("launch");
     let _guard = ChildGuard { handle: &handle };
     let text = read_text(&handle, "ENV-PROBE-DONE");
     assert!(
@@ -494,9 +534,13 @@ fn seeded_inherited_controls_stripped_in_isolated_subprocess() {
     assert!(
         !text.lines().any(|line| {
             let upper = line.to_ascii_uppercase();
-            upper.starts_with("ORCA_") || upper.starts_with("DROGON_")
+            (upper.starts_with("ORCA_") || upper.starts_with("DROGON_"))
+                && !line.starts_with("DROGON_DATA_DIR=")
+                && !line.starts_with("DROGON_WORKSPACE_ID=")
+                && !line.starts_with("DROGON_SESSION_ID=")
+                && !line.starts_with("DROGON_TERMINAL=")
         }),
-        "no control variables must reach the child"
+        "only the session's own safe subset must reach the child"
     );
     stop_quietly(&handle);
 }

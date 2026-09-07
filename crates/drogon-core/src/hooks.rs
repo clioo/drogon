@@ -51,9 +51,10 @@ pub(crate) fn hook_command(cli: &str, session_id: &str, incarnation: &str, event
 }
 
 /// Minimal POSIX single-quote escaping for one argv word embedded in a hook
-/// command string. Session ids and incarnations are UUIDs, but quoting
-/// unconditionally keeps a future caller from smuggling shell syntax.
-fn shell_quote(word: &str) -> String {
+/// command string (also reused by the `<data-dir>/bin` shim renderer).
+/// Session ids and incarnations are UUIDs, but quoting unconditionally keeps
+/// a future caller from smuggling shell syntax.
+pub(crate) fn shell_quote(word: &str) -> String {
     if word
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/' | b':'))

@@ -28,6 +28,24 @@ drogon-cli status --json
 
 If the CLI is missing, say so explicitly instead of inspecting source files.
 
+## Inside A Drogon Terminal
+
+Every shell or agent the daemon spawns already has Drogon on `PATH`: the
+daemon prepends its `<data-dir>/bin` directory, which holds two names for
+the same CLI — `drogon-cli` and the shorter alias `drogon`. Inside, drop
+`--data-dir`: the shim binds the running daemon's data directory on its
+own, and the session environment already exports `DROGON_DATA_DIR`,
+`DROGON_WORKSPACE_ID`, `DROGON_SESSION_ID` and `DROGON_TERMINAL=1`.
+
+```text
+drogon-cli status --json
+drogon-cli terminal list --json
+```
+
+Prefer `drogon-cli` in scripts and shared prompts; `drogon` is a
+keystroke-saver for interactive use. Both resolve to the CLI that belongs
+to the running daemon, never to another install on `PATH`.
+
 ## Status And Capabilities
 
 `drogon-cli status` shows the daemon identity, protocol version and
@@ -100,6 +118,9 @@ Interact with the page through CSS selectors resolved with
 `drogon-cli browser click --tab <ID> --selector <CSS>` clicks the match and
 `drogon-cli browser fill --tab <ID> --selector <CSS> --text <TEXT>` fills
 it. List a workspace's tabs with `drogon-cli browser tabs --workspace <ID>`.
+Inside a Drogon terminal both spellings work with no `--data-dir` flag:
+`drogon-cli browser open --workspace <ID> <URL>` or the shorter `drogon`
+alias — the shim is already on `PATH`.
 
 ## Harness Launch
 

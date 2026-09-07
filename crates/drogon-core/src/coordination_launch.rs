@@ -280,6 +280,7 @@ impl Engine {
     ) -> Result<Value, RpcError> {
         match session_admission::launch_reserved(
             self.db.clone(),
+            &self.data_dir,
             prepared.session,
             Some(prepared.environment),
         ) {
