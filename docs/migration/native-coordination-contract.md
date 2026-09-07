@@ -340,6 +340,30 @@ Windows build and Unix runtime coverage stated separately.
 
 ## Source anchors
 
+### Session reservation acceptance, 2026-09-07
+
+`session::spawn` now delegates to a transactional `reserve` and a consumed,
+private `launch_reserved` plan. Launch refuses an open transaction, missing or
+recovered reservation, or changed stored identity/argv/geometry/creation time.
+The existing schema stores no cwd: that remains an immutable service-authored
+plan field resolved from the registered workspace, not restart authority.
+Worker context is typed, bounded and injected only after stripping inherited
+Orca/Drogon context. The actual handle is returned before fallible post-spawn
+attachment persistence; no new session registry or PID-based operation exists.
+
+Root reproduced two behavioral failures (open transaction and changed creation
+time) before accepting corrections, then independently ran 46 core unit tests
+and six existing suites: engine18 (+1 existing child-probe ignore), persistence2,
+authority51, exit-observation2, native-release1, quiescence15; all passed.
+Scoped probes keep secrets out of their PTY output and seeded subprocess tests
+verify inherited context stripping. The retained-handle and lifecycle integration
+still owns cancellation races; these passes do not prove native workerStart.
+
+The correction worker could not authenticate its final report. Root preserved
+its ordinary status and files, explicitly abandoned the dispatch without process
+effects, and closed its task by documented coordinator recovery after independent
+review. This is not an accepted worker_done or a claim that report auth worked.
+
 Read at the pinned Orca revision: `src/shared/orchestration-rpc-contract.ts`,
 `src/main/runtime/orchestration/db/runs/run-delivery.ts`,
 `src/main/runtime/orchestration/db/dispatch-capability-hash.ts`,

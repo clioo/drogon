@@ -15,11 +15,14 @@ use std::time::{Duration, Instant};
 
 use drogon_protocol::RpcError;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{Value, json};
 
 use crate::error;
 use crate::ring::RingBuffer;
+
+#[path = "session_admission.rs"]
+pub(crate) mod session_admission;
 
 /// Non-blocking poll budget for `stop`: how long we wait for the kill to be
 /// observed before answering `unverifiable` instead of `exited`. Chosen to
@@ -57,15 +60,50 @@ pub(crate) struct SessionHandle {
     db: Arc<Mutex<Connection>>,
 }
 
+impl SessionHandle {
+    /// Assembles the retained handle from an already-spawned child. The
+    /// caller owns reader startup and engine registration from here.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_spawned(
+        session_id: String,
+        incarnation: String,
+        workspace_id: String,
+        host_id: String,
+        command: String,
+        args: Vec<String>,
+        created_at: String,
+        cols: u16,
+        rows: u16,
+        master: Box<dyn MasterPty + Send>,
+        writer: Box<dyn Write + Send>,
+        child: Box<dyn Child + Send + Sync>,
+        db: Arc<Mutex<Connection>>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            session_id,
+            incarnation,
+            workspace_id,
+            host_id,
+            command,
+            args,
+            created_at,
+            native: Mutex::new(Some(NativePty { master })),
+            writer: Mutex::new(Some(writer)),
+            child: Mutex::new(child),
+            ring: Mutex::new(RingBuffer::new()),
+            size: Mutex::new((cols, rows)),
+            exit_code: Mutex::new(None),
+            reader_done: AtomicBool::new(false),
+            db,
+        })
+    }
+}
+
 /// The native PTY master held open while the session can still resize.
 /// Releasing this struct closes the master descriptor. The writer lives
 /// separately (see `SessionHandle::writer`).
 struct NativePty {
     master: Box<dyn MasterPty + Send>,
-}
-
-fn now_rfc3339() -> String {
-    crate::now_rfc3339()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -79,70 +117,33 @@ pub(crate) fn spawn(
     cols: u16,
     rows: u16,
 ) -> Result<(String, Arc<SessionHandle>, Value), RpcError> {
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let incarnation = uuid::Uuid::new_v4().to_string();
-    let created_at = now_rfc3339();
-
     // Why insert before touching the PTY at all: protocol-v1.md requires
     // "Persist pending spawn admission before spawning." It also closes a
     // race where a fast-exiting child's reader thread would try to mark the
     // row `exited` before the row exists — an `UPDATE` that matches zero
     // rows would silently vanish and a later `INSERT ... verdict='live'`
     // would then permanently overwrite the true exited state.
-    {
+    //
+    // This is reserve (admission) + commit, then the launch effect; the
+    // failure cleanup and handle ownership below match `launch_reserved`.
+    let plan = {
         let conn = db.lock().unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', NULL, ?9)",
-            rusqlite::params![
-                session_id,
-                workspace_id,
-                host_id,
-                incarnation,
-                command,
-                serde_json::to_string(&args).unwrap_or_default(),
-                cols,
-                rows,
-                created_at,
-            ],
-        )
-        .map_err(error::from_sqlite)?;
-    }
-
-    match spawn_pty(cwd, &command, &args, cols, rows) {
-        Ok((master, writer, reader, child)) => {
-            let handle = Arc::new(SessionHandle {
-                session_id: session_id.clone(),
-                incarnation: incarnation.clone(),
-                workspace_id: workspace_id.clone(),
-                host_id: host_id.clone(),
-                command: command.clone(),
-                args: args.clone(),
-                created_at: created_at.clone(),
-                native: Mutex::new(Some(NativePty { master })),
-                writer: Mutex::new(Some(writer)),
-                child: Mutex::new(child),
-                ring: Mutex::new(RingBuffer::new()),
-                size: Mutex::new((cols, rows)),
-                exit_code: Mutex::new(None),
-                reader_done: AtomicBool::new(false),
-                db: db.clone(),
-            });
-            spawn_reader_thread(handle.clone(), reader);
-            finish_spawn(&handle, &session_id)
-        }
-        Err(e) => {
-            // Exact cleanup: the admitted row must not linger as `pending`
-            // (which crash-recovery would otherwise later mark
-            // `unverifiable` for a session that in fact never ran).
-            let conn = db.lock().unwrap();
-            let _ = conn.execute(
-                "UPDATE sessions SET verdict = 'exited', exit_code = NULL WHERE id = ?1 AND verdict = 'pending'",
-                [&session_id],
-            );
-            Err(e)
-        }
-    }
+        let tx = rusqlite::Transaction::new_unchecked(&conn, TransactionBehavior::Immediate)
+            .map_err(error::from_sqlite)?;
+        let plan = session_admission::reserve(
+            &tx,
+            &host_id,
+            &workspace_id,
+            cwd,
+            &command,
+            &args,
+            cols,
+            rows,
+        )?;
+        tx.commit().map_err(error::from_sqlite)?;
+        plan
+    };
+    session_admission::launch_reserved(db, plan, None)
 }
 
 type SpawnedPty = (
@@ -158,6 +159,7 @@ fn spawn_pty(
     args: &[String],
     cols: u16,
     rows: u16,
+    worker_env: Option<&session_admission::WorkerEnvironment>,
 ) -> Result<SpawnedPty, RpcError> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -187,14 +189,17 @@ fn spawn_pty(
     // Remove control-plane context from the child environment: a foreign
     // runtime's identifiers (ORCA_*) and this runtime's own authority binding
     // (DROGON_*), so a harness or agent inside a session cannot accidentally
-    // act on this service (or another one) through inherited variables. The
-    // service injects no credentials here; scoped identity injection is a
-    // separate, future coordination concern.
+    // act on this service (or another one) through inherited variables. A
+    // reserved worker launch then applies exactly its service-authored
+    // context; ordinary sessions keep none.
     for (key, _) in std::env::vars_os() {
         let upper = key.to_string_lossy().to_ascii_uppercase();
         if upper.starts_with("ORCA_") || upper.starts_with("DROGON_") {
             cmd.env_remove(key);
         }
+    }
+    if let Some(env) = worker_env {
+        env.apply_to_command(&mut cmd);
     }
     cmd.args(args);
     cmd.cwd(cwd);
