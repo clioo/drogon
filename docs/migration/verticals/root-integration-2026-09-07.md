@@ -331,3 +331,40 @@ No further model inference, Bot advertisement, package installation or
 rights/service publication. Audit remains 11/12 groups (91.7%, medium
 confidence, delta zero), all 46 product obligations remain in scope, and
 the fixed 16:41:33 UTC deadline is high risk.
+
+## 14:39 UTC checkpoint
+
+ROOT prepared the unregistered desktop create boundary in `174039a`, integrated
+V5 bootstrap `33188d1` as `fd358fb`, and V4 history assertion `4fee623` as
+`a58bf72`. The one history-test conflict retained ROOT's existing camelCase
+presence assertion and added the leaf's byte-exact before/after comparison.
+Independent desktop verification: TypeScript clean, 39 files / 475 tests pass.
+Independent native workspace verification: 927 passed, zero failed, one ignored
+across 66 result summaries, with the known unused `revalidate_containment`
+warning still present. Log: `.preflight/root-native-a58bf72-tests.log`.
+This run includes the explicit uncommitted Files test-advertisement line;
+it is not clean-tree packaging or Files rendered acceptance.
+
+V5 Windows acceptance `1dab46b` remains held: Node's Windows `SIGTERM`
+force-terminates, so the helper's `forced:false` cannot establish graceful
+drain. Requested authenticated `runtime.shutdown`, clean observed exit,
+real idle-pipe coverage and cleanup conditional on owned process exit.
+Normal fixture credentials must not inherit a worker capability. Reference:
+[Node child-process signal behavior](https://nodejs.org/api/child_process.html#subprocesskillsignal).
+
+V5 notice verifier `708709c` remains held. Pure-import reproductions proved
+an empty manifest accepts arbitrary preamble bytes and a matching Unicode
+preamble fails due to character/byte offset confusion. Requested strict
+manifest validation, UTF-8 byte-correct spans and test cleanup. Its expected
+corpus is a historical source slice, not the complete current runtime
+dependency inventory. A separate leaf may recover only already-pinned
+source notice bytes, verifying recorded sizes and hashes; no release or
+rights clearance follows from that recovery.
+
+V3 wrapper review found a completion/snapshot race, poll-error cleanup gap,
+remaining cross-call resource bounds and inherited Git configuration that
+can redirect `core.worktree`. These are queued with exclusive ownership;
+the wrapper is not registered. V4 staged run/create leaves and V1 Windows
+TokenUser ACL / bounded dogfood preparation remain active. No new paid
+inference or package installation occurred. Audit and all 46 obligations
+remain unchanged; deadline risk remains high.
