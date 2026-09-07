@@ -55,7 +55,10 @@ The comment is explicit about the security model this implies: *"named pipes
 lack the chmod hardening of Unix sockets; a per-runtime suffix avoids a stable,
 guessable endpoint name."* I.e. source's Windows same-endpoint-instance
 protection is **obscurity of the pipe name** (pid + random suffix), not an
-ACL/`SECURITY_ATTRIBUTES` on the pipe object. No file read in this task sets a
+ACL/`SECURITY_ATTRIBUTES` on the pipe object. ROOT sharpening (2026-09-07):
+an obscure/unguessable pipe name is **never same-user proof** — it only
+resists discovery; it authenticates nothing about the connecting process.
+No file read in this task sets a
 `SECURITY_DESCRIPTOR`, calls `GetNamedPipeClientProcessId`, or otherwise
 authenticates the connecting process/session on the pipe itself.
 
@@ -70,6 +73,52 @@ token itself is read from a metadata file whose Unix protection is the same
 NTFS ACLs the user-profile directory already has (not something this code
 sets), so same-user isolation for the token file is inherited from the OS
 default, not asserted in-repo.
+
+### 1.2.1 In-repo descriptor/token facts (this repo's actual stack)
+
+Verified 2026-09-07 by reading this repo's code (task E, read-only; no
+implementation change). These are facts about what the rewrite itself
+enforces today:
+
+- **Server:** the RPC server is Rust `drogond`, not Node. Its endpoint module
+  is `#![cfg(unix)]` (`crates/drogond/src/endpoint.rs:12`; header: *"Windows
+  named pipes are a different mechanism entirely and are not implemented
+  here"*), and `serve()` itself is `#[cfg(unix)]` with
+  `ServeError::UnsupportedPlatform` otherwise (`crates/drogond/src/lib.rs:22,30,51-52`).
+  On POSIX it sets the listening socket file to **0o600 before hard-linking**
+  (endpoint.rs:88-91), citing protocol-v1: socket restricted to the owning
+  user, matching the data directory **0o700** (`crates/drogond/src/lib.rs:56-57`)
+  and token file **0o600** (`crates/drogond/src/auth.rs:30`).
+- **Token file:** `ensure_token` writes a fresh token via `create_new` on a
+  scratch name + rename, with the **0o600 `set_permissions` call inside
+  `#[cfg(unix)]`** (auth.rs:27-31) — so it is a POSIX-only fact, not a
+  Windows guarantee. Token minting itself is `#[cfg(not(unix))] → Unsupported`
+  ("token generation is not implemented on this platform yet", auth.rs:47-53):
+  on Windows this repo mints **no token at all** today and attempts no
+  chmod-equivalent.
+- **Windows pipe client (CLI):** `crates/drogon-cli/src/transport.rs:95-103`
+  opens `Endpoint::NamedPipe` via
+  `tokio::net::windows::named_pipe::ClientOptions::new().open(name)` —
+  defaults only, no security/QoS override; a client cannot grant itself
+  rights anyway, the DACL lives on the server's pipe object, and no Windows
+  server exists in this repo. The deterministic name
+  `\\.\pipe\drogon-v1-{sha256(canonical data dir)[0..24]}` is set in
+  `crates/drogon-cli/src/paths.rs:93-101` (contract-stability tested).
+- **Node side (desktop main, V1-owned `native-client.ts`):** production Node
+  code is **client-only** (`createConnection`); `node:net`'s `createServer`
+  appears only as a POSIX test fixture (`native-runtime-bootstrap.test.ts:1`).
+  So there is no production `node:net` server in this repo whose defaults
+  would need hardening — and the Node client validates nothing about the
+  endpoint: win32 resolves the same deterministic pipe name
+  (`native-client.ts:73-74`), `observeLocalEndpoint` short-circuits win32 to
+  unconditional `ambiguous` (:108-112), and `auth.token` is read via plain
+  `readFile` with **no mode/ACL validation** (:317).
+
+**Conclusion (fact, not change):** the only same-user enforcement anywhere in
+this repo is POSIX file modes (0700 data dir / 0600 socket / 0600 token).
+On Windows, in-repo code enforces **no descriptor** on any pipe object and
+**no token-file protection**; once the unsupported gates lift, same-user
+would be entirely unproven unless V1 adds an explicit mechanism.
 
 ### 1.3 Same-user / identity resolution primitives that *do* exist
 
@@ -197,7 +246,8 @@ This is the bounded request:
 - **Shape:** Confirm whether `resolveEndpointPath`'s deterministic
   `drogon-v1-{hash(dataDir)}` pipe name is the final wire contract for a
   Windows `drogond`, and state what same-user protection (if any) replaces
-  source's "random suffix as obscurity": an explicit pipe
+  source's "random suffix as obscurity" — which was never same-user proof
+  either (§1.1): an explicit pipe
   `SECURITY_ATTRIBUTES`/DACL restricting to the creating user's SID (resolvable
   via the same `whoami /user` SID pattern `win32-utils.ts` already uses for
   directory ACLs), continued reliance on the auth-token file alone, or both.
@@ -258,13 +308,22 @@ silently `pass`-adjacent because "the job is green."
 
 1. **Windows same-user protection for the RPC pipe is undefined, not just
    unimplemented.** Source's model (unguessable per-pid pipe name) is
-   deliberately *not* an ACL; if V1's Windows `drogond` ships with a
-   deterministic, hash-of-data-dir pipe name (as this repo's
+   deliberately *not* an ACL — and per the ROOT sharpening above, such a name
+   is never same-user proof in any case. If V1's Windows `drogond` ships with
+   a deterministic, hash-of-data-dir pipe name (as this repo's
    `resolveEndpointPath` already produces) and no explicit
-   `SECURITY_ATTRIBUTES`/DACL, the default Windows named-pipe DACL (open to
-   `Everyone` unless restricted) plus a same-user-readable auth-token file is a
-   materially weaker default than source's "obscure name" scheme, since the
-   name is no longer obscure. This must be an explicit decision in V1's answer
+   `SECURITY_ATTRIBUTES`/DACL, the default Windows named-pipe DACL — which
+   per Microsoft's named-pipe security documentation grants `Everyone` and
+   anonymous **read** access (read data/attributes, read permissions),
+   with full control reserved to the instance's client/server, not
+   unrestricted access to all
+   (https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights;
+   ROOT correction 2026-09-07 supersedes the earlier "open to `Everyone`"
+   full-access wording) — plus an auth-token file with no Windows-mode
+   protection in-repo (§1.2.1), is a materially weaker default than source's
+   "obscure name" scheme, since the name is no longer obscure. **The finding
+   stands: a deterministic pipe name without an explicit DACL is weaker than
+   per-instance obscurity.** This must be an explicit decision in V1's answer
    to §2, not an accident of reusing the existing hash-based name unchanged.
 2. **No Windows runner executes any TypeScript test today.** `windows-
    compilation` compiles Rust only; this is the same "CI job exists, proves
