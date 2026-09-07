@@ -27,6 +27,7 @@ import { formatSidebarChord } from "./shortcut-label";
 describe("normalizeRightSidebarTab", () => {
   it("keeps the MVP tabs", () => {
     assert.equal(normalizeRightSidebarTab("explorer"), "explorer");
+    assert.equal(normalizeRightSidebarTab("mentu"), "mentu");
     assert.equal(normalizeRightSidebarTab("source-control"), "source-control");
     assert.equal(normalizeRightSidebarTab("session"), "session");
   });
@@ -97,20 +98,23 @@ describe("right-sidebar-width", () => {
 });
 
 describe("activity-bar-items", () => {
-  it("orders Explorer before Source Control and labels with the chord", () => {
+  it("orders Explorer, Mentu, Source Control and labels with the chord", () => {
     const items = buildRightSidebarActivityItems({
       explorerShortcut: "⌘⇧E",
       sourceControlShortcut: "⌘⇧G",
     });
     assert.deepEqual(
       items.map((item) => item.id),
-      ["explorer", "source-control", "session"],
+      ["explorer", "mentu", "source-control", "session"],
     );
     assert.equal(
       activityItemAriaLabel(items[0]),
       "Explorer (⌘⇧E)",
     );
-    assert.equal(activityItemAriaLabel(items[2]), "Session details");
+    // The fork's mentu entry carries no toggle chord.
+    assert.equal(items[1].title, "Mentu");
+    assert.equal(activityItemAriaLabel(items[1]), "Mentu");
+    assert.equal(activityItemAriaLabel(items[3]), "Session details");
   });
   it("formats chords per platform", () => {
     assert.equal(
@@ -129,14 +133,38 @@ describe("activity-bar-items", () => {
       sourceControlShortcut: "",
     });
     assert.deepEqual(
-      getVisibleRightSidebarActivityItems(items, { gitAvailable: false }).map(
-        (item) => item.id,
-      ),
-      ["explorer", "session"],
+      getVisibleRightSidebarActivityItems(items, {
+        gitAvailable: false,
+        mentuAvailable: true,
+      }).map((item) => item.id),
+      ["explorer", "mentu", "session"],
     );
     assert.equal(
-      getVisibleRightSidebarActivityItems(items, { gitAvailable: true }).length,
-      3,
+      getVisibleRightSidebarActivityItems(items, {
+        gitAvailable: true,
+        mentuAvailable: true,
+      }).length,
+      4,
+    );
+  });
+  it("projects the mentu entry with and without the mentu.v1 capability", () => {
+    const items = buildRightSidebarActivityItems({
+      explorerShortcut: "",
+      sourceControlShortcut: "",
+    });
+    assert.deepEqual(
+      getVisibleRightSidebarActivityItems(items, {
+        gitAvailable: true,
+        mentuAvailable: true,
+      }).map((item) => item.id),
+      ["explorer", "mentu", "source-control", "session"],
+    );
+    assert.deepEqual(
+      getVisibleRightSidebarActivityItems(items, {
+        gitAvailable: true,
+        mentuAvailable: false,
+      }).map((item) => item.id),
+      ["explorer", "source-control", "session"],
     );
   });
 });

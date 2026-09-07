@@ -1,10 +1,17 @@
-/* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   window.api.shell.openUrl surface (adapter: this repo's drogond-backed
-   bridge shape with the same sender/frame gate main/index.ts applies to
-   its own bridge; only https URLs may leave the app). Powers the
-   landing GitHub star button. */
+// MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
+// src/main/ipc/shell.ts (`shell:openUrl` handler: parse, http(s)-only gate,
+// shell.openExternal). Adapter: the `drogon:openExternal` channel, this
+// repo's Result envelope and sender check (same shape as
+// tasks-bridge.ts/mentu-bridge.ts), and an injectable opener so the IPC
+// handler is unit-testable without Electron.
 import { ipcMain, shell } from "electron";
 import type { BrowserWindow } from "electron";
+import {
+  isExternalUrlAllowed,
+  SHELL_OPEN_EXTERNAL_CHANNEL,
+} from "../shared/shell-contract";
+import type { Result } from "../shared/session-contract";
+import type { ShellOpenExternalResult } from "../shared/shell-contract";
 
 const invalid = {
   ok: false,
@@ -15,42 +22,47 @@ const invalid = {
   },
 } as const;
 
-/** Only https URLs may leave the app through the shell bridge. */
-export function isOpenExternalUrlAllowed(url: unknown): url is string {
-  if (typeof url !== "string") return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  return parsed.protocol === "https:";
-}
+export type ShellOpen = (url: string) => Promise<void>;
 
-export async function dispatchOpenExternal(
+/**
+ * Validates one `openExternal` request and opens it in the system browser.
+ * Disallowed input never reaches the shell; an opener failure is an honest
+ * internal error, never a silent drop.
+ */
+export async function dispatchOpenExternalRequest(
   input: unknown,
-  open: (url: string) => Promise<unknown> = shell.openExternal,
-): Promise<{ ok: true } | typeof invalid> {
-  if (!isOpenExternalUrlAllowed(input)) return { ...invalid };
+  open: ShellOpen = (url) => shell.openExternal(url),
+): Promise<Result<ShellOpenExternalResult>> {
+  if (!isExternalUrlAllowed(input)) return { ...invalid };
   try {
     await open(input);
-    return { ok: true };
+    return { ok: true, result: { opened: true } };
   } catch {
-    return { ...invalid };
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message: "The system browser could not be opened.",
+        retryable: false,
+      },
+    };
   }
 }
 
 export function registerShellBridge(
   getWindow: () => BrowserWindow | null,
 ): void {
-  ipcMain.handle("drogon:openExternal", async (event, input: unknown) => {
-    const window = getWindow();
-    if (
-      !window ||
-      event.sender !== window.webContents ||
-      event.senderFrame !== window.webContents.mainFrame
-    )
-      return { ...invalid };
-    return dispatchOpenExternal(input);
-  });
+  ipcMain.handle(
+    SHELL_OPEN_EXTERNAL_CHANNEL,
+    async (event, input: unknown) => {
+      const window = getWindow();
+      if (
+        !window ||
+        event.sender !== window.webContents ||
+        event.senderFrame !== window.webContents.mainFrame
+      )
+        return { ...invalid };
+      return dispatchOpenExternalRequest(input);
+    },
+  );
 }

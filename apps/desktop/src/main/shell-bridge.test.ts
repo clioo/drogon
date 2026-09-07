@@ -1,38 +1,50 @@
-import { describe, expect, it, vi } from "vitest";
-import { dispatchOpenExternal, isOpenExternalUrlAllowed } from "./shell-bridge";
+// Main-side unit test for the `drogon:openExternal` IPC handler: the
+// allow-list decision and the opener call, with a stubbed opener (no
+// Electron shell involved).
+import assert from "node:assert/strict";
+import { describe, it } from "vitest";
+import { dispatchOpenExternalRequest } from "./shell-bridge";
 
-describe("shell bridge admission", () => {
-  it("allows only https URLs", () => {
-    expect(isOpenExternalUrlAllowed("https://github.com/clioo/drogon")).toBe(
-      true,
-    );
-    for (const blocked of [
-      "http://github.com/clioo/drogon",
-      "file:///etc/passwd",
-      "javascript:alert(1)",
-      "not a url",
-      "",
-      null,
-      undefined,
-      42,
-    ])
-      expect(isOpenExternalUrlAllowed(blocked)).toBe(false);
-  });
-
-  it("opens allowed URLs through the injected opener", async () => {
-    const open = vi.fn(async (_url: string) => undefined);
-    const result = await dispatchOpenExternal(
+describe("dispatchOpenExternalRequest", () => {
+  it("opens an allowed URL through the opener", async () => {
+    const opened: string[] = [];
+    const result = await dispatchOpenExternalRequest(
       "https://github.com/clioo/drogon",
-      open,
+      async (url) => {
+        opened.push(url);
+      },
     );
-    expect(result).toEqual({ ok: true });
-    expect(open).toHaveBeenCalledWith("https://github.com/clioo/drogon");
+    assert.deepEqual(opened, ["https://github.com/clioo/drogon"]);
+    assert.deepEqual(result, { ok: true, result: { opened: true } });
   });
-
-  it("rejects without calling the opener", async () => {
-    const open = vi.fn(async (_url: string) => undefined);
-    const result = await dispatchOpenExternal("file:///etc/passwd", open);
-    expect(result.ok).toBe(false);
-    expect(open).not.toHaveBeenCalled();
+  it("refuses a dangerous scheme without calling the opener", async () => {
+    let calls = 0;
+    const result = await dispatchOpenExternalRequest(
+      "javascript:alert(1)",
+      async () => {
+        calls += 1;
+      },
+    );
+    assert.equal(calls, 0);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "invalid_argument");
+  });
+  it("refuses non-string input without calling the opener", async () => {
+    let calls = 0;
+    const result = await dispatchOpenExternalRequest(null, async () => {
+      calls += 1;
+    });
+    assert.equal(calls, 0);
+    assert.equal(result.ok, false);
+  });
+  it("reports an opener failure as an internal error", async () => {
+    const result = await dispatchOpenExternalRequest(
+      "https://example.com/",
+      async () => {
+        throw new Error("no browser");
+      },
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "internal_error");
   });
 });
