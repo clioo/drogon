@@ -221,7 +221,7 @@ export function TabCreateMenu({
           </Tooltip.Root>
           <DropdownMenu.Portal>
             <DropdownMenu.Content
-              className="w-72 max-w-[calc(100vw-1rem)] rounded-[11px] border border-border/80 bg-popover p-1 shadow-[0_16px_36px_rgba(0,0,0,0.24)]"
+              className="z-[70] w-72 max-w-[calc(100vw-1rem)] rounded-[11px] border border-border/80 bg-popover p-1 shadow-[0_16px_36px_rgba(0,0,0,0.24)]"
               align="start"
               sideOffset={6}
               onCloseAutoFocus={(event) => {

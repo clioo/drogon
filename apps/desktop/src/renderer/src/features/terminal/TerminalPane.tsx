@@ -102,6 +102,24 @@ async function writeClipboardText(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }
 
+
+type TerminalDebugRegistry = Map<string, Terminal>;
+declare global {
+  interface Window {
+    __drogonTerminals?: TerminalDebugRegistry;
+  }
+}
+function registerTerminalDebugHandle(sessionId: string, terminal: Terminal) {
+  if (typeof window === "undefined") return;
+  const registry = (window.__drogonTerminals ??= new Map());
+  registry.set(sessionId, terminal);
+}
+function unregisterTerminalDebugHandle(sessionId: string, terminal: Terminal) {
+  if (typeof window === "undefined") return;
+  const registry = window.__drogonTerminals;
+  if (registry?.get(sessionId) === terminal) registry.delete(sessionId);
+}
+
 export function TerminalPane({
   session,
   fontSize,
@@ -200,6 +218,10 @@ export function TerminalPane({
           {},
         ) ?? undefined,
     });
+    // Debug/e2e registry like Orca's `window.__paneManagers`: rendered
+    // acceptance reads the live buffer here because the WebGL renderer
+    // paints to a canvas and leaves no row text in the DOM.
+    registerTerminalDebugHandle(session.id, terminal);
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     const search = new SearchAddon();
@@ -435,6 +457,7 @@ export function TerminalPane({
     return () => {
       disposed = true;
       live.current = null;
+      unregisterTerminalDebugHandle(session.id, terminal);
       setSearchAddon(null);
       clearTimeout(timeout);
       media.removeEventListener("change", updateTheme);

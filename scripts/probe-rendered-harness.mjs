@@ -4,7 +4,23 @@ import { rename } from "node:fs/promises";
 import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 
 export function renderedPiIsReady(root = document) {
-  const rendered = root.querySelector(".xterm-screen")?.textContent ?? "";
+  // Self-contained (serialized into the page): read the live xterm buffers
+  // from the debug registry when the WebGL renderer leaves no DOM text.
+  const registry =
+    typeof window !== "undefined" ? window.__drogonTerminals : undefined;
+  let rendered = "";
+  if (registry && registry.size > 0) {
+    const lines = [];
+    for (const terminal of registry.values()) {
+      const buffer = terminal.buffer.active;
+      for (let row = 0; row < buffer.length; row += 1) {
+        lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+      }
+    }
+    rendered = lines.join("\n");
+  } else {
+    rendered = root.querySelector(".xterm-screen")?.textContent ?? "";
+  }
   return (
     /\bpi v\d+\.\d+\.\d+\b/.test(rendered) && rendered.includes("clear/exit")
   );
