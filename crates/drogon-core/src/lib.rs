@@ -29,6 +29,8 @@ mod harness;
 mod ring;
 mod session;
 mod workspace;
+mod workspace_file_rpc;
+mod workspace_files;
 
 mod service_quiescence;
 
@@ -308,6 +310,9 @@ impl Engine {
             "runtime.shutdown" => self.do_runtime_shutdown(request),
             "harness.list" => Ok(self.harness_list()),
             "bot.snapshot" => self.bot_snapshot(&request.params),
+            "files.list" => self.do_files_list(&request.params),
+            "files.read" => self.do_files_read(&request.params),
+            "files.write" => self.mutating(request, Self::do_files_write),
             "harness.start" => self.mutating(request, Self::do_harness_start),
             "workspace.register" => self.mutating(request, Self::do_workspace_register),
             "workspace.list" => {
