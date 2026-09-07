@@ -11,6 +11,7 @@ mod coordination_attempts;
 mod coordination_identity;
 mod coordination_launch;
 mod coordination_output;
+mod coordination_receipts;
 mod coordination_runs;
 mod coordination_worker_control;
 mod coordination_workers;
@@ -261,6 +262,12 @@ impl Engine {
             Ok(_) if request.method == "status" => {
                 Response::success(request.request_id, self.status())
             }
+            Ok(_) if request.method == "orchestration.requestShow" => {
+                match self.show_coordination_receipt(&request, Some(&binding)) {
+                    Ok(value) => Response::success(request.request_id, value),
+                    Err(err) => Response::failure(request.request_id, err),
+                }
+            }
             Ok(_) => {
                 Response::failure(request.request_id, error::method_not_found(&request.method))
             }
@@ -297,6 +304,7 @@ impl Engine {
             | "orchestration.workerStop"
             | "orchestration.workerAbandon"
             | "orchestration.workerRelease" => self.dispatch_coordination_worker(request),
+            "orchestration.requestShow" => self.show_coordination_receipt(request, None),
             other => Err(error::method_not_found(other)),
         }
     }

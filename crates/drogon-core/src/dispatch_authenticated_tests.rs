@@ -146,3 +146,32 @@ fn allowed_but_unimplemented_orchestration_method_is_honest_method_not_found_not
     assert!(!response.ok);
     assert_eq!(response.error.unwrap().code, "method_not_found");
 }
+
+#[test]
+fn worker_receipt_lookup_cannot_read_bootstrap_or_sibling_scope() {
+    let (_dir, engine, host_id) = open_engine_with_worker(WORKER_SECRET);
+    for scope in [
+        json!({"actorKind":"bootstrap","contractVersion":1,"hostId":host_id,"coordinatorId":"owner"}),
+        json!({"actorKind":"dispatch","contractVersion":1,"hostId":host_id,"runId":RUN,"taskId":TASK,"dispatchId":"sibling"}),
+    ] {
+        let mut request = req("orchestration.requestShow", Some(WORKER_SECRET));
+        request.params = json!({"scope":scope,"requestId":"r1"});
+        let refused = engine.dispatch_authenticated(request, SERVICE_CREDENTIAL);
+        assert!(!refused.ok);
+        assert_eq!(refused.error.unwrap().code, "unauthorized");
+    }
+    let mut request = req("orchestration.requestShow", Some(WORKER_SECRET));
+    request.params = json!({"scope":{"actorKind":"dispatch","contractVersion":1,"hostId":host_id,"runId":RUN,"taskId":TASK,"dispatchId":DISPATCH},"requestId":"missing"});
+    let result = engine.dispatch_authenticated(request, SERVICE_CREDENTIAL);
+    assert!(result.ok, "{:?}", result.error);
+    assert_eq!(result.result.unwrap()["state"], "absent");
+    assert_eq!(
+        engine
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT count(*) FROM requests", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}

@@ -32,7 +32,7 @@ const SCOPED_WORKER_METHODS: &[&str] = &[
     "orchestration.requestShow",
 ];
 
-fn unauthorized() -> RpcError {
+pub(crate) fn unauthorized() -> RpcError {
     RpcError::new(
         "unauthorized",
         "invalid or unauthorized dispatch credential",
