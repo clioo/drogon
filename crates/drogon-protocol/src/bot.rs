@@ -43,6 +43,63 @@ pub struct BotHistoryResult {
     pub messages: Vec<BotMessageWire>,
 }
 
+/// Params for `bot.responsibility_create`: creates one scheduled
+/// (cron) responsibility on a Bot together with the Bot-owned automation
+/// the daemon scheduler fires. `schedule` is a 5-field cron in UTC, the
+/// same expression shape `automation.create` admits; `prompt` becomes both
+/// the automation prompt and the responsibility instructions. The
+/// automation runs in `workspace_id` under the Bot's own harness policy.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BotResponsibilityCreateParams {
+    pub workspace_id: String,
+    pub host_id: String,
+    pub bot_id: String,
+    pub name: String,
+    pub schedule: String,
+    pub prompt: String,
+}
+
+/// Params for `bot.responsibility_delete`: removes the responsibility from
+/// the Bot and deletes its still-Bot-owned scheduled automation (runs
+/// included). Responsibility-run history rows are preserved as orphaned
+/// evidence, never deleted.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BotResponsibilityDeleteParams {
+    pub workspace_id: String,
+    pub host_id: String,
+    pub bot_id: String,
+    pub responsibility_id: String,
+}
+
+/// Lean `bot.responsibility_create` result: ids only. Callers re-read the
+/// full Bot through `bot.snapshot`, the same refresh pattern the desktop
+/// panel already uses after `bot.create`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BotResponsibilityCreateResult {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub bot_id: String,
+    pub responsibility_id: String,
+    pub automation_id: String,
+}
+
+/// `bot.responsibility_delete` result. `automation_id` is the deleted
+/// automation, or `None` when there was nothing Bot-owned left to delete
+/// (reactive responsibility, or an already-gone automation).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BotResponsibilityDeleteResult {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub bot_id: String,
+    pub responsibility_id: String,
+    pub removed: bool,
+    pub automation_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +175,72 @@ mod tests {
         ] {
             assert_eq!(serde_json::to_value(variant).unwrap(), json!(wire));
         }
+    }
+
+    #[test]
+    fn responsibility_create_params_use_exact_wire_keys_and_deny_unknown() {
+        let value = json!({
+            "workspaceId": "ws-1", "hostId": "host-1", "botId": "bot-1",
+            "name": "Nightly review", "schedule": "* * * * *",
+            "prompt": "Review incoming work.",
+        });
+        let params: BotResponsibilityCreateParams = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(params.schedule, "* * * * *");
+        let missing = json!({
+            "workspaceId": "ws-1", "hostId": "host-1", "botId": "bot-1",
+            "name": "Nightly review", "schedule": "* * * * *",
+        });
+        assert!(serde_json::from_value::<BotResponsibilityCreateParams>(missing).is_err());
+        let extra = json!({"workspaceId": "ws-1", "hostId": "host-1", "botId": "bot-1",
+            "name": "n", "schedule": "* * * * *", "prompt": "p", "locale": "en-US"});
+        assert!(serde_json::from_value::<BotResponsibilityCreateParams>(extra).is_err());
+    }
+
+    #[test]
+    fn responsibility_delete_params_use_exact_wire_keys_and_deny_unknown() {
+        let value = json!({
+            "workspaceId": "ws-1", "hostId": "host-1", "botId": "bot-1",
+            "responsibilityId": "resp-1",
+        });
+        let params: BotResponsibilityDeleteParams = serde_json::from_value(value).unwrap();
+        assert_eq!(params.responsibility_id, "resp-1");
+        let extra = json!({"workspaceId": "ws-1", "hostId": "host-1", "botId": "bot-1",
+            "responsibilityId": "resp-1", "force": true});
+        assert!(serde_json::from_value::<BotResponsibilityDeleteParams>(extra).is_err());
+    }
+
+    #[test]
+    fn responsibility_results_round_trip_with_exact_wire_keys() {
+        let created = BotResponsibilityCreateResult {
+            host_id: "host-1".into(),
+            workspace_id: "ws-1".into(),
+            bot_id: "bot-1".into(),
+            responsibility_id: "resp-1".into(),
+            automation_id: "auto-1".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&created).unwrap(),
+            json!({
+                "hostId": "host-1", "workspaceId": "ws-1", "botId": "bot-1",
+                "responsibilityId": "resp-1", "automationId": "auto-1",
+            })
+        );
+        let back: BotResponsibilityCreateResult =
+            serde_json::from_value(serde_json::to_value(&created).unwrap()).unwrap();
+        assert_eq!(back, created);
+
+        let deleted = BotResponsibilityDeleteResult {
+            host_id: "host-1".into(),
+            workspace_id: "ws-1".into(),
+            bot_id: "bot-1".into(),
+            responsibility_id: "resp-1".into(),
+            removed: true,
+            automation_id: None,
+        };
+        let value = serde_json::to_value(&deleted).unwrap();
+        assert_eq!(value["automationId"], serde_json::Value::Null);
+        assert_eq!(value["removed"], json!(true));
+        let back: BotResponsibilityDeleteResult = serde_json::from_value(value).unwrap();
+        assert_eq!(back, deleted);
     }
 }

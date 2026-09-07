@@ -32,3 +32,10 @@ export type {
   BotsPanelDescriptor,
   BotsPanelDescriptorInput,
 } from "./bots-panel-descriptor";
+export { BotResponsibilityCard } from "./BotResponsibilityCard";
+export { ResponsibilityFormCard } from "./BotsPageForms";
+export {
+  emptyResponsibilityForm,
+  isResponsibilityFormReady,
+} from "./bots-page-model";
+export type { ResponsibilityFormValues } from "./bots-page-model";

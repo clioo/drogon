@@ -183,3 +183,37 @@ export const botHistoryResultSchema = scope.extend({
   botId: z.string(),
   messages: z.array(botMessage),
 });
+
+// R7-E: scheduled-responsibility create/delete. Structural transport
+// validation only -- native owns name/prompt/cron policy, and re-derives
+// scope authority from its own host identity.
+export const botResponsibilityCreateInputSchema = scope
+  .extend({
+    requestId: id,
+    botId: id,
+    name: z.string().min(1).max(128),
+    schedule: z.string().min(1).max(2048),
+    prompt: z.string().min(1).max(32768),
+  })
+  .strict();
+
+export const botResponsibilityCreateResultSchema = scope.extend({
+  botId: z.string(),
+  responsibilityId: z.string(),
+  automationId: z.string(),
+});
+
+export const botResponsibilityDeleteInputSchema = scope
+  .extend({
+    requestId: id,
+    botId: id,
+    responsibilityId: z.string().min(1),
+  })
+  .strict();
+
+export const botResponsibilityDeleteResultSchema = scope.extend({
+  botId: z.string(),
+  responsibilityId: z.string(),
+  removed: z.boolean(),
+  automationId: z.string().nullable(),
+});

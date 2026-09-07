@@ -118,7 +118,48 @@ export interface BotBridge {
   botCreate?(input: BotCreateInput): Promise<Result<BotsPanelBot>>;
   botRun?(input: BotRunTurnInput): Promise<Result<BotRunReceipt>>;
   botHistory?(input: BotHistoryInput): Promise<Result<BotHistoryResult>>;
+  // R7-E: scheduled-responsibility create/delete. `requestId` is
+  // caller-chosen so a same-params retry after an ambiguous transport
+  // failure reuses the same ledger key, same as `botCreate`/`botRun`.
+  // Results are lean ids; callers re-read the full Bot via `botSnapshot`.
+  botResponsibilityCreate?(
+    input: BotResponsibilityCreateInput,
+  ): Promise<Result<BotResponsibilityCreateResult>>;
+  botResponsibilityDelete?(
+    input: BotResponsibilityDeleteInput,
+  ): Promise<Result<BotResponsibilityDeleteResult>>;
 }
+
+// R7-E additive types: a scheduled responsibility is an automation owned by
+// the bot. `schedule` is the 5-field UTC cron the daemon scheduler fires;
+// `prompt` becomes both the automation prompt and the responsibility
+// instructions. Transport shapes only; native owns validation.
+export type BotResponsibilityCreateInput = BotScope & {
+  requestId: string;
+  botId: string;
+  name: string;
+  schedule: string;
+  prompt: string;
+};
+
+export type BotResponsibilityCreateResult = BotScope & {
+  botId: string;
+  responsibilityId: string;
+  automationId: string;
+};
+
+export type BotResponsibilityDeleteInput = BotScope & {
+  requestId: string;
+  botId: string;
+  responsibilityId: string;
+};
+
+export type BotResponsibilityDeleteResult = BotScope & {
+  botId: string;
+  responsibilityId: string;
+  removed: boolean;
+  automationId: string | null;
+};
 
 export type BotsPanelHostObservation = "live" | "unverifiable" | "exited";
 
@@ -218,6 +259,10 @@ export type BotSessionReader = (input: {
 
 export type BotsPanelProps = {
   snapshot: BotsPanelSnapshot;
+  /** R7-E: closes the page (the fork's header Back button). Rendered only
+   *  when supplied, so callers without a close affordance keep the exact
+   *  pre-R7-E header. */
+  onClose?: () => void;
   onRunResponsibility?: (input: {
     botId: string;
     responsibilityId: string;

@@ -91,6 +91,14 @@ export function createGatedBotBridge(
       isAllowed()
         ? (source.botHistory?.(input) ?? notImplemented())
         : refused(),
+    botResponsibilityCreate: (input) =>
+      isAllowed()
+        ? (source.botResponsibilityCreate?.(input) ?? notImplemented())
+        : refused(),
+    botResponsibilityDelete: (input) =>
+      isAllowed()
+        ? (source.botResponsibilityDelete?.(input) ?? notImplemented())
+        : refused(),
   };
   if (source.read) gated.read = source.read;
   return gated;

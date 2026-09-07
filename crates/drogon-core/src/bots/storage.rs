@@ -796,6 +796,33 @@ pub fn create_scheduled_responsibility(
     responsibility: super::records::Responsibility,
     automation: Automation,
 ) -> Result<(Bot, Automation)> {
+    let tx = conn.unchecked_transaction()?;
+    let result = create_scheduled_responsibility_in_tx(
+        &tx,
+        host_id,
+        folder,
+        bot_id,
+        responsibility,
+        automation,
+    )?;
+    tx.commit()?;
+    Ok(result)
+}
+
+/// The check-then-insert body of [`create_scheduled_responsibility`],
+/// taking an already-open transaction/connection and never beginning or
+/// committing one of its own -- see [`record_responsibility_run_in_tx`]
+/// for why this split exists: the `bot.responsibility_create` RPC runs
+/// this inside its ledger's own transaction so the responsibility rows
+/// and the receipt row commit atomically.
+pub(crate) fn create_scheduled_responsibility_in_tx(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    bot_id: &str,
+    responsibility: super::records::Responsibility,
+    automation: Automation,
+) -> Result<(Bot, Automation)> {
     let ResponsibilityTrigger::Scheduled { automation_id } = &responsibility.trigger else {
         return Err(StorageError::OwnershipViolation(
             "create_scheduled_responsibility requires a Scheduled trigger",
@@ -811,15 +838,99 @@ pub fn create_scheduled_responsibility(
             "a scheduled responsibility's automation must be owned by the same Bot",
         ));
     }
-    let tx = conn.unchecked_transaction()?;
-    automations_storage::insert_new_automation(&tx, &automation)?;
+    automations_storage::insert_new_automation(conn, &automation)?;
     let (mut bot, expected_rev) =
-        get_bot_with_rev(&tx, host_id, folder, bot_id)?.ok_or(StorageError::NotFound("bot"))?;
+        get_bot_with_rev(conn, host_id, folder, bot_id)?.ok_or(StorageError::NotFound("bot"))?;
     bot.responsibilities.push(responsibility);
     bot.updated_at = automation.updated_at.max(bot.updated_at);
-    cas_write(&tx, host_id, folder, &bot, expected_rev)?;
-    tx.commit()?;
+    cas_write(conn, host_id, folder, &bot, expected_rev)?;
     Ok((bot, automation))
+}
+
+/// Removes one responsibility from the Bot and deletes its scheduled
+/// automation when that automation is still owned by this Bot -- the
+/// inverse of [`create_scheduled_responsibility`], in one transaction so
+/// the projection and the automation can never strand each other.
+///
+/// A scheduled responsibility whose automation is already gone (or is no
+/// longer owned by this Bot) still has its projection removed; the
+/// foreign/gone automation is never touched, and the returned
+/// `automation_id` is `None`. A reactive responsibility removes only the
+/// projection. `bot_responsibility_runs` rows are preserved as orphaned
+/// evidence either way (see [`delete_bot`]): history keeps resolving the
+/// missing responsibility/automation to `None`, never deleting the run.
+pub struct DeletedResponsibility {
+    pub bot: Bot,
+    pub responsibility_id: String,
+    pub automation_id: Option<String>,
+}
+
+pub fn delete_responsibility(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    bot_id: &str,
+    responsibility_id: &str,
+    new_updated_at: f64,
+) -> Result<DeletedResponsibility> {
+    let tx = conn.unchecked_transaction()?;
+    let result = delete_responsibility_in_tx(
+        &tx,
+        host_id,
+        folder,
+        bot_id,
+        responsibility_id,
+        new_updated_at,
+    )?;
+    tx.commit()?;
+    Ok(result)
+}
+
+/// The remove-projection-and-owned-automation body of
+/// [`delete_responsibility`], taking an already-open
+/// transaction/connection and never beginning or committing one of its
+/// own -- the `bot.responsibility_delete` RPC runs this inside its
+/// ledger's own transaction so the removal and the receipt row commit
+/// atomically.
+pub(crate) fn delete_responsibility_in_tx(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    bot_id: &str,
+    responsibility_id: &str,
+    new_updated_at: f64,
+) -> Result<DeletedResponsibility> {
+    let (mut bot, expected_rev) =
+        get_bot_with_rev(conn, host_id, folder, bot_id)?.ok_or(StorageError::NotFound("bot"))?;
+    let position = bot
+        .responsibilities
+        .iter()
+        .position(|r| r.id == responsibility_id)
+        .ok_or(StorageError::NotFound("responsibility"))?;
+    let removed = bot.responsibilities.remove(position);
+    bot.updated_at = new_updated_at;
+    cas_write(conn, host_id, folder, &bot, expected_rev)?;
+    let automation_id = match &removed.trigger {
+        super::records::ResponsibilityTrigger::Scheduled { automation_id } => {
+            match automations_storage::get_automation(conn, automation_id)? {
+                Some(automation) if automation.belongs_to_bot(bot_id) => {
+                    automations_storage::delete_automation(
+                        conn,
+                        automation_id,
+                        Some(&AutomationOwnerPrecondition::Owned(bot_id.to_string())),
+                    )?;
+                    Some(automation_id.clone())
+                }
+                _ => None,
+            }
+        }
+        super::records::ResponsibilityTrigger::Reactive { .. } => None,
+    };
+    Ok(DeletedResponsibility {
+        bot,
+        responsibility_id: responsibility_id.to_string(),
+        automation_id,
+    })
 }
 
 /// Validates that `automation_id` names an automation owned by `bot_id`

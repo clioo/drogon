@@ -389,14 +389,14 @@ describe("BotsPanel render", () => {
         historyEntry(),
       ],
     });
-    expect(markup).toContain("run-2");
-    expect(markup).toContain("unlinked responsibility");
-    expect(markup).toContain("unlinked automation");
-    expect(markup).toContain("run-1");
+    expect(markup).toContain("Responsibility history");
+    expect(markup).toContain("Removed responsibility");
+    expect(markup).toContain("Recorded");
     expect(markup).toContain("Review duty");
+    expect(markup).toContain("Nightly review · run 3");
   });
 
-  it("shows host observations verbatim as evidence labels, never as success status", () => {
+  it("renders per-bot history rows as evidence detail, never as success status", () => {
     const markup = render({
       bots: [bot()],
       history: [
@@ -415,10 +415,10 @@ describe("BotsPanel render", () => {
         }),
       ],
     });
-    expect(markup).toContain("r-live");
-    expect(markup).toContain("live");
-    expect(markup).toContain("unverifiable");
-    expect(markup).toContain("—");
+    expect(markup).toContain("Responsibility history");
+    expect(markup).toContain("Review duty");
+    expect(markup).not.toContain("Completed");
+    expect(markup).not.toContain("succeeded");
   });
 });
 
@@ -454,10 +454,10 @@ describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run
     }),
   };
 
-  it("renders no Create Bot / Chat controls without both bridge and scope", () => {
+  it("renders no Create Bot / Open session controls without both bridge and scope", () => {
     const markup = render({ bots: [bot()], history: [] });
     expect(markup).not.toContain("Create Bot");
-    expect(markup).not.toContain('data-testid="select-bot-bot-1"');
+    expect(markup).not.toContain('data-testid="open-session-bot-1"');
   });
 
   it("renders Create Bot on the empty state once bridge+scope are supplied", () => {
@@ -465,10 +465,10 @@ describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run
     expect(markup).toContain("Create Bot");
   });
 
-  it("renders a per-bot Chat control once bridge+scope are supplied", () => {
+  it("renders a per-bot Open session control once bridge+scope are supplied", () => {
     const markup = render({ bots: [bot()], history: [] }, { bridge, scope });
-    expect(markup).toContain('data-testid="select-bot-bot-1"');
-    expect(markup).toContain("Chat");
+    expect(markup).toContain('data-testid="open-session-bot-1"');
+    expect(markup).toContain("Open session");
   });
 
   it("still requires onRunResponsibility separately for the run button even with bridge+scope", () => {
@@ -527,18 +527,79 @@ describe("BotsPanel styling contract (admitted tokens/primitives only)", () => {
     );
     const runButtonMarkup = markup.slice(runButtonStart, runButtonEnd + 1);
     expect(runButtonMarkup).toContain('data-slot="button"');
-    expect(runButtonMarkup).toContain("outline");
+    expect(runButtonMarkup).toContain("size-8");
     expect(runButtonMarkup).toContain('data-bot-id="bot-1"');
     expect(runButtonMarkup).toContain('data-responsibility-id="resp-1"');
   });
 
   it("never hardcodes hex colors in the panel source — main.css variables are canonical", () => {
-    for (const file of ["BotsPanel.tsx", "bots-panel-projection.ts"]) {
+    for (const file of [
+      "BotsPanel.tsx",
+      "bots-panel-projection.ts",
+      "BotResponsibilityCard.tsx",
+      "BotsPageForms.tsx",
+    ]) {
       const source = readFileSync(
         new URL(`./${file}`, import.meta.url),
         "utf8",
       );
       expect(source.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
     }
+  });
+});
+
+describe("BotsPanel R7-E: header Back, add/delete responsibility controls", () => {
+  const scope = { hostId: "host-1", workspaceId: "ws-1", locale: "en-US" };
+  const fullBridge = {
+    botSnapshot: async () => ({
+      ok: true as const,
+      result: { ...scope, ...emptySnapshot },
+    }),
+    botResponsibilityCreate: async () => ({
+      ok: true as const,
+      result: {
+        ...scope,
+        botId: "bot-1",
+        responsibilityId: "resp-1",
+        automationId: "auto-1",
+      },
+    }),
+    botResponsibilityDelete: async () => ({
+      ok: true as const,
+      result: {
+        ...scope,
+        botId: "bot-1",
+        responsibilityId: "resp-1",
+        removed: true,
+        automationId: "auto-1",
+      },
+    }),
+  };
+
+  it("renders the header Back button only when onClose is supplied", () => {
+    const without = render({ bots: [bot()], history: [] });
+    expect(without).not.toContain(">Back<");
+    const withClose = render(
+      { bots: [bot()], history: [] },
+      { onClose: () => {} },
+    );
+    expect(withClose).toContain(">Back<");
+  });
+
+  it("renders Add/Delete responsibility controls only with both bridge methods and scope", () => {
+    const gated = render(
+      { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
+      { bridge: { botSnapshot: fullBridge.botSnapshot }, scope },
+    );
+    expect(gated).not.toContain("Add responsibility");
+    expect(gated).not.toContain("Delete Review duty");
+    const editable = render(
+      { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
+      { bridge: fullBridge, scope },
+    );
+    expect(editable).toContain('data-testid="add-responsibility-bot-1"');
+    expect(editable).toContain("Add responsibility");
+    expect(editable).toContain('data-testid="delete-responsibility-resp-1"');
+    expect(editable).toContain("Delete Review duty");
   });
 });
