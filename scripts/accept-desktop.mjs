@@ -275,7 +275,20 @@ try {
   await page.keyboard.press("Enter");
   await page.waitForFunction(
     (value) =>
-      document.querySelector(".xterm-screen")?.textContent?.includes(value),
+      (() => {
+        const registry = window.__drogonTerminals;
+        if (registry && registry.size > 0) {
+          const lines = [];
+          for (const terminal of registry.values()) {
+            const buffer = terminal.buffer.active;
+            for (let row = 0; row < buffer.length; row += 1) {
+              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+            }
+          }
+          return lines.join("\n");
+        }
+        return document.querySelector(".xterm-screen")?.textContent ?? "";
+      })().includes(value),
     marker,
   );
   report.checks.push("rendered-terminal-command-output");
@@ -287,7 +300,20 @@ try {
   await page.reload();
   await page.waitForFunction(
     (value) =>
-      document.querySelector(".xterm-screen")?.textContent?.includes(value),
+      (() => {
+        const registry = window.__drogonTerminals;
+        if (registry && registry.size > 0) {
+          const lines = [];
+          for (const terminal of registry.values()) {
+            const buffer = terminal.buffer.active;
+            for (let row = 0; row < buffer.length; row += 1) {
+              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+            }
+          }
+          return lines.join("\n");
+        }
+        return document.querySelector(".xterm-screen")?.textContent ?? "";
+      })().includes(value),
     marker,
   );
   const reconnected = await page.evaluate(async (id) => {
@@ -310,7 +336,20 @@ try {
     await launchDesktop();
     await page.waitForFunction(
       (value) =>
-        document.querySelector(".xterm-screen")?.textContent?.includes(value),
+        (() => {
+        const registry = window.__drogonTerminals;
+        if (registry && registry.size > 0) {
+          const lines = [];
+          for (const terminal of registry.values()) {
+            const buffer = terminal.buffer.active;
+            for (let row = 0; row < buffer.length; row += 1) {
+              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+            }
+          }
+          return lines.join("\n");
+        }
+        return document.querySelector(".xterm-screen")?.textContent ?? "";
+      })().includes(value),
       marker,
     );
     const after = await fixtureDaemon.rpc("status");
@@ -359,7 +398,20 @@ try {
   );
   await page.waitForFunction(
     (value) =>
-      document.querySelector(".xterm-screen")?.textContent?.includes(value),
+      (() => {
+        const registry = window.__drogonTerminals;
+        if (registry && registry.size > 0) {
+          const lines = [];
+          for (const terminal of registry.values()) {
+            const buffer = terminal.buffer.active;
+            for (let row = 0; row < buffer.length; row += 1) {
+              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+            }
+          }
+          return lines.join("\n");
+        }
+        return document.querySelector(".xterm-screen")?.textContent ?? "";
+      })().includes(value),
     marker,
   );
   report.checks.push("keyboard-tab-navigation-and-sibling-close");

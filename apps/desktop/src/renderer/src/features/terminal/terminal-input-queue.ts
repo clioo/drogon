@@ -1,4 +1,4 @@
-import type { Result } from "../../shared/session-contract";
+import type { Result } from "../../../../shared/session-contract";
 
 export class TerminalInputQueue {
   private tail = Promise.resolve();

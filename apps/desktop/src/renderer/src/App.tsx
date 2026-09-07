@@ -92,7 +92,7 @@ import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import { openCommandPalette } from "./features/shell/open-palette";
 import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
-import { TERMINAL_CLEAR_EVENT, TerminalPane } from "./TerminalPane";
+import { TERMINAL_CLEAR_EVENT, TerminalPane } from "./features/terminal/TerminalPane";
 import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
 import {

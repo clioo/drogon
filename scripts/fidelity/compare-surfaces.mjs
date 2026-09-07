@@ -912,7 +912,20 @@ async function candSetup(page, state, ctx) {
       // wait for evidence the shell is alive so the marker is not swallowed.
       await page
         .waitForFunction(
-          () => /[$#%]/.test(document.querySelector(".xterm-screen")?.textContent ?? ""),
+          () => /[$#%]/.test((() => {
+        const registry = window.__drogonTerminals;
+        if (registry && registry.size > 0) {
+          const lines = [];
+          for (const terminal of registry.values()) {
+            const buffer = terminal.buffer.active;
+            for (let row = 0; row < buffer.length; row += 1) {
+              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+            }
+          }
+          return lines.join("\n");
+        }
+        return document.querySelector(".xterm-screen")?.textContent ?? "";
+      })()),
           null,
           { timeout: 20000 },
         )
@@ -931,7 +944,20 @@ async function candSetup(page, state, ctx) {
         await page.keyboard.press("Enter");
         try {
           await page.waitForFunction(
-            (value) => document.querySelector(".xterm-screen")?.textContent?.includes(value),
+            (value) => (() => {
+        const registry = window.__drogonTerminals;
+        if (registry && registry.size > 0) {
+          const lines = [];
+          for (const terminal of registry.values()) {
+            const buffer = terminal.buffer.active;
+            for (let row = 0; row < buffer.length; row += 1) {
+              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+            }
+          }
+          return lines.join("\n");
+        }
+        return document.querySelector(".xterm-screen")?.textContent ?? "";
+      })().includes(value),
             marker,
             { timeout: 9000 },
           );
