@@ -29,9 +29,12 @@ and orchestration reference; older files under `docs/migration/` are history.
   are not behavioral failures, and mocks of missing product behavior prove
   nothing. Liveness verdicts are `live`, `unverifiable` or `exited`; loss of
   contact never proves exit.
-- UI follows Orca's monochrome token system already in
-  `apps/desktop/src/renderer/src/assets/main.css`; validate rendered UI with
-  Playwright over CDP, not computer-use. Use domain-specific filenames and
+- Fidelity is exact: the experience and UI must match orca-drogon. Port
+  components from the read-only reference SOURCE as literally as possible
+  (structure, Tailwind classes and tokens, copy, icons, keyboard, ARIA) and
+  adapt only the data layer; the source code is the source of truth and the
+  running orca-drogon instance only confirms the render. Validate rendered UI
+  with Playwright over CDP, not computer-use. Use domain-specific filenames and
   concise comments only where the code is non-obvious.
 - Use `apply_patch` for edits when your harness offers it. Never commit
   secrets or raw provider transcripts.
