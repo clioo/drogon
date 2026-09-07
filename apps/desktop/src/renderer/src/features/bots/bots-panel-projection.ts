@@ -1,0 +1,122 @@
+import type {
+  BotsPanelBot,
+  BotsPanelHistoryEntry,
+  BotsPanelResponsibility,
+  BotsPanelTrigger,
+} from "./bots-panel-contracts";
+
+// Pure display projections for the Bots panel. Ordering semantics follow the
+// admitted storage contracts: the bot list is locale-sorted by display name
+// (source listBots: displayName.localeCompare) and history arrives newest-first
+// from the store — the panel preserves that order and never re-sorts or
+// invents joins. Host observations are evidence labels only, never automation
+// status or a completion verdict.
+
+export const READY_FOR_A_PURPOSE = "Ready for a purpose";
+export const HARNESS_DEFAULT_MODEL_LABEL = "Harness default";
+
+export type BotsPanelBotRow = {
+  id: string;
+  displayName: string;
+  handle: string | null;
+  description: string;
+  harness: string;
+  modelLabel: string;
+  scheduledCount: number;
+  reactiveCount: number;
+  enabledCount: number;
+  sessionActive: boolean;
+};
+
+export type BotsPanelResponsibilityRow = {
+  id: string;
+  name: string;
+  kind: BotsPanelResponsibility["kind"];
+  triggerLabel: string;
+  recipeRef: string | null;
+  enabled: boolean;
+  canManualRun: boolean;
+};
+
+export type BotsPanelHistoryRow = {
+  runId: string;
+  startedAt: number;
+  endedAt: number | null;
+  hostObservation: BotsPanelHistoryEntry["run"]["hostObservation"];
+  responsibilityName: string | null;
+  automationName: string | null;
+  automationRunNumber: number | null;
+};
+
+export function botDescription(
+  entry: Pick<BotsPanelBot, "displayIdentity" | "instructions">,
+): string {
+  const title = entry.displayIdentity.title?.trim();
+  if (title) return title;
+  const instructions = entry.instructions.trim();
+  if (instructions) return instructions;
+  return READY_FOR_A_PURPOSE;
+}
+
+export function modelLabel(policy: BotsPanelBot["harnessPolicy"]): string {
+  return policy.explicitModel ?? HARNESS_DEFAULT_MODEL_LABEL;
+}
+
+export function triggerLabel(trigger: BotsPanelTrigger): string {
+  if (trigger.kind === "scheduled") return trigger.automationId;
+  return trigger.event ?? "connected event";
+}
+
+export function projectBotRows(bots: BotsPanelBot[]): BotsPanelBotRow[] {
+  return [...bots]
+    .sort((left, right) =>
+      left.displayIdentity.displayName.localeCompare(
+        right.displayIdentity.displayName,
+      ),
+    )
+    .map((entry) => ({
+      id: entry.id,
+      displayName: entry.displayIdentity.displayName,
+      handle: entry.displayIdentity.handle,
+      description: botDescription(entry),
+      harness: entry.harnessPolicy.defaultHarness,
+      modelLabel: modelLabel(entry.harnessPolicy),
+      scheduledCount: entry.responsibilities.filter(
+        (item) => item.kind === "scheduled",
+      ).length,
+      reactiveCount: entry.responsibilities.filter(
+        (item) => item.kind === "reactive",
+      ).length,
+      enabledCount: entry.responsibilities.filter((item) => item.enabled)
+        .length,
+      sessionActive: entry.currentSession !== null,
+    }));
+}
+
+export function projectResponsibilityRows(
+  bot: Pick<BotsPanelBot, "responsibilities">,
+): BotsPanelResponsibilityRow[] {
+  return bot.responsibilities.map((item) => ({
+    id: item.id,
+    name: item.name,
+    kind: item.kind,
+    triggerLabel: triggerLabel(item.trigger),
+    recipeRef: item.recipe?.recipeRef ?? null,
+    enabled: item.enabled,
+    canManualRun: item.kind === "scheduled" && item.enabled,
+  }));
+}
+
+export function projectHistoryRows(
+  history: BotsPanelHistoryEntry[],
+): BotsPanelHistoryRow[] {
+  return history.map((entry) => ({
+    runId: entry.run.id,
+    startedAt: entry.run.startedAt,
+    endedAt: entry.run.endedAt,
+    hostObservation: entry.run.hostObservation,
+    responsibilityName: entry.responsibilityName,
+    automationName: entry.automationName,
+    automationRunNumber: entry.automationRunNumber,
+  }));
+}
