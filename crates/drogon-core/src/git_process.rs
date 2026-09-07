@@ -147,17 +147,46 @@ pub fn run_read_only_git(
     cache: &CapabilityCache,
     budget: GitProbeBudget,
 ) -> Result<ParsedGitOutput, RpcError> {
+    run_read_only_git_with_bin(
+        operation,
+        workspace_root,
+        scope,
+        cache,
+        budget,
+        Path::new("git"),
+    )
+}
+
+/// Same as `run_read_only_git`, but spawns `git_bin` directly instead of
+/// resolving `git` from `PATH`. Exists as a narrow test seam: a caller that
+/// wants to exercise a slow/misbehaving `git` (e.g. a wrapper script that
+/// sleeps past the budget) can point `git_bin` straight at it, with zero
+/// process-global `PATH` mutation — see `tests/git_process.rs`'s
+/// `run_read_only_git_maps_a_real_timeout_to_unverifiable`, which is the only
+/// reason this entry point exists.
+pub fn run_read_only_git_with_bin(
+    operation: ReadOnlyGitOperation,
+    workspace_root: &Path,
+    scope: &HostScope,
+    cache: &CapabilityCache,
+    budget: GitProbeBudget,
+    git_bin: &Path,
+) -> Result<ParsedGitOutput, RpcError> {
     match operation {
-        ReadOnlyGitOperation::Status => run_status(workspace_root, &budget),
+        ReadOnlyGitOperation::Status => run_status(workspace_root, &budget, git_bin),
         ReadOnlyGitOperation::WorktreeList => {
-            run_worktree_list(workspace_root, scope, cache, &budget)
+            run_worktree_list(workspace_root, scope, cache, &budget, git_bin)
         }
     }
 }
 
-fn run_status(workspace_root: &Path, budget: &GitProbeBudget) -> Result<ParsedGitOutput, RpcError> {
+fn run_status(
+    workspace_root: &Path,
+    budget: &GitProbeBudget,
+    git_bin: &Path,
+) -> Result<ParsedGitOutput, RpcError> {
     let argv = status_argv();
-    let outcome = spawn_git_and_capture(workspace_root, &argv, budget)?;
+    let outcome = spawn_git_and_capture(workspace_root, &argv, budget, git_bin)?;
     let stdout = require_success(&outcome, &argv)?;
     let parsed = if stdout.contains('\0') {
         parse_status_porcelain_v2_z(stdout)?
@@ -211,6 +240,7 @@ fn run_worktree_list(
     scope: &HostScope,
     cache: &CapabilityCache,
     budget: &GitProbeBudget,
+    git_bin: &Path,
 ) -> Result<ParsedGitOutput, RpcError> {
     let capability = Capability::WorktreeListZ;
     let is_leader = cache.begin_probe(scope, capability) == ProbeOutcome::Leader;
@@ -218,7 +248,7 @@ fn run_worktree_list(
     if !is_leader {
         wait_for_leader_bounded(scope, cache, capability);
         let fallback_argv = follower_worktree_list_argv();
-        let outcome = spawn_git_and_capture(workspace_root, &fallback_argv, budget)?;
+        let outcome = spawn_git_and_capture(workspace_root, &fallback_argv, budget, git_bin)?;
         let stdout = require_success(&outcome, &fallback_argv)?;
         let entries = parse_worktree_list_porcelain(stdout)?;
         return Ok(ParsedGitOutput::WorktreeList(entries));
@@ -237,7 +267,7 @@ fn run_worktree_list(
     let fallback_argv = worktree_list_fallback_argv();
 
     if try_preferred {
-        let outcome = spawn_git_and_capture(workspace_root, &preferred_argv, budget)?;
+        let outcome = spawn_git_and_capture(workspace_root, &preferred_argv, budget, git_bin)?;
         match &outcome {
             SpawnOutcome::Exited { status, stdout, .. } if status.success() => {
                 let entries = parse_worktree_list_porcelain(stdout)?;
@@ -263,7 +293,7 @@ fn run_worktree_list(
         }
     }
 
-    let outcome = spawn_git_and_capture(workspace_root, &fallback_argv, budget)?;
+    let outcome = spawn_git_and_capture(workspace_root, &fallback_argv, budget, git_bin)?;
     let stdout = require_success(&outcome, &fallback_argv)?;
     let entries = parse_worktree_list_porcelain(stdout)?;
     Ok(ParsedGitOutput::WorktreeList(entries))
@@ -433,7 +463,15 @@ pub(crate) const ENV_REMOVE_DENYLIST: &[&str] = &[
 ];
 
 pub(crate) fn build_git_command(cwd: &Path, argv: &[String]) -> Command {
-    let mut cmd = Command::new("git");
+    build_git_command_with_bin(Path::new("git"), cwd, argv)
+}
+
+/// Same as `build_git_command`, but spawns `git_bin` instead of resolving
+/// `git` from `PATH` — the seam `run_read_only_git_with_bin` threads through
+/// to `spawn_git_and_capture` so a test can point directly at a slow wrapper
+/// script with zero process-global `PATH` mutation.
+pub(crate) fn build_git_command_with_bin(git_bin: &Path, cwd: &Path, argv: &[String]) -> Command {
+    let mut cmd = Command::new(git_bin);
     cmd.args(argv)
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -1113,8 +1151,9 @@ fn spawn_git_and_capture(
     cwd: &Path,
     argv: &[String],
     budget: &GitProbeBudget,
+    git_bin: &Path,
 ) -> Result<SpawnOutcome, RpcError> {
-    let cmd = build_git_command(cwd, argv);
+    let cmd = build_git_command_with_bin(git_bin, cwd, argv);
     spawn_and_capture_bounded(cmd, budget)
 }
 
