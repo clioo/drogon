@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bot,
   Folder,
   FolderPlus,
   Monitor,
@@ -38,6 +39,16 @@ import {
   isFilesAvailable,
   registerFilesRoute,
 } from "./files-mount";
+import {
+  BOTS_CAPABILITY,
+  BOTS_ROUTE_ID,
+  buildBotsPanelProps,
+  createGatedBotBridge,
+  isBotsAvailable,
+  registerBotsRoute,
+} from "./bots-mount";
+import { loadBotSnapshot } from "./bots-loader";
+import type { BotsLoadResult } from "./bots-loader";
 import { FILES_CAPABILITY } from "../../shared/file-contract";
 import {
   applyPanelFocus,
@@ -321,17 +332,73 @@ export function App() {
   useEffect(() => {
     filesGateRef.current = isFilesAvailable(liveCapabilities);
   }, [liveCapabilities]);
-  const panelRegistry = useMemo(
-    () =>
-      registerFilesRoute(
-        createRouteRegistry({
-          capabilities: [FILES_CAPABILITY],
-          fallbackId: FILES_ROUTE_ID,
-        }),
-        createGatedFileBridge(window.drogon, () => filesGateRef.current),
-      ),
+  const botsGateRef = useRef(false);
+  useEffect(() => {
+    botsGateRef.current = isBotsAvailable(liveCapabilities);
+  }, [liveCapabilities]);
+  const filesGatedBridge = useMemo(
+    () => createGatedFileBridge(window.drogon, () => filesGateRef.current),
     [],
   );
+  const botsGatedBridge = useMemo(
+    () => createGatedBotBridge(window.drogon, () => botsGateRef.current),
+    [],
+  );
+  // Bots snapshot loads through the gated bridge for the exact live scope;
+  // results carry their scope triple and render only on scope match, so no
+  // stale snapshot ever shows for another workspace/host. No run control:
+  // the panel is read-only until the BotRun bridge lands.
+  const botsScope =
+    current && status
+      ? {
+          hostId: status.hostId,
+          workspaceId: current.id,
+          locale: settings.get("locale"),
+        }
+      : null;
+  const botsScopeHost = botsScope?.hostId ?? null;
+  const botsScopeWorkspace = botsScope?.workspaceId ?? null;
+  const botsScopeLocale = botsScope?.locale ?? null;
+  function botsScopeEquals(
+    scope: { hostId: string; workspaceId: string; locale: string } | null | undefined,
+  ): scope is { hostId: string; workspaceId: string; locale: string } {
+    return (
+      scope != null &&
+      botsScopeHost !== null &&
+      scope.hostId === botsScopeHost &&
+      scope.workspaceId === botsScopeWorkspace &&
+      scope.locale === botsScopeLocale
+    );
+  }
+  const [botsLoad, setBotsLoad] = useState<BotsLoadResult | null>(null);
+  const [botsReload, setBotsReload] = useState(0);
+  const botsAvailable = isBotsAvailable(liveCapabilities);
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (route !== BOTS_ROUTE_ID || !botsAvailable || !botsScope) return;
+      const result = await loadBotSnapshot(botsGatedBridge, botsScope);
+      if (!cancelled) setBotsLoad(result);
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [route, botsAvailable, botsScopeHost, botsScopeWorkspace, botsScopeLocale, botsReload]);
+  const panelRegistry = useMemo(() => {
+    const base = createRouteRegistry({
+      capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY],
+      fallbackId: BOTS_ROUTE_ID,
+    });
+    const withFiles = registerFilesRoute(base, filesGatedBridge);
+    if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
+      return registerBotsRoute(
+        withFiles,
+        botsGatedBridge,
+        buildBotsPanelProps(botsLoad.snapshot),
+      );
+    return withFiles;
+  }, [botsLoad, botsScopeHost, botsScopeWorkspace, botsScopeLocale]);
   const filesAvailable =
     isFilesAvailable(liveCapabilities) &&
     checkAvailability(
@@ -365,19 +432,44 @@ export function App() {
   const filesAlive = filesAliveRef.current;
   const filesProps = current && status ? { workspace: current, status } : lastPropsRef.current;
   const filesSectionRef = useRef<HTMLElement>(null);
+  const botsSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
   useEffect(() => {
-    // Real focus, only on explicit user navigation to Files: background
+    // Real focus, only on explicit user navigation to a panel: background
     // refreshes and re-renders must never steal focus.
-    if (route === FILES_ROUTE_ID && prevRouteRef.current !== FILES_ROUTE_ID) {
-      const target = filesSectionRef.current;
-      if (target) {
-        applyPanelFocus(resolveRoute(panelRegistry, FILES_ROUTE_ID), target);
-        target.focus();
-      }
+    const target =
+      route === FILES_ROUTE_ID
+        ? filesSectionRef.current
+        : route === BOTS_ROUTE_ID
+          ? botsSectionRef.current
+          : null;
+    if (route !== null && target && prevRouteRef.current !== route) {
+      applyPanelFocus(resolveRoute(panelRegistry, route), target);
+      target.focus();
     }
     prevRouteRef.current = route;
   }, [route, panelRegistry]);
+  // Bots keep-alive mirrors files: survives switches and transients,
+  // unmounts on explicit withhold or settled workspace loss. The Bots
+  // panel is read-only (no drafts), so remounts on snapshot refresh are
+  // safe; scope mismatch never renders (no stale data).
+  const botsExplicitWithhold =
+    status !== null && !isBotsAvailable(liveCapabilities);
+  const botsAliveRef = useRef(false);
+  if (route === BOTS_ROUTE_ID && botsAvailable && current)
+    botsAliveRef.current = true;
+  else if (
+    botsExplicitWithhold ||
+    (status && !current && !busy && !loadingSessions)
+  )
+    botsAliveRef.current = false;
+  const botsAlive = botsAliveRef.current;
+  const botsScopeMatch =
+    botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope);
+  const botsDescriptor: PanelDescriptor | null =
+    botsAlive && filesProps && botsScopeMatch
+      ? resolveRoute(panelRegistry, BOTS_ROUTE_ID)
+      : null;
   const checked = <T,>(value: Result<T>): T => {
     if (!value.ok) throw new Error(value.error.message);
     return value.result;
@@ -677,6 +769,25 @@ export function App() {
               <Folder size={16} />
               <span>Files</span>
             </button>
+            <button
+              key="panel-bots"
+              className="workspace-row"
+              disabled={
+                busy ||
+                !current ||
+                !isBotsAvailable(liveCapabilities)
+              }
+              data-current={route === BOTS_ROUTE_ID}
+              title={
+                isBotsAvailable(liveCapabilities)
+                  ? "Bots"
+                  : "Bots unavailable: service does not advertise bot.snapshot.v1"
+              }
+              onClick={() => setRoute(BOTS_ROUTE_ID)}
+            >
+              <Bot size={16} />
+              <span>Bots</span>
+            </button>
           </nav>
           {adding && (
             <form
@@ -795,7 +906,10 @@ export function App() {
               aria-label="Terminals"
               style={{
                 display:
-                  route === FILES_ROUTE_ID && filesAlive ? "none" : undefined,
+                  (route === FILES_ROUTE_ID && filesAlive) ||
+                  (route === BOTS_ROUTE_ID && botsAlive && filesProps !== null)
+                    ? "none"
+                    : undefined,
               }}
             >
               <div
@@ -984,6 +1098,63 @@ export function App() {
                   workspace={filesProps.workspace}
                   status={filesProps.status}
                 />
+              </section>
+            ) : null}
+            {botsAlive && filesProps ? (
+              <section
+                ref={botsSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Bots"
+                style={{
+                  display: route === BOTS_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                {botsDescriptor ? (
+                  <MountedPanel
+                    descriptor={botsDescriptor}
+                    workspace={filesProps.workspace}
+                    status={filesProps.status}
+                  />
+                ) : (
+                  <div className="empty-state" role="status">
+                    {(() => {
+                      const fresh =
+                        botsLoad && botsScopeEquals(botsLoad.scope)
+                          ? botsLoad
+                          : null;
+                      if (fresh === null) return <p>Loading bots…</p>;
+                      if (fresh.status === "too_large")
+                        return (
+                          <>
+                            <p>
+                              Bots snapshot too large: {fresh.message}{" "}
+                              Narrow the workspace scope and retry.
+                            </p>
+                            <Button
+                              disabled={busy}
+                              onClick={() => setBotsReload((tick) => tick + 1)}
+                            >
+                              Retry
+                            </Button>
+                          </>
+                        );
+                      if (fresh.status === "error")
+                        return (
+                          <>
+                            <p>Bots unavailable: {fresh.message}</p>
+                            <Button
+                              disabled={busy}
+                              onClick={() => setBotsReload((tick) => tick + 1)}
+                            >
+                              Retry
+                            </Button>
+                          </>
+                        );
+                      return <p>Loading bots…</p>;
+                    })()}
+                  </div>
+                )}
               </section>
             ) : null}
             {inspector && (
