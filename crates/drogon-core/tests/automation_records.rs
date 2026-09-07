@@ -85,6 +85,9 @@ fn sample_run(id: &str, automation_id: &str) -> AutomationRun {
         run_number: None,
         occurrence_count: None,
         last_occurrence_at: None,
+        session_incarnation: None,
+        exit_code: None,
+        observed_at: None,
     }
 }
 
