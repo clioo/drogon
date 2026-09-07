@@ -49,3 +49,86 @@ implemented by the candidate; no assertion was weakened.
   end-to-end/public-seam (RPC + real storage + real process) layer.
 - Nothing outside the two exclusive files was created or modified; no Git
   operations were performed.
+
+---
+
+## Fixture Fixes (task_fe2272e9d9c6): ROOT fixture review — liveness + cleanup honesty
+
+Scope: `tests/native_worker_lifecycle/harness.rs` (shared V1 fixture),
+`tests/native_attempt_cancel_reopen.rs`, this section. No production files,
+no other test files touched.
+
+### Correction verdicts
+
+1. **Three-valued liveness observer replaces the buggy bool — DONE.**
+   `harness.rs` now owns ONE narrow observer:
+   `observe_liveness(pid) -> Liveness` (`Live`/`Exited`/`Unverifiable`),
+   backed by the pure `classify_kill_output(success, stderr)` mapping where
+   ONLY a proven ESRCH ("No such process" from `kill -0`) counts as
+   `Exited`; permission errors (e.g. EPERM), usage errors and kill-spawn
+   failures are `Unverifiable`. The observer is strictly read-only
+   (signal 0, never anything else) and is shared by both V1 test scopes:
+   the cancel/reopen suite now includes the harness by path
+   (`#[path = "native_worker_lifecycle/harness.rs"]`) instead of carrying a
+   copied fixture, so no second (buggy) bool exists anywhere. The legacy
+   `liveness_probe(pid) -> bool` remains ONLY as a proven-live wrapper for
+   the read-only probe assertions in the lifecycle suite (whose files are
+   outside this task's edit scope), with documentation warning that cleanup
+   must never consume the bool.
+   **Cleanup semantics fixed accordingly**: `Fixture::try_cleanup_within`
+   removes the fixture tree only when every recorded child has PROVEN its
+   exit (ESRCH) or none was recorded; a provably-live or unverifiable child
+   keeps the tree on disk and yields a typed `Err(reason)`. `cleanup()` now
+   panics WITH the preservation notice (including the reason and the
+   preserved path) instead of silently claiming success. The old bug —
+   `!liveness_probe(pid)` treating permission/spawn failures as exit and
+   deleting fixtures over a possibly-live child — is gone.
+   **Controlled error-path tests added** (in the cancel/reopen suite):
+   `liveness_observer_counts_only_proven_esrch_as_exit` (pure mapping:
+   success→Live, ESRCH→Exited, EPERM/usage/empty-stderr→Unverifiable, plus
+   one real live-process observation) and
+   `cleanup_preserves_fixtures_while_a_child_is_live_and_cleans_after_proven_exit`
+   (an owned blocking child: bounded cleanup refuses with
+   "provably live" and PRESERVES the fixture dir; after the child proves its
+   exit the same cleanup removes it — with a drop-guard releasing the child
+   even on assertion failure).
+2. **Timeout ordering fixed — DONE.** `Fixture::run_using` (new; `run` kept
+   as the lifecycle-suite wrapper for compatibility with its read-only
+   callers) now, on the 120s bound: publishes the cooperative stop-marker
+   FIRST, then gives the probe child and fixture children a bounded (5s)
+   window to self-exit, only then kills the EXACT retained child handle
+   (never a broad PID kill), and finally runs the same provable-exit-only
+   cleanup — so an unverifiable outcome preserves fixtures (cleanup panics
+   with the preservation notice) instead of deleting them. Guarantee
+   mechanism documented on `StopMarkerGuard` and in the timeout path: the
+   child-side guard's Drop cannot run once the child is killed, so the
+   PARENT's own marker publish is what holds the guarantee in that case;
+   the guard remains the normal-unwind path.
+
+### Suites run (all green)
+
+- `cargo test -p drogon-core --test native_attempt_cancel_reopen --locked`:
+  **7 passed / 0 failed** (4 behavioral probes + probe entry + 2 new
+  fixture error-path tests), re-run twice, stable.
+- `cargo test -p drogon-core --locked --test native_worker_lifecycle
+  --test native_receipt_recovery --test orchestration_worker_boundary
+  --test engine`: native_worker_lifecycle **9 passed / 0 failed**,
+  native_receipt_recovery **6 passed / 0 failed**,
+  orchestration_worker_boundary **2 passed / 0 failed**, engine
+  **18 passed / 0 failed (1 ignored, pre-existing)** — every pre-existing
+  consumer of the shared harness stays green with the corrected fixture.
+- `cargo clippy -p drogon-core --all-targets --locked -- -D warnings`:
+  clean (exit 0).
+- `cargo fmt -p drogon-core -- --check`: clean (exit 0).
+
+### Notes
+
+- One intermediate bug in my own cleanup restructure (the all-children-
+  exited case never reached the removal branch and timed out with a stale
+  reason) was caught by this suite's very first run and fixed before
+  delivery; final state is as described above.
+- The EPERM→Unverifiable mapping is covered at the pure-classifier level
+  (`classify_kill_output`) rather than by asserting on a real root-owned
+  process, so the test does not depend on the runner's uid.
+- What remains: nothing for this checkpoint; both corrections are landed
+  and every consuming suite is green.

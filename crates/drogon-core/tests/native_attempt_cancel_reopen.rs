@@ -3,510 +3,102 @@
 //! (`Engine::open` + `with_worker_cli` + `dispatch` /
 //! `dispatch_authenticated` against real SQLite and real PTYs).
 //!
-//! Fixture pattern copied from `tests/native_worker_lifecycle/`: each parent
-//! test re-executes this test binary as an isolated subprocess with `PATH`
-//! prepended to a temp fixture directory holding a fake installed `claude`
-//! harness and a `probe-cli` executable; the subprocess runs exactly one
-//! probe through `native_cancel_reopen_probe_entry`. Cleanup stays
-//! cooperative (stop marker + bounded self-expiry, read-only `kill -0`
-//! liveness, exact-handle `Child::kill` only on timeout).
-//!
-//! Storage-seam faults follow `probes_faults.rs`: a narrowly scoped SQLite
-//! trigger aborts exactly one durable write to force a real transaction
-//! rollback. Setup/compile failures are not RED evidence; each assertion is
-//! the behavioral contract itself.
+//! The fixture harness is the SHARED V1 harness
+//! (`native_worker_lifecycle/harness.rs`, included by path) so both V1 test
+//! scopes use the one narrow three-valued liveness observer and the same
+//! cooperative cleanup/timeout ordering; this file adds only its own probe
+//! entry, scope-specific helpers and controlled fixture error-path tests.
+//! Cleanup stays cooperative (stop marker, bounded self-expiry, read-only
+//! `kill -0` observation with only proven ESRCH counting as exit, no
+//! discovered-PID signaling, fixtures preserved whenever the outcome is
+//! unverifiable).
 
 #![cfg(unix)]
 
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+#[path = "native_worker_lifecycle/harness.rs"]
+mod harness;
+
+use std::process::Command;
+use std::time::Duration;
 
 use drogon_core::Engine;
-use drogon_protocol::{PROTOCOL_VERSION, Request, Response};
-use serde_json::{Value, json};
+use drogon_protocol::Response;
+use serde_json::json;
 
-// ---------------------------------------------------------------------------
-// Fixture (adapted from native_worker_lifecycle/harness.rs).
-// ---------------------------------------------------------------------------
+use harness::{
+    Fixture, Liveness, ProbeEnv, Started, StopMarkerGuard, capability_value, classify_kill_output,
+    err_code, fresh_worker, liveness_probe, observe_liveness, ok, pid_dir, recorded_pids, request,
+    started, wait_for_pid_count,
+};
 
-const WAIT_BUDGET: Duration = Duration::from_secs(10);
-const FIXTURE_LIFETIME_SECS: u64 = 20;
-
-/// The fake installed harness: records its PID, prints a sentinel line the
-/// probes wait for in the session ring, dumps presence facts, then waits
-/// cooperatively for the stop marker or its bounded self-expiry.
-const FIXTURE_SCRIPT: &str = r#"#!/bin/sh
-umask 077
-printf '%s\n' "$$" >> "$NATIVE_PID_LOG"
-echo worker-fixture-output
-out="$NATIVE_ENV_DUMP"
-{
-printf 'self_path=%s\n' "$0"
-if [ -n "${DROGON_DISPATCH_CAPABILITY:-}" ]; then
-printf '%s' "$DROGON_DISPATCH_CAPABILITY" > "${NATIVE_ENV_DUMP}.cap"
-fi
-printf 'dump_complete\n'
-} > "$out"
-lifetime="${NATIVE_FIXTURE_LIFETIME:-25}"
-marker="${NATIVE_STOP_MARKER}"
-i=0
-while [ ! -f "$marker" ] && [ "$i" -lt "$lifetime" ]; do
-sleep 1
-i=$((i+1))
-done
-"#;
-
-struct Fixture {
-    dir: PathBuf,
-    cli: PathBuf,
-}
-
-impl Fixture {
-    fn new(tag: &str) -> Fixture {
-        let dir = tempfile::Builder::new()
-            .prefix(&format!("dg-cancel-{tag}-"))
-            .tempdir()
-            .expect("fixture tempdir")
-            .keep();
-        let harness = dir.join("claude");
-        std::fs::write(&harness, FIXTURE_SCRIPT).expect("write claude fixture");
-        let cli = dir.join("probe-cli");
-        std::fs::write(&cli, "#!/bin/sh\nexit 0\n").expect("write cli fixture");
-        use std::os::unix::fs::PermissionsExt;
-        for path in [&harness, &cli] {
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-                .expect("chmod fixture");
-        }
-        Fixture { dir, cli }
-    }
-
-    /// Cooperative cleanup: stop marker, bounded wait for observed self-exit,
-    /// then removal of the owned fixture tree. Never signals a discovered PID.
-    fn cleanup(&self) {
-        std::fs::write(self.dir.join("stop-marker"), b"stop\n").expect("stop marker");
-        let deadline = Instant::now() + Duration::from_secs(FIXTURE_LIFETIME_SECS + 5);
-        while Instant::now() < deadline {
-            let pids = recorded_pids(&self.dir);
-            if pids.is_empty() || pids.iter().all(|pid| !liveness_probe(*pid)) {
-                std::fs::remove_dir_all(&self.dir).expect("remove owned fixture");
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        panic!("fixture cleanup is unverifiable after its bounded expiry");
-    }
-
-    fn run(&self, probe: &str) -> Invocation {
-        let exe = std::env::current_exe().expect("test binary path");
-        let path = {
-            let existing = std::env::var_os("PATH").unwrap_or_default();
-            let mut paths = std::env::split_paths(&existing).collect::<Vec<_>>();
-            paths.insert(0, self.dir.clone());
-            std::env::join_paths(&paths).expect("join PATH")
-        };
-        let mut child = Command::new(&exe)
-            .args([
-                "--exact",
-                "native_cancel_reopen_probe_entry",
-                "--nocapture",
-                "--test-threads",
-                "1",
-            ])
-            .env("NATIVE_PROBE", probe)
-            .env("NATIVE_FIXTURE_DIR", &self.dir)
-            .env("NATIVE_CLI_PATH", &self.cli)
-            .env("NATIVE_PID_LOG", self.dir.join("pid-log"))
-            .env("NATIVE_ENV_DUMP", self.dir.join("env-dump"))
-            .env("NATIVE_STOP_MARKER", self.dir.join("stop-marker"))
-            .env("NATIVE_FIXTURE_LIFETIME", FIXTURE_LIFETIME_SECS.to_string())
-            .env("PATH", &path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn isolated probe subprocess");
-        let mut stdout_pipe = child.stdout.take().expect("stdout pipe");
-        let mut stderr_pipe = child.stderr.take().expect("stderr pipe");
-        let stdout_reader = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stdout_pipe.read_to_end(&mut bytes);
-            String::from_utf8_lossy(&bytes).into_owned()
-        });
-        let stderr_reader = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stderr_pipe.read_to_end(&mut bytes);
-            String::from_utf8_lossy(&bytes).into_owned()
-        });
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let invocation = loop {
-            match child.try_wait().expect("poll probe subprocess") {
-                Some(status) => {
-                    break Invocation {
-                        exit_code: status.code().unwrap_or(-1),
-                        stdout: stdout_reader.join().expect("stdout reader"),
-                        stderr: stderr_reader.join().expect("stderr reader"),
-                    };
-                }
-                None if Instant::now() >= deadline => {
-                    // Exact retained test child only: timeout cleanup.
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = stdout_reader.join();
-                    let _ = stderr_reader.join();
-                    panic!("probe {probe} exceeded its 120s bound");
-                }
-                None => std::thread::sleep(Duration::from_millis(20)),
-            }
-        };
-        self.cleanup();
-        invocation
-    }
-}
-
-struct Invocation {
-    exit_code: i32,
-    stdout: String,
-    stderr: String,
-}
-
-struct ProbeEnv {
-    workspace: PathBuf,
-    data_dir: PathBuf,
-    cli: PathBuf,
-}
-
-impl ProbeEnv {
-    fn from_parent_env() -> ProbeEnv {
-        let dir = PathBuf::from(std::env::var("NATIVE_FIXTURE_DIR").expect("fixture dir"));
-        ProbeEnv {
-            workspace: {
-                std::fs::create_dir_all(dir.join("workspace")).expect("workspace dir");
-                dir.join("workspace")
-            },
-            data_dir: dir.join("data"),
-            cli: PathBuf::from(std::env::var("NATIVE_CLI_PATH").expect("cli path")),
-        }
-    }
-
-    fn host_id(&self, engine: &Engine) -> String {
-        ok(engine, "status", "status", json!({}))["hostId"]
-            .as_str()
-            .expect("host id")
-            .to_string()
-    }
-
-    fn workspace_id(&self, engine: &Engine) -> String {
-        ok(engine, "ws-list", "workspace.list", json!({}))["workspaces"][0]["id"]
-            .as_str()
-            .expect("workspace id")
-            .to_string()
-    }
-
-    /// Registers the workspace, creates the run and one dependency-free task
-    /// (Ready on creation), returning (host, run_id, task_id).
-    fn prepare(&self, engine: &Engine, tag: &str, objective: &str) -> (String, String, String) {
-        let host = self.host_id(engine);
-        ok(
-            engine,
-            &format!("ws-{tag}"),
-            "workspace.register",
-            json!({"path": self.workspace.to_str().unwrap(), "name": "probe-workspace"}),
-        );
-        let run = ok(
-            engine,
-            &format!("run-{tag}"),
-            "orchestration.runCreate",
-            json!({
-                "contractVersion": 1, "hostId": host,
-                "objective": objective, "coordinatorId": "coord-test-1"
-            }),
-        );
-        let run_id = run["run"]["runId"].as_str().expect("run id").to_string();
-        let task = ok(
-            engine,
-            &format!("task-{tag}"),
-            "orchestration.taskCreate",
-            json!({
-                "contractVersion": 1, "hostId": host, "runId": run_id,
-                "coordinatorId": "coord-test-1", "consumerGeneration": 1,
-                "spec": {"instructions": "probe instructions", "dependsOn": []}
-            }),
-        );
-        let task_id = task["task"]["taskId"].as_str().expect("task id").to_string();
-        assert_eq!(task["task"]["status"], json!("ready"));
-        (host, run_id, task_id)
-    }
-
-    fn scope(&self, engine: &Engine, run_id: &str, generation: u64) -> Value {
-        json!({
-            "contractVersion": 1, "hostId": self.host_id(engine), "runId": run_id,
-            "coordinatorId": "coord-test-1", "consumerGeneration": generation
-        })
-    }
-
-    fn start_worker(
-        &self,
-        engine: &Engine,
-        run_id: &str,
-        task_id: &str,
-        retry_of: Option<&str>,
-        request_id: &str,
-    ) -> Response {
-        let catalog = ok(engine, "fixture-catalog", "harness.list", json!({}));
-        let fixture = std::fs::canonicalize(pid_dir(self).join("claude")).unwrap();
-        let executable = catalog["harnesses"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|item| item["harnessId"] == "claude")
-            .unwrap()["executable"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        assert_eq!(
-            std::fs::canonicalize(executable).unwrap(),
-            fixture,
-            "refuse any installed model CLI before launch"
-        );
-        let mut params = json!({
-            "contractVersion": 1, "hostId": self.host_id(engine), "runId": run_id,
-            "coordinatorId": "coord-test-1", "consumerGeneration": 1,
-            "taskId": task_id,
-            "workspaceId": self.workspace_id(engine),
-            "mode": "fresh",
-            "launch": {
-                "harnessId": "claude", "model": "fixture-model",
-                "permissionMode": "unattended"
-            }
-        });
-        if let Some(retry) = retry_of {
-            params["retryOf"] = json!(retry);
-        }
-        engine.dispatch(request(request_id, "orchestration.workerStart", params))
-    }
-
-    fn worker_show(&self, engine: &Engine, run_id: &str, dispatch_id: &str, id: &str) -> Value {
-        let mut scope = self.scope(engine, run_id, 1);
-        scope["dispatchId"] = json!(dispatch_id);
-        ok(engine, id, "orchestration.workerShow", scope)
-    }
-
-    fn task_status(&self, engine: &Engine, run_id: &str, task_id: &str, id: &str) -> String {
-        ok(engine, id, "orchestration.taskShow", {
-            let mut scope = self.scope(engine, run_id, 1);
-            scope["taskId"] = json!(task_id);
-            scope
-        })["task"]["status"]
-            .as_str()
-            .expect("task status")
-            .to_string()
-    }
-
-    /// Settles the worker's own attempt with an authenticated final report
-    /// (kind `finalReport` binds the report to the exact sending dispatch).
-    fn settle(&self, engine: &Engine, host: &str, run_id: &str, task_id: &str, dispatch_id: &str, outcome: &str, request_id: &str) -> Response {
-        let capability = capability_value(self);
-        let mut request = request(
-            request_id,
-            "orchestration.send",
-            json!({
-                "scope": {"actorKind":"dispatch","contractVersion":1,"hostId":host,
-                          "runId":run_id,"taskId":task_id,"dispatchId":dispatch_id},
-                "kind": "finalReport",
-                "subject": "probe final report",
-                "finalReport": {"outcome": outcome}
-            }),
-        );
-        request.auth = Some(capability);
-        engine.dispatch_authenticated(request, "")
-    }
-}
-
-fn request(id: &str, method: &str, params: Value) -> Request {
-    Request {
-        protocol: PROTOCOL_VERSION,
-        request_id: id.into(),
-        auth: None,
-        method: method.into(),
-        params,
-    }
-}
-
-fn ok(engine: &Engine, id: &str, method: &str, params: Value) -> Value {
-    let response = engine.dispatch(request(id, method, params));
-    assert!(response.ok, "{method} failed: {:?}", response.error);
-    response.result.expect("ok result")
-}
-
-fn err_code(response: &Response) -> String {
-    response
-        .error
-        .as_ref()
-        .map(|error| error.code.clone())
-        .unwrap_or_else(|| "<ok>".into())
-}
-
-fn wait_for_exit(engine: &Engine, env: &ProbeEnv, run_id: &str, dispatch_id: &str) {
-    let deadline = Instant::now() + WAIT_BUDGET;
-    let mut attempts = 0u64;
-    loop {
-        attempts += 1;
-        let verdict = env.worker_show(engine, run_id, dispatch_id, &format!("wait-{attempts}"))["processVerdict"]
-            .clone();
-        if verdict == json!("exited") {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "stop never observed exit (last verdict {verdict})"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-/// Read-only liveness observation; never signals.
-fn liveness_probe(pid: i32) -> bool {
-    assert!(pid > 1, "fixture liveness requires one positive child PID");
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
-}
-
-fn recorded_pids(fixture_dir: &Path) -> Vec<i32> {
-    std::fs::read_to_string(fixture_dir.join("pid-log"))
-        .map(|content| {
-            content
-                .lines()
-                .map(|line| {
-                    let pid = line.trim().parse::<i32>().expect("invalid fixture PID record");
-                    assert!(pid > 1, "invalid fixture child PID");
-                    pid
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn pid_dir(env: &ProbeEnv) -> PathBuf {
-    env.data_dir.parent().expect("fixture dir").to_path_buf()
-}
-
-fn wait_for_pid_count(env: &ProbeEnv, expected: usize) {
-    let deadline = Instant::now() + WAIT_BUDGET;
-    loop {
-        if recorded_pids(&pid_dir(env)).len() >= expected {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "child count never reached {expected}"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn wait_for_file(path: &Path) {
-    let deadline = Instant::now() + WAIT_BUDGET;
-    while !path.exists() {
-        assert!(
-            Instant::now() < deadline,
-            "fixture file never appeared: {}",
-            path.display()
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-/// The worker capability, read from the fixture's temp-side file. Never
-/// printed; used only to authenticate the worker's own final report.
-fn capability_value(env: &ProbeEnv) -> String {
-    let path = PathBuf::from(format!(
-        "{}.cap",
-        pid_dir(env).join("env-dump").display()
-    ));
-    wait_for_file(&path);
-    std::fs::read_to_string(&path)
-        .expect("capability file")
-        .trim()
-        .to_string()
-}
-
-struct Started {
-    dispatch_id: String,
-    session_id: String,
-    incarnation: String,
-}
-
-fn started(value: &Value) -> Started {
-    Started {
-        dispatch_id: value["dispatchId"].as_str().expect("dispatch").into(),
-        session_id: value["sessionIdentity"]["sessionId"]
-            .as_str()
-            .expect("session id")
-            .into(),
-        incarnation: value["sessionIdentity"]["incarnation"]
-            .as_str()
-            .expect("incarnation")
-            .into(),
-    }
-}
-
-fn fresh_worker(
+/// Admits the first worker, stops it (settled stop: attempt `stopped`, task
+/// `blocked`, child signalled to cooperative exit).
+fn stopped_worker(
     env: &ProbeEnv,
     engine: &Engine,
     run_id: &str,
     task_id: &str,
-    rid: &str,
+    tag: &str,
 ) -> Started {
-    let response = env.start_worker(engine, run_id, task_id, None, rid);
-    assert!(response.ok, "worker start failed: {:?}", response.error);
-    let worker = started(&response.result.unwrap());
-    use base64::Engine as _;
-    let deadline = Instant::now() + WAIT_BUDGET;
-    loop {
-        let read = ok(
-            engine,
-            "fixture-ready",
-            "session.read",
-            json!({"sessionId":worker.session_id,"incarnation":worker.incarnation,"cursor":0}),
-        );
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(read["dataBase64"].as_str().unwrap())
-            .unwrap();
-        if String::from_utf8_lossy(&bytes).contains("worker-fixture-output") {
-            return worker;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "fixture never produced startup evidence"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let worker = fresh_worker(env, engine, run_id, task_id, &format!("start-{tag}"));
+    let _ = ok(
+        engine,
+        &format!("stop-{tag}"),
+        "orchestration.workerStop",
+        {
+            let mut scope = env.scope(engine, run_id, 1);
+            scope["dispatchId"] = json!(worker.dispatch_id);
+            scope
+        },
+    );
+    let scope = env.scope(engine, run_id, 1);
+    harness::wait_for_exit(engine, &scope, &worker.dispatch_id);
+    worker
 }
 
-/// Cooperative stop-marker guard for the inner probe process.
-struct StopMarkerGuard {
-    marker: PathBuf,
+fn task_status(env: &ProbeEnv, engine: &Engine, run_id: &str, task_id: &str, id: &str) -> String {
+    ok(engine, id, "orchestration.taskShow", {
+        let mut scope = env.scope(engine, run_id, 1);
+        scope["taskId"] = json!(task_id);
+        scope
+    })["task"]["status"]
+        .as_str()
+        .expect("task status")
+        .to_string()
 }
 
-impl StopMarkerGuard {
-    fn new(env: &ProbeEnv) -> StopMarkerGuard {
-        StopMarkerGuard {
-            marker: pid_dir(env).join("stop-marker"),
-        }
-    }
+/// The exact actor identity a final report binds to.
+struct AttemptIds<'a> {
+    host: &'a str,
+    run_id: &'a str,
+    task_id: &'a str,
+    dispatch_id: &'a str,
 }
 
-impl Drop for StopMarkerGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::write(&self.marker, b"stop\n");
-        // Bounded self-expiry finishes any child that misses the marker; no
-        // signal is ever sent to a discovered PID.
-    }
+/// Settles the worker's own attempt with an authenticated final report
+/// (kind `finalReport` binds the report to the exact sending dispatch).
+fn settle(
+    env: &ProbeEnv,
+    engine: &Engine,
+    ids: AttemptIds,
+    outcome: &str,
+    request_id: &str,
+) -> Response {
+    let capability = capability_value(env);
+    let mut request = request(
+        request_id,
+        "orchestration.send",
+        json!({
+            "scope": {"actorKind":"dispatch","contractVersion":1,
+                      "hostId":ids.host, "runId":ids.run_id,
+                      "taskId":ids.task_id, "dispatchId":ids.dispatch_id},
+            "kind": "finalReport",
+            "subject": "probe final report",
+            "finalReport": {"outcome": outcome}
+        }),
+    );
+    request.auth = Some(capability);
+    engine.dispatch_authenticated(request, "")
 }
 
 fn db(env: &ProbeEnv) -> rusqlite::Connection {
@@ -531,31 +123,109 @@ fn attempt_row(conn: &rusqlite::Connection, dispatch_id: &str) -> (bool, bool, S
 }
 
 fn count(conn: &rusqlite::Connection, table: &str) -> i64 {
-    conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row.get(0))
-        .expect("row count")
-}
-
-/// Admits the first worker, stops it (settled stop: attempt `stopped`, task
-/// `blocked`, child signalled to cooperative exit).
-fn stopped_worker(
-    env: &ProbeEnv,
-    engine: &Engine,
-    run_id: &str,
-    task_id: &str,
-    tag: &str,
-) -> Started {
-    let worker = fresh_worker(env, engine, run_id, task_id, &format!("start-{tag}"));
-    let _ = ok(engine, &format!("stop-{tag}"), "orchestration.workerStop", {
-        let mut scope = env.scope(engine, run_id, 1);
-        scope["dispatchId"] = json!(worker.dispatch_id);
-        scope
-    });
-    wait_for_exit(engine, env, run_id, &worker.dispatch_id);
-    worker
+    conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+        row.get(0)
+    })
+    .expect("row count")
 }
 
 // ---------------------------------------------------------------------------
-// Probes.
+// Controlled fixture error-path tests (shared-harness semantics).
+// ---------------------------------------------------------------------------
+
+/// The liveness mapping is exact: only a proven ESRCH ("No such process")
+/// counts as exited; success is live; permission errors, usage errors and
+/// anything else stay unverifiable so cleanup never deletes fixtures on an
+/// unproven outcome.
+#[test]
+fn liveness_observer_counts_only_proven_esrch_as_exit() {
+    assert_eq!(classify_kill_output(true, ""), Liveness::Live);
+    assert_eq!(
+        classify_kill_output(false, "kill: (1234) - No such process"),
+        Liveness::Exited
+    );
+    assert_eq!(
+        classify_kill_output(false, "no such process"),
+        Liveness::Exited
+    );
+    assert_eq!(
+        classify_kill_output(false, "kill: pid 1: Operation not permitted"),
+        Liveness::Unverifiable
+    );
+    assert_eq!(classify_kill_output(false, ""), Liveness::Unverifiable);
+    assert_eq!(
+        classify_kill_output(false, "kill: illegal option -- z"),
+        Liveness::Unverifiable
+    );
+    // The real observer agrees for a real process that exists (this test's
+    // own pid is never > 1 in a place where ESRCH could be plausible) and
+    // never signals anything beyond signal 0.
+    let self_pid = std::process::id() as i32;
+    assert!(self_pid > 1);
+    assert_eq!(observe_liveness(self_pid), Liveness::Live);
+}
+
+/// Cleanup is honest about outcomes: while an owned child is provably live
+/// the fixture tree is PRESERVED (bounded Err, no deletion); once the child
+/// proves its exit the same cleanup removes the fixtures.
+#[test]
+fn cleanup_preserves_fixtures_while_a_child_is_live_and_cleans_after_proven_exit() {
+    let fixture = Fixture::new("lp");
+    let release = fixture.dir.join("release-liveness-test");
+    let _guard = ReleaseGuard(release.clone());
+    let mut child = Command::new("/bin/sh")
+        .arg("-c")
+        .arg("while [ ! -f \"$RELEASE\" ]; do sleep 0.1; done")
+        .env("RELEASE", &release)
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn owned blocking fixture child");
+
+    // Record the child exactly the way the fixture harness does.
+    use std::io::Write as _;
+    let mut pid_log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(fixture.dir.join("pid-log"))
+        .expect("open pid log");
+    writeln!(pid_log, "{}", child.id()).expect("record owned child pid");
+    drop(pid_log);
+    assert_eq!(recorded_pids(&fixture.dir), vec![child.id() as i32]);
+    assert!(observe_liveness(child.id() as i32) == Liveness::Live);
+
+    // Provably live: bounded cleanup refuses and PRESERVES the fixture tree.
+    let preserved = fixture
+        .try_cleanup_within(Duration::from_millis(600))
+        .expect_err("cleanup must not finish while a child is provably live");
+    assert!(
+        preserved.contains("provably live"),
+        "unexpected refusal reason: {preserved}"
+    );
+    assert!(fixture.dir.is_dir(), "fixtures must be preserved");
+
+    // Prove the exit (exact owned handle: cooperative release, then reap).
+    std::fs::write(&release, b"1").expect("release owned fixture child");
+    child.wait().expect("reap owned fixture child");
+
+    // Now the outcome is proven and the same cleanup removes the fixtures.
+    fixture
+        .try_cleanup_within(Duration::from_secs(10))
+        .expect("cleanup must succeed once every child proved its exit");
+    assert!(!fixture.dir.exists(), "fixtures removed after proven exit");
+}
+
+/// Writes the release file even on an assertion failure inside the test, so
+/// the owned blocking child can never outlive this test.
+struct ReleaseGuard(std::path::PathBuf);
+
+impl Drop for ReleaseGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::write(&self.0, b"1");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Probes (public engine seams only).
 // ---------------------------------------------------------------------------
 
 /// A settled (final-reported) attempt is historic: new-request stop/abandon
@@ -568,13 +238,25 @@ fn settled_cancel_refused(env: &ProbeEnv) {
     let worker = fresh_worker(env, &engine, &run_id, &task_id, "start-sc-1");
 
     // The worker settles its own attempt; the task completes.
-    let report = env.settle(
-        &engine, &host, &run_id, &task_id, &worker.dispatch_id, "succeeded", "report-sc-1",
+    let report = settle(
+        env,
+        &engine,
+        AttemptIds {
+            host: &host,
+            run_id: &run_id,
+            task_id: &task_id,
+            dispatch_id: &worker.dispatch_id,
+        },
+        "succeeded",
+        "report-sc-1",
     );
     assert!(report.ok, "final report must settle: {:?}", report.error);
-    assert_eq!(report.result.unwrap()["lifecycle"]["outcome"], json!("succeeded"));
     assert_eq!(
-        env.task_status(&engine, &run_id, &task_id, "task-sc"),
+        report.result.unwrap()["lifecycle"]["outcome"],
+        json!("succeeded")
+    );
+    assert_eq!(
+        task_status(env, &engine, &run_id, &task_id, "task-sc"),
         "completed"
     );
     let settled_show = env.worker_show(&engine, &run_id, &worker.dispatch_id, "show-sc");
@@ -631,7 +313,7 @@ fn settled_cancel_refused(env: &ProbeEnv) {
     assert_eq!(count(&conn, "orchestration_attempts"), attempts_before);
     drop(conn);
     assert_eq!(
-        env.task_status(&engine, &run_id, &task_id, "task-sc-after"),
+        task_status(env, &engine, &run_id, &task_id, "task-sc-after"),
         "completed"
     );
     let after_show = env.worker_show(&engine, &run_id, &worker.dispatch_id, "show-sc-after");
@@ -660,7 +342,8 @@ fn concurrent_cancel_single_winner(env: &ProbeEnv) {
                         "runId": run_id, "coordinatorId": "coord-test-1",
                         "consumerGeneration": 1,
                     });
-                    params["hostId"] = ok(engine, "status-cc", "status", json!({}))["hostId"].clone();
+                    params["hostId"] =
+                        ok(engine, "status-cc", "status", json!({}))["hostId"].clone();
                     params["dispatchId"] = json!(dispatch_id);
                     engine.dispatch(request(
                         &format!("stop-cc-{index}"),
@@ -670,7 +353,10 @@ fn concurrent_cancel_single_winner(env: &ProbeEnv) {
                 })
             })
             .collect();
-        handles.into_iter().map(|handle| handle.join().expect("join")).collect()
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("join"))
+            .collect()
     });
 
     // Both requests are admitted (the fence is idempotent), but exactly one
@@ -689,9 +375,10 @@ fn concurrent_cancel_single_winner(env: &ProbeEnv) {
         "exactly one concurrent cancel may signal: {results:?}"
     );
 
-    wait_for_exit(&engine, env, &run_id, &worker.dispatch_id);
+    let scope = env.scope(&engine, &run_id, 1);
+    harness::wait_for_exit(&engine, &scope, &worker.dispatch_id);
     assert_eq!(
-        env.task_status(&engine, &run_id, &task_id, "task-cc"),
+        task_status(env, &engine, &run_id, &task_id, "task-cc"),
         "blocked",
         "the task transitions to blocked exactly once"
     );
@@ -723,7 +410,7 @@ fn failed_retry_rollback_restores_state(env: &ProbeEnv) {
     let credentials_before = count(&conn, "orchestration_dispatch_credentials");
     drop(conn);
     assert_eq!(
-        env.task_status(&engine, &run_id, &task_id, "task-rb-before"),
+        task_status(env, &engine, &run_id, &task_id, "task-rb-before"),
         "blocked"
     );
 
@@ -765,7 +452,7 @@ fn failed_retry_rollback_restores_state(env: &ProbeEnv) {
     );
     drop(conn);
     assert_eq!(
-        env.task_status(&engine, &run_id, &task_id, "task-rb-after"),
+        task_status(env, &engine, &run_id, &task_id, "task-rb-after"),
         "blocked",
         "the task keeps its pre-retry status"
     );
@@ -817,7 +504,8 @@ fn reopen_after_rollback_preserves_history(env: &ProbeEnv) {
 
     // Reopen: the same retry without the fault yields a NEW attempt identity.
     let conn = db(env);
-    conn.execute_batch("DROP TRIGGER inject_retry_admit_failure;").expect("drop trigger");
+    conn.execute_batch("DROP TRIGGER inject_retry_admit_failure;")
+        .expect("drop trigger");
     drop(conn);
     let reopened = env.start_worker(
         &engine,
@@ -826,7 +514,11 @@ fn reopen_after_rollback_preserves_history(env: &ProbeEnv) {
         Some(&first.dispatch_id),
         "start-ro-3",
     );
-    assert!(reopened.ok, "reopen must admit a replacement: {:?}", reopened.error);
+    assert!(
+        reopened.ok,
+        "reopen must admit a replacement: {:?}",
+        reopened.error
+    );
     let replacement = started(&reopened.result.unwrap());
     assert_ne!(
         replacement.dispatch_id, first.dispatch_id,
@@ -837,7 +529,7 @@ fn reopen_after_rollback_preserves_history(env: &ProbeEnv) {
         "reopen yields a distinct session"
     );
     assert_eq!(
-        env.task_status(&engine, &run_id, &task_id, "task-ro"),
+        task_status(env, &engine, &run_id, &task_id, "task-ro"),
         "dispatched",
         "the task is dispatched again"
     );
@@ -847,10 +539,12 @@ fn reopen_after_rollback_preserves_history(env: &ProbeEnv) {
     let conn = db(env);
     assert_eq!(count(&conn, "orchestration_attempts"), 2);
     let (current, fenced, state_json) = attempt_row(&conn, &first.dispatch_id);
-    assert!(!current && fenced, "the historic attempt stays fenced history");
+    assert!(
+        !current && fenced,
+        "the historic attempt stays fenced history"
+    );
     assert_eq!(
-        state_json,
-        historic_row.2,
+        state_json, historic_row.2,
         "the historic attempt's stored state is untouched"
     );
     let retry_of: String = conn
@@ -862,7 +556,10 @@ fn reopen_after_rollback_preserves_history(env: &ProbeEnv) {
         .expect("replacement row");
     assert_eq!(retry_of, first.dispatch_id, "history keeps the retry link");
     let (r_current, r_fenced, _) = attempt_row(&conn, &replacement.dispatch_id);
-    assert!(r_current && !r_fenced, "only the replacement is authoritative");
+    assert!(
+        r_current && !r_fenced,
+        "only the replacement is authoritative"
+    );
     drop(conn);
 
     // Both attempts remain inspectable through the public seam.
@@ -890,7 +587,7 @@ fn reopen_after_rollback_preserves_history(env: &ProbeEnv) {
 #[test]
 fn cancel_of_a_settled_attempt_is_refused_without_mutating_state() {
     let fixture = Fixture::new("sc");
-    let run = fixture.run("settled_cancel_refused");
+    let run = fixture.run_using("native_cancel_reopen_probe_entry", "settled_cancel_refused");
     assert_eq!(
         run.exit_code, 0,
         "stdout:\n{}\nstderr:\n{}",
@@ -901,7 +598,10 @@ fn cancel_of_a_settled_attempt_is_refused_without_mutating_state() {
 #[test]
 fn concurrent_cancels_serialize_with_exactly_one_signalling_winner() {
     let fixture = Fixture::new("cc");
-    let run = fixture.run("concurrent_cancel_single_winner");
+    let run = fixture.run_using(
+        "native_cancel_reopen_probe_entry",
+        "concurrent_cancel_single_winner",
+    );
     assert_eq!(
         run.exit_code, 0,
         "stdout:\n{}\nstderr:\n{}",
@@ -912,7 +612,10 @@ fn concurrent_cancels_serialize_with_exactly_one_signalling_winner() {
 #[test]
 fn rolled_back_replacement_admission_restores_the_failed_attempt_state() {
     let fixture = Fixture::new("rb");
-    let run = fixture.run("failed_retry_rollback_restores_state");
+    let run = fixture.run_using(
+        "native_cancel_reopen_probe_entry",
+        "failed_retry_rollback_restores_state",
+    );
     assert_eq!(
         run.exit_code, 0,
         "stdout:\n{}\nstderr:\n{}",
@@ -923,7 +626,10 @@ fn rolled_back_replacement_admission_restores_the_failed_attempt_state() {
 #[test]
 fn reopen_after_rollback_yields_a_new_attempt_with_history_preserved() {
     let fixture = Fixture::new("ro");
-    let run = fixture.run("reopen_after_rollback_preserves_history");
+    let run = fixture.run_using(
+        "native_cancel_reopen_probe_entry",
+        "reopen_after_rollback_preserves_history",
+    );
     assert_eq!(
         run.exit_code, 0,
         "stdout:\n{}\nstderr:\n{}",
