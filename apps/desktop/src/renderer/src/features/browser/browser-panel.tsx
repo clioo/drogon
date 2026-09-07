@@ -41,18 +41,27 @@ function tabLabel(tab: BrowserTabState): string {
 export function BrowserPanel({
   bridge,
   workspaceId,
+  hideTabStrip,
+  controlledTabId,
 }: {
   bridge: BrowserBridge;
   workspaceId: string;
+  /**
+   * Tab-hosting mode: the tab strip owns tab selection and renders one
+   * strip tab per page, so the pane hides its inner strip and follows
+   * `controlledTabId` (undefined keeps the legacy self-managed strip).
+   */
+  hideTabStrip?: boolean;
+  controlledTabId?: string | null;
 }) {
   const [tabs, setTabs] = useState<BrowserTabState[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [internalTabId, setInternalTabId] = useState<string | null>(null);
+  const controlled = controlledTabId !== undefined;
   const [address, setAddress] = useState("");
   const [notice, setNotice] = useState("");
   const [capture, setCapture] = useState(() => readCaptureWindowOpen());
   const placeholderRef = useRef<HTMLDivElement>(null);
   const activeTabIdRef = useRef<string | null>(null);
-  activeTabIdRef.current = activeTabId;
   const workspaceRef = useRef(workspaceId);
   workspaceRef.current = workspaceId;
 
@@ -61,11 +70,12 @@ export function BrowserPanel({
       bridge.onState((event) => {
         const scoped = workspaceTabs(event, workspaceRef.current);
         setTabs(scoped);
+        if (controlled) return;
         // The host owns the active tab (new tabs, popups, closes): the
         // renderer follows its verdict so chrome and guest never disagree.
         // A click sets the tab locally first for instant feedback; the
         // host's own active-changed event then confirms the same id.
-        setActiveTabId((current) => {
+        setInternalTabId((current) => {
           if (
             event.activeTabId &&
             scoped.some((tab) => tab.tabId === event.activeTabId)
@@ -76,9 +86,22 @@ export function BrowserPanel({
           return scoped.at(-1)?.tabId ?? null;
         });
       }),
-    [bridge],
+    [bridge, controlled],
   );
 
+  // Controlled mode follows the strip's selection; a selected id that left
+  // the list (closed elsewhere, App reconciling) falls back to the last
+  // page exactly like the self-managed path above.
+  const activeTabId = controlled
+    ? (tabs.some((tab) => tab.tabId === controlledTabId)
+        ? controlledTabId
+        : (tabs.at(-1)?.tabId ?? null))
+    : internalTabId;
+  const selectTab = (tabId: string) => {
+    setInternalTabId(tabId);
+  };
+
+  activeTabIdRef.current = activeTabId;
   const active = tabs.find((tab) => tab.tabId === activeTabId) ?? null;
 
   // The address bar mirrors the active tab until the user types.
@@ -121,8 +144,12 @@ export function BrowserPanel({
   }, [bridge, reportBounds, activeTabId]);
 
   // First visit to the panel opens a home tab so the strip is never empty.
+  // Tab-hosting mode is exempt: the strip owns creation (its empty list is
+  // a legitimate "no pages" state, and auto-creating here would duplicate
+  // a strip-initiated tab that the host has not echoed yet).
   const tabsEmpty = tabs.length === 0;
   useEffect(() => {
+    if (controlled) return;
     if (!tabsEmpty) return;
     let cancelled = false;
     void bridge
@@ -136,7 +163,7 @@ export function BrowserPanel({
     return () => {
       cancelled = true;
     };
-  }, [bridge, workspaceId, tabsEmpty]);
+  }, [bridge, workspaceId, tabsEmpty, controlled]);
 
   const go = (value: string) => {
     const url = value.trim();
@@ -187,6 +214,7 @@ export function BrowserPanel({
 
   return (
     <div className="browser-pane" data-testid="browser-pane">
+      {!hideTabStrip && (
       <div
         className="browser-tabstrip"
         role="tablist"
@@ -204,7 +232,7 @@ export function BrowserPanel({
               className="browser-tab-label"
               title={tab.url}
               onClick={() => {
-                setActiveTabId(tab.tabId);
+                selectTab(tab.tabId);
                 void bridge
                   .setBounds({
                     tabId: tab.tabId,
@@ -239,6 +267,7 @@ export function BrowserPanel({
           <Plus size={14} />
         </button>
       </div>
+      )}
       <form
         className="browser-bar"
         onSubmit={(event) => {

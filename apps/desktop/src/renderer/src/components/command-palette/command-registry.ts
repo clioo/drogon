@@ -13,6 +13,7 @@ export interface CommandContext {
   hasWorkspace: boolean;
   filesAvailable: boolean;
   botsAvailable: boolean;
+  changesAvailable: boolean;
   harnessAvailable: boolean;
   /** The service advertises worktree.v1. */
   worktreesAvailable: boolean;
@@ -85,6 +86,51 @@ export const COMMAND_DEFS: readonly CommandDef[] = [
     disabledReason: (context) => {
       if (!context.connected || context.busy) return needsConnection(context);
       return "Bots unavailable: service does not advertise bot.snapshot.v1";
+    },
+  },
+  // Right sidebar toggles per the source keybinding registry
+  // (src/shared/keybindings/definitions-core-1.ts: sidebar.right.toggle on
+  // Mod+L, sidebar.explorer.toggle on Mod+Shift+E,
+  // sidebar.sourceControl.toggle on Mod+Shift+G).
+  {
+    id: "sidebar.right.toggle",
+    label: "Toggle Right Sidebar",
+    hint: "⌘L",
+    keywords: [
+      "toggle right sidebar",
+      "sidebar right",
+      "hide sidebar",
+      "show sidebar",
+    ],
+    isEnabled: () => true,
+    disabledReason: () => null,
+  },
+  {
+    id: "sidebar.explorer.toggle",
+    label: "Show Explorer",
+    keywords: ["show explorer", "files panel", "explorer", "browse files"],
+    isEnabled: (context) =>
+      context.connected && !context.busy && context.filesAvailable,
+    disabledReason: (context) => {
+      if (!context.connected || context.busy) return needsConnection(context);
+      return "Files unavailable: service does not advertise files.v1";
+    },
+  },
+  {
+    id: "sidebar.sourceControl.toggle",
+    label: "Show Source Control",
+    keywords: [
+      "show source control",
+      "changes",
+      "git",
+      "source control",
+      "commit",
+    ],
+    isEnabled: (context) =>
+      context.connected && !context.busy && context.changesAvailable,
+    disabledReason: (context) => {
+      if (!context.connected || context.busy) return needsConnection(context);
+      return "Changes unavailable: service does not advertise git.v1";
     },
   },
   {

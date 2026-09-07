@@ -1,27 +1,35 @@
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
+   src/renderer/src/components/tab-bar/tab-bar-surface.tsx (the "+" trigger
+   and menu chrome) and tab-bar-static-create-menu.tsx (default-order static
+   entries: New Terminal, New Browser Tab). Adapter: no dnd-kit, no
+   simulator/recipe/markdown entries (out of MVP scope); the per-harness
+   entries open this repo's harness launch form (folded in from
+   HarnessLaunchMenu, which this menu replaces), and radix-ui primitives
+   stand in for the shadcn menu. */
 import { useMemo, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { Globe, Plus, TerminalSquare } from "lucide-react";
 import { DropdownMenu, Popover, Tooltip } from "radix-ui";
 import type {
   Harness,
   HarnessLaunchInput,
-} from "../../shared/session-contract";
-import { Button } from "./components/ui/button";
-import { Input } from "./components/ui/input";
+} from "../../../../shared/session-contract";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 import {
   emptyHarnessLaunchForm,
   normalizeHarnessLaunchInput,
   type HarnessLaunchFormValues,
-} from "./harness-launch-form";
+} from "../../harness-launch-form";
 import {
   isPristineLaunchForm,
   resolveLaunchDefaults,
-} from "./features/settings/agent-defaults";
-import type { HarnessAgentDefault } from "./settings-store";
+} from "../settings/agent-defaults";
+import type { HarnessAgentDefault } from "../../settings-store";
 import {
   clearPendingHarnessLaunch,
   loadPendingHarnessLaunch,
   savePendingHarnessLaunch,
-} from "./harness-launch-recovery";
+} from "../../harness-launch-recovery";
 
 const unavailableHint: Record<
   Exclude<Harness["availability"], "available">,
@@ -31,29 +39,43 @@ const unavailableHint: Record<
   unsupported_launcher: "unsupported launcher",
 };
 
-// Action selection and launch settings use distinct, trigger-anchored surfaces.
-export function HarnessLaunchMenu({
+const STATIC_ITEM_CLASS =
+  "tab-create-item gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium";
+
+/**
+ * The tab strip "+" menu: New terminal, one entry per harness (opening the
+ * launch form), New browser tab. The trigger keeps the source's accessible
+ * name so the palette's "Launch harness…" row can open the real menu.
+ */
+export function TabCreateMenu({
   workspaceId,
   hostId,
   harnesses,
   disabled,
-  onCreateTerminal,
-  onLaunch,
   defaultHarnessId,
   launchDefaults,
   onOpenMentu,
   mentuAvailable,
+  newTerminalShortcut,
+  newBrowserShortcut,
+  onCreateTerminal,
+  onLaunch,
+  onNewBrowserTab,
 }: {
   workspaceId: string;
   /** The execution host this recovery record is scoped to; `null` while disconnected — recovery is a no-op without it. */
   hostId: string | null;
   harnesses: Harness[];
   disabled: boolean;
-  onCreateTerminal(): void;
-  onLaunch(input: HarnessLaunchInput): Promise<boolean>;
-  /** J10: stored default harness (badged in the menu) and per-harness field defaults used to pre-fill a pristine form. Read-only here; edited in Settings. */
+  /** Stored default harness (badged in the menu) and per-harness field defaults used to pre-fill a pristine form. Read-only here; edited in Settings. */
   defaultHarnessId?: string;
   launchDefaults?: Record<string, HarnessAgentDefault>;
+  /** Display chords for the static rows ("" hides the hint). */
+  newTerminalShortcut: string;
+  newBrowserShortcut: string;
+  onCreateTerminal(): void;
+  onLaunch(input: HarnessLaunchInput): Promise<boolean>;
+  onNewBrowserTab(): void;
   /** R5-S: opens the wider Mentu tab for the selected workspace. Optional
    *  so existing callers/tests that predate Mentu keep compiling. */
   onOpenMentu?: () => void;
@@ -142,6 +164,32 @@ export function HarnessLaunchMenu({
     await launch(recoverable);
   };
 
+  const openFormFor = (harness: Harness) => {
+    setSelected(harness);
+    // A pristine form inherits the stored per-harness defaults; any
+    // user-typed value is never clobbered.
+    setValues((prev) => {
+      if (
+        !isPristineLaunchForm({
+          model: prev.model,
+          effort: prev.effort,
+          unattended: prev.unattended,
+        })
+      )
+        return prev;
+      const resolved = resolveLaunchDefaults(
+        harness.harnessId,
+        launchDefaults ?? {},
+      );
+      return {
+        ...prev,
+        model: resolved.model,
+        effort: resolved.effort,
+        unattended: resolved.unattended,
+      };
+    });
+  };
+
   return (
     <Popover.Root
       open={selected !== null}
@@ -150,39 +198,41 @@ export function HarnessLaunchMenu({
       }}
     >
       <Popover.Anchor>
-        <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
           <Tooltip.Root>
             <Tooltip.Trigger asChild>
               <DropdownMenu.Trigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="New terminal"
+                <button
+                  type="button"
+                  className="ml-2 my-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:opacity-35"
+                  title="New tab"
+                  aria-label="New tab"
                   disabled={disabled}
                 >
-                  <Plus />
-                </Button>
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
               </DropdownMenu.Trigger>
             </Tooltip.Trigger>
             <Tooltip.Portal>
               <Tooltip.Content className="tooltip" sideOffset={4}>
-                New terminal
+                New tab
               </Tooltip.Content>
             </Tooltip.Portal>
           </Tooltip.Root>
           <DropdownMenu.Portal>
             <DropdownMenu.Content
-              className="harness-menu"
+              className="w-72 max-w-[calc(100vw-1rem)] rounded-[11px] border border-border/80 bg-popover p-1 shadow-[0_16px_36px_rgba(0,0,0,0.24)]"
               align="start"
-              sideOffset={4}
+              sideOffset={6}
               onCloseAutoFocus={(event) => {
+                // Why: Radix restores focus to the "+" trigger on close, stealing it from a freshly-opened form.
                 if (selected) event.preventDefault();
               }}
             >
               {recoverable && (
                 <>
                   <DropdownMenu.Item
-                    className="harness-menu-item"
+                    className={STATIC_ITEM_CLASS}
                     disabled={submitting || disabled}
                     onSelect={() => void recover()}
                   >
@@ -198,65 +248,59 @@ export function HarnessLaunchMenu({
                 </>
               )}
               <DropdownMenu.Item
-                className="harness-menu-item"
+                className={STATIC_ITEM_CLASS}
                 onSelect={onCreateTerminal}
               >
-                New terminal
+                <TerminalSquare className="size-4 text-muted-foreground" />
+                New Terminal
+                {newTerminalShortcut && (
+                  <span className="tab-create-shortcut" aria-hidden="true">
+                    {newTerminalShortcut}
+                  </span>
+                )}
               </DropdownMenu.Item>
-              {onOpenMentu && mentuAvailable && (
-                <DropdownMenu.Item
-                  className="harness-menu-item"
-                  onSelect={onOpenMentu}
-                >
-                  Open Mentu
-                </DropdownMenu.Item>
-              )}
-              {harnesses.length > 0 && (
-                <DropdownMenu.Separator className="harness-menu-separator" />
-              )}
               {harnesses.map((harness) => (
                 <DropdownMenu.Item
                   key={harness.harnessId}
-                  className="harness-menu-item"
+                  className={STATIC_ITEM_CLASS}
                   disabled={harness.availability !== "available"}
-                  onSelect={() => {
-                    setSelected(harness);
-                    // A pristine form inherits the stored per-harness
-                    // defaults; any user-typed value is never clobbered.
-                    setValues((prev) => {
-                      if (
-                        !isPristineLaunchForm({
-                          model: prev.model,
-                          effort: prev.effort,
-                          unattended: prev.unattended,
-                        })
-                      )
-                        return prev;
-                      const resolved = resolveLaunchDefaults(
-                        harness.harnessId,
-                        launchDefaults ?? {},
-                      );
-                      return {
-                        ...prev,
-                        model: resolved.model,
-                        effort: resolved.effort,
-                        unattended: resolved.unattended,
-                      };
-                    });
-                  }}
+                  onSelect={() => openFormFor(harness)}
                 >
                   <span>{harness.displayName}</span>
                   {harness.availability !== "available" ? (
-                    <span className="harness-menu-hint">
+                    <span className="tab-create-hint" aria-hidden="true">
                       {unavailableHint[harness.availability]}
                     </span>
                   ) : (
                     defaultHarnessId === harness.harnessId && (
-                      <span className="harness-menu-hint">Default</span>
+                      <span className="tab-create-hint" aria-hidden="true">Default</span>
                     )
                   )}
                 </DropdownMenu.Item>
               ))}
+              <DropdownMenu.Item
+                className={STATIC_ITEM_CLASS}
+                onSelect={onNewBrowserTab}
+              >
+                <Globe className="size-4 text-muted-foreground" />
+                New Browser Tab
+                {newBrowserShortcut && (
+                  <span className="tab-create-shortcut" aria-hidden="true">
+                    {newBrowserShortcut}
+                  </span>
+                )}
+              </DropdownMenu.Item>
+              {onOpenMentu && mentuAvailable && (
+                <>
+                  <DropdownMenu.Separator className="harness-menu-separator" />
+                  <DropdownMenu.Item
+                    className={STATIC_ITEM_CLASS}
+                    onSelect={onOpenMentu}
+                  >
+                    Open Mentu
+                  </DropdownMenu.Item>
+                </>
+              )}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>

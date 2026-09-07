@@ -100,6 +100,17 @@ and `use-bots-page-controller.ts`; the native responsibility RPCs in
 revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
 keeps the MIT notice in its header comment.
 
+The right sidebar activity bar and host in
+`apps/desktop/src/renderer/src/features/right-sidebar/`, the tab strip and
+its static create menu in `features/shell/{TabBar,TabCreateMenu,tab-chrome}.tsx`
+and the browser strip tab in `features/browser/BrowserStripTab.tsx` port Orca's
+`src/renderer/src/components/right-sidebar/{activity-bar-buttons,index,right-sidebar-top-activity-bar}.tsx`,
+`right-sidebar-width.ts`, `use-right-sidebar-activity-items.ts`,
+`src/renderer/src/store/right-sidebar-route.ts`,
+`src/renderer/src/components/tab-bar/{TabBar,tab-bar-surface,tab-bar-static-create-menu,SortableTab,BrowserTab,drop-indicator,tab-width-rules}.tsx`
+and the sidebar chords of `src/shared/keybindings/definitions-core-1.ts`, all at
+the pinned source revision above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

@@ -18,13 +18,13 @@ export async function probeRenderedHarness({
 }) {
   await page.setViewportSize({ width: 1280, height: 850 });
   await page
-    .getByRole("button", { name: "New terminal", exact: true })
+    .getByRole("button", { name: "New tab", exact: true })
     .first()
     .click();
   await page.getByRole("menuitem", { name: "Pi", exact: true }).click();
   await page.getByRole("heading", { name: "Pi", exact: true }).waitFor();
   const trigger = await page
-    .getByRole("button", { name: "New terminal", exact: true })
+    .getByRole("button", { name: "New tab", exact: true })
     .first()
     .boundingBox();
   const form = await page.locator(".harness-launch-form").boundingBox();
@@ -67,7 +67,7 @@ export async function probeRenderedHarness({
     .waitFor({ state: "hidden" });
   await page.setViewportSize({ width: 1280, height: 850 });
   await page
-    .getByRole("button", { name: "New terminal", exact: true })
+    .getByRole("button", { name: "New tab", exact: true })
     .first()
     .click();
   await page.getByRole("menuitem", { name: "Pi", exact: true }).click();

@@ -887,18 +887,19 @@ async function candSetup(page, state, ctx) {
     const tabs = await page.getByRole("tab").count().catch(() => 0);
     if (tabs > 0) return true;
     if (!(await ensureProject())) return false;
-    // The launcher is a harness menu ("New terminal" button opens menuitems
-    // New terminal / Claude Code / Pi / ...): click through the menu item.
-    if (!(await tryClick(page, "button", "New terminal"))) {
-      missing.push("no New terminal affordance");
+    // The launcher is the tab strip "+" static create menu ("New tab"
+    // button opens New Terminal / per-harness rows / New Browser Tab):
+    // click through the New Terminal entry.
+    if (!(await tryClick(page, "button", "New tab"))) {
+      missing.push("no New tab affordance");
       return false;
     }
     await delay(600);
     try {
-      const item = page.getByRole("menuitem", { name: "New terminal", exact: true });
+      const item = page.getByRole("menuitem", { name: "New Terminal", exact: true });
       if ((await item.count()) > 0) {
         await item.first().click({ timeout: 3000 });
-        notes.push("harness menu: plain New terminal chosen");
+        notes.push("create menu: plain New Terminal chosen");
         await delay(500);
       }
     } catch {
@@ -956,15 +957,17 @@ async function candSetup(page, state, ctx) {
       break;
     case "palette":
       await ensureProject().catch(() => {});
-      // Candidate vocabulary (shortcuts.ts PALETTE_SHORTCUTS).
-      if (!(await chordOverlay(`${MOD}+K`, "palette.openCommands"))) {
-        missing.push("Cmd+K (palette.openCommands) opened no overlay");
+      // Candidate vocabulary (shortcuts.ts PALETTE_SHORTCUTS): the command
+      // palette is worktree.palette on Mod+J — Mod+K is terminal.clear and
+      // must open nothing outside a terminal.
+      if (!(await chordOverlay(`${MOD}+J`, "palette.worktree.palette"))) {
+        missing.push("Mod+J (worktree.palette) opened no overlay");
       }
       break;
     case "quick-open":
       await ensureProject().catch(() => {});
-      if (!(await chordOverlay(`${MOD}+P`, "palette.openQuickOpen"))) {
-        missing.push("Cmd+P (palette.openQuickOpen) opened no overlay");
+      if (!(await chordOverlay(`${MOD}+P`, "palette.worktree.quickOpen"))) {
+        missing.push("Mod+P (worktree.quickOpen) opened no overlay");
       }
       break;
     case "settings-appearance": {
@@ -989,9 +992,18 @@ async function candSetup(page, state, ctx) {
         } catch {
           notes.push("git fixture best-effort only");
         }
-        if (await tryClick(page, "button", "Changes")) notes.push("Changes route opened");
-        else {
-          missing.push("Changes route unavailable (capability or fixture)");
+        // R6-B: Changes lives in the right activity bar ("Source Control"
+        // button; the accessible name carries the ⌘⇧G chord suffix, so the
+        // match is non-exact).
+        try {
+          await page
+            .getByRole("button", { name: "Source Control" })
+            .first()
+            .click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Changes opened through the right activity bar");
+        } catch {
+          missing.push("Source Control activity button unavailable (capability or fixture)");
           notes.push("captured terminal view instead");
         }
       }
@@ -1004,8 +1016,21 @@ async function candSetup(page, state, ctx) {
       break;
     case "browser":
       await ensureProject().catch(() => {});
-      if (await tryClick(page, "button", "Browser")) {
-        notes.push("Browser route opened");
+      // R6-B: Browser is a tab, opened from the strip "+" static create
+      // menu ("New tab" trigger, "New Browser Tab" entry).
+      if (await tryClick(page, "button", "New tab")) {
+        await delay(600);
+        try {
+          const entry = page.getByRole("menuitem", { name: "New Browser Tab", exact: true });
+          if ((await entry.count()) > 0) {
+            await entry.first().click({ timeout: 3000 });
+            notes.push("browser tab opened through the + create menu");
+            await delay(800);
+          } else notes.push("no New Browser Tab menu entry; captured as-is");
+        } catch {
+          notes.push("create-menu selection best-effort only");
+        }
+        await dismissOverlays(page);
         try {
           const addr = page.getByPlaceholder(/address|url|search/i);
           if ((await addr.count()) > 0) {
@@ -1017,7 +1042,7 @@ async function candSetup(page, state, ctx) {
         } catch {
           notes.push("address navigation best-effort only");
         }
-      } else missing.push("no Browser nav reachable");
+      } else missing.push("no New tab affordance reachable");
       break;
     case "tasks":
       await ensureProject().catch(() => {});
@@ -1058,10 +1083,14 @@ async function candTeardown(page, state) {
     await delay(300);
   }
   await ensureClean(page, notes);
-  // Return to the terminal route so later states start from a stable view.
+  // Return to a stable view so later states start clean: select the first
+  // strip tab when one exists (R6-B: no "Terminals" route button remains;
+  // Files/Changes live in the right activity bar, Browser as a tab).
   try {
-    await page.getByRole("button", { name: "Terminals", exact: true }).first().click({ timeout: 1500 });
-    notes.push("teardown: returned to Terminals route");
+    if ((await page.getByRole("tab").count()) > 0) {
+      await page.getByRole("tab").first().click({ timeout: 1500 });
+      notes.push("teardown: selected first strip tab");
+    }
   } catch {
     /* stay where we are */
   }
@@ -1088,7 +1117,7 @@ const ALL_STATES = [
 
 const CAND_OWNER = {
   "shell-sidebar": "apps/desktop/src/renderer/src/features/shell/Sidebar.tsx, ProjectList.tsx, WorktreeCard.tsx",
-  "tab-bar": "apps/desktop/src/renderer/src/features/shell/TabBar.tsx",
+  "tab-bar": "apps/desktop/src/renderer/src/features/shell/TabBar.tsx, TabCreateMenu.tsx, tab-chrome.ts + features/browser/BrowserStripTab.tsx",
   "status-bar": "apps/desktop/src/renderer/src/components/status-bar/StatusBar.tsx",
   palette: "apps/desktop/src/renderer/src/components/command-palette/CommandPalette.tsx + shortcuts.ts",
   settings: "apps/desktop/src/renderer/src/settings-panel.tsx",
@@ -1133,6 +1162,12 @@ const SOURCE_PREFERENCE = {
 // Title-anchored source overrides: well-known controls cite their exact
 // owner file (verified by grep during R5-F), not the state surface file.
 const TITLE_SOURCES = [
+  // R6-B right sidebar + tab strip anchors (ordered most-specific first:
+  // "Toggle sidebar" is a substring of "Toggle right sidebar").
+  { match: "Toggle right sidebar", file: "src/renderer/src/components/right-sidebar/index.tsx", probes: ["Toggle right sidebar", "aria-label"], cand: "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx" },
+  { match: "Source Control", file: "src/renderer/src/components/right-sidebar/activity-bar-buttons.tsx", probes: ["aria-label", "activityItemAriaLabel"], cand: "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx" },
+  { match: "New Browser Tab", file: "src/renderer/src/components/tab-bar/tab-bar-static-create-menu.tsx", probes: ["New Browser Tab"], cand: "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx" },
+  { match: "New Terminal", file: "src/renderer/src/components/tab-bar/tab-bar-static-create-menu.tsx", probes: ["New Terminal"], cand: "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx" },
   { match: "Toggle sidebar", file: "src/renderer/src/app-shell/TitlebarLeftControls.tsx", probes: ["Toggle sidebar", "aria-label"], cand: "apps/desktop/src/renderer/src/features/shell/Sidebar.tsx" },
   { match: "Go back", file: "src/renderer/src/app-shell/TitlebarLeftControls.tsx", probes: ["Go back", "aria-label"], cand: "apps/desktop/src/renderer/src/features/shell/Sidebar.tsx" },
   { match: "Go forward", file: "src/renderer/src/app-shell/TitlebarLeftControls.tsx", probes: ["Go forward", "aria-label"], cand: "apps/desktop/src/renderer/src/features/shell/Sidebar.tsx" },

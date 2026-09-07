@@ -618,36 +618,44 @@
   min-height: 0;
   min-width: 0;
 }
-.terminal-tabs {
+/* R6-B tab strip (Orca port, MIT Copyright (c) 2026 Lovecast Inc.): tab
+   chrome rides Tailwind classes from tab-chrome.ts; only the native
+   scrollbar suppression lives here, verbatim from the source
+   (terminal-tab-strip recipe). */
+/* Why: horizontal tab strips scroll via pointer and keyboard; a native
+   scrollbar thumb overlays tab labels and looks broken. */
+.terminal-tab-strip {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.terminal-tab-strip::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+/* R6-B "+" static create menu rows (tab-bar-static-create-menu recipe:
+   icon + label + trailing hint). Radix renders the items unstyled, so the
+   flex row and the muted trailing hint live here. */
+.tab-create-item {
   display: flex;
   align-items: center;
-  flex-shrink: 0;
-  min-height: 40px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--border);
-  padding-right: 8px;
 }
-.terminal-tab {
-  display: flex;
-  align-items: center;
-  border-right: 1px solid var(--border);
-  color: var(--muted-foreground);
-  flex-shrink: 0;
-}
-.terminal-tab[data-current="true"] {
-  color: var(--foreground);
+.tab-create-item[data-highlighted] {
   background: var(--accent);
+  color: var(--accent-foreground);
+  outline: none;
 }
-.terminal-tab > button[role="tab"] {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 8px 10px 12px;
-  cursor: pointer;
-  font-size: 12px;
+.tab-create-item[data-disabled] {
+  color: var(--muted-foreground);
+  cursor: default;
 }
-.session-verdict {
+.tab-create-hint {
+  margin-left: auto;
   font-size: 11px;
+  color: var(--muted-foreground);
+}
+.tab-create-shortcut {
+  margin-left: auto;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .terminal-surface {
@@ -707,6 +715,52 @@
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.7;
+}
+/* R6-B right sidebar host (Orca port, MIT Copyright (c) 2026 Lovecast
+   Inc.): header drag-region recipes verbatim from the source; the host
+   only toggles panel display — mount lifetime (keep-alive) stays in App.
+   The session-details pane fills the host (the fixed width and divider
+   belonged to the retired inspector aside). */
+.right-sidebar-header-drag {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.right-sidebar-header-no-drag {
+  -webkit-app-region: no-drag;
+}
+/* Why: the right sidebar header extends to the window's right edge, so we
+   reserve the width of the window-controls overlay (0 without custom
+   desktop chrome) to keep the close button reachable. */
+.right-sidebar-header-inset {
+  padding-right: var(--window-controls-width, 0px);
+}
+.right-sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.right-sidebar-panel .session-details {
+  width: auto;
+  flex: 1;
+  border-left: none;
+}
+/* Why: the Files panel was built for a full-width column (240px tree
+   beside the editor). In the 280px sidebar that row layout squeezes the
+   editor to nothing, so the host forces the documented narrow stacking
+   (tree over editor) regardless of viewport width. */
+.right-sidebar-panel .files-panel {
+  flex-direction: column;
+}
+.right-sidebar-panel .workspace-explorer {
+  width: auto;
+  flex-shrink: 0;
+  max-height: 40%;
+  border-right: 0;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--border) 72%, transparent);
 }
 .migration-note {
   margin-top: 32px;
@@ -974,17 +1028,9 @@
       color-mix(in srgb, var(--border) 72%, transparent);
   }
 }
-@media (max-width: 1100px) {
-  .session-details {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 250px;
-    z-index: 1;
-    background: var(--background);
-  }
-}
+/* R6-B: the session-details overlay recipe is retired with the inspector
+   aside — the panel now lives in the right sidebar host below, and the
+   narrow-viewport guard closes the sidebar instead of overlaying it. */
 @media (max-width: 800px) {
   .workspace-sidebar {
     width: 200px;
