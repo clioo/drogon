@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Session, Status, Workspace } from "../../shared/session-contract";
 import {
   applyPanelFocus,
+  checkAvailability,
   createRouteRegistry,
   registerRoute,
   releasePanel,
@@ -192,5 +193,106 @@ describe("persisted per-route state", () => {
     expect(
       restoreRouteState(registry, routeId("gone"), '{"routeId":"gone"}'),
     ).toBeUndefined();
+  });
+});
+
+describe("nullable session mount (files/Bots/settings panels with no terminal)", () => {
+  it("mounts a descriptor with session null and renders without throwing", () => {
+    const registry = registryWith([descriptor({ id: routeId("settings") })]);
+    const resolved = resolveRoute(registry, "settings");
+    expect(() =>
+      resolved.component({
+        routeId: routeId("settings"),
+        session: null,
+        workspace,
+        status,
+        focusTarget: null,
+      }),
+    ).not.toThrow();
+  });
+  it("runs applyPanelFocus and releasePanel for a session-less mount", () => {
+    const hooks: string[] = [];
+    const route = descriptor({
+      id: routeId("settings"),
+      onFocus: (id) => hooks.push(`focus:${id}`),
+      onCleanup: (id) => hooks.push(`cleanup:${id}`),
+    });
+    const target = { focus: () => hooks.push("dom-focus") } as unknown as HTMLElement;
+    const props = {
+      routeId: routeId("settings"),
+      session: null,
+      workspace,
+      status,
+      focusTarget: target,
+    };
+    void props;
+    applyPanelFocus(route, target);
+    releasePanel(route);
+    expect(hooks).toEqual(["dom-focus", "focus:settings", "cleanup:settings"]);
+  });
+  it("serializes and restores route state for a session-less mount", () => {
+    const registry = registryWith([
+      descriptor({ id: routeId("settings"), restoreState: { tab: "general" } }),
+    ]);
+    const serialized = serializeRouteState(registry, "settings", {
+      tab: "advanced",
+    });
+    expect(
+      restoreRouteState(registry, routeId("settings"), serialized),
+    ).toEqual({ tab: "advanced" });
+  });
+});
+
+describe("capability vocabulary split (declared vs live service caps)", () => {
+  it("reports available when the live service exposes the descriptor's capability", () => {
+    const route = descriptor({ capability: "workspaces.v1" });
+    expect(checkAvailability(route, ["harness.catalog.v1", "workspaces.v1"])).toBe(
+      "available",
+    );
+  });
+  it("reports unsupported when the live service lacks the descriptor's capability", () => {
+    const route = descriptor({ capability: "workspaces.v1" });
+    expect(checkAvailability(route, ["harness.catalog.v1"])).toBe("unsupported");
+  });
+  it("reports available for a descriptor with no capability gate regardless of live caps", () => {
+    const route = descriptor();
+    expect(checkAvailability(route, [])).toBe("available");
+  });
+  it("keeps the declared registration vocabulary separate from live service caps", () => {
+    // Declared vocabulary includes workspaces.v1, so registration succeeds...
+    const registry = registryWith([
+      descriptor({ id: routeId("cloud"), capability: "workspaces.v1" }),
+    ]);
+    const route = resolveRoute(registry, "cloud");
+    // ...even though the live service caps (checked separately) don't have it yet.
+    expect(checkAvailability(route, ["harness.catalog.v1"])).toBe("unsupported");
+  });
+});
+
+describe("resolveRoute safe unavailable fallback", () => {
+  it("never throws when both the id and the fallback are unregistered", () => {
+    const registry = createRouteRegistry({
+      capabilities,
+      fallbackId: routeId("terminal"),
+    });
+    expect(() => resolveRoute(registry, "missing")).not.toThrow();
+  });
+  it("returns a built-in safe unavailable descriptor with no capability gate", () => {
+    const registry = createRouteRegistry({
+      capabilities,
+      fallbackId: routeId("terminal"),
+    });
+    const resolved = resolveRoute(registry, "missing");
+    expect(resolved.title).toBe("Unavailable");
+    expect(resolved.capability).toBeUndefined();
+    expect(
+      resolved.component({
+        routeId: resolved.id,
+        session: null,
+        workspace,
+        status,
+        focusTarget: null,
+      }),
+    ).toBeNull();
   });
 });

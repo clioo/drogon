@@ -23,7 +23,8 @@ export function routeId(value: string): RouteId {
 /** Typed props every mounted panel receives. Session/Workspace/Status are the shared bridge types, not parallel copies. */
 export type PanelProps = {
   routeId: RouteId;
-  session: Session;
+  /** Null when no terminal session backs this mount (e.g. files/Bots/settings panels). */
+  session: Session | null;
   workspace: Workspace;
   status: Status;
   /** Persisted per-route state from the last session (see restoreRouteState). */
@@ -98,7 +99,36 @@ export function registerRoute(
   return { ...registry, routes };
 }
 
-/** Resolves the panel for id; unknown ids resolve to the registered fallback. */
+/** Live availability of a declared-capability gate: 'unsupported' means App must not mount the panel. */
+export type Availability = "available" | "unsupported";
+
+/** Pure gate: does the running service (serviceCaps) actually expose the descriptor's capability right now? App calls this before mounting; it is independent of the registry's declared vocabulary. */
+export function checkAvailability(
+  descriptor: PanelDescriptor,
+  serviceCaps: readonly string[],
+): Availability {
+  if (descriptor.capability === undefined) return "available";
+  return serviceCaps.includes(descriptor.capability)
+    ? "available"
+    : "unsupported";
+}
+
+/** Fixed id for the built-in unavailable panel; never mint this id via routeId() for a real panel. */
+export const UNAVAILABLE_ROUTE_ID = routeId("__unavailable__");
+
+/** Built-in safe descriptor App renders as an empty/unavailable panel when no real route can be resolved. */
+const UNAVAILABLE_DESCRIPTOR: PanelDescriptor = {
+  id: UNAVAILABLE_ROUTE_ID,
+  title: "Unavailable",
+  component: () => null,
+};
+
+/**
+ * Resolves the panel for id; unknown ids resolve to the registered fallback.
+ * Never throws, even on older hosts where neither id nor the fallback are
+ * registered yet: App must be able to start up and render an empty/unavailable
+ * panel instead of crashing.
+ */
 export function resolveRoute(
   registry: RouteRegistry,
   id: string,
@@ -106,12 +136,8 @@ export function resolveRoute(
   const route = registry.routes.get(id);
   if (route) return route;
   const fallback = registry.routes.get(registry.fallbackId);
-  if (!fallback) {
-    throw new Error(
-      `route ${id} is unknown and fallback ${registry.fallbackId} is not registered`,
-    );
-  }
-  return fallback;
+  if (fallback) return fallback;
+  return UNAVAILABLE_DESCRIPTOR;
 }
 
 /** Focus contract: App focuses the panel's target element on mount, then runs onFocus. */
