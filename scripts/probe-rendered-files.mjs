@@ -11,13 +11,10 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await writeFile(path.join(workspace, second), "second baseline\n", {
     flag: "wx",
   });
-  const files = page.getByRole("button", { name: "Files", exact: true });
-  assert.equal(
-    await files.isEnabled(),
-    true,
-    "The candidate must advertise Files before rendered acceptance",
-  );
-  await files.click();
+  // Files is no longer a left-nav row (R6-A ported the source sidebar); until
+  // the right activity bar lands (R6-B) the panel opens through the command
+  // palette, which is gated on the same files capability.
+  await openFilesThroughPalette(page);
   const panel = page.locator('section[aria-label="Files"]');
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
   const editor = page.getByLabel(`Contents of ${first}`, { exact: true });
@@ -38,8 +35,8 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
   await editor.waitFor();
   assert.equal(await editor.inputValue(), "unsaved first draft\n");
-  await page.getByRole("button", { name: "Terminals", exact: true }).click();
-  await files.click();
+  await page.getByRole("button", { name: "Sessions", exact: true }).click();
+  await openFilesThroughPalette(page);
   await editor.waitFor();
   assert.equal(await editor.inputValue(), "unsaved first draft\n");
   await panel.getByRole("button", { name: "Save", exact: true }).click();
@@ -98,11 +95,11 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   }
   await page.reload();
   await page.getByText("Service 0.1.0", { exact: true }).waitFor();
-  await files.click();
+  await openFilesThroughPalette(page);
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
   await editor.waitFor();
   assert.equal(await editor.inputValue(), "unsaved first draft\n");
-  await page.getByRole("button", { name: "Terminals", exact: true }).click();
+  await page.getByRole("button", { name: "Sessions", exact: true }).click();
   return [
     "rendered-files-read-edit-switch-retains-unsaved-draft",
     "rendered-files-terminal-navigation-retains-draft",
@@ -132,4 +129,20 @@ export function assertFilesLayout(metrics) {
     metrics.scrollWidth <= metrics.clientWidth + 1,
     "The Files panel must not overflow horizontally",
   );
+}
+
+async function openFilesThroughPalette(page) {
+  await page.keyboard.press("Meta+J");
+  const palette = page.getByRole("dialog").or(page.locator("[cmdk-root]"));
+  await palette.first().waitFor({ timeout: 10000 });
+  await page.keyboard.type("Open Files panel");
+  const item = page.getByRole("option", { name: /Open Files panel/ }).first();
+  await item.waitFor({ timeout: 10000 });
+  assert.equal(
+    (await item.getAttribute("aria-disabled")) !== "true",
+    true,
+    "The candidate must advertise Files before rendered acceptance",
+  );
+  await item.click();
+  await page.locator('section[aria-label="Files"]').waitFor({ timeout: 10000 });
 }
