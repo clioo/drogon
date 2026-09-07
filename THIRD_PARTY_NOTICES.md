@@ -157,6 +157,13 @@ button, input) and `src/renderer/src/lib/utils.ts`, all at the pinned source
 revision above; each ported file keeps the MIT notice. `tw-animate-css` (MIT)
 is a packaged dependency imported by main.css as the source does.
 
+The Explorer panel in `apps/desktop/src/renderer/src/features/file-explorer/`
+ports Orca's `src/renderer/src/components/right-sidebar/{FileExplorer,FileExplorerToolbar,FileExplorerNameFilter,FileExplorerQueryStrip,FileExplorerFilesTreePane,FileExplorerVirtualRows,FileExplorerRow,FileExplorerTreeStatus,FileExplorerBackgroundMenu,file-explorer-inline-input-row,file-explorer-row-context-menu}.tsx`,
+`file-explorer-{entries,keyboard-navigation,paths,row-projection,selection,types}.ts`,
+`useFileExplorer{Keys,Reveal,AutoReveal,InlineInput,Selection}.ts`, `useFileDeletion.ts`,
+`path-tree.ts` and the file-type icon tables, all at the pinned source revision
+above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

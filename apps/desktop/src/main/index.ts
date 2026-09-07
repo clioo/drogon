@@ -86,6 +86,9 @@ function registerBridge() {
         case "fileList":
         case "fileRead":
         case "fileWrite":
+        case "fileCreate":
+        case "fileRename":
+        case "fileDelete":
           return dispatchFileRequest(method, value);
         case "status":
           return callNative("status", {});

@@ -6,6 +6,7 @@ import {
   FilesRequestIdCapError,
   activeOpenPath,
   activeSelection,
+  createExplorerSource,
   createFilesPanelDescriptor,
   createFilesSource,
   createRequestIdSource,
@@ -15,6 +16,7 @@ import {
   joinEntryPath,
   makeFileSaver,
   observeSaveResult,
+  openPathSurvivesDeletion,
   readContentFor,
   readErrorFor,
   runFilesRead,
@@ -1025,5 +1027,109 @@ describe("panel rendering", () => {
     const { bridge } = fakeBridge();
     const markup = renderPanel(bridge, statusWith([]), session);
     expect(markup).toContain("Files unavailable");
+  });
+});
+
+describe("createExplorerSource", () => {
+  const scope = { hostId: "h1", workspaceId: "w1" };
+  const entries: WorkspaceFileEntry[] = [
+    { name: "main.ts", kind: "file", size: 3, mtime: "t" },
+    { name: "docs", kind: "directory", size: 0, mtime: "t" },
+    { name: "link", kind: "symlink", size: 1, mtime: "t" },
+  ];
+  const listingBridge = (overrides?: Partial<FileBridge>): FileBridge => ({
+    fileList: () =>
+      Promise.resolve({
+        ok: true,
+        result: { ...scope, path: "src", entries, truncated: false },
+      }),
+    fileRead: () => Promise.reject(new Error("unused")),
+    fileWrite: () => Promise.reject(new Error("unused")),
+    ...overrides,
+  });
+
+  test("listings become explorer rows with depth and the symlink marker", async () => {
+    const source = createExplorerSource(listingBridge(), scope);
+    const result = await source.listDir("src", true);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toEqual([
+      { name: "main.ts", path: "src/main.ts", isDirectory: false, depth: 1 },
+      { name: "docs", path: "src/docs", isDirectory: true, depth: 1 },
+      { name: "link", path: "src/link", isDirectory: false, isSymlink: true, depth: 1 },
+    ]);
+  });
+
+  test("includeHidden reaches the bridge; truncation still reports", async () => {
+    const seen: unknown[] = [];
+    const listings: unknown[] = [];
+    const source = createExplorerSource(
+      listingBridge({
+        fileList: (input) => {
+          seen.push(input);
+          return listingBridge().fileList(input);
+        },
+      }),
+      scope,
+      (info) => listings.push(info),
+    );
+    await source.listDir("", false);
+    expect(seen).toEqual([
+      { ...scope, path: ".", limitEntries: MAX_DIRECTORY_ENTRIES, includeHidden: false },
+    ]);
+    expect(listings).toEqual([{ path: "src", truncated: false, count: 3 }]);
+  });
+
+  test("mutations map onto the optional bridge methods", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const source = createExplorerSource(
+      listingBridge({
+        fileCreate: (input) => {
+          calls.push(["create", input]);
+          return Promise.resolve({ ok: true, result: { ...input, kind: "file" as const } });
+        },
+        fileRename: (input) => {
+          calls.push(["rename", input]);
+          return Promise.resolve({ ok: true, result: input });
+        },
+        fileDelete: (input) => {
+          calls.push(["delete", input]);
+          return Promise.resolve({ ok: true, result: { ...input, deleted: input.paths } });
+        },
+      }),
+      scope,
+    );
+    expect(await source.create?.("docs", "n.txt", "file")).toEqual({ ok: true, result: null });
+    expect(await source.rename?.("a.txt", "b.txt")).toEqual({ ok: true, result: null });
+    expect(await source.remove?.(["a.txt"])).toEqual({ ok: true, result: null });
+    expect(calls.map(([method]) => method)).toEqual(["create", "rename", "delete"]);
+  });
+
+  test("mutations fail closed without bridge support — never a local fallback", async () => {
+    // The bridge predates the mutation methods: the source still exposes
+    // them (the UI stays interactive) but every call errors explicitly.
+    const source = createExplorerSource(listingBridge(), scope);
+    for (const call of [
+      () => source.create?.("docs", "n.txt", "file"),
+      () => source.rename?.("a.txt", "b.txt"),
+      () => source.remove?.(["a.txt"]),
+    ]) {
+      const result = await call();
+      expect(result?.ok).toBe(false);
+      if (result && !result.ok) {
+        expect(result.error.code).toBe("unsupported_capability");
+        expect(result.error.message).toMatch(/newer daemon/);
+      }
+    }
+  });
+});
+
+describe("openPathSurvivesDeletion", () => {
+  test("null stays open; exact and descendant paths close", () => {
+    expect(openPathSurvivesDeletion(null, ["a.txt"])).toBe(true);
+    expect(openPathSurvivesDeletion("a.txt", ["a.txt"])).toBe(false);
+    expect(openPathSurvivesDeletion("src/deep.ts", ["src"])).toBe(false);
+    expect(openPathSurvivesDeletion("other.ts", ["src"])).toBe(true);
+    expect(openPathSurvivesDeletion("src2.ts", ["src"])).toBe(true);
   });
 });

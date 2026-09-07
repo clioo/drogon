@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { EditorPane, scopedFileKey, type EditorScope } from "../editor/EditorPane";
 import {
-  WorkspaceExplorer,
+  FileExplorer,
+  depthOf,
+  type ExplorerNode,
+  type FileExplorerDataSource,
+} from "../file-explorer";
+import {
   type WorkspaceExplorerDataSource,
   type WorkspaceFileNode,
 } from "./WorkspaceExplorer";
@@ -249,6 +254,95 @@ export function createFilesSource(
   };
 }
 
+/**
+ * The explorer data source over the injected bridge: listings map onto the
+ * explorer's row model (symlinks keep file kind with a link marker, exactly
+ * like `entryToNode`), truncation reports through `onListing`, and the
+ * mutations fail closed when the bridge predates the daemon's
+ * files.create/rename/delete dispatch (the explorer disables the UI in
+ * that case; this is the second gate, never a local fallback).
+ */
+export function createExplorerSource(
+  bridge: FileBridge,
+  scope: { hostId: string; workspaceId: string },
+  onListing?: (info: FilesListingInfo) => void,
+): FileExplorerDataSource {
+  // Mutations stay INTERACTIVE even when the bridge predates the
+  // daemon's files.create/rename/delete dispatch: the call below fails
+  // closed with an explicit `unsupported_capability` error that the
+  // explorer surfaces (inline status / delete dialog), never a local
+  // fallback and never a silent no-op. There is deliberately no
+  // method-sniffing here — the UI shape is stable with old and new
+  // daemons alike.
+  const unsupported = (method: string) =>
+    Promise.resolve({
+      ok: false as const,
+      error: {
+        code: "unsupported_capability",
+        message: `File changes need a newer daemon with ${method} support.`,
+        retryable: false,
+      },
+    });
+  return {
+    listDir: (dirPath, includeHidden) =>
+      bridge
+        .fileList({
+          ...scope,
+          path: dirPath === "" ? "." : dirPath,
+          limitEntries: MAX_DIRECTORY_ENTRIES,
+          includeHidden,
+        })
+        .then((result): Result<ExplorerNode[]> => {
+          if (!result.ok) return result;
+          const parentPath = result.result.path;
+          onListing?.({
+            path: parentPath,
+            truncated: result.result.truncated,
+            count: result.result.entries.length,
+          });
+          return {
+            ok: true,
+            result: result.result.entries.map((entry) => {
+              const path = joinEntryPath(parentPath, entry.name);
+              return {
+                name: entry.name,
+                path,
+                isDirectory: entry.kind === "directory",
+                ...(entry.kind === "symlink" ? { isSymlink: true as const } : {}),
+                depth: depthOf(path),
+              };
+            }),
+          };
+        }),
+    create: (parentDir, name, kind) =>
+      bridge.fileCreate
+        ? bridge
+            .fileCreate({ ...scope, path: joinEntryPath(parentDir, name), kind })
+            .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
+        : unsupported("files.create"),
+    rename: (from, to) =>
+      bridge.fileRename
+        ? bridge
+            .fileRename({ ...scope, from, to })
+            .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
+        : unsupported("files.rename"),
+    remove: (paths) =>
+      bridge.fileDelete
+        ? bridge
+            .fileDelete({ ...scope, paths })
+            .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
+        : unsupported("files.delete"),
+  };
+}
+
+/** True when the open editor path survived a deletion batch. */
+export function openPathSurvivesDeletion(openPath: string | null, deleted: readonly string[]): boolean {
+  if (openPath === null) return true;
+  return !deleted.some(
+    (removed) => openPath === removed || openPath.startsWith(`${removed}/`),
+  );
+}
+
 /** Read pipeline with the same generation-fencing shape as the explorer's runLoad. */
 export function runFilesRead(input: {
   bridge: FileBridge;
@@ -489,11 +583,13 @@ function FilesPanel({
   // New scope (host/workspace change) => new source identity => the
   // explorer resets its cached children/expansion/selection. Truncation
   // reports are stamped with the scope so a stale notice can never render
-  // after a scope switch.
-  const source = useMemo(
+  // after a scope switch. (`createFilesSource` stays exported for the
+  // legacy WorkspaceExplorer contract and its tests; the mounted tree
+  // below reads only the richer explorer source.)
+  const explorerSource = useMemo(
     () =>
       available
-        ? createFilesSource(bridge, scope, (info) =>
+        ? createExplorerSource(bridge, scope, (info) =>
             setTruncation({ ...info, scopeKey }),
           )
         : null,
@@ -567,9 +663,37 @@ function FilesPanel({
     return <UnavailableFallback capability={FILES_CAPABILITY} />;
   }
 
-  const openEntry = (node: WorkspaceFileNode) => {
-    setSelection({ node: node as FilesExplorerRow, scopeKey });
+  const openEntry = (node: ExplorerNode) => {
+    // The explorer calls back for files only; the row keeps the symlink
+    // marker so the panel can still render its distinct badge.
+    const row: FilesExplorerRow = {
+      name: node.name,
+      path: node.path,
+      kind: node.isDirectory ? "directory" : "file",
+      ...(node.isSymlink ? { symlink: true as const } : {}),
+    };
+    setSelection({ node: row, scopeKey });
     setOpen({ scopeKey, path: node.path });
+  };
+  // A confirmed deletion closes the editor when its file (or folder) is
+  // gone; anything else keeps its draft and read state untouched.
+  const closeDeletedPaths = (deleted: readonly string[]) => {
+    setOpen((current) => {
+      if (current === null || current.scopeKey !== scopeKey) return current;
+      return openPathSurvivesDeletion(current.path, deleted) ? current : null;
+    });
+    setSelection((current) => {
+      if (current === null || current.scopeKey !== scopeKey) return current;
+      return openPathSurvivesDeletion(current.node.path, deleted) ? current : null;
+    });
+  };
+  // Open in Terminal goes through the existing session bridge: session
+  // start spans a shell at the workspace root (it takes no cwd), so the
+  // row's directory is noted in the call site only for future routing.
+  const openTerminalAt = (_cwd: string) => {
+    void window.drogon
+      .start(workspaceId)
+      .catch(() => undefined);
   };
   const reload = () => setReloadTick((tick) => tick + 1);
   // Frame-safe derived values: a selection/open path from another scope is
@@ -620,11 +744,14 @@ function FilesPanel({
       : null;
   return (
     <section className="files-panel" aria-label="Workspace files">
-      <WorkspaceExplorer
+      <FileExplorer
         workspaceId={workspaceId}
-        source={source}
-        selectedPath={effectiveOpenPath ?? undefined}
+        workspaceName={workspace.name}
+        source={explorerSource}
+        activePath={effectiveOpenPath}
         onSelect={openEntry}
+        onOpenTerminal={openTerminalAt}
+        onDeleted={closeDeletedPaths}
       />
       {activeTruncation && (
         <p className="files-panel-truncated" role="status">

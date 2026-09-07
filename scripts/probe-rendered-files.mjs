@@ -16,7 +16,9 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   // The sidebar may start closed on narrow windows: the source chord opens
   // it on Explorer when the button is not yet actionable.
   const mod = process.platform === "darwin" ? "Meta" : "Control";
-  const files = page.getByRole("button", { name: "Explorer" });
+  // Anchored: the explorer toolbar now has its own "Refresh Explorer" /
+  // "More Explorer Actions" buttons, so a substring match is ambiguous.
+  const files = page.getByRole("button", { name: /^Explorer/ });
   assert.equal(
     await files.isEnabled(),
     true,
@@ -108,7 +110,7 @@ export async function probeRenderedFiles({ page, workspace, output }) {
           };
           return {
             editor: box(".editor-pane-surface"),
-            rows: [...element.querySelectorAll(".workspace-explorer-row")]
+            rows: [...element.querySelectorAll('[data-file-explorer-row]')]
               .slice(0, 2)
               .map((row) => {
                 const bounds = row.getBoundingClientRect();

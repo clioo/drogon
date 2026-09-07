@@ -35,6 +35,12 @@ const harnessLaunch = z.object({
 export const bridgeSchemas = {
   botSnapshot: botSnapshotInputSchema,
   ...fileBridgeSchemas,
+  // Explorer mutations (R10-D): the channel gate only admits an object here;
+  // main/file-bridge.ts re-validates each shape strictly before the native
+  // call, so the two never drift apart.
+  fileCreate: z.object({}).passthrough(),
+  fileRename: z.object({}).passthrough(),
+  fileDelete: z.object({}).passthrough(),
   status: z.undefined(),
   workspaces: z.undefined(),
   chooseFolder: z.undefined(),
