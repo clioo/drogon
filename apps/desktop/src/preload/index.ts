@@ -8,7 +8,7 @@ import { project } from "./project";
 import { browser } from "./browser";
 import { settings } from "./settings";
 import { notifications } from "./notifications";
-import { shellBridge } from "./shell";
+import { shell } from "./shell";
 import { tasks } from "./tasks";
 import { mentu } from "./mentu";
 import { botBridgeExtras } from "./bot";
@@ -38,13 +38,12 @@ const bridge: DesktopBridge = {
   settings,
 };
 // Reconciles the granted namespaces (git, browser, notifications, tasks,
-// project and the R2-S botCreate/botRun/botHistory additions) with the
-// coordinator-owned DesktopBridge type without editing it: a runtime-only
-// merge before the freeze, so no existing key changes shape.
+// project, shell and the R2-S botCreate/botRun/botHistory additions) with
+// the coordinator-owned DesktopBridge type without editing it: a
+// runtime-only merge before the freeze, so no existing key changes shape.
 Object.assign(
   bridge,
-  { git, browser, notifications, tasks, project, mentu },
-  { shell: shellBridge },
+  { git, browser, notifications, shell, tasks, project, mentu },
   botBridgeExtras,
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

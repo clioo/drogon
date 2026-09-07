@@ -94,7 +94,18 @@ import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import { openCommandPalette } from "./features/shell/open-palette";
 import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
-import { TERMINAL_CLEAR_EVENT, TerminalPane } from "./features/terminal/TerminalPane";
+import {
+  TERMINAL_CLEAR_EVENT,
+  TERMINAL_CLOSE_EVENT,
+  TERMINAL_FILE_OPEN_EVENT,
+  TERMINAL_RESTART_EVENT,
+  TerminalPane,
+  type TerminalCloseDetail,
+  type TerminalFileOpenDetail,
+  type TerminalRestartDetail,
+} from "./features/terminal/TerminalPane";
+import { isExternalUrlAllowed } from "../../shared/shell-contract";
+import type { ShellBridge } from "../../shared/shell-contract";
 import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
 import {
@@ -523,6 +534,9 @@ export function App() {
   const changesRoutedRef = useRef(
     loadRightSidebarTab(window.localStorage) === "source-control",
   );
+  const mentuRoutedRef = useRef(
+    loadRightSidebarTab(window.localStorage) === "mentu",
+  );
   // Browser tabs live in the main process; the strip mirrors the workspace
   // scope and owns the selection. A host-created page (capture-links,
   // relay) auto-selects only while a browser tab is already selected or
@@ -769,6 +783,7 @@ export function App() {
     typeof navigator !== "undefined" ? navigator.userAgent : "",
   );
   const gitPanelAvailable = isChangesAvailable(liveCapabilities);
+  const mentuPanelAvailable = isMentuAvailable(liveCapabilities);
   const rightItems = useMemo(
     () =>
       getVisibleRightSidebarActivityItems(
@@ -782,9 +797,9 @@ export function App() {
             chordPlatform,
           ),
         }),
-        { gitAvailable: gitPanelAvailable },
+        { gitAvailable: gitPanelAvailable, mentuAvailable: mentuPanelAvailable },
       ),
-    [chordPlatform, gitPanelAvailable],
+    [chordPlatform, gitPanelAvailable, mentuPanelAvailable],
   );
   const rightEffective = resolveRightSidebarEffectiveTab(
     normalizeRightSidebarTab(rightSidebarTab),
@@ -856,11 +871,33 @@ export function App() {
   )
     changesAliveRef.current = false;
   const changesAlive = changesAliveRef.current;
+  // Mentu panel keep-alive mirrors files: survives switches and
+  // transients, unmounts on explicit mentu.v1 withhold or settled
+  // workspace loss. The wide Mentu tab keeps its own route keep-alive
+  // below; this one owns the activity-bar panel mount.
+  const mentuPanelAliveRef = useRef(false);
+  const mentuPanelExplicitWithhold =
+    status !== null && !isMentuAvailable(liveCapabilities);
+  if (
+    rightEffective === "mentu" &&
+    mentuRoutedRef.current &&
+    mentuPanelAvailable &&
+    current &&
+    gatesArmedFor
+  )
+    mentuPanelAliveRef.current = true;
+  else if (
+    mentuPanelExplicitWithhold ||
+    (status && !current && !busy && !loadingSessions)
+  )
+    mentuPanelAliveRef.current = false;
+  const mentuPanelAlive = mentuPanelAliveRef.current;
   const filesProps =
     current && status ? { workspace: current, status } : lastPropsRef.current;
   const settingsSectionRef = useRef<HTMLElement>(null);
   const filesSectionRef = useRef<HTMLElement>(null);
   const changesSectionRef = useRef<HTMLElement>(null);
+  const mentuPanelSectionRef = useRef<HTMLElement>(null);
   const sessionSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
   const automationsSectionRef = useRef<HTMLElement>(null);
@@ -904,7 +941,9 @@ export function App() {
         ? filesSectionRef.current
         : requested === "source-control"
           ? changesSectionRef.current
-          : sessionSectionRef.current;
+          : requested === "mentu"
+            ? mentuPanelSectionRef.current
+            : sessionSectionRef.current;
     target?.focus();
     // rightTick re-runs this for same-tab re-routing (state bail-outs).
   }, [rightEffective, rightSidebarOpen, rightTick]);
@@ -1296,6 +1335,7 @@ export function App() {
   const openRightSidebarOn = (tab: RightSidebarTab) => {
     if (tab === "explorer") filesRoutedRef.current = true;
     if (tab === "source-control") changesRoutedRef.current = true;
+    if (tab === "mentu") mentuRoutedRef.current = true;
     rightFocusRequest.current = tab;
     setRightSidebarTab(tab);
     saveRightSidebarTab(window.localStorage, tab);
@@ -1689,6 +1729,132 @@ export function App() {
       setSessions(applied.sessions);
       setActive(applied.active);
     });
+  useEffect(() => {
+    // Terminal pane DOM-event contracts (features/terminal): the pane owns
+    // the xterm surface and dispatches window CustomEvents for anything it
+    // cannot route itself — App owns tabs, the sidebar and the shell
+    // bridge. Registered once: every branch reads refs and stable setters
+    // only (close/create-shape/openRightSidebarOn touch nothing but
+    // those), so the empty deps are exact, never stale. No new state
+    // machines: each event reuses the existing handler below.
+    const onOpenFile = (event: Event) => {
+      const detail = (event as CustomEvent<TerminalFileOpenDetail>).detail;
+      if (!detail || typeof detail.path !== "string" || detail.path === "")
+        return;
+      const workspaceId =
+        typeof detail.workspaceId === "string" && detail.workspaceId !== ""
+          ? detail.workspaceId
+          : selectedRef.current;
+      if (!workspaceId) {
+        showRightExplorer();
+        return;
+      }
+      // A link from a workspace that is no longer selected switches there
+      // first: the file-open cell is workspace-scoped and the Files panel
+      // only applies its own scope.
+      if (workspaceId !== selectedRef.current) {
+        setSelected(workspaceId);
+        setActive("");
+        setSessions([]);
+      }
+      // Shift+click (system-default app) has no main primitive in this
+      // build; the in-app editor is the honest fallback, never a drop.
+      // Line/column ride the event but the cell carries path only — the
+      // editor has no cursor addressing yet (files-panel owner follow-up).
+      fileOpenNonce.current += 1;
+      fileOpenCell.current = {
+        workspaceId,
+        path: detail.path,
+        nonce: fileOpenNonce.current,
+      };
+      setFileOpenTick((tick) => tick + 1);
+      showRightExplorer();
+    };
+    const onRestart = (event: Event) => {
+      const detail = (event as CustomEvent<TerminalRestartDetail>).detail;
+      if (
+        !detail ||
+        typeof detail.workspaceId !== "string" ||
+        detail.workspaceId === ""
+      )
+        return;
+      // The exiting session's own record (when still listed) decides the
+      // scope; the event detail is the fallback. `start` only takes a
+      // workspace — the daemon spawns the same default shell, so "same
+      // command" holds by construction.
+      const prior =
+        typeof detail.sessionId === "string"
+          ? sessionsRef.current.find((item) => item.id === detail.sessionId)
+          : undefined;
+      const workspaceId = prior?.workspaceId ?? detail.workspaceId;
+      void action(async () => {
+        const captured = {
+          hostId: contextRef.current.hostId,
+          workspaceId,
+        };
+        const result = checked(await window.drogon.start(workspaceId));
+        // A late reply for a host/workspace no longer current is skipped,
+        // exactly like create() above; then the new tab activates.
+        if (!contextMatches(captured, contextRef.current)) return;
+        setSessions((items) => appendOrReplaceSession(items, result));
+        setActive(result.id);
+      });
+    };
+    const onClose = (event: Event) => {
+      const detail = (event as CustomEvent<TerminalCloseDetail>).detail;
+      if (!detail || typeof detail.sessionId !== "string") return;
+      // The tab's own close path (same confirmation policy): only the
+      // exact listed session is confirmed-stopped and dismissed. A stale
+      // event for a tab that is already gone is a no-op, never a blind
+      // stop.
+      const listed = sessionsRef.current.find(
+        (item) =>
+          item.id === detail.sessionId &&
+          item.workspaceId === detail.workspaceId,
+      );
+      if (!listed) return;
+      void close(listed);
+    };
+    const onOpenExternalUrl = (event: Event) => {
+      const detail = (event as CustomEvent<{ url: unknown }>).detail;
+      // The pane resolves {ok:true} on dispatch, so a refusal here only
+      // ever surfaces in the App error banner — never silently.
+      if (!detail || !isExternalUrlAllowed(detail.url)) {
+        setError("Refused to open a non-http(s) URL in the system browser.");
+        return;
+      }
+      const shellBridge = (
+        window.drogon as unknown as { shell?: ShellBridge }
+      ).shell;
+      if (!shellBridge || typeof shellBridge.openExternal !== "function") {
+        setError(
+          "System browser unavailable: the shell bridge is not exposed.",
+        );
+        return;
+      }
+      void shellBridge
+        .openExternal(detail.url)
+        .then((response) => {
+          if (!response.ok) setError(response.error.message);
+        })
+        .catch(() => setError("Could not open the URL in the system browser."));
+    };
+    window.addEventListener(TERMINAL_FILE_OPEN_EVENT, onOpenFile);
+    window.addEventListener(TERMINAL_RESTART_EVENT, onRestart);
+    window.addEventListener(TERMINAL_CLOSE_EVENT, onClose);
+    window.addEventListener("drogon:open-external-url", onOpenExternalUrl);
+    return () => {
+      window.removeEventListener(TERMINAL_FILE_OPEN_EVENT, onOpenFile);
+      window.removeEventListener(TERMINAL_RESTART_EVENT, onRestart);
+      window.removeEventListener(TERMINAL_CLOSE_EVENT, onClose);
+      window.removeEventListener(
+        "drogon:open-external-url",
+        onOpenExternalUrl,
+      );
+    };
+    // Registered once by design; every branch is ref/stable-setter only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     // Source-parity window chords (keybindings/definitions.ts): one shared
     // table with the palette host, so a chord is claimed once per scope and
@@ -2311,6 +2477,24 @@ export function App() {
                       ),
                     }
                   : null),
+                ...(mentuPanelAlive && filesProps
+                  ? {
+                      mentu: (
+                        <section
+                          ref={mentuPanelSectionRef}
+                          tabIndex={-1}
+                          className="right-sidebar-panel"
+                          aria-label="Mentu"
+                        >
+                          <MentuPanel
+                            bridge={mentuGatedBridge}
+                            workspaceId={filesProps.workspace.id}
+                            variant="panel"
+                          />
+                        </section>
+                      ),
+                    }
+                  : null),
                 session: (
                   <section
                     ref={sessionSectionRef}
@@ -2318,13 +2502,6 @@ export function App() {
                     className="right-sidebar-panel"
                   >
                     <SessionDetailsPanel terminal={terminal ?? null} />
-                    {mentuAvailable && current ? (
-                      <MentuPanel
-                        bridge={mentuGatedBridge}
-                        workspaceId={current.id}
-                        variant="panel"
-                      />
-                    ) : null}
                   </section>
                 ),
               }}
