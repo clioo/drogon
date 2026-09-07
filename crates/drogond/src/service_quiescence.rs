@@ -87,11 +87,22 @@ pub trait Transport: Read + Write + Send + 'static {
     fn try_clone(&self) -> std::io::Result<Self>
     where
         Self: Sized;
-    /// Best-effort: unblock any thread currently reading or writing this
-    /// transport, so [`ConnectionRegistry::drain`] does not wait out an
-    /// idle client's timeout. Mirrors `UnixStream::shutdown(Shutdown::Both)`;
-    /// callers intentionally ignore any error, matching existing drain
-    /// behavior.
+    /// Permanent transport shutdown, not merely an in-flight unblock: after
+    /// this returns, every clone of this transport (including ones already
+    /// handed to another thread, e.g. a handler's read/write halves) must
+    /// fail its *next* read/write immediately rather than start a new one,
+    /// as well as unblock whichever clone is currently blocked in one — so
+    /// [`ConnectionRegistry::drain`] does not wait out an idle client's
+    /// timeout, and a handler thread that raced the drain cannot serve one
+    /// more request on a transport the registry already considers gone.
+    /// Mirrors `UnixStream::shutdown(Shutdown::Both)`, which the Unix impl
+    /// gets from the OS for free (any clone's read/write on a shut-down
+    /// socket fails immediately); the Windows impl (`NamedPipeConnection`,
+    /// see its `shared` field and `SharedTransportState` in `endpoint.rs`)
+    /// establishes the same guarantee explicitly, since `CancelIoEx` alone
+    /// only reaches in-flight operations on handle values it is told about,
+    /// not future ones. Callers intentionally ignore any error, matching
+    /// existing drain behavior.
     fn shutdown_both(&self);
 }
 
@@ -137,10 +148,12 @@ struct ConnectionEntry<S> {
     id: usize,
     /// Clone of the handler's transport, used only to tear it down during
     /// drain; the handler's own copy wakes immediately (`shutdown(2)` on
-    /// Unix; best-effort `CancelIoEx` on Windows — see the evidence doc for
-    /// an open question about the Windows case). Dropped when the
-    /// handler's [`ActiveConnection`] guard removes the entry, so tracking
-    /// never holds a finished connection's client-visible close hostage.
+    /// Unix; on Windows, `NamedPipeConnection::shutdown_both` marks the
+    /// whole clone group closed and `CancelIoEx`s every live duplicate in
+    /// it, not just this entry's own handle — see `SharedTransportState` in
+    /// `endpoint.rs`). Dropped when the handler's [`ActiveConnection`] guard
+    /// removes the entry, so tracking never holds a finished connection's
+    /// client-visible close hostage.
     transport: S,
     finished: Arc<AtomicBool>,
 }

@@ -941,3 +941,115 @@ cargo build --workspace --locked                                   # OK, no regr
 5. Prior pass's patch request 3 is now resolved (item 4). Patch request 1
    (pipe-name consolidation into `drogon-protocol`) still stands, unaffected
    by this pass.
+
+## Safety corrections (root-blocking review of `530b0e7`)
+
+Three overlapped-lifetime defects in the `cfg(windows)` transport, found in
+root's blocking review of the "checkpoint-003" pass, are corrected in
+`endpoint.rs`/`service_quiescence.rs`. This supersedes the "Known gap" /
+"open question" framing in the Completion section above (item 2 and the
+`try_clone` paragraph) and the "a detached handler still can't serve"
+claim in the remaining-blockers list above (item 2/3): that claim was
+wrong — nothing previously stopped a detached handler thread from issuing
+one more read/write on a duplicate handle `CancelIoEx` never reached, since
+Windows named pipes are refcounted kernel objects (the earlier "impossible"
+reasoning applies to the *pipe name* going stale, not to an in-process
+handle staying usable after the registry considers the connection gone).
+None of this is compiler- or runtime-verified on this (Unix) host, same
+constraint as every other `cfg(windows)` line in this file — the tests
+below are real code, exercised for the first time by V5's Windows runner.
+
+1. **`run_overlapped` cancel-and-reap was timeout-only.** The `WaitForSingleObject`
+   match had a bare `_ => return Err(...)` arm (covering `WAIT_FAILED` and
+   any other non-`WAIT_OBJECT_0`/`WAIT_TIMEOUT` result) that returned
+   immediately while the issued `ERROR_IO_PENDING` operation still owned
+   the stack `OVERLAPPED`, the manual-reset event (about to be `CloseHandle`d
+   by `_event_guard`'s `Drop`) and, for `Read`/`Write`, the caller's buffer.
+   Fixed: that arm now captures the wait failure, `CancelIoEx`s the handle,
+   reaps via `GetOverlappedResult(..., TRUE)` exactly like the timeout arm,
+   and only then returns the original wait error. Every post-issue exit
+   path now cancels-and-reaps before returning, not only the timeout one.
+2. **The timeout path discarded a racing success.** On `WAIT_TIMEOUT`, the
+   prior code called `CancelIoEx` then reaped the result but ignored it
+   unconditionally, always reporting `(0, timed_out=true)` — silently
+   dropping a connect or a transferred-bytes count if the operation
+   actually completed in the race window between the timeout firing and
+   `CancelIoEx` stopping it. Fixed: `run_overlapped` now inspects
+   `GetOverlappedResult`'s outcome after the cancel; a real success
+   (`ok != 0`, or `ERROR_PIPE_CONNECTED`) is returned as an actual success
+   with its real transferred-byte count, and only `ERROR_OPERATION_ABORTED`
+   (cancellation genuinely won the race) is reported as `timed_out`.
+3. **`shutdown_both` could not stand in for permanent shutdown.** Every
+   `NamedPipeConnection` (including `try_clone` duplicates) previously
+   owned an independent `HANDLE` with no shared state: `shutdown_both`
+   `CancelIoEx`'d only `self.handle`, so a handler thread blocked in a
+   read/write on a *different* duplicate (the exact shape `drain` relies
+   on) was unreachable — the prior doc correctly flagged this as an open
+   Win32 question, but incorrectly concluded the fallback was still safe
+   ("a detached handler still can't serve"), when in fact nothing prevented
+   it from completing one more read/write on its own handle after the
+   registry believed the connection gone. Separately, every duplicate's
+   `Drop` called `DisconnectNamedPipe`, which severs the whole shared pipe
+   instance — correct only for the last live duplicate, not every one of
+   them. Fixed with a new `SharedTransportState<H>` (generic, host-testable
+   pure state machine; see `endpoint.rs`) shared via `Arc<Mutex<_>>` across
+   every clone in a connection group (handle values stored as `usize`, not
+   `HANDLE`, so the `Arc<Mutex<_>>` needs no `unsafe impl Send/Sync` beyond
+   what individual `HANDLE` fields already required):
+   - `shutdown_both` marks the group closed (fencing every clone's *next*
+     `read`/`write` to fail immediately with `ErrorKind::BrokenPipe`,
+     checked before any overlapped call is issued) and `CancelIoEx`s every
+     currently-live duplicate in the group, not only `self.handle`.
+   - `Drop` calls `DisconnectNamedPipe` only when removing the caller's
+     handle leaves the group empty (the final owner); every duplicate,
+     final owner or not, still closes its own handle value.
+   - `service_quiescence.rs`'s `Transport::shutdown_both` doc and
+     `ConnectionEntry`'s doc are corrected to describe this (permanent
+     shutdown across every clone, not a best-effort single-handle
+     cancellation with an open question).
+
+**Tests added**, all in `endpoint.rs` (none in the external
+`tests/windows_transport.rs`, since exercising any of this needs
+`connect_client`, a private helper with no public client-side wrapper to
+call from outside the crate):
+
+- Pure-logic, host-agnostic (`#[cfg(test)] mod tests` at the bottom of
+  `endpoint.rs`, run and GREEN on this Unix host as part of
+  `cargo test -p drogond`): `new_group_starts_open_with_exactly_its_initial_handle_live`,
+  `mark_closed_fences_every_clone_not_just_the_caller`,
+  `every_duplicate_is_tracked_for_cancellation`,
+  `disconnect_fires_exactly_once_for_the_final_owner`,
+  `removing_an_unknown_handle_is_a_harmless_no_op` — exercise
+  `SharedTransportState`'s transitions directly with a `u32` stand-in for
+  `HANDLE`, no Windows type or FFI involved.
+- Windows-only, host-gated (`#[cfg(test)] mod tests` inside the
+  `windows_pipe` module itself; compiled and executed only by V5's
+  runner, never here):
+  `repeated_timed_out_accepts_leave_the_pending_instance_reusable_for_a_later_connect`
+  (fix 1: several cancel+reap cycles must leave the handle usable for a
+  real connect afterward — deterministic, no client-timing race);
+  `a_connect_racing_the_poll_timeout_is_always_eventually_observed` (fix 2:
+  best-effort-deterministic — the exact kernel race cannot be forced from
+  outside, so this asserts the restored contract, bounded to 5s, rather
+  than a specific internal branch firing);
+  `shutdown_both_fences_new_io_on_every_clone_not_just_the_caller` (fix 3,
+  fencing half — fully deterministic, no cancellation or timing involved);
+  `dropping_one_duplicate_does_not_disconnect_the_shared_pipe_for_siblings`
+  (fix 3, single-disconnect half — fully deterministic).
+
+**Build verification, precisely:** unchanged from every prior pass on this
+vertical — there is no `rustup` on this host at all (`command not found`),
+so no Windows target can be added, and `cargo check -p drogond --target
+x86_64-pc-windows-msvc` fails immediately with `E0463: can't find crate for
+core` (confirmed again during this pass). Nothing under `cfg(windows)`,
+including these three fixes and their host-gated tests, has been compiled
+by any Rust toolchain; V5's isolated Windows runner remains the first
+compiler this code will ever see. What *is* real and verified on this
+(Unix) host: `cargo build -p drogond --locked` (exit 0), `cargo test -p
+drogond --locked` (22 lib tests + 31 integration tests, all pass, including
+the 5 new `SharedTransportState` unit tests), `cargo test -p drogon-harness
+--locked` (16 tests, all pass, unaffected by this pass), `cargo clippy -p
+drogond --all-targets --locked --offline -- -D warnings` (exit 0), `cargo
+clippy -p drogon-harness --all-targets --locked --offline -- -D warnings`
+(exit 0), and `cargo fmt --all -- --check` (exit 0, after `cargo fmt --all`
+reformatted the new code).

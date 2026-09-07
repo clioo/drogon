@@ -81,6 +81,82 @@ fn canonical_for_hash(data_dir: &Path) -> String {
     strip_verbatim_prefix(&canonical.to_string_lossy())
 }
 
+/// Pure state machine behind `NamedPipeConnection`'s (`cfg(windows)`, below)
+/// shared shutdown/disconnect bookkeeping. A named-pipe instance can be
+/// referenced by several distinct duplicate handle values at once
+/// (`DuplicateHandle`, used by `try_clone`) held by different threads —
+/// the accept loop's connection handler and its write-half clone, plus
+/// `ConnectionRegistry`'s tracking clone. Three invariants must hold across
+/// every one of those clones, not just the handle a given caller happens to
+/// hold:
+///
+/// 1. Once any clone calls `shutdown_both`, every clone's *next* read/write
+///    must fail immediately (`is_closed`) rather than start a fresh
+///    operation — a detached handler thread otherwise has no way to know
+///    the transport is permanently going away and could issue a write after
+///    the registry believes the connection is gone.
+/// 2. `shutdown_both` must be able to `CancelIoEx` every live duplicate
+///    (`live_handles`), not only the handle the caller happens to hold —
+///    `CancelIoEx`'s documented cancellation scope is "operations issued
+///    through this handle value," so a handler blocked in a read/write on a
+///    *different* duplicate is unreachable by cancelling only one.
+/// 3. `DisconnectNamedPipe` must run exactly once, when the last live
+///    duplicate is dropped (`remove_and_is_last`) — calling it once per
+///    duplicate's `Drop` would disconnect the shared pipe instance out from
+///    under sibling clones that are still in use.
+///
+/// Kept generic over the handle-identifier type (rather than hardcoded to
+/// the real Win32 `HANDLE`) purely so these transitions are unit-tested on
+/// every host, including this one — nothing here performs any actual I/O or
+/// references any Windows type.
+#[cfg_attr(not(windows), allow(dead_code))]
+struct SharedTransportState<H> {
+    closed: bool,
+    live: Vec<H>,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl<H: PartialEq + Copy> SharedTransportState<H> {
+    fn new(initial: H) -> Self {
+        Self {
+            closed: false,
+            live: vec![initial],
+        }
+    }
+
+    /// Registers a newly duplicated handle (`try_clone`) sharing this
+    /// connection group.
+    fn add(&mut self, handle: H) {
+        self.live.push(handle);
+    }
+
+    /// Fences new I/O across every clone: callers must check `is_closed`
+    /// before issuing the underlying platform read/write call.
+    fn mark_closed(&mut self) {
+        self.closed = true;
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    /// Every currently-live handle identifier sharing this connection
+    /// group, e.g. to `CancelIoEx` each in turn.
+    fn live_handles(&self) -> Vec<H> {
+        self.live.clone()
+    }
+
+    /// Removes `handle` from the live set (its owner is dropping it) and
+    /// reports whether that was the last live handle — i.e. whether the
+    /// caller is the final owner responsible for the one-time disconnect,
+    /// as opposed to a duplicate whose `Drop` must only close its own
+    /// handle value.
+    fn remove_and_is_last(&mut self, handle: H) -> bool {
+        self.live.retain(|&h| h != handle);
+        self.live.is_empty()
+    }
+}
+
 #[cfg(unix)]
 mod unix {
     use std::io;
@@ -272,11 +348,13 @@ mod windows_pipe {
     use std::path::Path;
     use std::time::Duration;
 
+    use std::sync::{Arc, Mutex};
+
     use windows_sys::Win32::Foundation::{
         CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_ACCESS_DENIED,
-        ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, FALSE, GENERIC_READ,
-        GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree, TRUE, WAIT_OBJECT_0,
-        WAIT_TIMEOUT,
+        ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED, ERROR_PIPE_CONNECTED,
+        FALSE, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
+        TRUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
     use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
@@ -442,16 +520,28 @@ mod windows_pipe {
     /// reimplement it. `issue` starts the operation and returns exactly
     /// what the Win32 call returned; this function does the rest: create a
     /// manual-reset event, wait on it up to `timeout` (`None` waits
-    /// indefinitely), and on timeout, `CancelIoEx` the specific handle
-    /// before reaping the result — a cancelled operation's `OVERLAPPED`
-    /// must still be reaped via `GetOverlappedResult` before the handle can
-    /// be reused, per the Win32 contract.
+    /// indefinitely), and on every exit path once the operation is
+    /// `ERROR_IO_PENDING` (not only the timeout path — see the `_` wait arm
+    /// below), `CancelIoEx` the specific handle before reaping the result —
+    /// a pending operation's `OVERLAPPED`, event and caller-provided buffer
+    /// are all still owned by the kernel until reaped via
+    /// `GetOverlappedResult`, per the Win32 contract; returning early while
+    /// that ownership is outstanding leaves the kernel free to write into
+    /// this function's stack frame (`overlapped`) and a closed event handle
+    /// after both are gone.
     ///
     /// Returns `(bytes_transferred, timed_out)`. `ERROR_PIPE_CONNECTED`
     /// (a client connected between instance creation and this call, so the
     /// "connect" was already complete before it was even issued) is folded
     /// into an ordinary immediate success with `0` bytes transferred,
-    /// matching `ConnectNamedPipe`'s documented special case.
+    /// matching `ConnectNamedPipe`'s documented special case. On the
+    /// timeout path, `CancelIoEx` racing a real completion is resolved in
+    /// favor of the completion: if `GetOverlappedResult` reports the
+    /// operation actually finished (a client connected, or bytes were
+    /// transferred, right at the timeout boundary), that success is
+    /// returned — never collapsed into `timed_out` — because it exists
+    /// exactly once and can never be redelivered on this about-to-be-
+    /// dropped `OVERLAPPED`.
     fn run_overlapped(
         handle: HANDLE,
         timeout: Option<Duration>,
@@ -506,16 +596,55 @@ mod windows_pipe {
                         CancelIoEx(handle, &overlapped);
                     }
                     let mut transferred: u32 = 0;
-                    // Safety: reaps the (now cancelled) operation so
-                    // `overlapped` and the handle are safe to reuse; `TRUE`
-                    // (wait) is fine here since cancellation already
-                    // completed or is completing imminently.
+                    // Safety: reaps the operation — which may have finished
+                    // successfully in the race window between the timeout
+                    // firing and `CancelIoEx` actually stopping it, or been
+                    // genuinely cancelled — so `overlapped` and the handle
+                    // are safe to reuse; `TRUE` (wait) is fine here since
+                    // cancellation already completed or is completing
+                    // imminently.
+                    let ok =
+                        unsafe { GetOverlappedResult(handle, &overlapped, &mut transferred, TRUE) };
+                    if ok != 0 {
+                        // The operation completed successfully despite the
+                        // cancel: report the real result, not a timeout.
+                        return Ok((transferred, false));
+                    }
+                    let err = unsafe { GetLastError() };
+                    if err == ERROR_PIPE_CONNECTED {
+                        return Ok((0, false));
+                    }
+                    if err == ERROR_OPERATION_ABORTED {
+                        // The expected outcome of our own cancellation: a
+                        // genuine timeout, nothing left pending.
+                        return Ok((0, true));
+                    }
+                    return Err(io::Error::from_raw_os_error(err as i32));
+                }
+                _ => {
+                    // `WaitForSingleObject` itself failed (e.g.
+                    // `WAIT_FAILED`). The issued operation is still exactly
+                    // as `ERROR_IO_PENDING` as it was before this wait, so
+                    // it must still be cancelled and reaped before
+                    // returning — the same obligation as the timeout arm
+                    // above, just with a wait failure instead of a wait
+                    // success to report once it's discharged.
+                    let wait_err = io::Error::last_os_error();
+                    unsafe {
+                        CancelIoEx(handle, &overlapped);
+                    }
+                    let mut transferred: u32 = 0;
+                    // Safety: reaps whatever the cancel left behind so
+                    // `overlapped`/`handle` are safe to reuse; the result is
+                    // discarded because `wait_err` — from the wait failure
+                    // itself, captured before this call could overwrite the
+                    // thread's last-error — is the more specific failure to
+                    // report.
                     unsafe {
                         GetOverlappedResult(handle, &overlapped, &mut transferred, TRUE);
                     }
-                    return Ok((0, true));
+                    return Err(wait_err);
                 }
-                _ => return Err(io::Error::last_os_error()),
             }
         }
         let mut transferred: u32 = 0;
@@ -602,27 +731,44 @@ mod windows_pipe {
         }
     }
 
-    /// One client's connection; owns exactly one pipe instance handle.
-    /// `read_timeout`/`write_timeout` are `Cell`s (not plain fields) so the
-    /// setters can take `&self` — matching `UnixStream::set_read_timeout`'s
-    /// signature exactly, which is what lets `drogond::server`'s generic
-    /// accept loop treat this and `UnixStream` identically through the
-    /// shared `Transport` bound in `service_quiescence.rs`.
+    /// One client's connection; owns exactly one pipe instance handle out of
+    /// a group that may include sibling `try_clone` duplicates (the read
+    /// handle held by `server.rs`'s `BufReader`, its write-half clone, and
+    /// `ConnectionRegistry`'s tracking clone can all be live at once, on
+    /// different threads). `shared` is that group's single source of truth
+    /// — see [`super::SharedTransportState`]'s doc for the three invariants
+    /// it exists to hold across every clone, not just `self`. Handle values
+    /// are stored as `usize` there rather than `HANDLE` (a raw pointer, not
+    /// `Send`/`Sync`) purely so the `Arc<Mutex<_>>` needs no `unsafe impl`
+    /// of its own; casting a `HANDLE` to and from `usize` is lossless and
+    /// never dereferences it. `read_timeout`/`write_timeout` are `Cell`s
+    /// (not plain fields) so the setters can take `&self` — matching
+    /// `UnixStream::set_read_timeout`'s signature exactly, which is what
+    /// lets `drogond::server`'s generic accept loop treat this and
+    /// `UnixStream` identically through the shared `Transport` bound in
+    /// `service_quiescence.rs`.
     pub struct NamedPipeConnection {
         handle: HANDLE,
+        shared: Arc<Mutex<super::SharedTransportState<usize>>>,
         read_timeout: Cell<Option<Duration>>,
         write_timeout: Cell<Option<Duration>>,
     }
 
-    // Safety: a Win32 HANDLE has no thread affinity; this connection is
-    // used from one thread at a time (like `UnixStream`), so `Send` (not
-    // `Sync`) is the correct, sufficient bound.
+    // Safety: a Win32 HANDLE has no thread affinity; this connection's
+    // clones are used concurrently from different threads (the read/write
+    // halves and the registry's tracking clone), all synchronized through
+    // `shared`'s `Mutex`, so `Send` is the correct, sufficient bound (not
+    // `Sync`: no clone's own `&self` methods are called from more than one
+    // thread at a time).
     unsafe impl Send for NamedPipeConnection {}
 
     impl NamedPipeConnection {
         fn new(handle: HANDLE) -> Self {
             Self {
                 handle,
+                shared: Arc::new(Mutex::new(super::SharedTransportState::new(
+                    handle as usize,
+                ))),
                 read_timeout: Cell::new(None),
                 write_timeout: Cell::new(None),
             }
@@ -643,18 +789,10 @@ mod windows_pipe {
         /// `dup(2)`, needed so `server.rs`'s connection loop can hold one
         /// handle for reading (wrapped in a `BufReader`) and another for
         /// writing concurrently, exactly as it already does for
-        /// `UnixStream`.
-        ///
-        /// **Known gap, not silently assumed correct**: `CancelIoEx` (what
-        /// `shutdown_both` below uses to force-unblock a stuck read/write
-        /// during drain) cancels operations issued through the specific
-        /// `HANDLE` *value* passed to it. Whether that also reaches an
-        /// operation issued through a sibling handle produced by this
-        /// method — the shape `ConnectionRegistry::drain` relies on,
-        /// mirroring `UnixStream::shutdown` unblocking every fd sharing a
-        /// socket — is real Win32 behavior this vertical could not verify
-        /// without a Windows host. See the evidence doc's Completion
-        /// section.
+        /// `UnixStream`. The new duplicate joins `self`'s `shared` group
+        /// (same `Arc`, registered into it below) rather than starting a
+        /// fresh, disconnected one, so `shutdown_both` called on *any* clone
+        /// reaches every other — see [`super::SharedTransportState`].
         pub fn try_clone(&self) -> io::Result<Self> {
             // Safety: `GetCurrentProcess` returns a pseudo-handle valid for
             // the lifetime of this process; no separate close is needed or
@@ -677,26 +815,52 @@ mod windows_pipe {
             if ok == 0 {
                 return Err(io::Error::last_os_error());
             }
+            self.shared.lock().unwrap().add(duplicate as usize);
             Ok(Self {
                 handle: duplicate,
+                shared: Arc::clone(&self.shared),
                 read_timeout: Cell::new(self.read_timeout.get()),
                 write_timeout: Cell::new(self.write_timeout.get()),
             })
         }
 
-        /// Best-effort: see the `try_clone` doc for the open question about
-        /// whether this reaches an operation issued through a duplicated
-        /// sibling handle. Errors are intentionally ignored, matching the
-        /// Unix side's `let _ = entry.transport.shutdown(Shutdown::Both)`.
+        /// Permanent transport shutdown, not merely a best-effort in-flight
+        /// cancellation: marks the shared group closed — every clone's next
+        /// `read`/`write` fails immediately (`ErrorKind::BrokenPipe`)
+        /// without issuing a new overlapped call, which is what stops a
+        /// detached handler thread from serving a request that raced the
+        /// drain instead of relying on `CancelIoEx` alone to have reached it
+        /// — then `CancelIoEx`s every currently-live duplicate handle in the
+        /// group, not only `self.handle`: `CancelIoEx`'s documented
+        /// cancellation scope is "operations issued through this handle
+        /// value," so a handler thread blocked in a read/write on a
+        /// *different* duplicate than the one `drain` happens to hold would
+        /// otherwise be unreachable. Errors from the cancellation itself are
+        /// intentionally ignored, matching the Unix side's
+        /// `let _ = entry.transport.shutdown(Shutdown::Both)`.
         pub fn shutdown_both(&self) {
-            unsafe {
-                CancelIoEx(self.handle, std::ptr::null());
+            let live: Vec<usize> = {
+                let mut shared = self.shared.lock().unwrap();
+                shared.mark_closed();
+                shared.live_handles()
+            };
+            for key in live {
+                let handle = key as *mut c_void;
+                unsafe {
+                    CancelIoEx(handle, std::ptr::null());
+                }
             }
         }
     }
 
     impl Read for NamedPipeConnection {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.shared.lock().unwrap().is_closed() {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "named pipe connection was shut down",
+                ));
+            }
             let handle = self.handle;
             let timeout = self.read_timeout.get();
             let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
@@ -716,6 +880,12 @@ mod windows_pipe {
 
     impl Write for NamedPipeConnection {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if self.shared.lock().unwrap().is_closed() {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "named pipe connection was shut down",
+                ));
+            }
             let handle = self.handle;
             let timeout = self.write_timeout.get();
             let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
@@ -739,8 +909,21 @@ mod windows_pipe {
 
     impl Drop for NamedPipeConnection {
         fn drop(&mut self) {
+            // `DisconnectNamedPipe` severs the pipe instance itself, shared
+            // by every duplicate in this group — calling it once per
+            // duplicate's `Drop` would disconnect siblings still in use, so
+            // only the final owner (the group's last live handle) may call
+            // it. Every duplicate, final owner or not, still closes its own
+            // handle value.
+            let is_last = self
+                .shared
+                .lock()
+                .unwrap()
+                .remove_and_is_last(self.handle as usize);
             unsafe {
-                DisconnectNamedPipe(self.handle);
+                if is_last {
+                    DisconnectNamedPipe(self.handle);
+                }
                 CloseHandle(self.handle);
             }
         }
@@ -782,6 +965,160 @@ mod windows_pipe {
                 }
             }
             Err(e) => Err(e),
+        }
+    }
+
+    /// Real-`HANDLE` tests for the overlapped-lifetime safety corrections
+    /// (see `run_overlapped`'s doc and `NamedPipeConnection::shutdown_both`'s
+    /// doc). Unlike `tests/windows_transport.rs` (an external integration
+    /// test limited to this module's public API), these live inside
+    /// `windows_pipe` itself so they can reach `connect_client` directly —
+    /// this vertical has no client-side wrapper type to expose publicly —
+    /// and so they compile only where `windows-sys` is actually a
+    /// dependency (`cfg(windows)`); V5's isolated Windows runner is the
+    /// first compiler and the only host that ever executes them.
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::time::Instant;
+
+        fn pipe_name_for(dir: &Path) -> String {
+            super::super::windows_pipe_name(&super::super::canonical_for_hash(dir))
+        }
+
+        /// Fix 1 (cancel-and-reap on every post-issue exit path, not only
+        /// the timeout path): several consecutive timed-out accepts reuse
+        /// the same pending instance and handle (`NamedPipeListener::accept`'s
+        /// documented reuse-on-timeout contract). If any one of those
+        /// cancel+reap cycles were incomplete, the kernel would still
+        /// consider the handle's overlapped slot busy, and either a later
+        /// cycle or the final real connect below would hang or error
+        /// instead of completing cleanly.
+        #[test]
+        fn repeated_timed_out_accepts_leave_the_pending_instance_reusable_for_a_later_connect() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut listener = establish(dir.path()).unwrap();
+            let poll = Duration::from_millis(10);
+            for _ in 0..5 {
+                let err = listener.accept(poll).unwrap_err();
+                assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+            }
+            let name = pipe_name_for(dir.path());
+            let client = std::thread::spawn(move || connect_client(&name).map(|h| h as usize));
+            let connection = listener.accept(Duration::from_secs(5));
+            assert!(
+                connection.is_ok(),
+                "the pending instance must still accept a real connection after \
+                 several cancel+reap cycles: {:?}",
+                connection.err()
+            );
+            let client_key = client
+                .join()
+                .unwrap()
+                .expect("client connect must succeed once the server accepted");
+            unsafe {
+                CloseHandle(client_key as HANDLE);
+            }
+        }
+
+        /// Fix 2 (a racing completion must win over a timeout, never be
+        /// silently discarded): the exact kernel-level race between
+        /// `CancelIoEx` and a genuinely completing `ConnectNamedPipe` cannot
+        /// be forced deterministically from outside the kernel, so this
+        /// instead asserts the externally observable contract the fix
+        /// restores — a client that starts connecting concurrently with a
+        /// tight poll loop is always eventually observed connected, never
+        /// lost to a timeout call that raced its completion. Bounded to 5s
+        /// so a regression (the old always-`timed_out` behavior stranding
+        /// the connect) fails the assertion rather than hanging forever.
+        #[test]
+        fn a_connect_racing_the_poll_timeout_is_always_eventually_observed() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut listener = establish(dir.path()).unwrap();
+            let name = pipe_name_for(dir.path());
+            let client = std::thread::spawn(move || connect_client(&name).map(|h| h as usize));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut observed = false;
+            while Instant::now() < deadline {
+                match listener.accept(Duration::from_micros(200)) {
+                    Ok(_connection) => {
+                        observed = true;
+                        break;
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+                    Err(e) => panic!("unexpected accept error: {e}"),
+                }
+            }
+            assert!(
+                observed,
+                "a connecting client must eventually be observed, never lost to a timeout race"
+            );
+            let client_key = client.join().unwrap().expect("client connect must succeed");
+            unsafe {
+                CloseHandle(client_key as HANDLE);
+            }
+        }
+
+        /// Fix 3a (shared closed-fence): `shutdown_both` on one clone must
+        /// make every sibling's *next* read/write fail immediately, not
+        /// only unblock whatever that one clone happened to be doing. No
+        /// timing race is involved — the fence is checked before any
+        /// overlapped call is even issued — so this is fully deterministic.
+        #[test]
+        fn shutdown_both_fences_new_io_on_every_clone_not_just_the_caller() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut listener = establish(dir.path()).unwrap();
+            let name = pipe_name_for(dir.path());
+            let client = std::thread::spawn(move || connect_client(&name).map(|h| h as usize));
+            let mut connection = listener
+                .accept(Duration::from_secs(5))
+                .expect("client should connect within 5s");
+            let client_key = client.join().unwrap().expect("client connect must succeed");
+
+            let mut clone = connection
+                .try_clone()
+                .expect("try_clone must succeed on a live connection");
+            connection.shutdown_both();
+
+            let mut buf = [0u8; 4];
+            let err = Read::read(&mut clone, &mut buf)
+                .expect_err("a sibling clone's read must be fenced after shutdown_both");
+            assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+
+            unsafe {
+                CloseHandle(client_key as HANDLE);
+            }
+        }
+
+        /// Fix 3b (disconnect exactly once, by the final owner): dropping
+        /// one duplicate must not sever the shared pipe instance out from
+        /// under a still-live sibling. Deterministic: no cancellation or
+        /// timing is involved, only whether `DisconnectNamedPipe` fired
+        /// early.
+        #[test]
+        fn dropping_one_duplicate_does_not_disconnect_the_shared_pipe_for_siblings() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut listener = establish(dir.path()).unwrap();
+            let name = pipe_name_for(dir.path());
+            let client = std::thread::spawn(move || connect_client(&name).map(|h| h as usize));
+            let connection = listener
+                .accept(Duration::from_secs(5))
+                .expect("client should connect within 5s");
+            let client_key = client.join().unwrap().expect("client connect must succeed");
+
+            let mut clone = connection
+                .try_clone()
+                .expect("try_clone must succeed on a live connection");
+            drop(connection); // a non-final duplicate; must not disconnect the pipe
+
+            let payload = b"ping";
+            let n = Write::write(&mut clone, payload)
+                .expect("a sibling clone must remain usable after a non-final duplicate's Drop");
+            assert_eq!(n, payload.len());
+
+            unsafe {
+                CloseHandle(client_key as HANDLE);
+            }
         }
     }
 }
@@ -871,5 +1208,75 @@ mod tests {
     fn pipe_name_matches_drogon_cli_contract_for_a_known_input() {
         let name = windows_pipe_name("/home/tester/.local/share/drogon");
         assert_eq!(name, "\\\\.\\pipe\\drogon-v1-44bca9b408bb8c048e5a2201");
+    }
+
+    // `SharedTransportState` is the pure state machine behind the Windows
+    // `NamedPipeConnection`'s shutdown/disconnect bookkeeping (see its doc
+    // above). It is generic over the handle-identifier type specifically so
+    // these transitions run on every host, not only a Windows runner — none
+    // of the following does any actual I/O or touches a Windows type.
+
+    #[test]
+    fn new_group_starts_open_with_exactly_its_initial_handle_live() {
+        let state = SharedTransportState::new(1u32);
+        assert!(!state.is_closed());
+        assert_eq!(state.live_handles(), vec![1]);
+    }
+
+    #[test]
+    fn mark_closed_fences_every_clone_not_just_the_caller() {
+        let mut state = SharedTransportState::new(1u32);
+        state.add(2);
+        assert!(!state.is_closed());
+        state.mark_closed();
+        // The fence is a property of the whole group: any clone's `is_closed`
+        // observes it, regardless of which handle called `mark_closed`.
+        assert!(state.is_closed());
+        assert_eq!(
+            state.live_handles(),
+            vec![1, 2],
+            "closing must not itself drop live handles; cancellation is separate"
+        );
+    }
+
+    #[test]
+    fn every_duplicate_is_tracked_for_cancellation() {
+        let mut state = SharedTransportState::new(10u32);
+        state.add(20);
+        state.add(30);
+        assert_eq!(
+            state.live_handles(),
+            vec![10, 20, 30],
+            "shutdown_both must be able to cancel every live duplicate, not only one"
+        );
+    }
+
+    #[test]
+    fn disconnect_fires_exactly_once_for_the_final_owner() {
+        let mut state = SharedTransportState::new(1u32);
+        state.add(2);
+        state.add(3);
+        assert!(
+            !state.remove_and_is_last(1),
+            "two siblings remain live; dropping this one must not disconnect the shared pipe"
+        );
+        assert!(
+            !state.remove_and_is_last(2),
+            "one sibling remains live; still not the final owner"
+        );
+        assert!(
+            state.remove_and_is_last(3),
+            "the last live handle must report itself as the final owner"
+        );
+    }
+
+    #[test]
+    fn removing_an_unknown_handle_is_a_harmless_no_op() {
+        let mut state = SharedTransportState::new(1u32);
+        assert!(
+            !state.remove_and_is_last(999),
+            "an unrelated handle must not be mistaken for the last live one"
+        );
+        assert_eq!(state.live_handles(), vec![1]);
     }
 }
