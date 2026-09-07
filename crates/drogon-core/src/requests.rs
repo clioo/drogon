@@ -21,6 +21,10 @@ use sha2::{Digest, Sha256};
 
 use crate::error;
 
+#[cfg(test)]
+#[path = "requests_atomic_tests.rs"]
+mod requests_atomic_tests;
+
 type ReceiptOutcome = Result<Value, RpcError>;
 type PersistedReceipt = (String, ReceiptOutcome);
 
