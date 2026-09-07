@@ -10,6 +10,7 @@ mod coordination_access;
 mod coordination_attempts;
 mod coordination_identity;
 mod coordination_launch;
+mod coordination_mail;
 mod coordination_output;
 mod coordination_receipts;
 mod coordination_runs;
