@@ -104,12 +104,25 @@ fn canonical_for_hash(data_dir: &Path) -> String {
 ///    duplicate is dropped (`remove_and_is_last`) — calling it once per
 ///    duplicate's `Drop` would disconnect the shared pipe instance out from
 ///    under sibling clones that are still in use.
+/// 4. Both the closed-check-and-issue step (`run_overlapped_guarded`) and
+///    the mark-closed-and-cancel step (`shutdown_both`) must hold this
+///    struct's `Mutex` across the *entire* step, including the real Win32
+///    call (`ReadFile`/`WriteFile`/`ConnectNamedPipe` on one side,
+///    `CancelIoEx` on the other) — not just the bookkeeping read/write —
+///    or a check can observe "not closed" in the gap before `shutdown_both`
+///    cancels nothing (because nothing was pending yet) and the real
+///    operation then starts uncancelled. The same lock must also be held
+///    through `Drop`'s `CloseHandle`/`DisconnectNamedPipe`, so a concurrent
+///    `shutdown_both` can never `CancelIoEx` a handle value `Drop` has
+///    already closed (and Windows may have already recycled for an
+///    unrelated object).
 ///
 /// Kept generic over the handle-identifier type (rather than hardcoded to
 /// the real Win32 `HANDLE`) purely so these transitions are unit-tested on
 /// every host, including this one — nothing here performs any actual I/O or
 /// references any Windows type.
 #[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Debug)]
 struct SharedTransportState<H> {
     closed: bool,
     live: Vec<H>,
@@ -514,12 +527,116 @@ mod windows_pipe {
         }
     }
 
-    /// Drives one overlapped Win32 I/O call to completion, timeout or
-    /// error — the shared wait/cancel/reap mechanics behind `accept`,
-    /// `Read` and `Write` below, so those three call sites do not each
-    /// reimplement it. `issue` starts the operation and returns exactly
-    /// what the Win32 call returned; this function does the rest: create a
-    /// manual-reset event, wait on it up to `timeout` (`None` waits
+    struct EventGuard(HANDLE);
+    impl Drop for EventGuard {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    /// Manual-reset event + zero-initialized `OVERLAPPED` wired to it,
+    /// shared setup for every overlapped call site (`accept`/`read`/
+    /// `write`). Split out from the old single `run_overlapped` so the
+    /// "issue" step can run either directly (`run_overlapped`, used by
+    /// `accept`, which has no shared shutdown state to race) or while
+    /// holding a `NamedPipeConnection`'s `shared` lock (`run_overlapped_guarded`,
+    /// used by `read`/`write`) — see that function's doc for why the lock
+    /// must be held across the check-and-issue step, not just the check.
+    struct OverlappedCall {
+        overlapped: OVERLAPPED,
+        _event_guard: EventGuard,
+    }
+
+    impl OverlappedCall {
+        fn new() -> io::Result<Self> {
+            // Safety: a manual-reset (`TRUE`), initially-unsignaled
+            // (`FALSE`), unnamed event; owned exclusively by this call and
+            // closed by `EventGuard` on drop.
+            let event = unsafe { CreateEventW(std::ptr::null(), TRUE, FALSE, std::ptr::null()) };
+            if event.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            let _event_guard = EventGuard(event);
+            // Safety: zero-initialized `OVERLAPPED` is a valid starting
+            // state per the Win32 contract; only `hEvent` needs to be set
+            // before use.
+            let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+            overlapped.hEvent = event;
+            Ok(Self {
+                overlapped,
+                _event_guard,
+            })
+        }
+
+        /// Safety: the returned pointer is valid only for the lifetime of
+        /// `self`, which every caller below keeps alive across the
+        /// subsequent wait/cancel/reap step.
+        fn ptr(&mut self) -> *mut OVERLAPPED {
+            &mut self.overlapped
+        }
+    }
+
+    /// Issues `issue` immediately and drives it to completion, timeout or
+    /// error. Used by `accept`, which has no shared shutdown state: a
+    /// `NamedPipeListener`'s pending instance is never part of any
+    /// `SharedTransportState` group, so there is no closed-check to race
+    /// here.
+    fn run_overlapped(
+        handle: HANDLE,
+        timeout: Option<Duration>,
+        issue: impl FnOnce(*mut OVERLAPPED) -> i32,
+    ) -> io::Result<(u32, bool)> {
+        let mut call = OverlappedCall::new()?;
+        let started = issue(call.ptr());
+        finish_overlapped_call(handle, &call.overlapped, timeout, started)
+    }
+
+    /// Issues `issue` only if `shared` is not already closed, checking and
+    /// issuing atomically under `shared`'s lock — released immediately
+    /// after, before the wait/cancel/reap step below, exactly like
+    /// `run_overlapped`. This closes the race the previous
+    /// drop-the-lock-before-issuing shape left open: `shutdown_both` now
+    /// also holds this same lock across its own mark-closed-and-cancel step
+    /// (see its doc), so the two can never interleave as "this check
+    /// observes open, `shutdown_both` marks closed and cancels nothing
+    /// (nothing pending yet), then this call issues an operation
+    /// `shutdown_both` already believes it accounted for." Either
+    /// `shutdown_both` completes its whole locked step first (so this
+    /// call's check observes closed and never issues), or this call's
+    /// locked step completes first (so the operation is genuinely pending
+    /// in the kernel by the time `shutdown_both` computes its
+    /// `live_handles()` snapshot and `CancelIoEx`s it) — never a partial
+    /// interleaving of the two.
+    fn run_overlapped_guarded(
+        shared: &Mutex<super::SharedTransportState<usize>>,
+        handle: HANDLE,
+        timeout: Option<Duration>,
+        issue: impl FnOnce(*mut OVERLAPPED) -> i32,
+    ) -> io::Result<(u32, bool)> {
+        let mut call = OverlappedCall::new()?;
+        let started = {
+            let guard = shared.lock().unwrap();
+            if guard.is_closed() {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "named pipe connection was shut down",
+                ));
+            }
+            issue(call.ptr())
+            // `guard` drops here, before the wait/cancel/reap step below —
+            // a blocking wait must never happen while holding this lock.
+        };
+        finish_overlapped_call(handle, &call.overlapped, timeout, started)
+    }
+
+    /// Shared wait/cancel/reap mechanics behind every overlapped call once
+    /// it has already been issued — the mechanics `run_overlapped` and
+    /// `run_overlapped_guarded` above both delegate to after their
+    /// different issue steps. `issue` starts the operation and returns
+    /// exactly what the Win32 call returned; this function does the rest:
+    /// wait on `overlapped.hEvent` up to `timeout` (`None` waits
     /// indefinitely), and on every exit path once the operation is
     /// `ERROR_IO_PENDING` (not only the timeout path — see the `_` wait arm
     /// below), `CancelIoEx` the specific handle before reaping the result —
@@ -527,8 +644,8 @@ mod windows_pipe {
     /// are all still owned by the kernel until reaped via
     /// `GetOverlappedResult`, per the Win32 contract; returning early while
     /// that ownership is outstanding leaves the kernel free to write into
-    /// this function's stack frame (`overlapped`) and a closed event handle
-    /// after both are gone.
+    /// the caller's `OverlappedCall` and a closed event handle after both
+    /// are gone.
     ///
     /// Returns `(bytes_transferred, timed_out)`. `ERROR_PIPE_CONNECTED`
     /// (a client connected between instance creation and this call, so the
@@ -542,36 +659,12 @@ mod windows_pipe {
     /// returned — never collapsed into `timed_out` — because it exists
     /// exactly once and can never be redelivered on this about-to-be-
     /// dropped `OVERLAPPED`.
-    fn run_overlapped(
+    fn finish_overlapped_call(
         handle: HANDLE,
+        overlapped: &OVERLAPPED,
         timeout: Option<Duration>,
-        issue: impl FnOnce(*mut OVERLAPPED) -> i32,
+        started: i32,
     ) -> io::Result<(u32, bool)> {
-        // Safety: a manual-reset (`TRUE`), initially-unsignaled (`FALSE`),
-        // unnamed event; owned exclusively by this call and closed below.
-        let event = unsafe { CreateEventW(std::ptr::null(), TRUE, FALSE, std::ptr::null()) };
-        if event.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        struct EventGuard(HANDLE);
-        impl Drop for EventGuard {
-            fn drop(&mut self) {
-                unsafe {
-                    CloseHandle(self.0);
-                }
-            }
-        }
-        let _event_guard = EventGuard(event);
-
-        // Safety: zero-initialized `OVERLAPPED` is a valid starting state
-        // per the Win32 contract; only `hEvent` needs to be set before use.
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        overlapped.hEvent = event;
-
-        // Safety: `overlapped` outlives every branch below, including the
-        // cancel-then-reap path, so the kernel never writes into a freed
-        // stack slot.
-        let started = issue(&mut overlapped);
         if started == 0 {
             let err = unsafe { GetLastError() };
             if err == ERROR_PIPE_CONNECTED {
@@ -584,16 +677,16 @@ mod windows_pipe {
                 None => INFINITE,
                 Some(d) => u32::try_from(d.as_millis()).unwrap_or(u32::MAX - 1),
             };
-            // Safety: `event` is valid and owned by this call for its
-            // duration.
-            match unsafe { WaitForSingleObject(event, wait_ms) } {
+            // Safety: `overlapped.hEvent` is valid and owned by the
+            // caller's `OverlappedCall` for the duration of this wait.
+            match unsafe { WaitForSingleObject(overlapped.hEvent, wait_ms) } {
                 WAIT_OBJECT_0 => {}
                 WAIT_TIMEOUT => {
                     // Safety: `handle` and `overlapped` are both still valid;
                     // cancelling only affects operations issued against this
                     // specific handle value.
                     unsafe {
-                        CancelIoEx(handle, &overlapped);
+                        CancelIoEx(handle, overlapped);
                     }
                     let mut transferred: u32 = 0;
                     // Safety: reaps the operation — which may have finished
@@ -604,7 +697,7 @@ mod windows_pipe {
                     // cancellation already completed or is completing
                     // imminently.
                     let ok =
-                        unsafe { GetOverlappedResult(handle, &overlapped, &mut transferred, TRUE) };
+                        unsafe { GetOverlappedResult(handle, overlapped, &mut transferred, TRUE) };
                     if ok != 0 {
                         // The operation completed successfully despite the
                         // cancel: report the real result, not a timeout.
@@ -631,7 +724,7 @@ mod windows_pipe {
                     // success to report once it's discharged.
                     let wait_err = io::Error::last_os_error();
                     unsafe {
-                        CancelIoEx(handle, &overlapped);
+                        CancelIoEx(handle, overlapped);
                     }
                     let mut transferred: u32 = 0;
                     // Safety: reaps whatever the cancel left behind so
@@ -641,7 +734,7 @@ mod windows_pipe {
                     // thread's last-error — is the more specific failure to
                     // report.
                     unsafe {
-                        GetOverlappedResult(handle, &overlapped, &mut transferred, TRUE);
+                        GetOverlappedResult(handle, overlapped, &mut transferred, TRUE);
                     }
                     return Err(wait_err);
                 }
@@ -651,7 +744,7 @@ mod windows_pipe {
         // Safety: the operation has completed (either synchronously above,
         // or the wait just observed its event), so the result is ready
         // without blocking (`FALSE`).
-        let ok = unsafe { GetOverlappedResult(handle, &overlapped, &mut transferred, FALSE) };
+        let ok = unsafe { GetOverlappedResult(handle, overlapped, &mut transferred, FALSE) };
         if ok == 0 {
             let err = unsafe { GetLastError() };
             if err == ERROR_PIPE_CONNECTED {
@@ -747,6 +840,7 @@ mod windows_pipe {
     /// lets `drogond::server`'s generic accept loop treat this and
     /// `UnixStream` identically through the shared `Transport` bound in
     /// `service_quiescence.rs`.
+    #[derive(Debug)]
     pub struct NamedPipeConnection {
         handle: HANDLE,
         shared: Arc<Mutex<super::SharedTransportState<usize>>>,
@@ -838,12 +932,19 @@ mod windows_pipe {
         /// otherwise be unreachable. Errors from the cancellation itself are
         /// intentionally ignored, matching the Unix side's
         /// `let _ = entry.transport.shutdown(Shutdown::Both)`.
+        ///
+        /// `shared`'s lock is held for the mark-closed step AND across the
+        /// entire cancellation loop below, not released in between: a
+        /// concurrent `Drop` (see its matching discipline) must not be able
+        /// to `CloseHandle` — and have Windows recycle — a handle value
+        /// while a `CancelIoEx` naming that exact value is in flight, which
+        /// would otherwise risk cancelling I/O on a completely unrelated,
+        /// freshly-opened kernel object that happened to reuse the same
+        /// handle number.
         pub fn shutdown_both(&self) {
-            let live: Vec<usize> = {
-                let mut shared = self.shared.lock().unwrap();
-                shared.mark_closed();
-                shared.live_handles()
-            };
+            let mut shared = self.shared.lock().unwrap();
+            shared.mark_closed();
+            let live = shared.live_handles();
             for key in live {
                 let handle = key as *mut c_void;
                 unsafe {
@@ -855,19 +956,14 @@ mod windows_pipe {
 
     impl Read for NamedPipeConnection {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            if self.shared.lock().unwrap().is_closed() {
-                return Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "named pipe connection was shut down",
-                ));
-            }
             let handle = self.handle;
             let timeout = self.read_timeout.get();
             let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
             let ptr = buf.as_mut_ptr();
-            let (transferred, timed_out) = run_overlapped(handle, timeout, |overlapped| unsafe {
-                ReadFile(handle, ptr, len, std::ptr::null_mut(), overlapped)
-            })?;
+            let (transferred, timed_out) =
+                run_overlapped_guarded(&self.shared, handle, timeout, |overlapped| unsafe {
+                    ReadFile(handle, ptr, len, std::ptr::null_mut(), overlapped)
+                })?;
             if timed_out {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -880,19 +976,14 @@ mod windows_pipe {
 
     impl Write for NamedPipeConnection {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            if self.shared.lock().unwrap().is_closed() {
-                return Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "named pipe connection was shut down",
-                ));
-            }
             let handle = self.handle;
             let timeout = self.write_timeout.get();
             let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
             let ptr = buf.as_ptr();
-            let (transferred, timed_out) = run_overlapped(handle, timeout, |overlapped| unsafe {
-                WriteFile(handle, ptr, len, std::ptr::null_mut(), overlapped)
-            })?;
+            let (transferred, timed_out) =
+                run_overlapped_guarded(&self.shared, handle, timeout, |overlapped| unsafe {
+                    WriteFile(handle, ptr, len, std::ptr::null_mut(), overlapped)
+                })?;
             if timed_out {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -915,11 +1006,15 @@ mod windows_pipe {
             // only the final owner (the group's last live handle) may call
             // it. Every duplicate, final owner or not, still closes its own
             // handle value.
-            let is_last = self
-                .shared
-                .lock()
-                .unwrap()
-                .remove_and_is_last(self.handle as usize);
+            //
+            // `shared`'s lock is held through `CloseHandle` (and, for the
+            // final owner, `DisconnectNamedPipe`) — matching
+            // `shutdown_both`'s discipline above — so the two can never
+            // interleave such that `CancelIoEx` there targets a handle
+            // value this call has already closed (and Windows may have
+            // already recycled for an unrelated object).
+            let mut shared = self.shared.lock().unwrap();
+            let is_last = shared.remove_and_is_last(self.handle as usize);
             unsafe {
                 if is_last {
                     DisconnectNamedPipe(self.handle);
@@ -1120,6 +1215,128 @@ mod windows_pipe {
                 CloseHandle(client_key as HANDLE);
             }
         }
+
+        /// Fix (race 1): the closed-check and the overlapped issue must be
+        /// atomic with `shutdown_both`'s mark-closed-and-cancel step
+        /// (`run_overlapped_guarded`), or a read issued in the gap between
+        /// "saw open" and "actually issued" starts uncancelled and blocks
+        /// forever — no read timeout is set here on purpose, so a
+        /// regression manifests as a hang, not merely a slow completion.
+        /// The exact kernel-level interleaving cannot be pinned from
+        /// outside the kernel, so this repeatedly races a fresh read
+        /// against a concurrent `shutdown_both` with no synchronization
+        /// delay between them (best-effort, not a guaranteed hit of the
+        /// narrowest window) and asserts every trial completes within a
+        /// generous bound: a regression (the pre-fix
+        /// drop-the-lock-before-issuing shape) would eventually hang one of
+        /// these trials, since the whole point of the fix is that
+        /// `shutdown_both` and the read's issue can never interleave
+        /// partially — one always fully precedes the other.
+        #[test]
+        fn a_read_racing_shutdown_both_never_starts_uncancelled() {
+            for _ in 0..50 {
+                let dir = tempfile::tempdir().unwrap();
+                let mut listener = establish(dir.path()).unwrap();
+                let name = pipe_name_for(dir.path());
+                let client = std::thread::spawn(move || connect_client(&name).map(|h| h as usize));
+                let connection = listener
+                    .accept(Duration::from_secs(5))
+                    .expect("client should connect within 5s");
+                let client_key = client.join().unwrap().expect("client connect must succeed");
+
+                let mut reader = connection
+                    .try_clone()
+                    .expect("try_clone must succeed on a live connection");
+                let (tx, rx) = std::sync::mpsc::channel();
+                let reader_thread = std::thread::spawn(move || {
+                    let mut buf = [0u8; 4];
+                    let result = Read::read(&mut reader, &mut buf);
+                    let _ = tx.send(());
+                    result
+                });
+                // No synchronization delay: races the read's issue against
+                // shutdown as tightly as this host's scheduler allows.
+                connection.shutdown_both();
+                assert!(
+                    rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+                    "a read racing shutdown_both must never hang: it was \
+                     either fenced closed before issuing, or genuinely \
+                     cancelled after issuing"
+                );
+                let _ = reader_thread.join().unwrap();
+
+                unsafe {
+                    CloseHandle(client_key as HANDLE);
+                }
+            }
+        }
+
+        /// Fix (race 2): `shutdown_both`'s cancellation loop and `Drop`'s
+        /// `CloseHandle` must never interleave on the same handle value, or
+        /// a `Drop`-recycled handle could receive a `CancelIoEx` meant for
+        /// an entirely different, freshly-opened kernel object. That
+        /// specific miscancellation cannot be observed directly from safe
+        /// Rust (a successful-but-wrong cancellation leaves no
+        /// distinguishing error here), so this instead stresses the shared
+        /// lock discipline many times, concurrently churning `try_clone`/
+        /// `Drop` on one duplicate against repeated `shutdown_both` calls
+        /// on another — never sharing one `NamedPipeConnection` value
+        /// across threads (that type is deliberately not `Sync`; see its
+        /// `unsafe impl Send` doc), only the group's
+        /// `Arc<Mutex<SharedTransportState<_>>>`, exactly the real shape a
+        /// handler thread's duplicate plus `ConnectionRegistry`'s tracking
+        /// clone produce in production — and asserts only that the whole
+        /// interaction completes without hanging within a generous bound;
+        /// a lock-discipline regression that let `CloseHandle` and
+        /// `CancelIoEx` race would tend to destabilize the pipe instance
+        /// and eventually hang one of these trials rather than pass
+        /// cleanly every time.
+        #[test]
+        fn concurrent_clone_drop_and_shutdown_both_never_hang() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut listener = establish(dir.path()).unwrap();
+            let name = pipe_name_for(dir.path());
+            let client = std::thread::spawn(move || connect_client(&name).map(|h| h as usize));
+            let connection = listener
+                .accept(Duration::from_secs(5))
+                .expect("client should connect within 5s");
+            let client_key = client.join().unwrap().expect("client connect must succeed");
+
+            let churn_seed = connection
+                .try_clone()
+                .expect("try_clone must succeed on a live connection");
+
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let shutdowner = connection;
+                let churner = churn_seed;
+                std::thread::scope(|scope| {
+                    scope.spawn(move || {
+                        for _ in 0..50 {
+                            shutdowner.shutdown_both();
+                        }
+                    });
+                    scope.spawn(move || {
+                        for _ in 0..200 {
+                            if let Ok(clone) = churner.try_clone() {
+                                drop(clone);
+                            }
+                        }
+                    });
+                });
+                let _ = tx.send(());
+            });
+
+            assert!(
+                rx.recv_timeout(Duration::from_secs(10)).is_ok(),
+                "concurrent try_clone/Drop churn racing shutdown_both on a \
+                 sibling duplicate must not hang"
+            );
+
+            unsafe {
+                CloseHandle(client_key as HANDLE);
+            }
+        }
     }
 }
 
@@ -1129,6 +1346,8 @@ pub use windows_pipe::{NamedPipeConnection, NamedPipeListener, establish};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn strip_verbatim_prefix_collapses_the_unc_form_back_to_a_plain_unc_path() {
@@ -1278,5 +1497,74 @@ mod tests {
             "an unrelated handle must not be mistaken for the last live one"
         );
         assert_eq!(state.live_handles(), vec![1]);
+    }
+
+    /// Host-agnostic stress test of the pure state machine both Windows
+    /// race fixes depend on (see `SharedTransportState`'s doc, invariant
+    /// 4): `run_overlapped_guarded` and `shutdown_both` (both `cfg(windows)`
+    /// only, in the `windows_pipe` module below) rely on this `Mutex`-
+    /// guarded structure staying internally consistent when `try_clone`
+    /// (`add`), `Drop` (`remove_and_is_last`) and `shutdown_both`
+    /// (`mark_closed` + `live_handles`) all touch it from different threads
+    /// concurrently — exactly the production shape (a handler thread's
+    /// read/write handle, its write-half clone, and the registry's tracking
+    /// clone). This is the lock-ordering logic separable from the
+    /// Windows-kernel-timing half of each fix (real `HANDLE`/overlapped I/O
+    /// race timing, which only V5's Windows runner can exercise, see the
+    /// two host-gated tests in `windows_pipe::tests` below), so it runs
+    /// under real thread contention on every host: `u32` identifiers, no
+    /// Windows type or real I/O anywhere.
+    #[test]
+    fn shared_transport_state_bookkeeping_stays_consistent_under_real_thread_contention() {
+        let state = Arc::new(Mutex::new(SharedTransportState::new(0u32)));
+        let next_id = Arc::new(AtomicU32::new(1));
+
+        let adders: Vec<_> = (0..4)
+            .map(|_| {
+                let state = Arc::clone(&state);
+                let next_id = Arc::clone(&next_id);
+                std::thread::spawn(move || {
+                    for _ in 0..200 {
+                        let id = next_id.fetch_add(1, Ordering::SeqCst);
+                        state.lock().unwrap().add(id);
+                        // Mirrors a short-lived duplicate's add-then-Drop —
+                        // never asserts `is_last` here, since a concurrent
+                        // `mark_closed`/`live_handles` snapshot from the
+                        // `closer` thread below makes that outcome
+                        // legitimately racy; only that this never panics
+                        // and the id ends up removed either way.
+                        state.lock().unwrap().remove_and_is_last(id);
+                    }
+                })
+            })
+            .collect();
+
+        let closer = {
+            let state = Arc::clone(&state);
+            std::thread::spawn(move || {
+                for _ in 0..50 {
+                    let mut guard = state.lock().unwrap();
+                    guard.mark_closed();
+                    let _ = guard.live_handles();
+                }
+            })
+        };
+
+        for adder in adders {
+            adder.join().unwrap();
+        }
+        closer.join().unwrap();
+
+        let guard = state.lock().unwrap();
+        assert!(
+            guard.is_closed(),
+            "the closer thread always ran mark_closed at least once"
+        );
+        assert_eq!(
+            guard.live_handles(),
+            vec![0],
+            "every added-then-removed duplicate must leave no residue behind; \
+             only the original handle from `new` remains live"
+        );
     }
 }

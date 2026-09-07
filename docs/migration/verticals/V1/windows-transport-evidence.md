@@ -1053,3 +1053,139 @@ drogond --all-targets --locked --offline -- -D warnings` (exit 0), `cargo
 clippy -p drogon-harness --all-targets --locked --offline -- -D warnings`
 (exit 0), and `cargo fmt --all -- --check` (exit 0, after `cargo fmt --all`
 reformatted the new code).
+
+## Race (root-blocking review of `4fcf2ee`, not integrated)
+
+Root's review of the "Safety corrections" pass above (commit `4fcf2ee`)
+found three further defects before accepting it: two new overlapped-lifetime
+races the previous pass's own locking shape left open, and one real compile
+error in a Windows-only test. All three are corrected in this pass, in
+`endpoint.rs` only (`service_quiescence.rs` needed a documentation
+cross-reference, not a behavior change — see below). Same standing
+constraint as every prior pass: nothing under `cfg(windows)` has been
+compiled by any Rust toolchain on this host; V5's isolated Windows runner
+remains the first compiler this code will ever see.
+
+1. **The closed-check released the lock before the overlapped issue.**
+   `Read::read`/`Write::write` locked `shared`, checked `is_closed()`, and
+   let the guard drop at the end of that `if` statement — then, separately
+   and without holding any lock, called `run_overlapped` to issue the real
+   `ReadFile`/`WriteFile`. `shutdown_both` could run entirely inside that
+   gap: it locks `shared`, marks it closed, snapshots `live_handles()`
+   (this handle is not yet an in-flight operation, so nothing is actually
+   pending to cancel), `CancelIoEx`s it as a no-op, and returns — believing
+   this connection is fully shut down. The read/write call then proceeds to
+   issue its `ReadFile`/`WriteFile`, which starts a fresh overlapped
+   operation `shutdown_both` already ran and will never cancel again,
+   leaving `ConnectionRegistry::drain` to block a stuck handler for its full
+   `drain_timeout` (or forever, on an unbounded read/write timeout) instead
+   of the immediate unblock the Windows path is supposed to provide. Fixed:
+   `run_overlapped_guarded` (new; `run_overlapped` itself is now the
+   already-issued case used only by `accept`, which has no shared shutdown
+   state to race) holds `shared`'s lock across the closed-check **and** the
+   `issue()` call together, releasing it only before the wait/cancel/reap
+   step. This makes the two operations strictly ordered with no partial
+   interleaving: either `shutdown_both`'s whole locked step runs first (so
+   the check observes closed and never issues), or the guarded issue's
+   whole locked step runs first (so the operation is genuinely pending in
+   the kernel by the time `shutdown_both` snapshots `live_handles()` and
+   `CancelIoEx`s it for real).
+2. **`shutdown_both` copied handles then unlocked before `CancelIoEx`.**
+   `shutdown_both` locked `shared` only long enough to `mark_closed()` and
+   copy `live_handles()` into a local `Vec`, then released the lock before
+   looping over that snapshot to call `CancelIoEx` on each raw handle value.
+   `Drop`'s `remove_and_is_last` + `CloseHandle` was similarly only locked
+   for the bookkeeping step, not the actual `CloseHandle`/`DisconnectNamedPipe`
+   call. A `Drop` of one of those exact handles could run entirely inside
+   that gap: remove itself from the group under its own lock acquisition,
+   then `CloseHandle` it — after which Windows is free to hand that same
+   numeric handle value to a completely unrelated, freshly-opened kernel
+   object. `shutdown_both`'s loop, still holding only the stale snapshot,
+   then calls `CancelIoEx` on that recycled value, an unrelated object with
+   no connection to this transport at all — a real use-after-close/handle-
+   recycling hazard, not merely a missed cancellation. Fixed: `shutdown_both`
+   now holds `shared`'s lock for the mark-closed step **and** the entire
+   `CancelIoEx` loop that follows it; `Drop` now holds the same lock through
+   `remove_and_is_last` **and** the `DisconnectNamedPipe`/`CloseHandle` calls
+   that follow. The two can now never interleave such that one closes a
+   handle value the other is still naming in a live `CancelIoEx` call —
+   `SharedTransportState`'s doc gained a fourth invariant stating this
+   explicitly, and `service_quiescence.rs`'s `Transport::shutdown_both` doc
+   now cross-references it (documentation only; the Windows impl already
+   just delegates to `NamedPipeConnection::shutdown_both`, so no behavior
+   change was needed there).
+3. **A Windows-only test would not have compiled.** Both
+   `tests/windows_transport.rs`'s `accept_with_no_client_reports_wouldblock_within_the_poll_timeout`
+   and `endpoint.rs`'s own
+   `repeated_timed_out_accepts_leave_the_pending_instance_reusable_for_a_later_connect`
+   call `listener.accept(poll).unwrap_err()` on an `io::Result<NamedPipeConnection>`.
+   `Result::unwrap_err` requires the `Ok` type to implement `Debug` (to
+   format it into the panic message if the result were unexpectedly `Ok`),
+   and `NamedPipeConnection` had no `Debug` impl — a real `E0599`/trait-bound
+   compile error on the first Windows toolchain that ever tried to build
+   this crate, not merely an untested code path. Fixed by deriving `Debug`
+   on `NamedPipeConnection` and on `SharedTransportState` (needed
+   transitively, since `NamedPipeConnection` holds one via
+   `Arc<Mutex<SharedTransportState<usize>>>`, and `Mutex<T>`/`Arc<T>` are
+   only `Debug` when `T` is): every other field (`HANDLE` — a raw pointer,
+   `Debug` unconditionally; `Cell<Option<Duration>>` — `Debug` since
+   `Option<Duration>` is `Copy + Debug`) already supported it, so no
+   restructuring of either call site was needed.
+
+**Tests added**, alongside the existing ones from the prior pass:
+
+- Windows-only, host-gated (inside `windows_pipe::tests`, compiled and run
+  only by V5's runner): `a_read_racing_shutdown_both_never_starts_uncancelled`
+  (fix 1 — best-effort/bounded: races a fresh read against a concurrent
+  `shutdown_both` with no synchronization delay across 50 trials, each
+  bounded to a 5s channel receive, asserting no trial hangs; the exact
+  kernel-level interleaving that would trigger the pre-fix bug cannot be
+  forced from outside the kernel, so this is a regression guard via
+  repeated contention, not a guaranteed reproduction) and
+  `concurrent_clone_drop_and_shutdown_both_never_hang` (fix 2 — churns
+  `try_clone`/`Drop` on one duplicate against repeated `shutdown_both` calls
+  on a sibling, entirely on owned, non-shared `NamedPipeConnection` values
+  since that type is deliberately not `Sync`; bounded to a 10s channel
+  receive around the whole interaction). Neither test can distinguish a
+  correct cancellation from a use-after-close-recycled one by its return
+  value alone (both would usually "succeed" from Rust's point of view); the
+  practical bar these assert is that the lock discipline never produces a
+  hang, which a broken interleaving would tend to do under repeated
+  contention.
+- Host-agnostic (bottom-level `#[cfg(test)] mod tests`, run and GREEN on
+  this Unix host): `shared_transport_state_bookkeeping_stays_consistent_under_real_thread_contention`
+  — the lock-ordering logic separable from Windows kernel timing: four
+  threads repeatedly `add`/`remove_and_is_last` distinct `u32` identifiers
+  while a fifth repeatedly `mark_closed`s and snapshots `live_handles()`,
+  all under real `std::thread` contention (no Windows type or I/O
+  involved), asserting the structure never panics and ends up in the exact
+  expected final state.
+
+**Build verification, precisely:** `cargo build -p drogond --locked` (exit
+0). `cargo test -p drogond --locked`: 23 lib unit tests (22 pre-existing +
+1 new `SharedTransportState` contention test; net +1 versus the prior
+pass's 22, since this pass adds one host-agnostic test and two
+Windows-only host-gated tests that do not run on this host) + 6 + 12 + 10 +
+3 integration tests = 54 total, all pass, 0 failed, 0 ignored. `cargo test
+-p drogon-harness --locked`: 23 tests, all pass, unaffected by this pass.
+`cargo clippy -p drogond --all-targets --locked -- -D warnings` (exit 0).
+`cargo clippy -p drogon-harness --all-targets --locked -- -D warnings`
+(exit 0). `cargo fmt -p drogond -- --check` (exit 0). `cargo fmt --all --
+--check` (exit 0, workspace-wide). No `rustup`/Windows target exists on
+this host (`command not found`, confirmed again), so — same as every prior
+pass — nothing under `cfg(windows)` in this diff, including the two new
+host-gated tests and fix 3's `Debug` derives, has been compiled by any
+Rust toolchain. V5's isolated Windows runner remains the first compiler
+this code will ever see; it is the only host that can confirm the two new
+Windows-only tests actually pass rather than merely being syntactically
+valid Rust.
+
+**Remaining blockers (this pass):** identical to every prior pass — no
+Windows Rust target on this host, so the entire `cfg(windows)` module
+(these three fixes, their tests, and everything from the two prior passes)
+remains compiler-unverified until V5's runner builds and runs it for the
+first time. All prior passes' own remaining blockers (the staged `sha2`/
+`drogon-cli::paths` diffs, the `windows-sys` `Win32_System_Threading`
+feature-gap ask, the `server.rs` accept-loop generalization now already
+applied, etc.) are unaffected by this pass and still stand as recorded
+above.

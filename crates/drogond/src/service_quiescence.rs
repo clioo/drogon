@@ -103,6 +103,15 @@ pub trait Transport: Read + Write + Send + 'static {
     /// only reaches in-flight operations on handle values it is told about,
     /// not future ones. Callers intentionally ignore any error, matching
     /// existing drain behavior.
+    ///
+    /// On Windows, this call and a concurrent `Drop` of a sibling duplicate
+    /// (e.g. `drain` calling this on the registry's tracking clone while
+    /// the handler thread's own clone is being torn down) both hold
+    /// `SharedTransportState`'s lock across their entire respective
+    /// `CancelIoEx` / `CloseHandle` step, not just the bookkeeping update —
+    /// see `SharedTransportState`'s doc (invariant 4) in `endpoint.rs` for
+    /// why a handle value must never be closed (and possibly recycled by
+    /// Windows) while a `CancelIoEx` naming it is in flight.
     fn shutdown_both(&self);
 }
 
