@@ -1,7 +1,7 @@
-// Orca AutomationsPageSurface/toolbar copy parity for the MVP subset
-// (list header, refresh label, create button, table vocabulary). Effects
-// never run under renderToString, so this pins the loading chrome: the
-// header, actions and empty/loading copy render before any bridge call.
+// AutomationsPageSurface chrome parity (list header, refresh label,
+// create button, local-time note). Effects never run under renderToString,
+// so this pins the loading chrome: the header, toolbar and loading copy
+// render before any bridge call.
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
@@ -43,7 +43,15 @@ describe("AutomationsPanel header and action copy", () => {
     expect(html).not.toContain("New automation</");
   });
 
-  it("notes the UTC schedule basis under the heading", () => {
-    expect(render()).toContain("Times are UTC.");
+  it("notes the local-time schedule basis under the heading", () => {
+    const html = render();
+    expect(html).toContain("local time");
+    expect(html).not.toContain("Times are UTC.");
+  });
+
+  it("renders the search field and the loading state", () => {
+    const html = render();
+    expect(html).toContain('aria-label="Search automations"');
+    expect(html).toContain("Loading automations…");
   });
 });

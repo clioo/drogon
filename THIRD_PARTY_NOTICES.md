@@ -111,6 +111,13 @@ and the browser strip tab in `features/browser/BrowserStripTab.tsx` port Orca's
 and the sidebar chords of `src/shared/keybindings/definitions-core-1.ts`, all at
 the pinned source revision above. Each ported file keeps the MIT notice.
 
+The Automations page in `apps/desktop/src/renderer/src/features/automations/`
+ports Orca's `src/renderer/src/components/automations/{AutomationsPageSurface,AutomationsPageTopBar,AutomationsListPanel,AutomationsDetailPane,AutomationDetail,AutomationEditorDialog,AutomationSchedulePicker,AutomationTimeField,AutomationCustomCronPanel,AutomationDeleteDialogs,AutomationListLocalRows,AutomationListToolbar,AutomationListTableHeader,AutomationListStatusCell,AutomationListLastRunCell,AutomationListEmptyView,AutomationTemplateEmptyState,AutomationListSearchField,AutomationListFilterMenu,AutomationRunHistory,AutomationPromptDisclosure}.tsx`,
+`automation-schedule-label.ts`, `automation-list-keyboard-navigation.ts`,
+`automation-detail-tab-navigation.ts`, `automation-run-history-keyboard-navigation.ts`,
+`automation-page-parts.tsx` and `src/shared/{automation-schedules,automation-schedule-occurrences}.ts`,
+all at the pinned source revision above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

@@ -2251,3 +2251,21 @@
 .composer-actions {
   justify-content: flex-end;
 }
+
+/* Automations (R8-O1): list table container + sleek scrollbar shared by the
+   automations list and detail panes. */
+.automations-table-container {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+}
+.automations-table-container::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.automations-table-container::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-radius: 4px;
+}
+.automations-table-container::-webkit-scrollbar-track {
+  background: transparent;
+}
