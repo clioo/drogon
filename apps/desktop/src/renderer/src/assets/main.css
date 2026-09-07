@@ -3,6 +3,7 @@
    Lovecast Inc. Imports are trimmed to what Drogon bundles; token values,
    font stacks and the base layer are verbatim. */
 @import "tailwindcss";
+@import "tw-animate-css";
 @import "@xterm/xterm/css/xterm.css";
 @import "./terminal.css";
 
