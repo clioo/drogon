@@ -10,7 +10,10 @@ use drogon_protocol::orchestration_mail::{
 use rusqlite::{OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-use super::{RESPONSE_BUDGET_BYTES, Recipient, StoredMessage, message_kind_str, message_kind_tag};
+use super::{
+    PACKING_BUDGET_BYTES, RESPONSE_BUDGET_BYTES, Recipient, StoredMessage, message_kind_str,
+    message_kind_tag,
+};
 use crate::error;
 
 #[cfg(test)]
@@ -71,21 +74,43 @@ pub(crate) struct CheckOutcome {
     pub(crate) messages: Vec<MessageSummary>,
 }
 
+/// Reads the mailbox's read-through pointer, rejecting corruption instead of
+/// silently coercing it: a negative stored value would wrap to a huge `u64`
+/// via `as`, and a pointer beyond every message ever recorded is impossible
+/// (it can only ever be set from a real delivered batch's own max sequence)
+/// and must not be treated as an honestly caught-up empty mailbox.
 fn read_pointer_in_tx(
     tx: &Transaction,
     host_id: &str,
     run_id: &str,
     recipient: &Recipient,
 ) -> Result<u64, RpcError> {
-    tx.query_row(
-        "SELECT read_through_sequence FROM orchestration_mail_read_pointers
-          WHERE host_id = ?1 AND run_id = ?2 AND to_dispatch_id = ?3",
-        params![host_id, run_id, recipient.column()],
-        |r| r.get::<_, i64>(0),
-    )
-    .optional()
-    .map_err(error::from_sqlite)
-    .map(|v| v.unwrap_or(0) as u64)
+    let raw: Option<i64> = tx
+        .query_row(
+            "SELECT read_through_sequence FROM orchestration_mail_read_pointers
+              WHERE host_id = ?1 AND run_id = ?2 AND to_dispatch_id = ?3",
+            params![host_id, run_id, recipient.column()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(super::mail_storage_error)?;
+    let value = raw.unwrap_or(0);
+    if value < 0 {
+        return Err(error::internal_error("Corrupt negative mail read pointer."));
+    }
+    let max_sequence: i64 = tx
+        .query_row(
+            "SELECT COALESCE(MAX(sequence), 0) FROM orchestration_mail_messages",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(super::mail_storage_error)?;
+    if value > max_sequence {
+        return Err(error::internal_error(
+            "Corrupt mail read pointer beyond any recorded message.",
+        ));
+    }
+    Ok(value as u64)
 }
 
 fn advance_read_pointer_in_tx(
@@ -103,7 +128,7 @@ fn advance_read_pointer_in_tx(
          DO UPDATE SET read_through_sequence = MAX(read_through_sequence, excluded.read_through_sequence)",
         params![host_id, run_id, recipient.column(), through_sequence as i64],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(super::mail_storage_error)?;
     Ok(())
 }
 
@@ -113,9 +138,9 @@ fn active_delivery_in_tx(
     run_id: &str,
     recipient: &Recipient,
     consumer: &Consumer,
-) -> Result<Option<(String, Vec<String>)>, RpcError> {
+) -> Result<Option<(String, Vec<String>, i64)>, RpcError> {
     tx.query_row(
-        "SELECT delivery_id, message_ids_json FROM orchestration_mail_deliveries
+        "SELECT delivery_id, message_ids_json, max_sequence FROM orchestration_mail_deliveries
           WHERE host_id = ?1 AND run_id = ?2 AND to_dispatch_id = ?3
             AND consumer_coordinator_id IS ?4 AND consumer_generation IS ?5
             AND acknowledged = 0",
@@ -126,31 +151,80 @@ fn active_delivery_in_tx(
             consumer.coordinator_id(),
             consumer.generation()
         ],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        },
     )
     .optional()
-    .map_err(error::from_sqlite)?
-    .map(|(id, ids_json)| {
+    .map_err(super::mail_storage_error)?
+    .map(|(id, ids_json, max_sequence)| {
         let ids: Vec<String> = serde_json::from_str(&ids_json)
             .map_err(|_| error::internal_error("Invalid stored delivery batch."))?;
-        Ok((id, ids))
+        Ok((id, ids, max_sequence))
     })
     .transpose()
 }
 
-fn load_messages_in_order(
+/// Re-validates a frozen batch before ever reusing it: shape (unique,
+/// 1..=50, valid ids), every message actually belongs to `recipient`,
+/// sequences strictly increasing, real total wire size under budget, and
+/// the stored `max_sequence` matches the batch's true last sequence. Never
+/// shrinks a corrupt batch -- refuses it whole.
+fn validate_delivery_batch(
     tx: &Transaction,
     host_id: &str,
     run_id: &str,
-    ids: &[String],
+    recipient: &Recipient,
+    delivery_id: &str,
+    message_ids: &[String],
+    stored_max_sequence: i64,
 ) -> Result<Vec<MessageSummary>, RpcError> {
-    let mut out = Vec::with_capacity(ids.len());
-    for id in ids {
+    OutstandingDelivery {
+        delivery_id: delivery_id.to_string(),
+        message_ids: message_ids.to_vec(),
+    }
+    .validate_shape()
+    .map_err(|_| error::internal_error("Corrupt stored delivery batch shape."))?;
+    if stored_max_sequence < 0 {
+        return Err(error::internal_error(
+            "Corrupt negative delivery max sequence.",
+        ));
+    }
+    let mut messages = Vec::with_capacity(message_ids.len());
+    let mut previous_sequence = 0u64;
+    let mut total_size = 0usize;
+    for id in message_ids {
         let stored = super::get_message_in_tx(tx, host_id, run_id, id)?
             .ok_or_else(|| error::internal_error("Delivered message is missing."))?;
-        out.push(stored.summary);
+        if stored.to != *recipient {
+            return Err(error::internal_error(
+                "Delivered message recipient mismatch.",
+            ));
+        }
+        if stored.summary.sequence <= previous_sequence {
+            return Err(error::internal_error(
+                "Delivered batch is out of sequence order.",
+            ));
+        }
+        previous_sequence = stored.summary.sequence;
+        total_size += super::message_wire_size(&stored.summary)?;
+        messages.push(stored.summary);
     }
-    Ok(out)
+    if previous_sequence as i64 != stored_max_sequence {
+        return Err(error::internal_error(
+            "Delivery max sequence does not match its batch.",
+        ));
+    }
+    if total_size > PACKING_BUDGET_BYTES {
+        return Err(error::internal_error(
+            "Delivered batch exceeds the response budget; refused, not shrunk.",
+        ));
+    }
+    Ok(messages)
 }
 
 fn fetch_unread_batch(
@@ -167,16 +241,47 @@ fn fetch_unread_batch(
         super::message_columns(),
         MAX_MAIL_BATCH
     );
-    let mut stmt = tx.prepare(&sql).map_err(error::from_sqlite)?;
+    let mut stmt = tx.prepare(&sql).map_err(super::mail_storage_error)?;
     let rows = stmt
         .query_map(
             params![host_id, run_id, recipient.column(), after_sequence as i64],
             super::decode_message_row,
         )
-        .map_err(error::from_sqlite)?
+        .map_err(super::mail_storage_error)?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(error::from_sqlite)?;
+        .map_err(super::mail_storage_error)?;
     Ok(rows)
+}
+
+/// Whether the *entire* unread backlog (not just the oldest 50 candidates a
+/// delivery could carry) contains a message of one of `kinds`. The wake
+/// condition must search the whole backlog: a matching message far behind
+/// the 50-message delivery cap must still wake the waiter, even though the
+/// delivered batch itself (the oldest FIFO prefix) may not yet include it.
+fn any_unread_matches_kind(
+    tx: &Transaction,
+    host_id: &str,
+    run_id: &str,
+    recipient: &Recipient,
+    after_sequence: u64,
+    kinds: &[MessageKind],
+) -> Result<bool, RpcError> {
+    let kind_strs: Vec<&'static str> = kinds.iter().map(|k| message_kind_str(*k)).collect();
+    let placeholders = kind_strs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT 1 FROM orchestration_mail_messages
+          WHERE host_id = ? AND run_id = ? AND to_dispatch_id = ? AND sequence > ?
+            AND kind IN ({placeholders}) LIMIT 1"
+    );
+    let mut stmt = tx.prepare(&sql).map_err(super::mail_storage_error)?;
+    let after = after_sequence as i64;
+    let recipient_col = recipient.column();
+    let mut all_params: Vec<&dyn rusqlite::ToSql> = vec![&host_id, &run_id, &recipient_col, &after];
+    for k in &kind_strs {
+        all_params.push(k);
+    }
+    stmt.exists(all_params.as_slice())
+        .map_err(super::mail_storage_error)
 }
 
 fn ack_in_tx(
@@ -204,7 +309,7 @@ fn ack_in_tx(
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
-        .map_err(error::from_sqlite)?;
+        .map_err(super::mail_storage_error)?;
     // Wrong recipient/run/host/generation (including a stale generation's own
     // delivery id) simply never matches this exact key: rejected before any
     // consumption, not silently accepted.
@@ -223,7 +328,7 @@ fn ack_in_tx(
                 params![host_id, run_id, recipient.column()],
                 |r| r.get(0),
             )
-            .map_err(error::from_sqlite)?;
+            .map_err(super::mail_storage_error)?;
         if newest.is_some_and(|newest| newest > *generation as i64) {
             return Err(error::invalid_argument(
                 "This consumer generation has been superseded by a takeover.",
@@ -232,6 +337,15 @@ fn ack_in_tx(
     }
     let message_ids: Vec<String> = serde_json::from_str(&ids_json)
         .map_err(|_| error::internal_error("Invalid stored delivery batch."))?;
+    validate_delivery_batch(
+        tx,
+        host_id,
+        run_id,
+        recipient,
+        delivery_id,
+        &message_ids,
+        max_sequence,
+    )?;
     if acknowledged != 0 {
         return Ok(AckReceipt {
             delivery_id: delivery_id.to_string(),
@@ -243,7 +357,7 @@ fn ack_in_tx(
         "UPDATE orchestration_mail_deliveries SET acknowledged = 1 WHERE delivery_id = ?1",
         params![delivery_id],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(super::mail_storage_error)?;
     advance_read_pointer_in_tx(tx, host_id, run_id, recipient, max_sequence as u64)?;
     Ok(AckReceipt {
         delivery_id: delivery_id.to_string(),
@@ -278,10 +392,18 @@ pub(crate) fn check_unread_in_tx(
         .map(|id| ack_in_tx(tx, host_id, run_id, recipient, consumer, id))
         .transpose()?;
 
-    if let Some((delivery_id, message_ids)) =
+    if let Some((delivery_id, message_ids, stored_max_sequence)) =
         active_delivery_in_tx(tx, host_id, run_id, recipient, consumer)?
     {
-        let messages = load_messages_in_order(tx, host_id, run_id, &message_ids)?;
+        let messages = validate_delivery_batch(
+            tx,
+            host_id,
+            run_id,
+            recipient,
+            &delivery_id,
+            &message_ids,
+            stored_max_sequence,
+        )?;
         return Ok(CheckOutcome {
             delivery: Some(OutstandingDelivery {
                 delivery_id,
@@ -301,7 +423,12 @@ pub(crate) fn check_unread_in_tx(
             messages: Vec::new(),
         });
     }
-    if !kinds.is_empty() && !candidates.iter().any(|m| kinds.contains(&m.summary.kind)) {
+    // The wake condition is checked against the *entire* unread backlog, not
+    // just the (at most 50) candidates a delivery could carry: a matching
+    // message far behind the delivery cap must still wake this call.
+    if !kinds.is_empty()
+        && !any_unread_matches_kind(tx, host_id, run_id, recipient, read_through, kinds)?
+    {
         // Wake condition unmet: earlier nonmatching messages are never
         // skipped/dropped — simply no allocation happens yet.
         return Ok(CheckOutcome {
@@ -310,6 +437,33 @@ pub(crate) fn check_unread_in_tx(
             messages: Vec::new(),
         });
     }
+    // Trim to a byte-budget-respecting prefix using each candidate's actual
+    // serialized wire size (never a raw string-length guess): the delivered
+    // batch is the oldest FIFO prefix that fits, even if that means fewer
+    // than the 50-message cap or fewer than the wake-triggering message
+    // itself (which may sit past this prefix and arrive in a later batch).
+    let mut budgeted = Vec::with_capacity(candidates.len());
+    let mut used_bytes = 0usize;
+    for candidate in candidates {
+        let size = super::message_wire_size(&candidate.summary)?;
+        if size > PACKING_BUDGET_BYTES {
+            if budgeted.is_empty() {
+                // The oldest unread message alone cannot fit any response:
+                // this is corruption/drift, not a livelock to hide behind an
+                // empty or an oversized delivery.
+                return Err(error::internal_error(
+                    "A stored message exceeds the response budget; delivery refused.",
+                ));
+            }
+            break;
+        }
+        if used_bytes + size > PACKING_BUDGET_BYTES && !budgeted.is_empty() {
+            break;
+        }
+        used_bytes += size;
+        budgeted.push(candidate);
+    }
+    let candidates = budgeted;
     let message_ids: Vec<String> = candidates
         .iter()
         .map(|m| m.summary.message_id.clone())
@@ -331,7 +485,7 @@ pub(crate) fn check_unread_in_tx(
             max_sequence as i64,
         ],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(super::mail_storage_error)?;
     let messages = candidates.into_iter().map(|m| m.summary).collect();
     Ok(CheckOutcome {
         delivery: Some(OutstandingDelivery {
@@ -360,6 +514,11 @@ pub(crate) fn inspect_in_tx(
     limit: u32,
 ) -> Result<(Vec<MessageSummary>, Option<String>), RpcError> {
     recipient.validate()?;
+    if limit == 0 || limit > drogon_protocol::orchestration_common::MAX_PAGE_LIMIT {
+        return Err(error::invalid_argument(
+            "Page limit is outside the supported range.",
+        ));
+    }
     let floor = if unread_only {
         read_pointer_in_tx(tx, host_id, run_id, recipient)?
     } else {
@@ -371,35 +530,44 @@ pub(crate) fn inspect_in_tx(
         }
         None => floor,
     };
+    // The kind filter is pushed into the SQL predicate itself (never
+    // filtered in Rust after a bounded, unfiltered fetch): a probe window
+    // that fetches rows before filtering can exhaust its limit on
+    // nonmatching rows and silently hide a later matching one.
+    let kind_strs: Vec<&'static str> = kinds.iter().map(|k| message_kind_str(*k)).collect();
+    let kind_clause = if kind_strs.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " AND kind IN ({})",
+            kind_strs.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+        )
+    };
     let probe_limit = limit as i64 + 1;
-    let kind_filter: Option<Vec<&'static str>> =
-        (!kinds.is_empty()).then(|| kinds.iter().map(|k| message_kind_str(*k)).collect());
     let sql = format!(
         "SELECT {} FROM orchestration_mail_messages
-          WHERE host_id = ?1 AND run_id = ?2 AND to_dispatch_id = ?3 AND sequence > ?4
+          WHERE host_id = ? AND run_id = ? AND to_dispatch_id = ? AND sequence > ?{kind_clause}
           ORDER BY sequence ASC LIMIT {probe_limit}",
         super::message_columns()
     );
-    let mut stmt = tx.prepare(&sql).map_err(error::from_sqlite)?;
+    let mut stmt = tx.prepare(&sql).map_err(super::mail_storage_error)?;
+    let after_i64 = after as i64;
+    let recipient_col = recipient.column();
+    let mut all_params: Vec<&dyn rusqlite::ToSql> =
+        vec![&host_id, &run_id, &recipient_col, &after_i64];
+    for k in &kind_strs {
+        all_params.push(k);
+    }
     let rows: Vec<StoredMessage> = stmt
-        .query_map(
-            params![host_id, run_id, recipient.column(), after as i64],
-            super::decode_message_row,
-        )
-        .map_err(error::from_sqlite)?
+        .query_map(all_params.as_slice(), super::decode_message_row)
+        .map_err(super::mail_storage_error)?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(error::from_sqlite)?;
+        .map_err(super::mail_storage_error)?;
     let mut included: Vec<MessageSummary> = Vec::new();
     let mut size = 0usize;
     let mut next_cursor = None;
-    let mut seen = 0u32;
-    for row in rows {
-        if let Some(filter) = &kind_filter
-            && !filter.contains(&message_kind_str(row.summary.kind))
-        {
-            continue;
-        }
-        if seen >= limit {
+    for (seen, row) in rows.into_iter().enumerate() {
+        if seen as u32 >= limit {
             next_cursor = Some(encode_cursor(
                 included.last().map(|m| m.sequence).unwrap_or(after),
                 host_id,
@@ -410,14 +578,15 @@ pub(crate) fn inspect_in_tx(
             ));
             break;
         }
-        let row_size = row.summary.subject.len()
-            + row.summary.body.as_ref().map_or(0, String::len)
-            + row
-                .summary
-                .payload
-                .as_ref()
-                .map_or(0, |p| serde_json::to_vec(p).map(|v| v.len()).unwrap_or(0));
-        if size + row_size > RESPONSE_BUDGET_BYTES && !included.is_empty() {
+        let row_size = super::message_wire_size(&row.summary)?;
+        if row_size > PACKING_BUDGET_BYTES {
+            // An individually oversized row is corruption, not a page
+            // boundary: refused outright, regardless of its position.
+            return Err(error::internal_error(
+                "A stored message exceeds the response budget; refused.",
+            ));
+        }
+        if size + row_size > PACKING_BUDGET_BYTES && !included.is_empty() {
             next_cursor = Some(encode_cursor(
                 included.last().map(|m| m.sequence).unwrap_or(after),
                 host_id,
@@ -429,7 +598,6 @@ pub(crate) fn inspect_in_tx(
             break;
         }
         size += row_size;
-        seen += 1;
         included.push(row.summary);
     }
     Ok((included, next_cursor))
@@ -491,6 +659,13 @@ fn decode_cursor(
         return Err(error::invalid_argument("Invalid orchestration cursor."));
     }
     let sequence = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
+    // A sequence beyond `i64::MAX` would wrap negative wherever this value
+    // is later cast `as i64` for a SQL parameter, turning `sequence > after`
+    // into "matches everything" and silently restarting pagination from the
+    // top instead of failing.
+    if sequence > i64::MAX as u64 {
+        return Err(error::invalid_argument("Invalid orchestration cursor."));
+    }
     let expected = scope_fingerprint(host_id, run_id, recipient, unread_only, kinds);
     if bytes[8..40] != expected {
         return Err(error::invalid_argument(

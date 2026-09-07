@@ -251,3 +251,146 @@ fn genuine_commit_persists_across_reopen() {
     let stored = get_message_in_tx(&tx, "host-1", "run-1", "persisted").unwrap();
     assert!(stored.is_some());
 }
+
+#[test]
+fn a_recorded_schema_value_other_than_exactly_one_is_refused_not_silently_advanced() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    {
+        let tx = conn.transaction().unwrap();
+        tx.execute_batch(
+            "CREATE TABLE schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL);
+             INSERT INTO schema_versions VALUES ('orchestration_mail', 0);",
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let tx = conn.transaction().unwrap();
+    let err = migrate_in_tx(&tx)
+        .expect_err("a stored 0 is neither absent nor the current version and must not be silently stepped forward");
+    assert_eq!(err.code, "unsupported_orchestration_contract");
+}
+
+#[test]
+fn corrupt_from_kind_identity_is_rejected_not_defaulted_to_an_empty_dispatch() {
+    let mut conn = migrated_conn();
+    let tx = conn.transaction().unwrap();
+    // Bypasses `append_message_in_tx` on purpose: this simulates a row this
+    // module never wrote (external corruption, or a future schema drift)
+    // rather than anything reachable through the public API.
+    tx.execute(
+        "INSERT INTO orchestration_mail_messages
+            (message_id, host_id, run_id, kind, from_kind, from_coordinator_id, from_dispatch_id,
+             to_dispatch_id, subject, body, payload_json, thread_id, origin_request_id, created_at)
+         VALUES ('corrupt', 'host-1', 'run-1', 'status', 'mystery', NULL, NULL, '', 's', NULL, NULL, 'corrupt', 'r1', 't')",
+        [],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+    let tx = conn.transaction().unwrap();
+    let err = get_message_in_tx(&tx, "host-1", "run-1", "corrupt")
+        .expect_err("an unknown from_kind must never silently become an empty-id Dispatch actor");
+    assert_eq!(err.code, "internal_error");
+}
+
+#[test]
+fn sentinel_trigger_proves_no_raw_driver_text_echo() {
+    let mut conn = migrated_conn();
+    const SENTINEL: &str = "SENTINEL-PRIVATE-BODY-CONTENT-4f2c";
+    conn.execute_batch(&format!(
+        "CREATE TEMP TRIGGER sentinel_leak_check BEFORE INSERT ON orchestration_mail_messages
+         WHEN NEW.subject = '{SENTINEL}'
+         BEGIN
+             SELECT RAISE(ABORT, '{SENTINEL}');
+         END;"
+    ))
+    .unwrap();
+    let from = coordinator_from();
+    let tx = conn.transaction().unwrap();
+    let err = append_message_in_tx(
+        &tx,
+        NewMessage {
+            message_id: "trig",
+            host_id: "host-1",
+            run_id: "run-1",
+            kind: MessageKind::Status,
+            from: &from,
+            to: &Recipient::RunHome,
+            subject: SENTINEL,
+            body: None,
+            payload: None,
+            thread_id: None,
+            origin_request_id: "r1",
+            created_at: "t",
+        },
+    )
+    .expect_err("the trigger aborts the insert");
+    let rendered = format!("{err:?} {}", err.message);
+    assert!(
+        !rendered.contains(SENTINEL),
+        "raw driver/trigger text must never reach the wire error: got {rendered:?}"
+    );
+}
+
+#[test]
+fn high_escape_body_is_measured_by_actual_serialized_size_not_raw_length() {
+    let mut conn = migrated_conn();
+    let from = coordinator_from();
+    let tx = conn.transaction().unwrap();
+    // Every quote byte doubles under JSON escaping (`"` -> `\"`), so this
+    // body's raw length is comfortably under budget but its real wire size
+    // is not -- a length-only check would wrongly accept it.
+    let escaped = "\"".repeat(super::RESPONSE_BUDGET_BYTES * 3 / 5);
+    assert!(escaped.len() < super::RESPONSE_BUDGET_BYTES);
+    let err = append_message_in_tx(
+        &tx,
+        NewMessage {
+            message_id: "escaped",
+            host_id: "host-1",
+            run_id: "run-1",
+            kind: MessageKind::Status,
+            from: &from,
+            to: &Recipient::RunHome,
+            subject: "s",
+            body: Some(&escaped),
+            payload: None,
+            thread_id: None,
+            origin_request_id: "r1",
+            created_at: "t",
+        },
+    )
+    .expect_err("actual JSON-serialized size, not raw length, must be measured");
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn origin_request_id_and_typed_sender_survive_a_real_read() {
+    let mut conn = migrated_conn();
+    let from = Actor::Dispatch("dispatch-9".into());
+    let tx = conn.transaction().unwrap();
+    append_message_in_tx(
+        &tx,
+        NewMessage {
+            message_id: "typed",
+            host_id: "host-1",
+            run_id: "run-1",
+            kind: MessageKind::FinalReport,
+            from: &from,
+            to: &Recipient::RunHome,
+            subject: "s",
+            body: None,
+            payload: None,
+            thread_id: None,
+            origin_request_id: "origin-req-77",
+            created_at: "t",
+        },
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = conn.transaction().unwrap();
+    let stored = get_message_in_tx(&tx, "host-1", "run-1", "typed")
+        .unwrap()
+        .expect("message exists");
+    assert_eq!(stored.from, Actor::Dispatch("dispatch-9".into()));
+    assert_eq!(stored.origin_request_id, "origin-req-77");
+}

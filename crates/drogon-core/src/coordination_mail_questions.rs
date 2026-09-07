@@ -52,7 +52,7 @@ fn load_question_row(
         },
     )
     .optional()
-    .map_err(error::from_sqlite)
+    .map_err(super::mail_storage_error)
 }
 
 fn to_record(
@@ -119,7 +119,7 @@ pub(crate) fn ask_new_in_tx(
          VALUES (?1, ?2, ?3, ?4, 0)",
         params![question_message_id, host_id, run_id, thread_id],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(super::mail_storage_error)?;
     Ok(to_record(question_message_id, false, None, None, thread_id))
 }
 
@@ -213,15 +213,10 @@ pub(crate) fn reply_in_tx(
         ));
     }
     let stored_thread = row.thread_id;
-    let asker = &question.summary.from_actor;
-    let asker_actor = if let Some(id) = asker.strip_prefix("dispatch:") {
-        Actor::Dispatch(id.to_string())
-    } else if let Some(id) = asker.strip_prefix("coordinator:") {
-        Actor::Coordinator(id.to_string())
-    } else {
-        return Err(error::internal_error("Invalid stored asker identity."));
-    };
-    let answer_recipient = match &asker_actor {
+    // The typed sender identity comes straight from the correlated
+    // message row -- never parsed back out of the opaque `from_actor`
+    // wire string.
+    let answer_recipient = match &question.from {
         Actor::Coordinator(_) => Recipient::RunHome,
         Actor::Dispatch(id) => Recipient::Dispatch(id.clone()),
     };
@@ -255,7 +250,7 @@ pub(crate) fn reply_in_tx(
             question_message_id
         ],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(super::mail_storage_error)?;
     Ok(to_record(
         question_message_id,
         false,
@@ -289,6 +284,6 @@ pub(crate) fn close_dispatch_questions_in_tx(
                 )",
             params![reason, host_id, run_id, dispatch_id],
         )
-        .map_err(error::from_sqlite)?;
+        .map_err(super::mail_storage_error)?;
     Ok(updated as u32)
 }
