@@ -478,6 +478,24 @@ describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run
     );
     expect(markup).not.toContain("data-responsibility-id=");
   });
+
+  it("exposes the bot list as role=list named Bots (Orca BotsPage parity)", () => {
+    const markup = render({ bots: [bot()], history: [] }, { bridge, scope });
+    expect(markup).toContain('role="list"');
+    expect(markup).toContain('aria-label="Bots"');
+  });
+
+  it("labels the refresh control exactly Refresh Bots", () => {
+    const markup = render(emptySnapshot, { bridge, scope });
+    expect(markup).toContain('aria-label="Refresh Bots"');
+  });
+
+  it("keeps the Orca empty-state copy", () => {
+    const markup = render(emptySnapshot, { bridge, scope });
+    expect(markup).toContain("No Bots yet");
+    expect(markup).toContain("Give a character a purpose.");
+    expect(markup).toContain("Create Bot");
+  });
 });
 
 describe("BotsPanel styling contract (admitted tokens/primitives only)", () => {

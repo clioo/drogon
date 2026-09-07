@@ -261,20 +261,25 @@ export function AutomationsPanel({
     editing !== null ? previewCronFires(form.cron, Date.now()) : null;
 
   return (
-    <div className="flex flex-col gap-4 text-foreground" data-testid="automations-panel">
+    <main className="flex h-full min-h-0 flex-col gap-4 bg-background p-5 text-foreground md:px-8" data-testid="automations-panel">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-medium">Automations</h2>
+          <h1 className="truncate text-base font-semibold leading-8">Automations</h1>
           <p className="text-sm text-muted-foreground">
             Cron schedules on {status.hostId}. Times are UTC.
           </p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => void refresh()}>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Refresh automations"
+            onClick={() => void refresh()}
+          >
             Refresh
           </Button>
           <Button size="sm" data-testid="automations-new" onClick={openCreate}>
-            New automation
+            New Automation
           </Button>
         </div>
       </div>
@@ -287,7 +292,7 @@ export function AutomationsPanel({
         <p className="text-sm text-muted-foreground">Loading automations…</p>
       ) : automations.length === 0 ? (
         <div className="rounded-md border border-border bg-background p-4" data-testid="automations-empty">
-          <p className="text-sm">No automations yet.</p>
+          <p className="text-sm">No automations on {status.hostId}.</p>
           <p className="text-sm text-muted-foreground">
             Create one to run a harness on a cron schedule in a workspace.
           </p>
@@ -299,9 +304,11 @@ export function AutomationsPanel({
               <th className="py-1 pr-3 font-medium">Name</th>
               <th className="py-1 pr-3 font-medium">Schedule</th>
               <th className="py-1 pr-3 font-medium">Next run</th>
-              <th className="py-1 pr-3 font-medium">Last outcome</th>
+              <th className="py-1 pr-3 font-medium">Last run</th>
               <th className="py-1 pr-3 font-medium">Enabled</th>
-              <th className="py-1 pr-3 font-medium">Actions</th>
+              <th className="py-1 pr-3 font-medium">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -369,12 +376,12 @@ export function AutomationsPanel({
       )}
       {editing !== null && (
         <section
-          aria-label={editing.id === null ? "New automation" : "Edit automation"}
+          aria-label={editing.id === null ? "New Automation" : "Edit Automation"}
           data-testid="automation-form"
           className="rounded-md border border-border bg-background p-4"
         >
           <h3 className="text-sm font-medium">
-            {editing.id === null ? "New automation" : "Edit automation"}
+            {editing.id === null ? "New Automation" : "Edit Automation"}
           </h3>
           <div className="mt-3 flex flex-col gap-3">
             <label className="flex flex-col gap-1 text-sm">
@@ -550,6 +557,6 @@ export function AutomationsPanel({
           )}
         </aside>
       )}
-    </div>
+    </main>
   );
 }
