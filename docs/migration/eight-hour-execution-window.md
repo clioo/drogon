@@ -7,19 +7,22 @@ acceptance requirements. Report missed requirements rather than claim parity.
 
 ## Worker policy
 
-Pi with provider `dgx-spark` and exact model
-`qwen3.8-flash-next-nvidia-nvfp4` is now authorized for development as well as
-experimental inference. It is independent of the exhausted cloud Qwen plan.
+The later user direction on 2026-09-07 suspends Pi + Qwen3.8 until explicitly
+reactivated, superseding the initial authorization in this window. Use
+GLM-5.3-Flash, Sonnet 5 and Kimi 2.7 for subsequent worker assignments.
 Keep the initial three-active-leaf limit, disjoint ownership, Orca Task/Dispatch
 provenance and no nested workers. Root coordinates architecture, integration and
-independent acceptance. Existing approved Sonnet, GLM, Muse and Kimi remain
-available; do not silently fall back to another provider/model.
+independent acceptance. Do not silently fall back to another provider/model.
 
-Pi 0.84.1 exposes `--approve` for project-local trust, not Claude's
-`--dangerously-skip-permissions`. Use verified per-invocation Pi options and
-explicit provider/model; do not alter global permissions. A plain API reply
-does not qualify a development worker: verify tool use and lifecycle reporting
-through an Orca assignment before handing over implementation ownership.
+Use verified per-invocation permissions; do not alter global settings. Verify
+tool use and lifecycle reporting through an Orca assignment before handing over
+implementation ownership.
+
+When a PR is closed or merged, inspect its related Orca sessions and close only
+the exact settled, no-longer-needed terminals. Preserve active or unrelated
+sessions and all worktree files. Release settled supervised Dispatches through
+the supported lifecycle; an unverifiable remote process is not exited and must
+not be killed through a local fallback.
 
 ## Critical path
 
