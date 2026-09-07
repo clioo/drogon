@@ -1,5 +1,7 @@
 # Drogon rewrite
 
+- Latest leader-model correction from Carlos, 2026-09-07: use Pi provider `muse-code`, exact model `muse-spark-1.3-contributor`, with `--thinking max` for all FIVE vertical leaders. This supersedes the non-Contributor leader requirement below, not max reasoning, closure-first sequencing or the deadline. The exact Contributor model is verified in the installed Pi catalog; live smoke remains required.
+
 - Latest reasoning requirement from Carlos, 2026-09-07: all five Pi / `muse-code` / `muse-spark-1.3` vertical leaders must launch with `--thinking max`. Installed Pi explicitly supports this level. Verify the effective level during the real launch smoke and each leader start; no silent downgrade. This does not change the current-wave closure-first order or the eight-hour deadline.
 
 - Latest staffing correction from Carlos, 2026-09-07: all FIVE vertical leaders are now Pi, exact provider `muse-code`, exact model `muse-spark-1.3` (not Contributor unless separately requested). Their coding leaves distribute work among Sonnet 5, GLM-5.3-Flash and Muse Spark 1.3. This supersedes Sonnet-leader wording below but preserves current-wave closure first, two delegated generations, five verticals, eight-hour deadline and root integration authority. It authorizes Pi/Muse only; Pi/Qwen and the benchmark remain suspended. Verify real tool/delegation/reporting behavior before assigning a vertical; model catalog presence is not a smoke test. Never silently substitute a provider/model.

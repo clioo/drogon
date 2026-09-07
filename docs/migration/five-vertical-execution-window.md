@@ -1,5 +1,13 @@
 # Five-vertical execution window
 
+## Latest model correction — Contributor
+
+Carlos now prefers all FIVE leaders on Pi / `muse-code` /
+`muse-spark-1.3-contributor`, retaining `--thinking max`. Exact launch:
+`pi --provider muse-code --model muse-spark-1.3-contributor --thinking max`.
+The installed catalog confirms this identifier. This supersedes non-Contributor
+leader wording below, not the closure-first order, two generations or deadline.
+
 ## Latest staffing correction — 08:49 UTC
 
 Carlos changed all five leaders to **Pi / `muse-code` / `muse-spark-1.3`**.
