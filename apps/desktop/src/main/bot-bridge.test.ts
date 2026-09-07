@@ -9,6 +9,45 @@ const snapshot = {
   history: [],
 };
 describe("Bot snapshot bridge", () => {
+  it("accepts populated scheduled and reactive responsibilities", async () => {
+    const responsibility = {
+      id: "duty",
+      name: "Review",
+      instructions: "Review the fixture",
+      enabled: true,
+      recipe: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const bot = {
+      id: "bot",
+      characterPreset: "custom",
+      displayIdentity: { displayName: "Reviewer", handle: null, title: null },
+      harnessPolicy: { defaultHarness: "pi", explicitModel: null },
+      instructions: "",
+      memories: [],
+      currentSession: null,
+      createdAt: 1,
+      updatedAt: 1,
+      responsibilities: [
+        {
+          ...responsibility,
+          kind: "scheduled",
+          trigger: { kind: "scheduled", automationId: "automation-1" },
+        },
+        {
+          ...responsibility,
+          id: "reactive",
+          kind: "reactive",
+          trigger: { kind: "reactive", event: null },
+        },
+      ],
+    };
+    const result = { ...snapshot, bots: [bot] };
+    expect(
+      await dispatchBotSnapshot(input, async () => ({ ok: true, result })),
+    ).toEqual({ ok: true, result });
+  });
   it("passes the explicit scope without inventing a folder", async () => {
     const call = vi.fn(async () => ({ ok: true as const, result: snapshot }));
     expect(await dispatchBotSnapshot(input, call)).toEqual({
