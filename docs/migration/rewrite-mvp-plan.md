@@ -106,10 +106,10 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J8 Bots | R2 | Sonnet | en curso | |
 | J1 sidebar y pestañas | R2 | Muse A | fusionada; estado de agente real llega con R1-S | #22 |
 | J7 Automations | R2 | Muse B | en curso | |
-| J4 Browser | R2 | Muse C | en curso (pane; CLI browser en R3) | |
+| J4 Browser | R2 | Muse C | fusionada (pane); CLI browser pendiente | #27 |
 | J9 Mentu | R3 | Sonnet | pendiente | |
-| J6 Tasks | R3 | Muse A | pendiente | |
-| J3 CLI | R3 | Muse B | pendiente | |
+| J6 Tasks | R3 | Muse A | en curso | |
+| J3 CLI | R3 | Muse B | en curso | |
 | J1 notificaciones | R3 | Muse C | pendiente | |
 | J10 Settings | R4 | Muse A | pendiente | |
 | J11 Paquete | R4 | Muse B | pendiente | |
