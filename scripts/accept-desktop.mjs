@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import {
   startAcceptanceProcess,
   stopAcceptanceProcess,
+  runAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
@@ -176,6 +177,27 @@ try {
     daemon.on("error", (error) => {
       daemonError = error;
     });
+    const deadline = Date.now() + 10000;
+    while (true) {
+      if (daemonError) throw daemonError;
+      try {
+        const response = await runAcceptanceProcess(
+          path.join(
+            root,
+            "target",
+            "debug",
+            process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
+          ),
+          ["--data-dir", dataDir, "--json", "status"],
+          { timeout: 1000 },
+        );
+        assert.equal(JSON.parse(response.stdout).ok, true);
+        break;
+      } catch (error) {
+        if (Date.now() >= deadline) throw error;
+        await delay(50);
+      }
+    }
   }
   await launchDesktop();
   if (daemonError) throw daemonError;

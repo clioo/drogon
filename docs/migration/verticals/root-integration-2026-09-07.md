@@ -204,3 +204,41 @@ release installation occurred at this checkpoint.
 Audit remains 11/12 groups (91.7%, medium confidence, delta zero). This is
 not a product parity percentage. All 46 obligations remain in scope and the
 fixed 16:41:33 UTC deadline remains high-risk.
+
+## 13:20 UTC checkpoint
+
+V2 Bots mount `4e79a7f` + correction `5e35c59` passed 420 combined desktop
+tests. V3 draft/store fixes `d3f8015` + `ddb52ab` then passed 448 tests.
+The full Rust workspace suite exited 0 at the preceding `a7f42e1` checkpoint;
+its test-only unused containment helper warning is queued with V3.
+
+The development fixture had an actual startup race: after its UI reported
+unavailable, a diagnostic bridge status call successfully reached the daemon.
+The test now waits for authenticated CLI status before launching Electron.
+With candidate-only, uncommitted `files.v1` advertisement, real Files acceptance
+passed 11 checks: reading, editing, two-file and terminal navigation draft
+retention, exact saved disk bytes, unchanged sibling, reload, plus existing
+terminal checks. All owned sessions, desktop and daemon were observed exited.
+Evidence: `.preflight/acceptance/desktop-1788787050361-835b6bcf-8793-412b-8002-e39847348d11/report.json`.
+Visual inspection remains RED: explorer rows are horizontal and the textarea
+is undersized/unstyled. V2 owns the CSS correction. True availability-induced
+unmount and rejected-save observer handling remain separate V3 checks.
+Functional PASS is not visual or release acceptance.
+
+V1 dogfood corrections `accf843` + `79f7678` passed the ROOT opted-in,
+pinned Sonnet 5 real-model test. At 13:19 UTC the actual daemon session
+`cf055325-97c8-4a51-b44c-fe159b44b8a7`, incarnation
+`2650797a-39ae-403c-a93a-236073080b6f`, returned the exact expected marker,
+exit code 0 and close verdict `exited`. Latency was 5.5036s; the provider
+reported US$0.137132 (34,237 cache-creation input tokens, 2 input, 18 output).
+This was one bounded completion, not the final autonomous coordinated
+artifact/failure/retry dogfood journey. V1 is preparing that proposal without
+another paid launch yet.
+
+V4 `3406c68` fixes completed-run projection but remains held: stale nonterminal
+observations still use incoming verdicts and its two history writes are not
+atomic. The correction must reuse a transaction-aware storage primitive after
+the existing storage owner settles. No receipt table or new DDL is authorized.
+V5 comment-only `365f422` is integrated. No release installation occurred;
+audit remains 11/12 (91.7%, medium confidence), product scope all 46 obligations,
+deadline risk high.
