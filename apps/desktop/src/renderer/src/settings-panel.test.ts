@@ -179,16 +179,38 @@ describe("attachSettingsDialogLifecycle (native modal open/close/focus-restore)"
 });
 
 describe("isSettingsBackdropClick (outside-interaction dismissal)", () => {
+  const dialog = {
+    getBoundingClientRect: () => ({
+      left: 10,
+      right: 100,
+      top: 10,
+      bottom: 100,
+    }),
+  };
   it("is true when the click target is the dialog element itself (native ::backdrop click)", () => {
-    const dialog = {};
-    expect(isSettingsBackdropClick({ target: dialog }, dialog)).toBe(true);
+    expect(
+      isSettingsBackdropClick(
+        { target: dialog, clientX: 0, clientY: 0 },
+        dialog,
+      ),
+    ).toBe(true);
   });
   it("is false when the click target is a control inside the dialog", () => {
-    const dialog = {};
     const innerButton = {};
-    expect(isSettingsBackdropClick({ target: innerButton }, dialog)).toBe(
-      false,
-    );
+    expect(
+      isSettingsBackdropClick(
+        { target: innerButton, clientX: 20, clientY: 20 },
+        dialog,
+      ),
+    ).toBe(false);
+  });
+  it("does not dismiss when dialog padding itself receives the click", () => {
+    expect(
+      isSettingsBackdropClick(
+        { target: dialog, clientX: 15, clientY: 15 },
+        dialog,
+      ),
+    ).toBe(false);
   });
 });
 

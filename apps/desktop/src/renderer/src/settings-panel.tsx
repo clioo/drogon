@@ -89,15 +89,29 @@ export function attachSettingsDialogLifecycle(
 
 /**
  * A native <dialog>'s ::backdrop is not part of the DOM, so an outside click
- * lands on the dialog element itself; a click on any real control inside
- * lands on that control. This is what the dialog's onClick wires to for
- * truthful outside-interaction dismissal (no synthetic overlay div).
+ * lands on the dialog element itself — but so does a click on the dialog's
+ * own padding. The target check alone cannot tell backdrop from padding, so
+ * this also requires the pointer to fall outside the dialog's content rect.
+ * This is what the dialog's onClick wires to for truthful
+ * outside-interaction dismissal (no synthetic overlay div).
  */
 export function isSettingsBackdropClick(
-  event: { target: unknown },
-  dialog: unknown,
+  event: { target: unknown; clientX: number; clientY: number },
+  dialog: {
+    getBoundingClientRect: () => Pick<
+      DOMRect,
+      "left" | "right" | "top" | "bottom"
+    >;
+  } | null,
 ): boolean {
-  return event.target === dialog;
+  if (!dialog || event.target !== dialog) return false;
+  const rect = dialog.getBoundingClientRect();
+  return (
+    event.clientX < rect.left ||
+    event.clientX > rect.right ||
+    event.clientY < rect.top ||
+    event.clientY > rect.bottom
+  );
 }
 
 /**
