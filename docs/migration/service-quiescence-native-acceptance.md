@@ -3,7 +3,7 @@
 Root validation, 2026-09-07. This accepts the native contract for integration;
 it is not a packaged-desktop, installed-app, Windows-runtime or full-parity claim.
 
-## Final source checks
+## Initial macOS source checks
 
 - `cargo test --workspace --locked --offline --quiet`: **406 passed, 0 failed,
   1 pre-existing ignored probe entry**. Its owning test explicitly invokes
@@ -18,6 +18,22 @@ persistence/freeze, release the private test-hook mutex before invocation,
 keep racing test children alive until explicitly stopped, propagate accepted
 stream configuration failure, and refuse untrackable connection handlers.
 Scoped worker and root test counts overlap this suite; do not add them together.
+
+## Cross-platform CI corrections
+
+CI run `34079626273` at `092fe87` passed macOS but failed Windows compilation
+and one Linux test. Windows found an unconditional import of the Unix-only
+quiescence module; the import now has the same platform guard as its callers.
+This restores the compilation boundary, not a Windows service implementation.
+
+The Linux EOF test connected before its fixture listener was bound. A fixed
+20 ms delay did not establish readiness. The fixture now receives an explicit
+ready signal after binding/configuring the listener, with its teardown owner
+already constructed if readiness fails. The separate production-loop test
+already binds before spawning and needs no startup sleep. Assertions about
+real service exit, lock release and refusal liveness are unchanged. These CI
+failures are retained as regression evidence; current-head CI must pass before
+merge, irrespective of the earlier local results.
 
 ## Actual service and CLI proof
 

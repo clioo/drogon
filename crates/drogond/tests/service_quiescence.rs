@@ -97,10 +97,14 @@ impl ServingFixture {
         let abort_for_loop = abort.clone();
         let engine_for_loop = engine;
         let token_for_loop: Arc<str> = Arc::from(token.as_str());
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let thread = std::thread::spawn(move || -> std::io::Result<()> {
             let _lock = drogond::lock::acquire_exclusive(&dir_path)?;
             let listener = drogond::endpoint::establish(&dir_path)?;
             listener.set_nonblocking(true)?;
+            ready_tx
+                .send(())
+                .map_err(|_| std::io::Error::other("fixture readiness receiver closed"))?;
             drogond::server::run_accept_loop(
                 move || {
                     if abort_for_loop.load(Ordering::Acquire) {
@@ -119,16 +123,18 @@ impl ServingFixture {
                 u32::MAX,
             )
         });
-        // connect() to a bound-but-not-yet-accepting socket is queued in the
-        // kernel backlog, so this is a generous margin, not a requirement.
-        std::thread::sleep(Duration::from_millis(20));
-        ServingFixture {
+        let fixture = ServingFixture {
             dir,
             token,
             socket_path,
             thread: Some(thread),
             abort,
-        }
+        };
+        // Construct the owner first so a failed readiness wait still tears down the thread.
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("fixture listener must be bound before clients connect");
+        fixture
     }
 
     fn connect(&self) -> Client {
@@ -554,8 +560,6 @@ fn production_accept_loop_exits_after_admitted_shutdown() {
             Duration::from_secs(60),
         )
     });
-    std::thread::sleep(Duration::from_millis(20));
-
     let mut client = {
         let stream = UnixStream::connect(&socket_path).unwrap();
         stream
