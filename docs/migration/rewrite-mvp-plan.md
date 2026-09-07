@@ -136,7 +136,10 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J6 R8-G1: Tasks con frame, source bar, filas GitHub, filtros y paginación del fuente; paging en tasks.list | R8 | GLM 5.3 Flash | lanzada | |
 | Fidelidad R8-G2: tokens `:root`/`.dark`, capa base y fuentes Geist + Nerd Symbols del fuente | R8 | GLM 5.3 Flash | fusionada: cabecera del oráculo idéntica (Geist 36px/700), tokens iguales en ambos esquemas, fuentes empaquetadas con OFL | #62 |
 | J7 R8-O1: Automations con lista, editor, detalle e historial del fuente; horarios en hora local | R8 | OpenCode + Muse | fusionada: 43 tests nuevos, oráculo automations PASSED; faltan dashboard de runs y scopes externos | #65 |
-| J1 R8-O2: terminal con terminal.css, tema xterm por esquema, zoom, búsqueda, links, menú contextual y overlay de salida | R8 | OpenCode + Muse | lanzada | |
+| J1 R8-O2: terminal con terminal.css, tema xterm por esquema, zoom, búsqueda, links, menú contextual y overlay de salida | R8 | OpenCode + Muse | fusionada: 108 tests; la aceptación lee el buffer vía `window.__drogonTerminals` (WebGL); eventos de App pendientes en R10-C | #68 |
 | J1 R9-A: acciones de tarjeta de worktree del fuente (menú contextual, renombrar, borrar con conteos, badges) | R9 | Muse | lanzada | |
 | Fidelidad R9-B: remanente del chrome (Back/Forward en el titlebar, cabecera de Projects, pie del sidebar, Star on GitHub, ⌘J) | R9 | Muse | lanzada | |
-| J8 R9-C: bot.delete, ejecuciones programadas en el historial, acciones de cabecera de la tarjeta | R9 | Muse | lanzada | |
+| J8 R9-C: bot.delete, ejecuciones programadas en el historial, acciones de cabecera de la tarjeta | R9 | Muse | fusionada; desvío conocido: diálogo de confirmación y etiquetas Scheduled/Manual que el fork no tiene | #67 |
+| Fidelidad R10-A: primitivas UI (shadcn/Radix) del fuente en components/ui | R10 | GLM 5.3 Flash | lanzada | |
+| J2 R10-B: contenido del panel Source Control del fuente (secciones, filas, commit, sync, Create PR) | R10 | OpenCode + Muse | lanzada | |
+| J1/J9 R10-C: eventos del terminal cableados en App, `shell.openExternal`, Mentu como ítem de la barra derecha | R10 | Muse | lanzada | |
