@@ -1107,6 +1107,12 @@ function execFileAsync(file, args2, opts) {
 
 async function candTeardown(page, state) {
   const notes = [];
+  // Settings is a full page that hides the shell chrome (R9-B): leave it the
+  // way the source does, through its "Back to app" row, before anything else.
+  if (await tryClick(page, "button", "Back to app", 1500)) {
+    notes.push("teardown: Back to app from full-page view");
+    await delay(300);
+  }
   // SettingsPanel is a native <dialog>: Escape does not reliably dismiss it,
   // so use its explicit Close button first (exact match; session closes are
   // labeled "Close <name> session" and never match).
