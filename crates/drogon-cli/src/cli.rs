@@ -109,6 +109,13 @@ pub enum Command {
         #[command(subcommand)]
         command: Box<OrchestrationCommand>,
     },
+    /// Service-internal callbacks (hook events from harness settings files).
+    /// Hidden: not a user verb, only invoked by generated hook commands.
+    #[command(hide = true)]
+    Internal {
+        #[command(subcommand)]
+        action: InternalAction,
+    },
     /// Diagnostic passthrough for a raw protocol method
     #[command(
         args_override_self = true,
@@ -241,6 +248,22 @@ pub enum AutomationAction {
         id: String,
         #[arg(long, value_name = "N")]
         limit: Option<u64>,
+    },
+}
+
+/// Hidden service-internal callbacks. Only the hook-event callback exists:
+/// Claude Code `Notification`/`Stop` hooks report a session waiting for the
+/// user. Hook payloads on stdin are drained and ignored (the settings file
+/// already names the session, incarnation and event).
+#[derive(Subcommand, Debug)]
+pub enum InternalAction {
+    HookEvent {
+        #[arg(long, value_name = "ID")]
+        session: String,
+        #[arg(long, value_name = "TOKEN")]
+        incarnation: String,
+        #[arg(long, value_name = "NAME")]
+        event: String,
     },
 }
 
@@ -735,6 +758,17 @@ impl Cli {
                 // connection is attempted.
                 crate::orchestration_commands::validate_actor_flags(command)?;
             }
+            Command::Internal { action } => match action {
+                InternalAction::HookEvent {
+                    session,
+                    incarnation,
+                    event,
+                } => {
+                    require_nonempty("session", session)?;
+                    require_nonempty("incarnation", incarnation)?;
+                    require_nonempty("event", event)?;
+                }
+            },
             Command::Status => {}
         }
         Ok(())

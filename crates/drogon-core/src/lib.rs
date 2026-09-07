@@ -34,6 +34,7 @@ pub mod git_process;
 mod git_rpc;
 pub mod git_worktree;
 mod harness;
+mod hooks;
 mod project;
 mod ring;
 mod session;
@@ -365,6 +366,7 @@ impl Engine {
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
+            "session.hook_event" => self.mutating(request, Self::do_session_hook_event),
             "project.add" => self.mutating(request, Self::do_project_add),
             "project.list" => {
                 let conn = self.db.lock().unwrap();

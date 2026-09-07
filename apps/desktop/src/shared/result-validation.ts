@@ -22,6 +22,11 @@ const session = z.object({
   verdict: z.enum(["live", "unverifiable", "exited"]),
   exitCode: z.number().int().nullable(),
   createdAt: z.string(),
+  // R3-C: the daemon always reports these (session-contract.ts), but they
+  // stay optional so a response from an older service without them still
+  // validates; absent reads as `unknown` at the call sites.
+  agentState: z.enum(["working", "idle", "needs_input", "exited", "unknown"]).optional(),
+  agentStateAt: z.string().nullable().optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const harness = z

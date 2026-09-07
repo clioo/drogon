@@ -142,6 +142,14 @@ pub fn session_started(session: &Session) -> String {
     )
 }
 
+pub fn session_hook_event(session: &Session) -> String {
+    format!(
+        "Session {} agent={}",
+        session.id,
+        session.agent_state.as_wire()
+    )
+}
+
 pub fn session_list(list: &SessionList) -> String {
     if list.sessions.is_empty() {
         return "No sessions.".into();

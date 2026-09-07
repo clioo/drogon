@@ -48,9 +48,9 @@ pub enum Verdict {
     Exited,
 }
 
-/// Mirrors `session-contract.ts`'s `AgentState`. `NeedsInput` has no
-/// producer in the service yet (Claude Code hook wiring is not implemented),
-/// but decodes and displays like any other value.
+/// Mirrors `session-contract.ts`'s `AgentState`. `NeedsInput` is produced
+/// by `session.hook_event` (the per-session Claude Code hooks file) and
+/// carries the hook timestamp in `agentStateAt`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
@@ -519,7 +519,9 @@ pub fn check_removed(removed: &Removed, expected_id: &str) -> Result<(), String>
 /// out-of-range dimensions are structurally decodable but not actionable.
 /// Also pins the agent-state/verdict/timestamp cross-field invariants the
 /// service actually implements: an exited session is always agentState
-/// `exited`, and only `working`/`idle` ever carry a non-null `agentStateAt`.
+/// `exited`, and `working`/`idle`/`needs_input` carry a non-null
+/// `agentStateAt` (activity stamp, or the hook-event stamp for the wait
+/// signal the card freshness ranking sorts on).
 pub fn check_session(session: &Session) -> Result<(), String> {
     require_nonempty("id", &session.id)?;
     require_nonempty("workspaceId", &session.workspace_id)?;
@@ -538,7 +540,7 @@ pub fn check_session(session: &Session) -> Result<(), String> {
         ));
     }
     match session.agent_state {
-        AgentState::Working | AgentState::Idle => {
+        AgentState::Working | AgentState::Idle | AgentState::NeedsInput => {
             if session.agent_state_at.is_none() {
                 return Err(format!(
                     "agentState {:?} must carry a non-null agentStateAt",
@@ -546,7 +548,7 @@ pub fn check_session(session: &Session) -> Result<(), String> {
                 ));
             }
         }
-        AgentState::Exited | AgentState::Unknown | AgentState::NeedsInput => {
+        AgentState::Exited | AgentState::Unknown => {
             if session.agent_state_at.is_some() {
                 return Err(format!(
                     "agentState {:?} must not carry an agentStateAt",

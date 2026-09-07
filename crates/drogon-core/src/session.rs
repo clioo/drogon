@@ -62,6 +62,15 @@ pub(crate) struct SessionHandle {
     /// wall-clock stamp captured at the same moment (an `Instant` cannot be
     /// rendered as `agentStateAt`). `None` until the first chunk arrives.
     last_activity: Mutex<Option<(Instant, String)>>,
+    /// Wall-clock stamp of the most recent `session.hook_event` (`Stop` or
+    /// `Notification` from the per-session Claude Code hooks file) that no
+    /// later PTY output has cleared yet. `None` for sessions that never got
+    /// one — other harnesses keep purely activity-based states.
+    needs_input_at: Mutex<Option<String>>,
+    /// Per-session Claude Code `--settings` file `harness.start` wrote for
+    /// this session (a nonce name under `<data-dir>/hooks/`), removed when
+    /// the session exits. `None` for sessions launched without one.
+    hook_settings_file: Mutex<Option<std::path::PathBuf>>,
     db: Arc<Mutex<Connection>>,
 }
 
@@ -100,9 +109,34 @@ impl SessionHandle {
             exit_code: Mutex::new(None),
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
+            needs_input_at: Mutex::new(None),
+            hook_settings_file: Mutex::new(None),
             db,
         })
     }
+
+    /// Records a hook wait signal; the next PTY output chunk clears it.
+    pub(crate) fn note_hook_event(&self) {
+        *self.needs_input_at.lock().unwrap() = Some(crate::now_rfc3339());
+    }
+
+    /// Remembers the per-session hooks settings file so the exit paths can
+    /// remove it. Called once by `harness.start` right after launch.
+    pub(crate) fn set_hook_settings_file(&self, path: std::path::PathBuf) {
+        *self.hook_settings_file.lock().unwrap() = Some(path);
+    }
+
+    /// Takes the remembered hooks settings file for deletion, if any.
+    fn take_hook_settings_file(&self) -> Option<std::path::PathBuf> {
+        self.hook_settings_file.lock().unwrap().take()
+    }
+}
+
+/// Best-effort removal of a session's hooks settings file: failures only
+/// mean a small orphaned JSON (its hook commands fail closed against a dead
+/// session), never a session-state error.
+fn remove_hook_settings_file(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 /// The native PTY master held open while the session can still resize.
@@ -244,6 +278,9 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                     handle.ring.lock().unwrap().push(&buf[..n]);
                     *handle.last_activity.lock().unwrap() =
                         Some((Instant::now(), crate::now_rfc3339()));
+                    // Output resumes: the wait signal is spent, back to
+                    // activity-based derivation.
+                    *handle.needs_input_at.lock().unwrap() = None;
                 }
                 Err(_) => break,
             }
@@ -285,6 +322,9 @@ fn poll_until_exit(handle: &SessionHandle) {
     loop {
         if let Some(code) = try_reap(handle) {
             if persist_exit(handle, code).is_ok() {
+                if let Some(path) = handle.take_hook_settings_file() {
+                    remove_hook_settings_file(&path);
+                }
                 try_release_native(handle);
                 return;
             }
@@ -349,6 +389,14 @@ pub(crate) fn check_incarnation(handle: &SessionHandle, incarnation: &str) -> Re
         return Err(error::stale_incarnation());
     }
     Ok(())
+}
+
+impl SessionHandle {
+    /// Whether the child's exit has been positively observed (reaped),
+    /// without forcing a reap (read paths must never block on process state).
+    pub(crate) fn is_exited(&self) -> bool {
+        self.exit_code.lock().unwrap().is_some()
+    }
 }
 
 pub(crate) fn read(
@@ -451,6 +499,9 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
     use drogon_protocol::orchestration_worker::ProcessAction;
 
     if let Some(code) = try_reap(handle) {
+        if let Some(path) = handle.take_hook_settings_file() {
+            remove_hook_settings_file(&path);
+        }
         try_release_native(handle);
         return StopObservation {
             process_action: ProcessAction::None,
@@ -467,6 +518,9 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
     let deadline = Instant::now() + STOP_VERIFY_TIMEOUT;
     loop {
         if let Some(code) = try_reap(handle) {
+            if let Some(path) = handle.take_hook_settings_file() {
+                remove_hook_settings_file(&path);
+            }
             try_release_native(handle);
             return StopObservation {
                 process_action,
@@ -502,15 +556,19 @@ pub(crate) fn snapshot(handle: &SessionHandle) -> Value {
 /// Exit takes precedence over the raw activity clock (see
 /// `agent_state::derive`): a caller here already knows whether the session
 /// exited via its own `verdict`, so this never re-reaps `exit_code` itself.
+/// An uncleared hook signal reports `needs_input` with its own stamp; the
+/// reader thread clears it on the next output chunk.
 fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, Option<String>) {
     let (activity, wall_clock_at) = match &*handle.last_activity.lock().unwrap() {
         None => (Activity::NeverObserved, None),
         Some((instant, at)) => (Activity::LastActiveAgo(instant.elapsed()), Some(at.clone())),
     };
-    let state = agent_state::derive(verdict == "exited", activity);
+    let needs_input_at = handle.needs_input_at.lock().unwrap().clone();
+    let state = agent_state::derive(verdict == "exited", activity, needs_input_at.is_some());
     let at = match state {
         AgentState::Working | AgentState::Idle => wall_clock_at,
-        AgentState::Exited | AgentState::Unknown | AgentState::NeedsInput => None,
+        AgentState::NeedsInput => needs_input_at,
+        AgentState::Exited | AgentState::Unknown => None,
     };
     (state.as_wire(), at)
 }

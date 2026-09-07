@@ -102,6 +102,9 @@ export function SettingsPanel({
   initialSection,
 }: SettingsPanelProps & { initialSection?: SettingsSectionId }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // The native-notification toggle is owned by main (default on); this row
+  // only mirrors it, so App's settings store stays untouched.
+  const [notifyOnNeedsInput, setNotifyOnNeedsInput] = useState(true);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -110,6 +113,19 @@ export function SettingsPanel({
     // Runs once per mount: the panel is mounted/unmounted directly by
     // App.tsx rather than toggled via a prop, so a re-open always means a
     // fresh mount with the current onClose/openerRef.
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.drogon.notifications
+      ?.getEnabled()
+      .then((enabled) => {
+        if (!cancelled) setNotifyOnNeedsInput(enabled);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
