@@ -39,6 +39,11 @@ import {
   SettingsStore,
 } from "./settings-store";
 import {
+  recoveryActionFor,
+  recoveryTabLabel,
+  retryAffordanceDisabled,
+} from "./session-recovery";
+import {
   applyThemeToRoot,
   resolveEffectiveTheme,
   resolveInspectorDefault,
@@ -669,9 +674,31 @@ export function App() {
                       onClick={() => setActive(item.id)}
                     >
                       <TerminalSquare size={14} />
-                      <span>{sessionLabel(item, harnesses)}</span>
+                      <span>
+                        {recoveryTabLabel({
+                          label: sessionLabel(item, harnesses),
+                          verdict: item.verdict,
+                          id: item.id,
+                          incarnation: item.incarnation,
+                        })}
+                      </span>
                       <span className="session-verdict">{item.verdict}</span>
                     </button>
+                    {recoveryActionFor(item.verdict, {
+                      // A confirmed close removes the tab, so a still-listed
+                      // exited session is one the user did not request.
+                      exitExpected: false,
+                    }).kind === "retry-connection" && (
+                      <IconButton
+                        label="Retry connection"
+                        disabled={retryAffordanceDisabled({
+                          refreshInFlight: busy,
+                        })}
+                        onClick={() => void refresh()}
+                      >
+                        <RefreshCw />
+                      </IconButton>
+                    )}
                     <IconButton
                       label={`Close ${sessionLabel(item, harnesses)} session`}
                       disabled={busy || loadingSessions || !status}
@@ -709,6 +736,28 @@ export function App() {
                 className="active-session-panel"
                 aria-busy={loadingSessions}
               >
+                {terminal &&
+                  status &&
+                  recoveryActionFor(terminal.verdict, {
+                    exitExpected: false,
+                  }).kind === "reveal-output+offer-new" && (
+                    <div className="error-banner" role="status">
+                      <span>
+                        This session exited (exit{" "}
+                        {terminal.exitCode ?? "unknown"}). Its output is kept
+                        below.
+                      </span>
+                      <Button
+                        size="sm"
+                        disabled={busy || loadingSessions}
+                        onClick={() =>
+                          current ? void create() : setAdding(true)
+                        }
+                      >
+                        New terminal
+                      </Button>
+                    </div>
+                  )}
                 {terminal && status ? (
                   <TerminalPane
                     key={`${terminal.id}:${revision}`}

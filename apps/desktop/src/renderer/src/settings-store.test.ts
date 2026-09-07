@@ -228,3 +228,69 @@ describe("persistence round-trip through injected storage", () => {
     expect(store.get("locale")).toBe("es");
   });
 });
+
+describe("unknown-key forward compatibility on read-modify-write", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("carries forward-compat keys unmodified through set + flush", () => {
+    const storage = new MemoryStorage();
+    storage.seed(
+      settingsStorageKey("ui"),
+      '{"settings":{"theme":"dark","futureField":{"nested":true},"anotherFutureKey":42}}',
+    );
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    store.set("locale", "es");
+    store.flush();
+    const raw = JSON.parse(storage.peek(settingsStorageKey("ui")) as string);
+    expect(raw.settings.futureField).toEqual({ nested: true });
+    expect(raw.settings.anotherFutureKey).toBe(42);
+    expect(raw.settings.theme).toBe("dark");
+    expect(raw.settings.locale).toBe("es");
+  });
+
+  it("does not let unknown keys leak into typed get() results", () => {
+    const storage = new MemoryStorage();
+    storage.seed(
+      settingsStorageKey("ui"),
+      '{"settings":{"theme":"light","futureField":"x"}}',
+    );
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    expect(store.get("theme")).toBe("light");
+    expect((store as unknown as Record<string, unknown>).futureField).toBeUndefined();
+  });
+
+  it("keeps unknown keys stable and unmodified across repeated flushes", () => {
+    const storage = new MemoryStorage();
+    storage.seed(
+      settingsStorageKey("ui"),
+      '{"settings":{"theme":"dark","futureField":"original"}}',
+    );
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    store.set("locale", "es");
+    store.flush();
+    store.set("locale", "fr");
+    store.flush();
+    const raw = JSON.parse(storage.peek(settingsStorageKey("ui")) as string);
+    expect(raw.settings.futureField).toBe("original");
+    expect(raw.settings.locale).toBe("fr");
+  });
+
+  it("does not fabricate unknown keys when the raw payload is malformed", () => {
+    const storage = new MemoryStorage();
+    storage.seed(settingsStorageKey("ui"), "not json{");
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    store.set("locale", "es");
+    store.flush();
+    const raw = JSON.parse(storage.peek(settingsStorageKey("ui")) as string);
+    expect(raw.settings).toEqual({
+      theme: "system",
+      inspectorVisible: true,
+      locale: "es",
+    });
+  });
+});

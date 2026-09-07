@@ -70,6 +70,54 @@
     color-scheme: dark;
   }
 }
+/* Explicit .dark/.light theme choices must win over the OS media query so an
+   in-app override (dark-on-light-OS, light-on-dark-OS) applies. :root.dark and
+   :root:not(.dark) both have specificity (0,2,0), which beats the plain
+   `:root` selector inside @media (prefers-color-scheme) at (0,1,0) regardless
+   of source order. Token values below are copied byte-for-byte from the
+   blocks above; do not edit one without the other. */
+:root.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --primary: #e5e5e5;
+  --primary-foreground: #171717;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted-foreground: #a1a1a1;
+  --accent: #404040;
+  --accent-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --border: rgb(255 255 255 / 0.07);
+  --input: rgb(255 255 255 / 0.15);
+  --ring: #737373;
+  --destructive: #ff6568;
+  --sidebar: #171717;
+  --sidebar-accent: #262626;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.dark) {
+    --background: #fff;
+    --foreground: #0a0a0a;
+    --primary: #171717;
+    --primary-foreground: #fafafa;
+    --secondary: #f5f5f5;
+    --secondary-foreground: #171717;
+    --muted-foreground: #737373;
+    --accent: #f5f5f5;
+    --accent-foreground: #171717;
+    --popover: #fff;
+    --popover-foreground: #0a0a0a;
+    --border: #e5e5e5;
+    --input: #e5e5e5;
+    --ring: #a1a1a1;
+    --destructive: #e40014;
+    --sidebar: #fafafa;
+    --sidebar-accent: #f5f5f5;
+    color-scheme: light;
+  }
+}
 * {
   box-sizing: border-box;
 }

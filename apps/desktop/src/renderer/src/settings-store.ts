@@ -110,11 +110,45 @@ export function parsePersistedSettings(
   }
 }
 
+/**
+ * Extracts envelope keys that aren't part of the typed SettingsSubset, so a
+ * read-modify-write cycle can carry forward-compat fields (written by a newer
+ * build, unknown to this one) through untouched instead of dropping them.
+ * Malformed or foreign envelopes yield no extras, matching parsePersistedSettings.
+ */
+export function parseUnknownSettingsKeys(
+  raw: string | null | undefined,
+): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+      return {};
+    const settings = (parsed as { settings?: unknown }).settings;
+    if (
+      typeof settings !== "object" ||
+      settings === null ||
+      Array.isArray(settings)
+    )
+      return {};
+    const candidate = settings as Record<string, unknown>;
+    const known = new Set(Object.keys(SETTINGS_DEFAULTS));
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(candidate)) {
+      if (!known.has(key)) out[key] = candidate[key];
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /** Small typed store: get/set with defaults, persisted state, migrations and launch overrides; debounced guarded saves. */
 export class SettingsStore {
   #storage: StorageLike;
   #key: string;
   #state: SettingsSubset;
+  #unknownKeys: Record<string, unknown> = {};
   #timer: ReturnType<typeof setTimeout> | null = null;
   #firstPendingAt: number | null = null;
 
@@ -131,9 +165,12 @@ export class SettingsStore {
     this.#key = settingsStorageKey(options.namespace);
     let persisted: Partial<SettingsSubset> = {};
     try {
-      persisted = parsePersistedSettings(storage.getItem(this.#key));
+      const raw = storage.getItem(this.#key);
+      persisted = parsePersistedSettings(raw);
+      this.#unknownKeys = parseUnknownSettingsKeys(raw);
     } catch {
       persisted = {};
+      this.#unknownKeys = {};
     }
     this.#state = mergeSettingLayers({
       defaults: options.defaults ?? SETTINGS_DEFAULTS,
@@ -169,7 +206,10 @@ export class SettingsStore {
     }
     this.#firstPendingAt = null;
     try {
-      this.#storage.setItem(this.#key, JSON.stringify({ settings: this.#state }));
+      this.#storage.setItem(
+        this.#key,
+        JSON.stringify({ settings: { ...this.#unknownKeys, ...this.#state } }),
+      );
     } catch {
       // Storage unavailable: keep serving in-memory state; no durability promise.
     }
