@@ -84,6 +84,10 @@ impl Fixture {
 #[test]
 fn create_is_born_empty_durable_scoped_and_never_starts_a_session() {
     let fx = Fixture::new();
+    let before_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
     let mut params = fx.params();
     params["botId"] = json!("chosen-bot");
     let created = success(fx.create("create", params));
@@ -91,7 +95,11 @@ fn create_is_born_empty_durable_scoped_and_never_starts_a_session() {
     assert_eq!(created["responsibilities"], json!([]));
     assert_eq!(created["currentSession"], Value::Null);
     assert_eq!(created["displayIdentity"]["displayName"], "Watcher");
-    assert!(created["createdAt"].as_f64().unwrap() > 0.0);
+    let after_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
+    assert!((before_ms..=after_ms).contains(&created["createdAt"].as_f64().unwrap()));
     assert_eq!(created["createdAt"], created["updatedAt"]);
     assert_eq!(fx.counts(), (1, 1, 0));
     let snapshot = success(fx.engine.dispatch(request(
@@ -103,6 +111,80 @@ fn create_is_born_empty_durable_scoped_and_never_starts_a_session() {
     )));
     assert_eq!(snapshot["bots"], json!([created]));
     assert_eq!(snapshot["history"], json!([]));
+}
+
+#[test]
+fn invalid_bot_ids_are_rejected_before_record_or_receipt_insertion() {
+    let fx = Fixture::new();
+    for (index, id) in [
+        String::new(),
+        "bad\nidentity".into(),
+        "x".repeat(129),
+        "bad\u{7f}".into(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut params = fx.params();
+        params["botId"] = json!(id);
+        failure(
+            fx.create(&format!("invalid-{index}"), params),
+            "invalid_argument",
+        );
+        assert_eq!(fx.counts(), (0, 0, 0));
+    }
+}
+
+#[test]
+fn strict_shape_and_born_empty_rules_reject_without_effects() {
+    let fx = Fixture::new();
+    for (index, (field, value)) in [
+        ("responsibilities", json!([{"id":"not-empty"}])),
+        ("currentSession", json!({"sessionId":"not-empty"})),
+        ("unknown", json!(true)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut params = fx.params();
+        params["body"][field] = value;
+        failure(
+            fx.create(&format!("strict-{index}"), params),
+            "invalid_argument",
+        );
+        assert_eq!(fx.counts(), (0, 0, 0));
+    }
+    let mut params = fx.params();
+    params["requestId"] = json!("params-cannot-own-envelope");
+    failure(fx.create("nested-request", params), "invalid_argument");
+    assert_eq!(fx.counts(), (0, 0, 0));
+}
+
+#[test]
+fn foreign_or_missing_workspace_is_denied_without_receipt() {
+    let fx = Fixture::new();
+    let mut params = fx.params();
+    params["hostId"] = json!("foreign-host");
+    failure(fx.create("foreign", params), "foreign_workspace_host");
+    let mut params = fx.params();
+    params["workspaceId"] = json!("missing-workspace");
+    failure(fx.create("missing", params), "unknown_workspace");
+    assert_eq!(fx.counts(), (0, 0, 0));
+}
+
+#[test]
+fn quiescent_service_refuses_new_creation() {
+    let fx = Fixture::new();
+    let status = success(fx.engine.dispatch(request("status", "status", json!({}))));
+    success(fx.engine.dispatch(request(
+        "shutdown",
+        "runtime.shutdown",
+        json!({
+            "hostId": status["hostId"], "serviceInstanceId": status["serviceInstanceId"]
+        }),
+    )));
+    failure(fx.create("late", fx.params()), "runtime_busy");
+    assert_eq!(fx.counts(), (0, 0, 0));
 }
 
 #[test]
