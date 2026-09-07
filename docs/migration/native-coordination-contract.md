@@ -83,6 +83,92 @@ wait releases database and admission locks between observations. Non-consuming
 inspection must not create a Delivery. Do not expose retired scheduler/reset
 commands as working aliases or claim gates/federation are covered by this group.
 
+## Resolved freeze decisions
+
+These decisions refine the proposal; typed request/response structs and source
+baseline acceptance are still required before implementing the method group.
+
+### Mutation classification
+
+| Operation | Admission and waiting |
+| --- | --- |
+| runCreate/runUse, taskCreate, workerStart/Stop/Abandon/Release, send/reply | Mutation: current actor fence, lifecycle admission, durable receipt |
+| runList/runShow, taskList/taskShow, workerShow/workerRead, requestShow | Inspection: current actor scope, no state allocation |
+| check with peek/history mode and no ACK | Inspection; filters only the returned inspection, never claims consumption |
+| check allocation or ACK | Mutation for each short database transaction; no locks while waiting |
+| ask with a new question | Commit once as a mutation, then wait/read by that message ID |
+| ask resume | Read the existing question/reply; no new question or effect on timeout |
+
+Reject incompatible check modes (for example peek plus ACK) before admission.
+The CLI generates an ID when none is supplied and retains it for recovery; a
+new-ID retry is not a replay. A waiter rechecks authority on every observation,
+so takeover or cancellation wakes/refuses a stale consumer rather than leaving it
+attached to a newer owner's mailbox. Shutdown wakes waiters with an explicit
+interrupted observation; no missing response becomes a final worker outcome.
+
+### Credential and receipt representation
+
+Use `DROGON_DISPATCH_CAPABILITY` for the worker secret, and
+`DROGON_RUN_ID`, `DROGON_TASK_ID`, `DROGON_DISPATCH_ID`, `DROGON_HOST_ID`,
+`DROGON_SESSION_ID`, `DROGON_SESSION_INCARNATION` for non-secret context.
+They are injected only by the engine after clearing inherited identity. IDs from
+the environment are routing hints and must agree with the capability's stored
+binding; they never grant authority. The host endpoint/data directory and exact
+CLI executable are injected separately from task-authored data.
+
+Present-but-empty or invalid worker credential fails closed, including raw RPC
+and `request-show`; it never opens `auth.token` as a fallback. The public launch
+receipt contains no capability. Mint 32 random bytes using the existing OS CSPRNG
+facility; store only a SHA-256 digest, use a non-printing secret wrapper, and never
+derive a secret from IDs, timestamps or the coordinator's token.
+
+Keep one existing `requests` table. For new coordination operations, use a
+versioned internal key derived from a length-unambiguous serialized tuple of
+actor kind, actor identity, run generation or dispatch attempt, and external
+request ID. Preserve the external ID in responses and scoped recovery. Include
+method and canonical semantic params in the fingerprint. Existing non-coordination
+keys are unchanged. Internal keys and raw actor hashes are not public report data.
+Test canonical key order explicitly rather than relying on a serde feature comment.
+
+Add a transaction-aware path to `RequestLedger` for database-only work, with
+state and receipt in one transaction. The external-effect path retains its durable
+pending admission and uncertain-result behavior. Domain methods receive the
+caller's transaction and do not independently nest BEGIN/COMMIT or publish a
+success before it commits. Neither path may acquire an in-flight map lock while
+already holding a database lock needed by the other path.
+
+### Reports, duplicate outcomes and prompt observation
+
+Source `db/dispatch-context/worker-report-settlement.ts` explicitly corrects a
+false failure caused by `AGENT_PROMPT_STALLED_ERROR`: the preamble can have reached
+the worker before observation expired. Preserve the *behavior*, not the false
+failure state. In Drogon, a prompt observation timeout leaves readiness unverified
+and the attempt active/inspectable. It neither revokes the capability nor unlocks
+replacement. An authenticated final report can still settle that exact attempt.
+Genuine launch failure, explicit cancellation and confirmed process exit remain
+different evidence. The selected source regression must map to this invariant.
+
+| Report condition | Required result |
+| --- | --- |
+| Same request ID, same actor and payload | Replay the saved receipt; no extra message or state change |
+| Same request ID, different payload | `request_conflict`; no new outcome |
+| Same attempt already reported the same outcome, no active replacement | Duplicate receipt identifying the original report; preserve original body/result, do not create another final message |
+| Same attempt already reported a different outcome | Refuse; no overwrite |
+| Cancelled, abandoned or superseded attempt | Refuse a fresh settlement, never complete its replacement |
+| Prompt not observed, exact active worker later reports | Accept once; lack of TUI observation is not a cancellation fence |
+
+Credential revocation prevents new worker effects but must retain enough scoped
+identity to recover an exact committed report receipt. This is not general
+authorization after settlement. Duplicate classification and current-attempt
+checks occur inside the same transaction; a different request ID cannot bypass
+the task's one-active-attempt constraint. Preserve questions and report evidence
+after settlement even when pending questions become closed.
+
+No automatic garbage collection of dispatches, capabilities' revocation records,
+receipts or unread mail is introduced here. Retention must not erase unresolved
+resource ownership or reopen a spent request identity. Capacity/retention behavior
+from the source suite remains tracked for a separate bounded-storage contract.
+
 ## Persistence and transaction rules
 
 Reuse the engine's admission ledger and same database, extending it deliberately:
