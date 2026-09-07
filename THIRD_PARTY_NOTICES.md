@@ -26,6 +26,18 @@ and the `.jump-palette-item[data-selected='true']` recipe from
 `src/renderer/src/assets/main.css`, all at the pinned source revision above.
 Each ported file keeps the MIT notice in its header comment.
 
+The bottom status bar in `apps/desktop/src/renderer/src/components/status-bar/`,
+its usage readers in `apps/desktop/src/main/usage/` and the contract in
+`apps/desktop/src/shared/usage-contract.ts` port Orca's
+`src/renderer/src/components/status-bar/{StatusBarSurface,InlineProviderUsage,CaffeinateStatusSegment,PortsStatusSegment,ResourceUsageStatusSegment}.tsx`,
+`resource-memory-metric-copy.ts`, `icons.tsx`, `tooltip.tsx`,
+`src/renderer/src/lib/window-label-formatter.ts`, `settings/agent-awake-copy.ts`,
+`src/shared/{rate-limit-types,rate-limit-reset-format,usage-percentage-display,claude-statusline-rate-limits}.ts`,
+`src/main/rate-limits/{claude-usage-window,claude-oauth-credentials,claude-oauth-usage-request,codex-auth-presence,codex-rpc-rate-limit-probe,codex-rate-limit-window-classification,codex-rate-limit-window-mapper,codex-pty-status-parser}.ts`,
+`src/main/codex-cli/codex-read-only-app-server-args.ts` and
+`src/main/macos-system-sleep-assertion.ts`, all at the pinned source revision
+above. Each ported file keeps the MIT notice in its header comment.
+
 MIT License
 
 Copyright (c) 2026 Lovecast Inc.
