@@ -188,3 +188,27 @@ files, no other test files touched.
   clean (exit 0).
 
 What remains: nothing for this checkpoint.
+
+---
+
+## Portability note (task_2bc542b409ad): ROOT fda7987 review — CI-portable unreadable-pid-log shape
+
+Scope: `tests/native_attempt_cancel_reopen.rs` only (+ this note).
+
+- The chmod-000 unreadable-pid-log case was REPLACED by a deterministic
+  shape that is uid-independent: the pid-log path is created as a
+  DIRECTORY, so `read_to_string` fails with an I/O error on every uid
+  (root bypasses permission bits but still cannot read a directory as a
+  file). The retention assertions are unchanged: typed Err (reason carries
+  the "pid log unreadable" prefix), fixture tree preserved, and the parent
+  cleanup stop-marker present.
+- The intentionally-preserved malformed-record fixture now has an exact
+  teardown (`remove_dir_all` at the end of its case) instead of being left
+  preserved with no teardown path; the directory-shaped case tears its
+  preserved fixture down the same way.
+- Gates: `cargo test -p drogon-core --test native_attempt_cancel_reopen
+  --locked` **8 passed / 0 failed**; `cargo fmt --all -- --check` **exit 0**;
+  `cargo clippy -p drogon-core --test native_attempt_cancel_reopen --locked
+  -- -D warnings` **exit 0**.
+
+What remains: nothing for this checkpoint.

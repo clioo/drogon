@@ -237,24 +237,23 @@ fn cleanup_preserves_fixtures_on_unreadable_pid_log_and_cleans_never_started() {
         fixture.dir.join("stop-marker").is_file(),
         "the cleanup stop-marker must be written even on retention paths"
     );
+    // Exact teardown: the intentionally-preserved fixture is removed by the
+    // test itself once its retention facts are asserted.
+    std::fs::remove_dir_all(&fixture.dir).expect("remove preserved malformed fixture");
 
-    // (b) Unreadable file: read failure is retention, not "zero children".
-    use std::os::unix::fs::PermissionsExt;
+    // (b) Unreadable path, deterministically on every uid: the pid-log path
+    // is a DIRECTORY, so read_to_string fails with an I/O error regardless
+    // of whether the runner is root (which would bypass permission bits).
     let fixture = Fixture::new("ul-b");
-    let log = fixture.dir.join("pid-log");
-    std::fs::write(&log, b"12345\n").expect("write pid log");
-    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o000))
-        .expect("make pid log unreadable");
+    std::fs::create_dir(fixture.dir.join("pid-log")).expect("create pid-log directory");
     let reason = fixture
         .try_cleanup_within(Duration::from_secs(2))
         .expect_err("an unreadable pid log must block fixture removal");
     assert!(reason.contains("pid log unreadable"), "{reason}");
     assert!(fixture.dir.is_dir(), "fixtures must be preserved");
     assert!(fixture.dir.join("stop-marker").is_file());
-    // Restore access so this test's own teardown can remove the tree.
-    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644))
-        .expect("restore pid log permissions");
-    std::fs::remove_dir_all(&fixture.dir).expect("remove owned fixture");
+    // Exact teardown of the intentionally-preserved fixture.
+    std::fs::remove_dir_all(&fixture.dir).expect("remove preserved unreadable fixture");
 
     // (c) Proven never-started: no pid-log at all still cleans up, proving
     // the never-started vs unreadable distinction.
