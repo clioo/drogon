@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { FileWarning, RefreshCw, Save } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { Result } from "../../../../shared/session-contract";
@@ -32,6 +32,13 @@ export interface EditorPaneProps {
    * saved, so a pending read can never blank-overwrite a real file.
    */
   allowEmptySave?: boolean;
+  /**
+   * Truthful draft restoration (descriptor-owned store -> panel): the
+   * retained draft PLUS the retained lastSaved, consumed once (at mount
+   * for the initially open file) so a restored dirty draft presents as
+   * DIRTY from the first paint — never as a clean baseline.
+   */
+  restoredDraft?: { draft: string; lastSaved: string | null } | null;
 }
 
 /** Per-file retained editing state; survives switching between files. */
@@ -80,6 +87,13 @@ export type EditorAction =
       scope: EditorScope;
       path: string | null;
       content: string | null;
+    }
+  | {
+      type: "draft-restored";
+      scope: EditorScope;
+      path: string;
+      draft: string;
+      lastSaved: string | null;
     }
   | { type: "edited"; value: string }
   | {
@@ -272,6 +286,32 @@ export function applyEditorAction(
         saveError: null,
       };
     }
+    case "draft-restored": {
+      const key = scopedFileKey(action.scope, action.path);
+      // Open file: present the restored draft truthfully dirty (its
+      // lastSaved is the service-confirmed content, not the draft).
+      if (openFileKey(state) === key) {
+        return {
+          ...state,
+          draft: action.draft,
+          lastSaved: action.lastSaved,
+          files: withFile(state, key, {
+            draft: action.draft,
+            lastSaved: action.lastSaved,
+          }),
+        };
+      }
+      // Not open: seed the retained entry without switching files, and
+      // never clobber an entry that already exists.
+      if (state.files[key] !== undefined) return state;
+      return {
+        ...state,
+        files: withFile(state, key, {
+          draft: action.draft,
+          lastSaved: action.lastSaved,
+        }),
+      };
+    }
     case "edited": {
       const key = openFileKey(state);
       if (key === null) return state;
@@ -424,31 +464,59 @@ export function EditorPane({
   onReload,
   onSave,
   allowEmptySave = false,
+  restoredDraft = null,
 }: EditorPaneProps) {
+  const restoredAtInit =
+    path !== null && restoredDraft !== undefined && restoredDraft !== null;
+  const restoredConsumed = useRef(restoredAtInit);
   const [state, dispatch] = useReducer(
     applyEditorAction,
-    { scope, path, content },
+    { scope, path, content, restoredDraft },
     // Initialize from props so the first paint (and SSR snapshot) already
-    // shows the opened file instead of a "no file" flash before effects run.
-    (initial) => ({
-      ...initialEditorState(),
-      openScope: initial.scope,
-      openPath: initial.path,
-      draft: initial.content ?? "",
-      lastSaved: initial.content,
-      files:
-        initial.path !== null
-          ? {
-              [scopedFileKey(initial.scope, initial.path)]: {
-                draft: initial.content ?? "",
-                lastSaved: initial.content,
-              },
-            }
-          : {},
-    }),
+    // shows the opened file — and a restored draft presents TRUTHFULLY
+    // dirty: draft from the store, lastSaved from the store's confirmed
+    // content, never the draft masquerading as saved.
+    (initial) => {
+      const restored =
+        initial.path !== null && initial.restoredDraft
+          ? initial.restoredDraft
+          : null;
+      return {
+        ...initialEditorState(),
+        openScope: initial.scope,
+        openPath: initial.path,
+        draft: restored ? restored.draft : (initial.content ?? ""),
+        lastSaved: restored ? restored.lastSaved : initial.content,
+        files:
+          initial.path !== null
+            ? {
+                [scopedFileKey(initial.scope, initial.path)]: restored
+                  ? { draft: restored.draft, lastSaved: restored.lastSaved }
+                  : {
+                      draft: initial.content ?? "",
+                      lastSaved: initial.content,
+                    },
+              }
+            : {},
+      };
+    },
   );
   useEffect(() => {
+    // Consume the restored draft exactly once (at mount for the initially
+    // open file, if init did not already use it); later navigation relies
+    // on the editor's own scope-keyed retention.
+    if (path !== null && restoredDraft && !restoredConsumed.current) {
+      dispatch({
+        type: "draft-restored",
+        scope,
+        path,
+        draft: restoredDraft.draft,
+        lastSaved: restoredDraft.lastSaved,
+      });
+    }
+    restoredConsumed.current = true;
     dispatch({ type: "file-opened", scope, path, content });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, path, content]);
 
   const readConfirmed = isReadConfirmed(state);

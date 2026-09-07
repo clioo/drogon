@@ -686,6 +686,113 @@ describe("runSave with deferred fakes (scoped identity)", () => {
   });
 });
 
+describe("restoredDraft truthfulness", () => {
+  test("draft-restored presents the open file truthfully dirty (lastSaved stays service-confirmed)", () => {
+    let state = applyEditorAction(initialEditorState(), {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "service body",
+    });
+    state = applyEditorAction(state, {
+      type: "draft-restored",
+      scope: SCOPE_A,
+      path: FILE_A,
+      draft: "my retained draft",
+      lastSaved: "saved body",
+    });
+    expect(state.draft).toBe("my retained draft");
+    expect(state.lastSaved).toBe("saved body");
+    expect(isDirty(state)).toBe(true);
+    expect(state.files[KEY_A]).toEqual({
+      draft: "my retained draft",
+      lastSaved: "saved body",
+    });
+  });
+
+  test("draft-restored seeds a non-open file's entry without switching or clobbering", () => {
+    let state = opened("open body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, {
+      type: "draft-restored",
+      scope: SCOPE_A,
+      path: FILE_B,
+      draft: "B retained",
+      lastSaved: "B saved",
+    });
+    // Still on FILE_A with its own content:
+    expect(state.openPath).toBe(FILE_A);
+    expect(state.draft).toBe("open body");
+    // B's entry was seeded:
+    expect(state.files[KEY_B]).toEqual({ draft: "B retained", lastSaved: "B saved" });
+    // Re-restoring never clobbers an existing entry:
+    const before = state;
+    state = applyEditorAction(state, {
+      type: "draft-restored",
+      scope: SCOPE_A,
+      path: FILE_B,
+      draft: "older draft",
+      lastSaved: null,
+    });
+    expect(state).toBe(before);
+  });
+
+  test("a mounted pane with a restored draft renders dirty from the first paint", () => {
+    const markup = renderToString(
+      createElement(EditorPane, {
+        scope: SCOPE_A,
+        path: FILE_A,
+        content: "saved body",
+        restoredDraft: { draft: "my retained draft", lastSaved: "saved body" },
+        onSave: okSave(),
+      }),
+    );
+    // Truthfully dirty at first paint:
+    expect(markup).toContain("Unsaved changes");
+    // The textarea carries the retained draft, not the saved baseline:
+    expect(markup).toContain("my retained draft");
+    expect(markup).not.toContain("Waiting for file content");
+  });
+
+  test("without a restored draft the pane stays clean for the same content", () => {
+    const markup = renderToString(
+      createElement(EditorPane, {
+        scope: SCOPE_A,
+        path: FILE_A,
+        content: "saved body",
+        onSave: okSave(),
+      }),
+    );
+    expect(markup).not.toContain("Unsaved changes");
+  });
+
+  test("the read flow cannot clobber a restored dirty draft", () => {
+    let state = applyEditorAction(initialEditorState(), {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "saved body",
+      });
+    // The panel restores the store's dirty draft (consumed on mount):
+    state = applyEditorAction(state, {
+      type: "draft-restored",
+      scope: SCOPE_A,
+      path: FILE_A,
+      draft: "my retained draft",
+      lastSaved: "saved body",
+    });
+    // The delayed service read arrives with the on-disk content:
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "saved body",
+    });
+    expect(state.draft).toBe("my retained draft");
+    expect(state.lastSaved).toBe("saved body");
+    expect(isDirty(state)).toBe(true);
+  });
+});
+
 describe("EditorPane rendering", () => {
   const render = (props: Partial<EditorPaneProps>) =>
     renderToString(

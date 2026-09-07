@@ -7,6 +7,10 @@ import {
   type WorkspaceFileNode,
 } from "./WorkspaceExplorer";
 import {
+  createFilesDraftStore,
+  type FilesDraftStore,
+} from "./files-draft-store";
+import {
   FILES_CAPABILITY,
   MAX_DIRECTORY_ENTRIES,
   MAX_FILE_BYTES,
@@ -240,41 +244,84 @@ export function runFilesRead(input: {
   );
 }
 
-/** Bounded retained-retry memory per mounted panel. */
+/** Bounded retained-retry memory PER FILE for a mounted panel. */
 export const MAX_RETAINED_REQUEST_IDS = 64;
 
+/** Fail-closed signal: the cap was hit while an unresolved retry was retained. */
+export class FilesRequestIdCapError extends Error {
+  override readonly name = "FilesRequestIdCapError";
+  constructor(readonly cap: number) {
+    super(
+      `Unresolved retry ids for this file reached the retained cap of ${cap}; refusing to mint a new logical attempt id (fail-closed, never silent).`,
+    );
+  }
+}
+
 export interface RequestIdSource {
-  /** The id for this (file, payload): retained while unresolved. */
+  /** The id for this (file, payload): retained while unresolved and unsuperseded. */
   next(key: string, draft: string): string;
-  /** Retire the id after CONFIRMED success — the next save of the same payload is a new logical attempt. */
+  /** Retire ids after a CONFIRMED success of this payload — and supersede every older attempt for the file. */
   settle(key: string, draft: string): void;
 }
 
 /**
- * Per-mount request-id source for write requestId values, per LOGICAL
- * ATTEMPT: an unresolved save keeps its id so a retry of the exact payload
- * reuses it; a confirmed success retires it, so the A->B->A sequence never
- * replays A's first receipt while disk holds B. Retained entries are
- * bounded (oldest evicted past MAX_RETAINED_REQUEST_IDS). One instance per
- * mounted panel — distinct mounts never share ids.
+ * Per-mount request-id source with PER-FILE GENERATION RETIRE, per LOGICAL
+ * ATTEMPT:
+ * - An unresolved attempt keeps its id so an exact-payload retry reuses it
+ *   — but ONLY while no intervening write to that file was confirmed
+ *   successful. Once ANY later payload for the same file succeeds, every
+ *   attempt minted before that success is superseded: A-after-B mints a
+ *   FRESH id (a new logical write against the disk B just changed).
+ * - Attempts minted AFTER a success are retryable until the next success.
+ * - Distinct files keep fully independent retries (per-file success
+ *   sequence).
+ * - Retention is bounded PER FILE and fails CLOSED: at the cap, a valid
+ *   unresolved retry is still returned, but a genuinely new attempt throws
+ *   FilesRequestIdCapError instead of silently minting or evicting. One
+ *   instance per mounted panel — distinct mounts never share ids.
  */
-export function createRequestIdSource(): RequestIdSource {
-  const retained = new Map<string, string>();
-  const slot = (key: string, draft: string) => `${key}\u0000${draft}`;
+export function createRequestIdSource(options?: {
+  maxRetained?: number;
+}): RequestIdSource {
+  const cap = options?.maxRetained ?? MAX_RETAINED_REQUEST_IDS;
+  let sequence = 0;
+  const files = new Map<
+    string,
+    { byDraft: Map<string, { id: string; seq: number }>; successSeq: number }
+  >();
+  const fileFor = (key: string) => {
+    let file = files.get(key);
+    if (file === undefined) {
+      file = { byDraft: new Map(), successSeq: 0 };
+      files.set(key, file);
+    }
+    return file;
+  };
   return {
     next(key: string, draft: string): string {
-      const id = retained.get(slot(key, draft));
-      if (id !== undefined) return id;
-      const fresh = crypto.randomUUID();
-      retained.set(slot(key, draft), fresh);
-      if (retained.size > MAX_RETAINED_REQUEST_IDS) {
-        const oldest = retained.keys().next().value;
-        if (oldest !== undefined) retained.delete(oldest);
+      const file = fileFor(key);
+      const existing = file.byDraft.get(draft);
+      // Valid unresolved retry: minted after the file's last confirmed write.
+      if (existing !== undefined && existing.seq > file.successSeq) {
+        return existing.id;
       }
-      return fresh;
+      // A new (or superseded) attempt: replacing a superseded entry is 1:1,
+      // so only genuinely new drafts can hit the cap — and then we refuse.
+      if (existing !== undefined) file.byDraft.delete(draft);
+      if (file.byDraft.size >= cap) {
+        throw new FilesRequestIdCapError(cap);
+      }
+      const id = crypto.randomUUID();
+      file.byDraft.set(draft, { id, seq: ++sequence });
+      return id;
     },
     settle(key: string, draft: string): void {
-      retained.delete(slot(key, draft));
+      const file = files.get(key);
+      if (file === undefined) return;
+      file.byDraft.delete(draft);
+      // This confirmed write supersedes every attempt minted before it.
+      file.successSeq = sequence;
+      if (file.byDraft.size === 0) files.delete(key);
     },
   };
 }
@@ -317,7 +364,11 @@ function UnavailableFallback({ capability }: { capability: string }) {
   );
 }
 
-function FilesPanel({ bridge, ...props }: FilesPanelProps & { bridge: FileBridge }) {
+function FilesPanel({
+  bridge,
+  drafts,
+  ...props
+}: FilesPanelProps & { bridge: FileBridge; drafts: FilesDraftStore }) {
   const { workspace, status } = props;
   // Files panels never need a terminal session: `session` is deliberately
   // ignored (fully supported as null) and never gates any call here.
@@ -391,15 +442,19 @@ function FilesPanel({ bridge, ...props }: FilesPanelProps & { bridge: FileBridge
       maxBytes: MAX_FILE_BYTES,
       generation,
       isCurrent: () => readGeneration.current === generation,
-      onDone: (outcome) =>
+      onDone: (outcome) => {
         setRead(
           outcome.ok
             ? { key, phase: "ready", content: outcome.content, message: "" }
             : { key, phase: "error", content: null, message: outcome.message },
-        ),
+        );
+        // Consult-on-mount: a confirmed read seeds the store's saved
+        // baseline; the editor reducer keeps any dirty retained draft.
+        if (outcome.ok) drafts.confirmRead(scope, target, outcome.content);
+      },
     });
     return invalidate;
-  }, [available, bridge, scope, open, reloadTick]);
+  }, [available, bridge, scope, open, reloadTick, drafts]);
 
   if (!available) {
     // No capability, no panel: never a local fallback, never a silent empty.
@@ -423,6 +478,38 @@ function FilesPanel({ bridge, ...props }: FilesPanelProps & { bridge: FileBridge
   );
 
   const selectedIsSymlink = activeSelected?.node.symlink === true;
+  // Draft-prop truthfulness: a dirty retained draft is handed to the editor
+  // as an explicit restoredDraft (draft + its retained lastSaved), so it
+  // presents DIRTY from the first paint; the content prop meanwhile carries
+  // the best-known SAVED baseline (store-confirmed, else the service read) —
+  // never the draft masquerading as saved. The service stays saved-truth.
+  const openDirty =
+    effectiveOpenPath !== null && drafts.isDirty(scope, effectiveOpenPath);
+  const restoredDraft =
+    effectiveOpenPath !== null && openDirty
+      ? {
+          draft: drafts.draftOf(scope, effectiveOpenPath) ?? "",
+          lastSaved: drafts.savedContentOf(scope, effectiveOpenPath),
+        }
+      : null;
+  const baselineContent =
+    openDirty && effectiveOpenPath !== null
+      ? drafts.savedContentOf(scope, effectiveOpenPath)
+      : readContentFor(read, scope, effectiveOpenPath);
+  // Update-on-edit (at save-attempt granularity): the attempted draft is
+  // recorded in the store before the write, and a service-confirmed write
+  // marks the payload saved — the store caches drafts, the service stays
+  // saved-truth.
+  const onSave = (content: string): Promise<Result<null>> => {
+    const result = saveDraft(content);
+    if (effectiveOpenPath !== null) {
+      drafts.recordDraft(scope, effectiveOpenPath, content);
+      void result.then((outcome) => {
+        if (outcome.ok) drafts.markSaved(scope, effectiveOpenPath, content);
+      });
+    }
+    return result;
+  };
   const activeTruncation =
     truncation !== null && truncation.scopeKey === scopeKey && truncation.truncated
       ? truncation
@@ -451,10 +538,11 @@ function FilesPanel({ bridge, ...props }: FilesPanelProps & { bridge: FileBridge
       <EditorPane
         scope={scope}
         path={effectiveOpenPath}
-        content={readContentFor(read, scope, effectiveOpenPath)}
+        restoredDraft={restoredDraft}
+        content={baselineContent}
         readError={readErrorFor(read, scope, effectiveOpenPath)}
         onReload={reload}
-        onSave={(content) => saveDraft(content)}
+        onSave={onSave}
       />
     </section>
   );
@@ -463,16 +551,22 @@ function FilesPanel({ bridge, ...props }: FilesPanelProps & { bridge: FileBridge
 /**
  * Factory for the files.explorer panel descriptor. The bridge is injected
  * once here and every render path (list/read/write) goes through it —
- * no Node/Electron APIs, no local fallbacks.
+ * no Node/Electron APIs, no local fallbacks. The factory also owns the
+ * descriptor-lifetime draft store: because V2 unmounts the panel on
+ * navigation, drafts live HERE (not in component state) so they survive
+ * unmount/remount. `deps.drafts` is an optional test/alt-host injection;
+ * the public `createFilesPanelDescriptor({ bridge })` call is unchanged.
  */
 export function createFilesPanelDescriptor(deps: {
   bridge: FileBridge;
+  drafts?: FilesDraftStore;
 }): FilesPanelDescriptor {
+  const drafts = deps.drafts ?? createFilesDraftStore();
   return {
     id: FILES_ROUTE_ID,
     title: "Files",
     component: (props: FilesPanelProps) => (
-      <FilesPanel {...props} bridge={deps.bridge} />
+      <FilesPanel {...props} bridge={deps.bridge} drafts={drafts} />
     ),
     capability: FILES_CAPABILITY,
   };
