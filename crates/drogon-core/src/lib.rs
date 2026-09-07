@@ -25,6 +25,8 @@ mod coordination_worker_control;
 mod coordination_workers;
 mod desktop_relay_rpc;
 pub mod locale_ordering;
+pub mod mentu;
+mod mentu_rpc;
 pub mod session_authority;
 
 mod agent_state;
@@ -101,6 +103,9 @@ const CAPABILITIES: &[&str] = &[
     // (apps/desktop/src/renderer/src/bots-mount.ts) has referenced this
     // exact string all along, dark until now.
     "bot.snapshot.v1",
+    // R5-S: Mentu (recipes, content-bound approval, execution through the
+    // pinned mentu-recipes runtime, run evidence, retry).
+    drogon_protocol::mentu::MENTU_CAPABILITY,
 ];
 
 pub(crate) fn now_rfc3339() -> String {
@@ -145,7 +150,6 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 pub struct Engine {
-    #[allow(dead_code)]
     data_dir: PathBuf,
     db: Arc<Mutex<Connection>>,
     host_id: String,
@@ -248,6 +252,20 @@ impl Engine {
     /// refused or unpersisted attempt — see `do_runtime_shutdown`.
     pub fn is_quiescent(&self) -> bool {
         self.quiescent.load(Ordering::Acquire)
+    }
+
+    /// The data directory this instance opened. Used by `mentu_rpc` to
+    /// resolve the pinned `mentu-recipes` runtime at
+    /// `<data_dir>/mentu/runtime/bin/mentu-recipes`.
+    pub(crate) fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    /// A clone of this instance's shared database handle, for a background
+    /// thread (Mentu's run watcher) to write a result back with once the
+    /// RPC call that started it has already returned.
+    pub(crate) fn db_handle(&self) -> Arc<Mutex<Connection>> {
+        self.db.clone()
     }
 
     pub fn dispatch(&self, request: Request) -> Response {
@@ -406,6 +424,15 @@ impl Engine {
             "tasks.show" => self.do_tasks_show(&request.params),
             "tasks.start" => self.mutating(request, Self::do_tasks_start),
             "tasks.links" => self.do_tasks_links(&request.params),
+            "mentu.recipes" => self.mentu_recipes(&request.params),
+            "mentu.recipe" => self.mentu_recipe(&request.params),
+            "mentu.runtime" => self.mentu_runtime_info(&request.params),
+            "mentu.approve" => self.mentu_approve(request),
+            "mentu.run" => self.mentu_run(request),
+            "mentu.runs" => self.mentu_runs(&request.params),
+            "mentu.run_status" => self.mentu_run_status(&request.params),
+            "mentu.retry" => self.mentu_retry(request),
+            "mentu.cancel" => self.mentu_cancel(request),
             "orchestration.runCreate"
             | "orchestration.runUse"
             | "orchestration.runList"

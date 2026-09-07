@@ -113,6 +113,15 @@ import {
   registerTasksRoute,
   windowTasksBridge,
 } from "./tasks-mount";
+import {
+  MENTU_CAPABILITY,
+  MENTU_ROUTE_ID,
+  createGatedMentuBridge,
+  isMentuAvailable,
+  registerMentuRoute,
+  windowMentuBridge,
+} from "./mentu-mount";
+import { MentuPanel } from "./features/mentu/MentuPanel";
 import { refreshWorktreeIssueLinks } from "./features/tasks/issue-links";
 import { TasksPage } from "./features/tasks/TasksPage";
 import { loadBotSnapshot } from "./bots-loader";
@@ -482,6 +491,17 @@ export function App() {
   useEffect(() => {
     automationsGateRef.current = isAutomationsAvailable(liveCapabilities);
   }, [liveCapabilities]);
+  // Updated synchronously during render (unlike the other feature gates
+  // above, which flip in an effect): MentuPanel fetches its recipe list
+  // from its own mount effect, in the very commit its parent's conditional
+  // render first mounts it, so an effect-updated ref would still read one
+  // commit stale at that exact moment and the fetch would never retry.
+  const mentuGateRef = useRef(false);
+  mentuGateRef.current = isMentuAvailable(liveCapabilities);
+  const mentuGatedBridge = useMemo(
+    () => createGatedMentuBridge(windowMentuBridge(), () => mentuGateRef.current),
+    [],
+  );
   const filesGatedBridge = useMemo(
     () => createGatedFileBridge(window.drogon, () => filesGateRef.current),
     [],
@@ -585,34 +605,45 @@ export function App() {
   const browserStaticBridge = useMemo(() => browserBridge(), []);
   const filesBaseRegistry = useMemo(
     () =>
-      registerAutomationsRoute(
-        registerBrowserRoute(
-          registerChangesRoute(
-            registerFilesRoute(
-              createRouteRegistry({
-                capabilities: [
-                  FILES_CAPABILITY,
-                  BOTS_CAPABILITY,
-                  GIT_CAPABILITY,
-                  AUTOMATIONS_CAPABILITY,
-                  TASKS_CAPABILITY,
-                ],
-                fallbackId: BOTS_ROUTE_ID,
-              }),
-              filesGatedBridge,
-              fileOpenCell,
+      registerMentuRoute(
+        registerAutomationsRoute(
+          registerBrowserRoute(
+            registerChangesRoute(
+              registerFilesRoute(
+                createRouteRegistry({
+                  capabilities: [
+                    FILES_CAPABILITY,
+                    BOTS_CAPABILITY,
+                    GIT_CAPABILITY,
+                    AUTOMATIONS_CAPABILITY,
+                    TASKS_CAPABILITY,
+                    MENTU_CAPABILITY,
+                  ],
+                  fallbackId: BOTS_ROUTE_ID,
+                }),
+                filesGatedBridge,
+                fileOpenCell,
+              ),
+              gitGatedBridge,
             ),
-            gitGatedBridge,
+            browserStaticBridge,
           ),
-          browserStaticBridge,
+          {
+            bridge: automationsGatedBridge,
+            listWorkspaces: () => window.drogon.workspaces(),
+            listHarnesses: () => window.drogon.harnesses(),
+          },
         ),
-        {
-          bridge: automationsGatedBridge,
-          listWorkspaces: () => window.drogon.workspaces(),
-          listHarnesses: () => window.drogon.harnesses(),
-        },
+        mentuGatedBridge,
       ),
-    [filesGatedBridge, gitGatedBridge, browserStaticBridge, automationsGatedBridge, fileOpenCell],
+    [
+      filesGatedBridge,
+      gitGatedBridge,
+      browserStaticBridge,
+      automationsGatedBridge,
+      mentuGatedBridge,
+      fileOpenCell,
+    ],
   );
   // Tasks host callbacks: stable across renders (the registry memo below
   // runs once). Groups ride a ref so the page always re-reads the current
@@ -694,6 +725,7 @@ export function App() {
   const botsSectionRef = useRef<HTMLElement>(null);
   const browserSectionRef = useRef<HTMLElement>(null);
   const automationsSectionRef = useRef<HTMLElement>(null);
+  const mentuSectionRef = useRef<HTMLElement>(null);
   const tasksSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
   useEffect(() => {
@@ -710,9 +742,11 @@ export function App() {
               ? browserSectionRef.current
               : route === AUTOMATIONS_ROUTE_ID
                 ? automationsSectionRef.current
-                : route === TASKS_ROUTE_ID
-                  ? tasksSectionRef.current
-                  : null;
+                : route === MENTU_ROUTE_ID
+                  ? mentuSectionRef.current
+                  : route === TASKS_ROUTE_ID
+                    ? tasksSectionRef.current
+                    : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -763,6 +797,20 @@ export function App() {
   )
     automationsAliveRef.current = false;
   const automationsAlive = automationsAliveRef.current;
+  // Mentu keep-alive mirrors Automations: survives switches and
+  // transients, unmounts on explicit withhold or settled workspace loss.
+  const mentuAvailable = isMentuAvailable(liveCapabilities);
+  const mentuExplicitWithhold =
+    status !== null && !isMentuAvailable(liveCapabilities);
+  const mentuAliveRef = useRef(false);
+  if (route === MENTU_ROUTE_ID && mentuAvailable && current)
+    mentuAliveRef.current = true;
+  else if (
+    mentuExplicitWithhold ||
+    (status && !current && !busy && !loadingSessions)
+  )
+    mentuAliveRef.current = false;
+  const mentuAlive = mentuAliveRef.current;
   // Tasks keep-alive: unlike the session-bound panels, Tasks is
   // project-scoped and mounts with no workspace selected, so the first
   // task can create the first worktree. It unmounts only on settled
@@ -1657,6 +1705,9 @@ export function App() {
                   (route === AUTOMATIONS_ROUTE_ID &&
                     automationsAlive &&
                     filesProps !== null) ||
+                  (route === MENTU_ROUTE_ID &&
+                    mentuAlive &&
+                    filesProps !== null) ||
                   (route === TASKS_ROUTE_ID && tasksAlive)
                     ? "none"
                     : undefined,
@@ -1684,6 +1735,8 @@ export function App() {
                     onLaunch={launchHarness}
                     defaultHarnessId={defaultHarnessId}
                     launchDefaults={harnessDefaults}
+                    onOpenMentu={() => setRoute(MENTU_ROUTE_ID)}
+                    mentuAvailable={mentuAvailable}
                   />
                 ) : (
                   <IconButton
@@ -1935,6 +1988,23 @@ export function App() {
                 />
               </section>
             ) : null}
+            {mentuAlive && filesProps ? (
+              <section
+                ref={mentuSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Mentu"
+                style={{
+                  display: route === MENTU_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                <MountedPanel
+                  descriptor={resolveRoute(filesBaseRegistry, MENTU_ROUTE_ID)}
+                  workspace={filesProps.workspace}
+                  status={filesProps.status}
+                />
+              </section>
+            ) : null}
             {inspector && (
               <aside className="session-details" aria-label="Session details">
                 <h2>Session</h2>
@@ -1957,13 +2027,21 @@ export function App() {
                 ) : (
                   <p>Select a terminal to see its execution details.</p>
                 )}
-                <div className="migration-note">
-                  <h2>Coming in the migration</h2>
-                  <p>
-                    Mentu and Bots are not connected in this build. Source
-                    control is available from the Changes panel.
-                  </p>
-                </div>
+                {mentuAvailable && current ? (
+                  <MentuPanel
+                    bridge={mentuGatedBridge}
+                    workspaceId={current.id}
+                    variant="panel"
+                  />
+                ) : (
+                  <div className="migration-note">
+                    <h2>Coming in the migration</h2>
+                    <p>
+                      Bots is not connected in this build. Source control is
+                      available from the Changes panel.
+                    </p>
+                  </div>
+                )}
               </aside>
             )}
           </div>
