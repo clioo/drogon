@@ -242,3 +242,28 @@ the existing storage owner settles. No receipt table or new DDL is authorized.
 V5 comment-only `365f422` is integrated. No release installation occurred;
 audit remains 11/12 (91.7%, medium confidence), product scope all 46 obligations,
 deadline risk high.
+
+## 13:30 UTC checkpoint
+
+V3 save-observer correction `3f22d96` passed independent review, all 451
+desktop tests (38 files), and desktop typecheck. Rejected saves now leave
+drafts dirty without an unhandled derived-promise rejection. The originating
+leaf encountered a lifecycle capability error; V3 abandoned that dispatch
+without process action and preserved the committed work and terminal.
+
+The Files acceptance probe now checks usable editor dimensions, vertical
+explorer rows and no horizontal overflow at 1440x900 and 760x900 in both
+themes. Its two assertion-unit tests pass. A real Electron run on `3f22d96`
+with candidate-only Files advertisement failed the editor-width assertion;
+the first wide screenshot confirms the unstyled layout. This is behavioral
+RED, not a startup failure. Existing terminal checks passed and all owned
+sessions, desktop and daemon exited without force. Evidence:
+`.preflight/acceptance/desktop-1788787729552-1a5bbce7-f6cd-4a10-ae14-ffedb2dcbce4/report.json`.
+
+V3 Git test review additionally found Windows-invalid tab filenames in the
+real fixtures; portable fixture isolation is queued with V3. V4 history
+test review is complete but atomicity/ownership corrections remain held.
+No bot capability activation, additional paid run or package installation.
+Audit remains 11/12 groups (91.7%, medium confidence, delta zero), not a
+product-parity percentage. All 46 obligations and the high-risk fixed
+16:41:33 UTC deadline remain unchanged.

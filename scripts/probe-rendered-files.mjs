@@ -54,12 +54,47 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     await readFile(path.join(workspace, second), "utf8"),
     "second baseline\n",
   );
-  for (const colorScheme of ["light", "dark"]) {
-    await page.emulateMedia({ colorScheme });
-    await page.screenshot({
-      path: path.join(output, `files-${colorScheme}.png`),
-      animations: "disabled",
-    });
+  const originalViewport = page.viewportSize();
+  try {
+    for (const width of [1440, 760]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const colorScheme of ["light", "dark"]) {
+        await page.emulateMedia({ colorScheme });
+        await page.screenshot({
+          path: path.join(output, `files-${width}-${colorScheme}.png`),
+          animations: "disabled",
+        });
+        const metrics = await panel.evaluate((element) => {
+          const box = (selector) => {
+            const bounds = element
+              .querySelector(selector)
+              ?.getBoundingClientRect();
+            return bounds
+              ? {
+                  x: bounds.x,
+                  y: bounds.y,
+                  width: bounds.width,
+                  height: bounds.height,
+                }
+              : null;
+          };
+          return {
+            editor: box(".editor-pane-surface"),
+            rows: [...element.querySelectorAll(".workspace-explorer-row")]
+              .slice(0, 2)
+              .map((row) => {
+                const bounds = row.getBoundingClientRect();
+                return { y: bounds.y, height: bounds.height };
+              }),
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+          };
+        });
+        assertFilesLayout(metrics);
+      }
+    }
+  } finally {
+    if (originalViewport) await page.setViewportSize(originalViewport);
   }
   await page.reload();
   await page.getByText("Service 0.1.0", { exact: true }).waitFor();
@@ -73,5 +108,28 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     "rendered-files-terminal-navigation-retains-draft",
     "rendered-files-save-confirmed-by-exact-disk-content-and-sibling-unchanged",
     "rendered-files-reload-reads-confirmed-disk-content",
+    "rendered-files-wide-and-narrow-layout-light-and-dark",
   ];
+}
+
+export function assertFilesLayout(metrics) {
+  assert.ok(metrics.editor, "The file editor must be rendered");
+  assert.ok(metrics.editor.width >= 200, "The editor must retain usable width");
+  assert.ok(
+    metrics.editor.height >= 240,
+    "The editor must retain usable height",
+  );
+  assert.equal(
+    metrics.rows.length,
+    2,
+    "Both fixture file rows must be rendered",
+  );
+  assert.ok(
+    metrics.rows[1].y >= metrics.rows[0].y + metrics.rows[0].height - 1,
+    "Explorer entries must form distinct vertical rows",
+  );
+  assert.ok(
+    metrics.scrollWidth <= metrics.clientWidth + 1,
+    "The Files panel must not overflow horizontally",
+  );
 }
