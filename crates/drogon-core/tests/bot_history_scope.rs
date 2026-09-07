@@ -512,7 +512,7 @@ fn record_responsibility_run_refuses_a_cross_scope_dedup_replay_against_a_fully_
     // ended_at.
     assert_eq!(raw_run_row_count(&c, "d1"), 1);
     let survivor = raw_payload_json(&c, "run-record-1");
-    assert_eq!(survivor["ended_at"], serde_json::Value::Null);
+    assert_eq!(survivor.get("endedAt"), Some(&serde_json::Value::Null));
 }
 
 #[test]

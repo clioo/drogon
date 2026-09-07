@@ -175,6 +175,31 @@ Audit closure stays 11/12 (91.7%, medium confidence, delta zero). All 46 product
 obligations remain in scope; no full-parity completion percentage is asserted.
 The fixed 16:41:33 UTC target remains high-risk.
 
+## 13:46 UTC history integration checkpoint
+
+ROOT integrated V4 `a56c6f0`, `3406c68`, `0d0dedc`, and `3adc0e7` as
+`47896ca` through `78b4004`, excluding the unaccepted `bot.run` module.
+Independent runner/history/snapshot/wire tests passed 57/57, then
+`cargo test --workspace --locked` exited 0. Both history writes now share
+one transaction; stale nonterminal observations preserve both rows, and
+conflicting session linkage is refused. A ROOT assertion correction checks
+the actual `endedAt` JSON key is present and null rather than comparing
+a missing snake-case key to null.
+
+`cargo clippy --workspace --all-targets --locked -- -D warnings` remains
+RED on the existing unused `workspace_files::revalidate_containment`
+test helper; V3 owns its correction. No lint suppression was added.
+The `bot.run` candidate is still held: its long-lived Connection borrow
+cannot release the Engine database mutex across ledger admission/dispatch,
+and saved replay bypasses its workspace checks. Ledger-double tests do not
+prove the Engine connection. V4 has a pure-stage correction request; ROOT
+will reuse the existing staged ledger rather than add receipt storage.
+
+No bot capability activation, paid-model run or installation occurred.
+Candidate-only Files advertisement remains uncommitted pending visual
+acceptance. Audit stays 11/12 (91.7%, medium confidence, delta zero), not
+product completion; all 46 obligations and the fixed deadline remain.
+
 ## 13:12 UTC checkpoint
 
 Combined candidate `0e4c115` includes V3 safe file reads (`40cf24a`):
