@@ -176,6 +176,15 @@ method and canonical semantic params in the fingerprint. Existing non-coordinati
 keys are unchanged. Internal keys and raw actor hashes are not public report data.
 Test canonical key order explicitly rather than relying on a serde feature comment.
 
+The internal key has a NUL-prefixed `drogon-coordination-v1:` namespace plus
+the tuple digest. External protocol-v1 request IDs reject controls, so no legacy
+request can claim this key even though both paths share the `requests` table.
+Root reproduced the unprefixed-key collision with the real envelope validator,
+then verified the fix and a SQLite round-trip. The internal identity seam's
+11 cases and all 33 core unit tests pass; runtime actor authentication and
+receipt lookup still need wiring. Minted secrets use 32 CSPRNG bytes, hash the
+transported hex string, and have a fixed redacted Debug representation.
+
 Add a transaction-aware path to `RequestLedger` for database-only work, with
 state and receipt in one transaction. The external-effect path retains its durable
 pending admission and uncertain-result behavior. Domain methods receive the
