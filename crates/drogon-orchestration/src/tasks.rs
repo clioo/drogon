@@ -451,3 +451,63 @@ pub fn list(tx: &Transaction<'_>, params: &TaskListParams) -> Result<TaskListRes
 fn page_too_large() -> RpcError {
     RpcError::new("invalid_argument", "The requested page is too large.")
 }
+
+/// Called only inside the engine's authenticated attempt transaction.
+pub fn set_status_in_tx(
+    tx: &Transaction<'_>,
+    host_id: &str,
+    run_id: &str,
+    task_id: &str,
+    status: TaskStatus,
+) -> Result<(), RpcError> {
+    let changed = tx.execute(
+        "UPDATE orchestration_tasks SET status=?4 WHERE host_id=?1 AND run_id=?2 AND task_id=?3",
+        params![host_id, run_id, task_id, status_code(status)],
+    ).map_err(store_error)?;
+    if changed != 1 {
+        return Err(RpcError::new(
+            "task_not_found",
+            "No task exists in this run with that id.",
+        ));
+    }
+    if status == TaskStatus::Completed {
+        tx.execute(
+            "UPDATE orchestration_tasks AS child SET status='ready'
+             WHERE child.host_id=?1 AND child.run_id=?2 AND child.status='pending'
+             AND EXISTS(SELECT 1 FROM orchestration_task_dependencies AS edge
+                 WHERE edge.task_id=child.task_id AND edge.depends_on_task_id=?3)
+             AND NOT EXISTS(SELECT 1 FROM orchestration_task_dependencies AS edge
+                 LEFT JOIN orchestration_tasks AS prerequisite
+                   ON prerequisite.task_id=edge.depends_on_task_id
+                   AND prerequisite.host_id=?1 AND prerequisite.run_id=?2
+                 WHERE edge.task_id=child.task_id
+                   AND (prerequisite.status IS NULL OR prerequisite.status <> 'completed'))",
+            params![host_id, run_id, task_id],
+        )
+        .map_err(store_error)?;
+    }
+    Ok(())
+}
+
+/// Recheck prerequisites at admission; a prior ready label is not authority.
+pub fn require_completed_dependencies(
+    tx: &Transaction<'_>,
+    host_id: &str,
+    run_id: &str,
+    task_id: &str,
+) -> Result<(), RpcError> {
+    let waiting: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM orchestration_task_dependencies AS edge
+         LEFT JOIN orchestration_tasks AS prerequisite ON prerequisite.task_id=edge.depends_on_task_id
+           AND prerequisite.host_id=?1 AND prerequisite.run_id=?2
+         WHERE edge.task_id=?3 AND (prerequisite.status IS NULL OR prerequisite.status <> 'completed'))",
+        params![host_id,run_id,task_id], |row| row.get(0),
+    ).map_err(store_error)?;
+    if waiting {
+        return Err(RpcError::new(
+            "task_not_ready",
+            "Task prerequisites have not completed successfully.",
+        ));
+    }
+    Ok(())
+}

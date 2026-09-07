@@ -9,7 +9,10 @@ pub mod claim_identity;
 mod coordination_access;
 mod coordination_attempts;
 mod coordination_identity;
+mod coordination_launch;
 mod coordination_runs;
+mod coordination_worker_control;
+mod coordination_workers;
 pub mod locale_ordering;
 pub mod session_authority;
 
@@ -100,6 +103,8 @@ pub struct Engine {
     service_instance_id: String,
     sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
     ledger: RequestLedger,
+    worker_cli: Option<PathBuf>,
+    worker_operations: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     /// Lifecycle admission gate for quiescent shutdown. Every mutating
     /// method (`Engine::mutating`) holds the *read* side across its whole
     /// ledger interaction — admission, the work itself (including PTY
@@ -176,6 +181,8 @@ impl Engine {
             service_instance_id: uuid::Uuid::new_v4().to_string(),
             sessions: Mutex::new(HashMap::new()),
             ledger: RequestLedger::default(),
+            worker_cli: None,
+            worker_operations: Mutex::new(HashMap::new()),
             lifecycle_gate: RwLock::new(()),
             quiescent: AtomicBool::new(false),
             #[cfg(test)]
@@ -283,6 +290,12 @@ impl Engine {
             | "orchestration.taskCreate"
             | "orchestration.taskList"
             | "orchestration.taskShow" => self.dispatch_run_task(request),
+            "orchestration.workerStart"
+            | "orchestration.workerShow"
+            | "orchestration.workerRead"
+            | "orchestration.workerStop"
+            | "orchestration.workerAbandon"
+            | "orchestration.workerRelease" => self.dispatch_coordination_worker(request),
             other => Err(error::method_not_found(other)),
         }
     }

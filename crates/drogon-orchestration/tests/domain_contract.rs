@@ -408,3 +408,73 @@ fn ignored_takeover_update_cannot_report_success() {
     );
     runs::require_coordinator(&tx, &scope("run-a")).unwrap();
 }
+
+#[test]
+fn completion_unlocks_only_children_with_all_successful_prerequisites() {
+    let mut conn = database();
+    let tx = conn.transaction().unwrap();
+    create_run(&tx, "run-a");
+    for id in ["one", "two"] {
+        tasks::create(&tx, &task_params("run-a", id, vec![]), id, 0).unwrap();
+    }
+    tasks::create(
+        &tx,
+        &task_params("run-a", "child", vec!["one".into(), "two".into()]),
+        "child",
+        1,
+    )
+    .unwrap();
+    tasks::set_status_in_tx(&tx, "host-a", "run-a", "one", TaskStatus::Completed).unwrap();
+    tasks::set_status_in_tx(&tx, "host-a", "run-a", "two", TaskStatus::Failed).unwrap();
+    assert!(tasks::require_completed_dependencies(&tx, "host-a", "run-a", "child").is_err());
+    let params = TaskShowParams {
+        scope: scope("run-a"),
+        task_id: "child".into(),
+    };
+    assert_eq!(
+        tasks::show(&tx, &params).unwrap().task.status,
+        TaskStatus::Pending
+    );
+    tasks::set_status_in_tx(&tx, "host-a", "run-a", "two", TaskStatus::Completed).unwrap();
+    tasks::require_completed_dependencies(&tx, "host-a", "run-a", "child").unwrap();
+    assert_eq!(
+        tasks::show(&tx, &params).unwrap().task.status,
+        TaskStatus::Ready
+    );
+}
+
+#[test]
+fn status_updates_are_host_scoped_and_rollback_with_the_report_transaction() {
+    let mut conn = database();
+    {
+        let tx = conn.transaction().unwrap();
+        create_run(&tx, "run-a");
+        tasks::create(&tx, &task_params("run-a", "task", vec![]), "task", 0).unwrap();
+        tx.commit().unwrap();
+    }
+    {
+        let tx = conn.transaction().unwrap();
+        assert_eq!(
+            tasks::set_status_in_tx(&tx, "foreign", "run-a", "task", TaskStatus::Completed)
+                .unwrap_err()
+                .code,
+            "task_not_found"
+        );
+        tasks::set_status_in_tx(&tx, "host-a", "run-a", "task", TaskStatus::Completed).unwrap();
+        tx.rollback().unwrap();
+    }
+    let tx = conn.transaction().unwrap();
+    assert_eq!(
+        tasks::show(
+            &tx,
+            &TaskShowParams {
+                scope: scope("run-a"),
+                task_id: "task".into()
+            }
+        )
+        .unwrap()
+        .task
+        .status,
+        TaskStatus::Ready
+    );
+}

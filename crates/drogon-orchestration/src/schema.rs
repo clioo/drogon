@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS orchestration_task_dependencies (
     position INTEGER NOT NULL,
     PRIMARY KEY (task_id, depends_on_task_id)
 );
+
+CREATE INDEX IF NOT EXISTS orchestration_dependents
+    ON orchestration_task_dependencies(depends_on_task_id, task_id);
 ";
 
 /// Reads the applied domain schema version: `None` when the tables are absent.

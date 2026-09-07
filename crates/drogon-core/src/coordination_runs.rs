@@ -88,7 +88,7 @@ impl Engine {
         }
     }
 
-    fn coordination_mutation(
+    pub(crate) fn coordination_mutation(
         &self,
         request: &Request,
         actor: Actor,
@@ -115,10 +115,10 @@ impl Engine {
         )
     }
 
-    fn coordination_read(
+    pub(crate) fn coordination_read<T>(
         &self,
-        read: impl FnOnce(&Transaction<'_>) -> Result<Value, RpcError>,
-    ) -> Result<Value, RpcError> {
+        read: impl FnOnce(&Transaction<'_>) -> Result<T, RpcError>,
+    ) -> Result<T, RpcError> {
         let mut conn = self.db.lock().unwrap();
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Deferred)
@@ -128,7 +128,7 @@ impl Engine {
     }
 }
 
-fn coordinator_actor(scope: &CoordinatorScope) -> Actor {
+pub(crate) fn coordinator_actor(scope: &CoordinatorScope) -> Actor {
     Actor::Coordinator {
         host_id: scope.host.host_id.clone(),
         run_id: scope.run_id.clone(),
@@ -165,13 +165,13 @@ fn authorize_run_use(
             "SELECT fingerprint, result_json FROM requests WHERE request_id = ?1 AND status = 'done' AND error_json IS NULL AND result_json IS NOT NULL",
             [key], |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional().map_err(error::from_sqlite)?;
-        if let Some((fingerprint, result)) = stored {
-            if fingerprint == requests::fingerprint(&request.method, &request.params) {
-                let receipt: RunUseResult = serde_json::from_str(&result)
-                    .map_err(|_| error::internal_error("invalid takeover receipt"))?;
-                if receipt.run == current {
-                    return Ok(());
-                }
+        if let Some((fingerprint, result)) = stored
+            && fingerprint == requests::fingerprint(&request.method, &request.params)
+        {
+            let receipt: RunUseResult = serde_json::from_str(&result)
+                .map_err(|_| error::internal_error("invalid takeover receipt"))?;
+            if receipt.run == current {
+                return Ok(());
             }
         }
     }
@@ -181,12 +181,12 @@ fn authorize_run_use(
     ))
 }
 
-fn decode<T: DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
+pub(crate) fn decode<T: DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
     serde_json::from_value(value.clone())
         .map_err(|_| RpcError::new("invalid_argument", "Invalid coordination parameters."))
 }
 
-fn encode(value: impl Serialize) -> Result<Value, RpcError> {
+pub(crate) fn encode(value: impl Serialize) -> Result<Value, RpcError> {
     serde_json::to_value(value).map_err(|_| error::internal_error("invalid coordination result"))
 }
 
