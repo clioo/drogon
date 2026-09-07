@@ -14,6 +14,7 @@ import {
   projectBotRows,
   projectHistoryRows,
   projectResponsibilityRows,
+  projectSessionLiveness,
   triggerLabel,
 } from "./bots-panel-projection";
 
@@ -206,13 +207,108 @@ describe("BotsPanel projection", () => {
       hostObservation: null,
     });
   });
+
+  it("reports the persisted session as a link, never as liveness", () => {
+    const linked = projectBotRows([
+      bot({
+        currentSession: {
+          sessionId: "session-stale",
+          harness: "codex",
+          model: null,
+          startedAt: 1,
+          rotatedAt: null,
+        },
+      }),
+    ]);
+    expect(linked[0].sessionLink).toBe("linked");
+    expect(linked[0]).not.toHaveProperty("sessionActive");
+    expect(projectBotRows([bot()])[0].sessionLink).toBe("none");
+  });
+
+  it("returns only caller-supplied liveness observations and never derives one from storage", () => {
+    const storedSessionBot = bot({
+      currentSession: {
+        sessionId: "session-stale",
+        harness: "codex",
+        model: null,
+        startedAt: 1,
+        rotatedAt: null,
+      },
+    });
+    expect(projectSessionLiveness("bot-1", undefined)).toBeNull();
+    expect(projectSessionLiveness("bot-1", {})).toBeNull();
+    expect(projectSessionLiveness("bot-1", { "bot-1": "live" })).toBe("live");
+    expect(projectSessionLiveness("bot-1", { "bot-1": "unverifiable" })).toBe(
+      "unverifiable",
+    );
+    expect(projectSessionLiveness("bot-1", { "bot-1": "exited" })).toBe(
+      "exited",
+    );
+    expect(projectSessionLiveness("bot-other", { "bot-1": "live" })).toBeNull();
+  });
 });
 
 describe("BotsPanel render", () => {
-  it("renders an actionable empty state", () => {
-    const markup = render(emptySnapshot, { onCreateBot: () => {} });
+  it("renders the empty state without a create control until the service capability lands", () => {
+    const markup = render(emptySnapshot);
     expect(markup).toContain("No Bots yet");
-    expect(markup).toContain("Create Bot");
+    expect(markup).not.toContain("Create Bot");
+  });
+
+  it("never renders a stored-but-stale session as live — link wording only, no liveness inference", () => {
+    const markup = render({
+      bots: [
+        bot({
+          currentSession: {
+            sessionId: "session-stale",
+            harness: "codex",
+            model: null,
+            startedAt: 1,
+            rotatedAt: null,
+          },
+        }),
+      ],
+      history: [],
+    });
+    expect(markup).toContain("Session linked");
+    expect(markup).not.toContain("session active");
+    expect(markup).not.toContain("Observed liveness");
+    expect(markup).not.toContain("live");
+  });
+
+  it("renders caller-supplied observed liveness verbatim and nothing when no observation exists", () => {
+    const observed = {
+      bots: [bot()],
+      history: [],
+    };
+    const exited = render(observed, {
+      observedLivenessByBotId: { "bot-1": "exited" },
+    });
+    expect(exited).toContain("Observed liveness: exited");
+    const unverifiable = render(observed, {
+      observedLivenessByBotId: { "bot-1": "unverifiable" },
+    });
+    expect(unverifiable).toContain("Observed liveness: unverifiable");
+    const live = render(observed, {
+      observedLivenessByBotId: { "bot-1": "live" },
+    });
+    expect(live).toContain("Observed liveness: live");
+    const unobserved = render({
+      bots: [
+        bot({
+          currentSession: {
+            sessionId: "session-stale",
+            harness: "codex",
+            model: null,
+            startedAt: 1,
+            rotatedAt: null,
+          },
+        }),
+      ],
+      history: [],
+    });
+    expect(unobserved).not.toContain("Observed liveness");
+    expect(unobserved).not.toContain("live");
   });
 
   it("renders each bot card with description, model label and identity", () => {

@@ -1,6 +1,8 @@
 import type {
   BotsPanelBot,
+  BotsPanelHostObservation,
   BotsPanelHistoryEntry,
+  BotsPanelProps,
   BotsPanelResponsibility,
   BotsPanelTrigger,
 } from "./bots-panel-contracts";
@@ -14,6 +16,12 @@ import type {
 
 export const READY_FOR_A_PURPOSE = "Ready for a purpose";
 export const HARNESS_DEFAULT_MODEL_LABEL = "Harness default";
+export const SESSION_LINKED_LABEL = "Session linked";
+export const SESSION_NONE_LABEL = "No session linked";
+
+/** Persisted session association only. This is a storage fact about a link,
+ *  never a liveness verdict — a stored session can be stale. */
+export type BotsPanelSessionLink = "linked" | "none";
 
 export type BotsPanelBotRow = {
   id: string;
@@ -25,7 +33,7 @@ export type BotsPanelBotRow = {
   scheduledCount: number;
   reactiveCount: number;
   enabledCount: number;
-  sessionActive: boolean;
+  sessionLink: BotsPanelSessionLink;
 };
 
 export type BotsPanelResponsibilityRow = {
@@ -89,8 +97,18 @@ export function projectBotRows(bots: BotsPanelBot[]): BotsPanelBotRow[] {
       ).length,
       enabledCount: entry.responsibilities.filter((item) => item.enabled)
         .length,
-      sessionActive: entry.currentSession !== null,
+      sessionLink: entry.currentSession !== null ? "linked" : "none",
     }));
+}
+
+/** Liveness comes only from the caller's observation map, rendered verbatim.
+ *  It never reads the bot record: a stored (possibly stale) session never
+ *  becomes a liveness verdict, and an unobserved bot gets null — no claim. */
+export function projectSessionLiveness(
+  botId: string,
+  observedLivenessByBotId: BotsPanelProps["observedLivenessByBotId"],
+): BotsPanelHostObservation | null {
+  return observedLivenessByBotId?.[botId] ?? null;
 }
 
 export function projectResponsibilityRows(

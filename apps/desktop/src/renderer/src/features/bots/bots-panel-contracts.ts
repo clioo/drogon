@@ -81,9 +81,14 @@ export type BotsPanelSnapshot = {
 
 export type BotsPanelProps = {
   snapshot: BotsPanelSnapshot;
-  onCreateBot?: () => void;
   onRunResponsibility?: (input: {
     botId: string;
     responsibilityId: string;
   }) => void;
+  /** Caller-observed liveness verdicts (live | unverifiable | exited), one per
+   *  bot, from a real observation source. The panel renders them verbatim and
+   *  never derives a verdict from the persisted record: a stored session is a
+   *  link, not proof of a live process. Bots without an entry render no
+   *  liveness claim at all. */
+  observedLivenessByBotId?: Record<string, BotsPanelHostObservation>;
 };
