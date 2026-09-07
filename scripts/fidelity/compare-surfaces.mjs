@@ -683,7 +683,11 @@ async function launchCandidate() {
   }
   assert.ok(page, "Electron must create a rendered page");
   page.setDefaultTimeout(15000);
-  await page.getByText("Service 0.1.0", { exact: true }).waitFor({ timeout: 25000 });
+  // R9-B: the sidebar footer is the source toolbar now (settings, help,
+  // reveal) — the "Service x.y.z" text is gone, so readiness waits for it.
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor({ timeout: 25000 });
   await page.setViewportSize(VIEWPORT);
   return { browser, page, desktop, daemon, fixture, dataDir, workspace };
 }
@@ -870,8 +874,10 @@ async function candSetup(page, state, ctx) {
         .getByRole("dialog", { name: "Add Project" })
         .getByRole("button", { name: "Add Project", exact: true })
         .click();
+      // R9-B: the empty view is the source's "No workspaces found" block
+      // now, so registration readiness waits for a project row instead.
       await page.waitForFunction(
-        () => !document.querySelector(".sidebar-empty"),
+        () => document.querySelector(".shell-project-row") !== null,
         null,
         { timeout: 8000 },
       ).catch(() => {});
