@@ -7,10 +7,11 @@ import type {
 } from "../../../../shared/session-contract";
 import type { Theme } from "../../settings-store";
 import {
-  createShortcutRegistry,
-  guardHandler,
-  PALETTE_SHORTCUTS,
-} from "../../shortcuts";
+  contextFromTarget,
+  createKeybindingRegistry,
+  isEditableTarget,
+  resolveKeybindingPlatform,
+} from "../../keybindings";
 import {
   COMMAND_DEFS,
   commandTokenScore,
@@ -62,13 +63,6 @@ export interface CommandPaletteHostProps {
   onOpenFile(path: string): void;
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-}
-
 export function CommandPaletteHost(props: CommandPaletteHostProps) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<PaletteMode>("commands");
@@ -96,14 +90,17 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
     resolvePaletteFocusRestoreTarget(openerRef.current)?.focus();
   };
 
-  // Global chords: Cmd+J (worktree.palette) / Cmd+P (worktree.quickOpen)
-  // toggle or switch modes, Cmd+1..9 select a tab, Cmd+Shift+[ / ] move
-  // across tabs. Tab chords stay out of editable fields and out of the way
-  // while the palette itself is open. Cmd+K is terminal.clear, never the
-  // palette.
+  // Source-parity chords (keybindings/definitions.ts): worktree.palette /
+  // worktree.quickOpen toggle or switch modes, tab travel moves across
+  // sessions. Tab chords stay out of editable fields and out of the way
+  // while the palette itself is open. Mod+K is terminal.clear, never the
+  // palette; App owns every other id in the table.
   useEffect(() => {
-    const platform = navigator.userAgent.includes("Mac") ? "darwin" : "other";
-    const registry = createShortcutRegistry();
+    const uiPlatform = navigator.userAgent.includes("Mac")
+      ? "darwin"
+      : "other";
+    const platform = resolveKeybindingPlatform(uiPlatform);
+    const registry = createKeybindingRegistry();
     const current = () => propsRef.current;
     const state = () => stateRef.current;
     const selectSessionAt = (index: number) => {
@@ -119,7 +116,7 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
         sessions.length;
       onSelectSession(sessions[next].id);
     };
-    const handlers: Record<string, () => void> = {
+    const handlers: Record<string, (digit: number | null) => void> = {
       "worktree.palette": () => {
         if (state().open && state().mode === "commands") closePalette();
         else openPalette("commands");
@@ -128,41 +125,41 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
         if (state().open && state().mode === "quick") closePalette();
         else openPalette("quick");
       },
-      "tabs.prev": () => stepSession(-1),
-      "tabs.next": () => stepSession(1),
+      "tab.previousSameType": () => stepSession(-1),
+      "tab.previousAllTypes": () => stepSession(-1),
+      "tab.nextSameType": () => stepSession(1),
+      "tab.nextAllTypes": () => stepSession(1),
+      "tab.selectByIndex": (digit) => {
+        if (digit !== null) selectSessionAt(digit);
+      },
     };
-    for (const def of PALETTE_SHORTCUTS) {
-      if (def.id.startsWith("tabs.select")) {
-        const index = Number(def.id.slice("tabs.select".length)) - 1;
-        registry.register({
-          ...def,
-          handler: guardHandler(() => selectSessionAt(index), () =>
-            state().open,
-          ),
-        });
-      } else {
-        const handler = handlers[def.id];
-        if (!handler) continue;
-        registry.register({
-          ...def,
-          handler: guardHandler(handler, () =>
-            def.id.startsWith("tabs.")
-              ? state().open
-              : false,
-          ),
-        });
-      }
-    }
     const keydown = (event: KeyboardEvent) => {
-      const action = registry.matchKeyEvent(event, platform);
-      if (!action) return;
+      const match = registry.match(
+        {
+          key: event.key,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+        },
+        platform,
+        contextFromTarget(event.target),
+        { editableTarget: isEditableTarget(event.target) },
+      );
+      if (!match) return;
+      const handler = handlers[match.id];
+      if (!handler) return;
+      // While open only the palette toggles tunnel through; tab travel
+      // stays out of the way (editable targets already yield via the
+      // registry's tabs-scope rule).
       if (
-        action.id.startsWith("tabs.") &&
-        (state().open || isEditableTarget(event.target))
+        state().open &&
+        match.id !== "worktree.palette" &&
+        match.id !== "worktree.quickOpen"
       )
         return;
       event.preventDefault();
-      action.handler();
+      handler(match.digitIndex);
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);

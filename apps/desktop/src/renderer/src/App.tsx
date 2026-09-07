@@ -159,7 +159,16 @@ import {
   resolveRoute,
 } from "./route-panel-contract";
 import type { PanelDescriptor } from "./route-panel-contract";
-import { createShortcutRegistry, guardHandler } from "./shortcuts";
+import {
+  contextFromTarget,
+  createKeybindingRegistry,
+  getKeybindingDefinition,
+  isEditableTarget,
+  isPaletteOpen,
+  resolveKeybindingPlatform,
+  shouldDispatch,
+} from "./keybindings";
+import { guardHandler } from "./shortcuts";
 import {
   parsePersistedSettings,
   settingsStorageKey,
@@ -1666,111 +1675,115 @@ export function App() {
       setActive(applied.active);
     });
   useEffect(() => {
-    const platform = navigator.userAgent.includes("Mac") ? "darwin" : "other";
+    // Source-parity window chords (keybindings/definitions.ts): one shared
+    // table with the palette host, so a chord is claimed once per scope and
+    // conflicts are impossible by construction. Ids the palette owns
+    // (worktree.palette/quickOpen, tab travel) have no handler here.
+    const uiPlatform = navigator.userAgent.includes("Mac")
+      ? "darwin"
+      : "other";
+    const platform = resolveKeybindingPlatform(uiPlatform);
     const isDisabled = () => !selected || !status || busy || loadingSessions;
-    const registry = createShortcutRegistry();
-    registry.register({
-      id: "workspace.newTerminal",
-      chord: "CmdOrCtrl+Shift+N",
-      handler: guardHandler(() => void create(), isDisabled),
-    });
-    // J10: Cmd+, opens the Settings page from anywhere — never gated on
-    // workspace, connection or busy state.
-    registry.register({
-      id: "settings.open",
-      chord: "CmdOrCtrl+,",
-      handler: () => openSettings(),
-    });
-    // R6-A source chords (definitions-core-1/3): Cmd+N opens the
-    // new-workspace composer,
-    // Cmd+K clears the focused terminal pane (reserved: never the palette),
-    // Cmd+B toggles the sidebar, Mod+Alt+arrows walk the view history.
-    // R6-B right sidebar (definitions-core-1.ts): Mod+L toggles the right
-    // sidebar, Mod+Shift+E reveals Explorer, Mod+Shift+G reveals Source
-    // Control (gated on git.v1, like the activity bar).
-    registry.register({
-      id: "workspace.create",
-      chord: "CmdOrCtrl+N",
-      handler: guardHandler(() => requestCreateWorkspace(), () => busy),
-    });
-    registry.register({
-      id: "terminal.clear",
-      chord: "CmdOrCtrl+K",
-      handler: () => {
+    const registry = createKeybindingRegistry();
+    const stepWorkspace = (delta: 1 | -1) => {
+      if (workspaces.length === 0) return;
+      const at = workspaces.findIndex((item) => item.id === selected);
+      const next =
+        (at < 0 ? (delta < 0 ? 0 : -1) : at + delta + workspaces.length) %
+        workspaces.length;
+      setSelected(workspaces[next].id);
+    };
+    const selectWorkspaceAt = (index: number) => {
+      const workspace = workspaces[index];
+      if (workspace) setSelected(workspace.id);
+    };
+    const handlers: Record<string, (digit: number | null) => void> = {
+      // Source id tab.newTerminal ("New terminal tab", Mod+T) replaces the
+      // Drogon-only workspace.newTerminal on Mod+Shift+N; that chord is the
+      // source's secondary workspace.create binding.
+      "tab.newTerminal": guardHandler(() => void create(), isDisabled),
+      // J10: Mod+, opens the Settings page from anywhere — never gated on
+      // workspace, connection or busy state.
+      "app.settings": () => openSettings(),
+      "workspace.create": guardHandler(() => requestCreateWorkspace(), () => busy),
+      "terminal.clear": () => {
         window.dispatchEvent(new CustomEvent(TERMINAL_CLEAR_EVENT));
       },
-    });
-    registry.register({
-      id: "sidebar.left.toggle",
-      chord: "CmdOrCtrl+B",
-      handler: toggleSidebar,
-    });
-    registry.register({
-      id: "sidebar.right.toggle",
-      chord: "CmdOrCtrl+L",
-      handler: toggleRightSidebar,
-    });
-    registry.register({
-      id: "sidebar.explorer.toggle",
-      chord: "CmdOrCtrl+Shift+E",
-      handler: showRightExplorer,
-    });
-    registry.register({
-      id: "sidebar.sourceControl.toggle",
-      chord: "CmdOrCtrl+Shift+G",
-      handler: guardHandler(showRightSourceControl, () => !gitPanelAvailable),
-    });
-    registry.register({
-      id: "worktree.history.back",
-      chord: "CmdOrCtrl+Alt+ArrowLeft",
-      handler: guardHandler(goBackViewHistory, () =>
+      "sidebar.left.toggle": toggleSidebar,
+      // R6-B right sidebar (definitions-core-1.ts): Mod+L toggles the right
+      // sidebar, Mod+Shift+E reveals Explorer, Mod+Shift+G reveals Source
+      // Control (gated on git.v1, like the activity bar).
+      "sidebar.right.toggle": toggleRightSidebar,
+      "sidebar.explorer.toggle": showRightExplorer,
+      "sidebar.sourceControl.toggle": guardHandler(
+        showRightSourceControl,
+        () => !gitPanelAvailable,
+      ),
+      // tab.newBrowser (definitions-core-2.ts): the strip's New Browser Tab.
+      "tab.newBrowser": guardHandler(() => void newBrowserTab(), isDisabled),
+      "worktree.history.back": guardHandler(goBackViewHistory, () =>
         !canGoBackView(viewHistory),
       ),
-    });
-    registry.register({
-      id: "worktree.history.forward",
-      chord: "CmdOrCtrl+Alt+ArrowRight",
-      handler: guardHandler(goForwardViewHistory, () =>
+      "worktree.history.forward": guardHandler(goForwardViewHistory, () =>
         !canGoForwardView(viewHistory),
       ),
-    });
+      "worktree.navigateUp": () => stepWorkspace(-1),
+      "worktree.navigateDown": () => stepWorkspace(1),
+      "workspace.selectByIndex": (digit) => {
+        if (digit !== null) selectWorkspaceAt(digit);
+      },
+    };
     const keydown = (event: KeyboardEvent) => {
-      const action = registry.matchKeyEvent(event, platform);
-      if (!action) return;
-      // terminal.clear is terminal-scoped: anywhere else the chord stays
-      // reserved (no global handler may claim Cmd+K).
-      if (action.id === "terminal.clear") {
-        const target = event.target;
-        const inTerminal =
-          target instanceof HTMLElement &&
-          target.closest("#active-session-panel") !== null;
-        if (!inTerminal) return;
-        event.preventDefault();
-        action.handler();
-        return;
-      }
-      // The palette owns its keys while open; only Settings tunnels through.
+      const context = contextFromTarget(event.target);
+      const editable = isEditableTarget(event.target);
+      const match = registry.match(
+        {
+          key: event.key,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+        },
+        platform,
+        context,
+        { editableTarget: editable },
+      );
+      if (!match) return;
+      const handler = handlers[match.id];
+      if (!handler) return;
+      const scope =
+        getKeybindingDefinition(match.id)?.scope ?? "global";
       if (
-        action.id !== "settings.open" &&
-        document.querySelector(".command-palette-overlay") !== null
+        !shouldDispatch({
+          id: match.id,
+          scope,
+          paletteOpen: isPaletteOpen(),
+          context,
+          editableTarget: editable,
+        })
       )
         return;
-      if (action.id !== "settings.open" && isDisabled()) {
+      // terminal.clear stays live without a workspace (clearing a visible
+      // terminal is always safe); app.settings tunnels everywhere.
+      if (match.id !== "app.settings" && match.id !== "terminal.clear" && isDisabled()) {
         // Window-level shell chords stay live without a workspace.
         if (
-          action.id !== "workspace.create" &&
-          action.id !== "sidebar.left.toggle" &&
-          action.id !== "sidebar.right.toggle" &&
-          action.id !== "sidebar.explorer.toggle" &&
-          action.id !== "sidebar.sourceControl.toggle" &&
-          action.id !== "worktree.history.back" &&
-          action.id !== "worktree.history.forward"
+          match.id !== "workspace.create" &&
+          match.id !== "sidebar.left.toggle" &&
+          match.id !== "sidebar.right.toggle" &&
+          match.id !== "sidebar.explorer.toggle" &&
+          match.id !== "sidebar.sourceControl.toggle" &&
+          match.id !== "worktree.history.back" &&
+          match.id !== "worktree.history.forward" &&
+          match.id !== "worktree.navigateUp" &&
+          match.id !== "worktree.navigateDown" &&
+          match.id !== "workspace.selectByIndex"
         )
           return;
-        if (action.id === "workspace.create" && busy) return;
+        if (match.id === "workspace.create" && busy) return;
       }
       event.preventDefault();
-      action.handler();
+      handler(match.digitIndex);
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);

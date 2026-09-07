@@ -125,6 +125,12 @@ asset tests, `components/{TerminalSearch}.tsx`, `terminal-search-safe-find.ts`,
 `TerminalContextMenu.tsx` and `TerminalProcessExitOverlay.tsx`, all at the pinned
 source revision above. Each ported file keeps the MIT notice.
 
+The keybinding core in `apps/desktop/src/renderer/src/keybindings/` and the
+Settings shortcuts section port Orca's `src/shared/keybindings/{definitions-core-1,definitions-core-2,definitions-core-3,definitions-core-4,definitions,types,parser,formatting,effective}.ts`,
+`src/renderer/src/app-shell/use-global-keybindings.ts` and
+`components/settings/ShortcutRowsList.tsx`, all at the pinned source revision
+above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
