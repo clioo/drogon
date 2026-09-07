@@ -132,7 +132,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J1 R7-A: composer de nuevo workspace y Add Project desde carpeta del fuente; quita el formulario legado | R7 | Muse | fusionada: aceptación 15/15, oráculo empty/project-terminal Δ0 en sidebar y barra; etiquetas de paleta llegan con R7-I | #57 |
 | J3 R7-C: shim `drogon-cli` en cada terminal, DROGON_* en el entorno de sesión | R7 | Muse | fusionada: shims en `<data-dir>/bin`, entorno de sesión con DROGON_* y TERM_PROGRAM=Drogon, hooks usan el shim | #56 |
 | J8 R7-E: responsabilidades de Bots (tarjetas, alta con cron, historial, Back) | R7 | Muse | fusionada: bot.responsibility_create/delete sobre automations del bot, tarjetas e historial por bot, Back de cabecera cableado; 876 tests | #60 |
-| J5/J10 R7-I: tabla de atajos del fuente, dispatcher por scope, sección de shortcuts en Settings | R7 | Muse | lanzada | |
+| J5/J10 R7-I: tabla de atajos del fuente, dispatcher por scope, sección de shortcuts en Settings | R7 | Muse | fusionada: 30 ids del fuente con chords por plataforma, registro sin conflictos, sección de atajos en orden del fuente | #70 |
 | J6 R8-G1: Tasks con frame, source bar, filas GitHub, filtros y paginación del fuente; paging en tasks.list | R8 | GLM 5.3 Flash | lanzada | |
 | Fidelidad R8-G2: tokens `:root`/`.dark`, capa base y fuentes Geist + Nerd Symbols del fuente | R8 | GLM 5.3 Flash | fusionada: cabecera del oráculo idéntica (Geist 36px/700), tokens iguales en ambos esquemas, fuentes empaquetadas con OFL | #62 |
 | J7 R8-O1: Automations con lista, editor, detalle e historial del fuente; horarios en hora local | R8 | OpenCode + Muse | fusionada: 43 tests nuevos, oráculo automations PASSED; faltan dashboard de runs y scopes externos | #65 |
@@ -143,3 +143,4 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | Fidelidad R10-A: primitivas UI (shadcn/Radix) del fuente en components/ui | R10 | GLM 5.3 Flash | lanzada | |
 | J2 R10-B: contenido del panel Source Control del fuente (secciones, filas, commit, sync, Create PR) | R10 | OpenCode + Muse | lanzada | |
 | J1/J9 R10-C: eventos del terminal cableados en App, `shell.openExternal`, Mentu como ítem de la barra derecha | R10 | Muse | lanzada | |
+| J2 R10-D: panel Explorer del fuente (árbol, filtro, toolbar, menú contextual, crear/renombrar/borrar) | R10 | Muse | lanzada | |
