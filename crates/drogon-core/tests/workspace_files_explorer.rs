@@ -741,6 +741,66 @@ fn write_file_bounds_its_post_write_readback_even_if_the_file_balloons_concurren
 }
 
 #[test]
+#[cfg(unix)]
+fn write_file_post_rename_readback_never_hangs_when_the_target_is_swapped_for_a_fifo() {
+    // Regression for the shared `open_regular_file` helper (see the
+    // ballooning test above for the companion concurrent-append case):
+    // before it existed, `write_file`'s post-rename read-back opened
+    // blocking with no handle-type check, so a target swapped for a FIFO
+    // right after the rename (and before the read-back's own open) could
+    // hang this call forever. `open_regular_file` opens non-blocking and
+    // validates the handle it actually got, exactly like `read_file`.
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let root = make_root();
+    let path = root.path().join("swap-target.txt");
+    let payload = b"expected-content";
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_swapper = stop.clone();
+    let swap_path = path.clone();
+    let swapper = std::thread::spawn(move || {
+        while !stop_swapper.load(Ordering::Relaxed) {
+            let _ = fs::remove_file(&swap_path);
+            let _ = std::process::Command::new("mkfifo")
+                .arg(&swap_path)
+                .status();
+        }
+    });
+
+    let start = std::time::Instant::now();
+    for _ in 0..20 {
+        match write_file(root.path(), "swap-target.txt", payload) {
+            Ok(result) => assert_eq!(result.size, payload.len() as u64),
+            // Every non-hang outcome is acceptable: the property under
+            // test is that this call always returns promptly, not which
+            // specific error a given interleaving of rename/swap/open
+            // lands on.
+            Err(err) => assert!(
+                matches!(
+                    err.code.as_str(),
+                    "invalid_argument" | "io_error" | "internal_error" | "not_found"
+                ),
+                "unexpected error code: {}",
+                err.code
+            ),
+        }
+    }
+    let elapsed = start.elapsed();
+
+    stop.store(true, Ordering::Relaxed);
+    swapper.join().unwrap();
+    let _ = fs::remove_file(&path);
+
+    assert!(
+        elapsed < std::time::Duration::from_secs(3),
+        "write_file took {elapsed:?} for 20 calls racing a FIFO swap on its post-rename \
+         read-back target; a blocking read-back open would have hung on the first FIFO hit"
+    );
+}
+
+#[test]
 fn write_file_rejects_path_escaping_root() {
     let root = make_root();
     let err = write_file(root.path(), "../escape.txt", b"x").unwrap_err();
