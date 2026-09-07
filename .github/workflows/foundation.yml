@@ -53,8 +53,20 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
       - name: Check platform boundaries, not runtime acceptance
         run: |
           rustup toolchain install 1.98.0 --profile minimal
           rustup override set 1.98.0
           cargo check --workspace --locked
+      - name: Install pinned JavaScript dependencies
+        run: |
+          npm install --global pnpm@11.19.0
+          pnpm install --frozen-lockfile
+      - name: Verify desktop client contracts on Windows
+        run: pnpm --filter @drogon/desktop test
+      - name: Verify owned pipe fixtures, not daemon runtime parity
+        run: node --test scripts/windows-native-transport.test.mjs
