@@ -192,3 +192,72 @@ cd apps/desktop && ./node_modules/.bin/tsc --noEmit
    **Test Files 2 passed (2), Tests 23 passed (23)** (B3's 16 unmodified plus
    these 7); full desktop suite **Test Files 16 passed (16), Tests 137 passed
    (137)**; `tsc --noEmit` clean; prettier clean.
+
+## V4-B5 — admitted tokens/primitives style pass (task_b08484f87c9a, 2026-09-07)
+
+### Style-guide provenance (read-only)
+
+The task's suggested command (`git -C <worktree> show c97906…:docs/STYLEGUIDE.md`)
+fails in this worktree because the pin object `c97906287…` is **absent from this
+worktree's object store** (verified: `rev-parse -q --verify <pin>^{commit}`
+fails here). The guide was read instead from the authorized read-only
+reference — `git -C /Users/carlos/Documents/Drogon-mentu-session show
+c97906287bb7a390b25e2025b600d9fb3c25d9c3:docs/STYLEGUIDE.md` (314 lines;
+reference HEAD verified == pin) — never as cwd, nothing written there. Key
+rules applied: monochrome/quiet; CSS variables before hex; match the nearest
+shadcn primitive; 11px/600/uppercase/0.05em for category labels; border token
+as the default hairline elevation; UI copy must not overclaim (aligns with the
+V4-B3 liveness wording).
+
+### Applied styling (no behavior/string/semantic change)
+
+- Tokens only, all admitted by `apps/desktop/src/renderer/src/assets/main.css`
+  via the `@theme inline` mapping: `text-foreground`, `text-muted-foreground`,
+  `border-border`, `bg-background`, `rounded-md`, plus Tailwind scale
+  utilities (`text-sm`, `text-xs`, `text-[11px]`, `gap-*`, `p-3`, `pb-1`,
+  `pr-3`, `tracking-[0.05em]`, `uppercase`, `font-semibold`). Zero hardcoded
+  colors; the hex-guard test reads the panel sources and asserts an empty hex
+  match list as a standing regression guard.
+- Panel header "Bots" and the history table headers use the guide's
+  category-label recipe; captions/metadata rows are `text-xs
+  text-muted-foreground`; bot cards are hairline-elevated
+  (`rounded-md border border-border bg-background p-3`).
+- The manual run control now renders through the admitted `components/ui`
+  Button primitive (`variant="outline" size="sm"`) using its documented
+  `asChild` (Radix Slot) form: the `data-bot-id`/`data-responsibility-id`
+  payload attrs and `onClick` live on a native button child because the
+  primitive's TS prop type does not declare `data-*` keys; Slot merges
+  `data-slot="button"` + token classes onto it. Dispatch payloads, callback
+  gating, liveness wording, linked labels and every rendered string are
+  byte-identical to B3/B4.
+- No new primitive was built. The guide's `Card` primitive is named but not
+  ported to this worktree; the panel uses the plain border treatment instead —
+  if V2 wants a real Card here, that is a V2-owned primitive request, not
+  something this package should invent.
+- Comments in BotsPanel.tsx trimmed to concise WHY form. `index.ts`,
+  `bots-panel-contracts.ts` and `bots-panel-descriptor.ts` are untouched (the
+  descriptor adds no markup of its own).
+
+### RED-before-GREEN (commands from worktree root, Node 24.19.0 runner)
+
+```sh
+node apps/desktop/node_modules/vitest/vitest.mjs run --root apps/desktop src/renderer/src/features/bots
+node apps/desktop/node_modules/vitest/vitest.mjs run --root apps/desktop
+cd apps/desktop && ./node_modules/.bin/tsc --noEmit
+node_modules/.bin/prettier --check "apps/desktop/src/renderer/src/features/bots/**"
+```
+
+1. RED (styling tests added first, implementation unchanged): **2 failed |
+   24 passed (26)** — token-class assertions and Button-primitive assertion
+   failed against the unstyled markup; the hex guard passed by design (no hex
+   existed before either; it is a standing guard, not RED material).
+2. Two test-authoring defects were fixed without weakening anything: the
+   `readFileSync` import placement, and a fragile ±200-char markup slice
+   replaced by order-agnostic run-button element extraction (Slot merges child
+   props before slot props, so attribute order differs from naive markup).
+   A first implementation attempt passed plain `data-*` props to the Button
+   component and was rejected by `tsc`; the asChild form is the typed,
+   documented escape hatch.
+3. GREEN: bots package **Test Files 2 passed (2), Tests 26 passed (26)** (all
+   B1–B4 pins stay green); full desktop suite **Test Files 16 passed (16),
+   Tests 140 passed (140)**; `tsc --noEmit` clean; prettier clean.

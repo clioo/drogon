@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
+import { readFileSync } from "node:fs";
 import { BotsPanel } from "./BotsPanel";
 import type {
   BotsPanelBot,
@@ -418,5 +419,50 @@ describe("BotsPanel render", () => {
     expect(markup).toContain("live");
     expect(markup).toContain("unverifiable");
     expect(markup).toContain("—");
+  });
+});
+
+describe("BotsPanel styling contract (admitted tokens/primitives only)", () => {
+  it("styles the panel with the quiet monochrome token classes from main.css", () => {
+    const markup = render({
+      bots: [bot({ responsibilities: [responsibility()] })],
+      history: [historyEntry()],
+    });
+    expect(markup).toContain('data-testid="bots-panel"');
+    expect(markup).toMatch(/class="[^"]*flex flex-col gap-4/);
+    expect(markup).toContain("text-foreground");
+    expect(markup).toContain("text-muted-foreground");
+    expect(markup).toContain("border-border");
+    expect(markup).toContain("rounded-md");
+  });
+
+  it("renders the manual run control through the admitted Button primitive", () => {
+    const markup = render(
+      { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
+      { onRunResponsibility: () => {} },
+    );
+    const runButtonStart = markup.lastIndexOf(
+      "<button",
+      markup.indexOf('data-bot-id="bot-1"'),
+    );
+    const runButtonEnd = markup.indexOf(
+      ">",
+      markup.indexOf('data-bot-id="bot-1"'),
+    );
+    const runButtonMarkup = markup.slice(runButtonStart, runButtonEnd + 1);
+    expect(runButtonMarkup).toContain('data-slot="button"');
+    expect(runButtonMarkup).toContain("outline");
+    expect(runButtonMarkup).toContain('data-bot-id="bot-1"');
+    expect(runButtonMarkup).toContain('data-responsibility-id="resp-1"');
+  });
+
+  it("never hardcodes hex colors in the panel source — main.css variables are canonical", () => {
+    for (const file of ["BotsPanel.tsx", "bots-panel-projection.ts"]) {
+      const source = readFileSync(
+        new URL(`./${file}`, import.meta.url),
+        "utf8",
+      );
+      expect(source.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
+    }
   });
 });

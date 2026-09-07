@@ -1,4 +1,5 @@
 import { createElement } from "react";
+import { Button } from "../../components/ui/button";
 import type { BotsPanelProps } from "./bots-panel-contracts";
 import {
   SESSION_LINKED_LABEL,
@@ -9,20 +10,14 @@ import {
   projectSessionLiveness,
 } from "./bots-panel-projection";
 
-// Exported-but-unmounted Bots panel (V2 owns App mounting). Reads only
-// caller-supplied props: no store, RPC, session or mounting access here.
-// Storage contracts: crates/drogon-core/src/bots + automations records via
-// docs/migration/native-bot-state-contract.md. History rows are rendered in
-// the order supplied by the caller (the store provides newest-first) and keep
-// orphaned evidence visible through explicit null-join markers; host
-// observations are rendered verbatim as evidence labels, never as a success
-// status. A stored session is rendered as a link ("Session linked"), never as
-// liveness — liveness appears only when the caller supplies an observed
-// verdict (live | unverifiable | exited), rendered verbatim. There is no
-// create control until the Bot-create service capability lands. Reactive
-// responsibilities render without a manual run control — the manual
-// scheduled-run path must keep refusing reactive work (source B-reactive), so
-// no such control is offered.
+// Exported-but-unmounted (V2 mounts). Props only — no store/RPC/session
+// access. Styling: admitted main.css tokens + ui primitives, monochrome and
+// quiet (STYLEGUIDE at the pinned source, read-only). WHY the wording rules:
+// a stored session is a link, never liveness — liveness renders only from the
+// caller's observed verdicts; history keeps store order with explicit
+// null-join markers because orphaned evidence is retained, never invented;
+// reactive duties get no manual run control because the source refuses one;
+// there is no create control until the Bot-create service capability lands.
 
 const JOINED = (value: string | number | null): string =>
   value === null || value === "" ? "—" : String(value);
@@ -35,16 +30,36 @@ function HistoryRow({
   return createElement(
     "tr",
     { "data-testid": `history-${entry.runId}` },
-    createElement("td", null, entry.runId),
     createElement(
       "td",
-      null,
+      { className: "border-border py-1 pr-3 text-muted-foreground" },
+      entry.runId,
+    ),
+    createElement(
+      "td",
+      { className: "border-border py-1 pr-3 text-muted-foreground" },
       entry.responsibilityName ?? "unlinked responsibility",
     ),
-    createElement("td", null, entry.automationName ?? "unlinked automation"),
-    createElement("td", null, JOINED(entry.automationRunNumber)),
-    createElement("td", null, JOINED(entry.hostObservation)),
-    createElement("td", null, JOINED(entry.endedAt)),
+    createElement(
+      "td",
+      { className: "border-border py-1 pr-3 text-muted-foreground" },
+      entry.automationName ?? "unlinked automation",
+    ),
+    createElement(
+      "td",
+      { className: "border-border py-1 pr-3 text-muted-foreground" },
+      JOINED(entry.automationRunNumber),
+    ),
+    createElement(
+      "td",
+      { className: "border-border py-1 pr-3 text-muted-foreground" },
+      JOINED(entry.hostObservation),
+    ),
+    createElement(
+      "td",
+      { className: "border-border py-1 pr-3 text-muted-foreground" },
+      JOINED(entry.endedAt),
+    ),
   );
 }
 
@@ -58,13 +73,31 @@ export function BotsPanel({
 
   return createElement(
     "section",
-    { "data-testid": "bots-panel", "aria-label": "Bots" },
-    createElement("h1", null, "Bots"),
+    {
+      "data-testid": "bots-panel",
+      "aria-label": "Bots",
+      className: "flex flex-col gap-4 text-foreground",
+    },
+    createElement(
+      "h1",
+      {
+        className:
+          "text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground",
+      },
+      "Bots",
+    ),
     botRows.length === 0
-      ? createElement("p", { "data-testid": "bots-empty" }, "No Bots yet")
+      ? createElement(
+          "p",
+          {
+            "data-testid": "bots-empty",
+            className: "text-sm text-muted-foreground",
+          },
+          "No Bots yet",
+        )
       : createElement(
           "ul",
-          null,
+          { className: "flex flex-col gap-3" },
           botRows.map((row) => {
             const owner = snapshot.bots.find((bot) => bot.id === row.id);
             if (!owner) return null;
@@ -75,17 +108,34 @@ export function BotsPanel({
             );
             return createElement(
               "li",
-              { key: row.id, "data-testid": `bot-${row.id}` },
-              createElement("h2", null, row.displayName),
-              row.handle ? createElement("span", null, `@${row.handle}`) : null,
+              {
+                key: row.id,
+                "data-testid": `bot-${row.id}`,
+                className: "rounded-md border border-border bg-background p-3",
+              },
+              createElement(
+                "h2",
+                { className: "text-sm font-medium text-foreground" },
+                row.displayName,
+              ),
+              row.handle
+                ? createElement(
+                    "span",
+                    { className: "text-xs text-muted-foreground" },
+                    `@${row.handle}`,
+                  )
+                : null,
               createElement(
                 "p",
-                { "data-testid": `bot-description-${row.id}` },
+                {
+                  "data-testid": `bot-description-${row.id}`,
+                  className: "text-sm text-foreground",
+                },
                 row.description,
               ),
               createElement(
                 "p",
-                null,
+                { className: "text-xs text-muted-foreground" },
                 `${row.harness} · ${row.modelLabel} · ${
                   row.sessionLink === "linked"
                     ? SESSION_LINKED_LABEL
@@ -97,35 +147,48 @@ export function BotsPanel({
               ),
               createElement(
                 "ul",
-                null,
+                { className: "mt-2 flex flex-col gap-1" },
                 responsibilities.map((item) =>
                   createElement(
                     "li",
                     {
                       key: item.id,
                       "data-testid": `responsibility-${item.id}`,
+                      className: "flex items-center gap-2",
                     },
                     createElement(
                       "span",
-                      null,
+                      { className: "text-xs text-muted-foreground" },
                       `${item.name} (${item.kind}) · ${item.triggerLabel} · ${
                         item.enabled ? "Enabled" : "Disabled"
                       }${item.recipeRef ? ` · ${item.recipeRef}` : ""}`,
                     ),
                     item.canManualRun && onRunResponsibility
                       ? createElement(
-                          "button",
+                          Button,
                           {
-                            type: "button",
-                            "data-bot-id": row.id,
-                            "data-responsibility-id": item.id,
-                            onClick: () =>
-                              onRunResponsibility({
-                                botId: row.id,
-                                responsibilityId: item.id,
-                              }),
+                            asChild: true,
+                            variant: "outline",
+                            size: "sm",
                           },
-                          `Run ${item.name}`,
+                          // asChild (Radix Slot): the payload attrs + onClick
+                          // live on a native button child because the
+                          // primitive's TS props don't declare data-* keys;
+                          // Slot merges tokens + data-slot onto it.
+                          createElement(
+                            "button",
+                            {
+                              type: "button",
+                              "data-bot-id": row.id,
+                              "data-responsibility-id": item.id,
+                              onClick: () =>
+                                onRunResponsibility({
+                                  botId: row.id,
+                                  responsibilityId: item.id,
+                                }),
+                            },
+                            `Run ${item.name}`,
+                          ),
                         )
                       : null,
                   ),
@@ -137,7 +200,10 @@ export function BotsPanel({
     historyRows.length > 0
       ? createElement(
           "table",
-          { "data-testid": "bots-history" },
+          {
+            "data-testid": "bots-history",
+            className: "w-full border-collapse text-left text-xs",
+          },
           createElement(
             "thead",
             null,
@@ -151,7 +217,17 @@ export function BotsPanel({
                 "Automation run",
                 "Host observation",
                 "Ended",
-              ].map((label) => createElement("th", { key: label }, label)),
+              ].map((label) =>
+                createElement(
+                  "th",
+                  {
+                    key: label,
+                    className:
+                      "border-border border-b pb-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground",
+                  },
+                  label,
+                ),
+              ),
             ),
           ),
           createElement(
