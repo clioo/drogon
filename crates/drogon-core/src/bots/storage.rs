@@ -142,7 +142,7 @@
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 
-use super::records::{Bot, HistoryEntry, ResponsibilityRun, ResponsibilityTrigger};
+use super::records::{Bot, BotMessage, HistoryEntry, ResponsibilityRun, ResponsibilityTrigger};
 use crate::automations::records::Automation;
 use crate::automations::storage::{self as automations_storage, AutomationOwnerPrecondition};
 use crate::locale_ordering::{self, LocaleOrderingError};
@@ -153,8 +153,11 @@ pub const BOTS_SCHEMA_COMPONENT: &str = "bots";
 /// revision column (see the module doc's "Cross-connection contention")
 /// and a partial `UNIQUE(bot_id, automation_run_id) WHERE automation_run_id
 /// IS NOT NULL` index on `bot_responsibility_runs` (see
-/// [`record_responsibility_run`]'s atomic dedupe fence).
-pub const BOTS_SCHEMA_VERSION: i64 = 2;
+/// [`record_responsibility_run`]'s atomic dedupe fence). v3: adds the
+/// `bot_messages` table (one append-only row per chat turn; see
+/// [`record_bot_message_in_tx`]) -- no dedupe/CAS needed, since each row is
+/// independently written exactly once by the delegated `bot.run` ledger.
+pub const BOTS_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -342,6 +345,31 @@ fn create_v2_tables(tx: &rusqlite::Transaction) -> Result<()> {
     Ok(())
 }
 
+/// Additive step from schema version 2 to 3: one append-only table for
+/// chat-turn history (see [`record_bot_message_in_tx`]). No backfill: a
+/// pre-existing database simply starts with no messages recorded.
+fn migrate_v2_to_v3(tx: &rusqlite::Transaction) -> Result<()> {
+    create_bot_messages_table(tx)
+}
+
+fn create_bot_messages_table(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS bot_messages (
+            id TEXT PRIMARY KEY,
+            bot_id TEXT NOT NULL,
+            started_at REAL NOT NULL,
+            payload_json TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS bot_messages_bot_id ON bot_messages(bot_id);",
+    )?;
+    Ok(())
+}
+
+fn create_v3_tables(tx: &rusqlite::Transaction) -> Result<()> {
+    create_v2_tables(tx)?;
+    create_bot_messages_table(tx)
+}
+
 /// Read-only precondition, called by [`migrate`] and by
 /// `apply_pending_steps_in_tx` (the single-transaction aggregate startup
 /// gate in `Engine::open`): refuses -- without creating or altering any
@@ -399,7 +427,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> Result<()> {
             // A brand-new database jumps straight to CURRENT via the
             // consolidated create-tables step, rather than replaying every
             // historical step -- both paths produce an identical schema.
-            create_v2_tables(tx)?;
+            create_v3_tables(tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![BOTS_SCHEMA_COMPONENT, BOTS_SCHEMA_VERSION],
@@ -412,6 +440,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> Result<()> {
                 match next_version {
                     1 => create_v1_tables(tx)?,
                     2 => migrate_v1_to_v2(tx)?,
+                    3 => migrate_v2_to_v3(tx)?,
                     _ => unreachable!("no migration step defined for version {next_version}"),
                 }
                 tx.execute(
@@ -452,7 +481,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             // consolidated create-tables step, rather than replaying every
             // historical step -- both paths produce an identical schema.
             let tx = conn.unchecked_transaction()?;
-            create_v2_tables(&tx)?;
+            create_v3_tables(&tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![BOTS_SCHEMA_COMPONENT, BOTS_SCHEMA_VERSION],
@@ -467,6 +496,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         match next_version {
             1 => create_v1_tables(&tx)?,
             2 => migrate_v1_to_v2(&tx)?,
+            3 => migrate_v2_to_v3(&tx)?,
             _ => unreachable!("no migration step defined for version {next_version}"),
         }
         tx.execute(
@@ -507,6 +537,16 @@ pub fn create_bot(conn: &Connection, host_id: &str, folder: &str, bot: &Bot) -> 
         )
         .optional()?;
     if retained_run.is_some() {
+        return Err(StorageError::BotIdCollision);
+    }
+    let retained_message: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM bot_messages WHERE bot_id = ?1 LIMIT 1",
+            params![bot.id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if retained_message.is_some() {
         return Err(StorageError::BotIdCollision);
     }
     let payload = serde_json::to_string(bot)?;
@@ -1088,6 +1128,44 @@ pub fn history_for_bot(
             }))
         })
         .filter_map(|r| r.transpose())
+        .collect()
+}
+
+/// Inserts one chat-turn record. Connection-bound (opens no transaction of
+/// its own) so `bot.run`'s delegated ledger can call this inside its own
+/// `finalize` transaction, committing the message row and the receipt
+/// atomically -- same shape as [`record_responsibility_run_in_tx`], minus
+/// any dedupe/merge logic: each row is written exactly once, since the
+/// ledger only ever runs `finalize` once per outer `bot.run` request id.
+pub(crate) fn record_bot_message_in_tx(conn: &Connection, message: &BotMessage) -> Result<()> {
+    let payload = serde_json::to_string(message)?;
+    conn.execute(
+        "INSERT INTO bot_messages (id, bot_id, started_at, payload_json) VALUES (?1, ?2, ?3, ?4)",
+        params![message.id, message.bot_id, message.started_at, payload],
+    )?;
+    Ok(())
+}
+
+/// Newest-first chat history for `bot_id`, bounded by `limit`. Scope is
+/// enforced by requiring the bot itself to resolve in `(host_id, folder)`
+/// first -- a message row names no scope of its own (chat turns are never
+/// re-owned across hosts the way a scheduled automation can be).
+pub fn history_for_bot_messages(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    bot_id: &str,
+    limit: i64,
+) -> Result<Vec<BotMessage>> {
+    get_bot(conn, host_id, folder, bot_id)?.ok_or(StorageError::NotFound("bot"))?;
+    let mut stmt = conn.prepare(
+        "SELECT payload_json FROM bot_messages WHERE bot_id = ?1 ORDER BY started_at DESC LIMIT ?2",
+    )?;
+    let rows: Vec<String> = stmt
+        .query_map(params![bot_id, limit], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|json| Ok(serde_json::from_str(&json)?))
         .collect()
 }
 

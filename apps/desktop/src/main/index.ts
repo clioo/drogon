@@ -15,7 +15,7 @@ import { registerTasksBridge } from "./tasks-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
 import { registerNotificationsIpc } from "./notifications/service";
 import { startBrowserRelay } from "./browser/relay-poller";
-import { dispatchBotSnapshot } from "./bot-bridge";
+import { dispatchBotSnapshot, registerBotBridge } from "./bot-bridge";
 import {
   readCursorMismatches,
   writeByteCountMismatches,
@@ -64,6 +64,7 @@ function registerBridge() {
   registerProjectBridge(() => window);
   registerSettingsProbes(() => window);
   registerTasksBridge(() => window);
+  registerBotBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
     ipcMain.handle(`drogon:${method}`, async (event, input: unknown) => {
       if (

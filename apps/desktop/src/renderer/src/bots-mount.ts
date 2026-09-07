@@ -1,14 +1,13 @@
-// V2-owned mount adapter for the exported-but-unmounted Bots panel
-// (features/bots/bots-panel-descriptor, V4-B4). Binds the real factory
-// through the V2 route-panel-contract boundary. The single App mount stays
-// V2-owned; this module registers nothing on import and Bots is never wired
-// into App.tsx here.
+// V2-owned mount adapter for the Bots panel (features/bots/bots-panel-descriptor).
+// Binds the real factory through the V2 route-panel-contract boundary. The
+// single App mount stays V2-owned; this module registers nothing on import
+// and Bots is never wired into App.tsx here.
 //
-// bot.snapshot.v1 stays DARK until ROOT enables it in the shared bridge
-// contract, so BOTS_CAPABILITY is a module-local constant, not a
-// shared/bot-contract.ts export. There is no run button until the BotRun
-// bridge is accepted, so panel props built here never carry a dispatch
-// callback.
+// R2-S: create/chat turn/history land as real bridge calls, gated the same
+// way botSnapshot always was. BOTS_CAPABILITY stays a module-local constant
+// (not a shared/bot-contract.ts export, per the original ROOT-ownership
+// note); it is now advertised by the service (see crates/drogon-core/src/lib.rs's
+// CAPABILITIES list) so this panel is reachable end-to-end.
 
 import { createBotsPanelDescriptor } from "./features/bots/bots-panel-descriptor";
 import type {
@@ -16,12 +15,21 @@ import type {
   BotsPanelProps,
   BotsPanelSnapshot,
 } from "./features/bots/bots-panel-contracts";
-import type { BotBridge } from "../../shared/bot-contract";
+import type {
+  BotBridge,
+  BotScope,
+  BotSessionReader,
+} from "../../shared/bot-contract";
+import type {
+  Identity,
+  ReadResult,
+  Result,
+} from "../../shared/session-contract";
 import { registerRoute, routeId } from "./route-panel-contract";
 import type { PanelDescriptor, RouteRegistry } from "./route-panel-contract";
 
 /** Module-local capability marker; not sourced from shared/bot-contract.ts,
- *  which does not export a capability id yet (ROOT-owned, unapproved). */
+ *  which does not export a capability id (kept ROOT-owned by convention). */
 export const BOTS_CAPABILITY = "bot.snapshot.v1";
 
 /** Branded route id for the Bots panel, minted once here (V2/ROOT owns
@@ -33,17 +41,27 @@ export function isBotsAvailable(capabilities: readonly string[]): boolean {
   return capabilities.includes(BOTS_CAPABILITY);
 }
 
+/** Structural session-read source: `window.drogon.read` satisfies this
+ *  (the widened parameter below), passed through ungated -- session reads
+ *  carry their own liveness/authorization model, distinct from the
+ *  bot.snapshot.v1 capability this gate enforces. */
+type SessionReadSource = (
+  input: Identity & { cursor: number },
+) => Promise<Result<ReadResult>>;
+
 /**
- * Fail-closed capability gate around a BotBridge. The bridge has exactly one
- * method, botSnapshot, and this gates exactly it: every call evaluates
- * isAllowed at call time, so while bot.snapshot.v1 is withheld the call is
- * refused locally (never reaching source) with an explicit retryable error,
- * and a mid-life capability loss fails closed on the very next call.
+ * Fail-closed capability gate around a BotBridge. Every method (botSnapshot,
+ * botCreate, botRun, botHistory) evaluates isAllowed at call time, so while
+ * bot.snapshot.v1 is withheld every call is refused locally (never reaching
+ * source) with an explicit retryable error, and a mid-life capability loss
+ * fails closed on the very next call. `read` (if the source provides it,
+ * e.g. the real `window.drogon`) passes through ungated -- see
+ * `SessionReadSource`'s doc.
  */
 export function createGatedBotBridge(
-  source: BotBridge,
+  source: BotBridge & { read?: SessionReadSource },
   isAllowed: () => boolean,
-): BotBridge {
+): BotBridge & { read?: SessionReadSource } {
   const refused = () =>
     Promise.resolve({
       ok: false as const,
@@ -53,26 +71,47 @@ export function createGatedBotBridge(
         retryable: true,
       },
     });
-  return {
+  const notImplemented = () =>
+    Promise.resolve({
+      ok: false as const,
+      error: {
+        code: "unsupported_method",
+        message: "This bridge does not implement the requested Bot method.",
+        retryable: false,
+      },
+    });
+  const gated: BotBridge & { read?: SessionReadSource } = {
     botSnapshot: (input) =>
       isAllowed() ? source.botSnapshot(input) : refused(),
+    botCreate: (input) =>
+      isAllowed() ? (source.botCreate?.(input) ?? notImplemented()) : refused(),
+    botRun: (input) =>
+      isAllowed() ? (source.botRun?.(input) ?? notImplemented()) : refused(),
+    botHistory: (input) =>
+      isAllowed()
+        ? (source.botHistory?.(input) ?? notImplemented())
+        : refused(),
   };
+  if (source.read) gated.read = source.read;
+  return gated;
 }
 
 /**
  * Builds Bots panel props from caller-supplied real data only: the snapshot
- * as observed and the caller-observed liveness map, verbatim. No dispatch
- * callback is set (no run button until BotRun lands) and no liveness or
- * persisted-session proof is invented here.
+ * as observed, the caller-observed liveness map and the scope needed for
+ * bridge calls, verbatim. No liveness or persisted-session proof is
+ * invented here.
  */
 export function buildBotsPanelProps(
   snapshot: BotsPanelSnapshot,
   observedLivenessByBotId?: Record<string, BotsPanelHostObservation>,
+  scope?: (BotScope & { locale: string }) | null,
 ): BotsPanelProps {
   const props: BotsPanelProps = { snapshot };
   if (observedLivenessByBotId !== undefined) {
     props.observedLivenessByBotId = observedLivenessByBotId;
   }
+  if (scope) props.scope = scope;
   return props;
 }
 
@@ -87,23 +126,69 @@ function adaptBotsDescriptor(
   return { ...hooks, id: routeId(id) };
 }
 
+function mintRequestId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `bot-run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 /**
  * Registers the REAL Bots route (capability-gated on bot.snapshot.v1)
- * through the V2 contract and returns the new registry. gatedBridge is
- * accepted for parity with the gated-bridge mount shape used elsewhere; the
- * current panel carries no dispatch and the descriptor factory does not call
- * the bridge directly (see buildBotsPanelProps).
+ * through the V2 contract and returns the new registry. Threads the gated
+ * bridge itself onto the panel props (create/chat/history need their own
+ * request lifecycle, not a single fire-and-forget callback) and wires the
+ * scheduled-responsibility manual-run control through `bridge.botRun` --
+ * only when `panel.scope` is present, so a caller that never supplied scope
+ * still renders the pre-R2-S read-only view (no run button without a
+ * callback, unchanged contract).
  */
+/**
+ * Pure panel-wiring step, split out from registerBotsRoute so its logic is
+ * directly unit-testable without rendering through the descriptor/registry.
+ */
+export function buildWiredBotsPanelProps(
+  gatedBridge: BotBridge & { read?: SessionReadSource },
+  panel: BotsPanelProps,
+): BotsPanelProps {
+  const wiredPanel: BotsPanelProps = { ...panel, bridge: gatedBridge };
+  if (gatedBridge.read) {
+    wiredPanel.sessionReader = gatedBridge.read as BotSessionReader;
+  }
+  if (panel.scope) {
+    const scope = panel.scope;
+    wiredPanel.onRunResponsibility = ({ botId, responsibilityId }) => {
+      // `bot.run` requires an admitted harness override on every call (no
+      // default resolution exists); the bot's own stored harness policy is
+      // the only real source for it here.
+      const harnessId = panel.snapshot.bots.find(
+        (bot) => bot.id === botId,
+      )?.harnessPolicy.defaultHarness;
+      if (!harnessId) return;
+      void gatedBridge.botRun?.({
+        hostId: scope.hostId,
+        workspaceId: scope.workspaceId,
+        locale: scope.locale,
+        botId,
+        responsibilityId,
+        reason: "manual",
+        eventIdentity: `manual:${Date.now()}`,
+        requestId: mintRequestId(),
+        harness: { harnessId },
+      });
+    };
+  }
+  return wiredPanel;
+}
+
 export function registerBotsRoute(
   registry: RouteRegistry,
-  gatedBridge: BotBridge,
+  gatedBridge: BotBridge & { read?: SessionReadSource },
   panel: BotsPanelProps,
 ): RouteRegistry {
-  void gatedBridge;
   const descriptor = createBotsPanelDescriptor({
     routeId: BOTS_ROUTE_ID,
     title: "Bots",
-    panel,
+    panel: buildWiredBotsPanelProps(gatedBridge, panel),
     capability: BOTS_CAPABILITY,
   });
   return registerRoute(registry, adaptBotsDescriptor(descriptor));

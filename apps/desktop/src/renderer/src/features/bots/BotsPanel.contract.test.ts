@@ -422,6 +422,64 @@ describe("BotsPanel render", () => {
   });
 });
 
+describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run button", () => {
+  const scope = { hostId: "host-1", workspaceId: "ws-1", locale: "en-US" };
+  const bridge = {
+    botSnapshot: async () => ({
+      ok: true as const,
+      result: { ...scope, ...emptySnapshot },
+    }),
+    botCreate: async () => ({ ok: true as const, result: bot() }),
+    botRun: async () => ({
+      ok: true as const,
+      result: {
+        requestId: "r",
+        hostId: scope.hostId,
+        workspaceId: scope.workspaceId,
+        automationRunId: null,
+        responsibilityRunId: null,
+        messageId: null,
+        session: null,
+        outcome: "dispatched" as const,
+        refusal: null,
+        reason: null,
+        error: null,
+        observedAt: null,
+        recordedAt: 0,
+      },
+    }),
+    botHistory: async () => ({
+      ok: true as const,
+      result: { ...scope, botId: "bot-1", messages: [] },
+    }),
+  };
+
+  it("renders no Create Bot / Chat controls without both bridge and scope", () => {
+    const markup = render({ bots: [bot()], history: [] });
+    expect(markup).not.toContain("Create Bot");
+    expect(markup).not.toContain('data-testid="select-bot-bot-1"');
+  });
+
+  it("renders Create Bot on the empty state once bridge+scope are supplied", () => {
+    const markup = render(emptySnapshot, { bridge, scope });
+    expect(markup).toContain("Create Bot");
+  });
+
+  it("renders a per-bot Chat control once bridge+scope are supplied", () => {
+    const markup = render({ bots: [bot()], history: [] }, { bridge, scope });
+    expect(markup).toContain('data-testid="select-bot-bot-1"');
+    expect(markup).toContain("Chat");
+  });
+
+  it("still requires onRunResponsibility separately for the run button even with bridge+scope", () => {
+    const markup = render(
+      { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
+      { bridge, scope },
+    );
+    expect(markup).not.toContain("data-responsibility-id=");
+  });
+});
+
 describe("BotsPanel styling contract (admitted tokens/primitives only)", () => {
   it("styles the panel with the quiet monochrome token classes from main.css", () => {
     const markup = render({
@@ -429,7 +487,7 @@ describe("BotsPanel styling contract (admitted tokens/primitives only)", () => {
       history: [historyEntry()],
     });
     expect(markup).toContain('data-testid="bots-panel"');
-    expect(markup).toMatch(/class="[^"]*flex flex-col gap-4/);
+    expect(markup).toMatch(/class="[^"]*flex h-full min-h-0 flex-col/);
     expect(markup).toContain("text-foreground");
     expect(markup).toContain("text-muted-foreground");
     expect(markup).toContain("border-border");

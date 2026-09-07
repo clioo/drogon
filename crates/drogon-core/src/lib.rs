@@ -96,6 +96,11 @@ const CAPABILITIES: &[&str] = &[
     drogon_protocol::worktree::WORKTREE_CAPABILITY,
     drogon_protocol::tasks::TASKS_CAPABILITY,
     "session.agent-state.v1",
+    // R2-S: the Bots page (list/create/chat/history) is real end-to-end as
+    // of this capability landing; desktop's `isBotsAvailable` gate
+    // (apps/desktop/src/renderer/src/bots-mount.ts) has referenced this
+    // exact string all along, dark until now.
+    "bot.snapshot.v1",
 ];
 
 pub(crate) fn now_rfc3339() -> String {
@@ -356,6 +361,7 @@ impl Engine {
             "automation.delete" => self.automation_delete(request),
             "automation.run_now" => self.automation_run_now(request),
             "automation.history" => self.automation_history(&request.params),
+            "bot.history" => self.bot_history(&request.params),
             "files.list" => self.do_files_list(&request.params),
             "files.read" => self.do_files_read(&request.params),
             "files.write" => self.mutating(request, Self::do_files_write),
