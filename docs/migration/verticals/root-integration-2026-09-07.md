@@ -141,3 +141,36 @@ No packaged installation is claimed for this checkpoint. Source audit remains
 defensible completion percentage over its 46 obligations. The 16:41:33 UTC
 target remains high risk. Next closure is real Files/Bots interaction followed
 by combined packaged acceptance, without weakening the safety gates.
+
+## 12:50 UTC checkpoint
+
+Combined candidate: `43d3b0f`, not a release. V2 `ecea077`, `d8a7107` and
+`9a45524` plus V3 `a6cab17` are now staged. Root independently passed all
+396 desktop tests across 35 files, TypeScript and the desktop build. Rebuilt
+daemon/CLI and the real Electron Playwright CDP probe passed 34 checks:
+keyboard focus, six theme combinations, 1440/760 layout and inspector behavior,
+with both fixture sessions observed exited and quiescent daemon shutdown.
+Screenshots are under `.preflight/v2-kbd-1788785294071/` (untracked evidence).
+
+This accepts only the narrow shell/layout behavior with Files withheld. Visual
+inspection found nearly invisible dark header icons despite successful hit
+testing; V2 owns the contrast investigation. The App gate has an effect-time
+transition window, not a proven synchronous admission fence. V3 still owns
+draft retention and ambiguous-save ordering; enabled Files remains unaccepted.
+
+Root reviewed but did not integrate V5 `44034a3`: its DISTINCT linked-payload
+budget undercounts per-history-row materialization. A repeated large linked
+record can still amplify memory before the final response cap. V5 owns the
+multiplicity/UTF-8-byte correction as well as the scheduled-trigger projection.
+Root's `native_bot_wire` scheduled snapshot regression remains RED; persisted
+snake-case storage compatibility must remain unchanged.
+
+Root also reviewed but did not integrate V1 `4fcf2ee`: closed-check/I/O-issue
+ordering and snapshot-handle/cancellation lifetime races remain. V1 owns those
+corrections and a suspected Windows-only test compilation issue. No native
+Windows acceptance is claimed. All five leaders remain active; no capability
+activation, paid-model launch or packaged installation occurred here.
+
+Audit closure stays 11/12 (91.7%, medium confidence, delta zero). All 46 product
+obligations remain in scope; no full-parity completion percentage is asserted.
+The fixed 16:41:33 UTC target remains high-risk.
