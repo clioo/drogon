@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Tooltip } from "radix-ui";
 import type {
+  AgentState,
   Harness,
   HarnessLaunchInput,
   Result,
@@ -787,6 +788,60 @@ export function App() {
       cancelled = true;
     };
   }, [selected, status, revision]);
+  useEffect(() => {
+    // J1 needs_input: main polls session.list for transitions (this repo
+    // has no daemon push channel) and forwards them here. Clicking the
+    // native notification selects that workspace and session; every
+    // transition also merges into the visible rows so the tab and card
+    // badges track the state live without a manual refresh.
+    const bridge = window.drogon.notifications;
+    if (!bridge) return;
+    const known: AgentState[] = [
+      "working",
+      "idle",
+      "needs_input",
+      "exited",
+      "unknown",
+    ];
+    const offFocus = bridge.onFocusSession((event) => {
+      setSelected(event.workspaceId);
+      setActive(event.sessionId);
+      setRevision((value) => value + 1);
+    });
+    const offState = bridge.onStateChanged((event) => {
+      if (!known.includes(event.agentState as AgentState)) return;
+      if (event.workspaceId !== contextRef.current.workspaceId) return;
+      const existing = sessionsRef.current.find(
+        (item) => item.id === event.sessionId,
+      );
+      if (!existing) {
+        // A session this window never listed (started elsewhere): reload
+        // once so it appears with its live state.
+        setRevision((value) => value + 1);
+        return;
+      }
+      if (
+        (existing.agentState ?? "unknown") === event.agentState &&
+        (existing.agentStateAt ?? null) === (event.agentStateAt ?? null)
+      )
+        return;
+      setSessions((items) =>
+        items.map((item) =>
+          item.id === event.sessionId
+            ? {
+                ...item,
+                agentState: event.agentState as AgentState,
+                agentStateAt: event.agentStateAt,
+              }
+            : item,
+        ),
+      );
+    });
+    return () => {
+      offFocus();
+      offState();
+    };
+  }, []);
   // Shared by sidebar worktree cards: re-clicking the already-active
   // workspace must not clear its visible live-session projection.
   const selectWorkspaceId = (id: string) => {

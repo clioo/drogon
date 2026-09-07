@@ -1,15 +1,14 @@
-//! Pure agent-state derivation for a Session's PTY activity. `docs/migration/
-//! rewrite-mvp-plan.md` J1: "estado del agente (trabajando, inactivo,
-//! esperando)". `session.rs` owns observing the actual facts (PTY output
-//! timing, exit); this module only classifies them, so the 3s window and the
-//! exited/unknown precedence are unit-testable without a real PTY or clock.
+//! Pure agent-state derivation for a Session's PTY activity plus the Claude
+//! Code hook signal. `docs/migration/rewrite-mvp-plan.md` J1: "estado del
+//! agente (trabajando, inactivo, esperando)". `session.rs` owns observing
+//! the actual facts (PTY output timing, exit, hook events); this module only
+//! classifies them, so the 3s window and the exited/needs-input precedence
+//! are unit-testable without a real PTY or clock.
 //!
-//! `NeedsInput` has no producer yet: Claude Code hook wiring (writing a
-//! per-session hook settings file, passing `--settings <file>`, reading the
-//! marker it writes on `Notification`/`Stop`) is out of scope for this pass —
-//! see the PR description. The variant exists now so the wire vocabulary
-//! (`AgentState::as_wire`, mirrored in `session-contract.ts`) is already
-//! complete for callers that switch on it exhaustively.
+//! `NeedsInput` is produced by `session.hook_event` (the `Notification` and
+//! `Stop` hooks in the per-session settings file `hooks.rs` writes for
+//! `harness.start` with the claude harness). Any later PTY output clears it
+//! back to activity-based derivation; exit takes precedence over it.
 
 use std::time::Duration;
 
@@ -22,9 +21,6 @@ pub(crate) const ACTIVITY_WINDOW: Duration = Duration::from_secs(3);
 pub(crate) enum AgentState {
     Working,
     Idle,
-    /// No producer yet (see the module doc): `derive` never returns this
-    /// today. Kept in the enum so the wire vocabulary is already complete.
-    #[allow(dead_code)]
     NeedsInput,
     Exited,
     Unknown,
@@ -52,12 +48,17 @@ pub(crate) enum Activity {
     LastActiveAgo(Duration),
 }
 
-/// Exit takes precedence over activity (a session can exit mid-burst of
-/// buffered output); a never-observed session is `Unknown` rather than
-/// guessed as idle, since idle implies activity once happened.
-pub(crate) fn derive(exited: bool, activity: Activity) -> AgentState {
+/// Exit takes precedence over everything (a session can exit mid-burst of
+/// buffered output, including while waiting for input); a live session with
+/// an uncleared hook signal is `NeedsInput` regardless of the activity
+/// clock; a never-observed session without a signal is `Unknown` rather
+/// than guessed as idle, since idle implies activity once happened.
+pub(crate) fn derive(exited: bool, activity: Activity, needs_input: bool) -> AgentState {
     if exited {
         return AgentState::Exited;
+    }
+    if needs_input {
+        return AgentState::NeedsInput;
     }
     match activity {
         Activity::NeverObserved => AgentState::Unknown,
@@ -72,39 +73,87 @@ mod tests {
 
     #[test]
     fn exited_wins_over_any_activity_fact() {
-        assert_eq!(derive(true, Activity::NeverObserved), AgentState::Exited);
         assert_eq!(
-            derive(true, Activity::LastActiveAgo(Duration::from_millis(1))),
+            derive(true, Activity::NeverObserved, false),
+            AgentState::Exited
+        );
+        assert_eq!(
+            derive(
+                true,
+                Activity::LastActiveAgo(Duration::from_millis(1)),
+                false
+            ),
             AgentState::Exited
         );
     }
 
     #[test]
+    fn exited_wins_over_an_uncleared_hook_signal() {
+        assert_eq!(
+            derive(true, Activity::NeverObserved, true),
+            AgentState::Exited
+        );
+    }
+
+    #[test]
+    fn hook_signal_wins_over_any_activity_fact() {
+        assert_eq!(
+            derive(false, Activity::NeverObserved, true),
+            AgentState::NeedsInput
+        );
+        assert_eq!(
+            derive(
+                false,
+                Activity::LastActiveAgo(Duration::from_millis(0)),
+                true
+            ),
+            AgentState::NeedsInput
+        );
+        assert_eq!(
+            derive(
+                false,
+                Activity::LastActiveAgo(ACTIVITY_WINDOW + Duration::from_secs(60)),
+                true
+            ),
+            AgentState::NeedsInput
+        );
+    }
+
+    #[test]
     fn never_observed_is_unknown_not_idle() {
-        assert_eq!(derive(false, Activity::NeverObserved), AgentState::Unknown);
+        assert_eq!(
+            derive(false, Activity::NeverObserved, false),
+            AgentState::Unknown
+        );
     }
 
     #[test]
     fn within_window_is_working_at_and_past_boundary_is_idle() {
         assert_eq!(
-            derive(false, Activity::LastActiveAgo(Duration::from_millis(0))),
+            derive(
+                false,
+                Activity::LastActiveAgo(Duration::from_millis(0)),
+                false
+            ),
             AgentState::Working
         );
         assert_eq!(
             derive(
                 false,
-                Activity::LastActiveAgo(ACTIVITY_WINDOW - Duration::from_millis(1))
+                Activity::LastActiveAgo(ACTIVITY_WINDOW - Duration::from_millis(1)),
+                false
             ),
             AgentState::Working
         );
         assert_eq!(
-            derive(false, Activity::LastActiveAgo(ACTIVITY_WINDOW)),
+            derive(false, Activity::LastActiveAgo(ACTIVITY_WINDOW), false),
             AgentState::Idle
         );
         assert_eq!(
             derive(
                 false,
-                Activity::LastActiveAgo(ACTIVITY_WINDOW + Duration::from_secs(60))
+                Activity::LastActiveAgo(ACTIVITY_WINDOW + Duration::from_secs(60)),
+                false
             ),
             AgentState::Idle
         );

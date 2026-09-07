@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, Cli, Command, HarnessAction, ProjectAction, TerminalAction, WaitFor,
-    WorkspaceAction, WorktreeAction,
+    AutomationAction, Cli, Command, HarnessAction, InternalAction, ProjectAction, TerminalAction,
+    WaitFor, WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, CallOk,
@@ -101,6 +101,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Skills { .. } => {
             unreachable!("skills commands are served locally before the client opens")
         }
+        Command::Internal { action } => internal(&client, &request_id, json, action).await,
         Command::Rpc { method, params } => {
             let params: Value = match params {
                 Some(text) => serde_json::from_str(text)
@@ -647,6 +648,55 @@ async fn automation(
             )
         }
     }
+}
+
+/// Hidden service-internal callbacks (no capability preflight: the daemon
+/// either knows `session.hook_event` or returns `method_not_found`, which is
+/// itself the correct signal).
+async fn internal(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &InternalAction,
+) -> Result<RunOutcome, CliError> {
+    match action {
+        InternalAction::HookEvent {
+            session,
+            incarnation,
+            event,
+        } => {
+            // Claude Code pipes the hook payload JSON on stdin; drain and
+            // ignore it (session, incarnation and event already came from
+            // the generated hook command). A TTY stdin means a manual
+            // invocation, which must never block waiting for input.
+            drain_hook_stdin();
+            let params = json!({
+                "sessionId": session,
+                "incarnation": incarnation,
+                "event": event,
+            });
+            let call = client
+                .call("session.hook_event", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let updated: Session =
+                Client::decode_checked(&call, "session.hook_event", check_session)?;
+            emit(call, json, || output::session_hook_event(&updated), 0, None)
+        }
+    }
+}
+
+/// Discards piped hook stdin on a detached thread (best effort; a hook must
+/// never hang the agent because stdin stayed open — the payload is already
+/// fully described by the hook command's flags, and process exit ends the
+/// drain thread either way).
+fn drain_hook_stdin() {
+    use std::io::IsTerminal as _;
+    if std::io::stdin().is_terminal() {
+        return;
+    }
+    std::thread::spawn(|| {
+        let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+    });
 }
 
 /// Read-only status negotiation. The preflight request id is distinct from

@@ -11,6 +11,7 @@ import { dispatchFileRequest } from "./file-bridge";
 import { registerGitBridge } from "./git-bridge";
 import { registerSettingsProbes } from "./settings-probes";
 import { registerBrowserIpc } from "./browser/browser-ipc";
+import { registerNotificationsIpc } from "./notifications/service";
 import { dispatchBotSnapshot } from "./bot-bridge";
 import {
   readCursorMismatches,
@@ -303,6 +304,7 @@ if (!holdsSingleInstanceLock) {
     );
     registerUsageIpc();
     registerBrowserIpc(() => window);
+    registerNotificationsIpc(() => window);
     await bootstrapDaemon();
     createWindow();
     app.on("activate", () => {
