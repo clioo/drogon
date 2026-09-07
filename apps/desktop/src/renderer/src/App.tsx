@@ -7,10 +7,6 @@ import {
   useState,
 } from "react";
 import {
-  Bot,
-  Folder,
-  FolderPlus,
-  GitCompareArrows,
   Monitor,
   Moon,
   PanelRight,
@@ -19,7 +15,6 @@ import {
   Settings,
   Sun,
   TerminalSquare,
-  X,
 } from "lucide-react";
 import { Tooltip } from "radix-ui";
 import type {
@@ -38,6 +33,14 @@ import {
   markSessionDismissed,
 } from "./dismissed-sessions";
 import { HarnessLaunchMenu } from "./HarnessLaunchMenu";
+import { Sidebar } from "./features/shell/Sidebar";
+import { TabBar } from "./features/shell/TabBar";
+import { loadProjectView } from "./features/shell/project-adapter";
+import type {
+  ProjectGroup,
+  ProjectRpcBridge,
+} from "./features/shell/project-adapter";
+import { openCommandPalette } from "./features/shell/open-palette";
 import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
 import { TerminalPane } from "./TerminalPane";
@@ -308,6 +311,10 @@ export function App() {
     builtAt: string;
     version: string;
   } | null>(null);
+  // Sidebar project view: real projects/worktrees once the service
+  // advertises them (project-adapter falls back to the Workspace list
+  // until then, so this is never empty while workspaces exist).
+  const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([]);
   useEffect(() => {
     // A local file read, not an RPC — available even while disconnected,
     // and simply absent (never fabricated) outside a packaged build. A
@@ -620,6 +627,22 @@ export function App() {
     void refresh();
   }, [refresh]);
   useEffect(() => {
+    // Reloads the project view whenever the workspace list or the live
+    // capabilities change; the adapter degrades to the workspace
+    // projection while project.v1/worktree.v1 are withheld or failing.
+    let cancelled = false;
+    void loadProjectView(
+      window.drogon as unknown as ProjectRpcBridge,
+      status?.capabilities ?? [],
+      workspaces,
+    ).then((view) => {
+      if (!cancelled) setProjectGroups(view.groups);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, workspaces]);
+  useEffect(() => {
     // Persists every confirmed selection once it settles against a known
     // workspace, so the next reload's restore has an up-to-date target.
     const workspace = workspaces.find((item) => item.id === selected);
@@ -681,6 +704,15 @@ export function App() {
       cancelled = true;
     };
   }, [selected, status, revision]);
+  // Shared by sidebar worktree cards: re-clicking the already-active
+  // workspace must not clear its visible live-session projection.
+  const selectWorkspaceId = (id: string) => {
+    const resolution = resolveWorkspaceSelection(selected, id);
+    if (!resolution.changed) return;
+    setSelected(resolution.selected);
+    setActive("");
+    setSessions([]);
+  };
   const create = () =>
     action(async () => {
       const captured = contextRef.current;
@@ -798,106 +830,24 @@ export function App() {
   return (
     <Tooltip.Provider delayDuration={400}>
       <div className="app-shell">
-        <aside className="workspace-sidebar" aria-label="Workspaces">
-          <header className="brand">Drogon</header>
-          <div className="sidebar-label">
-            <span>Workspaces</span>
-            <IconButton
-              label="Add workspace"
-              disabled={!status || busy}
-              onClick={() => setAdding((value) => !value)}
-            >
-              <FolderPlus />
-            </IconButton>
-          </div>
-          <nav>
-            {workspaces.map((workspace) => (
-              <button
-                key={workspace.id}
-                className="workspace-row"
-                disabled={busy}
-                data-current={workspace.id === selected}
-                aria-current={workspace.id === selected ? "page" : undefined}
-                onClick={() => {
-                  // Re-clicking the already-active workspace must not clear
-                  // its visible live-session projection.
-                  const resolution = resolveWorkspaceSelection(
-                    selected,
-                    workspace.id,
-                  );
-                  if (!resolution.changed) return;
-                  setSelected(resolution.selected);
-                  setActive("");
-                  setSessions([]);
-                }}
-              >
-                <Folder size={16} />
-                <span>{workspace.name}</span>
-              </button>
-            ))}
-          </nav>
-          <div className="sidebar-label">
-            <span>Panels</span>
-          </div>
-          <nav aria-label="Panels">
-            <button
-              key="panel-terminals"
-              className="workspace-row"
-              disabled={busy || !current}
-              data-current={route === null}
-              onClick={() => setRoute(null)}
-            >
-              <TerminalSquare size={16} />
-              <span>Terminals</span>
-            </button>
-            <button
-              key="panel-files"
-              className="workspace-row"
-              disabled={busy || !current || !isFilesAvailable(liveCapabilities)}
-              data-current={route === FILES_ROUTE_ID}
-              title={
-                isFilesAvailable(liveCapabilities)
-                  ? "Files"
-                  : "Files unavailable: service does not advertise files.v1"
-              }
-              onClick={() => setRoute(FILES_ROUTE_ID)}
-            >
-              <Folder size={16} />
-              <span>Files</span>
-            </button>
-            <button
-              key="panel-changes"
-              className="workspace-row"
-              disabled={
-                busy || !current || !isChangesAvailable(liveCapabilities)
-              }
-              data-current={route === CHANGES_ROUTE_ID}
-              title={
-                isChangesAvailable(liveCapabilities)
-                  ? "Changes"
-                  : "Changes unavailable: service does not advertise git.v1"
-              }
-              onClick={() => setRoute(CHANGES_ROUTE_ID)}
-            >
-              <GitCompareArrows size={16} />
-              <span>Changes</span>
-            </button>
-            <button
-              key="panel-bots"
-              className="workspace-row"
-              disabled={busy || !current || !isBotsAvailable(liveCapabilities)}
-              data-current={route === BOTS_ROUTE_ID}
-              title={
-                isBotsAvailable(liveCapabilities)
-                  ? "Bots"
-                  : "Bots unavailable: service does not advertise bot.snapshot.v1"
-              }
-              onClick={() => setRoute(BOTS_ROUTE_ID)}
-            >
-              <Bot size={16} />
-              <span>Bots</span>
-            </button>
-          </nav>
+        <Sidebar
+          route={route}
+          panelsDisabled={busy || !current}
+          filesAvailable={isFilesAvailable(liveCapabilities)}
+          changesAvailable={isChangesAvailable(liveCapabilities)}
+          botsAvailable={isBotsAvailable(liveCapabilities)}
+          onSelectRoute={setRoute}
+          onOpenPalette={openCommandPalette}
+          groups={projectGroups}
+          workspaces={workspaces}
+          sessions={sessions}
+          selectedWorkspaceId={selected}
+          workspaceDisabled={busy}
+          addDisabled={!status || busy}
+          onSelectWorkspace={selectWorkspaceId}
+          onAddProject={() => setAdding((value) => !value)}
+          addSlot={
+            <>
           {adding && (
             <form
               className="folder-form"
@@ -948,20 +898,20 @@ export function App() {
               Open a folder or repository to begin.
             </p>
           )}
-          <footer className="sidebar-footer">
-            <span>
-              {status ? `Service ${status.version}` : "Service unavailable"}
-            </span>
-            {buildInfo && (
-              <span
-                className="build-revision"
-                title={`Built ${buildInfo.builtAt}`}
-              >
-                {buildInfo.version} · {buildInfo.revision.slice(0, 7)}
-              </span>
-            )}
-          </footer>
-        </aside>
+            </>
+          }
+          serviceLabel={
+            status ? `Service ${status.version}` : "Service unavailable"
+          }
+          buildRevision={
+            buildInfo
+              ? `${buildInfo.version} · ${buildInfo.revision.slice(0, 7)}`
+              : null
+          }
+          buildTitle={buildInfo ? `Built ${buildInfo.builtAt}` : undefined}
+          onOpenSettings={() => setSettingsOpen(true)}
+          settingsExpanded={settingsOpen}
+        />
         <main className="session-area">
           <header className="session-header" style={{ position: "relative" }}>
             <div className="workspace-heading">
@@ -1039,82 +989,19 @@ export function App() {
                     : undefined,
               }}
             >
-              <div
-                className="terminal-tabs"
-                role="tablist"
-                aria-label="Sessions"
-              >
-                {sessions.map((item) => (
-                  <div
-                    className="terminal-tab"
-                    data-current={item.id === active}
-                    key={item.id}
-                  >
-                    <button
-                      role="tab"
-                      id={`session-tab-${item.id}`}
-                      aria-selected={item.id === active}
-                      aria-controls="active-session-panel"
-                      tabIndex={item.id === active ? 0 : -1}
-                      onKeyDown={(event) => {
-                        const index = sessions.findIndex(
-                          (value) => value.id === item.id,
-                        );
-                        const next =
-                          event.key === "ArrowRight"
-                            ? (index + 1) % sessions.length
-                            : event.key === "ArrowLeft"
-                              ? (index - 1 + sessions.length) % sessions.length
-                              : event.key === "Home"
-                                ? 0
-                                : event.key === "End"
-                                  ? sessions.length - 1
-                                  : -1;
-                        if (next < 0) return;
-                        event.preventDefault();
-                        setActive(sessions[next].id);
-                        document
-                          .getElementById(`session-tab-${sessions[next].id}`)
-                          ?.focus();
-                      }}
-                      onClick={() => setActive(item.id)}
-                    >
-                      <TerminalSquare size={14} />
-                      <span>
-                        {recoveryTabLabel({
-                          label: sessionLabel(item, harnesses),
-                          verdict: item.verdict,
-                          id: item.id,
-                          incarnation: item.incarnation,
-                        })}
-                      </span>
-                      <span className="session-verdict">{item.verdict}</span>
-                    </button>
-                    {recoveryActionFor(item.verdict, {
-                      // A confirmed close removes the tab, so a still-listed
-                      // exited session is one the user did not request.
-                      exitExpected: false,
-                    }).kind === "retry-connection" && (
-                      <IconButton
-                        label="Retry connection"
-                        disabled={retryAffordanceDisabled({
-                          refreshInFlight: busy,
-                        })}
-                        onClick={() => void refresh()}
-                      >
-                        <RefreshCw />
-                      </IconButton>
-                    )}
-                    <IconButton
-                      label={`Close ${sessionLabel(item, harnesses)} session`}
-                      disabled={busy || loadingSessions || !status}
-                      onClick={() => void close(item)}
-                    >
-                      <X />
-                    </IconButton>
-                  </div>
-                ))}
-                {harnessCapability ? (
+              <TabBar
+                sessions={sessions}
+                activeId={active}
+                harnesses={harnesses}
+                closeDisabled={busy || loadingSessions || !status}
+                retryDisabled={retryAffordanceDisabled({
+                  refreshInFlight: busy,
+                })}
+                onSelect={setActive}
+                onClose={(item) => void close(item)}
+                onRetry={() => void refresh()}
+                launcher={
+                  harnessCapability ? (
                   <HarnessLaunchMenu
                     workspaceId={selected}
                     hostId={status?.hostId ?? null}
@@ -1132,7 +1019,7 @@ export function App() {
                     <Plus />
                   </IconButton>
                 )}
-              </div>
+              />
               <div
                 id="active-session-panel"
                 role="tabpanel"
