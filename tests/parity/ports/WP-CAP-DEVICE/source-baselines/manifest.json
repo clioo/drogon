@@ -1,0 +1,370 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "recordedBy": "V4-B2 worker (task_f89d0c67d308 / dispatch ctx_d369b91d50a1), 2026-09-07",
+  "method": "sha256 of `git -C /Users/carlos/Documents/Drogon-mentu-session show <pin>:<path>` output, run from the Drogon-rewrite worktree cwd; the reference checkout was never used as cwd and nothing was written to it",
+  "revisionProof": {
+    "referenceHead": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "pinnedObjectExists": true,
+    "headEqualsPin": true
+  },
+  "crossCheck": "every computed sha256 equals the sha256 recorded for that path in docs/migration/parity-test-work-packages.json (199/199 paths)",
+  "isolationRationale": "hash/read-only recording only; no source module was imported or executed, no runner wrote to the reference, no fixture was copied outside the declared frozen-port test files",
+  "license": {
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "notice": "tests/parity/ports/LICENSE.orca"
+  },
+  "portPackage": "WP-CAP-DEVICE",
+  "scope": "Voice/speech, emulator (android/ios), computer-use — full canonical 62-file test inventory from parity-test-work-packages.json; native-chat engine files are NOT part of this package (WP-ENG-NCHAT)",
+  "fileCount": 62,
+  "duplicationNote": "src/main/speech/model-catalog.test.ts is canonically WP-CAP-DEVICE but was already frozen under tests/parity/ports/WP-CAP-MEET/speech-catalog/ per the prior task grouping; it is recorded here (hash) but deliberately not re-frozen to avoid duplication",
+  "files": [
+    {
+      "path": "src/main/computer/computer-action-verification-normalization.test.ts",
+      "sha256": "a6d534d37151777d419505f724a0fb3ad6d6d6ccccd3ce036759d8a913af1d37",
+      "bytes": 1041
+    },
+    {
+      "path": "src/main/computer/computer-provider-lifecycle.test.ts",
+      "sha256": "f4ed1fbf98916b4f7acdb430e110475af29eb8b7c684e09d9474fbb19cf1c748",
+      "bytes": 2761
+    },
+    {
+      "path": "src/main/computer/computer-provider-unavailable-message.test.ts",
+      "sha256": "e074b2fb1dabb8a6ed54abc9ba728f216b79906263295385c6b66f816815f2ce",
+      "bytes": 764
+    },
+    {
+      "path": "src/main/computer/desktop-script-provider-action-errors.test.ts",
+      "sha256": "6b87d59f2f525d0ca39ca57e2070233f9b63ec320c5aea8cf2df26ffd52bab79",
+      "bytes": 10061
+    },
+    {
+      "path": "src/main/computer/desktop-script-provider-actions.test.ts",
+      "sha256": "467548d8eeeffa6d7549d62ba7af56d54409ff8a35041d0693510fabb1454f20",
+      "bytes": 7986
+    },
+    {
+      "path": "src/main/computer/desktop-script-provider-bridge.test.ts",
+      "sha256": "f1a08fc081b1e0e38e5d7a8a6f7e933c44b5ca4e6adbb39f7b6e398755164b16",
+      "bytes": 986
+    },
+    {
+      "path": "src/main/computer/desktop-script-provider-cache-lifecycle.test.ts",
+      "sha256": "f45cad2d1355aff26c0d271dc652e4fba8b7bd003d6b8fe53515d4a04bbd86d4",
+      "bytes": 3409
+    },
+    {
+      "path": "src/main/computer/desktop-script-provider-cache.test.ts",
+      "sha256": "7422e1d965c7baf80192794173ebc790752fe4adbb155da3bf4fdf93126d424d",
+      "bytes": 9065
+    },
+    {
+      "path": "src/main/computer/desktop-script-provider-client.test.ts",
+      "sha256": "6bbe1be38710ec0c0868d0fd5a0b97f46a9c3c8ca005108b6f647ce528cc4570",
+      "bytes": 5443
+    },
+    {
+      "path": "src/main/computer/desktop-script-provider-errors.test.ts",
+      "sha256": "43cb4fb0c0102f5ccb76185b66c18266ae2eaabab46d16c377959ecd431b98f7",
+      "bytes": 5177
+    },
+    {
+      "path": "src/main/computer/desktop-script-provider-paste-validation.test.ts",
+      "sha256": "5f67f578bcb690f21937bee40c6cefca3636a82f8bf82aa63e83333f851f5123",
+      "bytes": 1500
+    },
+    {
+      "path": "src/main/computer/macos-computer-use-permission-status.test.ts",
+      "sha256": "7409b62ea3356fb7cf2f91f3125006b16548b8e40946824af919de07bda8b1fe",
+      "bytes": 7846
+    },
+    {
+      "path": "src/main/computer/macos-computer-use-permissions.test.ts",
+      "sha256": "6979edb47196fd9586e4d064fa1a3c33527534f0ed960fc23bb6e43e170a8b61",
+      "bytes": 9447
+    },
+    {
+      "path": "src/main/computer/macos-native-provider-client.test.ts",
+      "sha256": "188ae2ebb43e5d5bd311a1355fbf17aea64ff75e2b720d93adaab83950cf4589",
+      "bytes": 17653
+    },
+    {
+      "path": "src/main/computer/macos-native-provider-paste-validation.test.ts",
+      "sha256": "b0e3c9bd3d280934cef9f4152aeaf172c2e46192445d91cf4b45753fe6aa8a05",
+      "bytes": 4449
+    },
+    {
+      "path": "src/main/computer/macos-native-provider-socket.test.ts",
+      "sha256": "0538418286d955b5dec99c9794075023af88a695183a433be53e2a3c38e9fee0",
+      "bytes": 1921
+    },
+    {
+      "path": "src/main/computer/sidecar-client.test.ts",
+      "sha256": "6655b1f8f1c97a820e007329d58dfcab3f888d0df259fdd442bbd56aa170f731",
+      "bytes": 11343
+    },
+    {
+      "path": "src/main/emulator/android/adb-devices.test.ts",
+      "sha256": "77e3dae178e97475585fee72fda1c5d31699c71bc8c750e5d9d9565365b9e4fb",
+      "bytes": 4028
+    },
+    {
+      "path": "src/main/emulator/android/android-app-control.test.ts",
+      "sha256": "90233ee5fe9ff497192177c5721cbf64c3239410696ccd2b19dd022dc4eadca4",
+      "bytes": 1860
+    },
+    {
+      "path": "src/main/emulator/android/android-capability-operations.test.ts",
+      "sha256": "1b56918ca04a6090ae435eafba36f30f4969fccb75c76e371821406bb63f79bb",
+      "bytes": 3524
+    },
+    {
+      "path": "src/main/emulator/android/android-device-inventory.test.ts",
+      "sha256": "366ed7a934c06e06ee30d0c1f8a5c70b400a7e2f74195eead5f54c641b0f9adc",
+      "bytes": 3218
+    },
+    {
+      "path": "src/main/emulator/android/android-input-commands.test.ts",
+      "sha256": "aeb14d30fb0a94d17ffae75c2c82657a376caf73b8816d4ff72f9cc7283504b7",
+      "bytes": 1441
+    },
+    {
+      "path": "src/main/emulator/android/android-input-mapping.test.ts",
+      "sha256": "ca913619e2f37e15689a8d72ead03a5b1366fe65d788937f65d815ee938dd7ea",
+      "bytes": 2335
+    },
+    {
+      "path": "src/main/emulator/android/android-logcat.test.ts",
+      "sha256": "ea5348bf4e911d936af4b768d0753f52d5fab5e1635ae7e901e2580e2c795691",
+      "bytes": 2483
+    },
+    {
+      "path": "src/main/emulator/android/android-permissions.test.ts",
+      "sha256": "966f2bc01832c4d2ce78f66945a7269ae3b4e31ac013c0b33421774e1dd2f3ed",
+      "bytes": 2032
+    },
+    {
+      "path": "src/main/emulator/android/android-sdk-discovery.test.ts",
+      "sha256": "0b311421d8903e3aa2a5138d9312b1e513fea499ebd96ada4531d227f4575739",
+      "bytes": 4762
+    },
+    {
+      "path": "src/main/emulator/android/avd-manager.test.ts",
+      "sha256": "99165890696294787e5c21c93ff8a0c49dc8aa089757063fff5f41654d836f59",
+      "bytes": 2522
+    },
+    {
+      "path": "src/main/emulator/android/scrcpy-server-deploy.test.ts",
+      "sha256": "678880ccbd0b30182c36ed5d955a81284d4764f711cf0d0cf0abba3cba56c7e5",
+      "bytes": 1499
+    },
+    {
+      "path": "src/main/emulator/android/scrcpy-video-frame-parser.test.ts",
+      "sha256": "f4d5a444dc9489bc18256fc055ffc7a130fd1e1360b880072b5c4713db532aef",
+      "bytes": 2594
+    },
+    {
+      "path": "src/main/emulator/android/uiautomator-tree.test.ts",
+      "sha256": "3980adc0d83279bf9c4b8f39143025d97bd43dd7b8cb6ad286516dc4e2932bfa",
+      "bytes": 5560
+    },
+    {
+      "path": "src/main/emulator/backends/android-emulator-backend.test.ts",
+      "sha256": "5c0e84cfc35db9785c6daa82a6e38c09a0242c69b44cd1b474150ae6104b3ee6",
+      "bytes": 9063
+    },
+    {
+      "path": "src/main/emulator/backends/ios-emulator-backend.test.ts",
+      "sha256": "fb104c5a68d9e4c6d6343388006c15ade698db1afe3b3465e0f2ebc6b700ca0c",
+      "bytes": 14899
+    },
+    {
+      "path": "src/main/emulator/emulator-availability.test.ts",
+      "sha256": "dfba72add5db5f9864c3faf57da060c0dfc86cf128ceb7c29f1eb4d75ab4b94c",
+      "bytes": 4316
+    },
+    {
+      "path": "src/main/emulator/emulator-bridge.test.ts",
+      "sha256": "cc406181b1bcff93455b2a0d364352917fd73a3f1faf0a43574b9863b3bc2948",
+      "bytes": 30328
+    },
+    {
+      "path": "src/main/emulator/emulator-gesture-sender.test.ts",
+      "sha256": "93ca9bc639a7150221451954c7a88f0eff62174a955c8877d401be080a5b77b4",
+      "bytes": 1321
+    },
+    {
+      "path": "src/main/emulator/emulator-session-registry.test.ts",
+      "sha256": "30d43aa979c6eb14cea27d2e1b2c185d4ebc93c2098fb4d865095501a0ee701d",
+      "bytes": 1349
+    },
+    {
+      "path": "src/main/emulator/emulator-start-lease-registry.test.ts",
+      "sha256": "408dfe2a8c64b2123504081937d5b53756d9fa69081e36fcf905233e1a197e86",
+      "bytes": 3938
+    },
+    {
+      "path": "src/main/emulator/mjpeg-frame-parser.test.ts",
+      "sha256": "5908a9ee4b601581d425fa8152f6d180dbda2917cdf5ef27cfdb7e48c5ca035e",
+      "bytes": 1859
+    },
+    {
+      "path": "src/main/emulator/mjpeg-frame-stream.test.ts",
+      "sha256": "35fb35c05bce85fbbc29fd1fadbd6314fef7039b2fe453216e3a000434dc2777",
+      "bytes": 1741
+    },
+    {
+      "path": "src/main/emulator/scrcpy-video-registry.test.ts",
+      "sha256": "e537dbd9e69aa37f907f9059f9a6c16f83595fdb500b3f8cb5295a5042da99b6",
+      "bytes": 3226
+    },
+    {
+      "path": "src/main/emulator/serve-sim-accessibility-tree.test.ts",
+      "sha256": "38a89083d507034e6576d910b1418c65cbe0afd809e397d4e0663bfa0e18d97f",
+      "bytes": 2990
+    },
+    {
+      "path": "src/main/emulator/serve-sim-ax-normalization.test.ts",
+      "sha256": "6b4dcb6c89e84ccd0acd2d8ab44daa34518223056cea2ada0ea9932000dda2b7",
+      "bytes": 3545
+    },
+    {
+      "path": "src/main/emulator/serve-sim-detached-session.test.ts",
+      "sha256": "da1a5ac27bfb4b0ffda315d47cf4ad0e0b6d963be94882005d087fe657972c68",
+      "bytes": 2423
+    },
+    {
+      "path": "src/main/emulator/serve-sim-execution.test.ts",
+      "sha256": "6b726744d023d29a8d6506e9e95817767dbb50f2e21da801c4a18a9cc7009f8f",
+      "bytes": 4539
+    },
+    {
+      "path": "src/main/emulator/serve-sim-helper-processes.test.ts",
+      "sha256": "2c105256a372beea11cf4638558ebd56dc3f7aaa48c8f9301d4d79eae1e36333",
+      "bytes": 1547
+    },
+    {
+      "path": "src/main/emulator/serve-sim-runtime-materializer.test.ts",
+      "sha256": "ebfc991f1cbfb996ba5c52f651e605eb27b869af2e0f7f0d540d4b726388468c",
+      "bytes": 6000
+    },
+    {
+      "path": "src/main/emulator/simctl-simulator-devices.test.ts",
+      "sha256": "d71218f38c8121fcbb02638b1be42fce4467e634be116e70bb228b9d5ce13182",
+      "bytes": 4716
+    },
+    {
+      "path": "src/main/speech/model-catalog.test.ts",
+      "sha256": "6ce0ba6bfbb8d41b18b3678c5a6f7aa6aecb9134fa047b6add5a02751edeac2f",
+      "bytes": 1880
+    },
+    {
+      "path": "src/main/speech/model-manager-download-error.test.ts",
+      "sha256": "f1e0820f1293ad6eb183fbbf0ed00b4e23e69c9a4c56e31ab2d8d602b2bc3ad9",
+      "bytes": 2025
+    },
+    {
+      "path": "src/main/speech/model-manager-download-resume.test.ts",
+      "sha256": "f6a425fd42fa15faddd5075c1e64d64776a2621117480653d465f167e56053aa",
+      "bytes": 22624
+    },
+    {
+      "path": "src/main/speech/model-manager-progress-callback.test.ts",
+      "sha256": "5177a2019ad1fc8da06163e83a0acd7f07df7c715fd679dbbb6f423560eb209a",
+      "bytes": 2628
+    },
+    {
+      "path": "src/main/speech/model-manager-stream-cleanup.test.ts",
+      "sha256": "c23d4f931a70bc4920d158b14e54b340dc7dbd074d5661f627c2fa72c560ee55",
+      "bytes": 2272
+    },
+    {
+      "path": "src/main/speech/model-manager-windows-path.test.ts",
+      "sha256": "2dbbfa2f5a2bef08d0fc448704ade3015f21961703d0e11ff8a0caa901727275",
+      "bytes": 5689
+    },
+    {
+      "path": "src/main/speech/model-manager.test.ts",
+      "sha256": "816eb9ef7ef5b103054177cc9bd155c3b006da051e461e450e9cc2074873aaad",
+      "bytes": 16317
+    },
+    {
+      "path": "src/main/speech/openai-api-key-store.test.ts",
+      "sha256": "59b2fb273a1055ef7a9de426e050c4c2537721609bae15103251dfeaec26458f",
+      "bytes": 3188
+    },
+    {
+      "path": "src/main/speech/openai-transcription-client.test.ts",
+      "sha256": "030df49b1048a0e8a30f11aff56785b8a8ef00d7ecb31d071edb5a0cd0aa810e",
+      "bytes": 848
+    },
+    {
+      "path": "src/main/speech/speech-model-deletion.test.ts",
+      "sha256": "f836e6983413dda6078692e7acd95548c5bae57bee4f770aac906d8569039c72",
+      "bytes": 4142
+    },
+    {
+      "path": "src/main/speech/speech-model-download-response.test.ts",
+      "sha256": "6c66ecf3664bb0c6bd7607231a8f7c6647b9d9640b23358a40ff2a7e7b2caa96",
+      "bytes": 1189
+    },
+    {
+      "path": "src/main/speech/stt-offline-audio-chunker.test.ts",
+      "sha256": "c0eda15494dba60a2126ab50b50f5ee7853d8ad787b2e526ad501f8d9d61de42",
+      "bytes": 3596
+    },
+    {
+      "path": "src/main/speech/stt-service.test.ts",
+      "sha256": "497e04f935dd5cd30275ee06d418d5381a96b7fdd1757062fed16bc55dd331b4",
+      "bytes": 22992
+    },
+    {
+      "path": "src/main/speech/stt-worker-model-config.test.ts",
+      "sha256": "6861529a69451e9394958077942e4ae5106723f54260d9406b97d28d75672cfc",
+      "bytes": 1563
+    },
+    {
+      "path": "src/main/speech/stt-worker.test.ts",
+      "sha256": "e8918545b98b5695d6d79d5dce423303d5efc07cb249576fdb99375d3e0cbebe",
+      "bytes": 624
+    }
+  ],
+  "frozenPortCopies": [
+    {
+      "suite": "computer-verification",
+      "portPath": "tests/parity/ports/WP-CAP-DEVICE/computer-verification/src/main/computer/computer-action-verification-normalization.test.ts",
+      "sourcePath": "src/main/computer/computer-action-verification-normalization.test.ts",
+      "sha256": "a6d534d37151777d419505f724a0fb3ad6d6d6ccccd3ce036759d8a913af1d37",
+      "cases": 1
+    },
+    {
+      "suite": "android-input",
+      "portPath": "tests/parity/ports/WP-CAP-DEVICE/android-input/src/main/emulator/android/android-input-mapping.test.ts",
+      "sourcePath": "src/main/emulator/android/android-input-mapping.test.ts",
+      "sha256": "ca913619e2f37e15689a8d72ead03a5b1366fe65d788937f65d815ee938dd7ea",
+      "cases": 8
+    },
+    {
+      "suite": "audio-chunker",
+      "portPath": "tests/parity/ports/WP-CAP-DEVICE/audio-chunker/src/main/speech/stt-offline-audio-chunker.test.ts",
+      "sourcePath": "src/main/speech/stt-offline-audio-chunker.test.ts",
+      "sha256": "c0eda15494dba60a2126ab50b50f5ee7853d8ad787b2e526ad501f8d9d61de42",
+      "cases": 7
+    },
+    {
+      "suite": "speech-deletion",
+      "portPath": "tests/parity/ports/WP-CAP-DEVICE/speech-deletion/src/main/speech/speech-model-deletion.test.ts",
+      "sourcePath": "src/main/speech/speech-model-deletion.test.ts",
+      "sha256": "f836e6983413dda6078692e7acd95548c5bae57bee4f770aac906d8569039c72",
+      "cases": 4
+    },
+    {
+      "suite": "model-config",
+      "portPath": "tests/parity/ports/WP-CAP-DEVICE/model-config/src/main/speech/stt-worker-model-config.test.ts",
+      "sourcePath": "src/main/speech/stt-worker-model-config.test.ts",
+      "sha256": "6861529a69451e9394958077942e4ae5106723f54260d9406b97d28d75672cfc",
+      "cases": 5
+    }
+  ]
+}
