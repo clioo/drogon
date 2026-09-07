@@ -32,6 +32,10 @@ export function windowGitBridge(): GitBridge {
  * is refused locally (never reaching the service) with an explicit
  * retryable error.
  */
+type ScopeInput = Parameters<GitBridge["gitPush"]>[0];
+type DiscardInput = Parameters<NonNullable<GitBridge["gitDiscard"]>>[0];
+type CountsInput = Parameters<NonNullable<GitBridge["gitLineCounts"]>>[0];
+
 export function createGatedGitBridge(
   source: GitBridge,
   isAllowed: () => boolean,
@@ -54,6 +58,27 @@ export function createGatedGitBridge(
     gitPush: (input) => (isAllowed() ? source.gitPush(input) : refused()),
     gitPrCreate: (input) =>
       isAllowed() ? source.gitPrCreate(input) : refused(),
+    // R10-B additive surface: forwarded only when the underlying bridge
+    // implements them; the panel probes availability and hides the action
+    // when absent.
+    ...(source.gitDiscard
+      ? {
+          gitDiscard: (input: DiscardInput) =>
+            isAllowed() ? source.gitDiscard!(input) : refused(),
+        }
+      : null),
+    ...(source.gitLineCounts
+      ? {
+          gitLineCounts: (input: CountsInput) =>
+            isAllowed() ? source.gitLineCounts!(input) : refused(),
+        }
+      : null),
+    ...(source.gitPull
+      ? { gitPull: (input: ScopeInput) => (isAllowed() ? source.gitPull!(input) : refused()) }
+      : null),
+    ...(source.gitFetch
+      ? { gitFetch: (input: ScopeInput) => (isAllowed() ? source.gitFetch!(input) : refused()) }
+      : null),
   };
 }
 

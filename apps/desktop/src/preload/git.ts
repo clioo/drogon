@@ -9,5 +9,9 @@ export const git: GitBridge = {
   gitUnstage: (value) => ipcRenderer.invoke("drogon:gitUnstage", value),
   gitCommit: (value) => ipcRenderer.invoke("drogon:gitCommit", value),
   gitPush: (value) => ipcRenderer.invoke("drogon:gitPush", value),
+  gitDiscard: (value) => ipcRenderer.invoke("drogon:gitDiscard", value),
+  gitLineCounts: (value) => ipcRenderer.invoke("drogon:gitLineCounts", value),
+  gitPull: (value) => ipcRenderer.invoke("drogon:gitPull", value),
+  gitFetch: (value) => ipcRenderer.invoke("drogon:gitFetch", value),
   gitPrCreate: (value) => ipcRenderer.invoke("drogon:gitPrCreate", value),
 };

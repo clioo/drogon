@@ -1277,10 +1277,32 @@ pub const GIT_DIFF_MAX_CAPTURE: usize = 256 * 1024;
 /// an operation requires a reviewed code change, never a caller string.
 #[derive(Debug, Clone)]
 pub enum GitMutation {
-    Stage { paths: Vec<String> },
-    Unstage { paths: Vec<String> },
-    Commit { message: String },
+    Stage {
+        paths: Vec<String>,
+    },
+    Unstage {
+        paths: Vec<String>,
+    },
+    Commit {
+        message: String,
+        amend: bool,
+    },
     Push,
+    /// Restore tracked paths from the index: `git checkout -- <paths>`.
+    /// Only ever the caller-selected paths, after `--`.
+    DiscardTracked {
+        paths: Vec<String>,
+    },
+    /// Remove untracked paths: `git clean -fd -- <paths>`. Scoped to the
+    /// selected paths, never `-x` (ignored files survive) and never without
+    /// the pathspec (bare `git clean` would sweep the whole worktree).
+    DiscardUntracked {
+        paths: Vec<String>,
+    },
+    /// Fast-forward-only pull: never invents a merge commit from a panel click.
+    Pull,
+    /// Default-remote fetch.
+    Fetch,
 }
 
 /// Both streams on success: mutations (notably `push`) report on stderr.
@@ -1344,9 +1366,13 @@ pub(crate) fn unstage_argv(paths: &[String]) -> Vec<String> {
     argv
 }
 
-pub(crate) fn commit_argv(message: &str) -> Vec<String> {
+pub(crate) fn commit_argv(message: &str, amend: bool) -> Vec<String> {
     let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
-    argv.extend(["commit", "-m"].iter().map(|s| s.to_string()));
+    argv.push("commit".to_string());
+    if amend {
+        argv.push("--amend".to_string());
+    }
+    argv.push("-m".to_string());
     argv.push(message.to_string());
     argv
 }
@@ -1354,6 +1380,50 @@ pub(crate) fn commit_argv(message: &str) -> Vec<String> {
 pub(crate) fn push_argv() -> Vec<String> {
     let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
     argv.push("push".to_string());
+    argv
+}
+
+pub(crate) fn discard_tracked_argv(paths: &[String]) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.extend(["checkout", "--"].iter().map(|s| s.to_string()));
+    argv.extend(paths.iter().map(|p| literal_pathspec(p)));
+    argv
+}
+
+pub(crate) fn discard_untracked_argv(paths: &[String]) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.extend(["clean", "-fd", "--"].iter().map(|s| s.to_string()));
+    argv.extend(paths.iter().map(|p| literal_pathspec(p)));
+    argv
+}
+
+pub(crate) fn pull_argv() -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.extend(["pull", "--ff-only"].iter().map(|s| s.to_string()));
+    argv
+}
+
+pub(crate) fn fetch_argv() -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.push("fetch".to_string());
+    argv
+}
+
+pub(crate) fn numstat_argv(paths: &[String], staged: bool) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.push("diff".to_string());
+    argv.push("--numstat".to_string());
+    argv.push("-z".to_string());
+    // Keep records 1:1 with paths: with rename detection a rename record
+    // carries its origPath as a second NUL token, which `parse_numstat_z`
+    // must never mistake for the next record. `--no-renames` reports the
+    // pair as delete+add instead; counts stay truthful per path.
+    argv.push("--no-renames".to_string());
+    if staged {
+        argv.push("--cached".to_string());
+    }
+    argv.push("--".to_string());
+    argv.extend(paths.iter().map(|p| literal_pathspec(p)));
     argv
 }
 
@@ -1439,10 +1509,126 @@ pub fn run_git_mutation(
     let argv = match mutation {
         GitMutation::Stage { paths } => stage_argv(paths),
         GitMutation::Unstage { paths } => unstage_argv(paths),
-        GitMutation::Commit { message } => commit_argv(message),
+        GitMutation::Commit { message, amend } => commit_argv(message, *amend),
         GitMutation::Push => push_argv(),
+        GitMutation::DiscardTracked { paths } => discard_tracked_argv(paths),
+        GitMutation::DiscardUntracked { paths } => discard_untracked_argv(paths),
+        GitMutation::Pull => pull_argv(),
+        GitMutation::Fetch => fetch_argv(),
     };
     run_git_argv(workspace_root, &argv, budget)
+}
+
+/// One file's numstat line counts. `(None, None)` is binary or otherwise
+/// uncountable — never conflated with a genuine zero-line change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NumstatCount {
+    pub added: Option<u64>,
+    pub removed: Option<u64>,
+}
+
+/// Parses `git diff --numstat -z` output: records are
+/// `<added>\t<removed>\t<path>\0` (`-\t-` for binary). `-z` disables path
+/// quoting, so paths are verbatim. Unknown trailing bytes are rejected
+/// rather than silently dropped.
+pub(crate) fn parse_numstat_z(output: &str) -> Result<Vec<(String, NumstatCount)>, RpcError> {
+    // `-z` terminates every record with NUL; the only legitimate empty
+    // token is the trailing artifact after the final terminator.
+    let mut tokens: Vec<&str> = output.split('\0').collect();
+    if tokens.last() == Some(&"") {
+        tokens.pop();
+    }
+    let mut counts = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        let mut parts = token.split('\t');
+        let (added, removed, path) = match (parts.next(), parts.next(), parts.next()) {
+            (Some(a), Some(r), Some(p)) => (a, r, p),
+            _ => {
+                return Err(error::invalid_argument(format!(
+                    "malformed numstat record: {token:?}"
+                )));
+            }
+        };
+        if parts.next().is_some() {
+            return Err(error::invalid_argument(format!(
+                "malformed numstat record (extra field): {token:?}"
+            )));
+        }
+        if path.is_empty() {
+            return Err(error::invalid_argument(
+                "malformed numstat record (empty path)",
+            ));
+        }
+        let count = if added == "-" || removed == "-" {
+            NumstatCount {
+                added: None,
+                removed: None,
+            }
+        } else {
+            let parse = |field: &str| {
+                field.parse::<u64>().map_err(|_| {
+                    error::invalid_argument(format!("malformed numstat count: {token:?}"))
+                })
+            };
+            NumstatCount {
+                added: Some(parse(added)?),
+                removed: Some(parse(removed)?),
+            }
+        };
+        counts.push((path.to_string(), count));
+    }
+    Ok(counts)
+}
+
+/// Upper bound for counting lines of an untracked file as additions.
+/// Untracked files over this size report no counts rather than forcing a
+/// large read for a sidebar badge.
+pub const UNTRACKED_COUNT_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Counts `\n` bytes in a file, capped at `UNTRACKED_COUNT_MAX_BYTES`.
+/// Returns `None` for missing/unreadable files, files over budget, and
+/// files containing a NUL byte in the scanned prefix (binary heuristic).
+pub(crate) fn count_untracked_lines(path: &std::path::Path) -> Option<u64> {
+    use std::io::Read as _;
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > UNTRACKED_COUNT_MAX_BYTES {
+        return None;
+    }
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut lines: u64 = 0;
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut chunk).ok()?;
+        if n == 0 {
+            break;
+        }
+        if chunk[..n].contains(&0) {
+            return None;
+        }
+        lines += chunk[..n].iter().filter(|b| **b == b'\n').count() as u64;
+    }
+    Some(lines)
+}
+
+/// Numstat records for one side of the diff: `(path, counts)` per file.
+pub type NumstatSide = Vec<(String, NumstatCount)>;
+
+/// Per-file staged/unstaged line counts for exactly the given repo-relative
+/// paths: one `--cached` and one worktree `git diff --numstat -z` spawn,
+/// both bounded by `budget`. Paths absent from a numstat output simply have
+/// no entry on that side (unchanged on that side).
+pub fn run_git_numstat(
+    workspace_root: &std::path::Path,
+    paths: &[String],
+    budget: &GitProbeBudget,
+) -> Result<(NumstatSide, NumstatSide), RpcError> {
+    let staged_argv = numstat_argv(paths, true);
+    let staged_out = run_git_argv(workspace_root, &staged_argv, budget)?;
+    let staged = parse_numstat_z(&staged_out.stdout)?;
+    let unstaged_argv = numstat_argv(paths, false);
+    let unstaged_out = run_git_argv(workspace_root, &unstaged_argv, budget)?;
+    let unstaged = parse_numstat_z(&unstaged_out.stdout)?;
+    Ok((staged, unstaged))
 }
 
 /// `git rev-parse HEAD` for the just-created commit oid. Read-only and
@@ -1584,5 +1770,31 @@ pub fn run_gh_pr_create_with_bin(
             )))
         }
         other => Err(require_mutation_success(&other, "gh", &argv).unwrap_err()),
+    }
+}
+
+#[cfg(test)]
+mod numstat_tests {
+    use super::parse_numstat_z;
+
+    #[test]
+    fn parses_add_delete_and_binary_records() {
+        let counts = parse_numstat_z("3\t1\tedit.txt\0-\t-\tblob.bin\0").unwrap();
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts[0].0, "edit.txt");
+        assert_eq!(counts[0].1.added, Some(3));
+        assert_eq!(counts[0].1.removed, Some(1));
+        // Binary is uncountable, never zero.
+        assert_eq!(counts[1].1.added, None);
+        assert_eq!(counts[1].1.removed, None);
+    }
+
+    #[test]
+    fn accepts_empty_output_and_rejects_malformed_records() {
+        assert!(parse_numstat_z("").unwrap().is_empty());
+        assert!(parse_numstat_z("3\t1\0").is_err());
+        assert!(parse_numstat_z("x\ty\tfile.txt\0").is_err());
+        assert!(parse_numstat_z("3\t1\tfile.txt\textra\0").is_err());
+        assert!(parse_numstat_z("3\t1\t\0").is_err());
     }
 }
