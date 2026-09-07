@@ -18,14 +18,15 @@ import { BROWSER_ROUTE_ID } from "../../browser-mount";
 import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
 import { CHANGES_ROUTE_ID } from "../../changes-mount";
 import { FILES_ROUTE_ID } from "../../files-mount";
+import { TASKS_ROUTE_ID } from "../../tasks-mount";
 
-export type ShellPlaceholder = "tasks" | "automations" | null;
+export type ShellPlaceholder = "automations" | null;
 
 /**
  * Top nav rows: Search opens the existing command palette; Terminals /
- * Files / Bots switch the live panel routes; Tasks and Automations are
- * honest placeholders (journeys J6/J7 owners) that surface a "coming
- * soon" empty state instead of fake pages.
+ * Files / Bots / Tasks switch the live panel routes; Automations is an
+ * honest placeholder (journey J7 owner) that surfaces a "coming soon"
+ * empty state instead of a fake page.
  */
 export function SidebarNav({
   route,
@@ -148,13 +149,18 @@ export function SidebarNav({
         <Globe size={16} />
         <span>Browser</span>
       </button>
+      {/* Tasks is project-scoped, not session-scoped: it stays enabled
+          with no workspace selected so the first task can create the
+          first worktree. The page itself reports withheld capability,
+          folder projects and missing gh. */}
       <button
         type="button"
-        {...row(placeholder === "tasks")}
-        aria-current={placeholder === "tasks" ? "page" : undefined}
-        onClick={() =>
-          setPlaceholder((value) => (value === "tasks" ? null : "tasks"))
-        }
+        {...row(route === TASKS_ROUTE_ID)}
+        aria-current={route === TASKS_ROUTE_ID ? "page" : undefined}
+        onClick={() => {
+          setPlaceholder(null);
+          onSelectRoute(TASKS_ROUTE_ID);
+        }}
       >
         <ListTodo size={16} />
         <span>Tasks</span>
@@ -195,9 +201,8 @@ export function SidebarNav({
       </button>
       {placeholder !== null && (
         <p className="shell-coming-soon" role="status">
-          {placeholder === "tasks"
-            ? "Tasks are coming soon (journey J6): GitHub Issues with worktree sessions."
-            : "Automations are coming soon (journey J7): scheduled agent runs with history."}
+          Automations are coming soon (journey J7): scheduled agent runs with
+          history.
         </p>
       )}
     </div>

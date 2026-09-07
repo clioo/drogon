@@ -7,6 +7,7 @@ import { git } from "./git";
 import { browser } from "./browser";
 import { settings } from "./settings";
 import { notifications } from "./notifications";
+import { tasks } from "./tasks";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -35,5 +36,5 @@ const bridge: DesktopBridge = {
 // Reconciles the granted `window.drogon.git.*` namespace with the
 // coordinator-owned DesktopBridge type without editing it: a runtime-only
 // merge before the freeze, so no existing key changes shape.
-Object.assign(bridge, { git, browser, notifications });
+Object.assign(bridge, { git, browser, notifications, tasks });
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

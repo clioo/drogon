@@ -12,6 +12,7 @@ pub mod orchestration_scope;
 pub mod orchestration_task;
 pub mod orchestration_worker;
 pub mod project;
+pub mod tasks;
 pub mod workspace_files;
 pub mod worktree;
 

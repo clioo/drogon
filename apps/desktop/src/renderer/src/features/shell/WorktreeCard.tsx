@@ -3,9 +3,15 @@
    worktree-card-header.tsx (adapter: Orca's store-driven card becomes a
    pure props card over this repo's Worktree/Session contract). */
 import { GitBranch } from "lucide-react";
+import { useSyncExternalStore } from "react";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
-import { summarizeCardSessions, worktreeDisplayName } from "./project-adapter";
+import {
+  getWorktreeIssueNumber,
+  subscribeWorktreeIssueLinks,
+  summarizeCardSessions,
+  worktreeDisplayName,
+} from "./project-adapter";
 import type { Workspace } from "../../../../shared/session-contract";
 
 /**
@@ -35,6 +41,12 @@ export function WorktreeCard({
   const liveCount = attached.filter(
     (session) => session.verdict === "live",
   ).length;
+  // Linked GitHub issue from the tasks link store (journey J6); null when
+  // the worktree was not started from a task — no badge then.
+  const issueNumber = useSyncExternalStore(
+    subscribeWorktreeIssueLinks,
+    () => getWorktreeIssueNumber(worktree.id),
+  );
   return (
     <button
       type="button"
@@ -59,6 +71,14 @@ export function WorktreeCard({
         )}
       </span>
       <span className="shell-worktree-card-meta">
+        {issueNumber !== null && (
+          <span
+            className="shell-worktree-card-issue"
+            title={`Started from issue #${issueNumber}`}
+          >
+            #{issueNumber}
+          </span>
+        )}
         {worktree.branch ? (
           <span className="shell-worktree-card-branch">
             <GitBranch size={12} aria-hidden="true" />
