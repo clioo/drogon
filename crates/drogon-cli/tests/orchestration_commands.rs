@@ -161,6 +161,38 @@ fn coordinator_args() -> Vec<&'static str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn root_worker_read_decodes_terminal_bytes_and_checks_cursor_span() {
+    for (encoded, end, expected_exit) in
+        [("aGVsbG8=", 5, 0), ("aGVsbG8=", 6, 1), ("not-base64", 5, 1)]
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let _mock = MockService::start(
+            dir.path(),
+            mock_behavior(
+                true,
+                vec![(
+                    "orchestration.workerRead",
+                    json!({"dispatchId":"dispatch-1","source":"terminal","processVerdict":"exited",
+                "entries":[{"sequence":0,"sourceIdentity":"stream-1",
+                    "content":{"dataBase64":encoded,"startCursor":0,"nextCursor":end,"truncated":false}}]}),
+                )],
+            ),
+        );
+        let mut args = vec!["orchestration", "worker-read", "--dispatch", "dispatch-1"];
+        args.extend(coordinator_args());
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, expected_exit,
+            "{} {}",
+            invocation.stdout, invocation.stderr
+        );
+        if expected_exit == 0 {
+            assert!(invocation.stdout.contains("hello"), "{}", invocation.stdout);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn root_review_run_use_rejects_wrong_coordinator_or_generation() {
     for (coordinator, generation, takeover) in [
         ("foreign-coordinator", 3, false),

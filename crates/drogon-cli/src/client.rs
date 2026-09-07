@@ -337,23 +337,26 @@ pub fn check_session_list(list: &SessionList) -> Result<(), String> {
 pub fn check_read(result: &ReadResult) -> Result<(), String> {
     check_session(&result.session)
         .map_err(|err| format!("session {}: {err}", result.session.id))?;
-    if result.next_cursor < result.start_cursor {
+    decode_terminal_bytes(&result.data_base64, result.start_cursor, result.next_cursor).map(|_| ())
+}
+
+pub fn decode_terminal_bytes(data: &str, start: u64, next: u64) -> Result<Vec<u8>, String> {
+    if next < start {
         return Err(format!(
-            "nextCursor ({}) must not be below startCursor ({})",
-            result.next_cursor, result.start_cursor
+            "nextCursor ({next}) must not be below startCursor ({start})"
         ));
     }
     let decoded = base64::engine::general_purpose::STANDARD
-        .decode(result.data_base64.as_bytes())
+        .decode(data.as_bytes())
         .map_err(|_| "dataBase64 is not valid base64".to_string())?;
-    let span = result.next_cursor - result.start_cursor;
+    let span = next - start;
     if decoded.len() as u64 != span {
         return Err(format!(
             "cursor range covers {span} bytes but dataBase64 decodes to {}",
             decoded.len()
         ));
     }
-    Ok(())
+    Ok(decoded)
 }
 
 /// The service must accept exactly the bytes the CLI sent, no more, no less.

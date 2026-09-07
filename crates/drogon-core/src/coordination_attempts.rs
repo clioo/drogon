@@ -48,6 +48,8 @@ pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), RpcError> {
         );
         CREATE UNIQUE INDEX IF NOT EXISTS orchestration_attempt_current
             ON orchestration_attempts(host_id,run_id,task_id) WHERE is_current=1;
+        CREATE INDEX IF NOT EXISTS orchestration_attempt_history
+            ON orchestration_attempts(host_id,run_id,task_id,sequence);
         INSERT OR IGNORE INTO schema_versions(component,version) VALUES ('orchestration_attempts',1);",
     ).map_err(error::from_sqlite)
 }
@@ -81,6 +83,62 @@ pub(crate) fn show(
         ));
     }
     Ok(attempt)
+}
+
+pub(crate) struct HistoryEntry {
+    pub(crate) attempt: Attempt,
+    pub(crate) retry_of: Option<String>,
+    pub(crate) active: bool,
+}
+
+pub(crate) fn history(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    task_id: &str,
+) -> Result<Vec<HistoryEntry>, RpcError> {
+    let mut statement = tx
+        .prepare(
+            "SELECT dispatch_id,retry_of,is_current,fenced FROM orchestration_attempts
+         WHERE host_id=?1 AND run_id=?2 AND task_id=?3 ORDER BY sequence LIMIT 501",
+        )
+        .map_err(error::from_sqlite)?;
+    let rows = statement
+        .query_map(params![scope.host.host_id, scope.run_id, task_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, bool>(2)?,
+                row.get::<_, bool>(3)?,
+            ))
+        })
+        .map_err(error::from_sqlite)?;
+    let mut history = Vec::new();
+    for row in rows {
+        if history.len() == 500 {
+            return Err(RpcError::new(
+                "result_too_large",
+                "Task history exceeds the response bound.",
+            ));
+        }
+        let (dispatch_id, retry_of, current, fenced) = row.map_err(error::from_sqlite)?;
+        let attempt = show(tx, scope, &dispatch_id)?;
+        let awaiting_report = matches!(
+            attempt.result.assignment_state,
+            AssignmentState::Admitting | AssignmentState::Ready
+        ) || (attempt.result.assignment_state == AssignmentState::Failed
+            && attempt
+                .result
+                .failure
+                .as_ref()
+                .is_some_and(|failure| failure.code == "agent_prompt_stalled"));
+        let active = current && !fenced && awaiting_report;
+        history.push(HistoryEntry {
+            attempt,
+            retry_of,
+            active,
+        });
+    }
+    Ok(history)
 }
 
 /// Replacement preserves the old row and fences it in the admission transaction.

@@ -1196,6 +1196,7 @@ pub async fn run(
                             &entry.source_identity,
                         )
                         .map_err(|e| e.message)?;
+                        crate::orchestration_output::terminal_bytes(r.source, entry)?;
                     }
                     Ok(())
                 },
@@ -1217,10 +1218,7 @@ pub async fn run(
                     );
                     for entry in &result.entries {
                         output.push('\n');
-                        match &entry.content {
-                            Value::String(content) => output.push_str(content),
-                            content => output.push_str(&content.to_string()),
-                        }
+                        output.push_str(&crate::orchestration_output::render(result.source, entry));
                     }
                     output
                 },

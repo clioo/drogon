@@ -88,7 +88,7 @@ impl Engine {
             "orchestration.workerRead" => {
                 let params: WorkerReadParams = decode(&request.params)?;
                 params.validate_shape(&self.host_id)?;
-                Err(unsupported_worker_operation())
+                self.read_coordination_worker(&params)
             }
             "orchestration.workerStop" => {
                 let params: WorkerStopParams = decode(&request.params)?;
@@ -138,11 +138,4 @@ impl Engine {
             _ => Ok(ProcessVerdict::Unverifiable),
         }
     }
-}
-
-fn unsupported_worker_operation() -> RpcError {
-    RpcError::new(
-        "unsupported_feature",
-        "This native worker operation is not implemented yet.",
-    )
 }

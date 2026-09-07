@@ -91,6 +91,59 @@ fn coordinator_scope_params(
     })
 }
 
+#[test]
+fn task_show_retains_attempt_order_retry_links_and_honest_liveness_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        "history-run",
+        run_create_params(&host, "owner", "history"),
+    )["run"]["runId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let task = ok(
+        &engine,
+        "orchestration.taskCreate",
+        "history-task",
+        task_create_params(&host, &run, "owner", 1, "preserve attempts", &[]),
+    )["task"]["taskId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let conn = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    for (id, state, retry, current) in [
+        ("old", "stopped", None, 0),
+        ("new", "ready", Some("old"), 1),
+    ] {
+        let value = json!({
+            "result": {"runId": run, "taskId": task, "dispatchId": id,
+                "consumerGeneration": 1, "workspaceId": "folder", "assignmentState": state,
+                "readiness": "notObserved", "processVerdict": "live", "effects": [], "residualResources": []},
+            "launch": {"harnessId": "claude", "permissionMode": "inherit"},
+            "outcome": null, "report_message_id": null, "cleanup_owned": true
+        });
+        conn.execute("INSERT INTO orchestration_attempts(dispatch_id,host_id,run_id,task_id,is_current,fenced,retry_of,state_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            rusqlite::params![id,host,run,task,current,1-current,retry,value.to_string()]).unwrap();
+    }
+    drop(conn);
+    drop(engine);
+    let engine = Engine::open(dir.path()).unwrap();
+    let mut params = coordinator_scope_params(&host, &run, "owner", 1);
+    params["taskId"] = json!(task);
+    let result = ok(&engine, "orchestration.taskShow", "history-show", params);
+    assert_eq!(result["attempts"].as_array().unwrap().len(), 2);
+    assert_eq!(result["attempts"][0]["dispatchId"], "old");
+    assert_eq!(result["attempts"][0]["attempt"], 1);
+    assert_eq!(result["attempts"][1]["attempt"], 2);
+    assert_eq!(result["attempts"][1]["retryOf"], "old");
+    assert_eq!(result["attempts"][1]["processVerdict"], "unverifiable");
+    assert_eq!(result["activeDispatchId"], "new");
+}
+
 // --- The one real, currently-passing test: a positive control proving
 // Engine::open/dispatch itself works, so a failure below can never be
 // misread as "the engine is broken". ---

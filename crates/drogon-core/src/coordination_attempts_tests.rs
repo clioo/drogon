@@ -56,6 +56,32 @@ fn database() -> Connection {
 }
 
 #[test]
+fn history_is_task_scoped_and_refuses_truncating_more_than_500_attempts() {
+    let mut conn = database();
+    let tx = conn.transaction().unwrap();
+    for index in 0..501 {
+        let mut entry = attempt(&format!("history-{index}"));
+        entry.result.assignment_state = AssignmentState::Stopped;
+        tx.execute("INSERT INTO orchestration_attempts(dispatch_id,host_id,run_id,task_id,is_current,fenced,state_json) VALUES (?1,'host-a','run-a','task-a',0,1,?2)",
+            params![entry.result.dispatch_id,encode(&entry).unwrap()]).unwrap();
+    }
+    assert!(history(&tx, &scope(), "other-task").unwrap().is_empty());
+    assert_eq!(
+        history(&tx, &scope(), "task-a").err().unwrap().code,
+        "result_too_large"
+    );
+    tx.execute(
+        "DELETE FROM orchestration_attempts WHERE dispatch_id='history-500'",
+        [],
+    )
+    .unwrap();
+    let entries = history(&tx, &scope(), "task-a").unwrap();
+    assert_eq!(entries.len(), 500);
+    assert!(entries.iter().all(|entry| !entry.active));
+    assert_eq!(entries[499].attempt.result.dispatch_id, "history-499");
+}
+
+#[test]
 fn admission_rollback_removes_attempt_and_current_pointer() {
     let mut conn = database();
     let tx = conn.transaction().unwrap();

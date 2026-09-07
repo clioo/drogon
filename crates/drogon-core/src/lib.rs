@@ -10,6 +10,7 @@ mod coordination_access;
 mod coordination_attempts;
 mod coordination_identity;
 mod coordination_launch;
+mod coordination_output;
 mod coordination_runs;
 mod coordination_worker_control;
 mod coordination_workers;

@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::coordination_attempts;
 use crate::coordination_identity::Actor;
 use crate::{Engine, error, requests};
 
@@ -79,10 +80,30 @@ impl Engine {
             "orchestration.taskShow" => {
                 let params: TaskShowParams = decode(&request.params)?;
                 params.validate_shape(&self.host_id)?;
-                self.coordination_read(|tx| {
+                let (mut result, history) = self.coordination_read(|tx| {
                     runs::require_coordinator(tx, &params.scope)?;
-                    encode(tasks::show(tx, &params)?)
-                })
+                    Ok((
+                        tasks::show(tx, &params)?,
+                        coordination_attempts::history(tx, &params.scope, &params.task_id)?,
+                    ))
+                })?;
+                for (index, entry) in history.into_iter().enumerate() {
+                    let verdict = self.worker_verdict(&entry.attempt)?;
+                    if entry.active {
+                        result.active_dispatch_id = Some(entry.attempt.result.dispatch_id.clone());
+                    }
+                    result
+                        .attempts
+                        .push(drogon_protocol::orchestration_common::AttemptSummary {
+                            dispatch_id: entry.attempt.result.dispatch_id,
+                            attempt: (index + 1) as u32,
+                            retry_of: entry.retry_of,
+                            assignment_state: entry.attempt.result.assignment_state,
+                            outcome: entry.attempt.outcome,
+                            process_verdict: verdict,
+                        });
+                }
+                encode(result)
             }
             other => Err(error::method_not_found(other)),
         }
