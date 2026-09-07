@@ -57,11 +57,15 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Check platform boundaries, not runtime acceptance
+      - name: Compile Windows platform boundaries
         run: |
           rustup toolchain install 1.98.0 --profile minimal
           rustup override set 1.98.0
           cargo check --workspace --locked
+      - name: Build native binaries and exercise Windows daemon transport
+        run: |
+          cargo build --workspace --locked
+          cargo test -p drogond --locked
       - name: Install pinned JavaScript dependencies
         run: |
           npm install --global pnpm@11.19.0
