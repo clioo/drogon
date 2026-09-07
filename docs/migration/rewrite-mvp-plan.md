@@ -137,3 +137,5 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | Fidelidad R8-G2: tokens `:root`/`.dark`, capa base y fuentes Geist + Nerd Symbols del fuente | R8 | GLM 5.3 Flash | lanzada | |
 | J7 R8-O1: Automations con lista, editor, detalle e historial del fuente; horarios en hora local | R8 | OpenCode + Muse | lanzada | |
 | J1 R8-O2: terminal con terminal.css, tema xterm por esquema, zoom, búsqueda, links, menú contextual y overlay de salida | R8 | OpenCode + Muse | lanzada | |
+| J1 R9-A: acciones de tarjeta de worktree del fuente (menú contextual, renombrar, borrar con conteos, badges) | R9 | Muse | lanzada | |
+| Fidelidad R9-B: remanente del chrome (Back/Forward en el titlebar, cabecera de Projects, pie del sidebar, Star on GitHub, ⌘J) | R9 | Muse | lanzada | |
