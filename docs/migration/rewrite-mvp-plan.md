@@ -134,7 +134,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J8 R7-E: responsabilidades de Bots (tarjetas, alta con cron, historial, Back) | R7 | Muse | fusionada: bot.responsibility_create/delete sobre automations del bot, tarjetas e historial por bot, Back de cabecera cableado; 876 tests | #60 |
 | J5/J10 R7-I: tabla de atajos del fuente, dispatcher por scope, sección de shortcuts en Settings | R7 | Muse | lanzada | |
 | J6 R8-G1: Tasks con frame, source bar, filas GitHub, filtros y paginación del fuente; paging en tasks.list | R8 | GLM 5.3 Flash | lanzada | |
-| Fidelidad R8-G2: tokens `:root`/`.dark`, capa base y fuentes Geist + Nerd Symbols del fuente | R8 | GLM 5.3 Flash | lanzada | |
+| Fidelidad R8-G2: tokens `:root`/`.dark`, capa base y fuentes Geist + Nerd Symbols del fuente | R8 | GLM 5.3 Flash | fusionada: cabecera del oráculo idéntica (Geist 36px/700), tokens iguales en ambos esquemas, fuentes empaquetadas con OFL | #62 |
 | J7 R8-O1: Automations con lista, editor, detalle e historial del fuente; horarios en hora local | R8 | OpenCode + Muse | lanzada | |
 | J1 R8-O2: terminal con terminal.css, tema xterm por esquema, zoom, búsqueda, links, menú contextual y overlay de salida | R8 | OpenCode + Muse | lanzada | |
 | J1 R9-A: acciones de tarjeta de worktree del fuente (menú contextual, renombrar, borrar con conteos, badges) | R9 | Muse | lanzada | |
