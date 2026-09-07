@@ -765,6 +765,9 @@ fn record_responsibility_run_dedupes_on_automation_run_id_with_null_merge_semant
             run_number: None,
             occurrence_count: None,
             last_occurrence_at: None,
+            session_incarnation: None,
+            exit_code: None,
+            observed_at: None,
         },
     )
     .unwrap();
@@ -885,6 +888,9 @@ fn record_responsibility_run_is_atomic_across_two_real_concurrent_connections() 
                 run_number: None,
                 occurrence_count: None,
                 last_occurrence_at: None,
+                session_incarnation: None,
+                exit_code: None,
+                observed_at: None,
             },
         )
         .unwrap();

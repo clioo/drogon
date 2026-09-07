@@ -1,0 +1,277 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "recordedBy": "V4-B worker (task_de6680399532 / dispatch ctx_f035020e4207), 2026-09-07",
+  "method": "sha256 of `git -C /Users/carlos/Documents/Drogon-mentu-session show <pin>:<path>` output, run from the Drogon-rewrite worktree cwd; the reference checkout was never used as cwd and nothing was written to it",
+  "revisionProof": {
+    "referenceHead": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "pinnedObjectExists": true,
+    "headEqualsPin": true
+  },
+  "isolationRationale": "hash/read-only recording only; no source module was imported or executed, no runner wrote to the reference, no fixture was copied outside the declared frozen-port test files",
+  "license": {
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "notice": "tests/parity/ports/LICENSE.orca"
+  },
+  "portPackage": "WP-CAP-MEET",
+  "scope": "Meetings transcripts/Q&A/availability + speech separation/stt runtime + speech model catalog, plus the account catalog surfaces (accounts pane, provider account scope, voice/speech model settings section)",
+  "placementRationale": "The task groups account/provider/skills catalogs with this vertical; the skills catalog half is recorded under WP-CAP-MENTU (Mentu binding). Account-catalog files are recorded here because meetings/speech availability depends on account/provider state; their implementation ownership remains WP-CAP-INT/WP-CAP-DEVICE per the audit allocation and is not claimed by this port",
+  "fileCount": 45,
+  "files": [
+    {
+      "path": "src/renderer/src/components/meetings/MeetingsPage.tsx",
+      "sha256": "f1a6f8af3ad059c563f376a475a31b1b2cb638df7376fd5db1377710ed97f256",
+      "bytes": 5303
+    },
+    {
+      "path": "src/renderer/src/components/meetings/MeetingsPageHeader.tsx",
+      "sha256": "400b32495fac9487149e11c0f4541388afa45f9a32e2e66d016326ad878596ea",
+      "bytes": 2152
+    },
+    {
+      "path": "src/renderer/src/components/meetings/MeetingTranscriptRow.tsx",
+      "sha256": "cb53940b049d7b1442017cbe26e963dbf663fc7bb70b1a18d9d95dda9e1c0e39",
+      "bytes": 2968
+    },
+    {
+      "path": "src/renderer/src/components/meetings/MeetingsNotices.tsx",
+      "sha256": "6cfad3c3b49b210d3898fe34a66bb17352939d6ffbfc0c8d0d3971b76c171335",
+      "bytes": 2122
+    },
+    {
+      "path": "src/renderer/src/components/meetings/meetings-page-copy.ts",
+      "sha256": "0ef3096ff95c3f4ac3f2b583855f698dd7d8e12afd8f7521429511591ac2a006",
+      "bytes": 3209
+    },
+    {
+      "path": "src/renderer/src/components/meetings/meetings-page-runtime.ts",
+      "sha256": "c3dad21ace12fa3835be2a314feca4ef12d453818c926d99ff869a3ebd484f56",
+      "bytes": 3465
+    },
+    {
+      "path": "src/renderer/src/components/meetings/meetings-page-runtime.test.ts",
+      "sha256": "8216a4fe327ae82e2afeb68af7a735735fed4e5c27c4a643bc40f9bd3a380502",
+      "bytes": 3901
+    },
+    {
+      "path": "src/renderer/src/components/meetings/use-meetings-page-controller.ts",
+      "sha256": "f1e8201c30b8cc7d81b013b72b82c8f6a1b8c8c14fe60ba84a848142a9203a5e",
+      "bytes": 4640
+    },
+    {
+      "path": "src/renderer/src/components/meetings/use-meetings-page-escape.ts",
+      "sha256": "3b265f618a22fcadded60e4d918d4d183b09e8eca8d15555806bb3a25a27b548",
+      "bytes": 770
+    },
+    {
+      "path": "src/renderer/src/components/meetings/MeetingsPage.test.tsx",
+      "sha256": "de38914e502523a5b4b3006359a155b9c159340f6a293a7b0d6a3a256304e256",
+      "bytes": 7243
+    },
+    {
+      "path": "src/shared/drogon-meeting-contract.ts",
+      "sha256": "f4fb0f08e5128f9e0d52890ca4d7e988d8b66d1caa9645e164dda61bd33c7cc5",
+      "bytes": 8889
+    },
+    {
+      "path": "src/shared/drogon-meeting-contract.test.ts",
+      "sha256": "370df51ae823ba180bdbb0f126d74801779044bfe393be78a3931196c7fcdc9f",
+      "bytes": 3345
+    },
+    {
+      "path": "src/main/meetings/meeting-transcript-root.ts",
+      "sha256": "ac59be26897994922ab7204c98a5b179c3061921c79231e819b9e56e796937f8",
+      "bytes": 948
+    },
+    {
+      "path": "src/main/meetings/write-that-down-availability.ts",
+      "sha256": "92d349c79f18588e234a87f968ef8f701ee62252139a44039b8c87534dc35178",
+      "bytes": 1718
+    },
+    {
+      "path": "src/main/meetings/write-that-down-bridge.ts",
+      "sha256": "3af7b5620816ffa6e27bf8d45defb6d2f9d4b07c092dfbdc5148c6e52c38c0e5",
+      "bytes": 6991
+    },
+    {
+      "path": "src/main/meetings/write-that-down-bridge.test.ts",
+      "sha256": "61f45e4ae619f53c2a1e50ce61ca25a91f63a7fa3cc99b9fdad89c758531099a",
+      "bytes": 9612
+    },
+    {
+      "path": "src/main/meetings/write-that-down-configuration.ts",
+      "sha256": "ffae4620444552177ad0f0fc8a02aabb5ed0ba13950919b8ef55046981314d44",
+      "bytes": 9428
+    },
+    {
+      "path": "src/main/meetings/write-that-down-filesystem.ts",
+      "sha256": "dfd4c8899c0eb65e6114fad46152efa1086de6d3100090549178c27f95186148",
+      "bytes": 2235
+    },
+    {
+      "path": "src/main/meetings/write-that-down-ipc.test.ts",
+      "sha256": "887a64b94defe9d96e6395a809c07070436b7dd6780e4dcb8e068985932e16ce",
+      "bytes": 1970
+    },
+    {
+      "path": "src/main/meetings/write-that-down-transcripts.ts",
+      "sha256": "8fb283b12c52ddaa40772e569d462b41fc8d20161e6d351c3f189be98962d879",
+      "bytes": 4041
+    },
+    {
+      "path": "src/main/meetings/write-that-down-workspace.ts",
+      "sha256": "114d502485b3bdd470718330c023c20cc8db2cf07edb4319abfdd37e3d678ddb",
+      "bytes": 3281
+    },
+    {
+      "path": "src/main/ipc/speech.ts",
+      "sha256": "8ddd76741f144810674cdb84d94e4ef0754c68cc37d64aac31c24eb8b63ab005",
+      "bytes": 7734
+    },
+    {
+      "path": "src/main/ipc/speech.test.ts",
+      "sha256": "787c4997ad7a6556fecfa9dbf1fc694bc702b61cc79dc4cc4a9c0b69be07920b",
+      "bytes": 5068
+    },
+    {
+      "path": "src/main/host/electron-speech-services.ts",
+      "sha256": "6cada848c5c12dfd33bb8aad48bb746dad7f33cc9d4a0dea33893ab0bab7f3a5",
+      "bytes": 483
+    },
+    {
+      "path": "src/main/speech/model-catalog.ts",
+      "sha256": "a2fde409df7b3e57a021761901a4d19a0651175c9709479d6081edf79186c305",
+      "bytes": 4845
+    },
+    {
+      "path": "src/main/speech/model-catalog.test.ts",
+      "sha256": "6ce0ba6bfbb8d41b18b3678c5a6f7aa6aecb9134fa047b6add5a02751edeac2f",
+      "bytes": 1880
+    },
+    {
+      "path": "src/main/speech/stt-service.ts",
+      "sha256": "464c6ca825277a6c834816ae4cd014c52f3a96d620f3146e65a6a7ed383c52ce",
+      "bytes": 2078
+    },
+    {
+      "path": "src/main/speech/stt-service.test.ts",
+      "sha256": "497e04f935dd5cd30275ee06d418d5381a96b7fdd1757062fed16bc55dd331b4",
+      "bytes": 22992
+    },
+    {
+      "path": "src/main/speech/stt-session-timeouts.ts",
+      "sha256": "e684191bc1f5814853a19e9587227ea0cbf5907940df7fcccea6d637e0899785",
+      "bytes": 183
+    },
+    {
+      "path": "src/main/speech/stt-worker.ts",
+      "sha256": "4c94a138ed89373f5f8ed0da0375f3d5758aa24a58a0e1e52ae53d74cd7fe373",
+      "bytes": 10932
+    },
+    {
+      "path": "src/main/speech/stt-worker.test.ts",
+      "sha256": "e8918545b98b5695d6d79d5dce423303d5efc07cb249576fdb99375d3e0cbebe",
+      "bytes": 624
+    },
+    {
+      "path": "src/main/speech/openai-transcription-client.ts",
+      "sha256": "ad32a769d20a3af6d5f5c21a8044e3709d79b5fd35ffe6e76fdbfe8584ae8c69",
+      "bytes": 4468
+    },
+    {
+      "path": "src/main/speech/openai-transcription-client.test.ts",
+      "sha256": "030df49b1048a0e8a30f11aff56785b8a8ef00d7ecb31d071edb5a0cd0aa810e",
+      "bytes": 848
+    },
+    {
+      "path": "src/main/speech/model-manager.ts",
+      "sha256": "a73609763cee49eb89f9cd535c88fa3197667c62c9a9026473f9516399fe74f0",
+      "bytes": 11000
+    },
+    {
+      "path": "src/main/speech/model-manager.test.ts",
+      "sha256": "816eb9ef7ef5b103054177cc9bd155c3b006da051e461e450e9cc2074873aaad",
+      "bytes": 16317
+    },
+    {
+      "path": "src/renderer/src/components/settings/AccountsPane.tsx",
+      "sha256": "2f0872d630fe349ca8d56050b99c9d83aaabcd676310139bbc0d2e12ab2a2176",
+      "bytes": 15888
+    },
+    {
+      "path": "src/renderer/src/components/settings/AccountsPane.test.tsx",
+      "sha256": "a527e083c67081c489270d8620e7e141eeae24ee7011f0635d80aa2f5039727d",
+      "bytes": 6958
+    },
+    {
+      "path": "src/renderer/src/components/settings/accounts-pane-types.ts",
+      "sha256": "da0ed7b78bd6674cdd5a6d92aa8d6fdb6cb79557a05df9f7273e5e9f14e47151",
+      "bytes": 3993
+    },
+    {
+      "path": "src/renderer/src/components/settings/accounts-search.ts",
+      "sha256": "14a42579334e41c4a76320f0e3196bff1c9f4fe85439857ba88c4df5d4a1aee5",
+      "bytes": 10161
+    },
+    {
+      "path": "src/renderer/src/components/settings/accounts-search.test.ts",
+      "sha256": "9cee20c8fa73c97fec3ff858f4c2997143788390fd88c6a3c60d551e4c7f3e29",
+      "bytes": 1571
+    },
+    {
+      "path": "src/renderer/src/components/settings/provider-account-scope.ts",
+      "sha256": "11bdc7c32a938f27718a95a087c78b6900c9d92ed2a48e7eefc164971c64e089",
+      "bytes": 3506
+    },
+    {
+      "path": "src/renderer/src/components/settings/provider-account-scope.test.ts",
+      "sha256": "eb77435a3f5788d959ae8ab5bc7750caa4710aa67f59e468ae5a64f9e476d0bc",
+      "bytes": 2590
+    },
+    {
+      "path": "src/renderer/src/components/settings/accounts-pane-runtime.ts",
+      "sha256": "0927b126971809663fb9c161397476b966adb1c431be8e7e10aa441054143bc0",
+      "bytes": 3843
+    },
+    {
+      "path": "src/renderer/src/components/settings/VoiceSpeechModelSection.tsx",
+      "sha256": "f76968ef4df53ca70b3a40154922cbe0baa88467414269429a6f665d44829520",
+      "bytes": 10224
+    },
+    {
+      "path": "src/renderer/src/components/settings/VoiceSpeechModelSection.test.tsx",
+      "sha256": "8984b81d0da9ac95d060fb7c4038da1ce6ad1d38965460a53663517fcf8134ff",
+      "bytes": 7519
+    }
+  ],
+  "frozenPortCopies": [
+    {
+      "portPath": "tests/parity/ports/WP-CAP-MEET/page-runtime/src/renderer/src/components/meetings/meetings-page-runtime.test.ts",
+      "sourcePath": "src/renderer/src/components/meetings/meetings-page-runtime.test.ts",
+      "expected": "8216a4fe327ae82e2afeb68af7a735735fed4e5c27c4a643bc40f9bd3a380502",
+      "actual": "8216a4fe327ae82e2afeb68af7a735735fed4e5c27c4a643bc40f9bd3a380502",
+      "match": true
+    },
+    {
+      "portPath": "tests/parity/ports/WP-CAP-MEET/speech-catalog/src/main/speech/model-catalog.test.ts",
+      "sourcePath": "src/main/speech/model-catalog.test.ts",
+      "expected": "6ce0ba6bfbb8d41b18b3678c5a6f7aa6aecb9134fa047b6add5a02751edeac2f",
+      "actual": "6ce0ba6bfbb8d41b18b3678c5a6f7aa6aecb9134fa047b6add5a02751edeac2f",
+      "match": true
+    },
+    {
+      "portPath": "tests/parity/ports/WP-CAP-MEET/catalogs/src/renderer/src/components/settings/accounts-search.test.ts",
+      "sourcePath": "src/renderer/src/components/settings/accounts-search.test.ts",
+      "expected": "9cee20c8fa73c97fec3ff858f4c2997143788390fd88c6a3c60d551e4c7f3e29",
+      "actual": "9cee20c8fa73c97fec3ff858f4c2997143788390fd88c6a3c60d551e4c7f3e29",
+      "match": true
+    },
+    {
+      "portPath": "tests/parity/ports/WP-CAP-MEET/catalogs/src/renderer/src/components/settings/provider-account-scope.test.ts",
+      "sourcePath": "src/renderer/src/components/settings/provider-account-scope.test.ts",
+      "expected": "eb77435a3f5788d959ae8ab5bc7750caa4710aa67f59e468ae5a64f9e476d0bc",
+      "actual": "eb77435a3f5788d959ae8ab5bc7750caa4710aa67f59e468ae5a64f9e476d0bc",
+      "match": true
+    }
+  ]
+}

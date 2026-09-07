@@ -4,6 +4,7 @@
 //! auth and the transport; this crate never sees a raw socket.
 
 pub mod automations;
+mod bot_mutation_rpc;
 mod bot_snapshot_rpc;
 pub mod bots;
 pub mod claim_identity;
@@ -29,6 +30,8 @@ mod harness;
 mod ring;
 mod session;
 mod workspace;
+mod workspace_file_rpc;
+mod workspace_files;
 
 mod service_quiescence;
 
@@ -62,6 +65,7 @@ use session::SessionHandle;
 const CAPABILITIES: &[&str] = &[
     "orchestration.native.v1",
     "workspace.v1",
+    "files.v1",
     "session.pty.v1",
     "session.cursor-read.v1",
     "session.incarnation.v1",
@@ -76,6 +80,15 @@ pub(crate) fn now_rfc3339() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     humantime_rfc3339(dur.as_secs(), dur.subsec_nanos())
+}
+
+pub(crate) fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 /// Minimal UTC RFC3339 formatter so this crate does not need a chrono/time
@@ -308,6 +321,10 @@ impl Engine {
             "runtime.shutdown" => self.do_runtime_shutdown(request),
             "harness.list" => Ok(self.harness_list()),
             "bot.snapshot" => self.bot_snapshot(&request.params),
+            "bot.create" => self.bot_create(request),
+            "files.list" => self.do_files_list(&request.params),
+            "files.read" => self.do_files_read(&request.params),
+            "files.write" => self.mutating(request, Self::do_files_write),
             "harness.start" => self.mutating(request, Self::do_harness_start),
             "workspace.register" => self.mutating(request, Self::do_workspace_register),
             "workspace.list" => {
