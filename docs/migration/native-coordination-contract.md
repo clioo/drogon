@@ -1,7 +1,8 @@
 # Native coordination contract
 
-Status: coordinator design, awaiting the selected source-test baseline gates. No
-coordination capability is implemented or advertised by this document. This wave
+Status: selected source baselines accepted (59 store and 29 CLI cases); full
+typed method freeze and runtime integration remain pending. No coordination
+capability is implemented or advertised by this document. This wave
 advances the full rewrite; it does not redefine Orca parity as this smaller slice.
 
 Baseline: Drogon `252de85c2fd28bbdc4c09c70c16063a0c7eb901e`; preserved Orca
@@ -103,6 +104,21 @@ The DB-only receipt seam can proceed independently after its source atomicity
 baseline and candidate RED are accepted. It extends the existing ledger, not the
 public method group. The original external-effect path remains unchanged.
 
+Root accepted CLI credential isolation at `01565b9`, following behavioral RED
+`b403d73`. `DROGON_DISPATCH_CAPABILITY` is authoritative when present: malformed
+values fail locally and usable values travel verbatim without reading the admin
+token. Independent verification passed 115 CLI tests (53 unit, 49 integration,
+6 credential, 7 parser), strict CLI clippy and workspace format checks. Parser
+tests now use private temporary data directories rather than the user's daemon.
+These Unix subprocess cases do not establish Windows execution or server-side
+worker authentication; both remain integration obligations.
+
+Store source evidence is committed at `010f818`: nine retained capsules, 59
+source cases, 922 source/license references and 111 unique pinned files. Root
+also ran 41 verifier tests and inspected all nine retained result/receipt pairs.
+The verifier refuses missing independent expected counts; original process exit
+codes were not retained, so its reconstructed success is not exit-code evidence.
+
 Root accepted the database-only seam after independent focused (16/16) and
 full `drogon-core` test runs on 2026-09-07. The initial implementation was
 rejected: sharing the external path's retained in-flight slots caused an
@@ -160,6 +176,15 @@ method and canonical semantic params in the fingerprint. Existing non-coordinati
 keys are unchanged. Internal keys and raw actor hashes are not public report data.
 Test canonical key order explicitly rather than relying on a serde feature comment.
 
+The internal key has a NUL-prefixed `drogon-coordination-v1:` namespace plus
+the tuple digest. External protocol-v1 request IDs reject controls, so no legacy
+request can claim this key even though both paths share the `requests` table.
+Root reproduced the unprefixed-key collision with the real envelope validator,
+then verified the fix and a SQLite round-trip. The internal identity seam's
+11 cases and all 33 core unit tests pass; runtime actor authentication and
+receipt lookup still need wiring. Minted secrets use 32 CSPRNG bytes, hash the
+transported hex string, and have a fixed redacted Debug representation.
+
 Add a transaction-aware path to `RequestLedger` for database-only work, with
 state and receipt in one transaction. The external-effect path retains its durable
 pending admission and uncertain-result behavior. Domain methods receive the
@@ -170,13 +195,22 @@ already holding a database lock needed by the other path.
 ### Reports, duplicate outcomes and prompt observation
 
 Source `db/dispatch-context/worker-report-settlement.ts` explicitly corrects a
-false failure caused by `AGENT_PROMPT_STALLED_ERROR`: the preamble can have reached
-the worker before observation expired. Preserve the *behavior*, not the false
-failure state. In Drogon, a prompt observation timeout leaves readiness unverified
-and the attempt active/inspectable. It neither revokes the capability nor unlocks
-replacement. An authenticated final report can still settle that exact attempt.
-Genuine launch failure, explicit cancellation and confirmed process exit remain
-different evidence. The selected source regression must map to this invariant.
+failure caused by `AGENT_PROMPT_STALLED_ERROR`: the preamble can have reached the
+worker before observation expired. Root's earlier active-only proposal did not
+preserve the source's observable failed state or explicit retry behavior. The
+2026-09-07 source review supersedes that proposal: retain the compatibility
+task/assignment `failed` state with this exact observation-failure reason, while
+keeping reported outcome unset, readiness unverified and process verdict separate.
+The capability remains valid for that attempt's first real report unless an
+explicit cancellation, abandonment or replacement has fenced it. This is not
+evidence that the process exited or that the worker reported failure.
+
+Preserve explicit `retryOf` for the latest failed/stopped/abandoned attempt when
+its task is failed/blocked, as `worker-dispatch-start.ts` requires. A timeout alone
+never starts a replacement. The replacement transaction fences old authority;
+late original reports cannot settle the replacement. Existing uncertain/live
+resources remain recorded and inspectable, never implicitly killed or forgotten.
+These are compatibility state transitions, not new process-death evidence.
 
 | Report condition | Required result |
 | --- | --- |
@@ -185,7 +219,7 @@ different evidence. The selected source regression must map to this invariant.
 | Same attempt already reported the same outcome, no active replacement | Duplicate receipt identifying the original report; preserve original body/result, do not create another final message |
 | Same attempt already reported a different outcome | Refuse; no overwrite |
 | Cancelled, abandoned or superseded attempt | Refuse a fresh settlement, never complete its replacement |
-| Prompt not observed, exact active worker later reports | Accept once; lack of TUI observation is not a cancellation fence |
+| Prompt not observed, exact non-replaced worker later reports | Accept its first real report once, including a failed report replacing the observation-failure placeholder |
 
 Credential revocation prevents new worker effects but must retain enough scoped
 identity to recover an exact committed report receipt. This is not general
@@ -309,6 +343,8 @@ Windows build and Unix runtime coverage stated separately.
 Read at the pinned Orca revision: `src/shared/orchestration-rpc-contract.ts`,
 `src/main/runtime/orchestration/db/runs/run-delivery.ts`,
 `src/main/runtime/orchestration/db/dispatch-capability-hash.ts`,
+`src/main/runtime/orchestration/db/worker-dispatch/worker-dispatch-start.ts`,
+`src/main/runtime/orchestration/db/dispatch-context/worker-report-settlement.ts`,
 `docs/reference/remote-wire-compatibility.md`, and
 `docs/reference/ssh-execution-boundary.md`. Preserve attribution for adapted code.
 Current Drogon integration seams: `crates/drogon-core/src/requests.rs`, `db.rs`,

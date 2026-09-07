@@ -4,9 +4,11 @@
 use std::process::Command;
 
 fn run(args: &[&str]) -> std::process::Output {
+    let data_dir = tempfile::tempdir().expect("isolated parser data directory");
     Command::new(env!("CARGO_BIN_EXE_drogon-cli"))
         .args(args)
-        .env_remove("DROGON_DATA_DIR")
+        .env("DROGON_DATA_DIR", data_dir.path())
+        .env_remove("DROGON_DISPATCH_CAPABILITY")
         .output()
         .expect("spawn drogon-cli")
 }

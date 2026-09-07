@@ -6,6 +6,7 @@
 pub mod automations;
 pub mod bots;
 pub mod claim_identity;
+mod coordination_identity;
 pub mod locale_ordering;
 pub mod session_authority;
 
