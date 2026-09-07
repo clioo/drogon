@@ -132,15 +132,67 @@ fn persisted_harness_ids_are_explicit_and_agy_is_only_an_alias() {
     assert!(serde_json::from_str::<HarnessId>("\"unknown\"").is_err());
 }
 
+/// Was `batch_launchers_require_windows_argv_adapter`, asserting
+/// `unsupported_platform` — stale since `launch.rs`'s Windows batch-launcher
+/// adapter landed: `plan_launch` now accepts a `.cmd`/`.bat` executable and
+/// wraps it as `cmd.exe /d /c <script> <args...>` instead of refusing it.
 #[cfg(windows)]
 #[test]
-fn batch_launchers_require_windows_argv_adapter() {
+fn batch_launchers_get_the_cmd_exe_argv_adapter() {
     let req = request(HarnessId::Pi);
+    let plan = plan_launch(&req, Path::new(r"C:\tools\pi.cmd")).unwrap();
+    assert!(plan.command.to_lowercase().ends_with("cmd.exe"));
+    assert_eq!(plan.args[..3], ["/d", "/c", r"C:\tools\pi.cmd"]);
+}
+
+/// Host-gated (only runs on an actual Windows test runner, e.g. V5's — this
+/// vertical has no Windows toolchain and cannot execute it): fidelity of a
+/// `.cmd` launcher path carrying the characters `windows_batch_adapter`
+/// explicitly treats as *safe* (spaces, parens, Unicode) versus ones it must
+/// refuse (a literal quote). Never spawns `cmd.exe` or the script — every
+/// assertion is against the computed `HarnessLaunchPlan` alone, so a
+/// maliciously-crafted fixture path can never actually be executed by this
+/// test.
+#[cfg(windows)]
+#[test]
+fn cmd_fixture_path_preserves_safe_character_fidelity_and_refuses_a_quote() {
+    let safe_path = Path::new(r"C:\Program Files (x86)\tools café 日本語\pi.cmd");
+    let req = request(HarnessId::Pi);
+    let plan = plan_launch(&req, safe_path).unwrap();
+    assert!(plan.command.to_lowercase().ends_with("cmd.exe"));
     assert_eq!(
-        plan_launch(&req, Path::new(r"C:\tools\pi.cmd"))
-            .err()
-            .unwrap()
-            .code,
-        "unsupported_platform"
+        plan.args[..3],
+        [
+            "/d",
+            "/c",
+            r"C:\Program Files (x86)\tools café 日本語\pi.cmd"
+        ],
+        "spaces, parens and non-ASCII must survive byte-for-byte, unescaped and unmangled"
+    );
+
+    let quoted_path = Path::new(r#"C:\tools\pi "quoted".cmd"#);
+    assert!(
+        plan_launch(&req, quoted_path).is_err(),
+        "a literal quote is a cmd.exe metacharacter this adapter must refuse, not pass through"
+    );
+}
+
+/// Host-gated for the same reason as above. A newline-bearing prompt must
+/// still be refused for a `.cmd` launcher (there is no safe argv escape for
+/// it), but with a message scoped to the prompt and its real fix — stdin
+/// delivery post-spawn — rather than the generic per-token safety message,
+/// per this vertical's rationale in `launch.rs`.
+#[cfg(windows)]
+#[test]
+fn cmd_launcher_refuses_a_newline_bearing_prompt_with_a_scoped_rationale() {
+    let mut req = request(HarnessId::Pi);
+    req.prompt = Some("line one\nline two".into());
+    let err = plan_launch(&req, Path::new(r"C:\tools\pi.cmd")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+    assert!(
+        err.message.contains("session.write"),
+        "the error must name the real fix (post-spawn stdin delivery), not just say \
+         'unsafe characters': got {:?}",
+        err.message
     );
 }

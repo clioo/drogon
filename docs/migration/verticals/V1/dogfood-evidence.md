@@ -567,3 +567,383 @@ no panic, uid-independent.
 
 What remains: nothing for this checkpoint; the final paid-model pass under
 the pinned `claude-sonnet-5` lane remains ROOT's own deferred step.
+
+---
+
+## Checkpoint 6 (task_2d8438b86712): coordinated-journey opt-in leg — code delivered, NOT run
+
+Scope: `crates/drogon-cli/tests/native_dogfood.rs` only (+ this section), per
+ROOT seq 3282's follow-up assignment to the GREEN fixture dogfood. **No
+opted-in run was performed. `DROGON_DOGFOOD_REAL_MODEL` was never set by this
+task. Real-model spend attributable to this checkpoint is exactly zero** —
+per the assignment's explicit "you must not invoke any model yourself"
+instruction, this delivers reviewed code plus a bounded invocation proposal
+for ROOT to run once, not a self-executed paid pass.
+
+### What this closes
+
+This is the follow-up Checkpoint 2 explicitly deferred: *"a real model
+autonomously completing an `orchestration.workerStart` fresh launch end to
+end including its own final-report... should be its own explicitly scoped,
+explicitly costed checkpoint."* That checkpoint is this one.
+
+### Design summary
+
+New third test, `real_model_coordinated_journey_creates_and_reports_an_owned_artifact`,
+behind the exact same `DROGON_DOGFOOD_REAL_MODEL=1` opt-in gate as the
+existing `real_model_probe_reaches_a_daemon_spawned_session`. Unlike that
+probe (a single non-agentic `claude --print` completion via plain `terminal
+create`), this drives the **exact same native path the fixture leg
+exercises**: `orchestration task-create` -> `orchestration worker-start`,
+with a genuinely installed `claude` harness (pinned `--model
+claude-sonnet-5`, same approved lane as the probe leg) in `--permission-mode
+unattended` (`--dangerously-skip-permissions`) instead of the fixture's
+static stand-in script.
+
+1. **Task instructions as the model's real prompt.** Reading
+   `coordination_launch.rs::plan_coordination_launch` confirmed the daemon
+   wraps `task-create --instructions` text into the actual harness prompt
+   (fixed preamble + non-secret context + `TASK INSTRUCTIONS:\n{instructions}`),
+   and that fixed preamble already says "send exactly one orchestration send
+   --kind final-report." The new test's instructions text
+   (`real_model_journey_instructions`) explicitly overrides that default for
+   this one verification task, since proving late-report refusal requires a
+   second, deliberately conflicting report.
+2. **One fully specified script, one tool call.** The instructions hand the
+   model a literal, copy-paste shell script (`REAL_MODEL_JOURNEY_SCRIPT`) and
+   ask for exactly one bash tool call to run it verbatim — real tool-using
+   model autonomy, but scripted execution, not open-ended task
+   interpretation. The script:
+   - writes `artifact.txt` with `DROGON-REAL-ARTIFACT dispatch=<dispatch>
+     task=<task>\n`, substituting the worker's own env vars
+     (`DROGON_DISPATCH_ID`/`DROGON_TASK_ID`, injected by
+     `session_admission::WorkerEnvironment::apply_to_command` — the same
+     mechanism the fixture harness script already exercises for real);
+   - sends a real `orchestration send --kind final-report --outcome
+     succeeded` via `$DROGON_CLI_COMMAND` (auto-authenticated through
+     `DROGON_DISPATCH_CAPABILITY`, never handled explicitly by the
+     model/script);
+   - immediately sends a second, deliberately conflicting `--outcome failed`
+     final report from the same now-settled credential (captured to
+     `late-report.json`/`late-report.exit`) — this is the late-report-refusal
+     proof, exercised for real by the worker itself, exactly mirroring how
+     the fixture leg already proves it;
+   - `touch done` as the last, strictly-sequential action (same
+     done-marker-polling fix Checkpoint 1 already established, reused as-is).
+3. **Exact artifact bytes/provenance.** The test reads `artifact.txt` and
+   asserts **exact string equality** (not `contains`) against
+   `DROGON-REAL-ARTIFACT dispatch={dispatch_id} task={task_id}\n`, using the
+   dispatch/task ids the test itself obtained from `worker-start`/`task-create`
+   responses.
+4. **Late-report refusal validated for real**, identically to the fixture
+   leg: `late-report.exit` trimmed `== "1"`, `late-report.json` parses to
+   `ok:false`, `error.code == "report_conflict"`.
+5. **Bounded caps, explicit in code:**
+   - `REAL_MODEL_JOURNEY_TIMEOUT` = 180s wall-clock cap on the test's own
+     `done`-marker poll loop (the daemon's `worker-start --timeout-ms` is
+     passed too, but is documented in the protocol itself as "a budget hint,
+     not a kill deadline," so the poll loop is the real enforcement);
+   - turn budget is capped in the **prompt**, not a CLI flag — the harness
+     launch-plan builder (`drogon-harness/src/launch.rs::plan_launch`, read,
+     not edited) has no `--max-turns`-shaped passthrough for any harness, so
+     "exactly ONE tool call" is stated explicitly in the instructions text,
+     the only lever available through this native path;
+   - `REAL_MODEL_JOURNEY_READ_LIMIT` = 200 entries caps the one diagnostic
+     `worker-read` this leg performs (evidence/panic-context only, never a
+     pass/fail assertion — mirrors the probe leg's `--limit-bytes 65536` cap
+     on `terminal read`).
+6. **Exact release, no leaked process/handle.** The real `claude` process,
+   once launched without `--print`, is a **persistent interactive session
+   with no natural exit** once it finishes responding — confirmed by reading
+   `drogon-harness/src/launch.rs` (the `--` positional prompt path, not
+   `--print`) and consistent with Checkpoint 2's own recorded rationale for
+   why it avoided this exact mode originally. So this leg never relies on
+   natural exit: a new `DispatchGuard` (mirroring `SessionGuard` exactly,
+   not touching it) always calls `orchestration worker-stop` (fence +
+   force-signal; safe/idempotent even if the process already exited) before
+   `orchestration worker-release`, polling `worker-show` for
+   `processVerdict != live` (bounded `STOP_OBSERVATION_TIMEOUT` = 15s) before
+   releasing, and asserts `disposition == released` with a non-`live`
+   `processVerdict`. `SessionGuard` itself is untouched — this task's
+   "retain the exact SessionGuard cleanup" requirement is satisfied by
+   leaving it byte-for-byte as Checkpoint 4/the unwind note left it, and by
+   mirroring its exact non-panicking-Drop idiom for this new resource type.
+   `DispatchGuard::drop` uses a new owned fallible adapter,
+   `best_effort_stop_and_release` (modeled 1:1 on `best_effort_close`: no
+   `.expect`/`.unwrap`, every failure mapped to a reported `Err`, `Ok` only
+   for a fully proven `released` outcome), with its own regression test
+   `unwind_stop_release_adapter_maps_spawn_failure_to_unverifiable_without_panicking`,
+   mirroring `unwind_close_adapter_...` exactly.
+7. **Negative gate extended, not duplicated.** The existing skip-path test
+   was renamed `real_model_legs_skip_without_spending_unless_opt_in_is_exactly_one`
+   and now loops over **both** real-model test names x all 4 opt-out values
+   (unset/`0`/empty/`yes`) = 8 subprocess runs, each asserting exit 0, the
+   printed skip note, and a <30s fast return (no build/daemon/session/spend).
+8. **Labeling discipline.** Both the module doc comment and the new test's
+   own doc comment are explicit that this leg exercises **genuine model
+   tool-use autonomy** (bounded/scripted, not open-ended interpretation) —
+   distinct from the fixture leg's static shim and from the probe leg's
+   single non-agentic completion. No claim of model autonomy is implied by
+   the fixture leg anywhere in this file.
+
+### Why NOT run by this task
+
+The assignment is explicit: "YOU MUST NOT INVOKE ANY MODEL YOURSELF... the
+real-model test must skip by default... and you must NOT run the opted-in
+leg." `DROGON_DOGFOOD_REAL_MODEL` was never set during this checkpoint's
+work; every command below was run without it. **Spend incurred by this
+checkpoint: $0.00.**
+
+### Exact bounded invocation proposal for ROOT to run once
+
+```
+DROGON_DOGFOOD_REAL_MODEL=1 cargo test -p drogon-cli --test native_dogfood \
+  --locked real_model_coordinated_journey_creates_and_reports_an_owned_artifact \
+  -- --exact --nocapture
+```
+
+- **Model id:** `claude-sonnet-5` (the same approved lane Checkpoint 4 pinned
+  for the `--print` probe leg; hardcoded in the test as
+  `REAL_MODEL_JOURNEY_MODEL_ID`, not overridable without editing the test).
+- **Harness/mode:** native `claude` CLI discovered on `PATH`, launched via
+  `orchestration worker-start --harness claude --permission-mode unattended`
+  (`--dangerously-skip-permissions`) — a real, unattended, tool-using agent
+  session, not a one-shot `--print` completion.
+- **Turn cap:** exactly 1 tool call, enforced only by explicit prompt
+  instruction (no CLI-level max-turns lever exists on this native path today
+  — see design note 5 above); a model that ignores this instruction is a
+  real, disclosed risk of this leg, bounded only by the wall-clock cap below
+  and the explicit force-stop in `DispatchGuard`.
+- **Wall-time cap:** 180s poll loop (`REAL_MODEL_JOURNEY_TIMEOUT`) for the
+  `done` marker, plus a 15s bounded stop-observation window before release;
+  the whole test process itself has no additional externally-imposed
+  timeout, so a wedged real agent would make the test run up to roughly
+  180s + 15s + teardown before failing loudly (never hang silently, never
+  leak the process — `DispatchGuard` force-stops regardless of pass/fail).
+- **Output cap:** one diagnostic `worker-read --limit 200` (entries, not
+  bytes) — evidence only.
+- **Network/credentials:** uses this host's own already-provisioned Anthropic
+  credentials (macOS Keychain `Claude Code-credentials`), read only by the
+  real `claude` binary itself, exactly as the existing probe leg already
+  does; nothing is provisioned, copied, or persisted by the test.
+- **Expected spend ceiling:** one bounded agentic turn (read instructions,
+  issue one bash tool call, receive its result, stop) is comparable in scope
+  to the probe leg's single `--print` completion but with tool-use overhead;
+  expect low tens-of-cents at most (the probe leg's single completions
+  metered $0.02-0.03 each per Checkpoint 2/3's disclosed figures) — ROOT
+  should treat any run costing meaningfully more, or requiring more than a
+  couple of the retries, as a signal the prompt needs tightening rather than
+  a routine result.
+- **Non-determinism disclosure:** unlike the fixture leg (deterministic
+  shell script) and the probe leg (single completion, no tool use), this
+  leg's pass/fail genuinely depends on the real model correctly following
+  the "exactly one tool call, run this exact script, then a required second
+  conflicting report" instructions. A first run failing due to the model
+  deviating from the literal script (not a code defect) is a plausible,
+  disclosed outcome — ROOT should inspect the diagnostic `worker-read`
+  output included in any failure's panic message before assuming a bug in
+  this test.
+
+### Commands run (all default/skip-path, zero spend)
+
+- `cargo test -p drogon-cli --test native_dogfood --locked`: **6 passed / 0
+  failed** (fixture leg; probe leg skipped with note; coordinated-journey leg
+  skipped with note; negative gate test covering both legs x4 variants = 8
+  subprocess checks; both unwind-adapter regression tests). Re-ran after the
+  fmt/clippy fixes below with no failures, ~1.2-1.9s wall.
+- `cargo fmt -p drogon-cli` then `cargo fmt --all -- --check`: one diff
+  applied (import/line-wrap reflow from the new code), then clean.
+- `cargo clippy -p drogon-cli --test native_dogfood --locked -- -D
+  warnings`: one `clippy::cmp_owned` finding
+  (`show["result"]["processVerdict"] == Value::from("live")` where a bare
+  `"live"` comparison suffices, same class of finding Checkpoint 2 already
+  fixed once), corrected; then clean, 0 warnings. Also fixed one
+  `unused_assignments` compiler warning (an initial `last_show` value that
+  was always overwritten before being read) by restructuring the poll loop
+  to `break` its result directly instead of pre-seeding a variable.
+- `cargo test -p drogon-cli --locked`: all 9 targets green — lib 53, main 0,
+  argument_parity 22, integration 49, native_dogfood **6**, orchestration_auth
+  6, orchestration_commands 52, parser 7, doc 0. **0 failed.**
+- `cargo clippy -p drogon-cli --all-targets --locked -- -D warnings`: clean.
+- `git status --short` before and after: only
+  `crates/drogon-cli/tests/native_dogfood.rs` (this task's file) touched by
+  this task; `crates/drogond/src/endpoint.rs` and
+  `docs/migration/verticals/V1/windows-transport-evidence.md` are the
+  concurrent sibling leaf's disjoint files, confirmed untouched by this
+  checkpoint's edits.
+
+### Owned processes: session/incarnation/host, settlement/release receipts
+
+No process, session, or dispatch was created by this checkpoint's own work
+(the opted-in leg was never run). The default/skip-path runs above spawn only
+the real `drogond` daemon for the fixture leg and the negative-gate
+subprocesses, all of which are reaped by the existing, unmodified
+`Daemon::drop`/subprocess-`.output()` mechanics already covered in prior
+checkpoints.
+
+### Rollback; data/credentials/privacy check
+
+Nothing durable was created; no credentials were touched, provisioned, or
+read (the skip path returns before any daemon, session, or credential lookup
+happens). No commit, push, or install was made. Real-model spend
+attributable to this checkpoint: **$0.00** — the two prior real completions
+disclosed in Checkpoints 2/3 remain the only real spend this dogfood family
+has incurred to date.
+
+### What remains
+
+The exact bounded invocation above, run once by ROOT, is the only remaining
+step to close this checkpoint's real-model verification. If that run
+surfaces a prompt-following gap (the model not executing the literal script
+verbatim), the fix is a prompt/instructions adjustment to this same test
+file, not a new design.
+
+---
+
+## Checkpoint 7 (task_d3cc61d647b6): ROOT review of Checkpoint 6 — HOLD corrections
+
+Scope: `crates/drogon-cli/tests/native_dogfood.rs` only (+ this appendix). No
+opted-in run was performed (`DROGON_DOGFOOD_REAL_MODEL` never set, confirmed
+absent from this shell's environment before and after); ROOT's real
+invocation of `real_model_coordinated_journey_creates_and_reports_an_owned_artifact`
+remains explicitly ON HOLD. **Spend incurred by this checkpoint: $0.00.**
+
+### Correction verdicts
+
+1. **`stop_and_release` accepted any non-`live` verdict as cleanup proof —
+   FIXED.** The happy-path guard's bounded observation loop and both of its
+   post-loop assertions previously used `processVerdict != "live"`, so
+   `unverifiable`, a missing field, or any unrecognized string all passed as
+   if they proved the process exited. Both the loop's break condition and
+   the two `assert!`s (before release, and on the release response itself)
+   now require the new `is_proven_exited(verdict)` helper — an exact
+   `verdict.as_str() == Some("exited")` check, mirroring `SessionGuard`'s
+   own idiom rather than inventing a new rule. A verdict that never becomes
+   `exited` within `STOP_OBSERVATION_TIMEOUT` now fails the test loudly
+   (`assert!` panic) instead of silently proceeding to claim the guard
+   settled — this is the fail-closed behavior the correction asked for; a
+   held/unproven state is retained as a loud test failure, never quietly
+   accepted.
+2. **`best_effort_stop_and_release` checked only `disposition`, no verdict
+   at all — FIXED.** The Drop-path adapter previously called `worker-stop`
+   then `worker-release` back to back and returned `Ok(disposition)` purely
+   from the release response's `disposition` string, never inspecting
+   `processVerdict`. It's renamed to a parameterized
+   `best_effort_stop_and_release_bounded` (the public
+   `best_effort_stop_and_release` now delegates to it, fixed to the real
+   `STOP_OBSERVATION_TIMEOUT`) and now: (a) polls `worker-show` in a bounded
+   loop between stop and release, exactly mirroring `stop_and_release`'s own
+   poll; (b) returns `Err` (evidence retained in the message, surfaced by
+   `DispatchGuard::drop`'s existing `WARNING` print) if the observed verdict
+   never becomes `exited` within the bound; (c) additionally requires the
+   release response's own `processVerdict` to be `exited` before returning
+   `Ok(disposition)`. `disposition == "released"` is necessary but no longer
+   sufficient on its own.
+3. **Docs overstated a force-signal-alone never-leak guarantee — FIXED.**
+   The module doc comment for
+   `real_model_coordinated_journey_creates_and_reports_an_owned_artifact`
+   previously ended with "so no live process/handle can survive the test on
+   any path," implying the `worker-stop` force-signal itself was sufficient
+   proof. It now states the honest bound: cleanup is asserted only after an
+   explicit `exited` verdict is observed within
+   `STOP_OBSERVATION_TIMEOUT`; `unverifiable` (lost contact) never counts as
+   proof of exit; and if the verdict never resolves, this leg fails closed
+   (the happy path fails the test loudly, the unwind path reports
+   unverifiable/cleanup-failed) rather than claiming success. An orphaned
+   process is now an explicit, disclosed possible outcome when the verdict
+   never resolves to `exited` — not implied away. (Checkpoint 6 §6's header
+   "Exact release, no leaked process/handle" and its "never leak the
+   process" phrasing in the bounded-invocation proposal section are this
+   same overstatement, now corrected by this appendix rather than by editing
+   that frozen section; both should be read alongside this correction.)
+4. **Spend estimate and turn cap were not disclosed as non-enforced in code
+   — CLARIFIED.** A new comment block above the (unedited)
+   `real_model_journey_instructions` function states explicitly: nothing in
+   this file enforces a turn cap or a spend ceiling; "exactly ONE tool call"
+   is a prompt instruction only (no `--max-turns`-equivalent CLI lever
+   exists on this native path, confirmed by the unedited
+   `drogon-harness/src/launch.rs::plan_launch` read in Checkpoint 6); the
+   "low tens-of-cents at most" figure quoted in this doc's Checkpoint 6 §
+   "Exact bounded invocation proposal" is an ESTIMATE extrapolated from the
+   probe leg's completions, not a value asserted, measured, or capped
+   anywhere in the test. A model that ignores the one-tool-call instruction
+   is bounded only by `REAL_MODEL_JOURNEY_TIMEOUT` (wall-clock), never by
+   turn count or cost — this was already true of the code before this
+   checkpoint; only the explicit disclosure is new.
+
+### New/changed test coverage
+
+- `is_proven_exited(verdict: &Value) -> bool`: new shared helper, used by
+  both `stop_and_release` and `best_effort_stop_and_release_bounded`.
+- `only_explicit_exited_verdict_proves_cleanup_all_others_fail_closed`
+  (new, no subprocess): exhaustively covers all five required cases —
+  `live`, `unverifiable`, missing (`Value::Null`), unknown
+  (`"some-unrecognized-value"`), `exited` — asserting `is_proven_exited`
+  returns `false` for the first four and `true` only for `exited`.
+- `best_effort_stop_and_release_fails_closed_for_every_non_exited_verdict`
+  (new): spawns a real subprocess fixture stub
+  (`STUB_STOP_RELEASE_CLI_SCRIPT`) standing in for `drogon-cli` itself, so
+  the actual spawn/parse/bounded-observation plumbing in
+  `best_effort_stop_and_release_bounded` runs for real (not a mocked-out
+  closure). The stub reports a fully controlled `processVerdict` for
+  `worker-show`/`worker-release` while always reporting
+  `disposition: "released"`, isolating the verdict as the only varying
+  factor. Covers `live`/`unverifiable`/missing/unknown as `Err` (fail
+  closed) and `exited` as the sole `Ok("released")` case. A short
+  `observation_timeout` (200ms, not the real 15s `STOP_OBSERVATION_TIMEOUT`)
+  is passed via the new parameterized function so the four non-exited cases
+  don't each wait out the full real-world bound in the default test run;
+  the rule exercised is identical to the 15s-bounded production path.
+- `stop_and_release` itself (the live-daemon happy path) is not
+  independently re-tested with fake verdicts here — it shares the exact
+  same `is_proven_exited` helper covered exhaustively above, and its own
+  live-daemon behavior remains exercised end-to-end by the real-model leg
+  itself (skipped by default; proven only when ROOT runs the still-HELD
+  opted-in invocation).
+- Fixed one new `unused_assignments` compiler warning introduced by an
+  earlier draft of the `best_effort_stop_and_release_bounded` loop (an
+  initial `last_verdict` binding always overwritten before being read) by
+  restructuring the loop to `break` its result directly, matching the
+  existing `last_show` pattern already used by `stop_and_release`.
+
+### Commands run (all default/skip-path, zero spend)
+
+- `cargo test -p drogon-cli --test native_dogfood --locked`: **8 passed / 0
+  failed** (fixture leg; probe leg skipped with note; coordinated-journey
+  leg skipped with note; negative gate test covering both legs x4 variants;
+  both unwind-adapter regression tests; the two new fail-closed tests
+  above), 1.16-2.02s wall across repeated runs. `DROGON_DOGFOOD_REAL_MODEL`
+  confirmed absent from the environment before running.
+- `cargo fmt -p drogon-cli -- --check`: clean, both before and after edits
+  (no reflow needed).
+- `cargo clippy -p drogon-cli --all-targets --locked -- -D warnings`: clean.
+- `cargo test -p drogon-cli --locked`: all 9 targets green — lib 53, main 0,
+  argument_parity 22, integration 49, native_dogfood **8** (was 6), doc 0,
+  orchestration_auth 6, orchestration_commands 52, parser 7. **0 failed.**
+- `git status --short`: only `crates/drogon-cli/tests/native_dogfood.rs` and
+  this doc were written by this checkpoint. `crates/drogond/src/endpoint.rs`
+  and `docs/migration/verticals/V1/windows-transport-evidence.md` are the
+  concurrent sibling leaf's disjoint files, confirmed untouched by this
+  checkpoint.
+
+### Rollback; data/credentials/privacy check
+
+Nothing durable was created; no credentials were touched, provisioned, or
+read. No commit, push, or install was made. Real-model spend attributable
+to this checkpoint: **$0.00** — the two prior real completions disclosed in
+Checkpoints 2/3 remain the only real spend this dogfood family has incurred
+to date.
+
+### What remains
+
+ROOT's real invocation of
+`real_model_coordinated_journey_creates_and_reports_an_owned_artifact`
+(the exact bounded command in Checkpoint 6's "Exact bounded invocation
+proposal" section) remains explicitly ON HOLD and was not run by this
+checkpoint. All four requested corrections are otherwise closed: the
+fail-closed exact-`exited` rule now applies to both the live-daemon guard
+and its Drop-path adapter, is unit-tested for all five required verdict
+cases, and the docs/code comments no longer promise an unconditional
+never-leak guarantee based on the force-signal alone.
+
+Ready for independent review: yes.

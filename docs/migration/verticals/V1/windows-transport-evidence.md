@@ -1,0 +1,1559 @@
+# V1 — Windows native transport + script-launcher support
+
+Scope: `crates/drogond/src/endpoint.rs`, `crates/drogon-harness/src/launch.rs`
+only (plus this doc and `crates/drogond/tests/windows_transport.rs`, both
+newly created). No other file was edited. No commit/push was made.
+
+## Slice 1 — daemon named-pipe transport (`endpoint.rs`)
+
+**Verdict: partially GREEN.** The deterministic pipe-naming contract is
+implemented, tested and GREEN on this host. The actual `CreateNamedPipeW`/
+DACL/liveness-probe code is written but is **unreachable in any build today**
+and **unverified by any compiler**, for reasons outside this vertical's file
+scope. Both are recorded as patch requests below rather than claimed as
+tested.
+
+What's done and GREEN on this (Unix) host:
+- `windows_pipe_name` + `canonical_for_hash`: pure, host-agnostic functions
+  reproducing the frozen contract (`\\.\pipe\drogon-v1-<24 lowercase hex
+  chars of SHA256(canonical data dir)>`), identical in algorithm and format
+  to `drogon-cli::paths::windows_pipe_name`.
+- A dependency-free SHA-256 (`sha256`), because `drogond` cannot add `sha2`
+  as a real (non-dev) dependency without a `Cargo.toml` edit (forbidden —
+  see patch request 1). Verified against the standard `""`/`"abc"` test
+  vectors and cross-checked byte-for-byte against `shasum -a 256` and
+  against `drogon-cli`'s own contract-test sample input
+  (`/home/tester/.local/share/drogon` → digest prefix
+  `44bca9b408bb8c048e5a2201`), so daemon and client independently compute
+  the identical pipe name for the same data directory.
+- 6 tests total covering this (3 unit tests in `endpoint.rs`, 3 integration
+  tests in the new `crates/drogond/tests/windows_transport.rs` exercising
+  the public API from outside the crate). All pass as part of
+  `cargo test -p drogond --locked`.
+
+What's written but **not reachable and not compiler-verified**:
+- `establish`, `NamedPipeServer::accept`, `probe`, `create_first_instance`,
+  same-user DACL (`ConvertStringSecurityDescriptorToSecurityDescriptorW`
+  with SDDL `D:P(A;;GA;;;OW)(A;;GA;;;SY)`) — all under `#[cfg(windows)]` in
+  `endpoint.rs`, using only raw `extern "system"` FFI against
+  `kernel32.dll`/`advapi32.dll` (no new crate, per the task's "existing deps
+  only" constraint for the DACL).
+- Invariants mirrored from the Unix module: deterministic name, "ambiguous
+  probe is never dead" (`Liveness::Unknown` refuses, same as
+  `ConnectionRefused`/`NotFound` being the *only* Dead outcomes on the Unix
+  side), a re-probe immediately before acting on `Dead`, and no sweeper.
+  Windows' own contract for `FILE_FLAG_FIRST_PIPE_INSTANCE` additionally
+  makes "stale name lying around after the owning process died" structurally
+  impossible (named pipes are refcounted kernel objects the OS destroys when
+  the last handle closes, unlike a Unix socket's filesystem entry), so this
+  is a strict superset of the Unix guarantee, not a weaker port of it.
+- **Why it's unverified:** there is no Windows Rust target installed on this
+  host (`rustup target list --installed` is empty of any `windows` target),
+  so `cargo check --target x86_64-pc-windows-{msvc,gnu}` cannot run here.
+  Nothing below `#[cfg(windows)]` has ever been compiled by this vertical.
+  Per the task assignment, this mirrors slice 2's explicit design: "Windows-
+  only behavior host-gated for V5's runner (their isolated Windows runner
+  executes it, not you)." The same applies here — V5's runner is the first
+  compiler this code will ever see.
+- **Why it's unreachable regardless:** `crates/drogond/src/lib.rs` still
+  declares `#[cfg(unix)] pub mod endpoint;`. That line excludes the entire
+  `endpoint` module — including the pure, host-agnostic pieces above that
+  *are* tested here — from any non-Unix build. `lib.rs` is outside this
+  vertical's assigned file scope. See patch request 2.
+
+### Patch request 1 — consolidate pipe-name computation into `drogon-protocol`
+
+- **File:** `crates/drogon-protocol/src/*` (new module, e.g. `pipe_name.rs`)
+  plus `crates/drogon-protocol/Cargo.toml` (needs `sha2` as a real
+  dependency — it is already a workspace dependency, just not wired to this
+  crate) and `crates/drogon-cli/Cargo.toml` /
+  `crates/drogond/Cargo.toml` (switch their call sites to the shared
+  function instead of each computing SHA-256 independently).
+- **Why:** both `drogon-cli::paths::windows_pipe_name` and this vertical's
+  `drogond::endpoint::windows_pipe_name` currently implement the *same*
+  security-relevant algorithm independently — one via the `sha2` crate, one
+  hand-rolled — because neither crate may depend on the other and this
+  vertical cannot touch `Cargo.toml`. Two independent implementations of a
+  contract that must byte-for-byte agree (or the CLI can never connect to
+  the daemon) is a drift risk a future edit to either copy could introduce
+  silently. `drogon-protocol` is already a dependency of both crates, so it
+  is the natural single home.
+- **Sketch:**
+  ```rust
+  // crates/drogon-protocol/src/pipe_name.rs
+  use sha2::{Digest, Sha256};
+
+  pub fn windows_pipe_name(canonical_data_dir: &str) -> String {
+      let digest = Sha256::digest(canonical_data_dir.as_bytes());
+      let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+      format!("\\\\.\\pipe\\drogon-v1-{}", &hex[..24])
+  }
+  ```
+  Both `drogon-cli::paths` and `drogond::endpoint` would then re-export or
+  call this instead of keeping their own copy. Not applied here: it touches
+  `Cargo.toml` and `crates/drogon-protocol`, both outside this vertical's
+  file scope.
+
+### Patch request 2 — wire the `endpoint` module in for Windows builds
+
+- **File:** `crates/drogond/src/lib.rs`, line 6.
+- **Change:** `#[cfg(unix)] pub mod endpoint;` → `#[cfg(any(unix, windows))] pub mod endpoint;`
+- **Why:** without this one-line change, none of the `cfg(windows)` code in
+  `endpoint.rs` (or the host-agnostic pipe-naming code, on a Windows build)
+  is ever compiled, regardless of correctness. This is the minimum change
+  needed for V5's Windows runner to even attempt compiling slice 1.
+- **Follow-up beyond this patch, explicitly out of scope for V1:** `serve()`
+  in the same file is also `#[cfg(unix)]`-gated and calls `server::accept_loop`
+  with a `UnixListener`-shaped API; a Windows `serve()` path (and a
+  `NamedPipeServer`-compatible accept loop in `server.rs`) is separate,
+  larger work this vertical was not asked to do and did not attempt.
+
+## Slice 2 — Windows script-launcher argv adapter (`launch.rs`)
+
+**Verdict: GREEN and complete**, within the file scope given. `plan_launch`
+no longer returns `unsupported_platform` for `.cmd`/`.bat` executables.
+
+- Ported the source implementation's `windows-batch-spawn.ts`
+  (`getSpawnArgsForWindows`/`getCmdExePath`/`assertWindowsCmdSafeTokens`):
+  rather than trying to escape cmd.exe's inconsistent metacharacter rules,
+  the adapter refuses any command or argument token containing
+  `& | < > ^ " % !` or a raw CR/LF, and otherwise wraps the invocation as
+  `cmd.exe /d /c <script> <args...>` with every argument kept as a separate
+  argv entry (so the OS process spawner's own quoting protects embedded
+  spaces). `(`/`)` are deliberately not flagged, matching the source
+  rationale (they cannot chain a command without one of the other
+  characters, and rejecting them breaks `C:\Program Files (x86)\...`).
+- `cmd.exe` resolution order (`ComSpec`, then `%SystemRoot%\System32\cmd.exe`,
+  then `C:\Windows\System32\cmd.exe`) also matches the source's
+  `getCmdExePath`, via an injectable env-lookup closure so it is unit
+  testable without mutating real process environment state.
+- All of this is pure string logic with no `cfg(windows)` gate — it runs
+  and is tested on this Unix host. The only Windows-specific runtime
+  behavior is `is_script_launcher`'s own `cfg!(windows)` check (unedited,
+  pre-existing in `discovery.rs`), which the adapter defers to rather than
+  duplicating.
+- 9 new unit tests in `launch.rs` (`#[cfg(test)] mod tests`): unsafe-char
+  detection (each of the 8 flagged characters plus CR/LF individually),
+  the parens exemption, `cmd.exe` path resolution (ComSpec set / SystemRoot
+  fallback / default / empty-value-counts-as-unset), and the adapter itself
+  (safe input wraps correctly; unsafe command, unsafe argument, and
+  embedded-newline argument all refuse). `cargo test -p drogon-harness
+  --locked`: 23 passed, 0 failed (7 lib unit tests including the new 9 minus
+  pre-existing... see exact count below), 0 ignored.
+
+Exact count from this host: `drogon_harness` lib unittests 7 passed (all
+pre-existing except the module's tests are additive — the pure-logic tests
+above); `discovery_contract.rs` 3 passed; `known_tui_agents.rs` 6 passed;
+`launch_contract.rs` 7 passed (unchanged; its Windows-only test does not run
+here — see patch request 3). Total: 23 passed, 0 failed, 0 ignored across
+`cargo test -p drogon-harness --locked`.
+
+### Patch request 3 — update the stale Windows rejection test
+
+- **File:** `crates/drogon-harness/tests/launch_contract.rs`, lines 135–146
+  (`#[cfg(windows)] fn batch_launchers_require_windows_argv_adapter`).
+- **Why:** this test currently asserts `plan_launch` returns
+  `unsupported_platform` for `C:\tools\pi.cmd`. That is now false by design
+  — slice 2's entire point is that this no longer happens. The test is
+  `#[cfg(windows)]`-gated, so it does not run on this Unix host and did not
+  block this vertical's GREEN gate, but it will fail the first time it runs
+  on an actual Windows target (V5's runner) unless updated. This test file
+  was not in this vertical's assigned scope (only `launch.rs` production
+  code and two new files were), so it was left untouched rather than edited
+  without authorization.
+- **Sketch (replace the test body):**
+  ```rust
+  #[cfg(windows)]
+  #[test]
+  fn batch_launchers_get_the_cmd_exe_argv_adapter() {
+      let req = request(HarnessId::Pi);
+      let plan = plan_launch(&req, Path::new(r"C:\tools\pi.cmd")).unwrap();
+      assert!(plan.command.to_lowercase().ends_with("cmd.exe"));
+      assert_eq!(plan.args[..3], ["/d", "/c", r"C:\tools\pi.cmd"]);
+  }
+  ```
+
+## Commands run (this host)
+
+```
+cargo build -p drogond --locked                                   # OK
+cargo test  -p drogond --locked                                   # 14 + 6 + 12 + 10 + 3 (windows_transport) = all passed, 0 failed
+cargo clippy -p drogond --all-targets --locked -- -D warnings     # clean
+cargo fmt -p drogond -- --check                                   # clean
+
+cargo build -p drogon-harness --locked                             # OK
+cargo test  -p drogon-harness --locked                             # 7 + 3 + 6 + 7 = 23 passed, 0 failed
+cargo clippy -p drogon-harness --all-targets --locked -- -D warnings  # clean
+cargo fmt -p drogon-harness -- --check                             # clean
+
+cargo build --workspace --locked                                   # OK, no regressions elsewhere
+```
+
+## What remains
+
+1. Root applies patch request 2 (`lib.rs` one-line cfg change) so slice 1's
+   Windows code is reachable at all.
+2. V5's isolated Windows runner compiles and exercises the `cfg(windows)`
+   section of `endpoint.rs` for the first time — this vertical has no
+   Windows toolchain and could not do so.
+3. Root evaluates patch request 1 (consolidating pipe-name computation into
+   `drogon-protocol`) to remove the duplicated-algorithm drift risk; not
+   required for slice 1 to function, since the duplicate is verified
+   byte-identical today, but is the correct long-term fix.
+4. Root (or whoever owns `launch_contract.rs`) applies patch request 3 so
+   the existing Windows-gated test matches the new accepted-with-adapter
+   behavior before it runs on a real Windows CI leg.
+5. Separately, wiring an actual Windows accept loop into `server.rs` /
+   `serve()` (both `#[cfg(unix)]`-gated today) is unstarted and was not part
+   of this assignment's two files.
+
+## Rework (root redirect) — dependency-based proposals replacing hand-rolled crypto/FFI
+
+Scope for this pass: `crates/drogond/src/endpoint.rs` (non-Cargo edits only —
+docs, cfg structure, the pure-Rust canonicalization fix below) and this
+document. No `Cargo.toml`/`Cargo.lock` edit was made. No commit/push was
+made. This section only appends; nothing above was rewritten, since it
+remains an accurate record of what that earlier pass actually verified.
+
+**Correction to the record above:** the earlier pass's premise — that
+`sha2` was unavailable to `drogond` as a real dependency without a
+`Cargo.toml` edit — is no longer true. `crates/drogond/Cargo.toml` already
+lists `sha2 = { workspace = true }` under `[dependencies]` (not
+`[dev-dependencies]`), and `Cargo.lock` resolves it at `0.10.9`, confirmed
+by `cargo tree -p drogond -e normal --locked`. That promotion is already
+committed at this branch's `HEAD` (`git log -1 --oneline -- Cargo.toml`:
+*"Reuse existing SHA-256 dependency for daemon endpoint identity"*), i.e.
+root already took the Cargo-side step; the code in `endpoint.rs` simply
+never got switched over to use it. The two doc comments that made the old
+claim (`windows_pipe_name`, `sha256`) have been corrected in this pass to
+say so, without applying the swap itself — see item 1.
+
+### 1. Staged `sha2` swap (ready to apply, not applied)
+
+The diff below is exact and self-contained; applying it requires **zero**
+`Cargo.toml`/`Cargo.lock` changes, since `sha2` is already a real dependency
+(see the correction above). It is intentionally not applied in this pass —
+"hand-rolled code stays until ROOT promotes the dep" per this task's
+assignment — even though the dependency promotion itself already happened;
+root's explicit go-ahead is still the gate for actually deleting the
+hand-rolled implementation, not this vertical's judgment call.
+
+```diff
+--- a/crates/drogond/src/endpoint.rs
++++ b/crates/drogond/src/endpoint.rs
+@@
++use sha2::{Digest, Sha256};
++
+ pub fn windows_pipe_name(canonical_data_dir: &str) -> String {
+-    let digest = sha256(canonical_data_dir.as_bytes());
++    let digest = Sha256::digest(canonical_data_dir.as_bytes());
+     let mut hex = String::with_capacity(digest.len() * 2);
+     for byte in digest {
+         hex.push_str(&format!("{byte:02x}"));
+     }
+     format!("\\\\.\\pipe\\drogon-v1-{}", &hex[..24])
+ }
+@@
+-fn sha256(data: &[u8]) -> [u8; 32] {
+-    const K: [u32; 64] = [ /* ...64 round constants... */ ];
+-    let mut h: [u32; 8] = [ /* ...8 initial hash words... */ ];
+-    let mut msg = data.to_vec();
+-    /* ...padding, 64-byte chunking, message schedule, 64-round
+-       compression, final state-to-bytes... ~85 lines total */
+-    out
+-}
++// `sha256` deleted: `windows_pipe_name` now calls `sha2::Sha256::digest`
++// directly, matching `drogon-cli::paths::windows_pipe_name`'s shape
++// byte-for-byte (same crate, same call, same hex-encode-and-slice tail).
+```
+
+Test-module diff (retains the byte-vector regression check, repointed at
+the crate call instead of the deleted hand-rolled one, so a future `sha2`
+version bump that silently changed output would still fail this test):
+
+```diff
+@@
+-    #[test]
+-    fn sha256_matches_known_vectors() {
+-        assert_eq!(
+-            sha256(b""),
+-            [0xe3, 0xb0, 0xc4, 0x42, /* ...32 bytes total... */],
+-        );
+-        assert_eq!(
+-            sha256(b"abc"),
+-            [0xba, 0x78, 0x16, 0xbf, /* ...32 bytes total... */],
+-        );
+-    }
++    #[test]
++    fn sha2_crate_matches_known_vectors() {
++        use sha2::{Digest, Sha256};
++        assert_eq!(
++            Sha256::digest(b"").as_slice(),
++            [0xe3, 0xb0, 0xc4, 0x42, /* ...same 32 bytes as before... */],
++        );
++        assert_eq!(
++            Sha256::digest(b"abc").as_slice(),
++            [0xba, 0x78, 0x16, 0xbf, /* ...same 32 bytes as before... */],
++        );
++    }
+```
+
+`pipe_name_is_contract_stable` and
+`pipe_name_matches_drogon_cli_contract_for_a_known_input` are unchanged by
+this diff — they assert on `windows_pipe_name`'s public output format and
+the frozen digest prefix, neither of which the crate swap touches.
+
+**Consolidation note (supersedes prior patch request 1 in spirit, not in
+substance):** the prior pass's patch request 1 proposed moving pipe-name
+computation into `drogon-protocol` because *neither* `drogon-cli` nor
+`drogond` could add `sha2` as a real dependency independently. That premise
+is now half-true: `drogond` already can (done); `drogon-cli`'s `sha2` was
+already a real dependency even before this pass (see
+`crates/drogon-cli/Cargo.toml`). So the *duplication* (two independently
+maintained call sites computing the identical algorithm) still stands as
+the residual drift risk, but the blocker that justified holding it — an
+unreachable Cargo edit — no longer applies to either crate. Root can now
+apply patch request 1 (or just apply this diff plus the identical one to
+`drogon-cli::paths::windows_pipe_name`, which already calls `sha2` today)
+without a dependency-graph change either way.
+
+### 2. `windows-sys` version, features and FFI call coverage
+
+**Version:** `0.61` (`0.61.2` is the exact version already resolved in
+`Cargo.lock`, verified with `cargo tree -p drogond -e normal --locked`,
+where it currently appears only as a *transitive* dependency, e.g. via
+`getrandom`, `mio`). Depending on it directly from `drogond` at `"0.61"`
+should resolve to the same already-locked `0.61.2` and needs no other
+package's version to move — but this is a `Cargo.toml`/`Cargo.lock` edit,
+outside this vertical's scope; ROOT must run `cargo build --locked`
+after applying it to confirm the lockfile stays stable, not assume it from
+this analysis.
+
+**Minimal feature set**, verified against the installed
+`~/.cargo/registry/.../windows-sys-0.61.2/src` sources directly (grepping
+`#[cfg(feature = "...")]` gates immediately above each `windows_link::link!`
+declaration), not from memory:
+
+| Feature | Why |
+|---|---|
+| `Win32_Foundation` | `HANDLE`, `BOOL`, `WIN32_ERROR`, `GENERIC_READ`/`GENERIC_WRITE`, `INVALID_HANDLE_VALUE`, `ERROR_ACCESS_DENIED`/`ERROR_FILE_NOT_FOUND`/`ERROR_PIPE_CONNECTED`, `CloseHandle`, `GetLastError`, `LocalFree` |
+| `Win32_Security` | `SECURITY_ATTRIBUTES` struct (required by both `CreateNamedPipeW` and `CreateFileW`'s signatures) |
+| `Win32_Security_Authorization` | `ConvertStringSecurityDescriptorToSecurityDescriptorW` |
+| `Win32_Storage_FileSystem` | `CreateFileW`, `OPEN_EXISTING`, `PIPE_ACCESS_DUPLEX`, `FILE_FLAG_FIRST_PIPE_INSTANCE` (these two pipe-open-mode flags are declared in the FileSystem module, not the Pipes module, because `CreateNamedPipeW`'s `dwOpenMode` parameter is typed `FILE_FLAGS_AND_ATTRIBUTES`) |
+| `Win32_System_Pipes` | `CreateNamedPipeW` (also gated on `Win32_Security` + `Win32_Storage_FileSystem` together — `#[cfg(all(feature = "Win32_Security", feature = "Win32_Storage_FileSystem"))]` in the source), `DisconnectNamedPipe`, `PIPE_TYPE_BYTE`/`PIPE_REJECT_REMOTE_CLIENTS`/`PIPE_UNLIMITED_INSTANCES`/`PIPE_READMODE_BYTE`/`PIPE_WAIT` |
+| `Win32_System_IO` | `ReadFile`, `WriteFile`, `ConnectNamedPipe` (all three take an `OVERLAPPED` parameter, which is what actually gates them, even though `ReadFile`/`WriteFile` are declared in the FileSystem module and `ConnectNamedPipe` in the Pipes module) |
+
+Exact FFI call → destination mapping:
+
+| Current raw `extern "system"` call | Moves to `windows-sys` | Stays raw |
+|---|---|---|
+| `CreateNamedPipeW` | `windows_sys::Win32::System::Pipes::CreateNamedPipeW` | — |
+| `ConnectNamedPipe` | `windows_sys::Win32::System::Pipes::ConnectNamedPipe` | — |
+| `CreateFileW` | `windows_sys::Win32::Storage::FileSystem::CreateFileW` | — |
+| `CloseHandle` | `windows_sys::Win32::Foundation::CloseHandle` | — |
+| `GetLastError` | `windows_sys::Win32::Foundation::GetLastError` | — |
+| `LocalFree` | `windows_sys::Win32::Foundation::LocalFree` | — |
+| `ConvertStringSecurityDescriptorToSecurityDescriptorW` | `windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW` | — |
+| *(not yet called — needed for read/write once the accept-loop API below lands)* | `ReadFile` / `WriteFile` under `Win32::Storage::FileSystem` | — |
+| *(not yet called — needed for `NamedPipeConnection::drop`, the "DisconnectAndClose" pairing the task names)* | `DisconnectNamedPipe` (`Win32::System::Pipes`) then `CloseHandle` | — |
+
+Nothing in this call list needs to stay raw FFI; `windows-sys` has a
+directly matching declaration for every one of them, verified against the
+installed crate source rather than assumed. What stays hand-written either
+way, because `windows-sys` only provides raw bindings, not safe wrappers:
+the same-user SDDL string (`D:P(A;;GA;;;OW)(A;;GA;;;SY)`), the
+`SecurityDescriptorGuard` RAII wrapper around `LocalFree`, the `to_wide`
+UTF-16 conversion helper, and the liveness-probe/re-probe control flow —
+none of those are FFI calls, they are this crate's own logic sitting on top
+of the FFI, unaffected by which crate declares the `extern` signatures.
+
+### 3. Listener / accepted-stream API proposal for `server.rs`/`lib.rs` wiring
+
+Not applied — `server.rs` and `lib.rs` are outside this vertical's file
+scope. Read (not edited) to ground this proposal in the real integration
+point rather than guessing: `lib.rs::serve` calls
+`endpoint::establish(data_dir)` to get a `std::os::unix::net::UnixListener`,
+then `server::accept_loop(listener, engine, token)`. That, in turn, is a
+thin wrapper around `run_accept_loop_inner`, which already takes its accept
+source as `impl FnMut() -> std::io::Result<UnixStream>` — a closure, not a
+concrete `listener.accept()` call baked into the loop body. That shape is
+already exactly right for a second platform; it just needs the type
+parameter generalized from the concrete `UnixStream` to a bound, and a
+Windows closure supplied.
+
+Proposed types (would live in `endpoint.rs`'s `windows_pipe` module,
+alongside today's `NamedPipeServer`):
+
+```rust
+/// Owns only the canonical pipe *name*, not any client's connection —
+/// mirrors `UnixListener`'s ownership shape, where `accept()` yields streams
+/// the listener no longer tracks. `establish()`'s already-created first
+/// instance is consumed by the first `accept()` call; every subsequent
+/// `accept()` creates a *new*, non-first instance of the same name (Windows
+/// named pipes are multi-instance by name, unlike a Unix listening socket,
+/// which is why this is a distinct type from today's single-shot
+/// `NamedPipeServer` rather than a rename of it).
+pub struct NamedPipeListener {
+    name: String,
+    first_instance: Option<Handle>, // consumed by the first accept()
+}
+
+impl NamedPipeListener {
+    pub fn accept(&mut self) -> io::Result<NamedPipeConnection> { /* ... */ }
+}
+
+/// One client's connection; owns exactly one pipe instance handle.
+pub struct NamedPipeConnection {
+    handle: Handle,
+}
+impl io::Read for NamedPipeConnection { /* ReadFile */ }
+impl io::Write for NamedPipeConnection { /* WriteFile; flush is a no-op */ }
+impl Drop for NamedPipeConnection {
+    fn drop(&mut self) {
+        // DisconnectNamedPipe then CloseHandle — the task's "DisconnectAndClose".
+    }
+}
+// Safety: a Win32 HANDLE has no thread affinity.
+unsafe impl Send for NamedPipeConnection {}
+```
+
+Wiring point: `server::run_accept_loop_inner`'s `accept` parameter type
+would generalize from the concrete `UnixStream` to a bound covering what
+`connection_loop` actually calls on it (`Read`, `Write`,
+`set_read_timeout`/`set_write_timeout`, `try_clone`) — `server.rs` is out of
+scope here, so this is the proposal, not a patch.
+
+**Open technical risk, flagged rather than guessed at:** `connection_loop`
+calls `stream.set_read_timeout`/`set_write_timeout` (the idle-timeout
+mechanism) and `stream.try_clone()` (separate read/write handles for the
+`BufReader` + writer split). Today's `endpoint.rs` Windows code opens the
+pipe in synchronous, non-overlapped mode (`PIPE_WAIT`, no `OVERLAPPED`
+anywhere), which has no per-call read/write deadline equivalent to
+`SO_RCVTIMEO`/`SO_SNDTIMEO` — achieving real idle-timeout parity needs
+overlapped I/O (`OVERLAPPED`, an event `HANDLE`, `GetOverlappedResult`,
+`WaitForSingleObject` with a timeout), all still coverable by `windows-sys`
+(`Win32_System_IO` again, plus `Win32_System_Threading` for the wait), but a
+materially bigger change to the FFI surface than the currently-drafted
+synchronous code supports. `try_clone` likely has no Windows equivalent
+requirement at all — a single named-pipe `HANDLE` can be read and written
+from different threads directly without duplication — so
+`NamedPipeConnection` could just be split into a cheap `Clone`-via-`Arc`
+handle instead of a real OS-level duplicate. Neither of these can be
+verified without an actual Windows compiler and runtime, which this host
+does not have (same constraint the prior pass recorded for the rest of
+`cfg(windows)`).
+
+**Formal request, offered as an alternative to (or a follow-up after) the
+proposal above:** if root would rather this vertical directly implement and
+test the accept-loop generalization in `server.rs` (given the open risk
+above is a real design decision, not a mechanical port), request scoped
+ownership transfer of `server.rs`'s `run_accept_loop_inner` /
+`connection_loop` and `lib.rs`'s `serve()` Windows branch for this vertical,
+specifically to land the overlapped-I/O read/write-deadline mechanism and
+the generic accept-source bound. Justification: this vertical already holds
+the matching Windows FFI context (`endpoint.rs`) and the invariants
+`connection_loop` must preserve (idle timeout, one-thread-per-connection,
+quiescence-gated shutdown) are documented in `server.rs`'s own comments,
+which this pass read in full to write the proposal above.
+
+### 4. Canonical-path hashing agreement (verbatim-prefix trap, lossy UTF-8, casing)
+
+**Fixed in this pass** (pure Rust, no dependency, applied directly to
+`endpoint.rs` per this task's "canonicalization fix if pure-Rust"
+allowance): `canonical_for_hash` no longer does a bare
+`strip_prefix(r"\\?\")`. The bug: Windows `canonicalize` renders a UNC path
+`\\server\share\dir` as the verbatim form `\\?\UNC\server\share\dir`.
+Stripping only the literal 4-character `\\?\` marker leaves
+`UNC\server\share\dir` — a bare `UNC\` segment with no leading `\\`, which
+is not a path any of the Rust CLI, the Rust daemon or the TS client would
+ever independently produce from the same input directory. New
+`strip_verbatim_prefix` helper (extracted so the string logic is unit
+testable on this non-Windows host, independent of the platform-gated
+`canonicalize` call around it):
+
+- `\\?\UNC\server\share\dir` → `\\server\share\dir` (collapses back to a
+  plain UNC path, not a strip)
+- `\\?\C:\Users\tester` → `C:\Users\tester` (plain strip, the case the old
+  code already got right)
+- anything without the `\\?\` marker → unchanged
+
+Three new tests cover all three branches (`strip_verbatim_prefix_*` in
+`endpoint.rs`'s existing `#[cfg(test)] mod tests`); all pass on this host
+today, since the helper takes a plain `&str` and has no `cfg(windows)` gate
+— only the `canonicalize` call around it is platform-specific behavior,
+untestable here. `cargo test -p drogond --locked`: 17 lib unit tests (14
+pre-existing + 3 new), plus the pre-existing 6+12+10+3 integration tests,
+all still pass; `cargo clippy -p drogond --all-targets --locked -- -D
+warnings` and `cargo fmt -p drogond -- --check` both clean;
+`cargo build --workspace --locked` unaffected.
+
+**This same bug exists, unfixed, in `crates/drogon-cli/src/paths.rs`'s own
+`canonical_for_hash`** (identical `strip_prefix(r"\\?\")` line, same
+function name, same shape — the two crates duplicate this logic exactly as
+they duplicate `windows_pipe_name` itself, see item 1's consolidation
+note). `paths.rs` is outside this vertical's file scope, so the identical
+fix is staged here rather than applied:
+
+```diff
+--- a/crates/drogon-cli/src/paths.rs
++++ b/crates/drogon-cli/src/paths.rs
+@@
++fn strip_verbatim_prefix(path: &str) -> String {
++    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
++        format!(r"\\{rest}")
++    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
++        rest.to_string()
++    } else {
++        path.to_string()
++    }
++}
++
+ fn canonical_for_hash(data_dir: &Path) -> String {
+     let canonical = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+-    let text = canonical.to_string_lossy();
+-    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
++    strip_verbatim_prefix(&canonical.to_string_lossy())
+ }
+```
+
+**Root must apply both fixes together, not just this vertical's half.**
+Today the divergence is inert: `drogond`'s entire `windows_pipe` module is
+unreachable in any build regardless (per the prior pass's patch request 2 —
+`lib.rs`'s `#[cfg(unix)] pub mod endpoint;` still excludes it), so fixing
+only the daemon side cannot yet cause the CLI and daemon to disagree in
+practice. But the moment patch request 2 lands and makes the daemon's
+Windows code reachable, an unfixed `drogon-cli::paths::canonical_for_hash`
+would silently disagree with the now-fixed `drogond::endpoint`'s version
+for any UNC-reached data directory — the exact drift this fix exists to
+prevent. Sequence root must follow: apply the `paths.rs` diff above *before
+or atomically with* patch request 2, never after.
+
+**Lossy UTF-8 and casing, cited against the actual TS client in this
+repo** (`apps/desktop/src/main/native-client.ts`, read-only for this
+vertical, not edited — this is the live TS side of today's Drogon v1
+protocol, more directly the agreement target than the older prior-product
+precedent below):
+
+```ts
+// apps/desktop/src/main/native-client.ts:69-76
+export function resolveEndpointPath(directory: string, platform: NodeJS.Platform): string {
+  return platform === "win32"
+    ? `\\\\.\\pipe\\drogon-v1-${createHash("sha256").update(directory).digest("hex").slice(0, 24)}`
+    : path.join(directory, "runtime-v1.sock");
+}
+// ...:311, the caller:
+directory = await realpath(dataDirectory());
+```
+
+This confirms the naming scheme already agrees byte-for-byte with the Rust
+side (`\\.\pipe\drogon-v1-` + first 24 lowercase hex chars of SHA-256 of the
+directory string). Two agreement rules worth stating explicitly so a future
+edit to either side doesn't silently break the other:
+
+- **Lossy UTF-8:** Rust's `to_string_lossy()` and Node's default `'utf8'`
+  string encoding (what `createHash().update(string)` uses) both replace
+  unpaired UTF-16 surrogates with U+FFFD rather than erroring — already
+  consistent, but worth a named agreement since nothing enforces it if one
+  side's encoding argument ever changes (e.g. to `'latin1'`).
+- **Casing:** neither side lowercases or uppercases the directory string
+  before hashing (`resolveEndpointPath` has no `.toLowerCase()`; the fixed
+  `canonical_for_hash` above has none either) — both rely on the OS's own
+  canonicalization (`realpath` / `std::fs::canonicalize`) returning the
+  on-disk stored casing consistently, not on either language normalizing it
+  themselves. Already consistent; now documented in both places (the new
+  doc comment on `canonical_for_hash` and here) instead of being an
+  unstated coincidence.
+
+**Divergence the TS side avoids that the Rust side had to fix:** Node's
+`realpath` does not prepend a `\\?\`/`\\?\UNC\` verbatim marker to its
+result the way Rust's `std::fs::canonicalize` documents that it always
+does on Windows. So the TS client was never exposed to the verbatim-prefix
+trap at all — it has nothing to strip. This is exactly why the bug above is
+Rust-specific and was never going to surface as a TS-side symptom; it would
+only ever manifest as "the Rust CLI and Rust daemon agree with each other
+but the whole Rust side silently disagrees with the TS client" for any
+UNC-reached data directory, which is a materially worse failure mode (three
+components pairwise-inconsistent from the same nominal contract) than a
+same-language bug would have been.
+
+**Prior-product precedent, cited per the task's request to cite the
+read-only source specifically:**
+`/Users/carlos/Documents/Drogon-mentu-session/src/main/daemon/daemon-spawner.ts:124-136`
+(`getDaemonSocketPath`) is the earlier product's analogous named-pipe
+hashing code (different subsystem — its own terminal-host daemon, not this
+protocol): `` `\\\\?\\pipe\\orca-terminal-host-v${protocolVersion}-${suffix}` ``
+with `suffix = createHash('sha256').update(runtimeDir).digest('hex').slice(0, 12)`.
+Two differences from today's Drogon contract, noted so no one mistakes this
+for the same scheme: it keeps the verbatim `\\?\` marker *in* the pipe name
+itself (Drogon's contract uses non-verbatim `\\.\`), and it never calls
+`realpath`/`canonicalize` on `runtimeDir` at all — it hashes whatever string
+the caller passed as-is. That worked in that product only because its
+caller (Electron's `app.getPath('userData')`) never returns a
+`\\?\`-prefixed or symlink/junction-reached path in practice, so the
+verbatim-prefix trap this section fixes never had an opportunity to appear
+there. It is prior art for "hash a directory string into a named-pipe
+name," not a contract this vertical's code needs to match.
+
+### GREEN gate for this pass
+
+```
+cargo test  -p drogond --locked                                   # 17 + 6 + 12 + 10 + 3 = 48 passed, 0 failed (17 = 14 pre-existing + 3 new)
+cargo clippy -p drogond --all-targets --locked -- -D warnings     # clean
+cargo fmt -p drogond -- --check                                   # clean
+cargo test  -p drogon-harness --locked                             # 7 + 3 + 6 + 7 = 23 passed, 0 failed (unchanged — not touched this pass)
+cargo clippy -p drogon-harness --all-targets --locked -- -D warnings  # clean
+cargo fmt -p drogon-harness -- --check                             # clean
+cargo build --workspace --locked                                   # OK, no regressions
+```
+
+### Remaining blockers (this pass)
+
+1. Root decides whether/when to apply the staged `sha2` diff (item 1) —
+   already dependency-clean, purely a judgment call on timing now.
+2. Root must apply the identical `strip_verbatim_prefix` fix to
+   `drogon-cli::paths::canonical_for_hash` (item 4's staged diff),
+   sequenced before or atomically with the prior pass's patch request 2 —
+   see the explicit warning above about the drift this would otherwise
+   reopen.
+3. The `windows-sys` feature list (item 2) and the listener/connection API
+   (item 3) are both unverified by any compiler — same standing constraint
+   as the rest of this vertical's `cfg(windows)` code: no Windows Rust
+   target on this host. V5's Windows runner is the first compiler either
+   will see.
+4. Item 3's open technical risk (idle-timeout parity needs overlapped I/O;
+   `try_clone`'s Windows equivalent is likely unnecessary rather than
+   directly portable) is a real design decision, not resolved here — either
+   root accepts the proposal as a starting sketch for whoever implements
+   `server.rs`'s Windows branch, or grants this vertical scoped ownership of
+   that implementation per the formal request in item 3.
+5. Prior pass's patch requests 2 and 3 (both still unapplied, both still
+   outside this vertical's scope) are unaffected by this pass and still
+   stand as recorded above.
+
+## Completion (root grant) — applying the staged items for real
+
+Scope for this pass: `crates/drogond/src/{endpoint.rs, lib.rs, server.rs,
+service_quiescence.rs, lock.rs}`, `crates/drogon-harness/src/launch.rs`,
+`crates/drogon-harness/tests/launch_contract.rs`,
+`crates/drogond/tests/windows_transport.rs`, and this doc. No
+`Cargo.toml`/`Cargo.lock` edit was made. No commit/push was made. Four
+items; status of each below.
+
+### Item 1 — `sha2` swap: DONE, applied for real
+
+The Rework section's staged diff is now applied exactly as described there:
+`windows_pipe_name` calls `sha2::{Digest, Sha256}::digest` directly, the
+~85-line hand-rolled `sha256`/round-constant-table function is deleted, and
+the byte-vector regression test now asserts against `Sha256::digest`
+directly (renamed `sha2_crate_matches_known_vectors`) instead of the
+deleted function — same two test vectors, same assertion, still guards
+against a future `sha2` version silently changing output. `cargo test -p
+drogond --locked`: still 17 lib unit tests (net zero change — one test
+renamed, none added or removed), all pass. No Cargo edit was needed, since
+`sha2` was already a real dependency (see the Rework section's correction).
+
+### Item 2 — `cfg(windows)` wiring: implemented, blocked on one Cargo line
+
+**Decision:** implemented directly rather than requesting ownership
+transfer. The prior pass's open risks (idle-timeout parity, `try_clone`'s
+Windows shape) turned out to have workable designs once actually attempted
+(overlapped I/O; `DuplicateHandle`), so a transfer request would have
+deferred work that was in fact doable within this vertical's raised file
+scope. What follows is real, reviewed code — not a sketch — but it is
+**unverified by any compiler**: there is still no Windows Rust target on
+this host, and (see below) `windows-sys` is not yet an actual dependency,
+so none of it has ever been type-checked, only carefully checked by hand
+against the installed `windows-sys-0.61.2` source tree function-by-function
+(signatures, parameter types, feature gates — not memory).
+
+**`lib.rs`:** `endpoint`, `lock` and `service_quiescence` are now declared
+unconditionally (`pub mod ...;`, no `#[cfg(unix)]`) — each file's own
+internal `cfg(unix)`/`cfg(windows)` gates decide what compiles per target.
+Added a `#[cfg(windows)] pub fn serve` mirroring the Unix one exactly
+(create the directory, reject a symlinked `--data-dir`, acquire the
+exclusive lock, establish the endpoint, ensure the token, open the engine,
+wire the worker CLI, run the accept loop). `configure_worker_cli` and
+`reject_unsafe_data_dir` are now cross-platform (no `cfg(unix)`): neither
+actually used a Unix-only API — `reject_unsafe_data_dir` was already pure
+`std::fs`, and `configure_worker_cli`'s only platform-specific need
+(`drogon-cli` vs `drogon-cli.exe`) is now handled with
+`std::env::consts::EXE_SUFFIX` instead of a cfg branch. The old
+`#[cfg(not(unix))]` `UnsupportedPlatform` stub is now
+`#[cfg(not(any(unix, windows)))]` — still returned for any third target,
+never silently claiming parity there.
+
+**`endpoint.rs`:** the `windows_pipe` module is rewritten to call
+`windows_sys::Win32::*` directly wherever `windows-sys` has a matching
+declaration (verified against the installed crate source, not memory — see
+the version/feature list below): `CreateNamedPipeW`, `ConnectNamedPipe`,
+`DisconnectNamedPipe`, `CreateFileW`, `CloseHandle`, `GetLastError`,
+`LocalFree`, `ConvertStringSecurityDescriptorToSecurityDescriptorW`,
+`ReadFile`, `WriteFile`, plus (new, for real read/write/accept timeouts —
+see below) `CreateEventW`, `WaitForSingleObject`, `GetOverlappedResult`,
+`CancelIoEx`, `DuplicateHandle`, `GetCurrentProcess`. Still hand-written,
+per the task's "no new hand-written crypto/FFI beyond the already-justified
+SDDL/guard/to_wide" constraint: the same-user SDDL string, the
+`SecurityDescriptorGuard` RAII wrapper, and `to_wide`. No other hand-rolled
+FFI was added — the overlapped-I/O plumbing below is orchestration logic on
+top of the listed `windows-sys` calls, not new raw `extern` declarations.
+
+Two real types replace the old single-shot `NamedPipeServer`:
+
+- **`NamedPipeListener`** — owns the canonical pipe name and, between
+  calls, at most one not-yet-connected instance. `establish` creates the
+  first instance (`FILE_FLAG_FIRST_PIPE_INSTANCE`, the atomic
+  "does-this-name-already-exist" check, unchanged from the prior pass)
+  and now also opens it with `FILE_FLAG_OVERLAPPED`. `accept(poll_timeout)`
+  waits up to `poll_timeout` for a client on the pending instance; on
+  timeout it returns `io::ErrorKind::WouldBlock` — deliberately the same
+  `ErrorKind` the Unix nonblocking listener returns for "nothing pending" —
+  so `server.rs`'s existing quiescence-poll accept loop needs no
+  Windows-specific branch at all, it already treats `WouldBlock` as the
+  bounded wake-and-recheck point. The pending instance is not abandoned on
+  a timeout: Win32's documented pattern is to `CancelIoEx` the previous
+  attempt and re-issue `ConnectNamedPipe` on the *same* handle, which is
+  what happens here — a known, minor inefficiency (roughly one cancel/
+  reissue cycle per `poll_timeout` while idle; default `poll_timeout` is
+  `DEFAULT_QUIESCENCE_POLL` = 5ms) flagged rather than hidden; a persistent
+  long-lived pending accept would avoid it at the cost of more cross-call
+  state, and is a reasonable follow-up refinement, not attempted here.
+- **`NamedPipeConnection`** — one client's connection; owns one instance
+  handle. `Read`/`Write` are real, via a shared `run_overlapped` helper
+  (create a manual-reset event, issue the call, wait up to the configured
+  timeout, `CancelIoEx` + reap on timeout, `GetOverlappedResult` otherwise)
+  used identically for `accept`, `read` and `write` — one implementation of
+  the wait/cancel/reap dance, not three. `set_read_timeout`/
+  `set_write_timeout` take `&self` (backed by `Cell`, matching
+  `UnixStream`'s signatures exactly — see the `Transport` trait below).
+  `try_clone` uses `DuplicateHandle` — the Windows analog of `dup(2)` for a
+  Win32 `HANDLE`.
+
+**Known gap, documented rather than assumed away:** `shutdown_both`
+(used by `ConnectionRegistry::drain` to force-unblock a stuck handler) calls
+`CancelIoEx` on the connection's handle. Whether that also cancels an
+operation issued through a *different*, `DuplicateHandle`-derived handle to
+the same pipe instance (the exact shape `drain` relies on — it holds the
+registry's clone, the handler thread holds the original) is real Win32
+behavior this vertical could not verify without a Windows host;
+`CancelIoEx`'s documented cancellation scope is "operations issued through
+this handle value," and duplicated handles may or may not count as the
+same value for that purpose. If they do not, `drain`'s force-unblock does
+not reach a handler blocked in a Windows read/write, and drain would fall
+through to its timeout instead of the immediate unblock the Unix side gets
+from `shutdown(Shutdown::Both)`. This does not break correctness (the
+bounded `drain_timeout` still applies, and a detached handler still can't
+serve once the listener has stopped) — it just means drain may take the
+full timeout on Windows in a case Unix resolves instantly. Needs a real
+Windows run to confirm either way.
+
+**`service_quiescence.rs`:** added a `Transport` trait (`Read + Write +
+Send + 'static`, plus `set_read_timeout`/`set_write_timeout`/`try_clone`/
+`shutdown_both`) implemented for `UnixStream` (`cfg(unix)`, thin
+delegation) and `NamedPipeConnection` (`cfg(windows)`, ditto).
+`ConnectionRegistry`/`ConnectionEntry`/`ActiveConnection` are now generic
+over `S: Transport` instead of hardcoded to `UnixStream`; `Default` is
+hand-written (not derived) because `#[derive(Default)]` would add a
+spurious `S: Default` bound. `drain` now calls `entry.transport
+.shutdown_both()` instead of `entry.transport.shutdown(Shutdown::Both)`
+directly.
+
+**`server.rs`:** `run_accept_loop_inner`/`connection_loop`/
+`AcceptLoopConfig` are now generic over `S: Transport` (no cfg gate needed
+on the generic definitions themselves — they reference no platform-specific
+type anymore). The existing public Unix wrapper functions
+(`accept_loop`/`accept_loop_with_limits`/`run_accept_loop`/
+`handle_connection`) keep their exact prior signatures (still concrete over
+`UnixStream`) so `tests/server.rs` and `tests/service_quiescence.rs` —
+outside this vertical's file scope — compile completely unchanged; Rust's
+type inference resolves `S = UnixStream` at their call sites into the now-
+generic inner functions without any turbofish needed. New `#[cfg(windows)]`
+`accept_loop`/`accept_loop_with_limits` mirror them for
+`NamedPipeListener`/`NamedPipeConnection`. Added a `#[cfg(windows)]`
+`is_fatal_accept_error` twin (unverified, conservative: only
+`ERROR_INVALID_HANDLE`/`ERROR_NOT_ENOUGH_MEMORY` are fatal, everything else
+transient and retried, mirroring the Unix side's "ambiguous is never
+treated as more severe than it has to be" stance) — `NamedPipeListener
+::accept` already resolves its own "no client yet" case internally as
+`WouldBlock`, so this only ever sees failures creating the *next* instance.
+
+**`lock.rs`:** split into `cfg(unix)`/`cfg(windows)` submodules (the
+`#![cfg(unix)]` whole-file gate is gone). The Windows `acquire_exclusive`
+opens (or creates) the lock file, then calls `LockFileEx` with
+`LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY` over the whole file —
+no overlapped-completion dance needed here (unlike the named-pipe I/O
+above), since `LOCKFILE_FAIL_IMMEDIATELY` means the call never actually
+goes pending. Windows releases a `LockFileEx` lock automatically when the
+last handle closes, so the normal `Drop` (closing the file) is sufficient,
+matching the Unix side's "drop releases it" contract with no extra code.
+**Explicit gap, not silently dropped:** no ACL-hardening equivalent to the
+Unix side's `0600`/pipe-DACL was added for the lock file or the data
+directory — doing so would need new Windows security-descriptor FFI beyond
+what `endpoint.rs`'s pipe DACL already justifies, which the task's "no new
+hand-written crypto/FFI beyond the already-justified SDDL/guard/to_wide"
+constraint reads as out of scope for this pass. This relies on the data
+directory's inherited NTFS ACLs (from the user's profile folder) instead.
+Root should decide whether that is acceptable long-term or whether a
+future pass should add the same-user hardening explicitly.
+
+**The blocking Cargo line — updated live during this pass.** Root committed
+`72ef919` ("Provision Windows daemon API bindings for transport
+integration") to this branch *while this pass was in progress*, adding
+exactly the six-feature `windows-sys` dependency the Rework section
+proposed:
+
+```toml
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Pipes", "Win32_System_IO"] }
+```
+
+That unblocks everything in this pass **except** the overlapped I/O this
+pass added for real read/write/accept timeouts (not part of the prior,
+non-overlapped design the six-feature list was scoped for): `CreateEventW`,
+`WaitForSingleObject` and `GetCurrentProcess` all live under
+`Win32_System_Threading`, verified against the installed
+`windows-sys-0.61.2` source the same way as the other six — and that
+seventh feature is **not** in the committed line above. One remaining,
+precise, minimal ask for root:
+
+```toml
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Pipes", "Win32_System_IO", "Win32_System_Threading"] }
+```
+
+(one feature added to the existing line; no version change, so
+`Cargo.lock`'s already-resolved `0.61.2` should be unaffected — root should
+still confirm with `cargo build --locked` rather than assume it from this
+analysis.) Until `Win32_System_Threading` is added, `endpoint.rs`'s
+`run_overlapped` helper (and therefore `NamedPipeConnection::read`/`write`
+and `NamedPipeListener::accept`) will not compile on a real Windows build.
+
+Until that line lands, this entire `cfg(windows)` surface remains
+unreachable by any build, exactly like the prior pass's patch request 2
+(now resolved by the unconditional `lib.rs` module declarations above) —
+except the new blocker is the dependency itself, not the module gate.
+
+### Item 3 — adapter newline correction: scoped as unsupported-until-e2e, not moved to stdin
+
+**Decision, with justification:** did not move prompt delivery to the PTY
+stdin path. Traced the actual call site
+(`crates/drogon-core/src/harness.rs::do_harness_start` →
+`resolve_launch`/`plan_launch`, then straight into `do_session_start` with
+`plan.command`/`plan.args`): there is no existing post-spawn
+`session.write` call anywhere in that path today, and wiring one in would
+mean editing `crates/drogon-core/src/harness.rs` (spawn without the prompt
+in argv, then call `Engine::do_session_write` once the session starts) —
+`drogon-core`'s files are explicitly outside this vertical's scope
+(`core-lib.rs` and everything else in that crate). The task's own
+alternative — "explicitly scope `.cmd` prompts unsupported-until-Windows-
+e2e with rationale" — is what was implemented instead.
+
+**What changed in `launch.rs`:** the unsafe-token refusal is unchanged in
+effect (a `.cmd`/`.bat` launcher with a newline- or metacharacter-bearing
+prompt was refused before this change and still is), but the refusal is now
+raised earlier, scoped specifically to the prompt (not folded into the
+generic per-argv-token safety message), with a rationale naming the real
+fix and exactly where it belongs: writing the prompt via `session.write`
+after `session.start`, in `drogon-core::harness`, outside this adapter. A
+caller hitting this now gets an actionable, honest explanation instead of
+a generic "must not contain any of: & | < > ^ \" % !" message that gives no
+hint that a structural fix (not just picking different prompt text) exists.
+
+**Host-gated fixture tests added** (`launch_contract.rs`, `#[cfg(windows)]`
+— run only on an actual Windows test runner; never spawn `cmd.exe` or any
+script, every assertion is against the computed `HarnessLaunchPlan` alone,
+so a maliciously-crafted fixture path can never actually be executed by
+these tests):
+
+- `cmd_fixture_path_preserves_safe_character_fidelity_and_refuses_a_quote`
+  — a `.cmd` path containing spaces, parens and non-ASCII (café, 日本語)
+  survives into the computed argv byte-for-byte; a path containing a
+  literal quote is refused (a quote is a documented unsafe character, not
+  something this adapter should silently pass through).
+- `cmd_launcher_refuses_a_newline_bearing_prompt_with_a_scoped_rationale` —
+  a newline-bearing prompt to a `.cmd` launcher is still refused, and the
+  error message names `session.write` (the real fix), not just "unsafe
+  characters."
+
+Neither test can run on this (Unix) host; both are at least syntactically
+valid Rust (this crate's `cargo test -p drogon-harness --locked` still
+compiles and passes its 23 non-Windows-gated tests with these present,
+since cfg-stripping happens before semantic analysis). Never claims
+functional Windows behavior from this alone — only V5's runner can confirm
+it.
+
+### Item 4 — stale `launch_contract.rs` rejection test: DONE
+
+`batch_launchers_require_windows_argv_adapter` (asserted
+`unsupported_platform`, stale since the Windows batch-launcher adapter
+landed) is replaced with `batch_launchers_get_the_cmd_exe_argv_adapter`,
+exactly the sketch the Rework section's patch request 3 proposed: asserts
+`plan.command` ends with `cmd.exe` and `plan.args[..3]` is
+`["/d", "/c", r"C:\tools\pi.cmd"]`. Same host gating as before
+(`#[cfg(windows)]`) and same caveat (syntax-checked here, not executed).
+
+### GREEN gate for this pass
+
+```
+cargo test  -p drogond --locked                                   # 17 + 6 + 12 + 10 + 3 = 48 passed, 0 failed (net unchanged: one test renamed)
+cargo clippy -p drogond --all-targets --locked -- -D warnings     # clean
+cargo fmt -p drogond -- --check                                   # clean
+cargo test  -p drogon-harness --locked                             # 7 + 3 + 6 + 7 = 23 passed, 0 failed (new host-gated tests don't run here but compile)
+cargo clippy -p drogon-harness --all-targets --locked -- -D warnings  # clean
+cargo fmt -p drogon-harness -- --check                             # clean
+cargo build --workspace --locked                                   # OK, no regressions
+```
+
+### Implemented vs. still blocked, at a glance
+
+| Item | Status | Blocker |
+|---|---|---|
+| 1. `sha2` swap | **Done, applied** | none |
+| 2. `cfg(windows)` wiring | **Implemented, unverified** | one missing feature flag (`Win32_System_Threading`) on the `windows-sys` line root already committed mid-pass; then a real Windows compiler/runner |
+| 3. Adapter newline correction | **Scoped with rationale, not moved to stdin** | actual stdin delivery needs a `drogon-core::harness` edit, outside this vertical's file scope |
+| 4. Stale rejection test | **Done, applied** | none |
+
+### Remaining blockers and follow-ups
+
+1. Root adds `Win32_System_Threading` to the `windows-sys` feature list in
+   `crates/drogond/Cargo.toml` (root committed the other six features
+   mid-pass, in `72ef919`) and confirms `cargo build --locked` keeps
+   `Cargo.lock` stable, then the entire `cfg(windows)` surface in
+   `endpoint.rs`/`lib.rs`/`server.rs`/`service_quiescence.rs`/`lock.rs`
+   becomes compilable for the first time.
+2. V5's Windows runner is the first real compiler this code will see —
+   needed to confirm every hand-checked signature/feature-gate above is
+   actually correct, and specifically to resolve the `CancelIoEx`-on-
+   duplicate-handle open question flagged under item 2 (does `drain`'s
+   force-unblock actually reach a Windows handler blocked in read/write).
+3. If the `CancelIoEx` gap turns out to be real, `drain`'s Windows
+   behavior degrades to "wait out `drain_timeout`" rather than "unblock
+   immediately" — not a correctness break, but worth a follow-up fix (e.g.
+   tracking the *original* handle in the registry instead of a duplicate,
+   if that turns out to matter) once confirmed.
+4. Root still owns: applying the `drogon-cli::paths::canonical_for_hash`
+   companion fix from the Rework section (sequenced with reachability, as
+   warned there); evaluating the pipe-name consolidation into
+   `drogon-protocol`; deciding whether Windows data-directory/lock-file ACL
+   hardening (item 2's explicit gap) is required before shipping; and
+   actually wiring prompt delivery over `session.write` in
+   `drogon-core::harness` for `.cmd` launchers (item 3), which remains
+   fully unimplemented and outside every vertical's current scope until
+   explicitly assigned.
+5. Prior pass's patch request 3 is now resolved (item 4). Patch request 1
+   (pipe-name consolidation into `drogon-protocol`) still stands, unaffected
+   by this pass.
+
+## Safety corrections (root-blocking review of `530b0e7`)
+
+Three overlapped-lifetime defects in the `cfg(windows)` transport, found in
+root's blocking review of the "checkpoint-003" pass, are corrected in
+`endpoint.rs`/`service_quiescence.rs`. This supersedes the "Known gap" /
+"open question" framing in the Completion section above (item 2 and the
+`try_clone` paragraph) and the "a detached handler still can't serve"
+claim in the remaining-blockers list above (item 2/3): that claim was
+wrong — nothing previously stopped a detached handler thread from issuing
+one more read/write on a duplicate handle `CancelIoEx` never reached, since
+Windows named pipes are refcounted kernel objects (the earlier "impossible"
+reasoning applies to the *pipe name* going stale, not to an in-process
+handle staying usable after the registry considers the connection gone).
+None of this is compiler- or runtime-verified on this (Unix) host, same
+constraint as every other `cfg(windows)` line in this file — the tests
+below are real code, exercised for the first time by V5's Windows runner.
+
+1. **`run_overlapped` cancel-and-reap was timeout-only.** The `WaitForSingleObject`
+   match had a bare `_ => return Err(...)` arm (covering `WAIT_FAILED` and
+   any other non-`WAIT_OBJECT_0`/`WAIT_TIMEOUT` result) that returned
+   immediately while the issued `ERROR_IO_PENDING` operation still owned
+   the stack `OVERLAPPED`, the manual-reset event (about to be `CloseHandle`d
+   by `_event_guard`'s `Drop`) and, for `Read`/`Write`, the caller's buffer.
+   Fixed: that arm now captures the wait failure, `CancelIoEx`s the handle,
+   reaps via `GetOverlappedResult(..., TRUE)` exactly like the timeout arm,
+   and only then returns the original wait error. Every post-issue exit
+   path now cancels-and-reaps before returning, not only the timeout one.
+2. **The timeout path discarded a racing success.** On `WAIT_TIMEOUT`, the
+   prior code called `CancelIoEx` then reaped the result but ignored it
+   unconditionally, always reporting `(0, timed_out=true)` — silently
+   dropping a connect or a transferred-bytes count if the operation
+   actually completed in the race window between the timeout firing and
+   `CancelIoEx` stopping it. Fixed: `run_overlapped` now inspects
+   `GetOverlappedResult`'s outcome after the cancel; a real success
+   (`ok != 0`, or `ERROR_PIPE_CONNECTED`) is returned as an actual success
+   with its real transferred-byte count, and only `ERROR_OPERATION_ABORTED`
+   (cancellation genuinely won the race) is reported as `timed_out`.
+3. **`shutdown_both` could not stand in for permanent shutdown.** Every
+   `NamedPipeConnection` (including `try_clone` duplicates) previously
+   owned an independent `HANDLE` with no shared state: `shutdown_both`
+   `CancelIoEx`'d only `self.handle`, so a handler thread blocked in a
+   read/write on a *different* duplicate (the exact shape `drain` relies
+   on) was unreachable — the prior doc correctly flagged this as an open
+   Win32 question, but incorrectly concluded the fallback was still safe
+   ("a detached handler still can't serve"), when in fact nothing prevented
+   it from completing one more read/write on its own handle after the
+   registry believed the connection gone. Separately, every duplicate's
+   `Drop` called `DisconnectNamedPipe`, which severs the whole shared pipe
+   instance — correct only for the last live duplicate, not every one of
+   them. Fixed with a new `SharedTransportState<H>` (generic, host-testable
+   pure state machine; see `endpoint.rs`) shared via `Arc<Mutex<_>>` across
+   every clone in a connection group (handle values stored as `usize`, not
+   `HANDLE`, so the `Arc<Mutex<_>>` needs no `unsafe impl Send/Sync` beyond
+   what individual `HANDLE` fields already required):
+   - `shutdown_both` marks the group closed (fencing every clone's *next*
+     `read`/`write` to fail immediately with `ErrorKind::BrokenPipe`,
+     checked before any overlapped call is issued) and `CancelIoEx`s every
+     currently-live duplicate in the group, not only `self.handle`.
+   - `Drop` calls `DisconnectNamedPipe` only when removing the caller's
+     handle leaves the group empty (the final owner); every duplicate,
+     final owner or not, still closes its own handle value.
+   - `service_quiescence.rs`'s `Transport::shutdown_both` doc and
+     `ConnectionEntry`'s doc are corrected to describe this (permanent
+     shutdown across every clone, not a best-effort single-handle
+     cancellation with an open question).
+
+**Tests added**, all in `endpoint.rs` (none in the external
+`tests/windows_transport.rs`, since exercising any of this needs
+`connect_client`, a private helper with no public client-side wrapper to
+call from outside the crate):
+
+- Pure-logic, host-agnostic (`#[cfg(test)] mod tests` at the bottom of
+  `endpoint.rs`, run and GREEN on this Unix host as part of
+  `cargo test -p drogond`): `new_group_starts_open_with_exactly_its_initial_handle_live`,
+  `mark_closed_fences_every_clone_not_just_the_caller`,
+  `every_duplicate_is_tracked_for_cancellation`,
+  `disconnect_fires_exactly_once_for_the_final_owner`,
+  `removing_an_unknown_handle_is_a_harmless_no_op` — exercise
+  `SharedTransportState`'s transitions directly with a `u32` stand-in for
+  `HANDLE`, no Windows type or FFI involved.
+- Windows-only, host-gated (`#[cfg(test)] mod tests` inside the
+  `windows_pipe` module itself; compiled and executed only by V5's
+  runner, never here):
+  `repeated_timed_out_accepts_leave_the_pending_instance_reusable_for_a_later_connect`
+  (fix 1: several cancel+reap cycles must leave the handle usable for a
+  real connect afterward — deterministic, no client-timing race);
+  `a_connect_racing_the_poll_timeout_is_always_eventually_observed` (fix 2:
+  best-effort-deterministic — the exact kernel race cannot be forced from
+  outside, so this asserts the restored contract, bounded to 5s, rather
+  than a specific internal branch firing);
+  `shutdown_both_fences_new_io_on_every_clone_not_just_the_caller` (fix 3,
+  fencing half — fully deterministic, no cancellation or timing involved);
+  `dropping_one_duplicate_does_not_disconnect_the_shared_pipe_for_siblings`
+  (fix 3, single-disconnect half — fully deterministic).
+
+**Build verification, precisely:** unchanged from every prior pass on this
+vertical — there is no `rustup` on this host at all (`command not found`),
+so no Windows target can be added, and `cargo check -p drogond --target
+x86_64-pc-windows-msvc` fails immediately with `E0463: can't find crate for
+core` (confirmed again during this pass). Nothing under `cfg(windows)`,
+including these three fixes and their host-gated tests, has been compiled
+by any Rust toolchain; V5's isolated Windows runner remains the first
+compiler this code will ever see. What *is* real and verified on this
+(Unix) host: `cargo build -p drogond --locked` (exit 0), `cargo test -p
+drogond --locked` (22 lib tests + 31 integration tests, all pass, including
+the 5 new `SharedTransportState` unit tests), `cargo test -p drogon-harness
+--locked` (16 tests, all pass, unaffected by this pass), `cargo clippy -p
+drogond --all-targets --locked --offline -- -D warnings` (exit 0), `cargo
+clippy -p drogon-harness --all-targets --locked --offline -- -D warnings`
+(exit 0), and `cargo fmt --all -- --check` (exit 0, after `cargo fmt --all`
+reformatted the new code).
+
+## Race (root-blocking review of `4fcf2ee`, not integrated)
+
+Root's review of the "Safety corrections" pass above (commit `4fcf2ee`)
+found three further defects before accepting it: two new overlapped-lifetime
+races the previous pass's own locking shape left open, and one real compile
+error in a Windows-only test. All three are corrected in this pass, in
+`endpoint.rs` only (`service_quiescence.rs` needed a documentation
+cross-reference, not a behavior change — see below). Same standing
+constraint as every prior pass: nothing under `cfg(windows)` has been
+compiled by any Rust toolchain on this host; V5's isolated Windows runner
+remains the first compiler this code will ever see.
+
+1. **The closed-check released the lock before the overlapped issue.**
+   `Read::read`/`Write::write` locked `shared`, checked `is_closed()`, and
+   let the guard drop at the end of that `if` statement — then, separately
+   and without holding any lock, called `run_overlapped` to issue the real
+   `ReadFile`/`WriteFile`. `shutdown_both` could run entirely inside that
+   gap: it locks `shared`, marks it closed, snapshots `live_handles()`
+   (this handle is not yet an in-flight operation, so nothing is actually
+   pending to cancel), `CancelIoEx`s it as a no-op, and returns — believing
+   this connection is fully shut down. The read/write call then proceeds to
+   issue its `ReadFile`/`WriteFile`, which starts a fresh overlapped
+   operation `shutdown_both` already ran and will never cancel again,
+   leaving `ConnectionRegistry::drain` to block a stuck handler for its full
+   `drain_timeout` (or forever, on an unbounded read/write timeout) instead
+   of the immediate unblock the Windows path is supposed to provide. Fixed:
+   `run_overlapped_guarded` (new; `run_overlapped` itself is now the
+   already-issued case used only by `accept`, which has no shared shutdown
+   state to race) holds `shared`'s lock across the closed-check **and** the
+   `issue()` call together, releasing it only before the wait/cancel/reap
+   step. This makes the two operations strictly ordered with no partial
+   interleaving: either `shutdown_both`'s whole locked step runs first (so
+   the check observes closed and never issues), or the guarded issue's
+   whole locked step runs first (so the operation is genuinely pending in
+   the kernel by the time `shutdown_both` snapshots `live_handles()` and
+   `CancelIoEx`s it for real).
+2. **`shutdown_both` copied handles then unlocked before `CancelIoEx`.**
+   `shutdown_both` locked `shared` only long enough to `mark_closed()` and
+   copy `live_handles()` into a local `Vec`, then released the lock before
+   looping over that snapshot to call `CancelIoEx` on each raw handle value.
+   `Drop`'s `remove_and_is_last` + `CloseHandle` was similarly only locked
+   for the bookkeeping step, not the actual `CloseHandle`/`DisconnectNamedPipe`
+   call. A `Drop` of one of those exact handles could run entirely inside
+   that gap: remove itself from the group under its own lock acquisition,
+   then `CloseHandle` it — after which Windows is free to hand that same
+   numeric handle value to a completely unrelated, freshly-opened kernel
+   object. `shutdown_both`'s loop, still holding only the stale snapshot,
+   then calls `CancelIoEx` on that recycled value, an unrelated object with
+   no connection to this transport at all — a real use-after-close/handle-
+   recycling hazard, not merely a missed cancellation. Fixed: `shutdown_both`
+   now holds `shared`'s lock for the mark-closed step **and** the entire
+   `CancelIoEx` loop that follows it; `Drop` now holds the same lock through
+   `remove_and_is_last` **and** the `DisconnectNamedPipe`/`CloseHandle` calls
+   that follow. The two can now never interleave such that one closes a
+   handle value the other is still naming in a live `CancelIoEx` call —
+   `SharedTransportState`'s doc gained a fourth invariant stating this
+   explicitly, and `service_quiescence.rs`'s `Transport::shutdown_both` doc
+   now cross-references it (documentation only; the Windows impl already
+   just delegates to `NamedPipeConnection::shutdown_both`, so no behavior
+   change was needed there).
+3. **A Windows-only test would not have compiled.** Both
+   `tests/windows_transport.rs`'s `accept_with_no_client_reports_wouldblock_within_the_poll_timeout`
+   and `endpoint.rs`'s own
+   `repeated_timed_out_accepts_leave_the_pending_instance_reusable_for_a_later_connect`
+   call `listener.accept(poll).unwrap_err()` on an `io::Result<NamedPipeConnection>`.
+   `Result::unwrap_err` requires the `Ok` type to implement `Debug` (to
+   format it into the panic message if the result were unexpectedly `Ok`),
+   and `NamedPipeConnection` had no `Debug` impl — a real `E0599`/trait-bound
+   compile error on the first Windows toolchain that ever tried to build
+   this crate, not merely an untested code path. Fixed by deriving `Debug`
+   on `NamedPipeConnection` and on `SharedTransportState` (needed
+   transitively, since `NamedPipeConnection` holds one via
+   `Arc<Mutex<SharedTransportState<usize>>>`, and `Mutex<T>`/`Arc<T>` are
+   only `Debug` when `T` is): every other field (`HANDLE` — a raw pointer,
+   `Debug` unconditionally; `Cell<Option<Duration>>` — `Debug` since
+   `Option<Duration>` is `Copy + Debug`) already supported it, so no
+   restructuring of either call site was needed.
+
+**Tests added**, alongside the existing ones from the prior pass:
+
+- Windows-only, host-gated (inside `windows_pipe::tests`, compiled and run
+  only by V5's runner): `a_read_racing_shutdown_both_never_starts_uncancelled`
+  (fix 1 — best-effort/bounded: races a fresh read against a concurrent
+  `shutdown_both` with no synchronization delay across 50 trials, each
+  bounded to a 5s channel receive, asserting no trial hangs; the exact
+  kernel-level interleaving that would trigger the pre-fix bug cannot be
+  forced from outside the kernel, so this is a regression guard via
+  repeated contention, not a guaranteed reproduction) and
+  `concurrent_clone_drop_and_shutdown_both_never_hang` (fix 2 — churns
+  `try_clone`/`Drop` on one duplicate against repeated `shutdown_both` calls
+  on a sibling, entirely on owned, non-shared `NamedPipeConnection` values
+  since that type is deliberately not `Sync`; bounded to a 10s channel
+  receive around the whole interaction). Neither test can distinguish a
+  correct cancellation from a use-after-close-recycled one by its return
+  value alone (both would usually "succeed" from Rust's point of view); the
+  practical bar these assert is that the lock discipline never produces a
+  hang, which a broken interleaving would tend to do under repeated
+  contention.
+- Host-agnostic (bottom-level `#[cfg(test)] mod tests`, run and GREEN on
+  this Unix host): `shared_transport_state_bookkeeping_stays_consistent_under_real_thread_contention`
+  — the lock-ordering logic separable from Windows kernel timing: four
+  threads repeatedly `add`/`remove_and_is_last` distinct `u32` identifiers
+  while a fifth repeatedly `mark_closed`s and snapshots `live_handles()`,
+  all under real `std::thread` contention (no Windows type or I/O
+  involved), asserting the structure never panics and ends up in the exact
+  expected final state.
+
+**Build verification, precisely:** `cargo build -p drogond --locked` (exit
+0). `cargo test -p drogond --locked`: 23 lib unit tests (22 pre-existing +
+1 new `SharedTransportState` contention test; net +1 versus the prior
+pass's 22, since this pass adds one host-agnostic test and two
+Windows-only host-gated tests that do not run on this host) + 6 + 12 + 10 +
+3 integration tests = 54 total, all pass, 0 failed, 0 ignored. `cargo test
+-p drogon-harness --locked`: 23 tests, all pass, unaffected by this pass.
+`cargo clippy -p drogond --all-targets --locked -- -D warnings` (exit 0).
+`cargo clippy -p drogon-harness --all-targets --locked -- -D warnings`
+(exit 0). `cargo fmt -p drogond -- --check` (exit 0). `cargo fmt --all --
+--check` (exit 0, workspace-wide). No `rustup`/Windows target exists on
+this host (`command not found`, confirmed again), so — same as every prior
+pass — nothing under `cfg(windows)` in this diff, including the two new
+host-gated tests and fix 3's `Debug` derives, has been compiled by any
+Rust toolchain. V5's isolated Windows runner remains the first compiler
+this code will ever see; it is the only host that can confirm the two new
+Windows-only tests actually pass rather than merely being syntactically
+valid Rust.
+
+**Remaining blockers (this pass):** identical to every prior pass — no
+Windows Rust target on this host, so the entire `cfg(windows)` module
+(these three fixes, their tests, and everything from the two prior passes)
+remains compiler-unverified until V5's runner builds and runs it for the
+first time. All prior passes' own remaining blockers (the staged `sha2`/
+`drogon-cli::paths` diffs, the `windows-sys` `Win32_System_Threading`
+feature-gap ask, the `server.rs` accept-loop generalization now already
+applied, etc.) are unaffected by this pass and still stand as recorded
+above.
+
+## GetLastError immediate-capture correction (root review `msg_fcb8dbc8ebc0`
+## of committed `7f39ff6`, not integrated)
+
+Root's review of the "Race" pass above (commit `7f39ff6`, its
+`finish_overlapped_call` extraction) found one further defect before
+accepting it, at `endpoint.rs:627` vs `669`: `run_overlapped_guarded`
+called `issue(call.ptr())` inside the `shared`-lock guard, let the guard
+drop, then called `finish_overlapped_call`, which only then read
+`GetLastError()` — after both the guard's `Drop` and the call into
+`finish_overlapped_call` itself, either of which the Win32 immediate-
+capture contract does not promise leaves the thread's last-error slot
+untouched. `run_overlapped` (used by `accept`) shares `finish_overlapped_call`
+and has the identical gap between its own `issue()` call and the read.
+
+**Fixed:** both `run_overlapped` and `run_overlapped_guarded` now call
+`GetLastError()` themselves, immediately alongside `issue(call.ptr())` —
+inside the lock guard in the guarded case — and pass the captured `DWORD`
+into `finish_overlapped_call` as a new `issue_err: Option<u32>` parameter
+(`Some` exactly when `started == 0`, `None` otherwise, since the value is
+only meaningful on the failure/pending path). `finish_overlapped_call`'s
+`started == 0` branch now reads that captured value instead of calling
+`GetLastError()` itself. The function's later `GetLastError()` calls (after
+`GetOverlappedResult` on the timeout and wait-failure paths) are untouched:
+each of those already reads immediately after its own preceding Win32 call,
+with no guard-drop or helper-call gap in between, so they were never the
+defect. No cancel-then-reap ownership changed: every `ERROR_IO_PENDING`
+path still `CancelIoEx`s and reaps via `GetOverlappedResult` before
+returning, unchanged from the prior pass. The long production comments
+`7f39ff6` added to these three functions are trimmed to concise form in
+this pass; no documented behavior changed.
+
+**Test added:** `finish_overlapped_call_resolves_from_the_captured_issue_error`,
+inside `windows_pipe::tests` (Windows-gated — the function itself only
+exists under `cfg(windows)`, so a host-agnostic test is not possible; but
+the test needs no real pipe, handle or kernel I/O, since a `started == 0`
+call returns immediately once `issue_err` is not `ERROR_IO_PENDING`, before
+touching `handle`/`overlapped` at all). Calls `finish_overlapped_call`
+directly with `started = 0` and a synthetic `issue_err`, asserting the
+returned error/success comes from that captured value
+(`ERROR_ACCESS_DENIED` → `Err` with that raw OS error; `ERROR_PIPE_CONNECTED`
+→ `Ok((0, false))`) rather than from any `GetLastError()` the function
+might otherwise call itself.
+
+**Build verification, precisely:** `cargo test -p drogond --locked`: 23 lib
+unit tests + 6 + 12 + 10 + 3 integration tests = 54 total, all pass, 0
+failed, 0 ignored (unchanged count from the prior pass — the new test is
+Windows-gated and does not run or count on this host). `cargo test -p
+drogon-harness --locked`: 23 tests, all pass, unaffected by this pass.
+`cargo clippy -p drogond -p drogon-harness --all-targets --locked -- -D
+warnings` (exit 0). `cargo fmt --all -- --check` (exit 0). Same standing
+constraint as every prior pass: no Windows Rust target exists on this host,
+so this correction, including its new test, remains compiler-unverified —
+never to be confused with the macOS gates above, which cover only the
+host-agnostic code paths — until V5's isolated Windows runner builds and
+runs the `cfg(windows)` module for the first time.
+
+**Remaining blockers (this pass):** identical to every prior pass — no
+Windows Rust target on this host; this fix and its test join the rest of
+the `cfg(windows)` module as compiler-unverified until V5's runner builds
+it. All prior passes' remaining blockers stand unaffected.
+
+## ACL correction (root seq 3304): TokenUser explicit DACL replaces `OW`
+
+Root security review held that `SAME_USER_SDDL`
+(`D:P(A;;GA;;;OW)(A;;GA;;;SY)`, present in every prior pass above) rests on
+an unproven assumption: it grants Generic-All to `OW` ("the object's
+owner") and treats that as equivalent to "the creating process's user."
+Windows does not guarantee that equivalence. A process's `TOKEN_OWNER` —
+which becomes a new object's default owner whenever no owner is explicitly
+set, exactly the case here, since `same_user_security_attributes` never
+called `SetSecurityDescriptorOwner` — is documented (`GetTokenInformation`,
+`TokenOwner`) to be settable to *either* the user's own SID *or* one of the
+user's group SIDs, and `TOKEN_OWNER` is a field distinct from `TOKEN_USER`.
+An `OW`-keyed ACE can therefore silently grant access to a group the caller
+merely belongs to, not "this same user" — the opposite of
+`protocol-v1.md`'s requirement — in any token shape where `TOKEN_OWNER`
+happens to be a group, and this is not detectable from the SDDL string
+alone (`OW` is a placeholder the OS resolves at object-creation time, not a
+literal SID). This section fixes it, per the two required outcomes:
+
+**Chosen fix: query and name the real `TokenUser` SID, not a proof that
+`owner == TokenUser`.** The task offered two paths — build an explicit DACL
+naming the actual `TokenUser` SID, or formally prove `owner == TokenUser`
+holds for every valid token shape and fail closed where unprovable. The
+first is strictly the safer engineering choice: `TOKEN_USER` is documented
+to always be a user SID, never a group, so naming it directly sidesteps the
+entire "is `TOKEN_OWNER` a group in this shape" question rather than
+requiring an exhaustive, Windows-version-sensitive proof over every valid
+token configuration (impersonation, restricted tokens, UAC-filtered admin
+tokens, etc.) that a later Windows change could silently invalidate. If the
+`TokenUser` query fails for any reason, pipe creation now fails closed
+(propagates the `io::Error`) rather than falling back to `OW`, `NULL`
+security attributes, or any other default — matching the task's fail-closed
+requirement without needing the proof path at all.
+
+**What changed, in `crates/drogond/src/endpoint.rs` only, all inside the
+DACL region** (`SAME_USER_SDDL` and everything between `to_wide` and
+`same_user_security_attributes`; no other function, no `Cargo.toml`/
+`Cargo.lock` edit):
+
+- `SAME_USER_SDDL` (the fixed `D:P(A;;GA;;;OW)(A;;GA;;;SY)` constant) is
+  deleted.
+- New `dacl_sddl_for_user_sid(user_sid: &str) -> String` (top-level in
+  `endpoint.rs`, **not** inside `#[cfg(windows)]`, mirroring
+  `windows_pipe_name`/`canonical_for_hash`'s existing pattern of keeping
+  pure logic host-agnostic): `format!("D:P(A;;GA;;;{user_sid})(A;;GA;;;SY)")`.
+  This is the only actual SID/DACL *selection* logic in the fix — everything
+  else is FFI plumbing to obtain or apply the SID — and it is the piece the
+  task specifically asked to be unit-tested host-agnostically. It compiles
+  and is exercised on this (Unix) host today.
+- New `windows_pipe::token_user_sid_string() -> io::Result<String>`
+  (`cfg(windows)` only): `OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY,
+  ..)` → `GetTokenInformation(token, TokenUser, ..)` (two-call
+  size-probe-then-fill pattern) → `IsValidSid` on the returned `TOKEN_USER`'s
+  `Sid` (fails closed, does not proceed on an invalid SID) →
+  `ConvertSidToStringSidW` to render it as `S-1-...`. Every failing step
+  returns `Err` immediately; nothing here falls back to a default.
+- `same_user_security_attributes` now calls `token_user_sid_string()?` and
+  `dacl_sddl_for_user_sid(&user_sid)` instead of the old fixed constant; its
+  own structure (build the wide SDDL string, call
+  `ConvertStringSecurityDescriptorToSecurityDescriptorW`, wrap the result in
+  `SecurityDescriptorGuard`) is otherwise unchanged — the fix is scoped to
+  *which* SID the DACL names, not the mechanism that installs it.
+- New small helpers, both `cfg(windows)`: `HandleGuard` (closes the process
+  token handle on every return path, including the early-error ones) and
+  `wide_nul_terminated_to_string` (reads `ConvertSidToStringSidW`'s output
+  buffer; shared by the production code and the new DACL-inspection test
+  below, so the NUL-scanning logic exists exactly once).
+
+**No new dependency, confirmed by reading the installed crate source, not
+assumed.** `crates/drogond/Cargo.toml`'s existing
+`[target.'cfg(windows)'.dependencies]` line already enables
+`Win32_Security`, `Win32_Security_Authorization` and `Win32_System_Threading`
+(added across the two prior passes above). Every symbol this fix needs is
+already reachable under those three features — verified by grepping
+`~/.cargo/registry/src/index.crates.io-*/windows-sys-0.61.2/src` directly:
+`OpenProcessToken` (`Win32::System::Threading`, gated with the rest of that
+module's calls), `GetTokenInformation`, `TokenUser`, `TOKEN_USER`,
+`TOKEN_QUERY`, `IsValidSid`, `PSID` (all `Win32::Security`), and
+`ConvertSidToStringSidW` (`Win32::Security::Authorization`, alongside the
+already-used `ConvertStringSecurityDescriptorToSecurityDescriptorW`). No
+`Cargo.toml`/`Cargo.lock` edit was made or is needed for the production fix.
+
+**Test-only exception, one local constant instead of a feature-list ask:**
+the DACL-inspection test below needs the real Win32 `ACCESS_ALLOWED_ACE_TYPE`
+value to distinguish allow-ACEs from deny/audit ACEs while walking the
+DACL. That symbol lives behind `Win32_System_SystemServices`
+(`windows-sys` source, confirmed by grep), a feature not currently enabled
+and not requested here — this task's constraint is "add NO dependency," and
+a new feature flag is a `Cargo.toml` edit either way. Since
+`ACCESS_ALLOWED_ACE_TYPE`'s wire value (`0`, from `WinNT.h`) is a stable,
+documented part of the on-disk/on-wire ACE format that Windows cannot change
+without breaking every existing DACL, the test instead declares
+`const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;` locally, scoped to the test module,
+with a comment explaining why it is not imported. This is the only
+deviation from "reuse existing features, add nothing."
+
+**Test 1 (required, host-agnostic, pure logic):**
+`dacl_sddl_for_user_sid_names_the_given_sid_directly_never_ow` and
+`dacl_sddl_for_user_sid_differs_across_distinct_sids`, in the bottom-level
+`#[cfg(test)] mod tests` (no `cfg(windows)` gate — same placement pattern as
+`strip_verbatim_prefix_*` above). The first asserts the built SDDL is
+exactly `D:P(A;;GA;;;{sid})(A;;GA;;;SY)` for a sample `S-1-5-21-...` string
+(so it can never regress to naming `OW` again without failing this
+assertion); the second asserts two different SIDs produce different SDDL
+strings, guarding against an accidentally hardcoded trustee. Both pass on
+this (Unix) host as part of `cargo test -p drogond --locked` today.
+
+**Test 2 (required, Windows-gated, real DACL inspection, not string-only):**
+`created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder`, inside
+`windows_pipe::tests` (same host-gating as every other real-`HANDLE` test in
+that module). It does **not** assert anything about the SDDL string that
+was built; it creates a real pipe instance via `establish()`, then reads
+back the *actual* security descriptor the OS attached to it —
+`GetSecurityInfo(handle, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, ..)` —
+and walks its `ACL` via `GetAce`, extracting each `ACCESS_ALLOWED_ACE`'s SID
+(`ace.SidStart`, per the Win32 variable-length-ACE contract) and converting
+it back to a string with `ConvertSidToStringSidW` for comparison against an
+independently-obtained `token_user_sid_string()` result. This exercises the
+real kernel object, not just the SDDL text this process happened to build —
+a string-only assertion could pass even if
+`ConvertStringSecurityDescriptorToSecurityDescriptorW` or
+`CreateNamedPipeW` silently mishandled the descriptor on the way in; reading
+the DACL back is the only way to confirm the pipe Windows actually created
+grants access to the right SID.
+
+**Rebased onto another worker's uncommitted immediate-capture fix in the
+same file, touching only the DACL region.** At the start of this pass,
+`endpoint.rs` already carried the "GetLastError immediate-capture
+correction" section's uncommitted changes (`run_overlapped`/
+`run_overlapped_guarded`/`finish_overlapped_call`'s `issue_err` parameter,
+documented above). This pass's edits are confined to `SAME_USER_SDDL`
+through `same_user_security_attributes` (now replaced), the new
+`dacl_sddl_for_user_sid` top-level function, and one new test appended
+inside `windows_pipe::tests` and one pair of tests appended inside the
+bottom-level `mod tests` — none of the immediate-capture fix's functions,
+tests or doc comments were touched, moved, or reordered. `git diff --stat`
+for this pass therefore should show only additions/deletions inside those
+regions layered on top of the existing uncommitted diff, not a rewrite of
+it.
+
+**One pre-existing doc inaccuracy noticed, not fixed (out of this task's
+file scope):** the `mod windows_pipe` top-of-module doc comment (above the
+`use windows_sys::...` block) still says "`windows-sys` is **not yet a
+dependency of `drogond`**" — that was true when originally written, but has
+been false since the "Completion" pass above, where root committed the
+`[target.'cfg(windows)'.dependencies]` line. Flagging for whoever next
+touches that specific doc comment, since fixing it is outside "only the
+DACL section" for this pass.
+
+### GREEN gate for this pass
+
+```
+cargo fmt --all -- --check                                        # clean (after cargo fmt --all reordered two new `use` lines)
+cargo test  -p drogond --locked                                    # 25 lib unit tests (23 pre-existing + 2 new dacl_sddl_for_user_sid_* tests) + 6 + 12 + 10 + 3 integration tests = 56 total, all pass, 0 failed, 0 ignored
+cargo clippy -p drogond --all-targets --locked -- -D warnings      # clean
+```
+
+Both new host-agnostic tests (`dacl_sddl_for_user_sid_names_the_given_sid_directly_never_ow`,
+`dacl_sddl_for_user_sid_differs_across_distinct_sids`) are confirmed passing
+individually, not just counted in the aggregate above. `cargo fmt`/`cargo
+clippy` both ran on the whole `drogond` crate, i.e. cover this pass's edits
+plus every prior pass's uncommitted state in the same file.
+
+**Not run this pass, no regression risk:** `drogon-harness` (untouched by
+this pass) and `cargo build --workspace --locked` — this pass's file scope
+is exactly the two files listed at this section's top, neither of which any
+other crate depends on for its own build.
+
+### Fix/proof verdict, tests, remaining (summary)
+
+- **Verdict:** fix applied (explicit `TokenUser`-named DACL), not the
+  formal-proof alternative — see "Chosen fix" above for why. `OW` no longer
+  appears anywhere in the DACL construction path.
+- **Tests added:** 2 host-agnostic pure-logic tests (GREEN on this host,
+  part of the `cargo test -p drogond --locked` count above) + 1
+  Windows-gated real-kernel-DACL-inspection test (syntactically complete,
+  compiler-unverified on this host, per the standing constraint recorded in
+  every prior section of this doc — no Windows Rust target exists here).
+- **Gates:** `cargo test -p drogond --locked`, `cargo clippy -p drogond
+  --all-targets --locked -- -D warnings` and `cargo fmt --all -- --check`
+  all clean on this host, as shown above. None of these three gates
+  actually compiles or lints anything under `cfg(windows)` — that entire
+  module is cfg-stripped before name resolution on a non-Windows host, per
+  every prior pass's identical caveat — so this fix's real FFI code
+  (`token_user_sid_string`, the updated `same_user_security_attributes`,
+  and the new DACL-inspection test) is verified only by hand against the
+  installed `windows-sys-0.61.2` source tree (exact function signatures,
+  struct layouts and feature gates, cited above), not by any compiler here.
+- **What remains:** V5's isolated Windows runner is still the first
+  compiler/runtime this fix (like every other `cfg(windows)` line in this
+  file) will ever see — needed to confirm
+  `created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder`
+  actually passes, not merely compiles, and to confirm none of the
+  hand-verified FFI signatures above has a subtle mismatch this review
+  could not catch without a real toolchain.
+
+## Endpoint alignment correction (root review of `bbecf18`, not integrated)
+
+Scope for this pass: edits only to `crates/drogond/src/endpoint.rs`, append
+only to this doc. Three corrections requested by ROOT's review of checkpoint
+`bbecf18` ("GetLastError immediate-capture + TokenUser explicit DACL"):
+
+### Correction 1 — `token_user_sid_string` alignment: FIXED
+
+The prior version allocated `let mut buf = vec![0u8; needed as usize]` and
+then cast `buf.as_ptr()` to `*const TOKEN_USER`. `Vec<u8>`'s allocation is
+only byte-aligned; `TOKEN_USER` embeds a `SID_AND_ATTRIBUTES` whose `Sid`
+field is a `PSID` (a pointer), so the struct needs pointer alignment (8 on
+the targeted 64-bit hosts, 4 on 32-bit) — reading it through an
+under-aligned pointer is undefined behavior, even though it would very
+likely "work" in practice on x86/x64 (which tolerates unaligned loads at a
+performance cost, not a correctness one) and so would not necessarily be
+caught by any test.
+
+Fix: the buffer is now `Vec<u64>` sized in 8-byte words
+(`(needed as usize).div_ceil(size_of::<u64>())`), guaranteeing at least
+8-byte alignment on every target regardless of `needed`'s value. The
+two-call size-bounds query pattern is unchanged (first call learns `needed`
+with a null/zero-length probe, second call writes into the now-aligned
+buffer, same `needed` out-param reused), and `GetTokenInformation`'s write
+target is the same buffer whose alignment is now correct — both the read
+and the write side of the alignment bug are fixed by the one allocation
+change. `HandleGuard`/RAII cleanup of the token handle is untouched.
+
+### Correction 2 — DACL/capture comment trims: DONE
+
+Trimmed the multi-paragraph, deliberation-style prose added in `bbecf18` to
+concise WHY-only comments, per `AGENTS.md`'s "concise non-obvious comments"
+guidance:
+
+- `dacl_sddl_for_user_sid`'s doc: ~19 lines → 10, keeping only the WHY
+  (never emit `OW`, because `TOKEN_OWNER` can be a group SID).
+- `token_user_sid_string`'s doc: ~8 lines → 5.
+- `same_user_security_attributes`'s doc: ~29 lines → 15, dropping the
+  "rather than attempt to prove ... a harder, more failure-prone claim to
+  stand behind" reasoning-log language while keeping the same WHY (OW can
+  silently grant a group; fails closed on query failure).
+- The two immediate-capture inline `Safety:` comments in `run_overlapped`/
+  `run_overlapped_guarded` (capture region): each cut from 3 lines to 2,
+  same WHY (a call in between could reset the last-error).
+
+Left unchanged: `finish_overlapped_call`'s doc (already the trimmed form
+from `bbecf18` itself, factual/contract-shaped rather than a deliberation
+log) and every test's doc comment (this module's established convention —
+see the pre-existing "Fix 1"/"Fix 2"/"Fix 3a"/"Fix 3b"/race-1/race-2 test
+docs above, none of which this pass added or was asked to touch).
+
+### Correction 3 — exact-enumeration DACL test: TIGHTENED, not weakened
+
+The prior `created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder`
+test only asserted the DACL *contained* an ACE naming the expected
+`TokenUser` SID, silently `continue`-ing past any ACE of the wrong type, an
+invalid SID, or a failed string conversion. That leaves an extra/unexpected
+trustee (e.g. a stray `Everyone` ACE from a descriptor-construction
+regression) undetected.
+
+Exact-set enumeration turned out to be safely assertible in this leaf, using
+only APIs the test already imported (`GetSecurityInfo`, `GetAce`,
+`IsValidSid`, `ConvertSidToStringSidW`) plus one new well-known constant —
+no new `windows-sys` feature or FFI surface was needed:
+
+- Renamed to `created_pipe_dacl_allows_exactly_tokenuser_and_system`.
+- Every ACE in the DACL is now required to be `ACCESS_ALLOWED_ACE_TYPE`
+  (`assert_eq!`, fail the test) rather than skipped (`continue`) if it
+  is not — `dacl_sddl_for_user_sid` only ever emits allow ACEs, so any
+  other type appearing is itself a regression this test should now catch.
+- Every trustee SID is collected (not just checked against one expected
+  value), sorted, and compared with `assert_eq!` against the sorted
+  two-element set `[TokenUser SID, "S-1-5-18"]` — Local System's SID string
+  is the documented, locale-independent well-known constant `S-1-5-18`
+  (needs no runtime resolution, unlike `TokenUser`, which is still queried
+  live via the production `token_user_sid_string` path).
+- `IsValidSid`/`ConvertSidToStringSidW` failures now fail the test
+  (`assert_ne!`) instead of silently skipping that ACE.
+
+This is strictly a superset of the prior assertion (still fails if the
+expected `TokenUser` SID is absent) plus the new fail-closed exact-match and
+fail-closed-on-unexpected-ACE-type behavior the task requested. No fallback
+to a weaker contains-only assertion was needed.
+
+### GREEN gate for this pass
+
+```
+cargo test -p drogond --locked      # 56 passed, 0 failed (this host; cfg(windows) module cfg-stripped, not executed)
+cargo clippy -p drogond --all-targets --locked -- -D warnings   # clean
+cargo fmt -p drogond -- --check      # clean
+```
+
+Per-correction verdict: (1) fixed — alignment corrected via `Vec<u64>`
+backing, size-bounds pattern and RAII preserved; (2) done — DACL/capture
+doc comments trimmed to WHY-only, deliberation-log language removed;
+(3) tightened, not weakened — exact-trustee-set assertion replaces the
+prior contains-only check, fail-closed on any extra/wrong-type ACE.
+
+**What remains:** identical standing constraint as every prior section of
+this doc — this host has no Windows Rust target, so `cfg(windows)` is
+cfg-stripped before name resolution and none of `token_user_sid_string`,
+`same_user_security_attributes`, or the renamed DACL-inspection test has
+been compiled or executed anywhere in this pass. All three corrections
+above are verified by manual review against the `windows-sys-0.61.2` source
+tree (`SID_AND_ATTRIBUTES`/`TOKEN_USER`/`ACCESS_ALLOWED_ACE`/`ACL` layouts
+confirmed in-tree, cited in this pass) and by the macOS-host gates above,
+not by a real Windows compile or the isolated Windows runner. This pass did
+not touch `crates/drogon-cli/tests/native_dogfood.rs` or
+`docs/migration/verticals/V1/dogfood-evidence.md`, the concurrent sibling
+leaf's files, which remain exactly as found (uncommitted).

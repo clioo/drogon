@@ -21,6 +21,18 @@
 //! runs when explicitly opted into via `DROGON_DOGFOOD_REAL_MODEL` with the
 //! exact value `1`; any other value (unset, empty, `0`, …) skips before any
 //! build, spawn or spend, and dedicated negative tests pin that skip path.
+//!
+//! A third test, [`real_model_coordinated_journey_creates_and_reports_an_owned_artifact`],
+//! is the follow-up this suite's own evidence doc explicitly deferred: a real
+//! model driven through the exact same `orchestration task-create` ->
+//! `orchestration worker-start` path the fixture leg exercises (not the
+//! lower-risk plain `terminal create` the second test uses), asked to create
+//! an owned artifact and report completion through `drogon-cli` itself, with
+//! a second, deliberately conflicting final report proving the late-report
+//! refusal for real. It shares the exact same opt-in gate and is bounded the
+//! same way: unset/empty/`0`/non-`1` skips before any build, daemon, session
+//! or spend, and the same negative-test family pins that skip path for both
+//! real-model legs.
 
 #![cfg(unix)]
 
@@ -46,6 +58,27 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// generously above the ~2-9s observed locally, nowhere near unbounded.
 const REAL_MODEL_TIMEOUT: Duration = Duration::from_secs(60);
 const REAL_MODEL_OPT_IN_ENV: &str = "DROGON_DOGFOOD_REAL_MODEL";
+
+/// Approved real-model lane, pinned exactly as the `--print` probe leg was
+/// pinned in an earlier review round, so the coordinated-journey leg cannot
+/// drift onto an unapproved or default model.
+const REAL_MODEL_JOURNEY_MODEL_ID: &str = "claude-sonnet-5";
+/// Real agentic tool use (read instructions, invoke bash, exit) is slower and
+/// less deterministic than the trivial `--print` completion above; bounded
+/// generously above expected single-digit-second-to-low-tens-of-seconds
+/// latency for one scripted tool call, still a hard cap enforced by this
+/// test's own poll loop (the daemon's `--timeout-ms` is a budget hint, not a
+/// kill deadline, so it does not by itself bound anything).
+const REAL_MODEL_JOURNEY_TIMEOUT: Duration = Duration::from_secs(180);
+/// Bounded window to observe the explicitly stopped worker process actually
+/// leave `live` before releasing, so release never races a signal still in
+/// flight.
+const STOP_OBSERVATION_TIMEOUT: Duration = Duration::from_secs(15);
+/// Explicit output cap (max `workerRead` entries, not bytes) for the one
+/// diagnostic read this leg performs: evidence/panic-context only, never a
+/// pass/fail assertion, and never an unbounded read of a real agent's own
+/// session output.
+const REAL_MODEL_JOURNEY_READ_LIMIT: u32 = 200;
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -621,61 +654,61 @@ fn real_model_opted_in() -> bool {
     matches!(std::env::var(REAL_MODEL_OPT_IN_ENV).as_deref(), Ok("1"))
 }
 
-/// Negative gate coverage: with the variable unset, empty, `0` or any
-/// non-`1` value, the real-model leg must take the fast skip path — exit 0,
-/// printed skip note, no build, no daemon, no session, no spend (a subprocess
-/// per variant keeps the parent's env free of process-global mutation).
+/// Negative gate coverage for BOTH real-model legs: with the variable unset,
+/// empty, `0` or any non-`1` value, each must take the fast skip path — exit
+/// 0, printed skip note, no build, no daemon, no session/dispatch, no spend
+/// (a subprocess per variant keeps the parent's env free of process-global
+/// mutation).
 #[test]
-fn real_model_leg_skips_without_spending_unless_opt_in_is_exactly_one() {
+fn real_model_legs_skip_without_spending_unless_opt_in_is_exactly_one() {
     let exe = std::env::current_exe().expect("test binary path");
-    for (label, value) in [
-        ("unset", None),
-        ("zero", Some("0")),
-        ("empty", Some("")),
-        ("non-one-word", Some("yes")),
+    for test_name in [
+        "real_model_probe_reaches_a_daemon_spawned_session",
+        "real_model_coordinated_journey_creates_and_reports_an_owned_artifact",
     ] {
-        let mut command = Command::new(&exe);
-        command
-            .args([
-                "--exact",
-                "real_model_probe_reaches_a_daemon_spawned_session",
-                "--nocapture",
-                "--test-threads",
-                "1",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        match value {
-            Some(v) => {
-                command.env(REAL_MODEL_OPT_IN_ENV, v);
+        for (label, value) in [
+            ("unset", None),
+            ("zero", Some("0")),
+            ("empty", Some("")),
+            ("non-one-word", Some("yes")),
+        ] {
+            let mut command = Command::new(&exe);
+            command
+                .args(["--exact", test_name, "--nocapture", "--test-threads", "1"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            match value {
+                Some(v) => {
+                    command.env(REAL_MODEL_OPT_IN_ENV, v);
+                }
+                None => {
+                    command.env_remove(REAL_MODEL_OPT_IN_ENV);
+                }
             }
-            None => {
-                command.env_remove(REAL_MODEL_OPT_IN_ENV);
-            }
+            let start = Instant::now();
+            let output = command.output().expect("spawn skip-path subprocess");
+            let elapsed = start.elapsed();
+            assert!(
+                output.status.success(),
+                "{test_name} opt-in {label}: skip path must exit 0: {:?}",
+                output
+            );
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                text.contains("skipping real-model leg"),
+                "{test_name} opt-in {label}: skip note must be printed, got:\n{text}"
+            );
+            assert!(
+                elapsed < Duration::from_secs(30),
+                "{test_name} opt-in {label}: skip must be fast (no 300s build, \
+                 no daemon, no session/dispatch, no spend), took {elapsed:?}"
+            );
         }
-        let start = Instant::now();
-        let output = command.output().expect("spawn skip-path subprocess");
-        let elapsed = start.elapsed();
-        assert!(
-            output.status.success(),
-            "opt-in {label}: skip path must exit 0: {:?}",
-            output
-        );
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            text.contains("skipping real-model leg"),
-            "opt-in {label}: skip note must be printed, got:\n{text}"
-        );
-        assert!(
-            elapsed < Duration::from_secs(30),
-            "opt-in {label}: skip must be fast (no 300s build, no daemon, no \
-             session, no spend), took {elapsed:?}"
-        );
     }
 }
 
@@ -863,6 +896,306 @@ fn real_model_probe_reaches_a_daemon_spawned_session() {
     drop(scratch);
 }
 
+/// The exact literal shell script the real-model coordinated-journey leg asks
+/// the model to run, via exactly one tool call. This is NOT open-ended task
+/// interpretation: the model is handed a fully specified command sequence and
+/// asked to execute it verbatim, which is what makes a bounded turn/time
+/// budget realistic for a genuinely autonomous tool-using agent — as opposed
+/// to the fixture leg's static stand-in script (no model involved at all) or
+/// the `--print` probe leg's single non-agentic completion. Uses exactly the
+/// env vars the daemon injects into every worker process
+/// (`session_admission::WorkerEnvironment::apply_to_command`), the same ones
+/// the fixture harness script above already exercises for real.
+const REAL_MODEL_JOURNEY_SCRIPT: &str = r#"printf 'DROGON-REAL-ARTIFACT dispatch=%s task=%s\n' "$DROGON_DISPATCH_ID" "$DROGON_TASK_ID" > artifact.txt
+"$DROGON_CLI_COMMAND" --data-dir "$DROGON_DATA_DIR" --json orchestration send --kind final-report --subject "real-model artifact" --outcome succeeded --body "real-model worker report" > first-report.json 2> first-report.stderr
+first_status=$?
+"$DROGON_CLI_COMMAND" --data-dir "$DROGON_DATA_DIR" --json orchestration send --kind final-report --subject "late duplicate" --outcome failed --body "late duplicate report from the same settled worker, sent deliberately to verify the daemon refuses it" > late-report.json 2> late-report.stderr
+echo "$?" > late-report.exit
+touch done"#;
+
+/// Task instructions handed to `orchestration task-create`, which the
+/// daemon's own `plan_coordination_launch` wraps with a fixed preamble that
+/// already tells the model to "send exactly one orchestration send --kind
+/// final-report". This text explicitly overrides that default guidance for
+/// this one verification task, since proving the late-report refusal
+/// requires a second, deliberately conflicting report from the same settled
+/// attempt.
+fn real_model_journey_instructions() -> String {
+    format!(
+        "This is a bounded, scripted verification task, not an open-ended \
+         coding task. Do not explore the repository, do not ask questions, do \
+         not write or modify any code. Use exactly ONE tool call (a single \
+         bash command) and no other tool call before or after it: run this \
+         exact script verbatim in your current working directory (every \
+         variable below is already set in your process environment; \
+         substitute nothing else):\n\n{script}\n\nOverride note: this \
+         OVERRIDES the general \"send exactly one final report\" guidance \
+         above for this specific verification task — sending the SECOND, \
+         deliberately conflicting final-report call is REQUIRED. That second \
+         call is EXPECTED to fail (non-zero exit, an ok:false JSON error) \
+         because your first report already settled this attempt; that \
+         failure is the correct, intended outcome, not an error to fix or \
+         retry. After the script's last line (`touch done`) returns, stop: no \
+         further tool calls, retries, or reports.",
+        script = REAL_MODEL_JOURNEY_SCRIPT,
+    )
+}
+
+// Explicit disclosure: nothing in this file enforces a hard turn cap or a
+// spend ceiling for this leg. "Use exactly ONE tool call" above is stated
+// only as a prompt instruction the model is asked to follow — a request,
+// not a runtime constraint — because `drogon-harness/src/launch.rs::
+// plan_launch` has no `--max-turns`-equivalent passthrough for any harness
+// on this native path (no CLI lever exists to add one from this test). The
+// "low tens-of-cents at most" figure this suite's evidence doc quotes for a
+// compliant run is an ESTIMATE extrapolated from the probe leg's
+// single-completion cost, not a value this test asserts, measures, or caps.
+// A model that ignores the instruction, retries, or otherwise runs longer
+// is bounded only by `REAL_MODEL_JOURNEY_TIMEOUT` (wall-clock) — never by
+// turn count or by cost.
+
+/// Real-model coordinated-journey leg: the follow-up this suite's own
+/// evidence doc explicitly deferred ("a real model autonomously completing an
+/// `orchestration.workerStart` fresh launch end to end including its own
+/// final-report... should be its own explicitly scoped, explicitly costed
+/// checkpoint"). Unlike the fixture leg (a static script, no model) and the
+/// `--print` probe leg (one non-agentic completion via plain `terminal
+/// create`), this drives the exact same native `task-create` ->
+/// `worker-start` path the fixture leg exercises, with a genuinely installed
+/// `claude` harness instead of the fixture stand-in, in unattended
+/// (`--dangerously-skip-permissions`) mode. The model is asked to run one
+/// fully specified, literal shell script (`REAL_MODEL_JOURNEY_SCRIPT`): real
+/// tool-using model autonomy, but scripted execution, not open-ended task
+/// interpretation — never conflate this leg's genuine agentic tool use with
+/// the fixture leg's shim. Because the underlying real `claude` process is a
+/// persistent interactive session with no natural exit once it finishes
+/// responding (unlike `--print`, which exits on its own), this leg always
+/// explicitly force-stops it (`worker-stop`, safe/idempotent even if it
+/// already exited) before releasing. This is an honest bound, not an
+/// absolute guarantee: the force-stop signal alone proves nothing by
+/// itself, so cleanup is asserted only after a bounded observation window
+/// (`STOP_OBSERVATION_TIMEOUT`) during which the daemon must report an
+/// explicit `exited` verdict — `unverifiable` (lost contact) never counts as
+/// proof of exit. If that verdict never resolves to `exited` within the
+/// window, this leg fails closed: the happy path (`stop_and_release`) fails
+/// the test loudly instead of claiming release, and the unwind path
+/// (`best_effort_stop_and_release`) reports the outcome as unverifiable
+/// instead of `released`. An orphaned process therefore remains a possible,
+/// disclosed outcome when the verdict never resolves — never silently
+/// claimed away.
+#[test]
+fn real_model_coordinated_journey_creates_and_reports_an_owned_artifact() {
+    if !real_model_opted_in() {
+        eprintln!(
+            "skipping real-model leg: set {REAL_MODEL_OPT_IN_ENV}=1 to run it \
+             (it launches a real, unattended, tool-using model session through \
+             orchestration worker-start, reaches the network and spends real \
+             provider tokens)"
+        );
+        return;
+    }
+
+    let drogond_path = build_drogond();
+
+    let scratch = tempfile::tempdir().expect("scratch tempdir");
+    let data_dir = scratch.path().join("data");
+    let ws_dir = scratch.path().join("ws-real-journey");
+    std::fs::create_dir_all(&ws_dir).expect("create real-journey workspace dir");
+
+    // No fixture bin dir prepended: PATH is exactly what this test process
+    // inherited, so drogon_harness::discover finds the genuinely installed
+    // `claude` binary, never a stand-in.
+    let daemon = Daemon::start(&drogond_path, &data_dir, None);
+
+    let (code, status) = coordinator_call(&data_dir, &["status"]);
+    assert_ok(code, &status, &["status"]);
+    let host_id = text_field(&status, "/result/hostId").to_string();
+
+    let (code, ws) = coordinator_call(&data_dir, &["workspace", "add", ws_dir.to_str().unwrap()]);
+    assert_ok(code, &ws, &["workspace", "add"]);
+    let ws_id = text_field(&ws, "/result/id").to_string();
+
+    let (code, run) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "run-create",
+            "--objective",
+            "V1 dogfood: real-model coordinated journey",
+            "--host",
+            &host_id,
+        ],
+    );
+    assert_ok(code, &run, &["orchestration", "run-create"]);
+    let run_id = text_field(&run, "/result/run/runId").to_string();
+    let coordinator_id = text_field(&run, "/result/run/coordinatorId").to_string();
+
+    let scope_args = |args: &mut Vec<String>| {
+        args.push("--run".into());
+        args.push(run_id.clone());
+        args.push("--coordinator-id".into());
+        args.push(coordinator_id.clone());
+        args.push("--consumer-generation".into());
+        args.push("1".into());
+    };
+
+    let mut task_args: Vec<String> = vec!["orchestration".into(), "task-create".into()];
+    scope_args(&mut task_args);
+    task_args.push("--instructions".into());
+    task_args.push(real_model_journey_instructions());
+    task_args.push("--title".into());
+    task_args.push("V1 dogfood real-model coordinated journey".into());
+    let task_args_ref: Vec<&str> = task_args.iter().map(String::as_str).collect();
+    let (code, task) = coordinator_call(&data_dir, &task_args_ref);
+    assert_ok(code, &task, &["orchestration", "task-create"]);
+    let task_id = text_field(&task, "/result/task/taskId").to_string();
+
+    let mut start_args: Vec<String> = vec!["orchestration".into(), "worker-start".into()];
+    scope_args(&mut start_args);
+    start_args.push("--task".into());
+    start_args.push(task_id.clone());
+    start_args.push("--workspace".into());
+    start_args.push(ws_id);
+    start_args.push("--harness".into());
+    start_args.push("claude".into());
+    start_args.push("--model".into());
+    start_args.push(REAL_MODEL_JOURNEY_MODEL_ID.into());
+    start_args.push("--permission-mode".into());
+    start_args.push("unattended".into());
+    start_args.push("--timeout-ms".into());
+    start_args.push(REAL_MODEL_JOURNEY_TIMEOUT.as_millis().to_string());
+    let start_ref: Vec<&str> = start_args.iter().map(String::as_str).collect();
+    let (code, start) = coordinator_call(&data_dir, &start_ref);
+    assert_eq!(
+        code, 0,
+        "real-model worker-start must be accepted (ready/completed): {start:#}"
+    );
+    let dispatch_id = text_field(&start, "/result/dispatchId").to_string();
+
+    let mut dispatch_guard = Some(DispatchGuard {
+        data_dir: data_dir.clone(),
+        run_id: run_id.clone(),
+        coordinator_id: coordinator_id.clone(),
+        dispatch_id: dispatch_id.clone(),
+        settled: false,
+    });
+
+    let done_marker = ws_dir.join("done");
+    let settled_in_time = wait_for_file(&done_marker, REAL_MODEL_JOURNEY_TIMEOUT);
+
+    // Diagnostic only (never a pass/fail assertion by itself): a bounded read
+    // of the real model's own session output, capped explicitly, kept for
+    // evidence and for the panic message below if the model didn't finish.
+    let mut diag_args: Vec<String> = vec!["orchestration".into(), "worker-read".into()];
+    scope_args(&mut diag_args);
+    diag_args.push("--dispatch".into());
+    diag_args.push(dispatch_id.clone());
+    diag_args.push("--limit".into());
+    diag_args.push(REAL_MODEL_JOURNEY_READ_LIMIT.to_string());
+    let diag_ref: Vec<&str> = diag_args.iter().map(String::as_str).collect();
+    let (_diag_code, diag_read) = coordinator_call(&data_dir, &diag_ref);
+
+    assert!(
+        settled_in_time,
+        "real-model coordinated journey did not finish (no done marker) in \
+         {REAL_MODEL_JOURNEY_TIMEOUT:?}; last bounded worker-read (limit \
+         {REAL_MODEL_JOURNEY_READ_LIMIT} entries): {diag_read:#}"
+    );
+
+    let artifact = std::fs::read_to_string(ws_dir.join("artifact.txt")).expect("read artifact");
+    assert_eq!(
+        artifact,
+        format!("DROGON-REAL-ARTIFACT dispatch={dispatch_id} task={task_id}\n"),
+        "the real worker's artifact must carry EXACT bytes naming its own \
+         dispatch/task provenance, not merely contain them"
+    );
+
+    let first_report_text = std::fs::read_to_string(ws_dir.join("first-report.json"))
+        .unwrap_or_else(|err| {
+            let stderr_text =
+                std::fs::read_to_string(ws_dir.join("first-report.stderr")).unwrap_or_default();
+            panic!("read first-report.json: {err}\nstderr={stderr_text:?}")
+        });
+    let first_report_json: Value = serde_json::from_str(&first_report_text)
+        .unwrap_or_else(|err| panic!("parse first-report.json: {err}\n{first_report_text:?}"));
+    assert_eq!(first_report_json["ok"], Value::Bool(true));
+    assert_eq!(
+        first_report_json["result"]["lifecycle"]["action"],
+        Value::from("settled")
+    );
+    assert_eq!(
+        first_report_json["result"]["lifecycle"]["outcome"],
+        Value::from("succeeded")
+    );
+
+    // The core assertion this leg exists for: a genuine second, conflicting
+    // final report from the SAME real worker (after its first report already
+    // settled the attempt) is REFUSED by the daemon, not silently accepted.
+    let late_exit_text = std::fs::read_to_string(ws_dir.join("late-report.exit"))
+        .expect("read late-report.exit (the worker must have attempted the second report)");
+    assert_eq!(
+        late_exit_text.trim(),
+        "1",
+        "the deliberate late/conflicting final report must exit non-zero"
+    );
+    let late_report_text =
+        std::fs::read_to_string(ws_dir.join("late-report.json")).expect("read late-report.json");
+    let late_report_json: Value = serde_json::from_str(&late_report_text).unwrap_or_else(|err| {
+        panic!("late-report.json was not valid JSON: {err}\ncontent={late_report_text:?}")
+    });
+    assert_eq!(
+        late_report_json["ok"],
+        Value::Bool(false),
+        "the late report must be refused, not accepted: {late_report_json:#}"
+    );
+    assert_eq!(
+        late_report_json["error"]["code"],
+        Value::from("report_conflict"),
+        "the late-report refusal must carry the report_conflict code: {late_report_json:#}"
+    );
+
+    let mut show_args: Vec<String> = vec!["orchestration".into(), "worker-show".into()];
+    scope_args(&mut show_args);
+    show_args.push("--dispatch".into());
+    show_args.push(dispatch_id.clone());
+    let show_ref: Vec<&str> = show_args.iter().map(String::as_str).collect();
+    let (code, show) = coordinator_call(&data_dir, &show_ref);
+    assert_ok(code, &show, &["orchestration", "worker-show"]);
+    assert_eq!(text_field(&show, "/result/assignmentState"), "completed");
+    assert_eq!(text_field(&show, "/result/outcome"), "succeeded");
+
+    let mut task_show_args: Vec<String> = vec!["orchestration".into(), "task-show".into()];
+    scope_args(&mut task_show_args);
+    task_show_args.push("--task".into());
+    task_show_args.push(task_id.clone());
+    let task_show_ref: Vec<&str> = task_show_args.iter().map(String::as_str).collect();
+    let (code, task_show) = coordinator_call(&data_dir, &task_show_ref);
+    assert_ok(code, &task_show, &["orchestration", "task-show"]);
+    assert_eq!(text_field(&task_show, "/result/task/status"), "completed");
+
+    // Exact release: the real underlying `claude` process has no natural exit
+    // once it finishes responding (unlike `--print`), so this always
+    // explicitly force-stops it before releasing (see `DispatchGuard`).
+    let release = dispatch_guard
+        .take()
+        .expect("dispatch guard still armed")
+        .stop_and_release();
+
+    eprintln!(
+        "V1 dogfood real-model coordinated-journey leg: PASSED\n\
+         dispatch_id: {dispatch_id}\n\
+         task_id: {task_id}\n\
+         artifact bytes: {artifact:?}\n\
+         first report: {first_report_json:#}\n\
+         late report refusal: {late_report_json:#}\n\
+         worker-show: {show:#}\n\
+         release: {release:#}\n"
+    );
+
+    drop(daemon);
+    drop(scratch);
+}
+
 /// Tracks the real-model session and closes it exactly once: `close` asserts
 /// the daemon-observed end on the happy path; `Drop` is the best-effort
 /// unwind path — it never panics (a panic in drop aborts the process), runs
@@ -988,5 +1321,416 @@ fn unwind_close_adapter_maps_spawn_failure_to_unverifiable_without_panicking() {
     assert!(
         reason.contains("spawn drogon-cli"),
         "the failure must name the spawn step: {reason}"
+    );
+}
+
+/// Owns a real-model coordinated-journey dispatch for the test's lifetime.
+/// The underlying real `claude` process, spawned via `orchestration
+/// worker-start`, is a persistent interactive session with no natural exit
+/// once it finishes responding — unlike the fixture leg's script (which
+/// exits on its own) or the `--print` probe leg (which is genuinely
+/// one-shot) — so the happy path here always force-stops it via
+/// `worker-stop` (safe/idempotent even if it already exited) before
+/// releasing. `Drop` mirrors `SessionGuard`'s unwind semantics exactly: a
+/// best-effort, non-panicking stop-then-release that REPORTS whether cleanup
+/// was actually proven instead of claiming it (a panic inside `Drop` during
+/// unwind would abort the whole process).
+struct DispatchGuard {
+    data_dir: PathBuf,
+    run_id: String,
+    coordinator_id: String,
+    dispatch_id: String,
+    settled: bool,
+}
+
+/// The only value that proves a worker's underlying process actually ended.
+/// Mirrors `SessionGuard`'s own exact-string idiom (`verdict == "exited"`)
+/// rather than inventing a new rule for `DispatchGuard`: per this project's
+/// liveness contract (`live` / `unverifiable` / `exited`), a missing field,
+/// `live`, `unverifiable` (lost contact — "never proof of process exit"), or
+/// any other/unrecognized string must all fail closed identically. Only
+/// `"exited"` may be treated as cleanup proof.
+fn is_proven_exited(verdict: &Value) -> bool {
+    verdict.as_str() == Some("exited")
+}
+
+impl DispatchGuard {
+    fn scope_args(&self, args: &mut Vec<String>) {
+        args.push("--run".into());
+        args.push(self.run_id.clone());
+        args.push("--coordinator-id".into());
+        args.push(self.coordinator_id.clone());
+        args.push("--consumer-generation".into());
+        args.push("1".into());
+        args.push("--dispatch".into());
+        args.push(self.dispatch_id.clone());
+    }
+
+    /// Happy path: explicit `worker-stop` (fences and force-signals; safe
+    /// even if the process already exited on its own), a bounded wait for the
+    /// daemon to actually observe it leave `live`, then explicit
+    /// `worker-release`, asserting a clean, non-live disposition. Consumes
+    /// self so `Drop` never re-runs any of this.
+    fn stop_and_release(mut self) -> Value {
+        let mut stop_args: Vec<String> = vec!["orchestration".into(), "worker-stop".into()];
+        self.scope_args(&mut stop_args);
+        let stop_ref: Vec<&str> = stop_args.iter().map(String::as_str).collect();
+        let (code, stop) = coordinator_call(&self.data_dir, &stop_ref);
+        assert_eq!(code, 0, "worker-stop must be accepted: {stop:#}");
+
+        let start = Instant::now();
+        let last_show = loop {
+            let mut show_args: Vec<String> = vec!["orchestration".into(), "worker-show".into()];
+            self.scope_args(&mut show_args);
+            let show_ref: Vec<&str> = show_args.iter().map(String::as_str).collect();
+            let (code, show) = coordinator_call(&self.data_dir, &show_ref);
+            assert_ok(code, &show, &["orchestration", "worker-show"]);
+            if is_proven_exited(&show["result"]["processVerdict"])
+                || start.elapsed() > STOP_OBSERVATION_TIMEOUT
+            {
+                break show;
+            }
+            std::thread::sleep(POLL_INTERVAL * 4);
+        };
+        // Fail closed: process cleanup may be asserted ONLY on an explicit
+        // `exited` verdict. `live`, `unverifiable` (lost contact — never
+        // proof of exit), a missing field, and any other/unrecognized string
+        // are all treated identically here — none of them proves the
+        // process ended, so none may be silently accepted as cleanup
+        // evidence before the guard is marked settled.
+        assert!(
+            is_proven_exited(&last_show["result"]["processVerdict"]),
+            "process cleanup requires an explicit `exited` verdict before it \
+             can be asserted — live/unverifiable/missing/unknown are NOT \
+             cleanup proof and must fail closed: {last_show:#}"
+        );
+
+        let mut release_args: Vec<String> = vec!["orchestration".into(), "worker-release".into()];
+        self.scope_args(&mut release_args);
+        let release_ref: Vec<&str> = release_args.iter().map(String::as_str).collect();
+        let (code, release) = coordinator_call(&self.data_dir, &release_ref);
+        assert_eq!(
+            code, 0,
+            "release of a stopped attempt must succeed: {release:#}"
+        );
+        assert_eq!(
+            text_field(&release, "/result/disposition"),
+            "released",
+            "the dispatch's process/handle must be exactly released, not \
+             retained: {release:#}"
+        );
+        assert!(
+            is_proven_exited(&release["result"]["processVerdict"]),
+            "release must report an explicit `exited` processVerdict before \
+             the guard is marked settled — live/unverifiable/missing/unknown \
+             are not proof no process/handle survived: {release:#}"
+        );
+        self.settled = true;
+        release
+    }
+}
+
+impl Drop for DispatchGuard {
+    fn drop(&mut self) {
+        if self.settled {
+            return;
+        }
+        match best_effort_stop_and_release(
+            Path::new(env!("CARGO_BIN_EXE_drogon-cli")),
+            &self.data_dir,
+            &self.run_id,
+            &self.coordinator_id,
+            &self.dispatch_id,
+        ) {
+            Ok(disposition) if disposition == "released" => {
+                eprintln!(
+                    "stopped and released real-model journey dispatch {} on the \
+                     unwind path",
+                    self.dispatch_id
+                );
+            }
+            outcome => {
+                eprintln!(
+                    "WARNING: real-model journey dispatch {} unwind stop/release \
+                     is unverifiable/cleanup-failed (outcome: {outcome:?})",
+                    self.dispatch_id
+                );
+            }
+        }
+    }
+}
+
+/// The Drop path's own fallible best-effort stop-then-release, used ONLY
+/// there, mirroring `best_effort_close` exactly: no `.expect`/`.unwrap`, no
+/// broad panic catching, every failure mode mapped to a reported `Err`, and
+/// `Ok(disposition)` returned only for a fully proven `released` outcome.
+/// Fixed to the real `STOP_OBSERVATION_TIMEOUT` bound — see
+/// `best_effort_stop_and_release_bounded` for the parameterized body this
+/// delegates to (parameterized only so the fail-closed unit test below can
+/// prove the same rule quickly, without waiting out the full real-world
+/// bound for every non-exited case).
+fn best_effort_stop_and_release(
+    cli: &Path,
+    data_dir: &Path,
+    run_id: &str,
+    coordinator_id: &str,
+    dispatch_id: &str,
+) -> Result<String, String> {
+    best_effort_stop_and_release_bounded(
+        cli,
+        data_dir,
+        run_id,
+        coordinator_id,
+        dispatch_id,
+        STOP_OBSERVATION_TIMEOUT,
+    )
+}
+
+/// Disposition alone (the pre-correction check) is not cleanup proof: this
+/// now applies the exact same fail-closed rule as `stop_and_release`
+/// (`is_proven_exited`), plus the same bounded observation between stop and
+/// release. `unverifiable` (lost contact), `live`, a missing field, or any
+/// other/unrecognized processVerdict all map to `Err` (evidence retained,
+/// reported by the caller as a WARNING) rather than a silently claimed
+/// `Ok("released")`.
+fn best_effort_stop_and_release_bounded(
+    cli: &Path,
+    data_dir: &Path,
+    run_id: &str,
+    coordinator_id: &str,
+    dispatch_id: &str,
+    observation_timeout: Duration,
+) -> Result<String, String> {
+    let scope = [
+        "--run",
+        run_id,
+        "--coordinator-id",
+        coordinator_id,
+        "--consumer-generation",
+        "1",
+        "--dispatch",
+        dispatch_id,
+    ];
+    let call = |verb: &str| -> Result<Value, String> {
+        let mut args = vec!["--json", "orchestration", verb];
+        args.extend_from_slice(&scope);
+        let output = Command::new(cli)
+            .args(&args)
+            .env("DROGON_DATA_DIR", data_dir)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| format!("spawn drogon-cli {verb}: {error}"))?;
+        if !output.status.success() {
+            return Err(format!("cli {verb} exit {:?}", output.status.code()));
+        }
+        let text = String::from_utf8_lossy(&output.stdout).into_owned();
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|error| format!("unparsable {verb} output: {error}; stdout={text:?}"))?;
+        if value["ok"] != Value::Bool(true) {
+            return Err(format!("{verb} refused: {text:?}"));
+        }
+        Ok(value)
+    };
+
+    call("worker-stop")?;
+
+    // Bounded observation, mirroring `stop_and_release`'s own poll: only an
+    // explicit `exited` verdict proves cleanup, and this loop never returns
+    // early on anything less than that.
+    let start = Instant::now();
+    let last_verdict = loop {
+        let show = call("worker-show")?;
+        let verdict = show["result"]["processVerdict"].clone();
+        if is_proven_exited(&verdict) || start.elapsed() > observation_timeout {
+            break verdict;
+        }
+        std::thread::sleep(POLL_INTERVAL * 4);
+    };
+    if !is_proven_exited(&last_verdict) {
+        return Err(format!(
+            "process cleanup not proven within {observation_timeout:?}: observed \
+             processVerdict {last_verdict:?} (live/unverifiable/missing/unknown are \
+             not exited proof; evidence retained, not force-closed)"
+        ));
+    }
+
+    let release = call("worker-release")?;
+    let disposition = release["result"]["disposition"]
+        .as_str()
+        .ok_or_else(|| format!("release result carries no disposition: {release:?}"))?
+        .to_string();
+    if disposition != "released" {
+        return Err(format!("release disposition not `released`: {disposition}"));
+    }
+    if !is_proven_exited(&release["result"]["processVerdict"]) {
+        return Err(format!(
+            "release did not report an explicit exited processVerdict: {release:?}"
+        ));
+    }
+    Ok(disposition)
+}
+
+/// Mirrors `unwind_close_adapter_maps_spawn_failure_to_unverifiable_without_panicking`
+/// for the new adapter: a bogus argv0 fails the spawn with an io::Error,
+/// surfaced as `Err` naming the spawn step — never a panic.
+#[test]
+fn unwind_stop_release_adapter_maps_spawn_failure_to_unverifiable_without_panicking() {
+    let absent_dir = std::env::temp_dir().join("drogon-dogfood-no-such-cli-dir-2");
+    let bogus_cli = absent_dir.join("no-such-cli");
+    let data_dir = std::env::temp_dir().join("drogon-dogfood-no-such-data-dir-2");
+    let outcome = best_effort_stop_and_release(
+        &bogus_cli,
+        &data_dir,
+        "run-x",
+        "coordinator-x",
+        "dispatch-x",
+    );
+    let reason = outcome.expect_err("a spawn failure must map to Err, never panic, on any uid");
+    assert!(
+        reason.contains("spawn drogon-cli"),
+        "the failure must name the spawn step: {reason}"
+    );
+}
+
+/// Exhaustive coverage of the fail-closed exact-`exited` rule shared by
+/// `stop_and_release` and `best_effort_stop_and_release_bounded`: only the
+/// literal string `"exited"` proves cleanup. `live`, `unverifiable` (lost
+/// contact — see this project's `live`/`unverifiable`/`exited` liveness
+/// contract), a missing field, and any other/unrecognized string must all
+/// fail closed identically.
+#[test]
+fn only_explicit_exited_verdict_proves_cleanup_all_others_fail_closed() {
+    let cases: [(&str, Value, bool); 5] = [
+        ("live", Value::from("live"), false),
+        ("unverifiable", Value::from("unverifiable"), false),
+        ("missing", Value::Null, false),
+        ("unknown", Value::from("some-unrecognized-value"), false),
+        ("exited", Value::from("exited"), true),
+    ];
+    for (label, verdict, expected) in cases {
+        assert_eq!(
+            is_proven_exited(&verdict),
+            expected,
+            "case {label}: verdict {verdict:?} must map to is_proven_exited() == {expected}"
+        );
+    }
+}
+
+/// Fixture stub standing in for `drogon-cli` itself, used only by
+/// `best_effort_stop_and_release_fails_closed_for_every_non_exited_verdict`
+/// below: a real subprocess is still spawned (exercising the function's
+/// actual spawn/parse/retry plumbing for real, not a mocked-out call
+/// closure), but every response is fully controlled. It reads its verdict
+/// back out of the value that follows `--run` in argv (the one flag this
+/// stub actually inspects; the real function is never told this value means
+/// anything beyond an opaque scope id, so this is purely a test-fixture
+/// signaling channel, not a claim about what `--run` means in production),
+/// so the fail-closed behavior can be proven for every verdict case without
+/// a real daemon, process, or dispatch. `worker-release` always reports
+/// `disposition: "released"` so the only varying factor across cases is
+/// `processVerdict`, isolating exactly the rule under test.
+const STUB_STOP_RELEASE_CLI_SCRIPT: &str = r#"#!/usr/bin/env bash
+set -u
+
+verb=""
+verdict="exited"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--run" ]; then
+    verdict="$arg"
+  fi
+  case "$arg" in
+    worker-stop|worker-show|worker-release)
+      verb="$arg"
+      ;;
+  esac
+  prev="$arg"
+done
+
+case "$verb" in
+  worker-stop)
+    printf '{"ok":true,"result":{}}\n'
+    ;;
+  worker-show)
+    if [ "$verdict" = "__missing__" ]; then
+      printf '{"ok":true,"result":{}}\n'
+    else
+      printf '{"ok":true,"result":{"processVerdict":"%s"}}\n' "$verdict"
+    fi
+    ;;
+  worker-release)
+    if [ "$verdict" = "__missing__" ]; then
+      printf '{"ok":true,"result":{"disposition":"released"}}\n'
+    else
+      printf '{"ok":true,"result":{"disposition":"released","processVerdict":"%s"}}\n' "$verdict"
+    fi
+    ;;
+  *)
+    printf '{"ok":false,"error":{"code":"unknown_verb"}}\n' >&2
+    exit 1
+    ;;
+esac
+"#;
+
+fn write_stub_stop_release_cli(bin_dir: &Path) -> PathBuf {
+    std::fs::create_dir_all(bin_dir).expect("create stub cli bin dir");
+    let path = bin_dir.join("stub-drogon-cli");
+    std::fs::write(&path, STUB_STOP_RELEASE_CLI_SCRIPT).expect("write stub cli script");
+    let mut perms = std::fs::metadata(&path)
+        .expect("stat stub cli script")
+        .permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&path, perms).expect("chmod stub cli script");
+    path
+}
+
+/// Proves the fail-closed rule end to end through the real function (not
+/// just the pure `is_proven_exited` helper): `worker-show` reporting
+/// anything other than an explicit `exited` verdict must never produce
+/// `Ok("released")`, no matter what `disposition` says. Uses a short
+/// `observation_timeout` (not the real `STOP_OBSERVATION_TIMEOUT`) purely so
+/// the four non-exited cases below don't each wait out the full real-world
+/// bound; the rule exercised is identical either way.
+#[test]
+fn best_effort_stop_and_release_fails_closed_for_every_non_exited_verdict() {
+    let scratch = tempfile::tempdir().expect("scratch tempdir for stub cli");
+    let stub_cli = write_stub_stop_release_cli(&scratch.path().join("stub-bin"));
+    let data_dir = scratch.path().join("unused-data-dir");
+    let fast_timeout = Duration::from_millis(200);
+
+    for (label, verdict) in [
+        ("live", "live"),
+        ("unverifiable", "unverifiable"),
+        ("missing", "__missing__"),
+        ("unknown", "some-unrecognized-value"),
+    ] {
+        let outcome = best_effort_stop_and_release_bounded(
+            &stub_cli,
+            &data_dir,
+            verdict,
+            "coordinator-x",
+            "dispatch-x",
+            fast_timeout,
+        );
+        assert!(
+            outcome.is_err(),
+            "verdict case {label} ({verdict}) must fail closed (Err, evidence \
+             retained), never silently report Ok(\"released\"): {outcome:?}"
+        );
+    }
+
+    let proven = best_effort_stop_and_release_bounded(
+        &stub_cli,
+        &data_dir,
+        "exited",
+        "coordinator-x",
+        "dispatch-x",
+        fast_timeout,
+    );
+    assert_eq!(
+        proven.as_deref(),
+        Ok("released"),
+        "an explicit `exited` verdict must be the one case that proves a \
+         released outcome: {proven:?}"
     );
 }
