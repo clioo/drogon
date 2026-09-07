@@ -56,7 +56,7 @@ invalid params, duplicate/conflicting request IDs, new-instance replay,
 concurrent start versus shutdown, persistence refusal and blocked mutation.
 Service tests must exercise real authenticated sockets and observe an owned
 service thread/process exit, not merely a shutdown response or socket loss.
-Keep all existing379 tests, accept-loop error tests and actual crash fixtures.
+Keep all 379 pre-change tests, accept-loop error tests and actual crash fixtures.
 No user data, user processes, global environment mutation or raw PID signals.
 
 Before replacing packaged cleanup, root will register a kernel process watch

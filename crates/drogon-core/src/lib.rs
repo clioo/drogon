@@ -104,9 +104,8 @@ pub struct Engine {
     /// admission atomic with the freeze.
     lifecycle_gate: RwLock<()>,
     /// Set once a `runtime.shutdown` request has durably persisted an
-    /// accepted receipt (see `do_runtime_shutdown`). `drogond` polls this to
-    /// decide when its listener loop may stop; `Engine` itself never exits
-    /// a process or signals one.
+    /// accepted receipt. The server uses its separate post-reply gate to
+    /// stop listening; this flag only fences core mutations.
     quiescent: AtomicBool,
     /// Test-only admission-window seam: when set, `do_runtime_shutdown`
     /// invokes it exactly once between the ledger's durable receipt persist
