@@ -416,8 +416,11 @@ pub(crate) const GLOBAL_ARGS: &[&str] = &[
 /// test binary, not a live process inspection.
 pub(crate) fn status_argv() -> Vec<String> {
     let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    // `--branch` is what makes porcelain v2 emit the `# branch.*` header
+    // lines at all (verified live: without it a dirty repo prints only the
+    // `1`/`2`/`?` entries, no headers). Still read-only and deterministic.
     argv.extend(
-        ["status", "--porcelain=v2", "-z"]
+        ["status", "--porcelain=v2", "--branch", "-z"]
             .iter()
             .map(|s| s.to_string()),
     );
@@ -1248,5 +1251,338 @@ fn require_success<'a>(outcome: &'a SpawnOutcome, argv: &[String]) -> Result<&'a
             "git {} produced {which} that is not valid UTF-8",
             argv.join(" ")
         ))),
+    }
+}
+
+// --- bounded mutating git operations (journey J2) ---------------------------
+//
+// Same bounded-spawn policy as the read-only half above (admission gate,
+// timeout, combined byte cap, bounded reap/drain, no shell), extended to the
+// five review mutations the Changes panel needs: stage, unstage, commit,
+// push and `gh pr create`. Argv stays fully module-built: callers pass only
+// typed values (paths, message, title), never strings that reach argv or a
+// shell. Paths are passed after `--` so a leading `-` can never become a
+// flag; see `literal_pathspec` for the remaining `:(...)` magic edge.
+
+/// Wall-clock budget for one mutating git spawn: generous enough for a hook
+/// or a slow remote, still fail-closed via `unverifiable` on expiry.
+pub const GIT_MUTATION_TIMEOUT: Duration = Duration::from_secs(60);
+/// Combined stdout+stderr cap for mutations (push progress is chatty).
+pub const GIT_MUTATION_MAX_OUTPUT: usize = 1024 * 1024;
+/// Raw capture cap for `git diff`; the RPC layer truncates to its smaller
+/// wire budget with `truncated: true` instead of failing.
+pub const GIT_DIFF_MAX_CAPTURE: usize = 256 * 1024;
+
+/// Which review mutation to run. One variant per fixed argv shape, so adding
+/// an operation requires a reviewed code change, never a caller string.
+#[derive(Debug, Clone)]
+pub enum GitMutation {
+    Stage { paths: Vec<String> },
+    Unstage { paths: Vec<String> },
+    Commit { message: String },
+    Push,
+}
+
+/// Both streams on success: mutations (notably `push`) report on stderr.
+#[derive(Debug, Clone)]
+pub struct GitCommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+pub fn git_mutation_budget() -> GitProbeBudget {
+    GitProbeBudget {
+        timeout: GIT_MUTATION_TIMEOUT,
+        max_combined_output_bytes: GIT_MUTATION_MAX_OUTPUT,
+    }
+}
+
+pub fn git_diff_budget() -> GitProbeBudget {
+    GitProbeBudget {
+        timeout: GIT_MUTATION_TIMEOUT,
+        max_combined_output_bytes: GIT_DIFF_MAX_CAPTURE,
+    }
+}
+
+/// A repo-relative path that git must treat literally: pathspec magic such
+/// as `:(exclude)` stays active even after `--`, so a (legal, if unusual)
+/// filename starting with `:` gets a `./` prefix, which disables magic
+/// detection without changing what the path resolves to under cwd=root.
+fn literal_pathspec(path: &str) -> String {
+    if path.starts_with(':') {
+        format!("./{path}")
+    } else {
+        path.to_string()
+    }
+}
+
+pub(crate) fn diff_argv(path: &str, staged: bool) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.push("diff".to_string());
+    argv.push("--no-color".to_string());
+    argv.push("--no-ext-diff".to_string());
+    if staged {
+        argv.push("--cached".to_string());
+    }
+    argv.push("--".to_string());
+    argv.push(literal_pathspec(path));
+    argv
+}
+
+pub(crate) fn stage_argv(paths: &[String]) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.push("add".to_string());
+    argv.push("--".to_string());
+    argv.extend(paths.iter().map(|p| literal_pathspec(p)));
+    argv
+}
+
+pub(crate) fn unstage_argv(paths: &[String]) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.extend(["restore", "--staged", "--"].iter().map(|s| s.to_string()));
+    argv.extend(paths.iter().map(|p| literal_pathspec(p)));
+    argv
+}
+
+pub(crate) fn commit_argv(message: &str) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.extend(["commit", "-m"].iter().map(|s| s.to_string()));
+    argv.push(message.to_string());
+    argv
+}
+
+pub(crate) fn push_argv() -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.push("push".to_string());
+    argv
+}
+
+/// Fixed `gh pr create` argv: title/body ride as values, never a shell, and
+/// no `--head`/`--base` is ever invented — the PR targets whatever the
+/// current branch already tracks.
+pub(crate) fn gh_pr_create_argv(title: &str, body: Option<&str>) -> Vec<String> {
+    let mut argv = vec![
+        "pr".to_string(),
+        "create".to_string(),
+        "--title".to_string(),
+        title.to_string(),
+    ];
+    argv.push("--body".to_string());
+    argv.push(body.unwrap_or("").to_string());
+    argv
+}
+
+/// Same bounded-spawn error mapping as `require_success`, but keeps both
+/// streams on success and names the real program in messages.
+fn require_mutation_success(
+    outcome: &SpawnOutcome,
+    program: &str,
+    argv: &[String],
+) -> Result<GitCommandOutput, RpcError> {
+    match outcome {
+        SpawnOutcome::Exited {
+            status,
+            stdout,
+            stderr,
+        } if status.success() => Ok(GitCommandOutput {
+            stdout: stdout.clone(),
+            stderr: stderr.clone(),
+        }),
+        SpawnOutcome::Exited { status, stderr, .. } => Err(error::io_error(format!(
+            "{program} {} exited with {}: {}",
+            argv.join(" "),
+            status,
+            stderr.trim()
+        ))),
+        SpawnOutcome::TimedOut => Err(error::unverifiable(format!(
+            "{program} {} timed out and was killed before completing",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CapExceeded => Err(error::io_error(format!(
+            "{program} {} exceeded the configured combined output byte cap and was killed",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::UnreapedAfterKill => Err(error::unverifiable(format!(
+            "{program} {} was killed but could not be confirmed reaped",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureUnfinished => Err(error::unverifiable(format!(
+            "{program} {} exited but its output capture had not finished draining",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureReadError(e) => Err(error::io_error(format!(
+            "{program} {} output capture failed: {e}",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureInvalidUtf8(which) => Err(error::io_error(format!(
+            "{program} {} produced {which} that is not valid UTF-8",
+            argv.join(" ")
+        ))),
+    }
+}
+
+fn run_git_argv(
+    workspace_root: &Path,
+    argv: &[String],
+    budget: &GitProbeBudget,
+) -> Result<GitCommandOutput, RpcError> {
+    let outcome = spawn_git_and_capture(workspace_root, argv, budget, Path::new("git"))?;
+    require_mutation_success(&outcome, "git", argv)
+}
+
+/// Runs one typed review mutation with the module's bounded-spawn policy.
+pub fn run_git_mutation(
+    workspace_root: &Path,
+    mutation: &GitMutation,
+    budget: &GitProbeBudget,
+) -> Result<GitCommandOutput, RpcError> {
+    let argv = match mutation {
+        GitMutation::Stage { paths } => stage_argv(paths),
+        GitMutation::Unstage { paths } => unstage_argv(paths),
+        GitMutation::Commit { message } => commit_argv(message),
+        GitMutation::Push => push_argv(),
+    };
+    run_git_argv(workspace_root, &argv, budget)
+}
+
+/// `git rev-parse HEAD` for the just-created commit oid. Read-only and
+/// fixed-argv like the rest; fails honestly (non-zero exit) on an unborn
+/// HEAD instead of inventing an oid.
+pub fn run_git_head_oid(
+    workspace_root: &Path,
+    budget: &GitProbeBudget,
+) -> Result<String, RpcError> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.extend(["rev-parse", "HEAD"].iter().map(|s| s.to_string()));
+    let output = run_git_argv(workspace_root, &argv, budget)?;
+    Ok(output.stdout.trim().to_string())
+}
+
+/// Unified diff for one path: `git diff [--cached] -- <path>`, deterministic
+/// flags only (`--no-color --no-ext-diff`). Untracked paths diff empty.
+pub fn run_git_diff(
+    workspace_root: &Path,
+    path: &str,
+    staged: bool,
+    budget: &GitProbeBudget,
+) -> Result<String, RpcError> {
+    let argv = diff_argv(path, staged);
+    Ok(run_git_argv(workspace_root, &argv, budget)?.stdout)
+}
+
+/// Builds a `gh` child with the same bounded env discipline as git (scrub
+/// ambient `GIT_*` overrides, pin `LC_ALL=C` for deterministic stderr) but
+/// WITHOUT `GIT_OPTIONAL_LOCKS`: `gh` is not git and must still see the
+/// caller's `GH_TOKEN`/`GITHUB_TOKEN` auth, which this scrub preserves since
+/// neither starts with `GIT_`.
+pub(crate) fn build_gh_command_with_bin(gh_bin: &Path, cwd: &Path, argv: &[String]) -> Command {
+    let mut cmd = Command::new(gh_bin);
+    cmd.args(argv)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in ENV_REMOVE_DENYLIST {
+        cmd.env_remove(key);
+    }
+    for (key, _) in std::env::vars_os() {
+        let upper = key.to_string_lossy().to_ascii_uppercase();
+        if upper.starts_with("GIT_") {
+            cmd.env_remove(key);
+        }
+    }
+    cmd.env("LC_ALL", "C");
+    apply_platform_spawn_flags(&mut cmd);
+    cmd
+}
+
+/// Narrow predicate for "gh cannot act for this host": the binary is missing
+/// or it reports an auth-shaped failure. Kept narrow so a real repo error
+/// (no remotes, no upstream, network down) stays `io_error`, never a
+/// misleading "install/auth gh" hint.
+pub(crate) fn is_gh_auth_failure(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    [
+        "not authenticated",
+        "not logged in",
+        "gh auth login",
+        "bad credentials",
+        "http 401",
+        "http 403",
+        "missing token",
+        "no oauth",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn gh_unavailable(message: String) -> RpcError {
+    RpcError::new("gh_unavailable", message)
+}
+
+/// First `https?://` line of `gh pr create` output, if any.
+pub(crate) fn extract_pr_url(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("https://") || line.starts_with("http://"))
+        .map(str::to_string)
+}
+
+/// Creates a PR via `gh pr create` and returns its URL. Missing binary and
+/// auth-shaped failures map to the typed `gh_unavailable` error; every other
+/// failure keeps the git-style `io_error`/`unverifiable` mapping.
+pub fn run_gh_pr_create(
+    workspace_root: &Path,
+    title: &str,
+    body: Option<&str>,
+    budget: &GitProbeBudget,
+) -> Result<String, RpcError> {
+    run_gh_pr_create_with_bin(Path::new("gh"), workspace_root, title, body, budget)
+}
+
+/// Same as `run_gh_pr_create` but spawns `gh_bin` directly: the test seam
+/// for the typed `gh_unavailable` error with zero process-global `PATH`
+/// mutation (mirrors `run_read_only_git_with_bin`'s rationale).
+pub fn run_gh_pr_create_with_bin(
+    gh_bin: &Path,
+    workspace_root: &Path,
+    title: &str,
+    body: Option<&str>,
+    budget: &GitProbeBudget,
+) -> Result<String, RpcError> {
+    let argv = gh_pr_create_argv(title, body);
+    let outcome = match spawn_and_capture_bounded(
+        build_gh_command_with_bin(gh_bin, workspace_root, &argv),
+        budget,
+    ) {
+        Ok(outcome) => outcome,
+        // Admission exhaustion (`runtime_busy`) is the caller's signal to
+        // retry, never a statement about gh — only a spawn `io_error`
+        // (missing binary) becomes `gh_unavailable`.
+        Err(spawn_err) if spawn_err.code == "io_error" => {
+            return Err(gh_unavailable(format!(
+                "gh executable could not be spawned ({}): install gh or check PATH",
+                spawn_err.message
+            )));
+        }
+        Err(spawn_err) => return Err(spawn_err),
+    };
+    match outcome {
+        SpawnOutcome::Exited { status, stdout, .. } if status.success() => extract_pr_url(&stdout)
+            .ok_or_else(|| {
+                error::io_error(format!(
+                    "gh {} succeeded but printed no PR URL: {}",
+                    argv.join(" "),
+                    stdout.trim()
+                ))
+            }),
+        SpawnOutcome::Exited { stderr, .. } if is_gh_auth_failure(&stderr) => {
+            Err(gh_unavailable(format!(
+                "gh is not authenticated for this host ({}): run `gh auth login`, then retry",
+                stderr.trim()
+            )))
+        }
+        other => Err(require_mutation_success(&other, "gh", &argv).unwrap_err()),
     }
 }
