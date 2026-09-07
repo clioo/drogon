@@ -1018,27 +1018,15 @@ fn oversized_combined_response_is_never_silently_allowed() {
     assert!(ids.iter().all(|id| id.len() == 128));
     let prior_delivery_id = seed_and_ack_with_ids(&mut conn, &ids);
 
-    // Individually under RESPONSE_BUDGET_BYTES but over PACKING_BUDGET_BYTES:
-    // the old per-message-only guard would have delivered it anyway.
-    let from = Actor::Coordinator("coord-1".into());
+    // Admission now refuses this size; inject as corrupt data via raw SQL.
     let body = "a".repeat(super::RESPONSE_BUDGET_BYTES - 4096);
     let tx = conn.transaction().unwrap();
-    append_message_in_tx(
-        &tx,
-        NewMessage {
-            message_id: "danger-zone",
-            host_id: HOST,
-            run_id: RUN,
-            kind: MessageKind::Status,
-            from: &from,
-            to: &Recipient::RunHome,
-            subject: "s",
-            body: Some(&body),
-            payload: None,
-            thread_id: None,
-            origin_request_id: "r",
-            created_at: "t",
-        },
+    tx.execute(
+        "INSERT INTO orchestration_mail_messages
+            (message_id, host_id, run_id, kind, from_kind, from_coordinator_id, from_dispatch_id,
+             to_dispatch_id, subject, body, payload_json, thread_id, origin_request_id, created_at)
+         VALUES ('danger-zone', ?1, ?2, 'status', 'coordinator', 'coord-1', NULL, '', 's', ?3, NULL, 'danger-zone', 'r', 't')",
+        rusqlite::params![HOST, RUN, body],
     )
     .unwrap();
     tx.commit().unwrap();
@@ -1315,4 +1303,124 @@ fn ack_refuses_a_tampered_max_sequence_without_consuming_anything() {
         )
         .unwrap();
     assert_eq!(pointer, 0);
+}
+
+/// Mirrors `enforce_message_size`'s own worst-case-sequence probe.
+fn probe_wire_size(body_len: usize) -> usize {
+    let summary = drogon_protocol::orchestration_mail::MessageSummary {
+        message_id: "near-limit".to_string(),
+        sequence: u64::MAX,
+        kind: MessageKind::Status,
+        from_actor: "coordinator:coord-1".to_string(),
+        to_actor: None,
+        subject: "s".to_string(),
+        body: Some("a".repeat(body_len)),
+        payload: None,
+        thread_id: Some("near-limit".to_string()),
+    };
+    super::super::message_wire_size(&summary).unwrap()
+}
+
+/// Admission must never accept what delivery can never carry.
+#[test]
+fn a_message_accepted_at_append_is_never_permanently_undeliverable() {
+    let mut conn = migrated_conn();
+    let from = Actor::Coordinator("coord-1".into());
+    let body = "a".repeat(super::RESPONSE_BUDGET_BYTES - 4096);
+    let tx = conn.transaction().unwrap();
+    let result = append_message_in_tx(
+        &tx,
+        NewMessage {
+            message_id: "boundary",
+            host_id: HOST,
+            run_id: RUN,
+            kind: MessageKind::Status,
+            from: &from,
+            to: &Recipient::RunHome,
+            subject: "s",
+            body: Some(&body),
+            payload: None,
+            thread_id: None,
+            origin_request_id: "r",
+            created_at: "t",
+        },
+    );
+    match result {
+        Err(_) => {
+            let count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM orchestration_mail_messages WHERE message_id = 'boundary'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "a refused message must not be inserted");
+        }
+        Ok(_) => {
+            tx.commit().unwrap();
+            let tx = conn.transaction().unwrap();
+            let outcome = check_unread_in_tx(
+                &tx,
+                HOST,
+                RUN,
+                &Recipient::RunHome,
+                &coordinator(1),
+                None,
+                &[],
+                "d1",
+            );
+            assert!(
+                outcome.is_ok_and(|o| o.delivery.is_some()),
+                "admission accepted a message that delivery can never carry"
+            );
+        }
+    }
+}
+
+/// The largest message admission legitimately allows is still delivered.
+#[test]
+fn near_packing_budget_message_is_accepted_and_delivered() {
+    let mut conn = migrated_conn();
+    let overhead = probe_wire_size(0);
+    let body_len = super::PACKING_BUDGET_BYTES - overhead;
+    assert_eq!(probe_wire_size(body_len), super::PACKING_BUDGET_BYTES);
+    let body = "a".repeat(body_len);
+    let from = Actor::Coordinator("coord-1".into());
+    let tx = conn.transaction().unwrap();
+    append_message_in_tx(
+        &tx,
+        NewMessage {
+            message_id: "near-limit",
+            host_id: HOST,
+            run_id: RUN,
+            kind: MessageKind::Status,
+            from: &from,
+            to: &Recipient::RunHome,
+            subject: "s",
+            body: Some(&body),
+            payload: None,
+            thread_id: None,
+            origin_request_id: "r",
+            created_at: "t",
+        },
+    )
+    .expect("a message exactly at the packing budget ceiling must be accepted");
+    tx.commit().unwrap();
+
+    let tx = conn.transaction().unwrap();
+    let outcome = check_unread_in_tx(
+        &tx,
+        HOST,
+        RUN,
+        &Recipient::RunHome,
+        &coordinator(1),
+        None,
+        &[],
+        "d1",
+    )
+    .unwrap();
+    let delivery = outcome
+        .delivery
+        .expect("the accepted near-limit message must be delivered");
+    assert_eq!(delivery.message_ids, vec!["near-limit"]);
 }

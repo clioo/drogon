@@ -60,16 +60,10 @@ pub(crate) fn message_wire_size(summary: &MessageSummary) -> Result<usize, RpcEr
     Ok(bytes.len() + PER_MESSAGE_WIRE_OVERHEAD_BYTES)
 }
 
-/// Worst-case bytes a full 50-id ACK echo plus a delivery's own 50-id
-/// metadata plus the Response/CheckResult skeleton add on top of whatever
-/// messages are packed (measured at 26497 bytes with maximally-escaped
-/// 128-byte ids; see `combined_ack_and_delivery_response_fits_the_wire_budget`).
+/// Worst-case bytes a full 50-id ACK + delivery echo + envelope add (measured 26497B; see `near_budget_message_with_full_ack_still_fits_the_wire_budget`).
 pub(crate) const RESPONSE_ENVELOPE_RESERVE_BYTES: usize = 32 * 1024;
 
-/// Ceiling actually enforced when packing messages into a delivery or an
-/// inspection page: the wire budget minus the envelope reserve, so a
-/// same-call ACK or the envelope itself never pushes the real response over
-/// `RESPONSE_BUDGET_BYTES`.
+/// Real ceiling for packing/admission: reserve room so a same-call ACK/envelope never blows `RESPONSE_BUDGET_BYTES`.
 pub(crate) const PACKING_BUDGET_BYTES: usize =
     RESPONSE_BUDGET_BYTES - RESPONSE_ENVELOPE_RESERVE_BYTES;
 
@@ -297,12 +291,9 @@ pub(crate) struct NewMessage<'a> {
     pub(crate) created_at: &'a str,
 }
 
-/// Refuses before any mutation if the message's actual serialized wire
-/// shape (subject, body, payload, ids, kind, JSON escaping and all) would
-/// make it individually unframeable, rather than silently truncating it. A
-/// raw string-length sum ignores JSON escaping (e.g. every `"`/`\\` doubles
-/// under encoding) and every non-body field, so it can wrongly accept a
-/// message whose real wire bytes exceed the budget.
+/// Refuses at admission anything that could never later be delivered: the
+/// same `PACKING_BUDGET_BYTES` ceiling delivery enforces, checked against
+/// the worst-case (`u64::MAX`-width) persisted sequence, not sequence 0.
 #[allow(clippy::too_many_arguments)]
 fn enforce_message_size(
     message_id: &str,
@@ -316,7 +307,7 @@ fn enforce_message_size(
 ) -> Result<(), RpcError> {
     let probe = row_to_summary(
         message_id.to_string(),
-        0,
+        u64::MAX,
         kind,
         from,
         to,
@@ -325,7 +316,7 @@ fn enforce_message_size(
         payload.cloned(),
         Some(thread_id.to_string()),
     );
-    if message_wire_size(&probe)? > RESPONSE_BUDGET_BYTES {
+    if message_wire_size(&probe)? > PACKING_BUDGET_BYTES {
         return Err(error::invalid_argument(
             "Message exceeds the response budget.",
         ));

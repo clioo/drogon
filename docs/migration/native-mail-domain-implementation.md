@@ -178,6 +178,25 @@ assertions unchanged, 5 new); `cargo test --offline -p drogon-core` — same
 failures; `cargo clippy --offline -p drogon-core --all-targets` — 0 errors;
 `cargo fmt -p drogon-core -- --check` — clean.
 
+## Root review correction (admission/delivery budget mismatch, this revision)
+
+`enforce_message_size` checked `RESPONSE_BUDGET_BYTES` while delivery/inspect
+enforce the smaller `PACKING_BUDGET_BYTES`: a message between the two was
+admitted, then permanently unable to fit any delivery, blocking its
+mailbox's FIFO forever. Its size probe also used `sequence: 0`, undercounting
+real (larger) persisted sequence width. Fixed: admission now checks
+`PACKING_BUDGET_BYTES` with a `u64::MAX`-sequence probe (worst case, never an
+underestimate). RED: `a_message_accepted_at_append_is_never_permanently_undeliverable`
+failed pre-fix (admission accepted a message delivery then refused forever);
+passes post-fix (admission itself refuses it, nothing inserted). Added
+`near_packing_budget_message_is_accepted_and_delivered` (the largest legal
+message is both admitted and actually delivered). `oversized_combined_response_is_never_silently_allowed`
+now seeds its danger-zone row via raw SQL (explicitly marked corrupt/bypassing
+admission) since admission correctly refuses it through the public API;
+the delivery-side defense it exercises is unchanged. 49 passed, 0 failed
+(47 original assertions unchanged, 2 new); full crate: 146/146 lib-target
+plus the same 14 pre-existing unrelated failures; clippy/fmt clean.
+
 ## Files
 
 - `coordination_mail.rs` — additive v1 schema (`migrate_in_tx`), the shared
@@ -237,7 +256,7 @@ table; a caller rollback undoes every table (`migration_rollback_undoes_every_ta
 | `coordination_mail::questions::reply_in_tx` | Addressed-actor-only, idempotent-by-body answer |
 | `coordination_mail::questions::close_dispatch_questions_in_tx` | Close unresolved questions for a dispatch, both directions |
 
-## Semantics implemented and tested (47 tests, all real SQLite)
+## Semantics implemented and tested (49 tests, all real SQLite)
 
 - FIFO batch cap of 50, ordered (`fifo_batch_is_ordered_and_capped_at_fifty`).
 - One outstanding delivery per exact consumer key, replayed identically
