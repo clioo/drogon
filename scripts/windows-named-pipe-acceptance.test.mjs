@@ -39,13 +39,17 @@
 // (`dispatch_authenticated` in drogon-core/src/lib.rs:220-241,
 // `coordination_access::unauthorized()` in coordination_access.rs:35-39).
 //
-// Hard rules honored throughout: every case is gated on `process.platform
-// === "win32"`; a non-Windows (or unbuilt) run is reported NOT-RUN, never
-// green and never silently skipped-as-pass (see `offWindowsReport` and the
-// always-run test asserting it); every case has an explicit per-case
-// `timeout`; every daemon/process this file starts is torn down through
-// `./acceptance-process.mjs`'s `stopAcceptanceProcess`, asserted to reach a
-// provable `"exited"` verdict, never left running or merely assumed dead.
+// Hard rules honored throughout: every WIN32 case is gated on
+// `process.platform === "win32"`; a non-Windows (or unbuilt) run is reported
+// NOT-RUN, never green and never silently skipped-as-pass (see
+// `offWindowsReport` and the always-run test asserting it); every case has an
+// explicit per-case `timeout`; every daemon/process this file starts is torn
+// down through `./acceptance-process.mjs`'s `stopAcceptanceProcess`, asserted
+// to reach a provable `"exited"` verdict, never left running or merely
+// assumed dead. Fixture/dataDir removal additionally requires a passed test
+// body and no live/unverifiable CLI/session child outcomes — daemon-exited
+// alone never permits cleanup — and that removal contract carries its own
+// platform-independent regression tests below (never win32-gated).
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -66,8 +70,18 @@ import { resolveOwnedPipePath } from "./windows-native-transport.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const exeSuffix = process.platform === "win32" ? ".exe" : "";
-const daemonPath = path.join(repoRoot, "target", "debug", `drogond${exeSuffix}`);
-const cliPath = path.join(repoRoot, "target", "debug", `drogon-cli${exeSuffix}`);
+const daemonPath = path.join(
+  repoRoot,
+  "target",
+  "debug",
+  `drogond${exeSuffix}`,
+);
+const cliPath = path.join(
+  repoRoot,
+  "target",
+  "debug",
+  `drogon-cli${exeSuffix}`,
+);
 
 /** Honest off-Windows (or non-win32-build) status: never a fabricated pass. */
 function offWindowsReport() {
@@ -115,117 +129,170 @@ function withoutDispatchCapabilityEnv(source) {
 }
 
 /**
- * Spins up one owned, freshly minted `--data-dir` and a real `drogond`
- * against it, hands the caller CLI/RPC helpers scoped to that instance, and
- * guarantees explicit teardown: after an attempted (or admitted) graceful
- * `runtime.shutdown`, the daemon first gets a bounded exit observation via
- * `waitAcceptanceExit`, and `stopAcceptanceProcess` (SIGTERM-then-SIGKILL)
- * runs only if it has not exited by then; the fixture (which contains the
- * owned data directory) is removed only on a provable `"exited"` verdict —
- * every non-exited verdict (`"unverifiable"`, `"live"`, `"missing"`,
- * `"unknown"`, ...) preserves the fixture, logs its path, and fails loudly,
- * so a possibly-still-alive process never races cleanup.
+ * Classifies the test-body outcome for teardown. A cancelled body (node:test
+ * aborts `context.signal` on timeout/cancel — observed on Node 24: the test
+ * counts as `cancelled` with `signal.aborted === true`) counts as
+ * "cancelled" even when its error surfaces later; any other body error
+ * counts as "failed"; a clean return counts as "passed".
  */
-async function withDaemon(context, run, { env = {} } = {}) {
-  await access(daemonPath);
-  await access(cliPath);
-  const fixture = await mkdtemp(path.join(tmpdir(), "wnpa-"));
-  const dataDir = path.join(fixture, "data");
-  // Ambient inherited env must never hand a real dispatch credential to a
-  // fixture that expects the default per-run-token flow; only the
-  // wrong-credential case below adds its own explicit override.
-  const baseEnv = withoutDispatchCapabilityEnv(process.env);
-  const daemon = startAcceptanceProcess(daemonPath, ["--data-dir", dataDir], {
-    cwd: repoRoot,
-    stdio: ["ignore", "ignore", "ignore"],
-    env: {
-      ...baseEnv,
-      ...env,
-      ORCA_ACCEPTANCE_SENTINEL: "must-not-reach-new-runtime-children",
-    },
+function classifyBodyOutcome({ signalAborted = false, bodyError } = {}) {
+  if (signalAborted) return "cancelled";
+  if (bodyError !== undefined) return "failed";
+  return "passed";
+}
+
+/**
+ * Sole authority for fixture/dataDir removal. Daemon-exited alone never
+ * permits cleanup: removal requires a passed body, a provable `"exited"`
+ * daemon verdict, and every tracked CLI/session child outcome `"exited"`.
+ * Pure and platform-independent so the regression tests below execute it on
+ * any host instead of hiding behind the win32 gate.
+ */
+function decideFixtureDisposition({
+  bodyOutcome,
+  daemonVerdict,
+  openChildren = [],
+}) {
+  const blockers = [];
+  if (bodyOutcome !== "passed")
+    blockers.push(`test body ${bodyOutcome}, evidence must be preserved`);
+  for (const child of openChildren)
+    if (child.verdict !== "exited")
+      blockers.push(`${child.kind} ${child.id} is ${child.verdict}`);
+  if (daemonVerdict !== "exited")
+    blockers.push(
+      `daemon stop verdict was ${JSON.stringify(daemonVerdict)}, not the provable "exited"`,
+    );
+  if (blockers.length > 0)
+    return { remove: false, reason: `cleanup blocked: ${blockers.join("; ")}` };
+  return {
+    remove: true,
+    reason: "body passed, daemon provably exited, every tracked child exited",
+  };
+}
+
+/**
+ * Applies a fixture disposition: removes on approval, otherwise logs the
+ * preserved path and fails loudly — but only when the body itself passed. A
+ * failed/cancelled body already fails the test with its own error, so the
+ * teardown hook must not mask it with a second failure; preservation plus
+ * the log carry the evidence either way.
+ */
+async function settleOwnedFixture({
+  label,
+  fixture,
+  bodyOutcome,
+  daemonResult,
+  openChildren,
+  teardownNote,
+  deps = {},
+}) {
+  const {
+    removeDir = (dir) => rm(dir, { recursive: true, force: true }),
+    report = (message) => console.error(message),
+  } = deps;
+  const disposition = decideFixtureDisposition({
+    bodyOutcome,
+    daemonVerdict: daemonResult.verdict,
+    openChildren,
   });
-  context.after(async () => {
-    // Prefer the admitted graceful path (`runtime.shutdown` over the named
-    // pipe) while the daemon is still responsive; Node's child_process docs
-    // state SIGTERM forcibly terminates on Windows, so `stopAcceptanceProcess`
-    // (SIGTERM-then-SIGKILL) can only be a disclosed fallback, never the
-    // primary teardown path. `admitted` records whether the shutdown RPC was
-    // actually ADMITTED, not merely attempted.
-    let admitted = false;
-    // Bound to the error that prevented admission, distinct from
-    // "unresponsive/gone": an explicit rejection of runtime.shutdown must
-    // stay visible in the eventual failure message, never collapse into an
-    // indistinguishable `admitted: false`.
-    let shutdownAttemptError;
-    try {
-      const status = await cli(["status"], { timeout: 2000 });
-      if (status.ok === true) {
-        await rpc("runtime.shutdown", {
-          hostId: status.result.hostId,
-          serviceInstanceId: status.result.serviceInstanceId,
-        });
-        admitted = true;
-      }
-    } catch (error) {
-      // Daemon unresponsive, already gone, or shutdown was rejected; the
-      // bounded observation below still runs before any force.
-      shutdownAttemptError = error;
-    }
-    // Graceful-first: give the admitted (or never-responsive) daemon a
-    // bounded window to actually exit before any signal is sent.
-    const observed = await waitAcceptanceExit(daemon, 8000);
-    const actualPath =
-      observed.verdict === "exited"
-        ? "graceful-observed"
-        : "force-fallback";
-    const result =
-      observed.verdict === "exited"
-        ? { ...observed, forced: false }
-        : await stopAcceptanceProcess(daemon, {
-            graceMs: 5000,
-            forceMs: 2000,
-          });
-    // Fixture preservation on ANY unverified exit: only a provable "exited"
-    // verdict may delete the fixture (which contains the dataDir workspace);
-    // every other verdict (unverifiable, live, missing, unknown, ...) means a
-    // possibly-still-alive process must never race cleanup, so the fixture
-    // and its workspace are preserved, logged, and the case fails loudly.
-    if (result.verdict === "exited") {
-      await rm(fixture, { recursive: true, force: true });
-    } else {
-      // Surface whichever diagnostic the failure actually produced: a
-      // rejected/errored shutdown attempt, and/or stopAcceptanceProcess's own
-      // `error` (set when its kill() itself threw) — neither may be dropped
-      // from the loud failure below.
-      const shutdownDetail = shutdownAttemptError
-        ? `; shutdown attempt error: ${shutdownAttemptError.message}`
-        : "";
-      const stopDetail = result.error ? `; stop error: ${result.error}` : "";
-      console.error(
-        `[${context.name}] preserving fixture ${fixture} (contains the dataDir ` +
-          `workspace): daemon stop verdict was ${JSON.stringify(result.verdict)}, ` +
-          `not the provable "exited"; actual teardown path ${actualPath} ` +
-          `(shutdown admitted: ${admitted}, forced: ${result.forced})${shutdownDetail}${stopDetail}.`,
-      );
-      assert.fail(
-        `[${context.name}] the owned daemon must be provably stopped, never left ` +
-          `running (actual teardown path: ${actualPath}; shutdown admitted: ${admitted}; ` +
-          `forced: ${result.forced}); stop verdict was ${JSON.stringify(result.verdict)}, ` +
-          `so the fixture is preserved at ${fixture}${shutdownDetail}${stopDetail}`,
-      );
-    }
-  });
+  if (disposition.remove) {
+    await removeDir(fixture);
+    return { removed: true };
+  }
+  report(
+    `[${label}] preserving fixture ${fixture} (contains the dataDir ` +
+      `workspace): ${disposition.reason}; ${teardownNote}.`,
+  );
+  if (bodyOutcome === "passed") {
+    assert.fail(
+      `[${label}] the owned daemon and every owned child must be provably ` +
+        `stopped, never left running; ${disposition.reason}, ` +
+        `so the fixture is preserved at ${fixture}; ${teardownNote}`,
+    );
+  }
+  return { removed: false };
+}
+
+/**
+ * Runs `runProcess(file, args, options)`, appending a ledger record classified
+ * exactly the way `createFixtureCli`'s CLI calls are. `"exited"` requires
+ * positive evidence the process ended under the execFile runner contract:
+ * success, a numeric `error.code` exit status, or an `error.signal` string.
+ * Anything else is `"unverifiable"`: a runner-side kill (`error.killed`,
+ * e.g. an execFile `timeout`) never observed an exit, and a spawn failure
+ * (`error.code` a string errno such as `"ENOENT"`) never ran a process at
+ * all — a bare `killed === false` alone proves nothing, so the default is
+ * fail-closed. Extracted to a standalone helper so this exact classification
+ * logic can be exercised directly against a REAL child process (see the
+ * regression test below) instead of only through a stubbed `runProcess`.
+ */
+async function runTrackedChild({
+  ledger,
+  kind,
+  id,
+  runProcess,
+  file,
+  args,
+  options = {},
+}) {
+  const record = { kind, id, verdict: "live" };
+  ledger.push(record);
+  try {
+    const result = await runProcess(file, args, options);
+    record.verdict = "exited";
+    return result;
+  } catch (error) {
+    record.verdict = classifyRunProcessError(error);
+    throw error;
+  }
+}
+
+/**
+ * Fail-closed reading of an execFile-style rejection under the
+ * `runAcceptanceProcess` contract. Only a numeric exit `code` or a `signal`
+ * string proves the child ended; a runner-side kill or a spawn-shaped error
+ * (string errno, no exit evidence) stays `"unverifiable"`.
+ */
+function classifyRunProcessError(error) {
+  if (error?.killed) return "unverifiable";
+  if (typeof error?.code === "number" || typeof error?.signal === "string")
+    return "exited";
+  return "unverifiable";
+}
+
+/**
+ * CLI/RPC helpers with a child-outcome ledger. Every spawned CLI process is
+ * tracked via `runTrackedChild`. `session.start` / `session.stop` RPCs
+ * maintain the session-child record by exact session id + incarnation.
+ * Ledger entries are `{ kind, id, verdict }`; only non-`"exited"` entries
+ * block fixture removal.
+ */
+function createFixtureCli({
+  runProcess,
+  ledger,
+  cliPath,
+  dataDir,
+  cwd,
+  baseEnv,
+  env,
+}) {
+  let cliSeq = 0;
 
   async function cli(args, options = {}) {
-    const { stdout } = await runAcceptanceProcess(
-      cliPath,
-      ["--data-dir", dataDir, "--json", ...args],
-      {
-        cwd: repoRoot,
+    const { stdout } = await runTrackedChild({
+      ledger,
+      kind: "cli",
+      id: `cli-${++cliSeq}`,
+      runProcess,
+      file: cliPath,
+      args: ["--data-dir", dataDir, "--json", ...args],
+      options: {
+        cwd,
         timeout: options.timeout ?? 10000,
         env: { ...baseEnv, ...env, ...options.env },
       },
-    );
+    });
     return JSON.parse(stdout);
   }
 
@@ -257,8 +324,150 @@ async function withDaemon(context, run, { env = {} } = {}) {
       true,
       `expected ${method} to succeed: ${JSON.stringify(response)}`,
     );
-    return response.result;
+    const result = response.result;
+    if (method === "session.start" && result?.verdict === "live") {
+      ledger.push({
+        kind: "session",
+        id: `${result.id}#${result.incarnation}`,
+        sessionId: result.id,
+        incarnation: result.incarnation,
+        verdict: "live",
+      });
+    } else if (method === "session.stop" && params?.sessionId !== undefined) {
+      const record = ledger.find(
+        (entry) =>
+          entry.kind === "session" &&
+          entry.sessionId === params.sessionId &&
+          entry.incarnation === params.incarnation,
+      );
+      if (record) record.verdict = result?.verdict ?? "unverifiable";
+    }
+    return result;
   }
+
+  return { cli, cliExpectFailure, rpc };
+}
+
+/**
+ * Spins up one owned, freshly minted `--data-dir` and a real `drogond`
+ * against it, hands the caller CLI/RPC helpers scoped to that instance, and
+ * guarantees explicit teardown: after an attempted (or admitted) graceful
+ * `runtime.shutdown`, the daemon first gets a bounded exit observation via
+ * `waitAcceptanceExit`, and `stopAcceptanceProcess` (SIGTERM-then-SIGKILL)
+ * runs only if it has not exited by then.
+ *
+ * Removal contract: the fixture (which contains the owned data directory)
+ * is removed ONLY when the test body passed AND the daemon stop verdict is
+ * a provable `"exited"` AND every tracked CLI/session child outcome is
+ * `"exited"`. A failed or cancelled body, or any live/unverifiable child,
+ * preserves the fixture and its workspace for evidence — daemon-exited
+ * alone never permits cleanup, so a still-running child or a failed body
+ * can never race or destroy evidence.
+ */
+async function withDaemon(context, run, { env = {} } = {}) {
+  await access(daemonPath);
+  await access(cliPath);
+  const fixture = await mkdtemp(path.join(tmpdir(), "wnpa-"));
+  const dataDir = path.join(fixture, "data");
+  // Ambient inherited env must never hand a real dispatch credential to a
+  // fixture that expects the default per-run-token flow; only the
+  // wrong-credential case below adds its own explicit override.
+  const baseEnv = withoutDispatchCapabilityEnv(process.env);
+  const daemon = startAcceptanceProcess(daemonPath, ["--data-dir", dataDir], {
+    cwd: repoRoot,
+    stdio: ["ignore", "ignore", "ignore"],
+    env: {
+      ...baseEnv,
+      ...env,
+      ORCA_ACCEPTANCE_SENTINEL: "must-not-reach-new-runtime-children",
+    },
+  });
+  // Body-phase child-outcome ledger for the removal contract: every CLI
+  // process and session child the body spawns is recorded here. Set by the
+  // body via the helpers below; read (as a pre-probe snapshot) by teardown.
+  const childLedger = [];
+  // Set when the body throws; rethrown unchanged so the test still fails
+  // with its original error while teardown preserves the evidence.
+  let bodyError;
+  const { cli, cliExpectFailure, rpc } = createFixtureCli({
+    runProcess: runAcceptanceProcess,
+    ledger: childLedger,
+    cliPath,
+    dataDir,
+    cwd: repoRoot,
+    baseEnv,
+    env,
+  });
+  context.after(async () => {
+    const bodyOutcome = classifyBodyOutcome({
+      signalAborted: context.signal?.aborted === true,
+      bodyError,
+    });
+    // Snapshot body-phase children BEFORE teardown's own status/shutdown
+    // probes: probes run after the body and must never gate removal.
+    const openChildren = childLedger.filter(
+      (record) => record.verdict !== "exited",
+    );
+    // Prefer the admitted graceful path (`runtime.shutdown` over the named
+    // pipe) while the daemon is still responsive; Node's child_process docs
+    // state SIGTERM forcibly terminates on Windows, so `stopAcceptanceProcess`
+    // (SIGTERM-then-SIGKILL) can only be a disclosed fallback, never the
+    // primary teardown path. `admitted` records whether the shutdown RPC was
+    // actually ADMITTED, not merely attempted.
+    let admitted = false;
+    // Bound to the error that prevented admission, distinct from
+    // "unresponsive/gone": an explicit rejection of runtime.shutdown must
+    // stay visible in the eventual failure message, never collapse into an
+    // indistinguishable `admitted: false`.
+    let shutdownAttemptError;
+    try {
+      const status = await cli(["status"], { timeout: 2000 });
+      if (status.ok === true) {
+        await rpc("runtime.shutdown", {
+          hostId: status.result.hostId,
+          serviceInstanceId: status.result.serviceInstanceId,
+        });
+        admitted = true;
+      }
+    } catch (error) {
+      // Daemon unresponsive, already gone, or shutdown was rejected; the
+      // bounded observation below still runs before any force.
+      shutdownAttemptError = error;
+    }
+    // Graceful-first: give the admitted (or never-responsive) daemon a
+    // bounded window to actually exit before any signal is sent.
+    const observed = await waitAcceptanceExit(daemon, 8000);
+    const actualPath =
+      observed.verdict === "exited" ? "graceful-observed" : "force-fallback";
+    const result =
+      observed.verdict === "exited"
+        ? { ...observed, forced: false }
+        : await stopAcceptanceProcess(daemon, {
+            graceMs: 5000,
+            forceMs: 2000,
+          });
+    // Surface whichever diagnostic the failure actually produced: a
+    // rejected/errored shutdown attempt, and/or stopAcceptanceProcess's own
+    // `error` (set when its kill() itself threw) — neither may be dropped
+    // from the preservation report below.
+    const shutdownDetail = shutdownAttemptError
+      ? `; shutdown attempt error: ${shutdownAttemptError.message}`
+      : "";
+    const stopDetail = result.error ? `; stop error: ${result.error}` : "";
+    // Removal contract: daemon-exited alone never permits cleanup — the
+    // body must have passed and every tracked CLI/session child must be
+    // provably exited too, otherwise the fixture is preserved as evidence.
+    await settleOwnedFixture({
+      label: context.name,
+      fixture,
+      bodyOutcome,
+      daemonResult: result,
+      openChildren,
+      teardownNote:
+        `actual teardown path ${actualPath} (shutdown admitted: ${admitted}, ` +
+        `forced: ${result.forced})${shutdownDetail}${stopDetail}`,
+    });
+  });
 
   async function eventually(action, predicate, label, timeout = 10000) {
     const until = Date.now() + timeout;
@@ -277,8 +486,409 @@ async function withDaemon(context, run, { env = {} } = {}) {
     );
   }
 
-  return run({ dataDir, fixture, daemon, cli, cliExpectFailure, rpc, eventually });
+  try {
+    return await run({
+      dataDir,
+      fixture,
+      daemon,
+      cli,
+      cliExpectFailure,
+      rpc,
+      eventually,
+    });
+  } catch (error) {
+    // Record the body failure for teardown (which preserves the fixture as
+    // evidence), then rethrow unchanged so the test fails with its original
+    // error instead of a teardown substitute.
+    bodyError = error;
+    throw error;
+  }
 }
+
+// Platform-independent teardown-contract regression tests (critical
+// acceptance correction): these run on EVERY host — never WIN32-gated — so a
+// non-Windows run still executes the removal decision instead of skipping it.
+
+test("teardown contract: removal requires passed body, exited daemon, and no open children", () => {
+  const cases = [
+    [
+      "failed body blocks removal even when the daemon exited",
+      { bodyOutcome: "failed", daemonVerdict: "exited", openChildren: [] },
+      false,
+      /test body failed/,
+    ],
+    [
+      "cancelled body blocks removal even when the daemon exited",
+      {
+        bodyOutcome: "cancelled",
+        daemonVerdict: "exited",
+        openChildren: [],
+      },
+      false,
+      /test body cancelled/,
+    ],
+    [
+      "unverifiable session child blocks removal even when daemon exited",
+      {
+        bodyOutcome: "passed",
+        daemonVerdict: "exited",
+        openChildren: [
+          { kind: "session", id: "sess-1#2", verdict: "unverifiable" },
+        ],
+      },
+      false,
+      /session sess-1#2 is unverifiable/,
+    ],
+    [
+      "live CLI child blocks removal even when the daemon exited",
+      {
+        bodyOutcome: "passed",
+        daemonVerdict: "exited",
+        openChildren: [{ kind: "cli", id: "cli-1", verdict: "live" }],
+      },
+      false,
+      /cli cli-1 is live/,
+    ],
+    [
+      "unverifiable daemon blocks removal even with a passed body",
+      {
+        bodyOutcome: "passed",
+        daemonVerdict: "unverifiable",
+        openChildren: [],
+      },
+      false,
+      /daemon stop verdict was "unverifiable"/,
+    ],
+    [
+      "exited child records never block removal",
+      {
+        bodyOutcome: "passed",
+        daemonVerdict: "exited",
+        openChildren: [{ kind: "session", id: "sess-1#2", verdict: "exited" }],
+      },
+      true,
+      /every tracked child exited/,
+    ],
+    [
+      "clean passed run removes the fixture",
+      { bodyOutcome: "passed", daemonVerdict: "exited", openChildren: [] },
+      true,
+      /provably exited/,
+    ],
+  ];
+  for (const [name, input, wantRemove, wantReason] of cases) {
+    const disposition = decideFixtureDisposition(input);
+    assert.equal(disposition.remove, wantRemove, name);
+    assert.match(disposition.reason, wantReason, name);
+  }
+});
+
+test("teardown contract: aborted signal classifies the body as cancelled", () => {
+  assert.equal(classifyBodyOutcome({ signalAborted: true }), "cancelled");
+  assert.equal(
+    classifyBodyOutcome({
+      signalAborted: true,
+      bodyError: new Error("late failure"),
+    }),
+    "cancelled",
+  );
+  assert.equal(classifyBodyOutcome({ bodyError: new Error("boom") }), "failed");
+  assert.equal(classifyBodyOutcome({}), "passed");
+});
+
+test(
+  "teardown contract: blocked dispositions preserve the fixture dir and name the blocker",
+  { timeout: 15000 },
+  async (t) => {
+    const dirs = [];
+    t.after(async () => {
+      for (const dir of dirs) await rm(dir, { recursive: true, force: true });
+    });
+    const reports = [];
+    const deps = { report: (message) => reports.push(message) };
+    const teardownNote =
+      "actual teardown path graceful-observed (shutdown admitted: true, forced: false)";
+    async function freshDir() {
+      const dir = await mkdtemp(path.join(tmpdir(), "wnpa-contract-"));
+      dirs.push(dir);
+      return dir;
+    }
+
+    // Failed body + exited daemon: preserved, logged, and no second failure
+    // thrown (the body's own error already fails the test).
+    {
+      const fixture = await freshDir();
+      const outcome = await settleOwnedFixture({
+        label: "failed-body",
+        fixture,
+        bodyOutcome: "failed",
+        daemonResult: { verdict: "exited", forced: false },
+        openChildren: [],
+        teardownNote,
+        deps,
+      });
+      assert.equal(outcome.removed, false);
+      await access(fixture);
+      assert.match(reports.at(-1), /preserving fixture/);
+      assert.match(reports.at(-1), /test body failed/);
+    }
+
+    // Cancelled body + exited daemon: same, naming the cancellation.
+    {
+      const fixture = await freshDir();
+      const outcome = await settleOwnedFixture({
+        label: "cancelled-body",
+        fixture,
+        bodyOutcome: "cancelled",
+        daemonResult: { verdict: "exited", forced: false },
+        openChildren: [],
+        teardownNote,
+        deps,
+      });
+      assert.equal(outcome.removed, false);
+      await access(fixture);
+      assert.match(reports.at(-1), /test body cancelled/);
+    }
+
+    // Passed body + exited daemon + unverifiable session child: preserved
+    // AND loudly failed, naming the exact child.
+    {
+      const fixture = await freshDir();
+      await assert.rejects(
+        settleOwnedFixture({
+          label: "open-child",
+          fixture,
+          bodyOutcome: "passed",
+          daemonResult: { verdict: "exited", forced: false },
+          openChildren: [
+            { kind: "session", id: "sess-7#1", verdict: "unverifiable" },
+          ],
+          teardownNote,
+          deps,
+        }),
+        /sess-7#1 is unverifiable/,
+      );
+      await access(fixture);
+    }
+
+    // Passed body + exited daemon + LIVE (not merely unverifiable) cli
+    // child: preserved AND loudly failed, naming the exact live child.
+    {
+      const fixture = await freshDir();
+      await assert.rejects(
+        settleOwnedFixture({
+          label: "live-child",
+          fixture,
+          bodyOutcome: "passed",
+          daemonResult: { verdict: "exited", forced: false },
+          openChildren: [{ kind: "cli", id: "cli-3", verdict: "live" }],
+          teardownNote,
+          deps,
+        }),
+        /cli cli-3 is live/,
+      );
+      await access(fixture);
+    }
+
+    // Passed body + unverifiable daemon: preserved AND loudly failed.
+    {
+      const fixture = await freshDir();
+      await assert.rejects(
+        settleOwnedFixture({
+          label: "open-daemon",
+          fixture,
+          bodyOutcome: "passed",
+          daemonResult: { verdict: "unverifiable", forced: false },
+          openChildren: [],
+          teardownNote,
+          deps,
+        }),
+        /daemon stop verdict was "unverifiable"/,
+      );
+      await access(fixture);
+    }
+  },
+);
+
+test(
+  "teardown contract: clean passed run removes the fixture dir",
+  { timeout: 15000 },
+  async () => {
+    const reports = [];
+    const fixture = await mkdtemp(path.join(tmpdir(), "wnpa-contract-"));
+    const outcome = await settleOwnedFixture({
+      label: "clean",
+      fixture,
+      bodyOutcome: "passed",
+      daemonResult: { verdict: "exited", forced: false },
+      openChildren: [],
+      teardownNote:
+        "actual teardown path graceful-observed (shutdown admitted: true, forced: false)",
+      deps: { report: (message) => reports.push(message) },
+    });
+    assert.equal(outcome.removed, true);
+    assert.equal(reports.length, 0);
+    await assert.rejects(access(fixture), /ENOENT/);
+  },
+);
+
+test(
+  "teardown contract: CLI/session child outcomes are tracked by exact outcome",
+  { timeout: 15000 },
+  async () => {
+    const ledger = [];
+    const okEnvelope = (payload) => ({ stdout: JSON.stringify(payload) });
+    const { cli, cliExpectFailure, rpc } = createFixtureCli({
+      runProcess: async (file, args) => {
+        void file;
+        const sub = args[args.indexOf("--json") + 1];
+        if (sub === "timeout-cli") {
+          const error = new Error("timed out");
+          error.killed = true;
+          throw error;
+        }
+        if (sub === "gone-cli") {
+          const error = new Error("exit 1");
+          error.code = 1;
+          error.stdout = "";
+          throw error;
+        }
+        if (sub === "refused") {
+          const error = new Error("exit 1");
+          error.code = 1;
+          error.stdout = JSON.stringify({
+            ok: false,
+            error: { code: "unauthorized" },
+          });
+          throw error;
+        }
+        if (sub === "rpc") {
+          const method = args[args.indexOf("rpc") + 1];
+          if (method === "session.start")
+            return okEnvelope({
+              ok: true,
+              result: { id: "sess-9", incarnation: 4, verdict: "live" },
+            });
+          if (method === "session.stop")
+            return okEnvelope({ ok: true, result: { verdict: "exited" } });
+        }
+        return okEnvelope({ ok: true, result: {} });
+      },
+      ledger,
+      cliPath: "/stub/drogon-cli",
+      dataDir: "/stub/data",
+      cwd: "/stub",
+      baseEnv: {},
+      env: {},
+    });
+
+    const status = await cli(["status"]);
+    assert.equal(status.ok, true);
+    assert.equal(ledger.at(-1).verdict, "exited");
+
+    await assert.rejects(cli(["timeout-cli"]), /timed out/);
+    assert.equal(ledger.at(-1).verdict, "unverifiable");
+
+    await assert.rejects(cli(["gone-cli"]));
+    assert.equal(ledger.at(-1).verdict, "exited");
+
+    const refused = await cliExpectFailure(["refused"]);
+    assert.equal(refused.error.code, "unauthorized");
+    assert.equal(ledger.at(-1).verdict, "exited");
+
+    const started = await rpc("session.start", { workspaceId: "ws-1" });
+    assert.equal(started.verdict, "live");
+    const sessionRecord = ledger.find((entry) => entry.kind === "session");
+    assert.equal(sessionRecord.verdict, "live");
+    const stopped = await rpc("session.stop", {
+      sessionId: "sess-9",
+      incarnation: 4,
+    });
+    assert.equal(stopped.verdict, "exited");
+    assert.equal(sessionRecord.verdict, "exited");
+  },
+);
+
+test(
+  "teardown contract: ledger classification is driven by REAL runAcceptanceProcess children, not a stub",
+  { timeout: 15000 },
+  async () => {
+    const ledger = [];
+    // Real exited child: a real `process.execPath` process run through the
+    // REAL `runAcceptanceProcess` (execFileAsync), not a stub — proves the
+    // "exited" branch against an actual OS process that ran to completion.
+    await runTrackedChild({
+      ledger,
+      kind: "cli",
+      id: "real-exit",
+      runProcess: runAcceptanceProcess,
+      file: process.execPath,
+      args: ["-e", "process.exit(0)"],
+    });
+    assert.equal(
+      ledger.find((entry) => entry.id === "real-exit").verdict,
+      "exited",
+    );
+
+    // Real unverifiable child: a real process that outlives a bounded
+    // execFile `timeout`, so `runAcceptanceProcess` itself kills it and
+    // surfaces `error.killed` — proving the "unverifiable" branch against a
+    // real, was-alive-until-killed child, not a fabricated error shape.
+    await assert.rejects(
+      runTrackedChild({
+        ledger,
+        kind: "cli",
+        id: "real-timeout",
+        runProcess: runAcceptanceProcess,
+        file: process.execPath,
+        args: ["-e", "setTimeout(() => process.exit(0), 5000)"],
+        options: { timeout: 300 },
+      }),
+    );
+    assert.equal(
+      ledger.find((entry) => entry.id === "real-timeout").verdict,
+      "unverifiable",
+    );
+
+    // Real nonzero exit: the child provably ran and ended (execFile rejects
+    // with a numeric `error.code`), so the record is "exited" — this is the
+    // positive-evidence branch, not a bare `killed === false` assumption.
+    const exitError = await runTrackedChild({
+      ledger,
+      kind: "cli",
+      id: "real-nonzero-exit",
+      runProcess: runAcceptanceProcess,
+      file: process.execPath,
+      args: ["-e", "process.exit(3)"],
+    }).then(
+      () => assert.fail("a nonzero exit must reject under execFile"),
+      (error) => error,
+    );
+    assert.equal(exitError.code, 3);
+    assert.equal(
+      ledger.find((entry) => entry.id === "real-nonzero-exit").verdict,
+      "exited",
+    );
+
+    // Real spawn failure: no process ever ran (string errno, no exit
+    // evidence), so the record stays "unverifiable" even though nothing was
+    // killed — fail-closed instead of assuming an exit.
+    await assert.rejects(
+      runTrackedChild({
+        ledger,
+        kind: "cli",
+        id: "real-spawn-failure",
+        runProcess: runAcceptanceProcess,
+        file: path.join(tmpdir(), `wnpa-no-such-binary-${randomUUID()}`),
+        args: [],
+      }),
+    );
+    assert.equal(
+      ledger.find((entry) => entry.id === "real-spawn-failure").verdict,
+      "unverifiable",
+    );
+  },
+);
 
 test(
   "named-pipe startup: drogond binds a real win32 named pipe that drogon-cli can reach",
@@ -324,7 +934,10 @@ test(
       );
       assert.equal(status.ok, true);
       const token = await readFile(path.join(dataDir, "auth.token"), "utf8");
-      assert.ok(token.length > 0, "drogond must mint a real per-run token file");
+      assert.ok(
+        token.length > 0,
+        "drogond must mint a real per-run token file",
+      );
     }),
 );
 
@@ -383,7 +996,11 @@ test(
         "exited",
         "the daemon must actually exit after an admitted runtime.shutdown, not merely acknowledge it",
       );
-      assert.equal(exit.code, 0, "an admitted shutdown must exit cleanly, not crash");
+      assert.equal(
+        exit.code,
+        0,
+        "an admitted shutdown must exit cleanly, not crash",
+      );
     }),
 );
 
