@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Folder,
   FolderPlus,
+  Monitor,
+  Moon,
   PanelRight,
   Plus,
   RefreshCw,
+  Sun,
   TerminalSquare,
   X,
 } from "lucide-react";
@@ -31,11 +34,50 @@ import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
 import { createShortcutRegistry, guardHandler } from "./shortcuts";
 import {
+  parsePersistedSettings,
+  settingsStorageKey,
+  SettingsStore,
+} from "./settings-store";
+import {
+  applyThemeToRoot,
+  resolveEffectiveTheme,
+  resolveInspectorDefault,
+} from "./theme";
+import type { Theme } from "./settings-store";
+import {
   loadSavedSelection,
   resolveRestoredSelection,
   resolveWorkspaceSelection,
   saveSavedSelection,
 } from "./workspace-selection";
+
+// One App mount owns one settings store; created lazily so importing this
+// module (e.g. from pure-logic tests) never touches window/localStorage.
+let uiSettingsStore: SettingsStore | null = null;
+function uiSettings(): SettingsStore {
+  if (!uiSettingsStore)
+    uiSettingsStore = new SettingsStore(window.localStorage, {
+      namespace: "ui",
+    });
+  return uiSettingsStore;
+}
+
+/**
+ * Nullable read of the saved inspector choice: unlike the store's typed get
+ * (which applies its default), this distinguishes "nothing saved yet" so the
+ * viewport can decide the initial value.
+ */
+function savedInspectorValue(): boolean | null {
+  try {
+    return (
+      parsePersistedSettings(
+        window.localStorage.getItem(settingsStorageKey("ui")),
+      ).inspectorVisible ?? null
+    );
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Replaces an already-listed entry only on an exact host+id+incarnation
@@ -137,6 +179,7 @@ export function IconButton({
 }
 
 export function App() {
+  const settings = uiSettings();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selected, setSelected] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -162,9 +205,13 @@ export function App() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [adding, setAdding] = useState(false);
   const [folderPath, setFolderPath] = useState("");
-  const [inspector, setInspector] = useState(
-    () => matchMedia("(min-width: 1101px)").matches,
+  const [inspector, setInspector] = useState(() =>
+    resolveInspectorDefault(
+      matchMedia("(min-width: 1101px)").matches,
+      savedInspectorValue(),
+    ),
   );
+  const [theme, setTheme] = useState<Theme>(() => settings.get("theme"));
   const [revision, setRevision] = useState(0);
   const [harnessCapability, setHarnessCapability] = useState(false);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
@@ -184,6 +231,22 @@ export function App() {
       .then(setBuildInfo)
       .catch(() => setBuildInfo(null));
   }, []);
+  useEffect(() => {
+    // Applies the effective theme to the documentElement (.dark hook in
+    // main.css). While following the system scheme the class must track OS
+    // changes live; an explicit choice skips the listener. The effect re-runs
+    // on theme change and unmount, which is exactly the cleanup contract.
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () =>
+      applyThemeToRoot(
+        document.documentElement,
+        resolveEffectiveTheme(theme, query.matches),
+      );
+    apply();
+    if (theme !== "system") return;
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, [theme]);
   const current = workspaces.find((item) => item.id === selected);
   const terminal = sessions.find((item) => item.id === active);
   const checked = <T,>(value: Result<T>): T => {
@@ -324,6 +387,20 @@ export function App() {
       setSessions((items) => appendOrReplaceSession(items, result));
       setActive(result.id);
     }).then(() => launched);
+  };
+  // Inspector toggles persist through the settings store; the narrow-viewport
+  // guard below keeps overriding the pane shut on shrink without persisting,
+  // so an accidental shrink never becomes a saved "closed" choice.
+  const toggleInspector = () => {
+    const next = !inspector;
+    setInspector(next);
+    settings.set("inspectorVisible", next);
+  };
+  const cycleTheme = () => {
+    const next: Theme =
+      theme === "system" ? "dark" : theme === "dark" ? "light" : "system";
+    setTheme(next);
+    settings.set("theme", next);
   };
   const close = (session: Session) =>
     action(async () => {
@@ -510,6 +587,18 @@ export function App() {
             </div>
             <div className="header-actions">
               <IconButton
+                label={`Theme: ${theme}`}
+                onClick={cycleTheme}
+              >
+                {theme === "system" ? (
+                  <Monitor size={16} />
+                ) : theme === "dark" ? (
+                  <Moon size={16} />
+                ) : (
+                  <Sun size={16} />
+                )}
+              </IconButton>
+              <IconButton
                 label="Refresh connection"
                 disabled={busy}
                 onClick={() => void refresh()}
@@ -518,7 +607,7 @@ export function App() {
               </IconButton>
               <IconButton
                 label="Toggle session details"
-                onClick={() => setInspector((value) => !value)}
+                onClick={toggleInspector}
               >
                 <PanelRight />
               </IconButton>
