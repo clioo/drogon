@@ -16,6 +16,8 @@ mod ring;
 mod session;
 mod workspace;
 
+mod service_quiescence;
+
 pub mod requests;
 
 /// The on-disk SQLite filename under a data directory, exposed so
@@ -26,7 +28,8 @@ pub use db::DB_FILE_NAME;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use drogon_protocol::{PROTOCOL_VERSION, Request, Response, RpcError};
@@ -43,6 +46,7 @@ const CAPABILITIES: &[&str] = &[
     "request.idempotency.v1",
     "harness.catalog.v1",
     "harness.launch.v1",
+    "runtime.quiescent-shutdown.v1",
 ];
 
 pub(crate) fn now_rfc3339() -> String {
@@ -85,7 +89,40 @@ pub struct Engine {
     service_instance_id: String,
     sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
     ledger: RequestLedger,
+    /// Lifecycle admission gate for quiescent shutdown. Every mutating
+    /// method (`Engine::mutating`) holds the *read* side across its whole
+    /// ledger interaction — admission, the work itself (including PTY
+    /// spawn/IO/wait), and the durable receipt completion — while read-only
+    /// methods never touch the gate at all, so unrelated normal I/O is not
+    /// serialized. Shared holders never block each other, and the write
+    /// side is only ever try-acquired, so no reader ever queues behind a
+    /// pending writer.
+    /// `runtime.shutdown` try-acquires the *write* side and retains it from
+    /// its all-exited check through the durable receipt persist and the
+    /// `quiescent` store (`do_runtime_shutdown`), refusing `runtime_busy`
+    /// rather than blocking behind in-flight work — that single span makes
+    /// admission atomic with the freeze.
+    lifecycle_gate: RwLock<()>,
+    /// Set once a `runtime.shutdown` request has durably persisted an
+    /// accepted receipt (see `do_runtime_shutdown`). `drogond` polls this to
+    /// decide when its listener loop may stop; `Engine` itself never exits
+    /// a process or signals one.
+    quiescent: AtomicBool,
+    /// Test-only admission-window seam: when set, `do_runtime_shutdown`
+    /// invokes it exactly once between the ledger's durable receipt persist
+    /// and the `quiescent` store, passing `self` so the test can observe
+    /// gate state inside that precise window — the one the admission fix
+    /// must keep closed. Kept on the instance (not a process global) so
+    /// parallel unit tests can never consume each other's hook; invisible
+    /// to other crates and absent from production builds.
+    #[cfg(test)]
+    pre_freeze_hook: Mutex<Option<PreFreezeHook>>,
 }
+
+/// Test-only seam type for [`Engine::pre_freeze_hook`]; exists only under
+/// `cfg(test)`.
+#[cfg(test)]
+type PreFreezeHook = Box<dyn Fn(&Engine) + Send>;
 
 impl Engine {
     pub fn open(data_dir: &Path) -> Result<Engine, RpcError> {
@@ -129,7 +166,18 @@ impl Engine {
             service_instance_id: uuid::Uuid::new_v4().to_string(),
             sessions: Mutex::new(HashMap::new()),
             ledger: RequestLedger::default(),
+            lifecycle_gate: RwLock::new(()),
+            quiescent: AtomicBool::new(false),
+            #[cfg(test)]
+            pre_freeze_hook: Mutex::new(None),
         })
+    }
+
+    /// Whether a `runtime.shutdown` request has durably admitted this
+    /// instance for quiescent shutdown. Never true as a side effect of a
+    /// refused or unpersisted attempt — see `do_runtime_shutdown`.
+    pub fn is_quiescent(&self) -> bool {
+        self.quiescent.load(Ordering::Acquire)
     }
 
     pub fn dispatch(&self, request: Request) -> Response {
@@ -146,6 +194,7 @@ impl Engine {
     fn dispatch_inner(&self, request: &Request) -> Result<Value, RpcError> {
         match request.method.as_str() {
             "status" => Ok(self.status()),
+            "runtime.shutdown" => self.do_runtime_shutdown(request),
             "harness.list" => Ok(self.harness_list()),
             "harness.start" => self.mutating(request, Self::do_harness_start),
             "workspace.register" => self.mutating(request, Self::do_workspace_register),
@@ -170,6 +219,9 @@ impl Engine {
             "protocol": PROTOCOL_VERSION,
             "capabilities": CAPABILITIES,
             "version": env!("CARGO_PKG_VERSION"),
+            // Kernel-observer correlation only, per
+            // `service-quiescence-contract.md`: "not signaling authority."
+            "processId": std::process::id(),
         })
     }
 
@@ -179,13 +231,66 @@ impl Engine {
         work: impl FnOnce(&Self, &Value) -> Result<Value, RpcError>,
     ) -> Result<Value, RpcError> {
         let params = request.params.clone();
+        // Shutdown must also exclude the mutation's durable receipt write.
+        let _gate = self.lifecycle_gate.read().unwrap();
         self.ledger.run(
             &self.db,
             &request.request_id,
             &request.method,
             &params,
-            || work(self, &params),
+            || {
+                if self.quiescent.load(Ordering::Acquire) {
+                    return Err(error::runtime_busy(
+                        "service admission is frozen for shutdown",
+                    ));
+                }
+                work(self, &params)
+            },
         )
+    }
+
+    /// Fence before replay; retain exclusive admission through durable freeze.
+    fn do_runtime_shutdown(&self, request: &Request) -> Result<Value, RpcError> {
+        service_quiescence::validate_fences(self, &request.params)?;
+        let params = request.params.clone();
+        let mut admission_guard: Option<RwLockWriteGuard<'_, ()>> = None;
+        let result = self.ledger.run(
+            &self.db,
+            &request.request_id,
+            &request.method,
+            &params,
+            || {
+                // Refuse in-flight work rather than waiting for it to finish.
+                let Ok(guard) = self.lifecycle_gate.try_write() else {
+                    return Err(error::runtime_busy(
+                        "a session or harness admission is currently in flight",
+                    ));
+                };
+                match service_quiescence::check_all_sessions_exited(self) {
+                    Ok(receipt) => {
+                        admission_guard = Some(guard);
+                        Ok(receipt)
+                    }
+                    Err(err) => Err(err),
+                }
+            },
+        );
+        #[cfg(test)]
+        let pre_freeze_hook = self
+            .pre_freeze_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        #[cfg(test)]
+        if let Some(hook) = pre_freeze_hook {
+            hook(self);
+        }
+        // Failed persistence never freezes; successful persistence stays fenced.
+        if result.is_ok() {
+            self.quiescent.store(true, Ordering::Release);
+        }
+        drop(admission_guard);
+        result
     }
 
     fn do_workspace_register(&self, params: &Value) -> Result<Value, RpcError> {

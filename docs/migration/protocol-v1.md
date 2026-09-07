@@ -32,7 +32,7 @@ JSON fields are camelCase. IDs are opaque nonempty strings; do not embed paths i
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `status` | `{}` | `{hostId, serviceInstanceId, protocol:1, capabilities:string[], version}` |
+| `status` | `{}` | `{hostId, serviceInstanceId, protocol:1, capabilities:string[], version, processId?:number}` |
 | `workspace.register` | `{path, name?}` | `Workspace` |
 | `workspace.list` | `{}` | `{workspaces:Workspace[]}` |
 | `session.start` | `{workspaceId, command, args:string[], cols:80, rows:24}` | `Session` |
@@ -56,6 +56,28 @@ Capabilities initially reflect only working methods: `workspace.v1`, `session.pt
 - Persist workspace/session identities, exit evidence and request admission/results before reporting durable success. Persist pending spawn admission before spawning. After service crash, pending/previously-live records are `unverifiable` until owning-host process evidence proves otherwise; never silently spawn again or signal an old PID. Do not claim that SQLite recreates an OS PTY master after service death.
 - Closing Electron or CLI disconnects only. Exact stop requires the matching owned child identity and observed exit before returning `exited`. Failure to inspect/reach a process is `unverifiable`; normal exit records real exit code where known. Test multiple simultaneous sessions and descendants; do not claim broad descendant cleanup based on killing one PID.
 - File read/write, Git, harness discovery, orchestration, Mentu and Bots are subsequent additive methods, not fabricated first-slice output. No legacy runtime proxy behind drogon-cli.
+
+## Additive quiescent shutdown (implementation acceptance pending)
+
+The separate [quiescent shutdown contract](service-quiescence-contract.md)
+defines `runtime.shutdown {hostId, serviceInstanceId}` and capability
+`runtime.quiescent-shutdown.v1`. Advertise it only with the complete, verified
+core and serving-process implementation. It requires explicit authenticated
+intent; ordinary client/window closure still leaves the service running.
+
+`status.processId`, when present, is a positive execution-host PID for kernel
+exit observation only, never permission to signal a process. The new request
+does not accept a PID or force option. An old service without the capability
+must be refused without a kill fallback; no protocol version or stream opcode
+changes. Wrong host/instance retains `unsupported_host`/`stale_incarnation`.
+
+Additive `runtime_busy` (retryable) means shutdown cannot be admitted while
+mutations or pending/live/unverifiable sessions remain, or new mutation effects
+are refused after the durable freeze. A matching request ID still replays its
+original outcome: a known busy refusal may be reconsidered under a fresh
+request ID; a lost mutation response must not be retried under a new identity.
+`accepted:true` proves durable admission, not process exit. The client must
+independently observe exit; transport loss alone remains `unverifiable`.
 
 ## Rust implementation boundary
 
