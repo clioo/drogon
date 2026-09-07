@@ -292,3 +292,42 @@ No bot capability activation, additional paid run or package installation.
 Audit remains 11/12 groups (91.7%, medium confidence, delta zero), not a
 product-parity percentage. All 46 obligations and the high-risk fixed
 16:41:33 UTC deadline remain unchanged.
+
+## 14:11 UTC checkpoint
+
+Integrated V2 Files CSS `03d5132` as `0e8357f`: source editor-surface
+tokens, 240px explorer split and narrow stacked layout. The probe merge
+keeps the independent static CSS checks without importing the held contrast
+block or its missing functions. Node syntax check and desktop build passed.
+
+ROOT rebuilt the daemon/CLI and ran `node scripts/accept-desktop.mjs --files`
+with candidate-only `files.v1` advertisement. Read, unsaved draft switching,
+terminal navigation and exact-disk save assertions reached the first layout
+gate, which failed: editor height was below 240px. The wide screenshot
+confirms a roughly 40px textarea and unstyled tree contents; the outer split
+now fills the work surface. V3 owns the remaining component correction.
+All owned sessions, desktop and daemon exited. Evidence:
+`.preflight/acceptance/desktop-1788790037562-96c311e6-422c-40ff-94a4-4e529e48b757/report.json`.
+This is development-build RED, not installed or packaged acceptance.
+
+Pi coordinator steering was queued behind long-running child-Run waits.
+After each affected coordinator reported zero active leaves and a stable
+checkpoint, a single Escape aborted only its current turn, restoring the
+queued input; resubmission preserved its process, Task and Dispatch. V5,
+V1, V3 and V4 acknowledged parent guidance. No active leaf was stopped or
+replaced. Parent-Dispatch inbox checks are now required between child waits.
+
+V1's immediate Windows error-capture correction is active. V3's Git wrapper
+remains held pending full EOF/error handling, strict path decoding, bounded
+cross-call reader resources, actual probe coalescing and portable fixtures.
+V4 create/run handlers remain held pending composition with the canonical
+request ledger; domain ledger traits are not accepted integration adapters.
+V5's independent notices verifier is active, with no generator-derived
+expected corpus and missing source notice text failing closed. Actual
+Windows daemon runtime checks are requested for the existing CI runner;
+compilation and JS pipe fixtures do not establish that acceptance.
+
+No further model inference, Bot advertisement, package installation or
+rights/service publication. Audit remains 11/12 groups (91.7%, medium
+confidence, delta zero), all 46 product obligations remain in scope, and
+the fixed 16:41:33 UTC deadline is high risk.
