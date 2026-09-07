@@ -87,3 +87,57 @@ crash. Windows remains explicitly unverified; no packaged-install claim.
 Source audit remains 11/12 (91.7%, medium confidence, delta 0); all 46 package
 obligations remain. Product completion has no defensible percentage. The fixed
 16:41:33 UTC target has high risk; tests and scope are not reduced to meet it.
+
+## 12:39 UTC checkpoint
+
+Combined candidate: `053c89f`, not a release. This checkpoint supersedes the
+earlier current-state holds above, not their historical verification records.
+
+- V1 fixture fixes `fda7987` and `cef62f8` are integrated as `681b584` and
+  `6b5ecbf`: every cleanup attempts a stop marker; unreadable PID evidence
+  preserves fixtures; the regression is UID-independent and tears down its
+  exact test directories. Root independently passed 25 lifecycle/receipt/
+  cancellation/boundary tests, then reran all eight cancellation tests after
+  the portability correction.
+- `8f21da7` adds the final requested Windows threading feature to the daemon
+  manifest. Locked metadata passes. Windows implementation `530b0e7` is NOT
+  integrated: root found pending-overlapped lifetime, racing completion and
+  permanent shutdown/clone-ownership defects. V1 owns the active correction.
+  No Windows compile or execution acceptance is claimed.
+- `bab4cdf` relocates the Bot display DTO to the desktop shared boundary with
+  a full type reexport at the old renderer path. `28c1c10` adds validated
+  `botSnapshot` IPC: explicit host/workspace/locale, existing sender-frame
+  admission, deep record validation, exact response-scope matching and native
+  errors preserved verbatim. Twelve new isolated bridge cases pass; the full
+  combined desktop suite passed 381 tests across 35 files, with TypeScript
+  clean. These tests do not prove the native snapshot's resource bounds.
+- V4 style checkpoint `63edd954` is integrated as `053c89f`, preserving the
+  existing descriptor API, Button primitive and canonical tokens. Root passed
+  all 26 Bots contract tests. This remains an unmounted export, not rendered
+  interaction acceptance.
+
+Active acceptance work:
+
+- V3 owns FIFO-safe read/readback, Windows imports, scoped in-memory draft
+  retention, and save-retry ordering. Review of `a6cab17` found that ambiguous
+  A followed by confirmed B can still replay A's old receipt; the correction
+  must also retain retry identity at the memory limit. Neither that UI delta
+  nor Files capability activation is accepted yet.
+- V2 owns App layout and capability-gate wiring. `ecea077` keep-alive and
+  `d8a7107` gate are not integrated: the gate must be wired and validated
+  against explicit capability loss while busy. Bots mount planning uses the
+  existing route system and stays dark pending root acceptance.
+- V4 owns durable runner history and scope-safe retained Bot history; V5
+  owns only the native snapshot's bounded-query correction and auth/locale/
+  size regressions. V5 prerequisite registration hunks mirror the existing
+  root baseline; only its later correction should be integrated.
+- Bot-run RPC is still a proposal. Root requires asserted host scope checked
+  against host authority, typed invocation reason, stable request identity,
+  changed-parameter conflicts, inherited permission defaults and preserved
+  session incarnation. No automatic timer or paid-model activation occurred.
+
+No packaged installation is claimed for this checkpoint. Source audit remains
+11/12 (91.7%, medium confidence, delta zero); product parity still has no
+defensible completion percentage over its 46 obligations. The 16:41:33 UTC
+target remains high risk. Next closure is real Files/Bots interaction followed
+by combined packaged acceptance, without weakening the safety gates.
