@@ -4,6 +4,7 @@
    font stacks and the base layer are verbatim. */
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
+@import "./terminal.css";
 
 @font-face {
   font-family: 'Geist';

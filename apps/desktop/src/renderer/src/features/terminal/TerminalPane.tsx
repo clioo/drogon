@@ -191,7 +191,8 @@ export function TerminalPane({
       cursorBlink: true,
       cursorStyle: "block",
       scrollback: 5000,
-      allowProposedApi: false,
+      // Required for the SearchAddon match-decoration colors (proposed API).
+      allowProposedApi: true,
       screenReaderMode: true,
       theme:
         composeActiveTerminalTheme(
