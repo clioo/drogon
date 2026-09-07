@@ -81,27 +81,17 @@ fn canonical_for_hash(data_dir: &Path) -> String {
     strip_verbatim_prefix(&canonical.to_string_lossy())
 }
 
-/// Builds the Windows named-pipe DACL's SDDL string given the creating
-/// process's `TokenUser` SID, already rendered in its canonical `S-1-...`
-/// string form (see `windows_pipe::token_user_sid_string`, `cfg(windows)`
-/// only, for how that string is obtained). Protected (`P`, no inherited
+/// Builds the Windows named-pipe DACL's SDDL string for `user_sid` (a
+/// caller-supplied `TokenUser` SID in canonical `S-1-...` form; see
+/// `windows_pipe::token_user_sid_string`). Protected (`P`, no inherited
 /// ACEs); Generic-All to the named SID and to Local System (`SY`).
 ///
-/// Deliberately takes the SID as a string rather than resolving it itself,
-/// so this — the only actual SID/DACL *selection* logic here, as opposed to
-/// the FFI calls that resolve the caller's real SID or install the
-/// resulting descriptor — is pure string formatting and can be unit-tested
-/// on every host, not only wherever `cfg(windows)` happens to compile. This
-/// intentionally never emits the `OW` ("the object's owner") trustee: a
-/// process's `TOKEN_OWNER` — which becomes a new object's default owner
-/// whenever no owner is explicitly set — is documented to be settable to
-/// either the user's own SID or one of the user's group SIDs, and
-/// `TOKEN_OWNER` is a distinct token field from `TOKEN_USER`; an `OW`-keyed
-/// ACE can therefore silently grant a group the caller merely belongs to,
-/// not "this same user," in any token shape where `TOKEN_OWNER` is a group.
-/// Naming the actual queried `TokenUser` SID here instead sidesteps having
-/// to separately prove `owner == TokenUser` holds for every valid token
-/// shape.
+/// Takes the SID as a string, not a resolved token, so this — the only
+/// SID/DACL selection logic here — is pure string formatting and
+/// unit-testable on every host. Never emits `OW` ("the object's owner"):
+/// `TOKEN_OWNER` can be a group SID even when `TOKEN_USER` is a user SID, so
+/// an `OW`-keyed ACE could silently grant a group the caller merely belongs
+/// to, not this same user.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn dacl_sddl_for_user_sid(user_sid: &str) -> String {
     format!("D:P(A;;GA;;;{user_sid})(A;;GA;;;SY)")
@@ -461,14 +451,12 @@ mod windows_pipe {
         String::from_utf16_lossy(slice)
     }
 
-    /// Queries the calling process's real `TokenUser` SID — always a user
-    /// SID, never a group, unlike `TOKEN_OWNER`/`OW` (see
-    /// `same_user_security_attributes`'s doc) — and renders it as its
-    /// canonical `S-1-...` string form via `ConvertSidToStringSidW`, so it
-    /// can be embedded directly into the pipe's DACL SDDL in place of the
-    /// old `OW` placeholder. Fails closed (returns `Err`) on any step's
-    /// failure, including a SID that fails `IsValidSid` — never silently
-    /// falls back to `OW` or an unrestricted descriptor.
+    /// Queries the calling process's real `TokenUser` SID (always a user
+    /// SID, never a group, unlike `TOKEN_OWNER`/`OW`) and renders it in
+    /// canonical `S-1-...` string form via `ConvertSidToStringSidW`, for
+    /// embedding into the pipe's DACL SDDL. Fails closed on any step's
+    /// failure, including a SID that fails `IsValidSid` — never falls back
+    /// to `OW` or an unrestricted descriptor.
     fn token_user_sid_string() -> io::Result<String> {
         let mut token: HANDLE = std::ptr::null_mut();
         // Safety: `GetCurrentProcess` is a pseudo-handle needing no
@@ -489,10 +477,15 @@ mod windows_pipe {
         if needed == 0 {
             return Err(io::Error::last_os_error());
         }
-        let mut buf = vec![0u8; needed as usize];
-        // Safety: `buf` is exactly `needed` bytes, the size the probe call
-        // above just reported; `needed` is reused as the out-param for the
-        // actual bytes written, which this does not need to inspect.
+        // `TOKEN_USER` needs pointer alignment (`SID_AND_ATTRIBUTES::Sid` is
+        // a `PSID`); a `Vec<u8>` only guarantees byte alignment, so back the
+        // buffer with `u64` words instead — always at least as aligned as
+        // this cast needs — while still sizing it from the same probe call.
+        let words = (needed as usize).div_ceil(std::mem::size_of::<u64>());
+        let mut buf: Vec<u64> = vec![0u64; words];
+        // Safety: `buf` holds at least `needed` bytes, the size the probe
+        // call above just reported; `needed` is reused as the out-param for
+        // the actual bytes written, which this does not need to inspect.
         let ok = unsafe {
             GetTokenInformation(
                 token,
@@ -507,7 +500,8 @@ mod windows_pipe {
         }
         // Safety: `buf` was just filled by a successful `GetTokenInformation`
         // call for `TokenUser`, which per its contract writes a `TOKEN_USER`
-        // at the start of the buffer.
+        // at the start of the buffer; the `u64` backing keeps this pointer
+        // properly aligned for `TOKEN_USER`.
         let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
         let sid: PSID = token_user.User.Sid;
         // Safety: `sid` points inside `buf`, still alive here; `IsValidSid`
@@ -536,34 +530,22 @@ mod windows_pipe {
 
     /// Explicit-DACL pipe security attributes: Protected (`P`, no inherited
     /// ACEs), Generic-All to the creating process's real `TokenUser` SID and
-    /// to Local System. Passing `NULL` security attributes instead would use
+    /// to Local System. `NULL` security attributes would use
     /// `CreateNamedPipeW`'s *default* descriptor, which Microsoft documents
-    /// as granting read access to the Everyone group and the anonymous
-    /// account.
+    /// as granting read access to Everyone and the anonymous account.
     ///
-    /// This deliberately does not use the `OW` ACE trustee ("the object's
-    /// owner") to grant access, even though `OW` was this function's prior
-    /// approach: a process's `TOKEN_OWNER` — which in turn becomes a new
-    /// object's default owner whenever no owner is explicitly set, as is the
-    /// case here — is documented to be settable to *either* the user's own
-    /// SID *or* one of the user's group SIDs, and `TOKEN_OWNER` is a field
-    /// distinct from `TOKEN_USER`. An `OW`-keyed ACE can therefore silently
-    /// grant access to a group the caller merely belongs to, rather than
-    /// "this same user," in any token shape where `TOKEN_OWNER` is a group —
-    /// the opposite of `protocol-v1.md`'s same-user requirement, and not
-    /// detectable from the SDDL string alone. Rather than attempt to prove
-    /// `owner == TokenUser` holds for every valid token shape (a harder,
-    /// more failure-prone claim to stand behind), this queries `TokenUser`
-    /// directly (`token_user_sid_string`, above) and plugs its string SID
-    /// into the DACL (`dacl_sddl_for_user_sid`, top of this file) in place
-    /// of `OW`. If that query fails for any reason, pipe creation fails
-    /// closed (propagates the error) rather than falling back to `OW`,
-    /// `NULL` security attributes, or any other default.
+    /// Names `TokenUser` directly (`token_user_sid_string`, above) rather
+    /// than the `OW` ("object owner") ACE trustee: a token's `TOKEN_OWNER`
+    /// can be a group SID even when `TOKEN_USER` is a user SID, so `OW`
+    /// could silently grant a group the caller merely belongs to — the
+    /// opposite of `protocol-v1.md`'s same-user requirement, and not
+    /// detectable from the SDDL string alone. Fails closed (propagates the
+    /// error) if the `TokenUser` query fails, rather than falling back to
+    /// `OW`, `NULL`, or any other default.
     ///
     /// Still built via `ConvertStringSecurityDescriptorToSecurityDescriptorW`
     /// rather than manual SID/ACL construction, to keep the unverified FFI
-    /// surface area small — only the trustee naming the SID changed. See
-    /// the evidence doc's ACL section for the full before/after.
+    /// surface small. See the evidence doc's ACL section for the before/after.
     fn same_user_security_attributes() -> io::Result<(SECURITY_ATTRIBUTES, SecurityDescriptorGuard)>
     {
         let user_sid = token_user_sid_string()?;
@@ -744,9 +726,8 @@ mod windows_pipe {
     ) -> io::Result<(u32, bool)> {
         let mut call = OverlappedCall::new()?;
         let started = issue(call.ptr());
-        // Safety: captured immediately alongside `issue`, per the Win32
-        // immediate-capture contract — dropping to a helper call first
-        // risks an intervening call resetting this thread's last-error.
+        // Safety: captured immediately — a helper call in between could
+        // reset this thread's last-error before it's read.
         let issue_err = (started == 0).then(|| unsafe { GetLastError() });
         finish_overlapped_call(handle, &call.overlapped, timeout, started, issue_err)
     }
@@ -777,9 +758,8 @@ mod windows_pipe {
                 ));
             }
             let started = issue(call.ptr());
-            // Safety: captured here, still under `guard` — dropping the
-            // guard or calling `finish_overlapped_call` first could reset
-            // this thread's last-error before it is read.
+            // Safety: captured here, still under `guard` — dropping it
+            // first could reset this thread's last-error before it's read.
             let issue_err = (started == 0).then(|| unsafe { GetLastError() });
             (started, issue_err)
             // `guard` drops here, before the wait/cancel/reap step below —
@@ -1527,18 +1507,24 @@ mod windows_pipe {
 
         /// The ACL correction this module exists for (ROOT seq 3304):
         /// inspects the *actual* security descriptor Windows attached to a
-        /// freshly created pipe instance and asserts its DACL names this
-        /// process's real `TokenUser` SID — obtained independently here via
-        /// the same `token_user_sid_string` production code path — as an
-        /// explicit trustee, rather than only asserting the SDDL string we
-        /// built contains the expected substring. A string-only assertion
-        /// could pass even if `ConvertStringSecurityDescriptorToSecurityDescriptorW`
-        /// or `CreateNamedPipeW` silently mishandled the descriptor; reading
-        /// the DACL back via `GetSecurityInfo`/`GetAce` instead exercises
-        /// the real kernel-attached object, which is the only thing that
-        /// determines who can actually open this pipe.
+        /// freshly created pipe instance and asserts its DACL's allowed
+        /// trustees are *exactly* this process's real `TokenUser` SID
+        /// (obtained independently here via the same `token_user_sid_string`
+        /// production code path) and Local System — fail closed on any
+        /// extra, missing or non-allow ACE — rather than only asserting the
+        /// SDDL string we built contains the expected substring. A
+        /// string-only or contains-only assertion could pass even if
+        /// `ConvertStringSecurityDescriptorToSecurityDescriptorW` or
+        /// `CreateNamedPipeW` silently mishandled the descriptor, or added
+        /// an extra trustee; reading the DACL back via
+        /// `GetSecurityInfo`/`GetAce` instead exercises the real
+        /// kernel-attached object, which is the only thing that determines
+        /// who can actually open this pipe. Local System's SID string
+        /// (`S-1-5-18`) is a documented, locale-independent well-known
+        /// constant, so it needs no runtime resolution the way `TokenUser`
+        /// does.
         #[test]
-        fn created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder() {
+        fn created_pipe_dacl_allows_exactly_tokenuser_and_system() {
             use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
             use windows_sys::Win32::Security::{
                 ACCESS_ALLOWED_ACE, ACL, DACL_SECURITY_INFORMATION, GetAce, PSECURITY_DESCRIPTOR,
@@ -1552,6 +1538,7 @@ mod windows_pipe {
             // value (0), not something the underlying Windows ABI can
             // change without breaking every existing DACL on disk.
             const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+            const SYSTEM_SID: &str = "S-1-5-18";
 
             let dir = tempfile::tempdir().unwrap();
             let listener = establish(dir.path()).unwrap();
@@ -1594,7 +1581,7 @@ mod windows_pipe {
             // Safety: `dacl` is non-null per the check above and was just
             // filled by the successful `GetSecurityInfo` call.
             let acl = unsafe { &*dacl };
-            let mut names_expected_sid = false;
+            let mut allowed_trustees: Vec<String> = Vec::new();
             for index in 0..u32::from(acl.AceCount) {
                 let mut ace_ptr: *mut c_void = std::ptr::null_mut();
                 // Safety: `dacl` is valid and `index` is within
@@ -1605,40 +1592,53 @@ mod windows_pipe {
                     "every ACE index below AceCount must be readable"
                 );
                 // Safety: `GetAce` just returned this pointer as a valid ACE
-                // for the duration of `dacl`'s lifetime.
+                // for the duration of `dacl`'s lifetime; every ACE type
+                // shares the same `Header` layout at offset 0, so reading it
+                // via this cast is valid before the type is even checked.
                 let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
-                if ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE {
-                    continue;
-                }
-                // Safety: for an `ACCESS_ALLOWED_ACE`, the trustee SID
-                // begins in-place at `SidStart`, per the Win32 contract.
+                assert_eq!(
+                    ace.Header.AceType, ACCESS_ALLOWED_ACE_TYPE,
+                    "dacl_sddl_for_user_sid builds only access-allowed ACEs; any \
+                     other ACE type here (e.g. a deny ACE) must fail the test, \
+                     never be silently skipped"
+                );
+                // Safety: the type check above confirms this is really an
+                // `ACCESS_ALLOWED_ACE`, whose trustee SID begins in-place at
+                // `SidStart`, per the Win32 contract.
                 let sid: PSID = std::ptr::addr_of!(ace.SidStart) as PSID;
                 // Safety: `sid` points inside the live `dacl` buffer.
-                if unsafe { IsValidSid(sid) } == 0 {
-                    continue;
-                }
+                assert_ne!(
+                    unsafe { IsValidSid(sid) },
+                    0,
+                    "every trustee SID in this DACL must be well-formed"
+                );
                 let mut sid_string: *mut u16 = std::ptr::null_mut();
                 // Safety: `sid` was just validated above.
-                if unsafe { ConvertSidToStringSidW(sid, &mut sid_string) } == 0 {
-                    continue;
-                }
+                assert_ne!(
+                    unsafe { ConvertSidToStringSidW(sid, &mut sid_string) },
+                    0,
+                    "ConvertSidToStringSidW must succeed on a validated SID"
+                );
                 // Safety: `sid_string` was just set by the successful call
                 // above.
                 let sid_str = unsafe { wide_nul_terminated_to_string(sid_string) };
                 unsafe {
                     LocalFree(sid_string as *mut c_void);
                 }
-                if sid_str == expected_sid {
-                    names_expected_sid = true;
-                }
+                allowed_trustees.push(sid_str);
             }
             unsafe {
                 LocalFree(sd as *mut c_void);
             }
-            assert!(
-                names_expected_sid,
-                "the created pipe's DACL must explicitly name this process's real \
-                 TokenUser SID ({expected_sid}), not rely on OW or any other placeholder"
+
+            allowed_trustees.sort();
+            let mut expected_trustees = vec![expected_sid.clone(), SYSTEM_SID.to_string()];
+            expected_trustees.sort();
+            assert_eq!(
+                allowed_trustees, expected_trustees,
+                "the pipe's DACL must allow exactly this process's real TokenUser \
+                 SID ({expected_sid}) and Local System ({SYSTEM_SID}) — nothing more, \
+                 nothing less, never OW or any other placeholder"
             );
         }
     }

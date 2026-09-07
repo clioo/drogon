@@ -1446,3 +1446,114 @@ other crate depends on for its own build.
   actually passes, not merely compiles, and to confirm none of the
   hand-verified FFI signatures above has a subtle mismatch this review
   could not catch without a real toolchain.
+
+## Endpoint alignment correction (root review of `bbecf18`, not integrated)
+
+Scope for this pass: edits only to `crates/drogond/src/endpoint.rs`, append
+only to this doc. Three corrections requested by ROOT's review of checkpoint
+`bbecf18` ("GetLastError immediate-capture + TokenUser explicit DACL"):
+
+### Correction 1 — `token_user_sid_string` alignment: FIXED
+
+The prior version allocated `let mut buf = vec![0u8; needed as usize]` and
+then cast `buf.as_ptr()` to `*const TOKEN_USER`. `Vec<u8>`'s allocation is
+only byte-aligned; `TOKEN_USER` embeds a `SID_AND_ATTRIBUTES` whose `Sid`
+field is a `PSID` (a pointer), so the struct needs pointer alignment (8 on
+the targeted 64-bit hosts, 4 on 32-bit) — reading it through an
+under-aligned pointer is undefined behavior, even though it would very
+likely "work" in practice on x86/x64 (which tolerates unaligned loads at a
+performance cost, not a correctness one) and so would not necessarily be
+caught by any test.
+
+Fix: the buffer is now `Vec<u64>` sized in 8-byte words
+(`(needed as usize).div_ceil(size_of::<u64>())`), guaranteeing at least
+8-byte alignment on every target regardless of `needed`'s value. The
+two-call size-bounds query pattern is unchanged (first call learns `needed`
+with a null/zero-length probe, second call writes into the now-aligned
+buffer, same `needed` out-param reused), and `GetTokenInformation`'s write
+target is the same buffer whose alignment is now correct — both the read
+and the write side of the alignment bug are fixed by the one allocation
+change. `HandleGuard`/RAII cleanup of the token handle is untouched.
+
+### Correction 2 — DACL/capture comment trims: DONE
+
+Trimmed the multi-paragraph, deliberation-style prose added in `bbecf18` to
+concise WHY-only comments, per `AGENTS.md`'s "concise non-obvious comments"
+guidance:
+
+- `dacl_sddl_for_user_sid`'s doc: ~19 lines → 10, keeping only the WHY
+  (never emit `OW`, because `TOKEN_OWNER` can be a group SID).
+- `token_user_sid_string`'s doc: ~8 lines → 5.
+- `same_user_security_attributes`'s doc: ~29 lines → 15, dropping the
+  "rather than attempt to prove ... a harder, more failure-prone claim to
+  stand behind" reasoning-log language while keeping the same WHY (OW can
+  silently grant a group; fails closed on query failure).
+- The two immediate-capture inline `Safety:` comments in `run_overlapped`/
+  `run_overlapped_guarded` (capture region): each cut from 3 lines to 2,
+  same WHY (a call in between could reset the last-error).
+
+Left unchanged: `finish_overlapped_call`'s doc (already the trimmed form
+from `bbecf18` itself, factual/contract-shaped rather than a deliberation
+log) and every test's doc comment (this module's established convention —
+see the pre-existing "Fix 1"/"Fix 2"/"Fix 3a"/"Fix 3b"/race-1/race-2 test
+docs above, none of which this pass added or was asked to touch).
+
+### Correction 3 — exact-enumeration DACL test: TIGHTENED, not weakened
+
+The prior `created_pipe_dacl_names_the_actual_tokenuser_sid_not_a_placeholder`
+test only asserted the DACL *contained* an ACE naming the expected
+`TokenUser` SID, silently `continue`-ing past any ACE of the wrong type, an
+invalid SID, or a failed string conversion. That leaves an extra/unexpected
+trustee (e.g. a stray `Everyone` ACE from a descriptor-construction
+regression) undetected.
+
+Exact-set enumeration turned out to be safely assertible in this leaf, using
+only APIs the test already imported (`GetSecurityInfo`, `GetAce`,
+`IsValidSid`, `ConvertSidToStringSidW`) plus one new well-known constant —
+no new `windows-sys` feature or FFI surface was needed:
+
+- Renamed to `created_pipe_dacl_allows_exactly_tokenuser_and_system`.
+- Every ACE in the DACL is now required to be `ACCESS_ALLOWED_ACE_TYPE`
+  (`assert_eq!`, fail the test) rather than skipped (`continue`) if it
+  is not — `dacl_sddl_for_user_sid` only ever emits allow ACEs, so any
+  other type appearing is itself a regression this test should now catch.
+- Every trustee SID is collected (not just checked against one expected
+  value), sorted, and compared with `assert_eq!` against the sorted
+  two-element set `[TokenUser SID, "S-1-5-18"]` — Local System's SID string
+  is the documented, locale-independent well-known constant `S-1-5-18`
+  (needs no runtime resolution, unlike `TokenUser`, which is still queried
+  live via the production `token_user_sid_string` path).
+- `IsValidSid`/`ConvertSidToStringSidW` failures now fail the test
+  (`assert_ne!`) instead of silently skipping that ACE.
+
+This is strictly a superset of the prior assertion (still fails if the
+expected `TokenUser` SID is absent) plus the new fail-closed exact-match and
+fail-closed-on-unexpected-ACE-type behavior the task requested. No fallback
+to a weaker contains-only assertion was needed.
+
+### GREEN gate for this pass
+
+```
+cargo test -p drogond --locked      # 56 passed, 0 failed (this host; cfg(windows) module cfg-stripped, not executed)
+cargo clippy -p drogond --all-targets --locked -- -D warnings   # clean
+cargo fmt -p drogond -- --check      # clean
+```
+
+Per-correction verdict: (1) fixed — alignment corrected via `Vec<u64>`
+backing, size-bounds pattern and RAII preserved; (2) done — DACL/capture
+doc comments trimmed to WHY-only, deliberation-log language removed;
+(3) tightened, not weakened — exact-trustee-set assertion replaces the
+prior contains-only check, fail-closed on any extra/wrong-type ACE.
+
+**What remains:** identical standing constraint as every prior section of
+this doc — this host has no Windows Rust target, so `cfg(windows)` is
+cfg-stripped before name resolution and none of `token_user_sid_string`,
+`same_user_security_attributes`, or the renamed DACL-inspection test has
+been compiled or executed anywhere in this pass. All three corrections
+above are verified by manual review against the `windows-sys-0.61.2` source
+tree (`SID_AND_ATTRIBUTES`/`TOKEN_USER`/`ACCESS_ALLOWED_ACE`/`ACL` layouts
+confirmed in-tree, cited in this pass) and by the macOS-host gates above,
+not by a real Windows compile or the isolated Windows runner. This pass did
+not touch `crates/drogon-cli/tests/native_dogfood.rs` or
+`docs/migration/verticals/V1/dogfood-evidence.md`, the concurrent sibling
+leaf's files, which remain exactly as found (uncommitted).
