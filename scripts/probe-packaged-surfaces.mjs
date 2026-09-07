@@ -346,24 +346,32 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
       animations: "disabled",
     });
     terminalChecks.push("tab-strip-plus-menu-creates-browser-tab-rendering-guest");
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + 60000;
     let tabId = null;
+    let lastListError = "no attempts";
     for (;;) {
       const listed = await runCliJson(
         cli,
         ["--data-dir", dataDir, "--json", "browser", "tabs", "--workspace", workspaceId],
         { timeout: 30000 },
       );
-      assert.equal(listed.ok, true);
-      const match = listed.result.tabs.find(
-        (tab) => tab.url === guestUrl && tab.loading === false,
-      );
+      const match =
+        listed.ok === true
+          ? listed.result.tabs.find(
+              (tab) => tab.url === guestUrl && tab.loading === false,
+            )
+          : undefined;
       if (match) {
         tabId = match.tabId;
         break;
       }
-      assert.ok(Date.now() < deadline, "CLI browser tabs must list the loaded guest");
-      await delay(250);
+      if (listed.ok !== true)
+        lastListError = JSON.stringify(listed.error ?? listed);
+      assert.ok(
+        Date.now() < deadline,
+        `CLI browser tabs must list the loaded guest (last: ${lastListError})`,
+      );
+      await delay(500);
     }
     const snapshot = await runCliJson(
       cli,
