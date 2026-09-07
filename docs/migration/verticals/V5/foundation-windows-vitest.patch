@@ -1,6 +1,6 @@
 --- a/.github/workflows/foundation.yml
 +++ b/.github/workflows/foundation.yml
-@@ -53,8 +53,17 @@
+@@ -53,8 +53,19 @@
      timeout-minutes: 20
      steps:
        - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -18,3 +18,5 @@
 +      - run: pnpm install --frozen-lockfile
 +      - name: Run desktop vitest (real Windows TypeScript execution boundary; today this job only compiles Rust)
 +        run: pnpm --filter @drogon/desktop test
++      - name: Run windows-native-transport acceptance probe (real named-pipe I/O on this Windows runner; fixture-local scaffolding, not drogond proof)
++        run: node --test scripts/windows-native-transport.test.mjs

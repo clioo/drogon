@@ -2,9 +2,9 @@
 // (windows-native-transport.mjs). Split into two tiers:
 //
 //   - Pure mirror tests (`resolveOwnedPipePath`, `validateEnvelopeMirror`,
-//     `precheckFrameSize`): platform-agnostic, run everywhere, and pin the
-//     mirrored logic against known vectors so it cannot silently drift from
-//     native-client.ts's real behavior.
+//     `precheckFrameSize`, `isMainModule`): platform-agnostic, run
+//     everywhere, and pin the mirrored logic against known vectors so it
+//     cannot silently drift from native-client.ts's real behavior.
 //   - Real named-pipe I/O tests (`classifyOwnedEndpoint`, `startFixtureDaemon`
 //     and friends): gated `{ skip: process.platform !== "win32" }`, matching
 //     this repo's existing platform-skip convention (e.g.
@@ -12,6 +12,15 @@
 //     report skipped, never a fabricated pass; `runAcceptanceProbe` itself
 //     also honestly self-reports `verdict: "unverified"` off-Windows, which
 //     is asserted below unconditionally so that guard is always exercised.
+//     Every fixture auth/frame/cleanup result these tests observe is
+//     fixture-local scaffolding behavior pinned against real vectors from
+//     native-client.ts — never proof of the real (not-yet-implemented)
+//     Windows `drogond` admission path.
+//   - A small set of real-but-platform-agnostic socket tests (`sendRaw`
+//     timeout, `startFixtureDaemon` idle-socket cleanup) run unconditionally
+//     using Unix-domain sockets on this host, since the bounded-wait and
+//     explicit-socket-tracking logic under test is not itself Windows-named-
+//     pipe-specific.
 //
 // RED/GREEN for this file: RED was this suite plus the CLI runner both
 // failing to even execute on this darwin host (module didn't exist yet).
@@ -23,19 +32,22 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   MAX_FRAME_BYTES,
   buildFrame,
   callFixture,
   classifyOwnedEndpoint,
+  isMainModule,
   mintOwnedPipe,
   precheckFrameSize,
   resolveOwnedPipePath,
   runAcceptanceProbe,
+  sendRaw,
   startFixtureDaemon,
   validateEnvelopeMirror,
 } from "./windows-native-transport.mjs";
@@ -168,6 +180,136 @@ test("precheckFrameSize refuses an oversize frame exactly like native-client.ts'
   });
 });
 
+// isMainModule pure unit tests. `resolvePath`/`toFileUrl` are injected with
+// fixtures that faithfully mimic win32's `path.resolve` + `pathToFileURL`
+// encoding rules (backslash-to-forward-slash, unencoded drive-letter colon,
+// percent-encoded spaces) so these run deterministically on any host,
+// including this non-Windows one, while still proving the fix for the bug
+// this replaces: the old `` `file://${argv[1]}` `` string concatenation
+// never percent-encodes or slash-converts, so it never matched
+// `import.meta.url` on a real Windows host and the CLI runner silently
+// exited 0 without ever running the probe.
+function fakeWin32Resolve(p) {
+  return p; // fixtures below are already absolute drive-letter paths
+}
+function fakeWin32ToFileUrl(resolvedPath) {
+  const segments = resolvedPath.replace(/\\/g, "/").split("/");
+  const encoded = segments
+    .map((segment, index) => (index === 0 ? segment : encodeURIComponent(segment)))
+    .join("/");
+  return { href: `file:///${encoded}` };
+}
+
+test("isMainModule matches a Windows drive-letter, backslash argv path against its correctly encoded file URL", () => {
+  const argvPath = "C:\\Users\\ci\\windows-native-transport.mjs";
+  const moduleUrl = "file:///C:/Users/ci/windows-native-transport.mjs";
+  assert.equal(
+    isMainModule(argvPath, moduleUrl, {
+      resolvePath: fakeWin32Resolve,
+      toFileUrl: fakeWin32ToFileUrl,
+    }),
+    true,
+  );
+});
+
+test("isMainModule matches a Windows argv path with a space, percent-encoded in the file URL", () => {
+  const argvPath = "C:\\Users\\ci runner\\windows-native-transport.mjs";
+  const moduleUrl = "file:///C:/Users/ci%20runner/windows-native-transport.mjs";
+  assert.equal(
+    isMainModule(argvPath, moduleUrl, {
+      resolvePath: fakeWin32Resolve,
+      toFileUrl: fakeWin32ToFileUrl,
+    }),
+    true,
+  );
+});
+
+test("isMainModule rejects the naive file://+argv[1] concatenation a Windows host would have produced", () => {
+  const argvPath = "C:\\Users\\ci\\windows-native-transport.mjs";
+  // This is exactly what the old buggy comparison built: no slash
+  // conversion, no percent-encoding. It must never match the correctly
+  // encoded module URL, since that mismatch was the bug this helper fixes.
+  const naiveConcat = `file://${argvPath}`;
+  assert.equal(
+    isMainModule(argvPath, naiveConcat, {
+      resolvePath: fakeWin32Resolve,
+      toFileUrl: fakeWin32ToFileUrl,
+    }),
+    false,
+  );
+});
+
+test("isMainModule rejects a mismatched path", () => {
+  assert.equal(
+    isMainModule("C:\\Users\\ci\\other.mjs", "file:///C:/Users/ci/windows-native-transport.mjs", {
+      resolvePath: fakeWin32Resolve,
+      toFileUrl: fakeWin32ToFileUrl,
+    }),
+    false,
+  );
+});
+
+test("isMainModule returns false with no argv path, never a false positive", () => {
+  assert.equal(isMainModule(undefined, "file:///anything"), false);
+  assert.equal(isMainModule("", "file:///anything"), false);
+});
+
+test("isMainModule with its real (non-injected) defaults matches this test file's own path on the current host", () => {
+  assert.equal(isMainModule(fileURLToPath(import.meta.url), import.meta.url), true);
+});
+
+test("sendRaw times out instead of hanging when the peer never responds and never closes", async (context) => {
+  const root = await mkdtemp(path.join(tmpdir(), "dnt-test-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const socketPath = path.join(root, "silent.sock");
+  const sockets = new Set();
+  const server = createServer((socket) => {
+    // Deliberately never write a response and never end/destroy: this
+    // proves sendRaw's own bound ends the wait, not the peer's behavior.
+    // The accepted socket is still tracked so cleanup below can destroy it
+    // explicitly — the same "track every owned socket" discipline
+    // startFixtureDaemon.close() uses, applied here to this test's own
+    // throwaway server so `server.close()` cannot itself hang forever
+    // waiting on a connection sendRaw's client-side destroy did not fully
+    // tear down on both ends.
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  context.after(
+    () =>
+      new Promise((resolve) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => resolve());
+      }),
+  );
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, resolve);
+  });
+  const started = Date.now();
+  const outcome = await sendRaw(socketPath, "irrelevant\n", { timeoutMs: 150 });
+  assert.equal(outcome.kind, "timeout");
+  assert.ok(Date.now() - started < 5000, "sendRaw must not hang past its bound");
+});
+
+test("startFixtureDaemon.close() explicitly destroys an idle socket instead of relying on closeAllConnections", async (context) => {
+  const root = await mkdtemp(path.join(tmpdir(), "dnt-test-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const socketPath = path.join(root, "idle.sock");
+  const fixture = await startFixtureDaemon(socketPath, { token: "t" });
+  const idle = createConnection(socketPath); // connects, then never sends a full frame
+  await new Promise((resolve, reject) => {
+    idle.once("connect", resolve);
+    idle.once("error", reject);
+  });
+  const started = Date.now();
+  await fixture.close();
+  assert.ok(
+    Date.now() - started < 5000,
+    "close() must not hang waiting on an idle connection net.Server.closeAllConnections would have silently ignored",
+  );
+});
+
 test("an already-aborted signal classifies as ambiguous/cancelled before any connect is attempted", async () => {
   const controller = new AbortController();
   controller.abort();
@@ -243,6 +385,58 @@ test(
     });
     assert.equal(wrong.envelope.ok, false);
     assert.equal(wrong.envelope.error.code, "unauthenticated");
+  },
+);
+
+test(
+  "double-listen: a second server on the same owned pipe path fails EADDRINUSE",
+  WIN32_ONLY,
+  async (context) => {
+    const root = await mkdtemp(path.join(tmpdir(), "dnt-test-"));
+    context.after(() => rm(root, { recursive: true, force: true }));
+    const { directory, pipePath } = await mintOwnedPipe(root);
+    context.after(() => rm(directory, { recursive: true, force: true }));
+    const first = createServer(() => {});
+    context.after(() => new Promise((resolve) => first.close(resolve)));
+    await new Promise((resolve, reject) => {
+      first.once("error", reject);
+      first.listen(pipePath, resolve);
+    });
+    const second = createServer(() => {});
+    const error = await new Promise((resolve) => {
+      second.once("error", resolve);
+      second.listen(pipePath);
+    });
+    assert.equal(error.code, "EADDRINUSE");
+  },
+);
+
+test(
+  "server destroyed mid-flight: an in-flight connection observes a close, never a hang",
+  WIN32_ONLY,
+  async (context) => {
+    const root = await mkdtemp(path.join(tmpdir(), "dnt-test-"));
+    context.after(() => rm(root, { recursive: true, force: true }));
+    const { directory, pipePath } = await mintOwnedPipe(root);
+    context.after(() => rm(directory, { recursive: true, force: true }));
+    const sockets = new Set();
+    const server = createServer((socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(pipePath, resolve);
+    });
+    const pending = sendRaw(pipePath, "irrelevant\n", { timeoutMs: 2000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    for (const socket of sockets) socket.destroy();
+    server.close();
+    const outcome = await pending;
+    assert.ok(
+      outcome.kind === "closed" || outcome.kind === "error",
+      `expected a close or error, not a hang, got ${JSON.stringify(outcome)}`,
+    );
   },
 );
 
