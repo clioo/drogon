@@ -553,3 +553,191 @@ fn run_use_takeover_fences_old_coordinator_generation() {
         "the old coordinator's known generation must be fenced after takeover, not silently accepted"
     );
 }
+
+#[test]
+fn takeover_receipt_replays_only_while_its_resulting_binding_is_current() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        "create",
+        run_create_params(&host, "old", "takeover replay"),
+    );
+    let run_id = run["run"]["runId"].as_str().unwrap();
+    let mut params = coordinator_scope_params(&host, run_id, "new", 1);
+    params["takeover"] = json!(true);
+    let first = ok(&engine, "orchestration.runUse", "takeover", params.clone());
+    assert_eq!(first["run"]["consumerGeneration"], 2);
+    assert_eq!(
+        ok(&engine, "orchestration.runUse", "takeover", params.clone()),
+        first
+    );
+    assert_eq!(
+        err_code(
+            &engine,
+            "orchestration.runUse",
+            "new-request",
+            params.clone()
+        ),
+        "consumer_fenced"
+    );
+
+    let mut third = coordinator_scope_params(&host, run_id, "third", 2);
+    third["takeover"] = json!(true);
+    ok(&engine, "orchestration.runUse", "third-takeover", third);
+    assert_eq!(
+        err_code(&engine, "orchestration.runUse", "takeover", params),
+        "consumer_fenced"
+    );
+}
+
+#[test]
+fn stale_task_receipt_is_fenced_before_replay_or_payload_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        "create",
+        run_create_params(&host, "old", "fence replay"),
+    );
+    let run_id = run["run"]["runId"].as_str().unwrap();
+    let mut task = task_create_params(&host, run_id, "old", 1, "original", &[]);
+    ok(&engine, "orchestration.taskCreate", "task", task.clone());
+    let mut takeover = coordinator_scope_params(&host, run_id, "new", 1);
+    takeover["takeover"] = json!(true);
+    ok(&engine, "orchestration.runUse", "takeover", takeover);
+    assert_eq!(
+        err_code(&engine, "orchestration.taskCreate", "task", task.clone()),
+        "consumer_fenced"
+    );
+    task["spec"]["instructions"] = json!("changed");
+    assert_eq!(
+        err_code(&engine, "orchestration.taskCreate", "task", task),
+        "consumer_fenced"
+    );
+    assert_eq!(
+        err_code(
+            &engine,
+            "orchestration.taskList",
+            "read",
+            coordinator_scope_params(&host, run_id, "old", 1)
+        ),
+        "consumer_fenced"
+    );
+}
+
+#[test]
+fn atomic_task_receipt_failure_rolls_back_domain_insert_and_can_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        "create",
+        run_create_params(&host, "coordinator", "atomic failure"),
+    );
+    let run_id = run["run"]["runId"].as_str().unwrap();
+    let sql = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    sql.execute_batch("CREATE TRIGGER reject_task_receipt BEFORE INSERT ON requests WHEN NEW.method = 'orchestration.taskCreate' BEGIN SELECT RAISE(ABORT, 'injected failure'); END;").unwrap();
+    let params = task_create_params(&host, run_id, "coordinator", 1, "atomic", &[]);
+    let response = engine.dispatch(req("orchestration.taskCreate", "task", params.clone()));
+    assert!(!response.ok);
+    let listed = ok(
+        &engine,
+        "orchestration.taskList",
+        "list",
+        coordinator_scope_params(&host, run_id, "coordinator", 1),
+    );
+    assert_eq!(listed["tasks"], json!([]));
+    sql.execute_batch("DROP TRIGGER reject_task_receipt;")
+        .unwrap();
+    let created = ok(&engine, "orchestration.taskCreate", "task", params.clone());
+    assert_eq!(
+        ok(&engine, "orchestration.taskCreate", "task", params),
+        created
+    );
+}
+
+#[test]
+fn run_receipt_namespace_is_actor_scoped_and_host_refusal_has_no_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let a = ok(
+        &engine,
+        "orchestration.runCreate",
+        "same-id",
+        run_create_params(&host, "a", "A"),
+    );
+    let b = ok(
+        &engine,
+        "orchestration.runCreate",
+        "same-id",
+        run_create_params(&host, "b", "B"),
+    );
+    assert_ne!(a["run"]["runId"], b["run"]["runId"]);
+    assert_eq!(
+        err_code(
+            &engine,
+            "orchestration.runCreate",
+            "same-id",
+            run_create_params("another-host", "a", "A")
+        ),
+        "unsupported_host"
+    );
+    let listed = ok(
+        &engine,
+        "orchestration.runList",
+        "list",
+        json!({"contractVersion":1,"hostId":host}),
+    );
+    assert_eq!(listed["runs"].as_array().unwrap().len(), 2);
+    let sql = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    let receipts: u32 = sql
+        .query_row("SELECT count(*) FROM requests", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        receipts, 2,
+        "inspection and rejected host must not allocate receipts"
+    );
+}
+
+#[test]
+fn concurrent_run_creation_reuses_one_durable_receipt_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(Engine::open(dir.path()).unwrap());
+    let host = real_host_id(&engine);
+    let params = run_create_params(&host, "coordinator", "concurrent");
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+    let threads: Vec<_> = (0..6)
+        .map(|_| {
+            let engine = engine.clone();
+            let barrier = barrier.clone();
+            let params = params.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                ok(&engine, "orchestration.runCreate", "one-request", params)
+            })
+        })
+        .collect();
+    let results: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    assert!(results.iter().all(|r| r == &results[0]));
+    drop(engine);
+    let reopened = Engine::open(dir.path()).unwrap();
+    assert_eq!(
+        ok(&reopened, "orchestration.runCreate", "one-request", params),
+        results[0]
+    );
+    let listed = ok(
+        &reopened,
+        "orchestration.runList",
+        "list",
+        json!({"contractVersion":1,"hostId":host}),
+    );
+    assert_eq!(listed["runs"].as_array().unwrap().len(), 1);
+}

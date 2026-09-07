@@ -142,6 +142,7 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
 pub enum StartupError {
     Automations(automations_storage::StorageError),
     Bots(bots_storage::StorageError),
+    Orchestration(drogon_protocol::RpcError),
     /// Main-schema, recovery, or host-identity failure.
     Sqlite(rusqlite::Error),
 }
@@ -151,6 +152,7 @@ impl std::fmt::Display for StartupError {
         match self {
             Self::Automations(e) => write!(f, "automations: {e}"),
             Self::Bots(e) => write!(f, "bots: {e}"),
+            Self::Orchestration(e) => write!(f, "orchestration: {}", e.message),
             Self::Sqlite(e) => write!(f, "sqlite error: {e}"),
         }
     }
