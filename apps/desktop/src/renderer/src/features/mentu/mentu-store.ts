@@ -1,22 +1,26 @@
 // Shared Mentu state (journey J9): the right-panel surface and the wider
-// tab opened from "+" must show the same selected recipe, draft and run
-// state for a workspace. A tiny external store (useSyncExternalStore)
-// rather than a new state-management dependency: this module is the one
-// place both mounts read/write, per the task's "one store module in
-// features/mentu" instruction.
+// tab opened from "+" must show the same selected recipe, draft, run,
+// inspector mode and selected graph node for a workspace. A tiny external
+// store (useSyncExternalStore) rather than a new state-management
+// dependency: this module is the one place both mounts read/write.
 
 import { useSyncExternalStore } from "react";
+import type { MentuPaneMode } from "../../../../shared/persistence-contracts/mentu-pane-types";
 
 export type MentuState = {
   selectedRecipeId: string | null;
   draftSource: string;
   activeRunId: string | null;
+  mode: MentuPaneMode;
+  selectedNodeId: string | null;
 };
 
 const EMPTY_STATE: MentuState = {
   selectedRecipeId: null,
   draftSource: "",
   activeRunId: null,
+  mode: "graph",
+  selectedNodeId: null,
 };
 
 type Listener = () => void;

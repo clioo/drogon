@@ -7,6 +7,8 @@ describe("mentuStore", () => {
       selectedRecipeId: null,
       draftSource: "",
       activeRunId: null,
+      mode: "graph",
+      selectedNodeId: null,
     });
   });
 
@@ -18,7 +20,16 @@ describe("mentuStore", () => {
       selectedRecipeId: "hello",
       draftSource: "{}",
       activeRunId: null,
+      mode: "graph",
+      selectedNodeId: null,
     });
+  });
+
+  it("shares the inspector mode and selected node across mounts", () => {
+    const ws = `ws-${Math.random()}`;
+    mentuStore.set(ws, { mode: "metrics", selectedNodeId: "step:build" });
+    expect(mentuStore.get(ws).mode).toBe("metrics");
+    expect(mentuStore.get(ws).selectedNodeId).toBe("step:build");
   });
 
   it("keeps state isolated per workspace id", () => {

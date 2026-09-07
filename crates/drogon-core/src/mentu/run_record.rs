@@ -1,16 +1,17 @@
 //! Parsing for the run record `mentu-recipes` writes to
 //! `<workspace>/.mentu/runs/<run_id>/run.json` — a narrowed Rust port of the
 //! fork's `mentu-run-parsing.ts`, keeping only what the panel/tab need to
-//! show honestly: per-step status, evidence file paths and errors. Fields
-//! this crate does not display (git/verification/drift metadata, hooks) are
-//! left in the raw JSON rather than modeled, matching this product's own
-//! wire contract (`MentuStepRun`) rather than the fork's fuller shape.
+//! show honestly: per-step status, evidence file paths, errors and the
+//! recorded `verification` results. Fields this crate does not display
+//! (git/drift metadata, hooks) are left in the raw JSON rather than
+//! modeled, matching this product's own wire contract (`MentuStepRun`)
+//! rather than the fork's fuller shape.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use drogon_protocol::RpcError;
-use drogon_protocol::mentu::{MentuRunStatus, MentuStepRun};
+use drogon_protocol::mentu::{MentuRunStatus, MentuStepRun, MentuStepVerification};
 use serde_json::Value;
 
 use crate::error;
@@ -64,12 +65,53 @@ fn workspace_relative_evidence_path(mentu_run_id: &str, file_name: &str) -> Opti
     Some(format!(".mentu/runs/{mentu_run_id}/{file_name}"))
 }
 
-fn step_status(exit_code: Option<i64>) -> MentuRunStatus {
-    match exit_code {
-        Some(0) => MentuRunStatus::Succeeded,
-        Some(_) => MentuRunStatus::Failed,
-        None => MentuRunStatus::Unavailable,
+/// A step's own status. The record's per-step `outcome` wins: a step can
+/// fail boundary verification with a zero exit code (and vice versa for
+/// older records, which carry no outcome and fall back to the exit code).
+fn step_status(step: &Value, exit_code: Option<i64>) -> MentuRunStatus {
+    match step.get("outcome").and_then(Value::as_str) {
+        Some("ok") => MentuRunStatus::Succeeded,
+        Some("failed") => MentuRunStatus::Failed,
+        Some("running") => MentuRunStatus::Running,
+        _ => match exit_code {
+            Some(0) => MentuRunStatus::Succeeded,
+            Some(_) => MentuRunStatus::Failed,
+            None => MentuRunStatus::Unavailable,
+        },
     }
+}
+
+/// One verification issue message: a plain string, or an object carrying a
+/// `message` string like the real `mentu-recipes` writes
+/// (`{"kind": "command", "message": "..."}`).
+fn verification_issue(issue: &Value) -> String {
+    if let Some(text) = issue.as_str() {
+        return text.to_string();
+    }
+    issue
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| "Unrecognized verification issue; inspect the raw run record.".into())
+}
+
+fn verification_messages(step: &Value, key: &str) -> Vec<String> {
+    step.get("verification")
+        .and_then(|verification| verification.get(key))
+        .and_then(Value::as_array)
+        .map(|issues| issues.iter().map(verification_issue).collect())
+        .unwrap_or_default()
+}
+
+/// The recorded `verification` object when the step carries one; `None`
+/// when it does not, so the desktop renders "not recorded" rather than a
+/// clean bill it cannot prove.
+fn step_verification(step: &Value) -> Option<MentuStepVerification> {
+    step.get("verification")?.as_object()?;
+    Some(MentuStepVerification {
+        errors: verification_messages(step, "errors"),
+        warnings: verification_messages(step, "warnings"),
+    })
 }
 
 /// Extracts every step this crate's wire contract cares about from a parsed
@@ -93,7 +135,7 @@ pub fn parse_steps(run_json: &Value, mentu_run_id: &str) -> Vec<MentuStepRun> {
             Some(MentuStepRun {
                 label,
                 backend,
-                status: step_status(exit_code),
+                status: step_status(step, exit_code),
                 exit_code,
                 duration_seconds: step.get("duration_seconds").and_then(Value::as_i64),
                 attempts: step.get("attempts").and_then(Value::as_i64),
@@ -120,6 +162,7 @@ pub fn parse_steps(run_json: &Value, mentu_run_id: &str) -> Vec<MentuStepRun> {
                 } else {
                     None
                 },
+                verification: step_verification(step),
             })
         })
         .collect()
@@ -228,6 +271,15 @@ mod tests {
     }
 
     #[test]
+    fn a_verify_failed_step_is_failed_despite_a_zero_exit_code() {
+        let mut run_json = sample_run_json();
+        run_json["outcome"] = json!("failed");
+        run_json["steps"][0]["outcome"] = json!("failed");
+        let steps = parse_steps(&run_json, "run_20260907202509_15F1772D");
+        assert_eq!(steps[0].status, MentuRunStatus::Failed);
+    }
+
+    #[test]
     fn a_failed_step_reports_a_status_and_an_error_message() {
         let mut run_json = sample_run_json();
         run_json["outcome"] = json!("failed");
@@ -240,6 +292,31 @@ mod tests {
             Some("Completion policy was not satisfied")
         );
         assert_eq!(overall_status(&run_json, &steps), MentuRunStatus::Failed);
+    }
+
+    #[test]
+    fn verification_results_come_from_the_record_or_stay_unrecorded() {
+        // Mirrors the real `mentu-recipes` 0.4.0 record shape: `verification`
+        // issues are `{kind, message}` objects, warnings are plain strings.
+        let mut run_json = sample_run_json();
+        run_json["steps"][0]["verification"] = json!({
+            "errors": [{"kind": "command", "message": "Verification command failed: test -f out.txt\n"}],
+            "warnings": ["boundary drift is advisory"]
+        });
+        let steps = parse_steps(&run_json, "run_20260907202509_15F1772D");
+        let verification = steps[0].verification.as_ref().unwrap();
+        assert_eq!(
+            verification.errors,
+            vec!["Verification command failed: test -f out.txt\n".to_string()]
+        );
+        assert_eq!(
+            verification.warnings,
+            vec!["boundary drift is advisory".to_string()]
+        );
+
+        // No `verification` object: None, never a clean bill.
+        let bare = parse_steps(&sample_run_json(), "run_20260907202509_15F1772D");
+        assert!(bare[0].verification.is_none());
     }
 
     #[test]
