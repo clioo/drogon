@@ -111,5 +111,5 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J6 Tasks | R3 | Muse A | en curso | |
 | J3 CLI | R3 | Muse B | fusionada: terminal wait y guías skills get; browser CLI pendiente | #30 |
 | J1 notificaciones | R3 | Muse C | en curso: needs_input por hooks de Claude y notificación nativa | |
-| J10 Settings | R4 | Muse A | en curso | |
+| J10 Settings | R4 | Muse A | fusionada; falta tamaño de fuente en xterm | #33 |
 | J11 Paquete | R4 | Muse B | pendiente | |

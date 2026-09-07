@@ -38,6 +38,15 @@ its usage readers in `apps/desktop/src/main/usage/` and the contract in
 `src/main/macos-system-sleep-assertion.ts`, all at the pinned source revision
 above. Each ported file keeps the MIT notice in its header comment.
 
+The shell sidebar, project/worktree cards and agent-state tab bar in
+`apps/desktop/src/renderer/src/features/shell/` port Orca's
+`src/renderer/src/components/{AgentWorkingSpinner,AgentStateDot,AgentQuestionIcon}.tsx`,
+`components/sidebar/{SidebarNav,index,SidebarSettingsHelpMenu,SidebarHeader,worktree-card-surface,worktree-card-header}.tsx`,
+`components/tab-bar/SortableTab.tsx` and the worktree-card/agent-spinner CSS
+recipes. The Settings surface in `apps/desktop/src/renderer/src/features/settings/`
+ports `components/settings/{SettingsSidebar,SettingsSection,SettingsFormControls,ShortcutRowsList}.tsx`.
+All at the pinned source revision above; each ported file keeps the MIT notice.
+
 MIT License
 
 Copyright (c) 2026 Lovecast Inc.
