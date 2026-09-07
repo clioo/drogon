@@ -1,4 +1,4 @@
-use drogon_core::{DB_FILE_NAME, Engine, bots};
+use drogon_core::{DB_FILE_NAME, Engine, automations, bots};
 use drogon_protocol::{PROTOCOL_VERSION, Request, Response};
 use serde_json::{Value, json};
 
@@ -303,4 +303,138 @@ fn unsupported_locale_maps_to_invalid_argument_not_storage_error() {
         Some("invalid_argument"),
         "{result:?}"
     );
+}
+
+fn sample_automation(id: &str, bot_id: &str) -> automations::records::Automation {
+    automations::records::Automation {
+        id: id.to_string(),
+        creation_key: None,
+        name: "sweep".to_string(),
+        prompt: "p".to_string(),
+        precheck: None,
+        agent_id: "codex".to_string(),
+        run_context: None,
+        source_context: None,
+        project_id: "proj".to_string(),
+        execution_target_type: automations::records::ExecutionTargetType::Local,
+        execution_target_id: "local".to_string(),
+        execution_target_generation: None,
+        scheduler_owner: automations::records::SchedulerOwner::LocalHostService,
+        workspace_mode: automations::records::WorkspaceMode::Existing,
+        workspace_id: None,
+        base_branch: None,
+        setup_decision: None,
+        reuse_session: false,
+        timezone: "UTC".to_string(),
+        rrule: "FREQ=DAILY".to_string(),
+        dtstart: 0.0,
+        enabled: true,
+        next_run_at: 100.0,
+        last_run_at: None,
+        missed_run_policy: automations::records::MissedRunPolicy::RunOnceWithinGrace,
+        missed_run_grace_minutes: 30.0,
+        created_at: 0.0,
+        updated_at: 0.0,
+        bot_id: Some(bot_id.to_string()),
+    }
+}
+
+fn sample_scheduled_responsibility(id: &str, automation_id: &str) -> bots::records::Responsibility {
+    bots::records::Responsibility {
+        id: id.to_string(),
+        name: "sweep".to_string(),
+        instructions: String::new(),
+        kind: bots::records::ResponsibilityKind::Scheduled,
+        trigger: bots::records::ResponsibilityTrigger::Scheduled {
+            automation_id: automation_id.to_string(),
+        },
+        enabled: true,
+        recipe: None,
+        created_at: 0.0,
+        updated_at: 0.0,
+    }
+}
+
+/// Regression: `ResponsibilityTrigger::Scheduled`'s `automation_id` field is
+/// not covered by the enum's variant-level `rename_all` (that renames the
+/// tag, not fields), so a scheduled trigger re-serialized on its own stays
+/// snake_case. The `bot.snapshot` history entry for a scheduled run must
+/// still project a camelCase `automationId`, while retaining the
+/// snake_case `automation_id` for old clients.
+#[test]
+fn scheduled_history_entry_has_camel_case_automation_id_and_retains_snake_case() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("b1", host, folder);
+
+    let conn = fx.conn();
+    let automation = sample_automation("auto-1", "b1");
+    let responsibility = sample_scheduled_responsibility("r1", "auto-1");
+    bots::storage::create_scheduled_responsibility(
+        &conn,
+        host,
+        folder,
+        "b1",
+        responsibility,
+        automation,
+    )
+    .unwrap();
+    bots::storage::record_responsibility_run(
+        &conn,
+        host,
+        folder,
+        bots::records::ResponsibilityRun {
+            id: "run-1".to_string(),
+            bot_id: "b1".to_string(),
+            responsibility_id: "r1".to_string(),
+            automation_id: Some("auto-1".to_string()),
+            automation_run_id: None,
+            started_at: 1.0,
+            ended_at: None,
+            recipe: None,
+            host_observation: None,
+        },
+    )
+    .unwrap();
+
+    let result = call(&fx.engine, "bot.snapshot", fx.scope());
+    assert!(result.ok, "{result:?}");
+    let data = result.result.unwrap();
+    let entry = &data["history"][0];
+    assert_eq!(entry["automationId"], json!("auto-1"), "{entry:?}");
+    assert_eq!(entry["automation_id"], json!("auto-1"), "{entry:?}");
+}
+
+/// Regression: the same missing-`rename_all`-on-fields gap as above also
+/// affects the raw `Bot` struct serialized into the `bots` array -- each
+/// scheduled responsibility's own `trigger` object (not just the derived
+/// `history` entry) must also carry a projected camelCase `automationId`
+/// alongside the retained snake_case `automation_id`.
+#[test]
+fn scheduled_responsibility_trigger_in_bots_array_has_camel_case_automation_id() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("b1", host, folder);
+
+    let conn = fx.conn();
+    let automation = sample_automation("auto-1", "b1");
+    let responsibility = sample_scheduled_responsibility("r1", "auto-1");
+    bots::storage::create_scheduled_responsibility(
+        &conn,
+        host,
+        folder,
+        "b1",
+        responsibility,
+        automation,
+    )
+    .unwrap();
+
+    let result = call(&fx.engine, "bot.snapshot", fx.scope());
+    assert!(result.ok, "{result:?}");
+    let data = result.result.unwrap();
+    let trigger = &data["bots"][0]["responsibilities"][0]["trigger"];
+    assert_eq!(trigger["automationId"], json!("auto-1"), "{trigger:?}");
+    assert_eq!(trigger["automation_id"], json!("auto-1"), "{trigger:?}");
 }
