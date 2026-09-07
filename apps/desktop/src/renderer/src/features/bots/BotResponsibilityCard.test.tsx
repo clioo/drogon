@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { BotResponsibilityCard } from "./BotResponsibilityCard";
+import { BotDeleteConfirmDialog, BotResponsibilityCard } from "./BotResponsibilityCard";
 import type {
   BotsPanelBot,
   BotsPanelHistoryEntry,
@@ -55,6 +55,7 @@ function historyEntry(
       endedAt: 300,
       recipe: null,
       hostObservation: "exited",
+      invocation: "manual",
     },
     responsibilityName: "Nightly review",
     automationName: "Nightly review",
@@ -226,5 +227,62 @@ describe("BotResponsibilityCard", () => {
     expect(render({ bot: bot(), history: [] })).not.toContain(
       "Responsibility history",
     );
+  });
+
+  it("renders the header Delete only when its callback is supplied", () => {
+    expect(render({ bot: bot(), history: [] })).not.toContain("delete-bot-");
+    const markup = render({ bot: bot(), history: [], onDeleteBot: () => {} });
+    expect(markup).toContain("delete-bot-bot-1");
+    expect(markup).toContain('aria-label="Delete Watcher"');
+    // The confirm dialog stays closed until Delete is pressed.
+    expect(markup).not.toContain("bot-delete-confirm");
+  });
+
+  it("labels scheduled runs Scheduled and manual ones Manual", () => {
+    const markup = render({
+      bot: bot(),
+      history: [
+        historyEntry({
+          run: { ...historyEntry().run, id: "sched", invocation: "scheduled" },
+        }),
+        historyEntry({
+          run: { ...historyEntry().run, id: "man", invocation: "manual" },
+        }),
+        historyEntry({
+          run: { ...historyEntry().run, id: "legacy", invocation: null },
+        }),
+      ],
+    });
+    expect(markup).toContain("Scheduled");
+    expect(markup).toContain("Manual");
+  });
+});
+
+describe("BotDeleteConfirmDialog", () => {
+  function dialog(botName = "Watcher"): string {
+    return renderToStaticMarkup(
+      createElement(BotDeleteConfirmDialog, {
+        botName,
+        onConfirm: () => {},
+        onCancel: () => {},
+      }),
+    );
+  }
+
+  it("names the bot and states the native delete effects", () => {
+    const markup = dialog();
+    expect(markup).toContain("Watcher");
+    expect(markup).toContain("its responsibilities and their scheduled");
+    expect(markup).toContain("Past runs stay in history.");
+  });
+
+  it("exposes an alertdialog with Cancel and Delete actions", () => {
+    const markup = dialog();
+    expect(markup).toContain('role="alertdialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain("aria-labelledby=");
+    expect(markup).toContain("aria-describedby=");
+    expect(markup).toContain("bot-delete-confirm");
+    expect(markup).toContain("Cancel");
   });
 });

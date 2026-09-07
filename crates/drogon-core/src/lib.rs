@@ -381,6 +381,7 @@ impl Engine {
             "bot.run" => self.bot_run(request),
             "bot.responsibility_create" => self.bot_responsibility_create(request),
             "bot.responsibility_delete" => self.bot_responsibility_delete(request),
+            "bot.delete" => self.bot_delete(request),
             "automation.create" => self.automation_create(request),
             "automation.list" => self.automation_list(&request.params),
             "automation.update" => self.automation_update(request),

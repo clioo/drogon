@@ -12,6 +12,8 @@ import {
   botResponsibilityCreateResultSchema,
   botResponsibilityDeleteInputSchema,
   botResponsibilityDeleteResultSchema,
+  botDeleteInputSchema,
+  botDeleteResultSchema,
 } from "../shared/bot-validation";
 import type { Result } from "../shared/session-contract";
 import type {
@@ -23,6 +25,7 @@ import type {
   BotResponsibilityCreateResult,
   BotResponsibilityDeleteInput,
   BotResponsibilityDeleteResult,
+  BotDeleteResult,
 } from "../shared/bot-contract";
 import { dispatchBotCreate } from "./bot-create-bridge";
 import { callNative } from "./native-client";
@@ -44,6 +47,7 @@ resultSchemas["bot.run"] = botRunResultSchema;
 resultSchemas["bot.history"] = botHistoryResultSchema;
 resultSchemas["bot.responsibility_create"] = botResponsibilityCreateResultSchema;
 resultSchemas["bot.responsibility_delete"] = botResponsibilityDeleteResultSchema;
+resultSchemas["bot.delete"] = botDeleteResultSchema;
 
 type NativeCall = (
   method: string,
@@ -167,7 +171,8 @@ export async function dispatchBotResponsibilityCreate(
         retryable: false,
       },
     };
-  const { requestId, ...params } = parsed.data;
+  // `locale` rides the caller's scope triple; native's params deny it.
+  const { requestId, locale: _locale, ...params } = parsed.data;
   const result = await call("bot.responsibility_create", params, requestId);
   if (!result.ok) return result;
   const checked = botResponsibilityCreateResultSchema.safeParse(result.result);
@@ -203,7 +208,8 @@ export async function dispatchBotResponsibilityDelete(
         retryable: false,
       },
     };
-  const { requestId, ...params } = parsed.data;
+  // `locale` rides the caller's scope triple; native's params deny it.
+  const { requestId, locale: _locale, ...params } = parsed.data;
   const result = await call("bot.responsibility_delete", params, requestId);
   if (!result.ok) return result;
   const checked = botResponsibilityDeleteResultSchema.safeParse(result.result);
@@ -235,9 +241,50 @@ const invalid = {
   },
 } as const;
 
+// R9-C: bot-level delete dispatcher. Same envelope convention as the
+// responsibility dispatchers above: `requestId` travels as the native
+// envelope id (ledger key), never inside params.
+export async function dispatchBotDelete(
+  input: unknown,
+  call: NativeCall = callNative,
+): Promise<Result<BotDeleteResult>> {
+  const parsed = botDeleteInputSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: {
+        code: "invalid_argument",
+        message: "Invalid Bot delete request.",
+        retryable: false,
+      },
+    };
+  // `locale` rides the caller's scope triple; native's params deny it.
+  const { requestId, locale: _locale, ...params } = parsed.data;
+  const result = await call("bot.delete", params, requestId);
+  if (!result.ok) return result;
+  const checked = botDeleteResultSchema.safeParse(result.result);
+  if (
+    !checked.success ||
+    checked.data.hostId !== params.hostId ||
+    checked.data.workspaceId !== params.workspaceId ||
+    checked.data.botId !== params.botId
+  )
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The deleted bot does not match its requested scope or contract.",
+        retryable: false,
+      },
+    };
+  return { ok: true, result: checked.data };
+}
+
 /**
  * Registers `drogon:botCreate`/`drogon:botRun`/`drogon:botHistory`/
- * `drogon:botResponsibilityCreate`/`drogon:botResponsibilityDelete` with
+ * `drogon:botResponsibilityCreate`/`drogon:botResponsibilityDelete`/
+ * `drogon:botDelete` with
  * the same sender/frame gate main/index.ts applies to its own bridge. Own
  * registration (rather than `bridgeSchemas` entries) because that map is
  * coordinator-owned; see `main/git-bridge.ts` for the identical precedent.
@@ -268,4 +315,5 @@ export function registerBotBridge(getWindow: () => BrowserWindow | null): void {
     "drogon:botResponsibilityDelete",
     guarded(dispatchBotResponsibilityDelete),
   );
+  ipcMain.handle("drogon:botDelete", guarded(dispatchBotDelete));
 }

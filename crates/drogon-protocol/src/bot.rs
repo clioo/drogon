@@ -100,6 +100,32 @@ pub struct BotResponsibilityDeleteResult {
     pub automation_id: Option<String>,
 }
 
+/// Params for `bot.delete`: removes the Bot together with its
+/// responsibilities and their still-Bot-owned automations (automation
+/// runs included). Responsibility-run and chat-message rows are preserved
+/// as orphaned evidence, never deleted.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BotDeleteParams {
+    pub workspace_id: String,
+    pub host_id: String,
+    pub bot_id: String,
+}
+
+/// Lean `bot.delete` result: ids only. `automation_ids` names every owned
+/// automation deleted with the Bot (sorted, for a stable receipt).
+/// Callers re-read the full list through `bot.snapshot`, the same refresh
+/// pattern the desktop panel already uses after `bot.create`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BotDeleteResult {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub bot_id: String,
+    pub removed: bool,
+    pub automation_ids: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +233,39 @@ mod tests {
         let extra = json!({"workspaceId": "ws-1", "hostId": "host-1", "botId": "bot-1",
             "responsibilityId": "resp-1", "force": true});
         assert!(serde_json::from_value::<BotResponsibilityDeleteParams>(extra).is_err());
+    }
+
+    #[test]
+    fn delete_params_use_exact_wire_keys_and_deny_unknown() {
+        let value = json!({
+            "workspaceId": "ws-1", "hostId": "host-1", "botId": "bot-1",
+        });
+        let params: BotDeleteParams = serde_json::from_value(value).unwrap();
+        assert_eq!(params.bot_id, "bot-1");
+        let extra = json!({"workspaceId": "ws-1", "hostId": "host-1", "botId": "bot-1",
+            "force": true});
+        assert!(serde_json::from_value::<BotDeleteParams>(extra).is_err());
+    }
+
+    #[test]
+    fn delete_result_round_trips_with_exact_wire_keys() {
+        let deleted = BotDeleteResult {
+            host_id: "host-1".into(),
+            workspace_id: "ws-1".into(),
+            bot_id: "bot-1".into(),
+            removed: true,
+            automation_ids: vec!["auto-1".into()],
+        };
+        assert_eq!(
+            serde_json::to_value(&deleted).unwrap(),
+            json!({
+                "hostId": "host-1", "workspaceId": "ws-1", "botId": "bot-1",
+                "removed": true, "automationIds": ["auto-1"],
+            })
+        );
+        let back: BotDeleteResult =
+            serde_json::from_value(serde_json::to_value(&deleted).unwrap()).unwrap();
+        assert_eq!(back, deleted);
     }
 
     #[test]

@@ -65,6 +65,7 @@ const history = z.object({
     endedAt: timestamp.nullable(),
     recipe: recipe.nullable(),
     hostObservation: observation.nullable(),
+    invocation: z.enum(["scheduled", "manual"]).nullable(),
   }),
   responsibilityName: z.string().nullable(),
   automationName: z.string().nullable(),
@@ -186,7 +187,11 @@ export const botHistoryResultSchema = scope.extend({
 
 // R7-E: scheduled-responsibility create/delete. Structural transport
 // validation only -- native owns name/prompt/cron policy, and re-derives
-// scope authority from its own host identity.
+// scope authority from its own host identity. `locale` rides the panel's
+// scope triple (like botSnapshot/botRun) and is stripped by the dispatcher
+// below: native's params deny it.
+const scopeLocale = { locale: z.string().nullable().optional() };
+
 export const botResponsibilityCreateInputSchema = scope
   .extend({
     requestId: id,
@@ -194,6 +199,7 @@ export const botResponsibilityCreateInputSchema = scope
     name: z.string().min(1).max(128),
     schedule: z.string().min(1).max(2048),
     prompt: z.string().min(1).max(32768),
+    ...scopeLocale,
   })
   .strict();
 
@@ -208,6 +214,7 @@ export const botResponsibilityDeleteInputSchema = scope
     requestId: id,
     botId: id,
     responsibilityId: z.string().min(1),
+    ...scopeLocale,
   })
   .strict();
 
@@ -216,4 +223,20 @@ export const botResponsibilityDeleteResultSchema = scope.extend({
   responsibilityId: z.string(),
   removed: z.boolean(),
   automationId: z.string().nullable(),
+});
+
+// R9-C: bot-level delete. Structural transport validation only -- native
+// owns scope authority and the atomic Bot/automation removal.
+export const botDeleteInputSchema = scope
+  .extend({
+    requestId: id,
+    botId: id,
+    ...scopeLocale,
+  })
+  .strict();
+
+export const botDeleteResultSchema = scope.extend({
+  botId: z.string(),
+  removed: z.boolean(),
+  automationIds: z.array(z.string()),
 });

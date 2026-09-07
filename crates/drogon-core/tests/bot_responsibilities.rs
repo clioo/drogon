@@ -197,6 +197,12 @@ fn create_delete_snapshot_round_trip_with_orphaned_history() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["responsibilityName"], json!("Nightly review"));
     assert_eq!(entries[0]["automationName"], json!("Nightly review"));
+    // A manual `bot.run` stamps a manual invocation on the run row.
+    assert_eq!(
+        entries[0]["run"]["responsibilityId"],
+        json!(responsibility_id)
+    );
+    assert_eq!(entries[0]["run"]["invocation"], json!("manual"));
 
     // Delete removes the projection and the still-Bot-owned automation
     // (runs included) but preserves the responsibility-run row as
@@ -398,6 +404,7 @@ fn scheduled_tick_fires_the_bot_owned_automation_through_the_seam() {
     let bot_id = bot["id"].as_str().unwrap().to_string();
     let created = fx.create_responsibility("resp-create-1", &bot_id, "* * * * *");
     let automation_id = created["automationId"].as_str().unwrap().to_string();
+    let responsibility_id = created["responsibilityId"].as_str().unwrap().to_string();
 
     let listed = ok(fx
         .engine
@@ -418,6 +425,22 @@ fn scheduled_tick_fires_the_bot_owned_automation_through_the_seam() {
     let runs = history["runs"].as_array().unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0]["trigger"], json!("scheduled"));
+
+    // The tick records a responsibility run exactly like a manual Run
+    // does: the run row carries the responsibility id, links the
+    // automation run (which carries the session id), and the snapshot
+    // history shows it with a scheduled invocation.
+    let snapshot = fx.snapshot();
+    let bot_history = snapshot["history"].as_array().unwrap();
+    assert_eq!(bot_history.len(), 1);
+    let entry = &bot_history[0];
+    assert!(runs[0]["terminalSessionId"].as_str().is_some());
+    assert_eq!(entry["run"]["responsibilityId"], json!(responsibility_id));
+    assert_eq!(entry["run"]["automationRunId"], runs[0]["id"]);
+    assert_eq!(entry["run"]["automationId"], json!(automation_id));
+    assert_eq!(entry["run"]["invocation"], json!("scheduled"));
+    assert_eq!(entry["responsibilityName"], json!("Nightly review"));
+    assert_eq!(entry["automationName"], json!("Nightly review"));
 
     // The responsibility projection survives its automation's fire: the
     // schedule advanced past the fired slot.

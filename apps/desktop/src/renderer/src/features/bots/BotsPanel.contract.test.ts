@@ -11,6 +11,7 @@ import type {
 } from "./bots-panel-contracts";
 import {
   botDescription,
+  historyTriggerLabel,
   modelLabel,
   projectBotRows,
   projectHistoryRows,
@@ -75,6 +76,7 @@ function historyEntry(
       endedAt: 300,
       recipe: null,
       hostObservation: "exited",
+      invocation: "manual",
     },
     responsibilityName: "Review duty",
     automationName: "Nightly review",
@@ -193,6 +195,7 @@ describe("BotsPanel projection", () => {
         endedAt: null,
         recipe: null,
         hostObservation: null,
+        invocation: null,
       },
       responsibilityName: null,
       automationName: null,
@@ -207,6 +210,22 @@ describe("BotsPanel projection", () => {
       automationRunNumber: null,
       hostObservation: null,
     });
+  });
+
+  it("labels history trigger invocations Scheduled or Manual, defaulting legacy nulls to Manual", () => {
+    expect(historyTriggerLabel("scheduled")).toBe("Scheduled");
+    expect(historyTriggerLabel("manual")).toBe("Manual");
+    expect(historyTriggerLabel(null)).toBe("Manual");
+    const rows = projectHistoryRows([
+      historyEntry({
+        run: { ...historyEntry().run, id: "sched", invocation: "scheduled" },
+      }),
+      historyEntry(),
+    ]);
+    expect(rows.map((row) => row.triggerLabel)).toEqual([
+      "Scheduled",
+      "Manual",
+    ]);
   });
 
   it("reports the persisted session as a link, never as liveness", () => {
@@ -381,6 +400,7 @@ describe("BotsPanel render", () => {
             endedAt: null,
             recipe: null,
             hostObservation: null,
+            invocation: null,
           },
           responsibilityName: null,
           automationName: null,

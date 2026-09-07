@@ -19,6 +19,7 @@ export {
   SESSION_LINKED_LABEL,
   SESSION_NONE_LABEL,
   botDescription,
+  historyTriggerLabel,
   modelLabel,
   projectBotRows,
   projectHistoryRows,

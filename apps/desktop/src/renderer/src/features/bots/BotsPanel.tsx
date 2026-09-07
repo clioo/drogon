@@ -56,6 +56,10 @@ export function BotsPanel({
   const canEditResponsibilities = Boolean(
     bridge?.botResponsibilityCreate && bridge?.botResponsibilityDelete && scope,
   );
+  // Bot delete gates on its own bridge method, not bare scope: a caller
+  // whose bridge predates R9-C renders the read-only header (same rule
+  // the responsibility controls already follow).
+  const canDeleteBot = Boolean(bridge?.botDelete && scope);
   const [localSnapshot, setLocalSnapshot] = useState<BotsPanelSnapshot | null>(
     null,
   );
@@ -148,6 +152,25 @@ export function BotsPanel({
     if (!response.ok) {
       setActionError(response.error.message);
       return;
+    }
+    await refreshSnapshot();
+  }
+
+  async function deleteBot(botId: string) {
+    if (!bridge?.botDelete || !scope) return;
+    setActionError(null);
+    const response = await bridge.botDelete({
+      ...scope,
+      requestId: mintRequestId("bot-delete"),
+      botId,
+    });
+    if (!response.ok) {
+      setActionError(response.error.message);
+      return;
+    }
+    if (selectedBotId === botId) {
+      setSelectedBotId(null);
+      setShowResponsibilityForm(false);
     }
     await refreshSnapshot();
   }
@@ -248,6 +271,9 @@ export function BotsPanel({
                   selectedBot.id,
                   observedLivenessByBotId,
                 )}
+                onDeleteBot={
+                  canDeleteBot ? () => void deleteBot(selectedBot.id) : undefined
+                }
                 onAddResponsibility={
                   canEditResponsibilities
                     ? () => setShowResponsibilityForm(true)
@@ -344,6 +370,9 @@ export function BotsPanel({
                         row.id,
                         observedLivenessByBotId,
                       )}
+                      onDeleteBot={
+                        canDeleteBot ? () => void deleteBot(row.id) : undefined
+                      }
                       onOpenSession={
                         canMutate
                           ? () => setSelectedBotId(row.id)

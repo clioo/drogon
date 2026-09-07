@@ -757,23 +757,64 @@ pub fn rotate_session(
     })
 }
 
-/// Deletes the Bot. Automations it owns keep every field and all their
-/// runs; only their `bot_id` ownership is cleared (never cascaded into
-/// another Bot, workspace or automation). `bot_responsibility_runs` rows
-/// for this Bot are preserved as orphaned evidence, not deleted. Runs the
-/// ownership-clearing and the row delete in one transaction.
+/// Deletes the Bot together with every automation it owns (each with its
+/// automation runs, via [`automations_storage::delete_automation`]):
+/// Bot-owned automations only ever exist as a scheduled responsibility's
+/// other half, so a surviving ownerless row would strand a live cron with
+/// no Bot behind it. `bot_responsibility_runs` and `bot_messages` rows
+/// for this Bot are preserved as orphaned evidence, not deleted -- history
+/// keeps resolving the missing responsibility/automation to `None`, never
+/// deleting the run (same contract as [`delete_responsibility`]).
+pub struct DeletedBot {
+    pub bot_id: String,
+    /// Every owned automation deleted with the Bot, in sorted order for a
+    /// stable receipt.
+    pub automation_ids: Vec<String>,
+}
+
 pub fn delete_bot(conn: &Connection, host_id: &str, folder: &str, id: &str) -> Result<bool> {
     let tx = conn.unchecked_transaction()?;
-    let owned = automations_storage::list_automations_owned_by_bot(&tx, id)?;
-    for automation in &owned {
-        automations_storage::clear_automation_owner(&tx, &automation.id)?;
+    let result = delete_bot_in_tx(&tx, host_id, folder, id)?;
+    tx.commit()?;
+    Ok(result.is_some())
+}
+
+/// The delete-Bot-and-owned-automations body of [`delete_bot`], taking an
+/// already-open transaction/connection and never beginning or committing
+/// one of its own -- the `bot.delete` RPC runs this inside its ledger's
+/// own transaction so the Bot row, the automation rows and the receipt row
+/// commit atomically. Returns `None` when no Bot with this id lives in
+/// scope (the RPC maps that to `not_found`); missing automations are
+/// never an error (only still-Bot-owned rows are deleted, foreign/gone
+/// ones never touched).
+pub(crate) fn delete_bot_in_tx(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    id: &str,
+) -> Result<Option<DeletedBot>> {
+    if get_bot_with_rev(conn, host_id, folder, id)?.is_none() {
+        return Ok(None);
     }
-    let deleted = tx.execute(
+    let mut automation_ids: Vec<String> = Vec::new();
+    for automation in automations_storage::list_automations_owned_by_bot(conn, id)? {
+        automations_storage::delete_automation(
+            conn,
+            &automation.id,
+            Some(&AutomationOwnerPrecondition::Owned(id.to_string())),
+        )?;
+        automation_ids.push(automation.id);
+    }
+    automation_ids.sort();
+    let deleted = conn.execute(
         "DELETE FROM bots WHERE id = ?1 AND host_id = ?2 AND folder = ?3",
         params![id, host_id, folder],
     )?;
-    tx.commit()?;
-    Ok(deleted > 0)
+    debug_assert!(deleted > 0);
+    Ok(Some(DeletedBot {
+        bot_id: id.to_string(),
+        automation_ids,
+    }))
 }
 
 /// Creates a scheduled responsibility together with its owning automation
@@ -931,6 +972,58 @@ pub(crate) fn delete_responsibility_in_tx(
         responsibility_id: responsibility_id.to_string(),
         automation_id,
     })
+}
+
+/// The live scheduled responsibility (and its Bot's scope) referencing
+/// `automation_id`, if any: the first Bot in insertion order whose
+/// responsibilities carry a scheduled trigger for it. Connection-bound
+/// (opens no transaction of its own) so the scheduler's direct record
+/// path can call this inside its own `BEGIN IMMEDIATE` alongside the
+/// linked `AutomationRun` upsert. Returns `None` for a bot-free
+/// (standalone) automation -- no Bot row to attach a responsibility run
+/// to -- never an error.
+pub struct OwningScheduledResponsibility {
+    pub host_id: String,
+    pub folder: String,
+    pub bot_id: String,
+    pub responsibility_id: String,
+}
+
+pub(crate) fn owning_scheduled_responsibility(
+    conn: &Connection,
+    automation_id: &str,
+) -> Result<Option<OwningScheduledResponsibility>> {
+    // A database with no `bots` table at all (a component-scoped test
+    // database that only migrated automations) holds no Bot row by
+    // construction, so there is nothing to own this automation -- `None`,
+    // never a "no such table" error. Any other storage failure still
+    // propagates.
+    let has_bots_table: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'bots'",
+        [],
+        |r| r.get(0),
+    )?;
+    if !has_bots_table {
+        return Ok(None);
+    }
+    for (host_id, folder, bot, _) in all_bots_unordered(conn)? {
+        if let Some(responsibility) = bot.responsibilities.iter().find(|r| {
+            matches!(
+                &r.trigger,
+                super::records::ResponsibilityTrigger::Scheduled {
+                    automation_id: owned,
+                } if owned == automation_id
+            )
+        }) {
+            return Ok(Some(OwningScheduledResponsibility {
+                host_id,
+                folder,
+                bot_id: bot.id.clone(),
+                responsibility_id: responsibility.id.clone(),
+            }));
+        }
+    }
+    Ok(None)
 }
 
 /// Validates that `automation_id` names an automation owned by `bot_id`

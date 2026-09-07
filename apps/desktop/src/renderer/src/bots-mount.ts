@@ -51,7 +51,8 @@ type SessionReadSource = (
 
 /**
  * Fail-closed capability gate around a BotBridge. Every method (botSnapshot,
- * botCreate, botRun, botHistory) evaluates isAllowed at call time, so while
+ * botCreate, botRun, botHistory, botResponsibilityCreate,
+ * botResponsibilityDelete, botDelete) evaluates isAllowed at call time, so while
  * bot.snapshot.v1 is withheld every call is refused locally (never reaching
  * source) with an explicit retryable error, and a mid-life capability loss
  * fails closed on the very next call. `read` (if the source provides it,
@@ -98,6 +99,10 @@ export function createGatedBotBridge(
     botResponsibilityDelete: (input) =>
       isAllowed()
         ? (source.botResponsibilityDelete?.(input) ?? notImplemented())
+        : refused(),
+    botDelete: (input) =>
+      isAllowed()
+        ? (source.botDelete?.(input) ?? notImplemented())
         : refused(),
   };
   if (source.read) gated.read = source.read;

@@ -276,6 +276,63 @@ describe("gated bot bridge (R2-S: botCreate/botRun/botHistory/read)", () => {
   });
 });
 
+describe("gated bot bridge (R9-C: botDelete)", () => {
+  const scope: BotScope & { locale: string } = {
+    hostId: "host-a",
+    workspaceId: "w-a",
+    locale: "en-US",
+  };
+  const deleteInput = { ...scope, requestId: "req-del", botId: "bot-1" };
+
+  function deleteSource(calls: string[]) {
+    return {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: { ...scope, ...emptySnapshot },
+      }),
+      botDelete: async () => {
+        calls.push("botDelete");
+        return {
+          ok: true as const,
+          result: { ...scope, botId: "bot-1", removed: true, automationIds: [] },
+        };
+      },
+    };
+  }
+
+  it("refuses botDelete while the capability is withheld and never calls source", async () => {
+    const calls: string[] = [];
+    const gated = createGatedBotBridge(deleteSource(calls), () => false);
+    const response = await gated.botDelete?.(deleteInput);
+    expect(response?.ok).toBe(false);
+    if (!response?.ok) expect(response?.error.code).toBe("unsupported_capability");
+    expect(calls).toEqual([]);
+  });
+
+  it("passes botDelete through while allowed", async () => {
+    const calls: string[] = [];
+    const gated = createGatedBotBridge(deleteSource(calls), () => true);
+    const response = await gated.botDelete?.(deleteInput);
+    expect(response?.ok).toBe(true);
+    expect(calls).toEqual(["botDelete"]);
+  });
+
+  it("reports unsupported_method when the source predates botDelete", async () => {
+    const gated = createGatedBotBridge(
+      {
+        botSnapshot: async () => ({
+          ok: true as const,
+          result: { ...scope, ...emptySnapshot },
+        }),
+      },
+      () => true,
+    );
+    const response = await gated.botDelete?.(deleteInput);
+    expect(response?.ok).toBe(false);
+    if (!response?.ok) expect(response?.error.code).toBe("unsupported_method");
+  });
+});
+
 describe("buildWiredBotsPanelProps", () => {
   const scope: BotScope & { locale: string } = {
     hostId: "host-a",

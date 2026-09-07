@@ -15,8 +15,8 @@ use crate::bots::records::{
 use crate::bots::storage as bots_storage;
 use drogon_protocol::RpcError;
 use drogon_protocol::bot::{
-    BotResponsibilityCreateParams, BotResponsibilityCreateResult, BotResponsibilityDeleteParams,
-    BotResponsibilityDeleteResult,
+    BotDeleteParams, BotDeleteResult, BotResponsibilityCreateParams, BotResponsibilityCreateResult,
+    BotResponsibilityDeleteParams, BotResponsibilityDeleteResult,
 };
 
 // The envelope request ID must not enter the params fingerprint.
@@ -383,6 +383,27 @@ fn create_responsibility_in_tx(
         .map_err(|e| storage_error(format!("created responsibility unreadable: {e}")))
 }
 
+fn delete_bot_in_connection(
+    tx: &Transaction<'_>,
+    host_id: &str,
+    params: &BotDeleteParams,
+) -> Result<Value, RpcError> {
+    let folder = owned_folder_for(tx, host_id, &params.workspace_id, &params.host_id)?;
+    let deleted = bots_storage::delete_bot_in_tx(tx, host_id, &folder, &params.bot_id)
+        .map_err(responsibility_storage_error)?;
+    let Some(deleted) = deleted else {
+        return Err(not_found(format!("bot {} not found", params.bot_id)));
+    };
+    let result = BotDeleteResult {
+        host_id: host_id.to_string(),
+        workspace_id: params.workspace_id.clone(),
+        bot_id: params.bot_id.clone(),
+        removed: true,
+        automation_ids: deleted.automation_ids,
+    };
+    serde_json::to_value(&result).map_err(|e| storage_error(format!("deleted bot unreadable: {e}")))
+}
+
 fn delete_responsibility_in_connection(
     tx: &Transaction<'_>,
     host_id: &str,
@@ -460,6 +481,31 @@ impl crate::Engine {
             |tx| {
                 create_responsibility_in_tx(tx, &self.host_id, &params, crate::now_unix_ms() as f64)
             },
+        )
+    }
+
+    pub(crate) fn bot_delete(&self, request: &drogon_protocol::Request) -> Result<Value, RpcError> {
+        let params: BotDeleteParams = parse_responsibility_params(&request.params, "bot.delete")?;
+        let _gate = self.lifecycle_gate.read().unwrap();
+        self.ledger.run_atomic(
+            &self.db,
+            &request.request_id,
+            &request.method,
+            &request.params,
+            |tx| {
+                if self.quiescent.load(std::sync::atomic::Ordering::Acquire) {
+                    return Err(crate::error::runtime_busy(
+                        "service admission is frozen for shutdown",
+                    ));
+                }
+                authorize_responsibility_scope(
+                    tx,
+                    &self.host_id,
+                    &params.workspace_id,
+                    &params.host_id,
+                )
+            },
+            |tx| delete_bot_in_connection(tx, &self.host_id, &params),
         )
     }
 
