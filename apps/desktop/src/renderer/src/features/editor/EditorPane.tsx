@@ -130,6 +130,38 @@ export function isReadConfirmed(state: EditorState): boolean {
   return state.lastSaved !== null;
 }
 
+function pathFromFileKey(key: string): string {
+  const first = key.indexOf("/");
+  const second = key.indexOf("/", first + 1);
+  return second === -1 ? "" : key.slice(second + 1);
+}
+
+/**
+ * The single admission decision for saving, used by BOTH the rendered
+ * Save gate and startSave so a stale prop/state frame can never invoke
+ * onSave. Requires: the editor state to belong to the exact scope+path
+ * being rendered, no save in flight, a confirmed read (or explicit
+ * new-file intent), and a dirty draft.
+ */
+export function saveAdmission(
+  state: EditorState,
+  scope: EditorScope,
+  path: string | null,
+  allowEmptySave: boolean,
+): boolean {
+  if (path === null) return false;
+  if (state.openPath !== path) return false;
+  if (
+    state.openScope === null ||
+    state.openScope.hostId !== scope.hostId ||
+    state.openScope.workspaceId !== scope.workspaceId
+  )
+    return false;
+  if (state.saveInFlight) return false;
+  if (state.lastSaved === null && !allowEmptySave) return false;
+  return isDirty(state);
+}
+
 function withFile(
   state: EditorState,
   key: string,
@@ -211,13 +243,14 @@ export function applyEditorAction(
         };
       }
       const retained = files[key as string];
-      const retainedDirty =
-        retained !== undefined && retained.draft !== retained.lastSaved;
-      if (retainedDirty) {
-        // Restore the retained dirty draft — same scope or not, only the
-        // exact scoped key restores it. A cross-scope same-path file can
-        // never inherit a foreign draft. The in-flight save (if any) stays
-        // fenced to its own key and its completion will be dropped.
+      if (retained !== undefined) {
+        // Restore the retained entry — dirty (nothing silently dropped) or
+        // clean (it reflects our own latest confirmed write, which is newer
+        // than a stale content prop; a fresh read still adopts on arrival
+        // through the same-spot clean rule). Only the exact scoped key
+        // restores it, so a cross-scope same-path file can never inherit a
+        // foreign draft. The in-flight save (if any) stays fenced to its
+        // own key and its completion retires against that key.
         return {
           ...state,
           openScope: action.scope,
@@ -271,36 +304,69 @@ export function applyEditorAction(
       if (!state.saveInFlight) return state;
       if (state.saveGeneration !== action.generation || state.savingKey !== action.key)
         return state;
-      // Transition fence at completion: the file must still be the open
-      // one (same scope+path). A rapid switch drops the stale completion.
-      if (action.key !== openFileKey(state)) return state;
+      const snapshot = state.savingDraft ?? "";
+      // Still open: apply to the active pane and retained entry together.
+      if (action.key === openFileKey(state)) {
+        const files = withFile(state, action.key, {
+          draft: state.draft,
+          lastSaved: snapshot,
+        });
+        return {
+          ...state,
+          lastSaved: snapshot,
+          files,
+          saveInFlight: false,
+          savingKey: null,
+          savingDraft: null,
+          saveError: null,
+        };
+      }
+      // Switched away: RETIRE the exact completed operation so no future
+      // save stays locked, and update ONLY the original file's retained
+      // entry — never the now-active draft of another file.
+      const retained = state.files[action.key];
       const files = withFile(state, action.key, {
-        draft: state.draft,
-        lastSaved: state.savingDraft ?? "",
+        draft: retained?.draft ?? snapshot,
+        lastSaved: snapshot,
       });
       return {
         ...state,
-        lastSaved: state.savingDraft ?? "",
         files,
         saveInFlight: false,
         savingKey: null,
         savingDraft: null,
-        saveError: null,
       };
     }
     case "save-failed": {
       if (!state.saveInFlight) return state;
       if (state.saveGeneration !== action.generation || state.savingKey !== action.key)
         return state;
-      // Same completion fence: a failure for a file that is no longer open
-      // is dropped, never attached to the newly open file.
-      if (action.key !== openFileKey(state)) return state;
+      // Retire the operation in both branches so the pane never locks.
+      if (action.key === openFileKey(state)) {
+        return {
+          ...state,
+          saveInFlight: false,
+          savingKey: null,
+          savingDraft: null,
+          saveError: {
+            key: action.key,
+            path: state.openPath ?? "",
+            message: action.message,
+          },
+        };
+      }
+      // The failure is recorded against its own key (shown again if that
+      // file is reopened); the active file is never touched.
       return {
         ...state,
         saveInFlight: false,
         savingKey: null,
         savingDraft: null,
-        saveError: { key: action.key, path: state.openPath ?? "", message: action.message },
+        saveError: {
+          key: action.key,
+          path: pathFromFileKey(action.key),
+          message: action.message,
+        },
       };
     }
   }
@@ -386,9 +452,19 @@ export function EditorPane({
   }, [scope, path, content]);
 
   const readConfirmed = isReadConfirmed(state);
-  const canSave =
-    (readConfirmed || allowEmptySave) && !state.saveInFlight;
+  // Prop/state fence: before the effect dispatches, state still describes
+  // the PREVIOUS scope+path. The textarea, dirty flag and save admission
+  // are all gated on exact state/props agreement so neither the old draft
+  // nor the old lastSaved can be rendered or saved under the new label.
+  const stateMatchesProps =
+    state.openScope !== null &&
+    state.openScope.hostId === scope.hostId &&
+    state.openScope.workspaceId === scope.workspaceId &&
+    state.openPath === path;
+  const canSave = saveAdmission(state, scope, path, allowEmptySave);
   const startSave = () => {
+    // Admission is checked again here: reducer rejection alone would not
+    // stop onSave from hitting the bridge.
     if (path === null || !canSave) return;
     void runSave({
       draft: state.draft,
@@ -426,9 +502,11 @@ export function EditorPane({
       </section>
     );
   }
-  if (!readConfirmed && !allowEmptySave) {
-    // Explicit unread state: content has not been confirmed yet. No
-    // editable surface, no enabled Save — a blank overwrite is impossible.
+  if (!stateMatchesProps || (!readConfirmed && !allowEmptySave)) {
+    // Either the state has not caught up with the rendered scope+path yet
+    // (prop/state fence), or the content has not been confirmed by a read.
+    // Both show the same honest waiting state: no editable surface, no
+    // enabled Save — a blank or foreign overwrite is impossible.
     return (
       <section className="editor-pane" aria-label={`Editor: ${path}`}>
         <header className="editor-pane-header">
