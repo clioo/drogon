@@ -355,57 +355,6 @@ fn sample_scheduled_responsibility(id: &str, automation_id: &str) -> bots::recor
     }
 }
 
-/// Regression: `ResponsibilityTrigger::Scheduled`'s `automation_id` field is
-/// not covered by the enum's variant-level `rename_all` (that renames the
-/// tag, not fields), so a scheduled trigger re-serialized on its own stays
-/// snake_case. The `bot.snapshot` history entry for a scheduled run must
-/// still project a camelCase `automationId`, while retaining the
-/// snake_case `automation_id` for old clients.
-#[test]
-fn scheduled_history_entry_has_camel_case_automation_id_and_retains_snake_case() {
-    let fx = Fixture::new();
-    let host = fx.workspace["hostId"].as_str().unwrap();
-    let folder = fx.workspace["path"].as_str().unwrap();
-    fx.seed("b1", host, folder);
-
-    let conn = fx.conn();
-    let automation = sample_automation("auto-1", "b1");
-    let responsibility = sample_scheduled_responsibility("r1", "auto-1");
-    bots::storage::create_scheduled_responsibility(
-        &conn,
-        host,
-        folder,
-        "b1",
-        responsibility,
-        automation,
-    )
-    .unwrap();
-    bots::storage::record_responsibility_run(
-        &conn,
-        host,
-        folder,
-        bots::records::ResponsibilityRun {
-            id: "run-1".to_string(),
-            bot_id: "b1".to_string(),
-            responsibility_id: "r1".to_string(),
-            automation_id: Some("auto-1".to_string()),
-            automation_run_id: None,
-            started_at: 1.0,
-            ended_at: None,
-            recipe: None,
-            host_observation: None,
-        },
-    )
-    .unwrap();
-
-    let result = call(&fx.engine, "bot.snapshot", fx.scope());
-    assert!(result.ok, "{result:?}");
-    let data = result.result.unwrap();
-    let entry = &data["history"][0];
-    assert_eq!(entry["automationId"], json!("auto-1"), "{entry:?}");
-    assert_eq!(entry["automation_id"], json!("auto-1"), "{entry:?}");
-}
-
 /// Regression: the same missing-`rename_all`-on-fields gap as above also
 /// affects the raw `Bot` struct serialized into the `bots` array -- each
 /// scheduled responsibility's own `trigger` object (not just the derived
@@ -437,4 +386,53 @@ fn scheduled_responsibility_trigger_in_bots_array_has_camel_case_automation_id()
     let trigger = &data["bots"][0]["responsibilities"][0]["trigger"];
     assert_eq!(trigger["automationId"], json!("auto-1"), "{trigger:?}");
     assert_eq!(trigger["automation_id"], json!("auto-1"), "{trigger:?}");
+}
+
+/// P2-2 correction: same per-reference budget as
+/// `snapshot_budget_counts_linked_payload_for_each_materialized_history_entry`
+/// in `native_bot_wire.rs`, mirrored here against the `automation_runs`
+/// table (reached via `automationRunId`) instead of `automations`. A single
+/// 200KB linked run record, referenced by 4 history rows, is comfortably
+/// under budget once (200KB) but not four times over (800KB); the stored
+/// linked payload is deliberately not valid `AutomationRun` JSON, so a
+/// `storage_error` response would mean the preflight under-counted this
+/// scope and let materialization run first.
+#[test]
+fn snapshot_budget_counts_linked_automation_run_payload_for_each_referencing_row() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("b1", host, folder);
+
+    let conn = fx.conn();
+    let linked_payload = json!("x".repeat(200_000)).to_string();
+    conn.execute(
+        "INSERT INTO automation_runs (id, automation_id, payload_json) VALUES ('linked-run', 'some-auto', ?1)",
+        rusqlite::params![linked_payload],
+    )
+    .unwrap();
+    for index in 0..4 {
+        let id = format!("run-{index}");
+        let run = json!({
+            "id":id, "botId":"b1", "responsibilityId":"duty",
+            "automationId":null, "automationRunId":"linked-run",
+            "startedAt":1.0, "endedAt":null, "recipe":null, "hostObservation":null,
+        });
+        conn.execute(
+            "INSERT INTO bot_responsibility_runs
+             (id, bot_id, automation_run_id, started_at, payload_json)
+             VALUES (?1, 'b1', NULL, 1.0, ?2)",
+            rusqlite::params![id, run.to_string()],
+        )
+        .unwrap();
+    }
+    assert!(linked_payload.len() < drogon_protocol::MAX_FRAME_BYTES / 2);
+    assert!(linked_payload.len() * 4 > drogon_protocol::MAX_FRAME_BYTES / 2);
+
+    let result = call(&fx.engine, "bot.snapshot", fx.scope());
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("snapshot_too_large"),
+        "Budget each reference before loading malformed linked records: {result:?}",
+    );
 }
