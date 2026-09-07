@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 
 use drogon_orchestration::{runs, tasks};
 use drogon_protocol::orchestration_common::*;
+use drogon_protocol::orchestration_scope::CoordinatorScope;
 use drogon_protocol::orchestration_task::TaskStatus;
 use drogon_protocol::orchestration_worker::*;
 use drogon_protocol::{Request, RpcError};
@@ -33,13 +34,7 @@ impl Engine {
                     AssignmentState::Abandoned,
                 )?;
                 coordination_access::revoke_in_tx(tx, &params.dispatch_id, "abandoned")?;
-                tasks::set_status_in_tx(
-                    tx,
-                    &self.host_id,
-                    &params.scope.run_id,
-                    &attempt.result.task_id,
-                    TaskStatus::Blocked,
-                )?;
+                block_current_task(tx, &params.scope, &attempt)?;
                 encode(WorkerAbandonResult {
                     dispatch_id: params.dispatch_id.clone(),
                     assignment_state: attempt.result.assignment_state,
@@ -80,13 +75,7 @@ impl Engine {
                     AssignmentState::Stopped,
                 )?;
                 coordination_access::revoke_in_tx(tx, &params.dispatch_id, "stopped")?;
-                tasks::set_status_in_tx(
-                    tx,
-                    &self.host_id,
-                    &params.scope.run_id,
-                    &attempt.result.task_id,
-                    TaskStatus::Blocked,
-                )?;
+                block_current_task(tx, &params.scope, &attempt)?;
                 Ok((attempt, already_fenced))
             },
             |(attempt, already_fenced)| {
@@ -214,6 +203,29 @@ impl Engine {
         };
         (stopped.process_action, verdict)
     }
+}
+
+fn block_current_task(
+    tx: &rusqlite::Transaction<'_>,
+    scope: &CoordinatorScope,
+    attempt: &Attempt,
+) -> Result<(), RpcError> {
+    // A historical cancellation can recover its result, never mutate its replacement.
+    let current: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM orchestration_attempts WHERE dispatch_id=?1 AND host_id=?2 AND run_id=?3 AND task_id=?4 AND is_current=1)",
+        rusqlite::params![attempt.result.dispatch_id,scope.host.host_id,scope.run_id,attempt.result.task_id],
+        |row| row.get(0),
+    ).map_err(error::from_sqlite)?;
+    if current {
+        tasks::set_status_in_tx(
+            tx,
+            &scope.host.host_id,
+            &scope.run_id,
+            &attempt.result.task_id,
+            TaskStatus::Blocked,
+        )?;
+    }
+    Ok(())
 }
 
 fn worker_residuals(attempt: &Attempt, verdict: ProcessVerdict) -> Vec<ResidualResource> {
