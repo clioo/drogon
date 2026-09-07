@@ -741,7 +741,10 @@ impl crate::Engine {
                 // the prepared tuple so `effect` never needs its own admission
                 // clock.
                 let attempt_at = crate::now_unix_ms() as f64;
-                Ok((attempt_at, authorized_prepare(tx, &derived_host_id, &parsed, attempt_at)?))
+                Ok((
+                    attempt_at,
+                    authorized_prepare(tx, &derived_host_id, &parsed, attempt_at)?,
+                ))
             },
             |(attempt_at, prepared)| match prepared {
                 BotRunPrepare::Refused {

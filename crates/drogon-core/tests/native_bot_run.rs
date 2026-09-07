@@ -254,20 +254,23 @@ fn strict_schema_rejects_unknown_fields_missing_fields_and_non_admitted_harness(
     let (_dir, _engine, _conn, host) = fixture();
 
     // Unknown top-level field is denied.
-    let error = bot_run_rpc::parse_bot_run_request(&params(&host, json!({"extra": 1}))).unwrap_err();
+    let error =
+        bot_run_rpc::parse_bot_run_request(&params(&host, json!({"extra": 1}))).unwrap_err();
     assert_eq!(error.code, "invalid_argument");
     assert!(error.message.contains("unknown field"), "{error:?}");
 
     // `requestId` lives on the native envelope, not in params: a params
     // requestId is an unknown field and is denied.
-    let error = bot_run_rpc::parse_bot_run_request(&params(&host, json!({"requestId": "smuggled"})))
-        .unwrap_err();
+    let error =
+        bot_run_rpc::parse_bot_run_request(&params(&host, json!({"requestId": "smuggled"})))
+            .unwrap_err();
     assert_eq!(error.code, "invalid_argument");
     assert!(error.message.contains("requestId"), "{error:?}");
 
     // Required responsibilityId is missing in v1.
-    let error = bot_run_rpc::parse_bot_run_request(&params(&host, json!({"responsibilityId": null})))
-        .unwrap_err();
+    let error =
+        bot_run_rpc::parse_bot_run_request(&params(&host, json!({"responsibilityId": null})))
+            .unwrap_err();
     assert_eq!(error.code, "invalid_argument");
     assert!(error.message.contains("responsibilityId"), "{error:?}");
 
@@ -320,7 +323,8 @@ fn asserted_host_mismatch_is_refused_as_structured_foreign_workspace_host() {
 
     let request =
         bot_run_rpc::parse_bot_run_request(&params(&host, json!({"hostId": "host-evil"}))).unwrap();
-    let prepared = bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
     let BotRunPrepare::Refused {
         workspace_id,
         refusal,
@@ -360,7 +364,8 @@ fn workspace_owned_by_another_host_is_refused_even_when_the_assertion_matches() 
     seed_scheduled_bot(&conn, "host-other", true);
 
     let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
-    let prepared = bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
     let BotRunPrepare::Refused { refusal, error, .. } = prepared else {
         panic!("expected Refused, got {prepared:?}");
     };
@@ -382,7 +387,8 @@ fn unknown_workspace_is_refused_as_a_structured_receipt() {
     let (_dir, _engine, conn, host) = fixture();
     // No workspace row seeded at all.
     let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
-    let prepared = bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
     let BotRunPrepare::Refused {
         workspace_id,
         refusal,
@@ -447,7 +453,8 @@ fn no_lock_is_held_on_the_database_during_execute() {
     seed_workspace(&conn, &host);
     seed_scheduled_bot(&conn, &host, true);
     let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
-    let prepared = bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
     let BotRunPrepare::Ready { plan, .. } = prepared else {
         panic!("expected Ready, got {prepared:?}");
     };
@@ -486,7 +493,8 @@ fn callers_own_transaction_rollback_leaves_both_history_rows_absent() {
         starts: Cell::new(0),
     };
     let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
-    let prepared = bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
     let BotRunPrepare::Ready { plan, .. } = prepared else {
         panic!("expected Ready, got {prepared:?}");
     };
@@ -901,7 +909,10 @@ fn atomic_finalize_failure_stays_pending() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(status, "pending", "a finalize failure must never complete the request row");
+    assert_eq!(
+        status, "pending",
+        "a finalize failure must never complete the request row"
+    );
 
     let poison_automation_id: String = fx
         .conn()
@@ -997,8 +1008,7 @@ fn shutdown_admission() {
 fn worker_route_fail_closed() {
     let fx = EngineFixture::new();
     const SERVICE_CREDENTIAL: &str = "bot-run-test-service-credential";
-    const WORKER_SECRET: &str =
-        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+    const WORKER_SECRET: &str = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
     let digest = format!("{:x}", Sha256::digest(WORKER_SECRET.as_bytes()));
     {
         let conn = fx.conn();
