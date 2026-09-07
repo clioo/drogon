@@ -7,7 +7,7 @@
 //! `{workspaceId*, hostId*, botId*, responsibilityId*, reason*:
 //! scheduledDue|manual|reactiveEvent, eventIdentity*, harness?, locale?}`.
 //! `requestId` is NOT an admitted param: the native envelope carries it, and
-//! [`handle_bot_run`] takes it explicitly as `request_id`. `hostId` is a
+//! ROOT's wiring takes it explicitly, never from `params`. `hostId` is a
 //! client ASSERTION tripwire only -- the server always derives the current
 //! host internally (the caller-supplied `derived_host_id`, which ROOT's
 //! wiring takes from `Engine`'s own host identity) and never trusts the
@@ -18,19 +18,46 @@
 //! -- and no such mapping exists in this build, so no default is invented
 //! and no authorization is synthesized.
 //!
-//! ## Idempotency is DELEGATED, never stored here
+//! ## Staged API, delegated idempotency (V4-A6d)
 //!
-//! ROOT directive (A6c): no DDL and no parallel ledger are approved for this
-//! module. Receipt persistence and the replay/conflict decision belong to
-//! the admitted [`crate::requests::RequestLedger`] at ROOT wiring time; this
-//! module therefore defines only the narrow [`ReceiptLedger`] seam,
-//! fingerprints the normalized params ([`normalized_request_fingerprint`]),
-//! and builds receipt Values as pure functions. It never creates a table,
-//! never executes DDL, and never persists anything itself. Parse and
-//! authorization failures are decided BEFORE the ledger is consulted, so a
-//! malformed or unauthorized request consumes no admission.
+//! ROOT directive (A6d): no DDL and no parallel ledger are approved for this
+//! module. This module owns no receipt-ledger seam and no monolithic
+//! handler; instead it exposes independently testable stages that ROOT's
+//! wiring adapts directly onto the admitted
+//! `crate::requests::RequestLedger::run_staged` (zero ledger/fingerprint
+//! API additions -- `run_staged` fingerprints `(method, params)` internally,
+//! so this module never computes or stores a fingerprint of its own):
 //!
-//! ## Structured outcomes
+//! 1. [`parse_bot_run_request`] -- strict parse, unchanged from A6c.
+//! 2. [`authorize_caller`] -- the worker-denied auth path, unchanged from
+//!    A6c: a denied caller is rejected before parsing or the ledger, and
+//!    consumes no admission.
+//! 3. [`revalidate_run_scope`] -- the workspace-ownership + host-assertion
+//!    checks ONLY (never harness/readiness); meant to be ROOT's
+//!    `run_staged` `authorize` callback, so it reruns on EVERY admission
+//!    attempt, replay included -- a replay whose workspace moved or was
+//!    deleted is denied even though the stored receipt would otherwise be
+//!    returned verbatim.
+//! 4. [`authorized_prepare`] -- FRESH-ONLY (`run_staged` calls `prepare`
+//!    only when no stored row exists for this key): repeats the scope
+//!    checks (so a fresh refusal still renders a structured, persisted
+//!    receipt, matching this module's previous admit-path behavior), then
+//!    adds the harness-mapping/bot-readiness checks -- which a replay must
+//!    NEVER re-evaluate. Returns an OWNED [`BotRunPrepare`]: every borrowed
+//!    value is converted to owned data before returning, so a `Ready`
+//!    plan outlives the `&Connection` this call borrowed.
+//! 5. [`execute`] -- takes no `Connection`, only the owned `RunPlan` and the
+//!    seam: nothing in this module ever holds a database guard across
+//!    dispatch, so the production `Engine` wrapper MUST drop its own
+//!    `MutexGuard` before calling this and re-lock only for [`record`].
+//! 6. [`record`] -- durable write, connection-bound (opens no transaction of
+//!    its own): meant to run inside `run_staged`'s own `finalize`
+//!    transaction, so the run rows and the receipt row commit atomically.
+//! 7. [`build_receipt`] -- the pure, unchanged receipt constructor.
+//!    `observed_at` must be sampled AFTER [`execute`] returns (the actual
+//!    `session.read` wall time), never at admission time; admission time is
+//!    instead the `attempt_at` passed into [`authorized_prepare`] (used for
+//!    `recordedAt` and, for a `Ready` plan, `RunPlan::attempt_at`).
 //!
 //! Refused receipts carry `refusal: {type, kind, ...detail}` --
 //! `responsibility{disabled|reactiveRequiresSuppliedEvent|unownedAutomation}`,
@@ -40,33 +67,15 @@
 //! `reason: {kind: newPerRunWorkspaceMode|reactiveDispatchParamsNotWired}`
 //! (plus `harnessMappingAbsent` for this module's own no-mapping case,
 //! flagged for ROOT approval). A human-readable `error` string is kept
-//! alongside, never instead. `recordedAt`/`observedAt` are numeric
-//! attempt-time seconds (`f64`); `observedAt` is the actual observation
-//! time -- with this module's single injected clock that is exactly
-//! `now_unix` at the poll -- and is null whenever no observation occurred.
-//!
-//! ## Phase discipline (caller MUST release its DB guard)
-//!
-//! Like `automations::runner`, this module is structured so nothing holds a
-//! `&Connection` across the dispatch phase. That is a property of THIS
-//! module's call sequencing only: the production Engine wrapper (ROOT-owned
-//! wiring) locks its connection mutex across `prepare`, MUST drop its own
-//! `MutexGuard` before the harness dispatch happens, and re-locks for the
-//! record phase. Nothing here claims a signature removes a caller's guard;
-//! this function simply never holds one, because it takes `&Connection`
-//! and the seam by separate parameters.
+//! alongside, never instead.
 //!
 //! ## Registration status and the ROOT adapter (report-only, not applied)
 //!
 //! This module is not yet registered in `lib.rs` (ROOT owns registration).
-//! The intended wiring: `impl Engine { fn dispatch_bot_run(&self, ...) }`
-//! adapts the in-crate `RequestLedger` to [`ReceiptLedger`] (its admit path
-//! needs to accept this module's externally computed fingerprint), then
-//! calls [`handle_bot_run`] with `EngineDispatchSeam` and the private auth
-//! layer's worker binding mapped to [`BotRunCaller::Worker`]. See the A6c
-//! delivery report for the exact adapter hunk and the ledger-backed replay
-//! test plan, which is ROOT-wiring-tested, not testable from this external
-//! compile.
+//! The intended wiring composes the stages above through
+//! `RequestLedger::run_staged`'s `authorize`/`prepare`/`effect`/`finalize`
+//! callbacks; see the A6d delivery report for the exact adapter hunk this
+//! module is not authorized to apply itself.
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -74,24 +83,11 @@ use serde_json::{Value, json};
 
 use drogon_core::automations::execution::{DispatchRefusal, InvocationReason};
 use drogon_core::automations::runner::{
-    self, DispatchSeam, HarnessLaunchParams, PrepareOutcome, RunRefusal, RunUnsupported,
+    self, DispatchSeam, HarnessLaunchParams, PrepareOutcome, RunPlan, RunRefusal, RunUnsupported,
     RunnerOutcome,
 };
 use drogon_core::bots::policy::ResponsibilityRefusal;
 use drogon_protocol::RpcError;
-
-/// The idempotency boundary ROOT's wiring adapts the admitted
-/// `RequestLedger` into. Implementations decide replay vs. conflict vs.
-/// first admission: identical (id, fingerprint) replays return the stored
-/// receipt verbatim; a changed fingerprint under the same id is the frozen
-/// `request_conflict` rejection; a first admission runs `work` exactly once
-/// and persists its receipt. This module never implements persistence
-/// itself.
-pub trait ReceiptLedger {
-    fn admit<F>(&self, request_id: &str, fingerprint: &str, work: F) -> Result<Value, RpcError>
-    where
-        F: FnOnce() -> Result<Value, RpcError>;
-}
 
 /// Who is calling. ROOT's wiring maps the private auth layer's
 /// `WorkerBinding` onto [`BotRunCaller::Worker`]; `bot.run` is desktop-only
@@ -189,6 +185,20 @@ fn unauthorized() -> RpcError {
     )
 }
 
+/// `bot.run` is desktop-only in v1: a worker caller is denied before parsing
+/// or the ledger, so a denied caller consumes no admission. Unchanged from
+/// A6c's monolithic admit path, now its own named stage.
+pub fn authorize_caller(caller: &BotRunCaller) -> Result<(), RpcError> {
+    if matches!(caller, BotRunCaller::Worker { .. }) {
+        return Err(unauthorized());
+    }
+    Ok(())
+}
+
+fn scope_denied(message: impl Into<String>) -> RpcError {
+    RpcError::new("unauthorized", message.into())
+}
+
 fn required_string(object: &Value, key: &str) -> Result<String, RpcError> {
     let value = object
         .get(key)
@@ -270,15 +280,6 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         harness,
         locale: optional_string(params, "locale")?,
     })
-}
-
-/// Stable fingerprint over the normalized request (never over raw wire
-/// bytes, never including the envelope id). This is what the delegated
-/// ledger keys replays and conflicts on, alongside the envelope id.
-pub fn normalized_request_fingerprint(request: &BotRunRequest) -> String {
-    use sha2::{Digest, Sha256};
-    let canonical = serde_json::to_vec(request).unwrap_or_default();
-    format!("{:x}", Sha256::digest(canonical))
 }
 
 /// This module's own deterministic rendering of a native refusal: the
@@ -380,7 +381,7 @@ fn render_unsupported(unsupported: &RunUnsupported) -> (Value, String) {
 
 /// Pure receipt construction: the single source of the approved receipt
 /// shape. Nothing here persists anything -- persistence is the delegated
-/// ledger's side of the [`ReceiptLedger`] seam.
+/// ledger's job.
 #[allow(clippy::too_many_arguments)]
 pub fn build_receipt(
     request_id: &str,
@@ -412,297 +413,253 @@ pub fn build_receipt(
     })
 }
 
-/// Full `bot.run` admission. `derived_host_id` is the server's own host
-/// identity (ROOT's wiring reads it from `Engine`); `request_id` is the
-/// native envelope identity and the delegated idempotency key; `seam` is
-/// injectable so tests never spawn a real session; `ledger` is the
-/// delegated idempotency boundary ([`ReceiptLedger`], adapted from the
-/// admitted `RequestLedger` at ROOT wiring); `now_unix` is the server
-/// clock, injected for deterministic receipts.
-// Each parameter is a distinct delegated dependency of the ROOT wiring; a
-// bundling struct would hide the exact seam shape the adapter hunk needs.
-#[allow(clippy::too_many_arguments)]
-pub fn handle_bot_run<L: ReceiptLedger, S: DispatchSeam>(
+/// The workspace-ownership + host-assertion fact set both
+/// [`revalidate_run_scope`] and [`authorized_prepare`] check -- the SAME
+/// query and equality checks, translated by each caller into its own
+/// vocabulary (a propagated `RpcError` for the replay-time `authorize`
+/// callback; a persisted, structured `Refused` receipt for fresh
+/// admission).
+enum WorkspaceScope {
+    Ok { folder: String },
+    UnknownWorkspace,
+    ForeignWorkspaceHost { workspace_host_id: String },
+    ForeignAssertedHost,
+}
+
+fn lookup_workspace_scope(
     conn: &Connection,
     derived_host_id: &str,
-    request_id: &str,
-    params: &Value,
-    caller: &BotRunCaller,
-    seam: &S,
-    ledger: &L,
-    now_unix: u64,
-) -> Result<Value, RpcError> {
-    // Authorization precedes everything, including parsing and the ledger:
-    // a denied caller consumes no admission.
-    if matches!(caller, BotRunCaller::Worker { .. }) {
-        return Err(unauthorized());
+    request: &BotRunRequest,
+) -> Result<WorkspaceScope, RpcError> {
+    let workspace = {
+        let mut statement = conn
+            .prepare("SELECT host_id, path FROM workspaces WHERE id = ?1")
+            .map_err(|e| internal_error(format!("workspace lookup failed: {e}")))?;
+        let mut rows = statement
+            .query([&request.workspace_id])
+            .map_err(|e| internal_error(format!("workspace lookup failed: {e}")))?;
+        match rows.next() {
+            Ok(Some(row)) => {
+                let host_id: String = row
+                    .get(0)
+                    .map_err(|e| internal_error(format!("workspace lookup failed: {e}")))?;
+                let path: String = row
+                    .get(1)
+                    .map_err(|e| internal_error(format!("workspace lookup failed: {e}")))?;
+                Some((host_id, path))
+            }
+            Ok(None) => None,
+            Err(e) => Err(internal_error(format!("workspace lookup failed: {e}")))?,
+        }
+    };
+    let (workspace_host_id, folder) = match workspace {
+        Some(pair) => pair,
+        None => return Ok(WorkspaceScope::UnknownWorkspace),
+    };
+    if workspace_host_id != derived_host_id {
+        return Ok(WorkspaceScope::ForeignWorkspaceHost { workspace_host_id });
     }
+    if request.asserted_host_id != derived_host_id {
+        return Ok(WorkspaceScope::ForeignAssertedHost);
+    }
+    Ok(WorkspaceScope::Ok { folder })
+}
 
-    // Strict parse precedes the ledger too: a malformed request is a pure
-    // rejection and must not consume an admission.
-    let request = parse_bot_run_request(params)?;
-    let print = normalized_request_fingerprint(&request);
+/// Replay-time scope revalidation ONLY: workspace-ownership +
+/// host-assertion, never harness/readiness. Meant to be installed as
+/// `run_staged`'s `authorize` callback, which runs on EVERY admission
+/// attempt including a saved replay, BEFORE the stored receipt is decoded --
+/// so a replay whose workspace was deleted/moved/host-changed since the
+/// original admission is denied with a propagated error, and the stored
+/// receipt is left completely untouched (an `authorize` error short-circuits
+/// before any read/write of the `requests` row).
+pub fn revalidate_run_scope(
+    conn: &Connection,
+    derived_host_id: &str,
+    request: &BotRunRequest,
+) -> Result<(), RpcError> {
+    match lookup_workspace_scope(conn, derived_host_id, request)? {
+        WorkspaceScope::Ok { .. } => Ok(()),
+        WorkspaceScope::UnknownWorkspace => Err(scope_denied(format!(
+            "workspace {} not found",
+            request.workspace_id
+        ))),
+        WorkspaceScope::ForeignWorkspaceHost { workspace_host_id } => Err(scope_denied(format!(
+            "foreign workspace host: workspace {} belongs to host {}, not current host {}",
+            request.workspace_id, workspace_host_id, derived_host_id
+        ))),
+        WorkspaceScope::ForeignAssertedHost => Err(scope_denied(format!(
+            "foreign workspace host: asserted host {} does not match derived host {}",
+            request.asserted_host_id, derived_host_id
+        ))),
+    }
+}
 
-    // Idempotency is delegated from here on: identical replay -> stored
-    // receipt verbatim, changed params -> frozen request_conflict, first
-    // admission -> the work below runs exactly once.
-    ledger.admit(request_id, &print, || {
-        // Workspace ownership + the client's host assertion. The workspace
-        // row (id -> host/path) is the workspace-ownership fact: the derived
-        // host must own the workspace, and the asserted host must equal the
-        // derived host. The folder for the scoped Bot load is the workspace
-        // path.
-        let workspace = {
-            let mut statement = conn
-                .prepare("SELECT host_id, path FROM workspaces WHERE id = ?1")
-                .map_err(|e| internal_error(format!("workspace lookup failed: {e}")))?;
-            let mut rows = statement
-                .query([&request.workspace_id])
-                .map_err(|e| internal_error(format!("workspace lookup failed: {e}")))?;
-            match rows.next() {
-                Ok(Some(row)) => {
-                    let host_id: String = row
-                        .get(0)
-                        .map_err(|e| internal_error(format!("workspace lookup failed: {e}")))?;
-                    let path: String = row
-                        .get(1)
-                        .map_err(|e| internal_error(format!("workspace lookup failed: {e}")))?;
-                    Some((host_id, path))
-                }
-                Ok(None) => None,
-                Err(e) => Err(internal_error(format!("workspace lookup failed: {e}")))?,
-            }
-        };
-        let (workspace_host_id, folder) = match workspace {
-            Some(pair) => pair,
-            None => {
-                return Ok(build_receipt(
-                    request_id,
-                    derived_host_id,
-                    &request.workspace_id,
-                    "refused",
-                    json!({
-                        "type": "workspace",
-                        "kind": "unknownWorkspace",
-                        "workspaceId": request.workspace_id,
-                    }),
-                    Value::Null,
-                    None,
-                    None,
-                    None,
-                    Value::String(format!("workspace {} not found", request.workspace_id)),
-                    None,
-                    now_unix as f64,
-                ));
-            }
-        };
-        if workspace_host_id != derived_host_id {
-            return Ok(build_receipt(
-                request_id,
-                derived_host_id,
-                &request.workspace_id,
-                "refused",
-                json!({
+/// Outcome of [`authorized_prepare`]. Every variant is fully owned: `Ready`'s
+/// `RunPlan` has no lifetime parameters (`automations::runner::RunPlan`), so
+/// it outlives the `&Connection` this call borrowed, by construction.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BotRunPrepare {
+    Refused {
+        workspace_id: String,
+        refusal: Value,
+        error: String,
+    },
+    Unsupported {
+        workspace_id: String,
+        reason: Value,
+        error: String,
+    },
+    Ready {
+        plan: RunPlan,
+        workspace_id: String,
+    },
+}
+
+/// FRESH-ONLY admission preparation (ROOT's `run_staged` `prepare` callback
+/// runs this only when no stored row exists for this key): repeats the
+/// workspace-ownership + host-assertion checks (so a fresh refusal still
+/// renders a structured, persisted receipt), then the harness-mapping
+/// presence check (absent overrides -> `Unsupported` `harnessMappingAbsent`;
+/// no default is invented and no authorization is synthesized), then
+/// delegates the storage-scope + bot/responsibility readiness gate to
+/// `automations::runner::prepare_run_plan_in_tx` (composed, never
+/// duplicated). `attempt_at` is this admission's own clock sample: used for
+/// `RunPlan::attempt_at` and, by the caller, as every receipt's
+/// `recordedAt` -- `observed_at` for a `Ready` plan's eventual receipt must
+/// come from a LATER sample, taken after [`execute`] returns.
+///
+/// Uses `_in_tx` (not the transaction-owning `prepare_run_plan`) because
+/// this function is meant to run inside the delegated ledger's own
+/// admission transaction, which cannot nest a second real `BEGIN`.
+pub fn authorized_prepare(
+    conn: &Connection,
+    derived_host_id: &str,
+    request: &BotRunRequest,
+    attempt_at: f64,
+) -> Result<BotRunPrepare, RpcError> {
+    let workspace_id = request.workspace_id.clone();
+    let folder = match lookup_workspace_scope(conn, derived_host_id, request)? {
+        WorkspaceScope::Ok { folder } => folder,
+        WorkspaceScope::UnknownWorkspace => {
+            return Ok(BotRunPrepare::Refused {
+                error: format!("workspace {workspace_id} not found"),
+                refusal: json!({
+                    "type": "workspace",
+                    "kind": "unknownWorkspace",
+                    "workspaceId": workspace_id,
+                }),
+                workspace_id,
+            });
+        }
+        WorkspaceScope::ForeignWorkspaceHost { workspace_host_id } => {
+            return Ok(BotRunPrepare::Refused {
+                error: format!(
+                    "foreign workspace host: workspace {workspace_id} belongs to host \
+                     {workspace_host_id}, not current host {derived_host_id}"
+                ),
+                refusal: json!({
                     "type": "workspace",
                     "kind": "foreignWorkspaceHost",
-                    "workspaceId": request.workspace_id,
+                    "workspaceId": workspace_id,
                     "workspaceHostId": workspace_host_id,
                     "currentHostId": derived_host_id,
                 }),
-                Value::Null,
-                None,
-                None,
-                None,
-                Value::String(format!(
-                    "foreign workspace host: workspace {} belongs to host {}, \
-                     not current host {}",
-                    request.workspace_id, workspace_host_id, derived_host_id
-                )),
-                None,
-                now_unix as f64,
-            ));
+                workspace_id,
+            });
         }
-        if request.asserted_host_id != derived_host_id {
-            return Ok(build_receipt(
-                request_id,
-                derived_host_id,
-                &request.workspace_id,
-                "refused",
-                json!({
+        WorkspaceScope::ForeignAssertedHost => {
+            return Ok(BotRunPrepare::Refused {
+                error: format!(
+                    "foreign workspace host: asserted host {} does not match \
+                     derived host {derived_host_id}",
+                    request.asserted_host_id
+                ),
+                refusal: json!({
                     "type": "workspace",
                     "kind": "foreignWorkspaceHost",
-                    "workspaceId": request.workspace_id,
+                    "workspaceId": workspace_id,
                     "assertedHostId": request.asserted_host_id,
                     "currentHostId": derived_host_id,
                 }),
-                Value::Null,
-                None,
-                None,
-                None,
-                Value::String(format!(
-                    "foreign workspace host: asserted host {} does not match \
-                     derived host {}",
-                    request.asserted_host_id, derived_host_id
-                )),
-                None,
-                now_unix as f64,
-            ));
+                workspace_id,
+            });
         }
+    };
 
-        // Harness mapping: absent overrides are `unsupported` until an
-        // existing mapping resolves them; none exists in this build, so no
-        // default and no synthetic authorization.
-        // (`harnessMappingAbsent` is this module's own reason kind, flagged
-        // for ROOT approval.)
-        let Some(harness) = &request.harness else {
-            return Ok(build_receipt(
-                request_id,
-                derived_host_id,
-                &request.workspace_id,
-                "unsupported",
-                Value::Null,
-                json!({"kind": "harnessMappingAbsent"}),
-                None,
-                None,
-                None,
-                Value::String(
-                    "no harness mapping exists for this bot: supply admitted \
-                     harness overrides"
-                        .to_string(),
-                ),
-                None,
-                now_unix as f64,
-            ));
-        };
-        let harness_params = HarnessLaunchParams {
-            harness_id: harness.harness_id.clone(),
-            model: harness.model.clone(),
-            effort: harness.effort.clone(),
-            provider: harness.provider.clone(),
-            permission_mode: harness.permission_mode.clone(),
-        };
+    // Harness mapping: absent overrides are `unsupported` until an existing
+    // mapping resolves them; none exists in this build, so no default and
+    // no synthetic authorization. (`harnessMappingAbsent` is this module's
+    // own reason kind, flagged for ROOT approval.) FRESH-ONLY: a replay
+    // must never depend on whether a harness mapping currently exists.
+    let Some(harness) = &request.harness else {
+        return Ok(BotRunPrepare::Unsupported {
+            workspace_id,
+            reason: json!({"kind": "harnessMappingAbsent"}),
+            error: "no harness mapping exists for this bot: supply admitted \
+                    harness overrides"
+                .to_string(),
+        });
+    };
+    let harness_params = HarnessLaunchParams {
+        harness_id: harness.harness_id.clone(),
+        model: harness.model.clone(),
+        effort: harness.effort.clone(),
+        provider: harness.provider.clone(),
+        permission_mode: harness.permission_mode.clone(),
+    };
 
-        // Phase 1 (read-only). Phase 2 deliberately takes no connection:
-        // this module never holds a DB guard, and the production Engine
-        // wrapper MUST drop its own mutex guard before dispatching and
-        // re-lock for phase 3.
-        let prepared = runner::prepare_run_plan(
-            conn,
-            derived_host_id,
-            &folder,
-            &request.bot_id,
-            &request.responsibility_id,
-            derived_host_id,
-            &request.reason.to_invocation_reason(&request.event_identity),
-            &request.event_identity,
-            &harness_params,
-            now_unix as f64,
-        );
-        let plan = match prepared {
-            Ok(PrepareOutcome::Ready(plan)) => plan,
-            Ok(PrepareOutcome::Refused(refusal)) => {
-                let (object, message) = render_refusal(&refusal);
-                return Ok(build_receipt(
-                    request_id,
-                    derived_host_id,
-                    &request.workspace_id,
-                    "refused",
-                    object,
-                    Value::Null,
-                    None,
-                    None,
-                    None,
-                    Value::String(message),
-                    None,
-                    now_unix as f64,
-                ));
-            }
-            Ok(PrepareOutcome::Unsupported(unsupported)) => {
-                let (reason, message) = render_unsupported(&unsupported);
-                return Ok(build_receipt(
-                    request_id,
-                    derived_host_id,
-                    &request.workspace_id,
-                    "unsupported",
-                    Value::Null,
-                    reason,
-                    None,
-                    None,
-                    None,
-                    Value::String(message),
-                    None,
-                    now_unix as f64,
-                ));
-            }
-            Err(e) => return Err(internal_error(format!("failed to load bot run state: {e}"))),
-        };
+    let prepared = runner::prepare_run_plan_in_tx(
+        conn,
+        derived_host_id,
+        &folder,
+        &request.bot_id,
+        &request.responsibility_id,
+        derived_host_id,
+        &request.reason.to_invocation_reason(&request.event_identity),
+        &request.event_identity,
+        &harness_params,
+        attempt_at,
+    );
+    match prepared {
+        Ok(PrepareOutcome::Ready(plan)) => Ok(BotRunPrepare::Ready { plan, workspace_id }),
+        Ok(PrepareOutcome::Refused(refusal)) => {
+            let (object, message) = render_refusal(&refusal);
+            Ok(BotRunPrepare::Refused {
+                workspace_id,
+                refusal: object,
+                error: message,
+            })
+        }
+        Ok(PrepareOutcome::Unsupported(unsupported)) => {
+            let (reason, message) = render_unsupported(&unsupported);
+            Ok(BotRunPrepare::Unsupported {
+                workspace_id,
+                reason,
+                error: message,
+            })
+        }
+        Err(e) => Err(internal_error(format!("failed to load bot run state: {e}"))),
+    }
+}
 
-        // Phase 2: no `Connection` in hand by construction.
-        let outcome = runner::dispatch_run_plan(seam, &plan);
+/// Phase 2: no `Connection` -- the caller MUST have released its DB guard
+/// before calling. Named pass-through onto
+/// `automations::runner::dispatch_run_plan` so this module's own staged-API
+/// surface names every stage.
+pub fn execute<S: DispatchSeam>(plan: &RunPlan, seam: &S) -> RunnerOutcome {
+    runner::dispatch_run_plan(seam, plan)
+}
 
-        // Phase 3: durable record. `observed_at` is the actual observation
-        // time -- with this module's single injected clock, exactly
-        // `now_unix` at the poll.
-        // 4-ARG ADAPTATION (A6b, coordinator-authorized): matches the
-        // parallel runner track's
-        // `record_run_outcome(conn, plan, outcome, observed_at: f64)`.
-        runner::record_run_outcome(conn, &plan, &outcome, now_unix as f64)
-            .map_err(|e| internal_error(format!("failed to record bot run: {e}")))?;
-
-        let automation_run_id = format!("ar:{}", plan.request_id);
-        let (session, error, outcome_name, observed_at) = match &outcome {
-            RunnerOutcome::Observed {
-                session_id,
-                incarnation,
-                ..
-            } => (
-                Some(json!({
-                    "sessionId": session_id,
-                    "incarnation": incarnation,
-                })),
-                Value::Null,
-                "dispatched",
-                Some(now_unix as f64),
-            ),
-            // A session was admitted but its state could not be observed:
-            // the session identity is real and reported verbatim, the
-            // observation is the seam's native error, and the outcome stays
-            // `dispatched`.
-            RunnerOutcome::ObservationFailed {
-                session_id,
-                incarnation,
-                error,
-            } => (
-                Some(json!({
-                    "sessionId": session_id,
-                    "incarnation": incarnation,
-                })),
-                Value::String(error.to_string()),
-                "dispatched",
-                Some(now_unix as f64),
-            ),
-            // `harness.start` refused admission: no session exists, the
-            // native error is carried verbatim, the recorded rows exist (the
-            // runner records the failed attempt), and no observation ever
-            // occurred.
-            RunnerOutcome::DispatchFailed(error) => {
-                (None, Value::String(error.to_string()), "refused", None)
-            }
-        };
-
-        Ok(build_receipt(
-            request_id,
-            derived_host_id,
-            &request.workspace_id,
-            outcome_name,
-            Value::Null,
-            Value::Null,
-            session,
-            Some(automation_run_id),
-            Some(plan.request_id),
-            error,
-            observed_at,
-            now_unix as f64,
-        ))
-    })
+/// Phase 3: durable record. Connection-bound (opens no transaction of its
+/// own, V4-A6d) so it can run inside the delegated ledger's own `finalize`
+/// transaction and commit atomically with that transaction's receipt write.
+pub fn record(
+    conn: &Connection,
+    plan: &RunPlan,
+    outcome: &RunnerOutcome,
+    observed_at: f64,
+) -> Result<(), RpcError> {
+    runner::record_run_outcome_in_tx(conn, plan, outcome, observed_at)
+        .map_err(|e| internal_error(format!("failed to record bot run: {e}")))
 }

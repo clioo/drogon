@@ -11,6 +11,15 @@
 //! success -- wherever ROOT-owned wiring (new-workspace-per-run creation,
 //! reactive-dispatch params, and `Bot::harness_policy` -> `HarnessId`
 //! resolution) is absent.
+//!
+//! [`prepare_run_plan_in_tx`] and [`record_run_outcome_in_tx`] (V4-A6d) are
+//! the connection-bound bodies of [`prepare_run_plan`]/[`record_run_outcome`]
+//! minus their own transaction begin/drop/commit: a caller that already
+//! holds an open transaction (e.g. a delegated request ledger's own
+//! admission/finalize transaction) calls these directly instead, since
+//! rusqlite cannot nest a second real `BEGIN` inside one already open. The
+//! public wrappers are exactly these bodies wrapped in their own owned
+//! transaction and are unchanged in behavior.
 
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
@@ -378,11 +387,9 @@ fn build_harness_start_params(
     params
 }
 
-/// Phase 1 (read-only, one transaction snapshot): composes `bots::policy`/
-/// `automations::execution` gating unchanged, then adds the workspace-row-
-/// owner check beyond the automation's own `execution_target_id` fence.
-/// The transaction is dropped (never committed) before returning -- no
-/// lock survives this call.
+/// Phase 1 (read-only, one transaction snapshot): opens its own transaction,
+/// delegates to [`prepare_run_plan_in_tx`], then drops (never commits) the
+/// snapshot before returning -- no lock survives this call.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_run_plan(
     conn: &Connection,
@@ -397,9 +404,46 @@ pub fn prepare_run_plan(
     attempt_at: f64,
 ) -> Result<PrepareOutcome, RunnerLookupError> {
     let tx = conn.unchecked_transaction()?;
-
-    let decision = bots_policy::evaluate_and_attempt_responsibility_dispatch_from_storage(
+    let outcome = prepare_run_plan_in_tx(
         &tx,
+        host_id,
+        folder,
+        bot_id,
+        responsibility_id,
+        current_host_id,
+        reason,
+        event_identity,
+        harness_params,
+        attempt_at,
+    )?;
+    // Every read is done; drop the (uncommitted, read-only) snapshot now,
+    // before this function returns -- not after the caller drives dispatch.
+    drop(tx);
+    Ok(outcome)
+}
+
+/// Connection-bound body of [`prepare_run_plan`]: composes `bots::policy`/
+/// `automations::execution` gating unchanged, then adds the workspace-row-
+/// owner check beyond the automation's own `execution_target_id` fence.
+/// Begins and ends no transaction of its own, so a caller that already
+/// holds one open (e.g. a delegated request ledger's own admission
+/// transaction, which cannot nest a second real `BEGIN`) can call this
+/// directly.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_run_plan_in_tx(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    bot_id: &str,
+    responsibility_id: &str,
+    current_host_id: &str,
+    reason: &InvocationReason,
+    event_identity: &str,
+    harness_params: &HarnessLaunchParams,
+    attempt_at: f64,
+) -> Result<PrepareOutcome, RunnerLookupError> {
+    let decision = bots_policy::evaluate_and_attempt_responsibility_dispatch_from_storage(
+        conn,
         host_id,
         folder,
         bot_id,
@@ -425,7 +469,7 @@ pub fn prepare_run_plan(
         ResponsibilityDispatchAttempt::Dispatched(ResponsibilityJobOutcome::Automation(_)) => {
             // Eligibility is already proven; re-read only for the fields
             // (workspace_id/prompt) the stub `JobOutcome` never carried.
-            let bot = bots_storage::get_bot(&tx, host_id, folder, bot_id)
+            let bot = bots_storage::get_bot(conn, host_id, folder, bot_id)
                 .map_err(ResponsibilityLookupError::Storage)?
                 .ok_or(ResponsibilityLookupError::BotNotFound)?;
             let responsibility = bot
@@ -436,7 +480,7 @@ pub fn prepare_run_plan(
             let ResponsibilityTrigger::Scheduled { automation_id } = &responsibility.trigger else {
                 return Err(RunnerLookupError::InconsistentTriggerKind);
             };
-            bots_storage::require_owned_automation(&tx, bot_id, automation_id)
+            bots_storage::require_owned_automation(conn, bot_id, automation_id)
                 .map_err(ResponsibilityLookupError::Storage)?
         }
     };
@@ -454,7 +498,7 @@ pub fn prepare_run_plan(
     };
 
     let workspace_host_id =
-        read_workspace_host_id(&tx, &workspace_id).map_err(ResponsibilityLookupError::Storage)?;
+        read_workspace_host_id(conn, &workspace_id).map_err(ResponsibilityLookupError::Storage)?;
     let workspace_host_id = match workspace_host_id {
         Some(host) => host,
         None => {
@@ -470,10 +514,6 @@ pub fn prepare_run_plan(
             current_host_id: current_host_id.to_string(),
         }));
     }
-
-    // Every read is done; drop the (uncommitted, read-only) snapshot now,
-    // before this function returns -- not after the caller drives dispatch.
-    drop(tx);
 
     let request_id = derive_request_id(host_id, folder, bot_id, responsibility_id, event_identity);
     let params = build_harness_start_params(&workspace_id, &automation.prompt, harness_params);
@@ -792,39 +832,57 @@ fn responsibility_projection(
     }
 }
 
-/// Phase 3: durable record via existing responsibility-run history storage,
-/// linked to a durably upserted `AutomationRun` at the stable id
-/// `ar:{request_id}` (see [`upsert_linked_automation_run_in_tx`]).
-/// `host_observation`/`ended_at` are derived from that ACCEPTED row by
-/// [`responsibility_projection`], never fabricated from the raw `outcome`
-/// directly -- see its doc for the terminal-guard rationale. `observed_at`
-/// is the ACTUAL wall-clock time of this `session.read` (or failed-poll)
-/// call, supplied by the caller and distinct from `plan.attempt_at` (the
-/// dispatch attempt time); it is only ever used when this call's
-/// observation is the one accepted.
-///
-/// V4-A5c: both durable writes -- the linked `AutomationRun` upsert and the
-/// `ResponsibilityRun` record -- now share exactly ONE `BEGIN IMMEDIATE`
-/// transaction, committed once at the end; any failure on either write (a
-/// storage error, or the session fence in
-/// [`upsert_linked_automation_run_in_tx`]) drops the transaction
-/// uncommitted, rolling both back together rather than leaving the first
-/// write durably committed while the second silently never happens. When
-/// the upsert reports [`AcceptedOutcome::RejectedStale`], the
-/// `ResponsibilityRun` write is skipped entirely -- the existing row is
-/// left exactly as it was, never regressed by a projection built from this
-/// call's own rejected `outcome`.
+/// Phase 3: opens its own `BEGIN IMMEDIATE`, delegates to
+/// [`record_run_outcome_in_tx`], then commits once at the end -- both
+/// durable writes land together or not at all.
 pub fn record_run_outcome(
     conn: &Connection,
     plan: &RunPlan,
     outcome: &RunnerOutcome,
     observed_at: f64,
 ) -> Result<(), bots_storage::StorageError> {
-    let automation_run_id = format!("ar:{}", plan.request_id);
     let tx = automations_storage::begin_immediate(conn)?;
+    record_run_outcome_in_tx(&tx, plan, outcome, observed_at)?;
+    tx.commit()?;
+    Ok(())
+}
 
+/// Connection-bound body of [`record_run_outcome`]: durable record via
+/// existing responsibility-run history storage, linked to a durably
+/// upserted `AutomationRun` at the stable id `ar:{request_id}` (see
+/// [`upsert_linked_automation_run_in_tx`]). `host_observation`/`ended_at`
+/// are derived from that ACCEPTED row by [`responsibility_projection`],
+/// never fabricated from the raw `outcome` directly -- see its doc for the
+/// terminal-guard rationale. `observed_at` is the ACTUAL wall-clock time of
+/// this `session.read` (or failed-poll) call, supplied by the caller and
+/// distinct from `plan.attempt_at` (the dispatch attempt time); it is only
+/// ever used when this call's observation is the one accepted.
+///
+/// Begins and commits no transaction of its own (V4-A6d): a caller that
+/// already holds one open (e.g. a delegated request ledger's own finalize
+/// transaction) calls this directly so the run rows and that transaction's
+/// own receipt write commit atomically together. [`record_run_outcome`]'s
+/// owned `BEGIN IMMEDIATE`/commit around this body is what gives the V4-A5c
+/// atomicity guarantee (both durable writes -- the linked `AutomationRun`
+/// upsert and the `ResponsibilityRun` record -- share exactly ONE
+/// transaction; any failure on either write, including the session fence in
+/// [`upsert_linked_automation_run_in_tx`], rolls both back together rather
+/// than leaving the first write durably committed while the second silently
+/// never happens) for that owned caller, and an embedding caller's own
+/// transaction gives the identical guarantee when it wraps this function
+/// instead. When the upsert reports [`AcceptedOutcome::RejectedStale`], the
+/// `ResponsibilityRun` write is skipped entirely -- the existing row is left
+/// exactly as it was, never regressed by a projection built from this
+/// call's own rejected `outcome`.
+pub fn record_run_outcome_in_tx(
+    conn: &Connection,
+    plan: &RunPlan,
+    outcome: &RunnerOutcome,
+    observed_at: f64,
+) -> Result<(), bots_storage::StorageError> {
+    let automation_run_id = format!("ar:{}", plan.request_id);
     let (automation_run, accepted) =
-        upsert_linked_automation_run_in_tx(&tx, &automation_run_id, plan, outcome, observed_at)?;
+        upsert_linked_automation_run_in_tx(conn, &automation_run_id, plan, outcome, observed_at)?;
 
     if accepted != AcceptedOutcome::RejectedStale {
         let (host_observation, ended_at) = responsibility_projection(&automation_run, outcome);
@@ -839,9 +897,8 @@ pub fn record_run_outcome(
             recipe: None,
             host_observation,
         };
-        bots_storage::record_responsibility_run_in_tx(&tx, &plan.host_id, &plan.folder, run)?;
+        bots_storage::record_responsibility_run_in_tx(conn, &plan.host_id, &plan.folder, run)?;
     }
 
-    tx.commit()?;
     Ok(())
 }
