@@ -1,7 +1,5 @@
 use std::process::ExitCode;
 
-use clap::Parser as _;
-
 use drogon_cli::cli::Cli;
 use drogon_cli::error::CliError;
 
