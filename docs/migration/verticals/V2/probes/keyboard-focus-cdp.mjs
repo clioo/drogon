@@ -206,6 +206,186 @@ async function setSystemTheme() {
   await page.getByText("Service 0.1.0", { exact: true }).waitFor();
 }
 
+// Contrast evidence (settled themes only): WCAG 2.x relative-luminance
+// ratios computed in-page from getComputedStyle used values. Intermediate or
+// transitioning theme colors are explicitly NOT evaluated here.
+async function setSettledTheme(theme) {
+  await page.evaluate((value) => {
+    window.localStorage.setItem(
+      "drogon:settings:ui",
+      JSON.stringify({ settings: { theme: value } }),
+    );
+  }, theme);
+  await page.reload();
+  await page.getByText("Service 0.1.0", { exact: true }).waitFor();
+  await page.emulateMedia({ colorScheme: theme });
+  await page.waitForFunction(
+    (want) => {
+      const dark = want === "dark";
+      const root = document.documentElement;
+      if (root.classList.contains("dark") !== dark) return false;
+      return (
+        getComputedStyle(root).getPropertyValue("--background").trim() ===
+        (dark ? "#0a0a0a" : "#fff")
+      );
+    },
+    theme,
+    { timeout: 10000 },
+  );
+}
+
+// Self-contained page-side measurement: parses resolved rgb()/rgba() colors,
+// composites alpha over the actual adjacent surface, and returns WCAG ratios.
+function measureContrast() {
+  const parse = (color) => {
+    const m = /rgba?\(([^)]+)\)/.exec(color);
+    if (!m) return null;
+    const parts = m[1].split(",").map((s) => parseFloat(s.trim()));
+    if (parts.length < 3 || parts.some((v) => Number.isNaN(v))) return null;
+    return {
+      r: parts[0],
+      g: parts[1],
+      b: parts[2],
+      a: parts.length > 3 ? parts[3] : 1,
+    };
+  };
+  const over = (fg, bg) => {
+    // General (un-premultiplied) Porter-Duff "A over B": bg may itself be
+    // non-opaque (multi-layer surface() chains), so its channels must be
+    // weighted by bg.a and the result un-premultiplied by the output alpha.
+    const a = fg.a + bg.a * (1 - fg.a);
+    if (a === 0) return { r: 0, g: 0, b: 0, a: 0 };
+    return {
+      r: (fg.r * fg.a + bg.r * bg.a * (1 - fg.a)) / a,
+      g: (fg.g * fg.a + bg.g * bg.a * (1 - fg.a)) / a,
+      b: (fg.b * fg.a + bg.b * bg.a * (1 - fg.a)) / a,
+      a,
+    };
+  };
+  const lum = (c) => {
+    const f = (v) => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  };
+  const ratio = (a, b) => {
+    const l1 = lum(a);
+    const l2 = lum(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  };
+  const style = (el, prop) => getComputedStyle(el)[prop];
+  const body = document.body;
+  const bodyBg = parse(style(body, "backgroundColor"));
+  const muted = document.querySelector(".sidebar-footer");
+  const button = [...document.querySelectorAll("button")].find(
+    (b) => b.textContent.trim() === "New terminal",
+  );
+  const header = document.querySelector(".session-header");
+  if (!bodyBg || !muted || !button || !header) return null;
+  // ROOT correction: a transparent element shows its nearest opaque
+  // ancestor, not the body (e.g. transparent .sidebar-footer renders over
+  // opaque .workspace-sidebar #fafafa/#171717). Composite every layer from
+  // the body down to the element, stopping at the first opaque result.
+  const surface = (el) => {
+    const chain = [];
+    for (
+      let node = el;
+      node && node.nodeType === 1;
+      node = node.parentElement
+    ) {
+      chain.push(node);
+      if (node === body) break;
+    }
+    // Painter's order: start at the element, composite outward until opaque.
+    let bg = null;
+    for (let i = 0; i < chain.length; i++) {
+      const layer = parse(style(chain[i], "backgroundColor"));
+      if (!layer) continue;
+      bg = bg === null ? layer : over(bg, layer);
+      if (bg.a >= 1) break;
+    }
+    return bg ?? bodyBg;
+  };
+  const mutedSurface = surface(muted);
+  const buttonBg = surface(button);
+  const headerSurface = surface(header);
+  // Header icons: lucide glyphs stroke with currentColor, so the button's
+  // computed color is the icon foreground; ghost buttons render on
+  // transparent over the canvas.
+  const iconRatio = (ariaLabel) => {
+    const btn = [...document.querySelectorAll(".header-actions button")].find(
+      (b) => b.getAttribute("aria-label") === ariaLabel,
+    );
+    if (!btn) return null;
+    const source = btn.querySelector("svg") ?? btn;
+    const surfaceColor = surface(btn);
+    return ratio(over(parse(style(source, "color")), surfaceColor), surfaceColor);
+  };
+  return {
+    body: ratio(parse(style(body, "color")), bodyBg),
+    muted: ratio(
+      over(parse(style(muted, "color")), mutedSurface),
+      mutedSurface,
+    ),
+    primaryButton: ratio(
+      over(parse(style(button, "color")), buttonBg),
+      buttonBg,
+    ),
+    border: ratio(
+      over(parse(style(header, "borderBottomColor")), headerSurface),
+      headerSurface,
+    ),
+    icons: {
+      refresh: iconRatio("Refresh connection"),
+      inspector: iconRatio("Toggle session details"),
+    },
+  };
+}
+
+function assertContrast(theme, measured) {
+  report.contrast = report.contrast ?? {};
+  const textThreshold = 4.5;
+  const uiThreshold = 3.0;
+  const record = (name, ratio, threshold, gate) => {
+    const pass = ratio >= threshold;
+    const tag = `${theme}-${name}(${ratio.toFixed(2)}:1,AA-${pass ? "pass" : "fail"}${gate ? "" : ",recorded"})`;
+    report.checks.push(`contrast-${tag}`);
+    if (gate) {
+      assert.ok(
+        pass,
+        `${theme} ${name}: contrast ${ratio.toFixed(2)}:1 below AA ${threshold}:1`,
+      );
+    }
+    return `${ratio.toFixed(2)}:1 ${pass ? "AA-pass" : "AA-fail"}`;
+  };
+  report.contrast[theme] = {
+    bodyText: record("body-text", measured.body, textThreshold, true),
+    mutedText: record("muted-text", measured.muted, textThreshold, true),
+    primaryButton: record(
+      "primary-button-text",
+      measured.primaryButton,
+      textThreshold,
+      true,
+    ),
+    // Hairline divider vs canvas: decorative boundary (no information is
+    // conveyed solely by the border), so the WCAG 3.0 non-text verdict is
+    // recorded and reported, not gated - the report owns the conclusion.
+    border: record("border-ui", measured.border, uiThreshold, false),
+  };
+  // Header icons, settled dark only: the glyphs are the visible meaning
+  // for sighted low-vision users, so aria-label/tooltip duplication does NOT
+  // waive them - meaningful header glyphs gate at non-text 3.0 (ROOT).
+  if (theme === "dark" && measured.icons) {
+    const icons = {};
+    for (const [name, value] of Object.entries(measured.icons)) {
+      if (value === null) continue;
+      icons[name] = record(`icon-${name}`, value, uiThreshold, true);
+    }
+    report.contrast[theme].icons = icons;
+  }
+}
+
 async function pageUsable() {
   if (!page) return false;
   try {
@@ -495,7 +675,37 @@ try {
   report.checks.push("inspector-toggle-works-below-1101");
   await assertLayout("1000-inspector-closed", { withTargets: false });
 
-  // Static CSS evidence only; rendered Files acceptance remains a separate gate.
+  // 7. Contrast evidence: settled light and settled dark only (explicit
+  // theme via the settings envelope + reload + token-stable wait). Text
+  // surfaces gate on AA 4.5:1; the border hairline verdict is recorded for
+  // the report, not gated (decorative divider, see contrast-report.md).
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  for (const theme of ["light", "dark"]) {
+    await setSettledTheme(theme);
+    await page.waitForFunction(measureContrast, { timeout: 15000 });
+    const measured = await page.evaluate(measureContrast);
+    assert.ok(measured, `${theme}: contrast surfaces not measurable`);
+    await page.screenshot({
+      path: path.join(shots, `contrast-${theme}.png`),
+    });
+    assertContrast(theme, measured);
+  }
+
+  // 8. Files-split CSS static verification (Follow-up B V2 half + the
+  // ROOT-approved extras: editor surface, explorer rows, notice overlays).
+  // HONESTY: files.v1 is withheld in every available environment, so the
+  // Files panel cannot mount over CDP here and NO rendered-files visual
+  // claim is possible from this probe; this section therefore verifies the
+  // BUILT stylesheet statically (selector + token presence). Visual
+  // acceptance of the rendered split stays with the integrated CDP lane once
+  // files.v1 ships in a real environment - this section must be replaced by
+  // rendered assertions there, not treated as the visual proof. The 760px
+  // narrow-viewport gate (stacked fallback usable, editor usable at 760x600)
+  // is rendered-only for the same reason; its static prerequisite asserted
+  // here is presence of the @media (max-width: 1100px) stacked-fallback rule
+  // (760 falls within that breakpoint) plus overlay-free editor rules. Row
+  // math for the record: at 1440 the fixed 240px tree beside the 240px
+  // sidebar leaves 960px for the editor before any V3 drag-resize.
   const cssAssets = path.join(appDir, "out", "renderer", "assets");
   const cssFile = (await readdir(cssAssets)).find((f) => f.endsWith(".css"));
   assert.ok(cssFile, "built renderer CSS not found - run electron-vite build");
@@ -508,9 +718,19 @@ try {
     ["editor-surface-token-light", "--editor-surface: #fff;", 2],
     ["files-panel-split", ".files-panel {", 2],
     ["workspace-explorer-tree", ".workspace-explorer {", 2],
+    [
+      "files-panel-stacked-media",
+      "@media (max-width: 1100px) {",
+      1,
+    ],
     ["editor-pane-canvas", ".editor-pane {", 1],
     ["editor-pane-header", ".editor-pane-header {", 2],
     ["tree-fixed-240px", "width: 240px;", 1],
+    ["editor-surface-textarea", ".editor-pane-surface {", 1],
+    ["editor-surface-no-resize", "resize: none", 1],
+    ["explorer-row", ".workspace-explorer-row {", 1],
+    ["explorer-row-selected", ".workspace-explorer-row[data-current", 1],
+    ["notice-overlay", ".files-panel-truncated", 1],
     // color-mix borders ship as progressive enhancement: var() fallback plus
     // an @supports-wrapped color-mix override per the build pipeline.
     ["color-mix-border", "color-mix(in srgb, var(--border) 72%, transparent)", 3],
