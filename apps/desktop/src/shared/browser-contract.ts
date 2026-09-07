@@ -49,6 +49,50 @@ export type BrowserTabState = {
   canGoForward: boolean;
   /** Honest failure text when the last navigation failed or was blocked. */
   error: string | null;
+  /**
+   * Additive (R11-B chrome): structured load-failure detail behind `error`.
+   * `kind` mirrors the host verdict — `blocked` for policy refusals, `failed`
+   * for guest load errors. Absent on older hosts; the pane falls back to
+   * parsing `error`.
+   */
+  loadError?: { kind: "blocked" | "failed"; code: number | null; description: string; url: string } | null;
+  /**
+   * Additive (R11-B chrome): true once a page committed in this tab. Fresh
+   * tabs and failed navigations show DOM states; committed pages stay
+   * visible under the guest while reloading.
+   */
+  committed?: boolean;
+  /** Additive (R11-B chrome): page zoom as a percentage (100 is default). */
+  zoomPercent?: number;
+};
+
+/** Additive (R11-B chrome): one guest find-in-page request. */
+export const browserFindInPageSchema = z.object({
+  tabId,
+  query: z.string().min(1).max(2_048),
+  forward: z.boolean().optional(),
+  findNext: z.boolean().optional(),
+});
+export type BrowserFindInPageInput = z.infer<typeof browserFindInPageSchema>;
+
+/** Additive (R11-B chrome): guest `found-in-page` result forwarded to the pane. */
+export type BrowserFindResultEvent = {
+  tabId: string;
+  requestId: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  finalUpdate: boolean;
+};
+
+/** Additive (R11-B chrome): guest `context-menu` params forwarded to the pane. */
+export type BrowserContextMenuEvent = {
+  tabId: string;
+  /** Renderer-window CSS px of the click (main offsets the guest coords). */
+  x: number;
+  y: number;
+  linkUrl: string;
+  pageUrl: string;
+  selectionText: string;
 };
 
 export type BrowserStateEvent = {
@@ -76,6 +120,22 @@ export interface BrowserBridge {
   setBounds(input: BrowserSetBoundsInput): Promise<Result<null>>;
   snapshot(input: BrowserTabRef): Promise<Result<BrowserSnapshot>>;
   onState(listener: (event: BrowserStateEvent) => void): () => void;
+  /** Additive (R11-B chrome): reload ignoring the cache (right-click menu). */
+  hardReload(input: BrowserTabRef): Promise<Result<BrowserTabState>>;
+  /** Additive (R11-B chrome): page zoom steps around the 100 default. */
+  zoomIn(input: BrowserTabRef): Promise<Result<BrowserTabState>>;
+  zoomOut(input: BrowserTabRef): Promise<Result<BrowserTabState>>;
+  zoomReset(input: BrowserTabRef): Promise<Result<BrowserTabState>>;
+  /** Additive (R11-B chrome): guest findInPage; matches arrive via onFindResult. */
+  findInPage(input: BrowserFindInPageInput): Promise<Result<null>>;
+  /** Additive (R11-B chrome): clears the guest find selection. */
+  stopFind(input: BrowserTabRef): Promise<Result<null>>;
+  /** Additive (R11-B chrome): opens the guest devtools (context menu). */
+  openDevTools(input: BrowserTabRef): Promise<Result<null>>;
+  /** Additive (R11-B chrome): guest found-in-page results for the find bar. */
+  onFindResult(listener: (event: BrowserFindResultEvent) => void): () => void;
+  /** Additive (R11-B chrome): guest context-menu requests for the page menu. */
+  onContextMenu(listener: (event: BrowserContextMenuEvent) => void): () => void;
 }
 
 /**
@@ -169,4 +229,13 @@ export const browserIpcChannels = {
   setBounds: "drogon:browserSetBounds",
   snapshot: "drogon:browserSnapshot",
   state: "drogon:browserState",
+  hardReload: "drogon:browserHardReload",
+  zoomIn: "drogon:browserZoomIn",
+  zoomOut: "drogon:browserZoomOut",
+  zoomReset: "drogon:browserZoomReset",
+  findInPage: "drogon:browserFindInPage",
+  stopFind: "drogon:browserStopFind",
+  openDevTools: "drogon:browserOpenDevTools",
+  findResult: "drogon:browserFindResult",
+  contextMenu: "drogon:browserContextMenu",
 } as const;

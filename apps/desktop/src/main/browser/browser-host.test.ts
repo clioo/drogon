@@ -49,6 +49,9 @@ function fakeContents(session?: GuestSessionLike): GuestContentsLike & {
   listeners: Map<string, (...args: never[]) => void>;
   loaded: string[];
   windowOpenHandler: ((details: { url: string }) => { action: "deny" }) | null;
+  zoomLevel: number;
+  found: { text: string; options?: unknown }[];
+  devtoolsOpened: number;
 } {
   const contents = {
     listeners: new Map<string, (...args: never[]) => void>(),
@@ -56,12 +59,16 @@ function fakeContents(session?: GuestSessionLike): GuestContentsLike & {
     windowOpenHandler: null as
       | ((details: { url: string }) => { action: "deny" })
       | null,
+    zoomLevel: 0,
+    found: [] as { text: string; options?: unknown }[],
+    devtoolsOpened: 0,
     session: session ?? fakeSession(),
     loadURL(url: string) { this.loaded.push(url); },
     stop() {},
     goBack() {},
     goForward() {},
     reload() {},
+    reloadIgnoringCache() {},
     getURL: () => "https://example.test/",
     getTitle: () => "Example",
     executeJavaScript: async () => ({ title: "Example", text: "hello" }),
@@ -72,6 +79,14 @@ function fakeContents(session?: GuestSessionLike): GuestContentsLike & {
     on(event: string, listener: (...args: never[]) => void) {
       this.listeners.set(event, listener);
     },
+    getZoomLevel() { return this.zoomLevel; },
+    setZoomLevel(level: number) { this.zoomLevel = level; },
+    findInPage(text: string, options?: { forward?: boolean; findNext?: boolean }) {
+      this.found.push({ text, options });
+      return this.found.length;
+    },
+    stopFindInPage() {},
+    openDevTools() { this.devtoolsOpened += 1; },
   };
   return contents;
 }

@@ -2,6 +2,8 @@ import { ipcRenderer } from "electron";
 import {
   browserIpcChannels,
   type BrowserBridge,
+  type BrowserContextMenuEvent,
+  type BrowserFindResultEvent,
   type BrowserStateEvent,
 } from "../shared/browser-contract";
 
@@ -20,5 +22,26 @@ export const browser: BrowserBridge = {
     const wrapped = (_event: unknown, state: BrowserStateEvent) => listener(state);
     ipcRenderer.on(browserIpcChannels.state, wrapped);
     return () => ipcRenderer.removeListener(browserIpcChannels.state, wrapped);
+  },
+  // Additive (R11-B chrome): reload/zoom/find/devtools plus the guest
+  // find-result and context-menu events the pane chrome subscribes to.
+  hardReload: (value) => ipcRenderer.invoke(browserIpcChannels.hardReload, value),
+  zoomIn: (value) => ipcRenderer.invoke(browserIpcChannels.zoomIn, value),
+  zoomOut: (value) => ipcRenderer.invoke(browserIpcChannels.zoomOut, value),
+  zoomReset: (value) => ipcRenderer.invoke(browserIpcChannels.zoomReset, value),
+  findInPage: (value) => ipcRenderer.invoke(browserIpcChannels.findInPage, value),
+  stopFind: (value) => ipcRenderer.invoke(browserIpcChannels.stopFind, value),
+  openDevTools: (value) => ipcRenderer.invoke(browserIpcChannels.openDevTools, value),
+  onFindResult: (listener: (event: BrowserFindResultEvent) => void) => {
+    const wrapped = (_event: unknown, result: BrowserFindResultEvent) =>
+      listener(result);
+    ipcRenderer.on(browserIpcChannels.findResult, wrapped);
+    return () => ipcRenderer.removeListener(browserIpcChannels.findResult, wrapped);
+  },
+  onContextMenu: (listener: (event: BrowserContextMenuEvent) => void) => {
+    const wrapped = (_event: unknown, menu: BrowserContextMenuEvent) =>
+      listener(menu);
+    ipcRenderer.on(browserIpcChannels.contextMenu, wrapped);
+    return () => ipcRenderer.removeListener(browserIpcChannels.contextMenu, wrapped);
   },
 };

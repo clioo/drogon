@@ -17,6 +17,18 @@ export type HostTabRecord = {
   canGoForward: boolean;
   /** True once a page committed in this tab; fresh tabs show DOM states. */
   committed: boolean;
+  /** Additive (R11-B chrome): page zoom percent, 100 is the default. */
+  zoomPercent: number;
+  /**
+   * Additive (R11-B chrome): structured detail behind `message` for the
+   * error/blocked phases. Cleared on every new request and on commit.
+   */
+  loadError: {
+    kind: "blocked" | "failed";
+    code: number | null;
+    description: string;
+    url: string;
+  } | null;
 };
 
 export type BrowserHostSnapshot = {
@@ -30,10 +42,21 @@ export type HostAction =
   | { type: "active-changed"; tabId: string | null }
   | { type: "load-started"; tabId: string; url: string }
   | { type: "load-stopped"; tabId: string; url: string }
-  | { type: "load-failed"; tabId: string; message: string }
+  | {
+      type: "load-failed";
+      tabId: string;
+      message: string;
+      loadError?: {
+        kind: "blocked" | "failed";
+        code: number | null;
+        description: string;
+        url: string;
+      };
+    }
   | { type: "load-blocked"; tabId: string; url: string; reason: string }
   | { type: "title-changed"; tabId: string; title: string }
-  | { type: "history-changed"; tabId: string; canGoBack: boolean; canGoForward: boolean };
+  | { type: "history-changed"; tabId: string; canGoBack: boolean; canGoForward: boolean }
+  | { type: "zoom-changed"; tabId: string; zoomPercent: number };
 
 export function initialHostSnapshot(): BrowserHostSnapshot {
   return { tabs: [], activeTabId: null };
@@ -50,6 +73,10 @@ function toPublic(tab: HostTabRecord): BrowserTabState {
     canGoForward: tab.canGoForward,
     error:
       tab.phase === "error" || tab.phase === "blocked" ? tab.message : null,
+    loadError:
+      tab.phase === "error" || tab.phase === "blocked" ? tab.loadError : null,
+    committed: tab.committed,
+    zoomPercent: tab.zoomPercent,
   };
 }
 
@@ -79,6 +106,8 @@ export function applyHostAction(
         canGoBack: false,
         canGoForward: false,
         committed: false,
+        zoomPercent: 100,
+        loadError: null,
       };
       return {
         tabs: [...snapshot.tabs, tab],
@@ -104,14 +133,21 @@ export function applyHostAction(
     case "load-failed":
     case "load-blocked":
     case "title-changed":
-    case "history-changed": {
+    case "history-changed":
+    case "zoom-changed": {
       const index = snapshot.tabs.findIndex((tab) => tab.tabId === action.tabId);
       if (index < 0) return snapshot;
       const current = snapshot.tabs[index];
       let next = current;
       switch (action.type) {
         case "load-started":
-          next = { ...current, phase: "loading", url: action.url, message: null };
+          next = {
+            ...current,
+            phase: "loading",
+            url: action.url,
+            message: null,
+            loadError: null,
+          };
           break;
         case "load-stopped":
           // A stop/finish for a tab stuck in blocked/error keeps the honest
@@ -123,12 +159,18 @@ export function applyHostAction(
                   phase: "ready",
                   url: action.url,
                   message: null,
+                  loadError: null,
                   committed: true,
                 }
               : current;
           break;
         case "load-failed":
-          next = { ...current, phase: "error", message: action.message };
+          next = {
+            ...current,
+            phase: "error",
+            message: action.message,
+            loadError: action.loadError ?? current.loadError,
+          };
           break;
         case "load-blocked":
           next = {
@@ -136,6 +178,12 @@ export function applyHostAction(
             phase: "blocked",
             url: action.url,
             message: action.reason,
+            loadError: {
+              kind: "blocked",
+              code: null,
+              description: action.reason,
+              url: action.url,
+            },
           };
           break;
         case "title-changed":
@@ -147,6 +195,9 @@ export function applyHostAction(
             canGoBack: action.canGoBack,
             canGoForward: action.canGoForward,
           };
+          break;
+        case "zoom-changed":
+          next = { ...current, zoomPercent: action.zoomPercent };
           break;
       }
       if (next === current) return snapshot;
