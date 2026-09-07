@@ -113,6 +113,34 @@ describe("draft store lifecycle (unmount/remount survival)", () => {
   });
 });
 
+describe("per-edit recording", () => {
+  test("successive recordDraft calls (one per keystroke) keep the latest draft dirty", () => {
+    const store = createFilesDraftStore();
+    store.confirmRead(SCOPE_A, FILE_A, "saved body");
+    // The panel's onDraftChange fires recordDraft per edit:
+    store.recordDraft(SCOPE_A, FILE_A, "d");
+    store.recordDraft(SCOPE_A, FILE_A, "dr");
+    store.recordDraft(SCOPE_A, FILE_A, "draft without save");
+    expect(store.draftOf(SCOPE_A, FILE_A)).toBe("draft without save");
+    expect(store.isDirty(SCOPE_A, FILE_A)).toBe(true);
+    expect(store.savedContentOf(SCOPE_A, FILE_A)).toBe("saved body");
+    // Type-without-save then "unmount": the store (descriptor lifetime)
+    // still holds the latest draft, and a remount consult returns it.
+    expect(
+      editorContentFor(store, SCOPE_A, FILE_A, "service body"),
+    ).toBe("draft without save");
+  });
+
+  test("per-edit recording under a different scope never touches the other scope's draft", () => {
+    const store = createFilesDraftStore();
+    store.confirmRead(SCOPE_A, FILE_A, "A saved");
+    store.recordDraft(SCOPE_A, FILE_A, "A draft");
+    store.recordDraft(SCOPE_B, FILE_A, "B typing");
+    expect(store.draftOf(SCOPE_A, FILE_A)).toBe("A draft");
+    expect(store.draftOf(SCOPE_B, FILE_A)).toBe("B typing");
+  });
+});
+
 describe("availability: memory-only, never touches the bridge", () => {
   test("the store takes no bridge and performs no file calls by construction", () => {
     // createFilesDraftStore() accepts no bridge; these operations are pure

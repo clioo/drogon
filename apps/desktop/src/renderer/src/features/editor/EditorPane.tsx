@@ -34,11 +34,18 @@ export interface EditorPaneProps {
   allowEmptySave?: boolean;
   /**
    * Truthful draft restoration (descriptor-owned store -> panel): the
-   * retained draft PLUS the retained lastSaved, consumed once (at mount
-   * for the initially open file) so a restored dirty draft presents as
-   * DIRTY from the first paint — never as a clean baseline.
+   * retained draft PLUS the retained lastSaved, consumed once per file
+   * (seeded at first paint for the initially open file, else seeded when
+   * that file is selected without local state) so a restored dirty draft
+   * presents as DIRTY from the first paint — never as a clean baseline.
    */
   restoredDraft?: { draft: string; lastSaved: string | null } | null;
+  /**
+   * Per-edit draft hook: fired on every textarea change with the current
+   * draft so the panel can record it into the descriptor-owned store
+   * immediately — typing without saving must survive unmount/remount.
+   */
+  onDraftChange?: (draft: string) => void;
 }
 
 /** Per-file retained editing state; survives switching between files. */
@@ -456,6 +463,22 @@ export async function runSave(input: {
   }
 }
 
+/**
+ * Whether a restored draft may still be seeded for this scope+path: only
+ * when the editor holds NO local entry for the exact scoped key yet. This
+ * makes restore seeding per-file and one-shot without ever overwriting
+ * already-edited local state, and without a global consumed flag that a
+ * null initial path would permanently disable.
+ */
+export function shouldSeedRestore(
+  state: EditorState,
+  scope: EditorScope,
+  path: string | null,
+): boolean {
+  if (path === null) return false;
+  return state.files[scopedFileKey(scope, path)] === undefined;
+}
+
 export function EditorPane({
   scope,
   path,
@@ -465,10 +488,10 @@ export function EditorPane({
   onSave,
   allowEmptySave = false,
   restoredDraft = null,
+  onDraftChange,
 }: EditorPaneProps) {
-  const restoredAtInit =
-    path !== null && restoredDraft !== undefined && restoredDraft !== null;
-  const restoredConsumed = useRef(restoredAtInit);
+  const restoredRef = useRef(restoredDraft);
+  restoredRef.current = restoredDraft;
   const [state, dispatch] = useReducer(
     applyEditorAction,
     { scope, path, content, restoredDraft },
@@ -502,19 +525,23 @@ export function EditorPane({
     },
   );
   useEffect(() => {
-    // Consume the restored draft exactly once (at mount for the initially
-    // open file, if init did not already use it); later navigation relies
-    // on the editor's own scope-keyed retention.
-    if (path !== null && restoredDraft && !restoredConsumed.current) {
+    // Restore seeding is per-file and idempotent: seed only when the editor
+    // holds no local entry for this exact scoped key (never overwriting
+    // already-edited local state), tracked by presence in the files map —
+    // so an initial null path does not disable later selections.
+    if (
+      path !== null &&
+      restoredRef.current &&
+      shouldSeedRestore(state, scope, path)
+    ) {
       dispatch({
         type: "draft-restored",
         scope,
         path,
-        draft: restoredDraft.draft,
-        lastSaved: restoredDraft.lastSaved,
+        draft: restoredRef.current.draft,
+        lastSaved: restoredRef.current.lastSaved,
       });
     }
-    restoredConsumed.current = true;
     dispatch({ type: "file-opened", scope, path, content });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, path, content]);
@@ -640,9 +667,13 @@ export function EditorPane({
         aria-label={`Contents of ${path}`}
         spellCheck={false}
         value={state.draft}
-        onChange={(event) =>
-          dispatch({ type: "edited", value: event.target.value })
-        }
+        onChange={(event) => {
+          const value = event.target.value;
+          dispatch({ type: "edited", value });
+          // Per-edit recording: every keystroke reaches the descriptor-
+          // owned store so typing without saving survives unmount.
+          onDraftChange?.(value);
+        }}
       />
     </section>
   );

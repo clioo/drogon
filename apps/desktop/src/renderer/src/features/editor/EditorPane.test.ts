@@ -11,6 +11,7 @@ import {
   runSave,
   saveAdmission,
   scopedFileKey,
+  shouldSeedRestore,
   type EditorAction,
   type EditorPaneProps,
   type EditorScope,
@@ -790,6 +791,54 @@ describe("restoredDraft truthfulness", () => {
     expect(state.draft).toBe("my retained draft");
     expect(state.lastSaved).toBe("saved body");
     expect(isDirty(state)).toBe(true);
+  });
+});
+
+describe("restore seeding (per-file, initial-null path)", () => {
+  test("shouldSeedRestore: null path never seeds; unknown key seeds; existing entry never re-seeds", () => {
+    const state = opened("body", FILE_A, SCOPE_A);
+    expect(shouldSeedRestore(state, SCOPE_A, null)).toBe(false);
+    expect(shouldSeedRestore(state, SCOPE_A, FILE_B)).toBe(true);
+    expect(shouldSeedRestore(state, SCOPE_A, FILE_A)).toBe(false);
+    expect(shouldSeedRestore(state, SCOPE_B, FILE_A)).toBe(true);
+  });
+
+  test("initial-null mount then selecting a previously-dirty file seeds its restored draft", () => {
+    // Effect logic mirror: the panel mounts with no selection (path null),
+    // so nothing seeds and the gate is NOT globally disabled…
+    let state = initialEditorState();
+    expect(shouldSeedRestore(state, SCOPE_A, FILE_A)).toBe(true); // gate open
+    // …the user then selects the previously-dirty file (restoredDraft
+    // arrives from the descriptor-owned store):
+    const key = KEY_A;
+    if (shouldSeedRestore(state, SCOPE_A, FILE_A)) {
+      state = applyEditorAction(state, {
+        type: "draft-restored",
+        scope: SCOPE_A,
+        path: FILE_A,
+        draft: "retained work",
+        lastSaved: "saved body",
+      });
+    }
+    // The same effect then dispatches the selection (file-opened):
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "service read",
+    });
+    expect(state.draft).toBe("retained work");
+    expect(state.lastSaved).toBe("saved body");
+    expect(isDirty(state)).toBe(true);
+    // A later effect run must not re-seed (entry now exists locally):
+    expect(shouldSeedRestore(state, SCOPE_A, FILE_A)).toBe(false);
+    void key;
+  });
+
+  test("seeding never overwrites already-edited local state for the same file", () => {
+    let state = opened("saved body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "local edits" });
+    expect(shouldSeedRestore(state, SCOPE_A, FILE_A)).toBe(false);
   });
 });
 
