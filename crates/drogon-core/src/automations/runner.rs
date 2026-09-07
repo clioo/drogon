@@ -522,10 +522,15 @@ struct ObservationUpdate {
     terminal_session_id: Option<String>,
     session_incarnation: Option<String>,
     exit_code: Option<i64>,
-    /// The wall-clock time of *this* observation attempt (the `session.read`
-    /// call, successful or not) -- `None` for [`RunnerOutcome::DispatchFailed`],
-    /// which never reached an observation at all.
+    /// The wall-clock time of *this* observation attempt -- the ACTUAL
+    /// `session.read` call (successful or not), supplied by the caller via
+    /// [`record_run_outcome`]'s own `observed_at` parameter, distinct from
+    /// `plan.attempt_at`/`dispatched_at`. `None` for
+    /// [`RunnerOutcome::DispatchFailed`], which never reached an observation
+    /// at all.
     observed_at: Option<f64>,
+    /// The wall-clock time `harness.start` was dispatched -- always
+    /// `plan.attempt_at`, never the caller's `observed_at`.
     dispatched_at: Option<f64>,
 }
 
@@ -535,7 +540,7 @@ impl ObservationUpdate {
     /// was admitted and its terminal state is simply not yet proven, never
     /// synthesized as failed. A failed `harness.start` carries no session
     /// linkage at all, since none was ever admitted.
-    fn from_outcome(outcome: &RunnerOutcome, attempt_at: f64) -> Self {
+    fn from_outcome(outcome: &RunnerOutcome, dispatched_at: f64, observed_at: f64) -> Self {
         match outcome {
             RunnerOutcome::Observed {
                 session_id,
@@ -553,8 +558,8 @@ impl ObservationUpdate {
                     terminal_session_id: Some(session_id.clone()),
                     session_incarnation: Some(incarnation.clone()),
                     exit_code: *exit_code,
-                    observed_at: Some(attempt_at),
-                    dispatched_at: Some(attempt_at),
+                    observed_at: Some(observed_at),
+                    dispatched_at: Some(dispatched_at),
                 }
             }
             RunnerOutcome::ObservationFailed {
@@ -567,8 +572,8 @@ impl ObservationUpdate {
                 terminal_session_id: Some(session_id.clone()),
                 session_incarnation: Some(incarnation.clone()),
                 exit_code: None,
-                observed_at: Some(attempt_at),
-                dispatched_at: Some(attempt_at),
+                observed_at: Some(observed_at),
+                dispatched_at: Some(dispatched_at),
             },
             RunnerOutcome::DispatchFailed(error) => Self {
                 status: AutomationRunStatus::DispatchFailed,
@@ -607,10 +612,11 @@ fn upsert_linked_automation_run(
     automation_run_id: &str,
     plan: &RunPlan,
     outcome: &RunnerOutcome,
+    observed_at: f64,
 ) -> Result<AutomationRun, automations_storage::StorageError> {
     let tx = automations_storage::begin_immediate(conn)?;
     let existing = automations_storage::get_automation_run(&tx, automation_run_id)?;
-    let observation = ObservationUpdate::from_outcome(outcome, plan.attempt_at);
+    let observation = ObservationUpdate::from_outcome(outcome, plan.attempt_at, observed_at);
 
     let result = match existing {
         None => {
@@ -678,7 +684,10 @@ fn upsert_linked_automation_run(
                         .or(existing.session_incarnation.clone()),
                     exit_code: observation.exit_code.or(existing.exit_code),
                     observed_at: observation.observed_at.or(existing.observed_at),
-                    dispatched_at: observation.dispatched_at.or(existing.dispatched_at),
+                    // The FIRST dispatch time is frozen forever: existing
+                    // wins whenever it is already `Some`, never rewritten by
+                    // a later replay's own attempt time.
+                    dispatched_at: existing.dispatched_at.or(observation.dispatched_at),
                     ..existing
                 };
                 automations_storage::upsert_automation_run(&tx, &merged)?;
@@ -690,37 +699,70 @@ fn upsert_linked_automation_run(
     Ok(result)
 }
 
+/// Projects the durable `ResponsibilityRun.host_observation`/`ended_at`
+/// pair from the ACCEPTED `AutomationRun` row [`upsert_linked_automation_run`]
+/// just returned -- never straight from the raw incoming `outcome`. That
+/// row's own terminal guard already refuses to regress a proven
+/// `Completed` (real exit observed) with a later stale/unverifiable
+/// replay for the same incarnation; this function only ever reads its
+/// result, so a stored `Completed` row can never project back to `Live`
+/// (or to an `ended_at`-less `Unverifiable`) here either -- both stay
+/// `Exited`, with `ended_at` taken from that same accepted row's
+/// `observed_at`, regardless of what the current call's own `outcome`
+/// happened to report. `DispatchFailed` never admitted a session, so its
+/// `ended_at` is the row's own frozen `created_at`, not this call's
+/// `plan.attempt_at`. Only when the accepted row is still non-terminal
+/// (`Dispatched`) does the current `outcome`'s own verdict decide
+/// `Live`/`Exited`/`Unverifiable`.
+fn responsibility_projection(
+    automation_run: &AutomationRun,
+    outcome: &RunnerOutcome,
+) -> (Option<HostObservation>, Option<f64>) {
+    match automation_run.status {
+        AutomationRunStatus::Completed => {
+            (Some(HostObservation::Exited), automation_run.observed_at)
+        }
+        AutomationRunStatus::DispatchFailed => (None, Some(automation_run.created_at)),
+        _ => match outcome {
+            RunnerOutcome::Observed { verdict, .. } => match verdict.as_str() {
+                "live" => (Some(HostObservation::Live), None),
+                "exited" => (Some(HostObservation::Exited), automation_run.observed_at),
+                _ => (Some(HostObservation::Unverifiable), None),
+            },
+            RunnerOutcome::ObservationFailed { .. } => (Some(HostObservation::Unverifiable), None),
+            RunnerOutcome::DispatchFailed(_) => (None, Some(automation_run.created_at)),
+        },
+    }
+}
+
 /// Phase 3: durable record via existing responsibility-run history storage,
 /// linked to a durably upserted `AutomationRun` at the stable id
-/// `ar:{request_id}` (see [`upsert_linked_automation_run`]). `"live"`/
-/// `"exited"` map to their `HostObservation`; anything else reported, or a
-/// failed poll after a real start, is `Unverifiable` -- never a synthesized
-/// guess. A failed `harness.start` has no observation at all, since no
-/// session was ever admitted.
+/// `ar:{request_id}` (see [`upsert_linked_automation_run`]).
+/// `host_observation`/`ended_at` are derived from that ACCEPTED row by
+/// [`responsibility_projection`], never fabricated from the raw `outcome`
+/// directly -- see its doc for the terminal-guard rationale. `observed_at`
+/// is the ACTUAL wall-clock time of this `session.read` (or failed-poll)
+/// call, supplied by the caller and distinct from `plan.attempt_at` (the
+/// dispatch attempt time); it is only ever used when this call's
+/// observation is the one accepted.
 pub fn record_run_outcome(
     conn: &Connection,
     plan: &RunPlan,
     outcome: &RunnerOutcome,
+    observed_at: f64,
 ) -> Result<(), bots_storage::StorageError> {
-    let (host_observation, ended_at) = match outcome {
-        RunnerOutcome::Observed { verdict, .. } => match verdict.as_str() {
-            "live" => (Some(HostObservation::Live), None),
-            "exited" => (Some(HostObservation::Exited), Some(plan.attempt_at)),
-            _ => (Some(HostObservation::Unverifiable), None),
-        },
-        RunnerOutcome::ObservationFailed { .. } => (Some(HostObservation::Unverifiable), None),
-        RunnerOutcome::DispatchFailed(_) => (None, Some(plan.attempt_at)),
-    };
-
     let automation_run_id = format!("ar:{}", plan.request_id);
-    let automation_run = upsert_linked_automation_run(conn, &automation_run_id, plan, outcome)?;
+    let automation_run =
+        upsert_linked_automation_run(conn, &automation_run_id, plan, outcome, observed_at)?;
+
+    let (host_observation, ended_at) = responsibility_projection(&automation_run, outcome);
 
     let run = ResponsibilityRun {
         id: plan.request_id.clone(),
         bot_id: plan.bot_id.clone(),
         responsibility_id: plan.responsibility_id.clone(),
         automation_id: Some(plan.automation_id.clone()),
-        automation_run_id: Some(automation_run.id),
+        automation_run_id: Some(automation_run.id.clone()),
         started_at: plan.attempt_at,
         ended_at,
         recipe: None,
