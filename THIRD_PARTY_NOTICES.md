@@ -100,6 +100,13 @@ and `use-bots-page-controller.ts`; the native responsibility RPCs in
 revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
 keeps the MIT notice in its header comment.
 
+## Bundled fonts
+
+Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
+
+- `Geist-Variable.woff2` — Geist, Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font). License: `apps/desktop/src/renderer/src/assets/fonts/Geist-OFL.txt`.
+- `SymbolsNerdFontMono-Regular.woff2` — Symbols Nerd Font Mono, Copyright (c) 2014, Ryan L McIntyre (https://ryanlmcintyre.com). License: `apps/desktop/src/renderer/src/assets/fonts/SymbolsNerdFontMono-OFL.txt`.
+
 ## Packaged dependencies
 
-Dependency versions are fixed in Cargo.lock and pnpm-lock.yaml. Their licenses must accompany redistributed artifacts. Geist is consumed from `@fontsource-variable/geist` with its bundled SIL Open Font License. No Game of Thrones artwork is redistributed in this foundation.
+Dependency versions are fixed in Cargo.lock and pnpm-lock.yaml. Their licenses must accompany redistributed artifacts. Geist is bundled directly as `Geist-Variable.woff2` under the SIL Open Font License (see "Bundled fonts" above). No Game of Thrones artwork is redistributed in this foundation.
