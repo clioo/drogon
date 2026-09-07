@@ -302,6 +302,12 @@ export function App() {
   // static contract set (files.v1 declared here); mounting additionally
   // requires the LIVE service to advertise it, so a withheld capability
   // degrades to terminal UI instead of a half-mounted panel.
+  // Mount lifetime: the panel stays mounted (hidden, state intact) across
+  // route switches and transient refresh loss so unsaved editor drafts are
+  // never discarded by navigation. It unmounts only on settled
+  // unavailability, workspace loss, or explicit terminal routing — never on
+  // busy/transient status gaps, and never issues bridge calls while hidden
+  // behind a withheld capability (it is simply not rendered then).
   const [route, setRoute] = useState<string | null>(null);
   const liveCapabilities = status?.capabilities ?? [];
   const panelRegistry = useMemo(
@@ -315,13 +321,50 @@ export function App() {
       ),
     [],
   );
-  const filesDescriptor: PanelDescriptor | null =
-    route === FILES_ROUTE_ID && current && status &&
+  const filesAvailable =
     isFilesAvailable(liveCapabilities) &&
-    checkAvailability(resolveRoute(panelRegistry, route), liveCapabilities) ===
-      "available"
-      ? resolveRoute(panelRegistry, route)
-      : null;
+    checkAvailability(
+      resolveRoute(panelRegistry, FILES_ROUTE_ID),
+      liveCapabilities,
+    ) === "available";
+  const lastPropsRef = useRef<{
+    workspace: Workspace;
+    status: Status;
+  } | null>(null);
+  if (current && status) lastPropsRef.current = { workspace: current, status };
+  // Keep-alive: once mounted while available, the panel survives route
+  // switches AND transient refresh gaps (drafts live in mount state).
+  // Unmount happens only on settled capability loss or workspace loss.
+  // Hidden-but-available scope reloads are normal available-capability
+  // behavior, never withheld-capability calls (unmounted then).
+  const filesAliveRef = useRef(false);
+  // First mount needs explicit user routing; keep-alive covers later
+  // switches and transients. Never auto-mounts unopened panels.
+  if (route === FILES_ROUTE_ID && filesAvailable && current)
+    filesAliveRef.current = true;
+  else if (
+    status &&
+    !busy &&
+    !loadingSessions &&
+    (!current || !isFilesAvailable(liveCapabilities))
+  )
+    filesAliveRef.current = false;
+  const filesAlive = filesAliveRef.current;
+  const filesProps = current && status ? { workspace: current, status } : lastPropsRef.current;
+  const filesSectionRef = useRef<HTMLElement>(null);
+  const prevRouteRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Real focus, only on explicit user navigation to Files: background
+    // refreshes and re-renders must never steal focus.
+    if (route === FILES_ROUTE_ID && prevRouteRef.current !== FILES_ROUTE_ID) {
+      const target = filesSectionRef.current;
+      if (target) {
+        applyPanelFocus(resolveRoute(panelRegistry, FILES_ROUTE_ID), target);
+        target.focus();
+      }
+    }
+    prevRouteRef.current = route;
+  }, [route, panelRegistry]);
   const checked = <T,>(value: Result<T>): T => {
     if (!value.ok) throw new Error(value.error.message);
     return value.result;
@@ -734,16 +777,14 @@ export function App() {
             </div>
           )}
           <div className="session-layout">
-            {filesDescriptor && current && status ? (
-              <section className="terminal-column" aria-label="Files">
-                <MountedPanel
-                  descriptor={filesDescriptor}
-                  workspace={current}
-                  status={status}
-                />
-              </section>
-            ) : (
-            <section className="terminal-column" aria-label="Terminals">
+            <section
+              className="terminal-column"
+              aria-label="Terminals"
+              style={{
+                display:
+                  route === FILES_ROUTE_ID && filesAlive ? "none" : undefined,
+              }}
+            >
               <div
                 className="terminal-tabs"
                 role="tablist"
@@ -915,7 +956,23 @@ export function App() {
                 )}
               </div>
             </section>
-            )}
+            {filesAlive && filesProps ? (
+              <section
+                ref={filesSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Files"
+                style={{
+                  display: route === FILES_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                <MountedPanel
+                  descriptor={resolveRoute(panelRegistry, FILES_ROUTE_ID)}
+                  workspace={filesProps.workspace}
+                  status={filesProps.status}
+                />
+              </section>
+            ) : null}
             {inspector && (
               <aside className="session-details" aria-label="Session details">
                 <h2>Session</h2>
