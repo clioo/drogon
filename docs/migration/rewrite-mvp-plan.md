@@ -99,13 +99,13 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 
 | Journey | Ola | Dueño | Estado | PR |
 |---|---|---|---|---|
-| J1 contratos, worktrees, estado | R1 | Sonnet | pendiente | |
-| J12 barra inferior | R1 | Muse A | pendiente | |
-| J5 paleta | R1 | Muse B | pendiente | |
-| J2 Git review | R1 | Muse C | pendiente | |
+| J1 contratos, worktrees, estado | R1 | Sonnet | contratos en main (#18); RPC y CLI en curso | #18 |
+| J12 barra inferior | R1 | Muse A | fusionada | #19 |
+| J5 paleta | R1 | Muse B | fusionada; falta revelar archivo desde quick open | #17 |
+| J2 Git review | R1 | Muse C | en curso | |
 | J8 Bots | R2 | Sonnet | pendiente | |
-| J1 sidebar y pestañas | R2 | Muse A | pendiente | |
-| J7 Automations | R2 | Muse B | pendiente | |
+| J1 sidebar y pestañas | R2 | Muse A | en curso | |
+| J7 Automations | R2 | Muse B | lanzada | |
 | J4 Browser | R2 | Muse C | pendiente | |
 | J9 Mentu | R3 | Sonnet | pendiente | |
 | J6 Tasks | R3 | Muse A | pendiente | |
