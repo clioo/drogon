@@ -117,11 +117,14 @@ function withoutDispatchCapabilityEnv(source) {
 /**
  * Spins up one owned, freshly minted `--data-dir` and a real `drogond`
  * against it, hands the caller CLI/RPC helpers scoped to that instance, and
- * guarantees explicit teardown: the daemon is stopped through
- * `stopAcceptanceProcess` (asserted to reach a provable `"exited"` verdict,
- * never left running) and only then is its temp directory removed — the
- * owned data directory is never deleted while the stop verdict is still
- * `"unverifiable"`, so a possibly-still-alive process never races cleanup.
+ * guarantees explicit teardown: after an attempted (or admitted) graceful
+ * `runtime.shutdown`, the daemon first gets a bounded exit observation via
+ * `waitAcceptanceExit`, and `stopAcceptanceProcess` (SIGTERM-then-SIGKILL)
+ * runs only if it has not exited by then; the fixture (which contains the
+ * owned data directory) is removed only on a provable `"exited"` verdict —
+ * every non-exited verdict (`"unverifiable"`, `"live"`, `"missing"`,
+ * `"unknown"`, ...) preserves the fixture, logs its path, and fails loudly,
+ * so a possibly-still-alive process never races cleanup.
  */
 async function withDaemon(context, run, { env = {} } = {}) {
   await access(daemonPath);
@@ -146,8 +149,9 @@ async function withDaemon(context, run, { env = {} } = {}) {
     // pipe) while the daemon is still responsive; Node's child_process docs
     // state SIGTERM forcibly terminates on Windows, so `stopAcceptanceProcess`
     // (SIGTERM-then-SIGKILL) can only be a disclosed fallback, never the
-    // primary teardown path, and which path actually ran is recorded below.
-    let shutdownPath = "force-fallback";
+    // primary teardown path. `admitted` records whether the shutdown RPC was
+    // actually ADMITTED, not merely attempted.
+    let admitted = false;
     try {
       const status = await cli(["status"], { timeout: 2000 });
       if (status.ok === true) {
@@ -155,25 +159,47 @@ async function withDaemon(context, run, { env = {} } = {}) {
           hostId: status.result.hostId,
           serviceInstanceId: status.result.serviceInstanceId,
         });
-        shutdownPath = "graceful";
+        admitted = true;
       }
     } catch {
-      // Daemon unresponsive or already gone; the force fallback below still runs.
+      // Daemon unresponsive or already gone; the bounded observation below
+      // still runs before any force.
     }
-    const result = await stopAcceptanceProcess(daemon, {
-      graceMs: 5000,
-      forceMs: 2000,
-    });
-    assert.equal(
-      result.verdict,
-      "exited",
-      `[${context.name}] the owned daemon must be provably stopped, never left running ` +
-        `(attempted shutdown path: ${shutdownPath})` +
-        (result.verdict === "unverifiable"
-          ? `; preserving fixture ${fixture} because the stop verdict is still "unverifiable" and a possibly-live process must never race cleanup`
-          : ""),
-    );
-    await rm(fixture, { recursive: true, force: true });
+    // Graceful-first: give the admitted (or never-responsive) daemon a
+    // bounded window to actually exit before any signal is sent.
+    const observed = await waitAcceptanceExit(daemon, 8000);
+    const actualPath =
+      observed.verdict === "exited"
+        ? "graceful-observed"
+        : "force-fallback";
+    const result =
+      observed.verdict === "exited"
+        ? { ...observed, forced: false }
+        : await stopAcceptanceProcess(daemon, {
+            graceMs: 5000,
+            forceMs: 2000,
+          });
+    // Fixture preservation on ANY unverified exit: only a provable "exited"
+    // verdict may delete the fixture (which contains the dataDir workspace);
+    // every other verdict (unverifiable, live, missing, unknown, ...) means a
+    // possibly-still-alive process must never race cleanup, so the fixture
+    // and its workspace are preserved, logged, and the case fails loudly.
+    if (result.verdict === "exited") {
+      await rm(fixture, { recursive: true, force: true });
+    } else {
+      console.error(
+        `[${context.name}] preserving fixture ${fixture} (contains the dataDir ` +
+          `workspace): daemon stop verdict was ${JSON.stringify(result.verdict)}, ` +
+          `not the provable "exited"; actual teardown path ${actualPath} ` +
+          `(shutdown admitted: ${admitted}, forced: ${result.forced}).`,
+      );
+      assert.fail(
+        `[${context.name}] the owned daemon must be provably stopped, never left ` +
+          `running (actual teardown path: ${actualPath}; shutdown admitted: ${admitted}; ` +
+          `forced: ${result.forced}); stop verdict was ${JSON.stringify(result.verdict)}, ` +
+          `so the fixture is preserved at ${fixture}`,
+      );
+    }
   });
 
   async function cli(args, options = {}) {
@@ -394,8 +420,8 @@ test(
         cols: 80,
         rows: 24,
       });
-      assert.equal(started.verdict, "live");
       try {
+        assert.equal(started.verdict, "live");
         const stopped = await rpc("session.stop", {
           sessionId: started.id,
           incarnation: started.incarnation,
