@@ -29,6 +29,7 @@ import { supportsHarnessLaunch } from "./harness-capability";
 import { TerminalPane } from "./TerminalPane";
 import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
+import { createShortcutRegistry, guardHandler } from "./shortcuts";
 import {
   loadSavedSelection,
   resolveRestoredSelection,
@@ -379,22 +380,19 @@ export function App() {
       setFolderPath("");
     });
   useEffect(() => {
+    const platform = navigator.userAgent.includes("Mac") ? "darwin" : "other";
+    const isDisabled = () => !selected || !status || busy || loadingSessions;
+    const registry = createShortcutRegistry();
+    registry.register({
+      id: "workspace.newTerminal",
+      chord: "CmdOrCtrl+Shift+N",
+      handler: guardHandler(() => void create(), isDisabled),
+    });
     const keydown = (event: KeyboardEvent) => {
-      const mod = navigator.userAgent.includes("Mac")
-        ? event.metaKey
-        : event.ctrlKey;
-      if (
-        mod &&
-        event.shiftKey &&
-        event.key.toLowerCase() === "n" &&
-        selected &&
-        status &&
-        !busy &&
-        !loadingSessions
-      ) {
-        event.preventDefault();
-        void create();
-      }
+      const action = registry.matchKeyEvent(event, platform);
+      if (!action || isDisabled()) return;
+      event.preventDefault();
+      action.handler();
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
