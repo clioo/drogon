@@ -110,10 +110,162 @@ fn resolving_into_a_symlink_that_stays_within_root_is_allowed() {
     let root = make_root();
     fs::create_dir(root.path().join("realdir")).unwrap();
     fs::write(root.path().join("realdir/inner.txt"), b"inner").unwrap();
-    symlink(root.path().join("realdir"), root.path().join("alias")).unwrap();
+    // A *relative* symlink target: `cap_std`'s own resolver walks this
+    // directly and proves it safe, by holding the directory descriptors
+    // down to `realdir` and refusing any `..` that would go above the open
+    // root. See `resolving_into_an_absolute_target_symlink_is_refused_even_when_the_target_lies_inside_root`
+    // for the absolute-target case, which this module does not implement
+    // (see the module docs — this is explicit UNMET behavior, not a
+    // considered restriction).
+    symlink("realdir", root.path().join("alias")).unwrap();
 
-    let content = read_file(root.path(), "alias/inner.txt", 1024).unwrap();
-    assert_eq!(content, "inner");
+    let result = read_file(root.path(), "alias/inner.txt", 1024).unwrap();
+    assert_eq!(result.content, "inner");
+}
+
+#[test]
+#[cfg(unix)]
+fn resolving_into_an_absolute_target_symlink_is_refused_even_when_the_target_lies_inside_root() {
+    // Documents a real, explicit UNMET behavior (see the module docs):
+    // `cap_std`'s `Dir` has no notion of the sandbox root's real absolute
+    // path to compare an absolute symlink target against, so it refuses
+    // every absolute target as an escape attempt, including one that
+    // happens to resolve inside `root`. A prior attempt to close this gap
+    // was reverted by root ruling; this test intentionally asserts the
+    // refusal, not a followed result, so a future reintroduction of that
+    // gap-closing logic must consciously change this test rather than
+    // silently pass.
+    use std::os::unix::fs::symlink;
+
+    let root = make_root();
+    fs::create_dir(root.path().join("realdir")).unwrap();
+    fs::write(root.path().join("realdir/inner.txt"), b"inner").unwrap();
+    symlink(root.path().join("realdir"), root.path().join("abs-alias")).unwrap();
+
+    let err = read_file(root.path(), "abs-alias/inner.txt", 1024).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+
+    let err = list_dir(root.path(), "abs-alias", MANY).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+#[cfg(unix)]
+fn list_dir_refuses_a_directory_pre_swapped_to_an_escaping_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("secret.txt"), b"top secret").unwrap();
+
+    let root = make_root();
+    symlink(outside.path(), root.path().join("escape")).unwrap();
+
+    let err = list_dir(root.path(), "escape", MANY).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+#[cfg(unix)]
+fn read_file_refuses_a_nested_pre_swapped_escaping_symlink_one_level_deeper() {
+    use std::os::unix::fs::symlink;
+
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("secret.txt"), b"top secret").unwrap();
+
+    let root = make_root();
+    fs::create_dir(root.path().join("real")).unwrap();
+    symlink(outside.path(), root.path().join("real/escape")).unwrap();
+
+    let err = read_file(root.path(), "real/escape/secret.txt", 1024).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+    let err = list_dir(root.path(), "real/escape", MANY).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+// --- handle-relative containment under a concurrent swap -------------------
+
+#[test]
+#[cfg(unix)]
+fn read_file_never_returns_content_from_outside_root_while_a_component_is_concurrently_swapped() {
+    use std::io::Write as _;
+    use std::os::unix::fs::symlink;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let outside = tempdir().unwrap();
+    // Named identically to the contained case's file below, so a real leak
+    // would be directly observable as this exact string coming back.
+    fs::write(outside.path().join("inner.txt"), b"outside secret").unwrap();
+
+    let root = make_root();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_swapper = stop.clone();
+    let swap_root = root.path().to_path_buf();
+    let swapper = std::thread::spawn(move || {
+        let mut toggle = false;
+        while !stop_swapper.load(Ordering::Relaxed) {
+            let victim = swap_root.join("victim");
+            if toggle {
+                // Build the contained replacement fully off to the side,
+                // then rename it into place, so a reader can never observe
+                // `victim` existing with a partially-written `inner.txt`.
+                let staging = swap_root.join("victim-staging");
+                let _ = fs::remove_dir_all(&staging);
+                fs::create_dir(&staging).ok();
+                if let Ok(mut f) = fs::File::create(staging.join("inner.txt")) {
+                    let _ = f.write_all(b"contained");
+                }
+                let _ = fs::remove_dir_all(&victim);
+                let _ = fs::rename(&staging, &victim);
+            } else {
+                let _ = fs::remove_dir_all(&victim);
+                let _ = fs::remove_file(&victim);
+                let _ = symlink(outside.path(), &victim);
+            }
+            toggle = !toggle;
+        }
+    });
+
+    // Every attempt to read through the racing component must either see
+    // exactly the contained file's content, or fail — with any error code,
+    // since the swap thread's own churn (removing/recreating `victim`
+    // between operations) can surface ordinary transient I/O errors that
+    // are not themselves security-relevant. What must never happen, and is
+    // the actual property under test, is `outside`'s content coming back:
+    // the handle-relative design makes that true by construction, because
+    // each call walks components against the open root descriptor as one
+    // sequence of syscalls, leaving no separate "checked safe" moment for
+    // the swapper to land in between.
+    for _ in 0..300 {
+        if let Ok(result) = read_file(root.path(), "victim/inner.txt", 1024) {
+            assert_eq!(result.content, "contained");
+        }
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    swapper.join().unwrap();
+}
+
+// --- FIFO/special rejection through a followed symlink ---------------------
+
+#[test]
+#[cfg(unix)]
+fn read_file_rejects_a_fifo_reached_through_a_followed_contained_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let root = make_root();
+    fs::create_dir(root.path().join("realdir")).unwrap();
+    let fifo_path = root.path().join("realdir/pipe");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&fifo_path)
+        .status()
+        .expect("failed to invoke mkfifo");
+    assert!(status.success(), "mkfifo command failed");
+    symlink("realdir", root.path().join("alias")).unwrap();
+
+    let err = read_file(root.path(), "alias/pipe", 1024).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
 }
 
 // --- list_dir sorting / metadata -----------------------------------------
@@ -137,6 +289,32 @@ fn list_dir_sorts_entries_and_reports_kind_and_size() {
 }
 
 #[test]
+// Linux (and other non-Darwin unix) filesystems accept arbitrary,
+// non-UTF-8 bytes in a filename. macOS's APFS/HFS+ validate filenames as
+// UTF-8 at the syscall level (`EILSEQ`/"Illegal byte sequence") and refuse
+// to create one at all, so there is no way to exercise this path with a
+// real on-disk entry there; excluded rather than left to fail on that
+// platform.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn list_dir_rejects_a_non_utf8_entry_name_instead_of_lossily_rewriting_it() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let root = make_root();
+    // Two distinct on-disk names that a lossy `to_string_lossy` rewrite
+    // (replacing the invalid byte with U+FFFD) would collide onto the same
+    // reported string — the exact ambiguity `into_string` must prevent by
+    // failing outright instead.
+    let bad_name_a = OsStr::from_bytes(b"bad-\xffname");
+    let bad_name_b = OsStr::from_bytes(b"bad-\xfename");
+    fs::write(root.path().join(bad_name_a), b"a").unwrap();
+    fs::write(root.path().join(bad_name_b), b"b").unwrap();
+
+    let err = list_dir(root.path(), "", MANY).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
 fn list_dir_not_found_maps_to_not_found_error() {
     let root = make_root();
     let err = list_dir(root.path(), "missing", MANY).unwrap_err();
@@ -155,8 +333,60 @@ fn list_dir_truncates_and_reports_the_flag_when_max_entries_exceeded() {
     let listing = list_dir(root.path(), "", 3).unwrap();
     assert!(listing.truncated);
     assert_eq!(listing.entries.len(), 3);
+    // Bounded enumeration stops as soon as 3 raw entries have been
+    // collected, before the directory has been fully walked, so which
+    // three of the five come back depends on the filesystem's own
+    // (unspecified) readdir order — only the count, the fact that each is
+    // one of the five created, and that the returned page is itself sorted
+    // are guaranteed.
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, vec!["f0.txt", "f1.txt", "f2.txt"]);
+    let mut sorted_names = names.clone();
+    sorted_names.sort_unstable();
+    assert_eq!(names, sorted_names, "the returned page must be sorted among itself");
+    for name in &names {
+        assert!(
+            (0..5).any(|i| *name == format!("f{i}.txt")),
+            "unexpected name in bounded page: {name}"
+        );
+    }
+}
+
+#[test]
+fn list_dir_truncates_at_two_when_five_entries_exist() {
+    let root = make_root();
+    for i in 0..5 {
+        fs::write(root.path().join(format!("g{i}.txt")), b"x").unwrap();
+    }
+
+    let listing = list_dir(root.path(), "", 2).unwrap();
+    assert!(listing.truncated);
+    assert_eq!(listing.entries.len(), 2);
+}
+
+#[test]
+fn list_dir_stops_enumerating_before_visiting_every_entry_in_a_large_directory() {
+    let root = make_root();
+    for i in 0..20_000 {
+        fs::write(root.path().join(format!("bulk-{i}.txt")), b"").unwrap();
+    }
+
+    let start = std::time::Instant::now();
+    let listing = list_dir(root.path(), "", 2).unwrap();
+    let elapsed = start.elapsed();
+
+    assert!(listing.truncated);
+    assert_eq!(listing.entries.len(), 2);
+    // Accumulate-then-truncate would stat all 20,000 entries before
+    // returning; bounded early-stop only ever looks at `max_entries + 1`
+    // raw entries, so this should complete near-instantly regardless of
+    // directory size. A generous bound keeps this robust on slow CI while
+    // still failing loudly if accumulate-then-truncate ever regresses back
+    // in.
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "list_dir took {elapsed:?} for max_entries=2 over 20,000 entries; \
+         bounded enumeration should not scale with directory size"
+    );
 }
 
 #[test]
@@ -223,8 +453,10 @@ fn read_file_returns_invalid_argument_for_non_utf8_content() {
 fn read_file_returns_content_on_success() {
     let root = make_root();
     fs::write(root.path().join("ok.txt"), "hello world").unwrap();
-    let content = read_file(root.path(), "ok.txt", 1024).unwrap();
-    assert_eq!(content, "hello world");
+    let result = read_file(root.path(), "ok.txt", 1024).unwrap();
+    assert_eq!(result.content, "hello world");
+    assert_eq!(result.size, "hello world".len() as u64);
+    assert!(!result.mtime.is_empty());
 }
 
 // --- read_file bound enforcement -------------------------------------------
@@ -233,8 +465,9 @@ fn read_file_returns_content_on_success() {
 fn read_file_allows_content_exactly_at_the_max_bytes_boundary() {
     let root = make_root();
     fs::write(root.path().join("exact.txt"), b"0123456789").unwrap();
-    let content = read_file(root.path(), "exact.txt", 10).unwrap();
-    assert_eq!(content, "0123456789");
+    let result = read_file(root.path(), "exact.txt", 10).unwrap();
+    assert_eq!(result.content, "0123456789");
+    assert_eq!(result.size, 10);
 }
 
 #[test]
@@ -258,6 +491,97 @@ fn read_file_rejects_a_fifo_special_file_instead_of_blocking() {
 
     let err = read_file(root.path(), "pipe", 1024).unwrap_err();
     assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+#[cfg(unix)]
+fn read_file_does_not_block_opening_a_fifo_with_no_writer_attached() {
+    // Nonblocking proof: with no writer ever attached to this FIFO, a
+    // plain (blocking) `open(O_RDONLY)` against it would hang forever.
+    // `read_file` opens with `O_NONBLOCK`, so this must return quickly
+    // (refused, since a FIFO isn't a regular file) instead of hanging.
+    let root = make_root();
+    let fifo_path = root.path().join("pipe");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&fifo_path)
+        .status()
+        .expect("failed to invoke mkfifo");
+    assert!(status.success(), "mkfifo command failed");
+
+    let start = std::time::Instant::now();
+    let err = read_file(root.path(), "pipe", 1024).unwrap_err();
+    let elapsed = start.elapsed();
+
+    assert_eq!(err.code, "invalid_argument");
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "read_file took {elapsed:?} opening a writer-less FIFO; the open must be non-blocking"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn read_file_validates_the_type_of_the_handle_it_actually_opened_not_an_earlier_stat() {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let root = make_root();
+    let path = root.path().join("swapme");
+    fs::write(&path, b"contained").unwrap();
+
+    // Continuously swap the target between a regular file and a directory
+    // — a type change opening never blocks on, so this test can safely
+    // race it many times without any risk of hanging. If `read_file`
+    // trusted a stat taken before its own open, a swap landing between
+    // that stat and the open could make it believe it's still looking at
+    // the regular file it checked a moment ago; validating the *opened
+    // handle*'s own metadata instead means it can never be fooled that
+    // way.
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_swapper = stop.clone();
+    let swap_path = path.clone();
+    let staging_path = root.path().join("swapme-staging");
+    let swapper = std::thread::spawn(move || {
+        let mut toggle = false;
+        while !stop_swapper.load(Ordering::Relaxed) {
+            if toggle {
+                // Write fully off to the side, then rename into place, so
+                // a reader can never observe `swapme` existing as a
+                // regular file with partially-written content.
+                if let Ok(mut f) = fs::File::create(&staging_path) {
+                    let _ = f.write_all(b"contained");
+                }
+                let _ = fs::remove_dir_all(&swap_path);
+                let _ = fs::rename(&staging_path, &swap_path);
+            } else {
+                let _ = fs::remove_dir_all(&swap_path);
+                let _ = fs::remove_file(&swap_path);
+                fs::create_dir(&swap_path).ok();
+            }
+            toggle = !toggle;
+        }
+    });
+
+    for _ in 0..300 {
+        match read_file(root.path(), "swapme", 1024) {
+            Ok(result) => assert_eq!(result.content, "contained"),
+            // `not_found` is an expected, benign outcome of the swap
+            // thread's own `remove_*` calls transiently emptying `swapme`
+            // between operations; the property under test is that a
+            // *directory* is never misreported back as file content, which
+            // `invalid_argument` (from the post-open handle check) or
+            // `not_found` both correctly avoid.
+            Err(err) => assert!(
+                err.code == "invalid_argument" || err.code == "not_found",
+                "unexpected error code: {}",
+                err.code
+            ),
+        }
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    swapper.join().unwrap();
 }
 
 #[test]
@@ -289,7 +613,10 @@ fn read_file_never_returns_content_beyond_max_bytes_while_the_file_grows_concurr
     // invalid_argument rejection.
     for _ in 0..500 {
         match read_file(root.path(), "growing.log", max_bytes) {
-            Ok(content) => assert!(content.len() as u64 <= max_bytes),
+            Ok(result) => {
+                assert!(result.content.len() as u64 <= max_bytes);
+                assert_eq!(result.size, result.content.len() as u64);
+            }
             Err(err) => assert_eq!(err.code, "invalid_argument"),
         }
     }
@@ -326,6 +653,91 @@ fn write_file_overwrites_existing_file_atomically() {
     assert_eq!(result.size, 13);
     let content = fs::read_to_string(root.path().join("over.txt")).unwrap();
     assert_eq!(content, "second-longer");
+}
+
+#[test]
+fn write_file_temp_creation_is_exclusive_and_never_truncates_a_collision() {
+    // Exercises the exact cap_std mechanism `write_file`'s temp-file
+    // creation now relies on (`OpenOptions::create_new`, i.e. `O_EXCL`):
+    // proves it refuses a name collision and — critically — never
+    // truncates whatever was already occupying that name. `write_file`'s
+    // own temp name embeds a fresh UUID, so a real collision can't be
+    // forced from a black-box test; this verifies the primitive it is
+    // built on directly.
+    use cap_std::ambient_authority;
+    use cap_std::fs::{Dir, OpenOptions};
+
+    let root = make_root();
+    let dir = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+
+    fs::write(root.path().join("collide.tmp"), b"pre-existing, must survive").unwrap();
+
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
+    let err = dir.open_with("collide.tmp", &opts).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+
+    let content = fs::read(root.path().join("collide.tmp")).unwrap();
+    assert_eq!(
+        content, b"pre-existing, must survive",
+        "create_new must never truncate a pre-existing collision"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn write_file_bounds_its_post_write_readback_even_if_the_file_balloons_concurrently() {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let root = make_root();
+    let path = root.path().join("ballooning.txt");
+    let payload = b"expected-content";
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_writer = stop.clone();
+    let writer_path = path.clone();
+    let balloon = std::thread::spawn(move || {
+        // Keep appending a large chunk in a tight loop: if `write_file`'s
+        // post-rename read-back were ever unbounded, it would have to read
+        // however much this thread has appended by the time it runs,
+        // which grows without limit. A bounded read-back only ever looks
+        // at `expected_len + 1` bytes regardless.
+        let chunk = vec![b'x'; 64 * 1024];
+        while !stop_writer.load(Ordering::Relaxed) {
+            if let Ok(mut f) = fs::OpenOptions::new().append(true).open(&writer_path) {
+                let _ = f.write_all(&chunk);
+            }
+        }
+    });
+
+    let start = std::time::Instant::now();
+    for _ in 0..20 {
+        match write_file(root.path(), "ballooning.txt", payload) {
+            Ok(result) => assert_eq!(result.size, payload.len() as u64),
+            // A racing append landing between the rename and the bounded
+            // read-back makes the file longer than expected, which the
+            // bounded read-back correctly reports as a mismatch rather
+            // than silently accepting or reading the whole (ballooning)
+            // file to check.
+            Err(err) => assert_eq!(err.code, "internal_error"),
+        }
+    }
+    let elapsed = start.elapsed();
+
+    stop.store(true, Ordering::Relaxed);
+    balloon.join().unwrap();
+
+    // If the read-back were unbounded, by the end of this loop the file
+    // could have grown to many megabytes and each of the 20 write_file
+    // calls would have had to read all of it back; bounded to
+    // `expected_len + 1` bytes, this should stay fast regardless.
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "write_file took {elapsed:?} for 20 calls against a concurrently-ballooning file; \
+         the post-write read-back should not scale with the file's actual size"
+    );
 }
 
 #[test]
