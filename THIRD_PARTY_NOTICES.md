@@ -19,6 +19,13 @@ and `docs/migration/sol-wave/cap-bots/native-state.md`. The locale comparator
 uses the ICU4X dependencies already pinned in Cargo.lock; their redistribution
 licenses must be included in packaged dependency notices.
 
+The command palette in `apps/desktop/src/renderer/src/components/command-palette/`
+ports focus-restore, section render-cap and result-ranking logic from Orca's
+`src/renderer/src/components/cmd-j/{palette-focus-restore-target,palette-section-render-cap,palette-query-tokens,palette-results}.ts`
+and the `.jump-palette-item[data-selected='true']` recipe from
+`src/renderer/src/assets/main.css`, all at the pinned source revision above.
+Each ported file keeps the MIT notice in its header comment.
+
 MIT License
 
 Copyright (c) 2026 Lovecast Inc.
