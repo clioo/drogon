@@ -35,10 +35,11 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
     cli.validate()?;
     // Mint before anything else: every Local error from here on (including a
     // missing runtime) carries this id in its failure envelope.
-    let request_id: String = cli
-        .request_id
-        .clone()
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let request_id: String = match (&cli.request_id, &cli.retry_request) {
+        (Some(id), _) => id.clone(),
+        (None, Some(alias)) => alias.clone(),
+        (None, None) => uuid::Uuid::new_v4().to_string(),
+    };
     let data_dir = paths::resolve_data_dir(cli.data_dir.as_deref());
     let client = Client::open(&data_dir, &request_id)?;
     let json = cli.json;
@@ -76,6 +77,9 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         },
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
+        Command::Orchestration { command } => {
+            crate::orchestration_commands::run(&client, &request_id, json, command).await
+        }
         Command::Rpc { method, params } => {
             let params: Value = match params {
                 Some(text) => serde_json::from_str(text)

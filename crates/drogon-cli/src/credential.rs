@@ -33,6 +33,15 @@ fn is_usable_credential(value: &str) -> bool {
         && !value.chars().any(|c| c.is_control() || c.is_whitespace())
 }
 
+/// Whether a dispatch-scoped credential is present in the environment
+/// (including a present-but-invalid one, which fails closed in `resolve`).
+/// The native orchestration CLI uses this to pick the actor scope: presence
+/// means worker actor, absence means coordinator actor — the availability of
+/// an admin token file never decides.
+pub fn dispatch_credential_present() -> bool {
+    std::env::var_os(DISPATCH_CAPABILITY_ENV).is_some()
+}
+
 /// Resolves the wire credential. Only the absent-variable case reads the
 /// service token file; every other decision precedes filesystem and network.
 pub fn resolve(data_dir: &Path, request_id: &str) -> Result<String, CliError> {

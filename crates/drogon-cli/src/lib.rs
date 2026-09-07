@@ -13,6 +13,8 @@ pub mod client;
 pub mod commands;
 pub mod credential;
 pub mod error;
+pub mod orchestration_cli;
+pub mod orchestration_commands;
 pub mod output;
 pub mod paths;
 pub mod transport;
