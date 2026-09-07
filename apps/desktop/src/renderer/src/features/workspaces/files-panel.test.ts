@@ -14,6 +14,7 @@ import {
   isFilesAvailable,
   joinEntryPath,
   makeFileSaver,
+  observeSaveResult,
   readContentFor,
   readErrorFor,
   runFilesRead,
@@ -21,6 +22,7 @@ import {
   type FilesOpenEntry,
   type FilesReadState,
 } from "./files-panel";
+import { createFilesDraftStore } from "./files-draft-store";
 import {
   applyEditorAction,
   initialEditorState,
@@ -742,6 +744,174 @@ describe("edit+save through the factory wiring (scoped fenced runSave)", () => {
     expect(state.lastSaved).toBe("B draft");
     expect(isDirty(state)).toBe(false);
     expect(state.files[KEY_A]).toEqual({ draft: "A draft", lastSaved: "A saved" });
+  });
+});
+
+describe("onSave observer rejection handling", () => {
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  function watchUnhandled(): { unhandled: unknown[]; done(): void } {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", listener);
+    return {
+      unhandled,
+      done() {
+        process.off("unhandledRejection", listener);
+      },
+    };
+  }
+
+  test("a transport throw is absorbed by the observer; runSave still reports the failure", async () => {
+    const watch = watchUnhandled();
+    try {
+      const store = createFilesDraftStore();
+      store.confirmRead(SCOPE_A, "src/a.ts", "saved");
+      const bridge: FileBridge = {
+        fileList: () => Promise.reject(new Error("unused")),
+        fileRead: () => Promise.reject(new Error("unused")),
+        fileWrite: () => {
+          throw new Error("transport down");
+        },
+      };
+      // The exact panel wiring: makeFileSaver promise + derived observer,
+      // with the panel's recordDraft before the write attempt.
+      const result = makeFileSaver(
+        bridge,
+        { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+        createRequestIdSource(),
+        KEY_A,
+      )("body");
+      store.recordDraft(SCOPE_A, "src/a.ts", "body");
+      observeSaveResult(result, store, SCOPE_A, "src/a.ts", "body");
+      // The editor's runSave receives the SAME original rejection:
+      let state = applyEditorAction(initialEditorState(), {
+        type: "file-opened",
+        scope: SCOPE_A,
+        path: "src/a.ts",
+        content: "saved",
+      });
+      state = applyEditorAction(state, { type: "edited", value: "body" });
+      const dispatched: EditorAction[] = [];
+      await runSave({
+        draft: "body",
+        scope: SCOPE_A,
+        path: "src/a.ts",
+        generation: nextSaveGeneration(state),
+        allowEmpty: false,
+        onSave: () => result,
+        dispatch: (action) => {
+          dispatched.push(action);
+          state = applyEditorAction(state, action);
+        },
+      });
+      await flush();
+      await flush();
+      // No unhandled rejection escaped the derived observer:
+      expect(watch.unhandled).toEqual([]);
+      // runSave's failure path is intact (a thrown transport maps to the
+      // pane's fallback save message):
+      expect(state.saveError).toEqual({
+        key: KEY_A,
+        path: "src/a.ts",
+        message: "The file could not be saved.",
+      });
+      // No markSaved on rejection — the draft stays dirty in the store.
+      expect(store.isDirty(SCOPE_A, "src/a.ts")).toBe(true);
+      expect(store.savedContentOf(SCOPE_A, "src/a.ts")).toBe("saved");
+    } finally {
+      watch.done();
+    }
+  });
+
+  test("a FilesRequestIdCapError rejection is absorbed; no markSaved, failure still reported", async () => {
+    const watch = watchUnhandled();
+    try {
+      const store = createFilesDraftStore();
+      store.confirmRead(SCOPE_A, "src/a.ts", "saved");
+      // The panel records the draft before the write attempt:
+      store.recordDraft(SCOPE_A, "src/a.ts", "payload two");
+      // Fill the per-file cap, so the next (different) payload fails closed:
+      const ids = createRequestIdSource({ maxRetained: 1 });
+      ids.next(KEY_A, "payload one");
+      const bridge: FileBridge = {
+        fileList: () => Promise.reject(new Error("unused")),
+        fileRead: () => Promise.reject(new Error("unused")),
+        fileWrite: () => Promise.reject(new Error("must not be reached")),
+      };
+      const result = makeFileSaver(
+        bridge,
+        { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+        ids,
+        KEY_A,
+      )("payload two");
+      observeSaveResult(result, store, SCOPE_A, "src/a.ts", "payload two");
+      let state = applyEditorAction(initialEditorState(), {
+        type: "file-opened",
+        scope: SCOPE_A,
+        path: "src/a.ts",
+        content: "saved",
+      });
+      state = applyEditorAction(state, { type: "edited", value: "payload two" });
+      const dispatched: EditorAction[] = [];
+      await runSave({
+        draft: "payload two",
+        scope: SCOPE_A,
+        path: "src/a.ts",
+        generation: nextSaveGeneration(state),
+        allowEmpty: false,
+        onSave: () => result,
+        dispatch: (action) => {
+          dispatched.push(action);
+          state = applyEditorAction(state, action);
+        },
+      });
+      await flush();
+      await flush();
+      expect(watch.unhandled).toEqual([]);
+      expect(state.saveError).toEqual({
+        key: KEY_A,
+        path: "src/a.ts",
+        message: "The file could not be saved.",
+      });
+      expect(store.isDirty(SCOPE_A, "src/a.ts")).toBe(true);
+      void dispatched;
+    } finally {
+      watch.done();
+    }
+  });
+
+  test("success still marks the payload saved through the observer", async () => {
+    const watch = watchUnhandled();
+    try {
+      const store = createFilesDraftStore();
+      store.confirmRead(SCOPE_A, "src/a.ts", "saved");
+      store.recordDraft(SCOPE_A, "src/a.ts", "edited body");
+      const bridge: FileBridge = {
+        fileList: () => Promise.reject(new Error("unused")),
+        fileRead: () => Promise.reject(new Error("unused")),
+        fileWrite: () =>
+          Promise.resolve({
+            ok: true,
+            result: { hostId: "h1", workspaceId: "w1", path: "src/a.ts", size: 1, mtime: "t" },
+          }),
+      };
+      const result = makeFileSaver(
+        bridge,
+        { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+        createRequestIdSource(),
+        KEY_A,
+      )("edited body");
+      observeSaveResult(result, store, SCOPE_A, "src/a.ts", "edited body");
+      await flush();
+      await flush();
+      expect(watch.unhandled).toEqual([]);
+      // Confirmed write retired the dirty flag via the observer's markSaved:
+      expect(store.isDirty(SCOPE_A, "src/a.ts")).toBe(false);
+      expect(store.savedContentOf(SCOPE_A, "src/a.ts")).toBe("edited body");
+    } finally {
+      watch.done();
+    }
   });
 });
 
