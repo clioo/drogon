@@ -9,6 +9,14 @@
 // bad auth/frames against a real `node:net` named pipe it mints and owns for
 // the run, never a fixed or shared name.
 //
+// IMPORTANT — what this file is NOT: every "fixture" below (`startFixtureDaemon`
+// and the auth/frame results it produces) is fixture-local scaffolding pinned
+// against real vectors from native-client.ts, not the real `drogond` service
+// and not product proof. A fixture accepting a token or refusing an oversize
+// frame demonstrates that *this scaffolding* implements the mirrored logic
+// correctly; it is never evidence that the real Windows `drogond` admission
+// path (which does not exist on this branch yet) behaves the same way.
+//
 // Scope boundary: this is a leaf-D file, not a V1 edit. It deliberately does
 // NOT import apps/desktop/src/main/native-client.ts (out of this task's file
 // ownership, and that file's own extensionless relative import of
@@ -36,7 +44,11 @@ import { createServer, createConnection } from "node:net";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+
+/** Default bound for {@link sendRaw}: no wait, including on a hung/silent peer, may exceed this. */
+export const SEND_RAW_TIMEOUT_MS = 5000;
 
 export const MAX_FRAME_BYTES = 1024 * 1024; // native-client.ts:10
 
@@ -162,9 +174,24 @@ export function classifyOwnedEndpoint(
  * never a shape the real client's parser would reject as `Invalid service
  * response`. It never accepts a request whose `auth` does not match the
  * token it was started with.
+ *
+ * Every auth/frame verdict this fixture produces is fixture behavior only —
+ * it proves this scaffolding enforces the mirrored rules, never that the
+ * real (not-yet-implemented) `drogond` does.
+ *
+ * Cleanup note: `server.closeAllConnections` is an `http.Server` method, not
+ * part of the `net.Server` API this fixture is built on (`createServer` is
+ * imported from `node:net`) — calling it here would silently no-op and
+ * leave any still-open socket connected. `close()` below instead tracks
+ * every socket this server ever accepted and destroys each one explicitly
+ * before closing the server, so cleanup never depends on a client
+ * eventually ending the connection on its own.
  */
 export function startFixtureDaemon(pipePath, { token }) {
+  const sockets = new Set();
   const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
     let bytes = Buffer.alloc(0);
     let handled = false;
     socket.on("data", (chunk) => {
@@ -227,7 +254,7 @@ export function startFixtureDaemon(pipePath, { token }) {
       resolve({
         close: () =>
           new Promise((res) => {
-            server.closeAllConnections?.();
+            for (const socket of sockets) socket.destroy();
             server.close(() => res());
           }),
       });
@@ -235,21 +262,36 @@ export function startFixtureDaemon(pipePath, { token }) {
   });
 }
 
-/** Connects, writes a raw (possibly non-JSON) string, and collects the response until `close`. */
-function sendRaw(pipePath, raw) {
+/**
+ * Connects, writes a raw (possibly non-JSON) string, and collects the
+ * response until `close`. Bounded by `timeoutMs`: a peer that never
+ * responds and never closes (a silent fixture, a mid-flight server
+ * destroy, or a real hung Windows CI peer) must never hang this wait
+ * indefinitely — the timeout destroys the socket and resolves instead.
+ */
+function sendRaw(pipePath, raw, { timeoutMs = SEND_RAW_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
     const socket = createConnection(pipePath);
     let bytes = Buffer.alloc(0);
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ kind: "timeout", bytes }), timeoutMs);
     socket.on("connect", () => socket.write(raw));
     socket.on("data", (chunk) => {
       bytes = Buffer.concat([bytes, chunk]);
     });
-    socket.on("error", () => resolve({ kind: "error", bytes }));
-    socket.on("close", () => resolve({ kind: "closed", bytes }));
+    socket.on("error", () => finish({ kind: "error", bytes }));
+    socket.on("close", () => finish({ kind: "closed", bytes }));
   });
 }
 
-/** Sends a well-formed request and parses the response through the real envelope validator. */
+/** Sends a well-formed request to the fixture and parses its response through the mirrored envelope validator (fixture behavior, not drogond proof). */
 async function callFixture(pipePath, { requestId, auth, method, params }) {
   const frame = buildFrame(requestId, auth, method, params ?? {});
   const outcome = await sendRaw(pipePath, frame);
@@ -348,7 +390,10 @@ const CASES = [
     },
   },
   {
-    name: "auth rejection: wrong token refused",
+    // Fixture behavior, not drogond proof: this proves the fixture enforces
+    // its own auth check correctly, not that the real (not-yet-implemented)
+    // Windows drogond admission path rejects a wrong token the same way.
+    name: "auth rejection: fixture refuses a wrong token (fixture behavior, not drogond proof)",
     async run(root) {
       const { directory, pipePath } = await mintOwnedPipe(root);
       const fixture = await startFixtureDaemon(pipePath, { token: "correct-token" });
@@ -376,7 +421,10 @@ const CASES = [
     },
   },
   {
-    name: "frame rejection: malformed and oversize refused",
+    // Fixture behavior, not drogond proof: this proves the client-side
+    // precheck and this fixture's server-side framing guard both refuse
+    // bad frames; it says nothing about the real drogond framing path.
+    name: "frame rejection: malformed and oversize refused (fixture behavior, not drogond proof)",
     async run(root) {
       const { directory, pipePath } = await mintOwnedPipe(root);
       const fixture = await startFixtureDaemon(pipePath, { token: "correct-token" });
@@ -407,6 +455,58 @@ const CASES = [
           throw new Error(`expected no response to a malformed frame, got ${malformedOutcome.bytes.length} bytes`);
       } finally {
         await fixture.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "double-listen: a second server on the same owned pipe path fails EADDRINUSE",
+    async run(root) {
+      const { directory, pipePath } = await mintOwnedPipe(root);
+      const first = createServer(() => {});
+      const second = createServer(() => {});
+      try {
+        await new Promise((resolve, reject) => {
+          first.once("error", reject);
+          first.listen(pipePath, resolve);
+        });
+        const error = await new Promise((resolve) => {
+          second.once("error", resolve);
+          second.listen(pipePath);
+        });
+        if (error.code !== "EADDRINUSE")
+          throw new Error(`expected EADDRINUSE, got ${error.code ?? error}`);
+      } finally {
+        await new Promise((resolve) => first.close(resolve));
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "server destroyed mid-flight: an in-flight connection observes a close, never a hang",
+    async run(root) {
+      const { directory, pipePath } = await mintOwnedPipe(root);
+      const sockets = new Set();
+      const server = createServer((socket) => {
+        sockets.add(socket);
+        socket.once("close", () => sockets.delete(socket));
+        // Deliberately never respond: the point of this case is that the
+        // server itself is destroyed mid-flight, not that it answers.
+      });
+      try {
+        await new Promise((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(pipePath, resolve);
+        });
+        const pending = sendRaw(pipePath, "irrelevant\n", { timeoutMs: 2000 });
+        await delay(50); // let the connection actually establish before destroying it
+        for (const socket of sockets) socket.destroy();
+        server.close();
+        const outcome = await pending;
+        if (outcome.kind !== "closed" && outcome.kind !== "error")
+          throw new Error(`expected a close or error, not a hang, got ${JSON.stringify(outcome)}`);
+      } finally {
+        for (const socket of sockets) socket.destroy();
         await rm(directory, { recursive: true, force: true });
       }
     },
@@ -470,8 +570,31 @@ export async function runAcceptanceProbe() {
   };
 }
 
-const isMain =
-  process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+/**
+ * Whether this module was invoked directly as the CLI entry point (as
+ * opposed to imported by the test file). The naive `` `file://${argvPath}` ``
+ * string comparison this replaces never matches on Windows: a Windows
+ * argv path uses backslashes and an unencoded drive letter
+ * (`C:\Users\ci\windows-native-transport.mjs`), while `import.meta.url` is
+ * always a properly percent-encoded, forward-slashed `file:///C:/...` URL —
+ * so the old comparison was always false on win32, and the CLI runner would
+ * silently exit 0 without ever calling `runAcceptanceProbe`. Converting the
+ * argv path through `path.resolve` and `pathToFileURL` (Node's own
+ * platform-correct URL conversion) before comparing fixes that on a real
+ * Windows host. `resolvePath`/`toFileUrl` are injectable so this can be
+ * pinned against Windows-shaped paths in pure unit tests without requiring
+ * an actual win32 host.
+ */
+export function isMainModule(
+  argvPath,
+  moduleUrl,
+  { resolvePath = path.resolve, toFileUrl = pathToFileURL } = {},
+) {
+  if (!argvPath) return false;
+  return moduleUrl === toFileUrl(resolvePath(argvPath)).href;
+}
+
+const isMain = isMainModule(process.argv[1], import.meta.url);
 if (isMain) {
   const report = await runAcceptanceProbe();
   console.log(JSON.stringify(report, null, 2));
