@@ -88,6 +88,21 @@ commands as working aliases or claim gates/federation are covered by this group.
 These decisions refine the proposal; typed request/response structs and source
 baseline acceptance are still required before implementing the method group.
 
+`drogon_protocol::orchestration_scope` now defines the common wire contexts:
+`HostScope` (`contractVersion`, `hostId`), `CoordinatorScope` (host context plus
+`runId`, `coordinatorId`, `consumerGeneration`), and `DispatchScope` (host context
+plus `runId`, `taskId`, `dispatchId`). Serialization is camelCase and additive.
+Opaque IDs contain 1–128 UTF-8 bytes without whitespace/control characters;
+consumer generations are positive integers within JavaScript's exact range.
+The validator checks shape and the explicitly selected execution host only.
+Authentication, persisted ownership/generation fences and capability negotiation
+remain engine obligations; passing validation grants no authority. These context
+types do not freeze every method's fields or advertise a working capability.
+
+The DB-only receipt seam can proceed independently after its source atomicity
+baseline and candidate RED are accepted. It extends the existing ledger, not the
+public method group. The original external-effect path remains unchanged.
+
 ### Mutation classification
 
 | Operation | Admission and waiting |
