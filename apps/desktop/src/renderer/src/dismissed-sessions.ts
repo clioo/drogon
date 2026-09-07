@@ -1,0 +1,76 @@
+import type { Session } from "../../shared/session-contract";
+
+const STORAGE_KEY = "drogon:dismissed-sessions";
+// Bounds unbounded growth from long-lived profiles; oldest entries drop first.
+const MAX_ENTRIES = 500;
+
+function entryKey(
+  hostId: string,
+  sessionId: string,
+  incarnation: string,
+): string {
+  return `${hostId}\u0000${sessionId}\u0000${incarnation}`;
+}
+
+/**
+ * Reads the confirmed-dismissed set from persisted view state. Storage is a
+ * plain string-array; anything that is not exactly that shape is treated as
+ * absent rather than trusted, since this file only hides tabs and must never
+ * be able to corrupt session state if tampered with.
+ */
+export function loadDismissedSessions(
+  storage: Pick<Storage, "getItem"> = localStorage,
+): Set<string> {
+  try {
+    const raw = storage.getItem(STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      !Array.isArray(parsed) ||
+      !parsed.every((item) => typeof item === "string")
+    )
+      return new Set();
+    return new Set(parsed);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Records an *explicit* user dismissal only — never call this for a session
+ * that merely exited on its own. A session the user never closed must keep
+ * showing up as an exited tab across reloads; only a confirmed close hides it.
+ */
+export function markSessionDismissed(
+  hostId: string,
+  sessionId: string,
+  incarnation: string,
+  storage: Pick<Storage, "getItem" | "setItem"> = localStorage,
+): void {
+  try {
+    const current = loadDismissedSessions(storage);
+    current.add(entryKey(hostId, sessionId, incarnation));
+    const bounded = [...current].slice(-MAX_ENTRIES);
+    storage.setItem(STORAGE_KEY, JSON.stringify(bounded));
+  } catch {
+    // Best-effort view state; a write failure must not block the close itself.
+  }
+}
+
+/**
+ * A dismissal tombstone only ever hides an *exited* session — even a
+ * matching identity in tampered/corrupted storage must never hide a `live`
+ * or `unverifiable` one, since those still need the user's attention (a
+ * live session especially so). `hostId` should be the session's own
+ * recorded identity (`session.hostId`), not whatever host the connection
+ * currently believes it's on, so a dismissal is never checked against a
+ * value that can drift after the session was fetched.
+ */
+export function isSessionDismissed(
+  dismissed: Set<string>,
+  hostId: string,
+  session: Session,
+): boolean {
+  if (session.verdict !== "exited") return false;
+  return dismissed.has(entryKey(hostId, session.id, session.incarnation));
+}

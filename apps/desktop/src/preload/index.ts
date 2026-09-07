@@ -17,5 +17,6 @@ const bridge: DesktopBridge = {
   stop: (value) => ipcRenderer.invoke("drogon:stop", value),
   harnesses: () => ipcRenderer.invoke("drogon:harnesses"),
   startHarness: (value) => ipcRenderer.invoke("drogon:startHarness", value),
+  buildInfo: () => ipcRenderer.invoke("drogon:buildInfo"),
 };
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

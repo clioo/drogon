@@ -74,6 +74,12 @@ export interface DesktopBridge {
     input: Identity & { cols: number; rows: number },
   ): Promise<Result<Session>>;
   stop(input: Identity): Promise<Result<Session>>;
+  /** Non-secret packaged build identity (or `null` in development, or a build without it); never a token or path. */
+  buildInfo(): Promise<{
+    revision: string;
+    builtAt: string;
+    version: string;
+  } | null>;
 }
 declare global {
   interface Window {

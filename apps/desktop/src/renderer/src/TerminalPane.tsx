@@ -47,12 +47,22 @@ export function TerminalPane({
     let cursor = 0;
     let timeout: ReturnType<typeof setTimeout>;
     let canWrite = session.verdict === "live";
+    let lastObserved = session;
     const identity = {
       sessionId: session.id,
       incarnation: session.incarnation,
     };
     const report = (message: string) => {
       if (!disposed) callbacks.current.onError(message);
+    };
+    // Loss of contact is never proof of exit: a read failure or transport
+    // error must not leave a stale "live" badge showing. Once exited is
+    // positively observed, that stays authoritative — a later transport
+    // hiccup does not un-exit a session that already reported its real end.
+    const projectUnverifiable = () => {
+      if (lastObserved.verdict === "exited") return;
+      lastObserved = { ...lastObserved, verdict: "unverifiable" };
+      callbacks.current.onSession(lastObserved);
     };
     const input = new TerminalInputQueue(
       (text) => window.drogon.write({ ...identity, text }),
@@ -88,6 +98,7 @@ export function TerminalPane({
         if (disposed) return;
         if (!response.ok) {
           canWrite = false;
+          projectUnverifiable();
           report(response.error.message);
           return;
         }
@@ -101,11 +112,13 @@ export function TerminalPane({
         if (disposed) return;
         cursor = value.nextCursor;
         canWrite = value.session.verdict === "live";
+        lastObserved = value.session;
         callbacks.current.onSession(value.session);
         if (value.session.verdict === "exited" && bytes.length === 0) return;
         timeout = setTimeout(read, bytes.length === 65536 ? 0 : 120);
       } catch {
         canWrite = false;
+        projectUnverifiable();
         report(
           "Terminal connection lost. Refresh to reconnect; process state is unverified.",
         );

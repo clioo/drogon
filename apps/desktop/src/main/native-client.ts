@@ -65,6 +65,82 @@ export function validateEnvelope(
   throw new Error("Invalid service result");
 }
 
+/** Same construction the wire client and the local-only probe both need, kept in one place so they can never diverge. */
+export function resolveEndpointPath(
+  directory: string,
+  platform: NodeJS.Platform,
+): string {
+  return platform === "win32"
+    ? `\\\\.\\pipe\\drogon-v1-${createHash("sha256").update(directory).digest("hex").slice(0, 24)}`
+    : path.join(directory, "runtime-v1.sock");
+}
+
+/**
+ * A local-only classification of "is anything listening at this endpoint",
+ * deliberately narrower than a full `callNative` round-trip: it never reads
+ * or sends the auth token, so it can tell "present" from "absent" even when
+ * the token file itself is missing or unreadable — which a full status call
+ * cannot, since it fails the same `unverifiable` way for both. Used only to
+ * decide whether *this process* may attempt one candidate spawn; it is not
+ * new wire vocabulary and never substitutes for the daemon's own endpoint
+ * lock as the actual ownership arbiter.
+ */
+export type LocalEndpointObservation =
+  | { kind: "absent" }
+  | { kind: "present" }
+  | { kind: "ambiguous"; reason: string };
+
+/**
+ * Connects (and immediately disconnects, sending nothing) to classify
+ * `ENOENT`/`ECONNREFUSED` as `"absent"` — the only case that authorizes a
+ * spawn attempt elsewhere. Every other outcome (permission denied, some
+ * other connect error, a successful connect, or this probe's own timeout)
+ * is `"present"` or `"ambiguous"`: something might already own this
+ * endpoint, or the cause of failure isn't known well enough to say it
+ * doesn't, so neither ever authorizes a spawn.
+ */
+export function observeLocalEndpoint(
+  directory: string,
+  platform: NodeJS.Platform,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<LocalEndpointObservation> {
+  if (platform === "win32")
+    return Promise.resolve({
+      kind: "ambiguous",
+      reason: "unsupported-platform",
+    });
+  if (signal?.aborted)
+    return Promise.resolve({ kind: "ambiguous", reason: "cancelled" });
+  const endpoint = resolveEndpointPath(directory, platform);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (observation: LocalEndpointObservation) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      socket.destroy();
+      resolve(observation);
+    };
+    const onAbort = () => finish({ kind: "ambiguous", reason: "cancelled" });
+    const socket = createConnection(endpoint);
+    const timer = setTimeout(
+      () => finish({ kind: "ambiguous", reason: "connect-timed-out" }),
+      timeoutMs,
+    );
+    signal?.addEventListener("abort", onAbort, { once: true });
+    socket.on("connect", () => finish({ kind: "present" }));
+    socket.on("error", (error: NodeJS.ErrnoException) =>
+      finish(
+        error.code === "ENOENT" || error.code === "ECONNREFUSED"
+          ? { kind: "absent" }
+          : { kind: "ambiguous", reason: error.code ?? "connect-error" },
+      ),
+    );
+  });
+}
+
 function unreachable(message?: string): Result<never> {
   return {
     ok: false,
@@ -91,26 +167,39 @@ function malformed(message: string): Result<never> {
 
 let lastKnownHostId: string | null = null;
 
-/**
- * `session.start`/`harness.start` must return a session that is actually for
- * the workspace the caller asked for, on the host this client is actually
- * connected to. Neither check can be done by the wire schema alone (it only
- * knows the shape of a session, not which one was requested). Exported as a
- * pure function (host identity passed in, not read from module state) so it
- * is directly unit-testable.
- */
-export function identityMismatch(
-  method: string,
-  params: object,
-  result: unknown,
+type SessionIdentity = {
+  id?: unknown;
+  incarnation?: unknown;
+  workspaceId?: unknown;
+  hostId?: unknown;
+};
+
+type ExpectedIdentity = {
+  sessionId?: string;
+  incarnation?: string;
+  workspaceId?: string;
+};
+
+/** One session result must match every identity the caller actually asserted; absent expectations are not checked. */
+function checkSession(
+  session: SessionIdentity,
+  expected: ExpectedIdentity,
   knownHostId: string | null,
 ): Result<never> | null {
-  if (method !== "session.start" && method !== "harness.start") return null;
-  const session = result as { workspaceId?: unknown; hostId?: unknown };
-  const requested = params as { workspaceId?: unknown };
+  if (expected.sessionId !== undefined && session.id !== expected.sessionId)
+    return malformed(
+      "The service returned a different session id than requested.",
+    );
   if (
-    typeof requested.workspaceId === "string" &&
-    session.workspaceId !== requested.workspaceId
+    expected.incarnation !== undefined &&
+    session.incarnation !== expected.incarnation
+  )
+    return malformed(
+      "The service returned a session with a different incarnation than requested.",
+    );
+  if (
+    expected.workspaceId !== undefined &&
+    session.workspaceId !== expected.workspaceId
   )
     return malformed(
       "The service returned a session for a different workspace than requested.",
@@ -120,6 +209,77 @@ export function identityMismatch(
       "The service returned a session for a different execution host than the one this client is connected to.",
     );
   return null;
+}
+
+/**
+ * Every method that returns a `Session` (directly, nested under `session`,
+ * or as a `sessions[]`/`harnesses` list) must return one that actually
+ * matches the identity the caller asserted — its requested session id,
+ * incarnation, workspace, and this client's own known execution host.
+ * Wire-shape validation alone cannot catch this: a structurally valid
+ * `Session` for the *wrong* session is still a valid `Session`. Exported as
+ * a pure function (host identity passed in, not read from module state) so
+ * it is directly unit-testable.
+ */
+export function identityMismatch(
+  method: string,
+  params: object,
+  result: unknown,
+  knownHostId: string | null,
+): Result<never> | null {
+  const p = params as {
+    workspaceId?: unknown;
+    sessionId?: unknown;
+    incarnation?: unknown;
+  };
+  const workspaceId =
+    typeof p.workspaceId === "string" ? p.workspaceId : undefined;
+  const sessionId = typeof p.sessionId === "string" ? p.sessionId : undefined;
+  const incarnation =
+    typeof p.incarnation === "string" ? p.incarnation : undefined;
+
+  switch (method) {
+    case "session.start":
+    case "harness.start":
+      return checkSession(
+        result as SessionIdentity,
+        { workspaceId },
+        knownHostId,
+      );
+    case "session.resize":
+    case "session.stop":
+      return checkSession(
+        result as SessionIdentity,
+        { sessionId, incarnation },
+        knownHostId,
+      );
+    case "session.read": {
+      const read = result as { session?: SessionIdentity };
+      return checkSession(
+        read.session ?? {},
+        { sessionId, incarnation },
+        knownHostId,
+      );
+    }
+    case "session.list": {
+      const list = result as { sessions?: SessionIdentity[] };
+      for (const session of list.sessions ?? []) {
+        const mismatch = checkSession(session, { workspaceId }, knownHostId);
+        if (mismatch) return mismatch;
+      }
+      return null;
+    }
+    case "harness.list": {
+      const catalog = result as { hostId?: unknown };
+      if (knownHostId && catalog.hostId !== knownHostId)
+        return malformed(
+          "The service returned a harness catalog for a different execution host than the one this client is connected to.",
+        );
+      return null;
+    }
+    default:
+      return null;
+  }
 }
 
 /**
@@ -135,19 +295,45 @@ export async function callNative(
   method: string,
   params: object,
   requestId: string = randomUUID(),
+  /**
+   * Optional and cooperative only: honored solely so a caller that bounds
+   * its own overall deadline (the bootstrap loop) can abandon a stuck
+   * request and free its socket instead of it lingering unbounded. Absent,
+   * behavior is byte-for-byte identical to before — every existing caller
+   * that never passed a fourth argument sees no change.
+   */
+  signal?: AbortSignal,
 ): Promise<Result<unknown>> {
+  if (signal?.aborted) throw new Error("Request aborted");
   let directory: string;
   let auth: string;
   try {
     directory = await realpath(dataDirectory());
-    auth = (await readFile(path.join(directory, "auth.token"), "utf8")).trim();
-  } catch {
+    // `realpath` itself takes no `signal` (unsupported by the fs API);
+    // re-check immediately after so an abort that landed during it is not
+    // missed just because the resolved directory looks fine.
+    if (signal?.aborted) throw new Error("Request aborted");
+    auth = (
+      await readFile(path.join(directory, "auth.token"), {
+        encoding: "utf8",
+        signal,
+      })
+    ).trim();
+  } catch (error) {
+    // An abort during either await must propagate as a cancellation, not
+    // read as "couldn't reach the directory/token" — those are different
+    // callers (one gave up waiting, the other never got an answer).
+    if (signal?.aborted)
+      throw error instanceof Error ? error : new Error("Request aborted");
     return unreachable();
   }
-  const endpoint =
-    process.platform === "win32"
-      ? `\\\\.\\pipe\\drogon-v1-${createHash("sha256").update(directory).digest("hex").slice(0, 24)}`
-      : path.join(directory, "runtime-v1.sock");
+  // Re-check once more, right before opening the socket: the two awaits
+  // above are the only gap between the top-of-function check and socket
+  // creation, and an abort landing in that gap must never fall through to
+  // registering a listener on a signal whose "abort" event already fired
+  // (which would never replay, leaving the socket to open regardless).
+  if (signal?.aborted) throw new Error("Request aborted");
+  const endpoint = resolveEndpointPath(directory, process.platform);
   const frame =
     JSON.stringify({ protocol: 1, requestId, auth, method, params }) + "\n";
   if (Buffer.byteLength(frame) > MAX_FRAME_BYTES)
@@ -159,17 +345,29 @@ export async function callNative(
         retryable: false,
       },
     };
-  return await new Promise((resolve) => {
+  return await new Promise((resolve, reject) => {
     const socket = createConnection(endpoint);
     let bytes = Buffer.alloc(0);
     let settled = false;
+    const cleanup = () => {
+      clearTimeout(deadline);
+      signal?.removeEventListener("abort", abort);
+    };
     const finish = (result: Result<unknown>) => {
       if (settled) return;
       settled = true;
-      clearTimeout(deadline);
+      cleanup();
       socket.destroy();
       resolve(result);
     };
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.destroy();
+      reject(new Error("Request aborted"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
     const deadline = setTimeout(
       () => finish(unreachable("Service request timed out")),
       REQUEST_DEADLINE_MS,
@@ -181,6 +379,9 @@ export async function callNative(
     socket.on("error", () => finish(unreachable()));
     socket.on("end", () => finish(unreachable("Service disconnected")));
     socket.on("data", (chunk) => {
+      // Already settled (including via abort) — a response racing in after
+      // that must never mutate `lastKnownHostId` or resolve/reject again.
+      if (settled) return;
       if (bytes.length + chunk.length > MAX_FRAME_BYTES)
         return finish(malformed("Service response is too large."));
       bytes = Buffer.concat([bytes, chunk]);
