@@ -12,11 +12,23 @@ use crate::orchestration_cli::OrchestrationCommand;
 #[command(
     name = "drogon-cli",
     version,
-    about = "Command-line client for the Drogon runtime (protocol v1)"
+    about = "Command-line client for the Drogon runtime (protocol v1)",
+    args_override_self = true,
+    override_usage = "drogon-cli [OPTIONS] <COMMAND>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
 )]
 pub struct Cli {
     /// Drogon data directory (default: DROGON_DATA_DIR, else platform default)
-    #[arg(long, global = true, value_name = "PATH")]
+    ///
+    /// Accepts an optional value: a following flag-shaped token leaves the
+    /// implicit-presence marker (`args.ts:58-75`), which `validate` then
+    /// refuses exactly like the source's required-value globals.
+    #[arg(
+        long,
+        global = true,
+        value_name = "PATH",
+        num_args = 0..=1,
+        default_missing_value = IMPLICIT_FLAG_PRESENCE
+    )]
     pub data_dir: Option<PathBuf>,
 
     /// Print one JSON envelope on stdout instead of human text
@@ -24,21 +36,42 @@ pub struct Cli {
     pub json: bool,
 
     /// Caller-chosen request id so a mutation can be replayed byte-equivalently
-    #[arg(long, global = true, value_name = "ID")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "ID",
+        num_args = 0..=1,
+        default_missing_value = IMPLICIT_FLAG_PRESENCE
+    )]
     pub request_id: Option<String>,
 
     /// Alias for --request-id for retry workflows; giving both requires
     /// equal values (a contradiction is a usage error)
-    #[arg(long, global = true, value_name = "ID")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "ID",
+        num_args = 0..=1,
+        default_missing_value = IMPLICIT_FLAG_PRESENCE
+    )]
     pub retry_request: Option<String>,
 
     #[command(subcommand)]
     pub command: Command,
 }
 
+/// Stands in for the source parser's implicit boolean `true` (`args.ts:70-72`).
+/// NUL is unambiguous: `execve` argv can never contain it, so no real value
+/// can collide with the marker.
+const IMPLICIT_FLAG_PRESENCE: &str = "\u{0}";
+
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Show runtime identity, protocol version and capabilities
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli status\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
     Status,
     Workspace {
         #[command(subcommand)]
@@ -61,6 +94,10 @@ pub enum Command {
         command: Box<OrchestrationCommand>,
     },
     /// Diagnostic passthrough for a raw protocol method
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli rpc <METHOD> [--params <JSON>]\nValid flags: --data-dir, --help, --json, --params, --request-id, --retry-request"
+    )]
     Rpc {
         /// Method name, e.g. session.read
         method: String,
@@ -73,9 +110,17 @@ pub enum Command {
 #[derive(Subcommand, Debug)]
 pub enum HarnessAction {
     /// List harnesses discovered on the service's execution host
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli harness list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
     List,
     /// Start a session running a harness; the service resolves the host
     /// executable, so there is nothing to point at a local binary
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli harness start --workspace <ID> --harness <ID> [OPTIONS]\nValid flags: --data-dir, --effort, --help, --harness, --json, --model, --permission-mode, --provider, --prompt, --request-id, --retry-request, --workspace"
+    )]
     Start {
         #[arg(long, value_name = "ID")]
         workspace: String,
@@ -123,6 +168,10 @@ impl PermissionModeArg {
 #[derive(Subcommand, Debug)]
 pub enum WorkspaceAction {
     /// Register an existing directory as a workspace
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli workspace add [OPTIONS] <PATH>\nValid flags: --data-dir, --help, --json, --name, --request-id, --retry-request"
+    )]
     Add {
         /// Path to an existing directory
         path: PathBuf,
@@ -130,12 +179,20 @@ pub enum WorkspaceAction {
         name: Option<String>,
     },
     /// List registered workspaces
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli workspace list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
     List,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum TerminalAction {
     /// Start a PTY session running COMMAND with ARGS (after `--`)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal create --workspace <ID> -- <COMMAND> [ARGS...]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
     Create {
         #[arg(long, value_name = "ID")]
         workspace: String,
@@ -145,11 +202,19 @@ pub enum TerminalAction {
         command: Vec<String>,
     },
     /// List sessions, optionally scoped to one workspace
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal list [--workspace <ID>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
     List {
         #[arg(long, value_name = "ID")]
         workspace: Option<String>,
     },
     /// Read bounded output from a session
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal read --session <ID> --incarnation <TOKEN> [--cursor <N>] [--limit-bytes <BYTES>]\nValid flags: --cursor, --data-dir, --help, --incarnation, --json, --limit-bytes, --request-id, --retry-request, --session"
+    )]
     Read {
         #[arg(long, value_name = "ID")]
         session: String,
@@ -163,6 +228,10 @@ pub enum TerminalAction {
         limit_bytes: Option<u64>,
     },
     /// Write UTF-8 text to a session (encoded to base64 exactly once)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>\nValid flags: --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --session, --text"
+    )]
     Send {
         #[arg(long, value_name = "ID")]
         session: String,
@@ -172,6 +241,10 @@ pub enum TerminalAction {
         text: String,
     },
     /// Resize a session's PTY
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal resize --session <ID> --incarnation <TOKEN> --cols <COLS> --rows <ROWS>\nValid flags: --cols, --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --rows, --session"
+    )]
     Resize {
         #[arg(long, value_name = "ID")]
         session: String,
@@ -183,6 +256,10 @@ pub enum TerminalAction {
         rows: u16,
     },
     /// Stop a session and wait for the observed exit
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal close --session <ID> --incarnation <TOKEN>\nValid flags: --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --session"
+    )]
     Close {
         #[arg(long, value_name = "ID")]
         session: String,
@@ -192,9 +269,37 @@ pub enum TerminalAction {
 }
 
 impl Cli {
+    /// Binary entry parse. Shadows `clap::Parser::try_parse` (inherent
+    /// methods win) so the real argv passes through the source contract's
+    /// boundary rule first: a leading bare `--` is an inert empty-named flag
+    /// token, never a hard escape that blocks command resolution
+    /// (`cli-argument-boundary.test.ts:21`). Mid-argv `--` (terminal create)
+    /// is untouched.
+    pub fn try_parse() -> Result<Cli, clap::Error> {
+        let mut argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+        let program = if argv.is_empty() {
+            None
+        } else {
+            Some(argv.remove(0))
+        };
+        while argv
+            .first()
+            .is_some_and(|token| token.as_os_str().to_str() == Some("--"))
+        {
+            argv.remove(0);
+        }
+        <Cli as clap::Parser>::try_parse_from(program.into_iter().chain(argv))
+    }
+
     /// Client-side validation: anything provably wrong before contacting the
     /// runtime is a usage error (exit 2), not a round trip.
     pub fn validate(&self) -> Result<(), CliError> {
+        if let Some(dir) = &self.data_dir
+            && dir.as_os_str() == std::ffi::OsStr::new(IMPLICIT_FLAG_PRESENCE)
+        {
+            // Source wording: args.ts:250-254, `Flag --<name> requires a value.`
+            return Err(CliError::Usage("Flag --data-dir requires a value.".into()));
+        }
         if let Some(request_id) = &self.request_id {
             validate_request_id(request_id)?;
         }

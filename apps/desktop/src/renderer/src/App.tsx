@@ -1,10 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  Bot,
   Folder,
   FolderPlus,
+  Monitor,
+  Moon,
   PanelRight,
   Plus,
   RefreshCw,
+  Settings,
+  Sun,
   TerminalSquare,
   X,
 } from "lucide-react";
@@ -29,6 +41,83 @@ import { supportsHarnessLaunch } from "./harness-capability";
 import { TerminalPane } from "./TerminalPane";
 import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
+import {
+  FILES_ROUTE_ID,
+  createGatedFileBridge,
+  isFilesAvailable,
+  registerFilesRoute,
+} from "./files-mount";
+import {
+  BOTS_CAPABILITY,
+  BOTS_ROUTE_ID,
+  buildBotsPanelProps,
+  createGatedBotBridge,
+  isBotsAvailable,
+  registerBotsRoute,
+} from "./bots-mount";
+import { loadBotSnapshot } from "./bots-loader";
+import type { BotsLoadResult } from "./bots-loader";
+import { FILES_CAPABILITY } from "../../shared/file-contract";
+import {
+  applyPanelFocus,
+  checkAvailability,
+  createRouteRegistry,
+  releasePanel,
+  resolveRoute,
+} from "./route-panel-contract";
+import type { PanelDescriptor } from "./route-panel-contract";
+import { createShortcutRegistry, guardHandler } from "./shortcuts";
+import {
+  parsePersistedSettings,
+  settingsStorageKey,
+  SettingsStore,
+} from "./settings-store";
+import {
+  recoveryActionFor,
+  recoveryTabLabel,
+  retryAffordanceDisabled,
+} from "./session-recovery";
+import {
+  applyThemeToRoot,
+  resolveEffectiveTheme,
+  resolveInspectorDefault,
+} from "./theme";
+import type { Theme } from "./settings-store";
+import { SettingsPanel } from "./settings-panel";
+import {
+  loadSavedSelection,
+  resolveRestoredSelection,
+  resolveWorkspaceSelection,
+  saveSavedSelection,
+} from "./workspace-selection";
+
+// One App mount owns one settings store; created lazily so importing this
+// module (e.g. from pure-logic tests) never touches window/localStorage.
+let uiSettingsStore: SettingsStore | null = null;
+function uiSettings(): SettingsStore {
+  if (!uiSettingsStore)
+    uiSettingsStore = new SettingsStore(window.localStorage, {
+      namespace: "ui",
+    });
+  return uiSettingsStore;
+}
+
+/**
+ * Nullable read of the saved inspector choice: unlike the store's typed get
+ * (which applies its default), this distinguishes "nothing saved yet" so the
+ * viewport can decide the initial value.
+ */
+function savedInspectorValue(): boolean | null {
+  try {
+    return (
+      parsePersistedSettings(
+        window.localStorage.getItem(settingsStorageKey("ui")),
+      ).inspectorVisible ?? null
+    );
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Replaces an already-listed entry only on an exact host+id+incarnation
@@ -108,15 +197,20 @@ export function applyConfirmedClose(
   return { sessions, active: nextActive };
 }
 
-export function IconButton({
-  label,
-  children,
-  ...props
-}: React.ComponentProps<typeof Button> & { label: string }) {
+export const IconButton = forwardRef<
+  HTMLButtonElement,
+  React.ComponentProps<typeof Button> & { label: string }
+>(function IconButton({ label, children, ...props }, ref) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <Button variant="ghost" size="icon" aria-label={label} {...props}>
+        <Button
+          ref={ref}
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          {...props}
+        >
           {children}
         </Button>
       </Tooltip.Trigger>
@@ -127,9 +221,40 @@ export function IconButton({
       </Tooltip.Portal>
     </Tooltip.Root>
   );
+});
+
+/**
+ * Single App mount for contract-registered panels: resolves the visible
+ * descriptor, applies the focus contract on mount and releases panel
+ * resources on unmount. Files panels mount session-less by design.
+ */
+export function MountedPanel({
+  descriptor,
+  workspace,
+  status,
+}: {
+  descriptor: PanelDescriptor;
+  workspace: Workspace;
+  status: Status;
+}) {
+  useEffect(() => {
+    applyPanelFocus(descriptor, null);
+    return () => releasePanel(descriptor);
+  }, [descriptor]);
+  const Component = descriptor.component;
+  return (
+    <Component
+      routeId={descriptor.id}
+      session={null}
+      workspace={workspace}
+      status={status}
+      focusTarget={null}
+    />
+  );
 }
 
 export function App() {
+  const settings = uiSettings();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selected, setSelected] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -155,9 +280,15 @@ export function App() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [adding, setAdding] = useState(false);
   const [folderPath, setFolderPath] = useState("");
-  const [inspector, setInspector] = useState(
-    () => matchMedia("(min-width: 1101px)").matches,
+  const [inspector, setInspector] = useState(() =>
+    resolveInspectorDefault(
+      matchMedia("(min-width: 1101px)").matches,
+      savedInspectorValue(),
+    ),
   );
+  const [theme, setTheme] = useState<Theme>(() => settings.get("theme"));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsOpenerRef = useRef<HTMLButtonElement>(null);
   const [revision, setRevision] = useState(0);
   const [harnessCapability, setHarnessCapability] = useState(false);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
@@ -177,8 +308,220 @@ export function App() {
       .then(setBuildInfo)
       .catch(() => setBuildInfo(null));
   }, []);
+  useEffect(() => {
+    // Applies the effective theme to the documentElement (.dark hook in
+    // main.css). While following the system scheme the class must track OS
+    // changes live; an explicit choice skips the listener. The effect re-runs
+    // on theme change and unmount, which is exactly the cleanup contract.
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () =>
+      applyThemeToRoot(
+        document.documentElement,
+        resolveEffectiveTheme(theme, query.matches),
+      );
+    apply();
+    if (theme !== "system") return;
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, [theme]);
   const current = workspaces.find((item) => item.id === selected);
   const terminal = sessions.find((item) => item.id === active);
+  // Single App mount for contract panels. The registry vocabulary is the
+  // static contract set (files.v1 declared here); mounting additionally
+  // requires the LIVE service to advertise it.
+  // Mount lifetime: once user-routed while available, the panel stays
+  // mounted (hidden, state intact) across Terminals/files switches and
+  // transient refresh gaps (status null), so navigation never discards
+  // unsaved editor drafts. It unmounts on explicit capability withhold
+  // (present status without files.v1, even while busy) and on settled
+  // workspace loss — a kept-alive panel can never call behind a withheld
+  // capability because every bridge call additionally passes the
+  // fail-closed gate below. Draft survival across a true capability loss
+  // needs V3 draft-state hoisting (their item).
+  const [route, setRoute] = useState<string | null>(null);
+  const liveCapabilities = status?.capabilities ?? [];
+  // Gate refs update in an effect (never during render): steady-state
+  // exact, bounded one-commit staleness on transitions. The render guard
+  // (explicitWithhold below) is synchronous, so the gate is
+  // defense-in-depth for races, not the primary fence.
+  const filesGateRef = useRef(false);
+  useEffect(() => {
+    filesGateRef.current = isFilesAvailable(liveCapabilities);
+  }, [liveCapabilities]);
+  const botsGateRef = useRef(false);
+  useEffect(() => {
+    botsGateRef.current = isBotsAvailable(liveCapabilities);
+  }, [liveCapabilities]);
+  const filesGatedBridge = useMemo(
+    () => createGatedFileBridge(window.drogon, () => filesGateRef.current),
+    [],
+  );
+  const botsGatedBridge = useMemo(
+    () => createGatedBotBridge(window.drogon, () => botsGateRef.current),
+    [],
+  );
+  // Bots snapshot loads through the gated bridge for the exact live scope;
+  // results carry their scope triple and render only on scope match, so no
+  // stale snapshot ever shows for another workspace/host. No run control:
+  // the panel is read-only until the BotRun bridge lands.
+  const botsScope =
+    current && status
+      ? {
+          hostId: status.hostId,
+          workspaceId: current.id,
+          locale: settings.get("locale"),
+        }
+      : null;
+  const botsScopeHost = botsScope?.hostId ?? null;
+  const botsScopeWorkspace = botsScope?.workspaceId ?? null;
+  const botsScopeLocale = botsScope?.locale ?? null;
+  function botsScopeEquals(
+    scope:
+      | { hostId: string; workspaceId: string; locale: string }
+      | null
+      | undefined,
+  ): scope is { hostId: string; workspaceId: string; locale: string } {
+    return (
+      scope != null &&
+      botsScopeHost !== null &&
+      scope.hostId === botsScopeHost &&
+      scope.workspaceId === botsScopeWorkspace &&
+      scope.locale === botsScopeLocale
+    );
+  }
+  const [botsLoad, setBotsLoad] = useState<BotsLoadResult | null>(null);
+  const [botsReload, setBotsReload] = useState(0);
+  const botsAvailable = isBotsAvailable(liveCapabilities);
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (route !== BOTS_ROUTE_ID || !botsAvailable || !botsScope) return;
+      // Clear the previous result first: the UI shows in-progress instead
+      // of a stale error while the fresh request is pending.
+      setBotsLoad(null);
+      const result = await loadBotSnapshot(botsGatedBridge, botsScope);
+      if (!cancelled) setBotsLoad(result);
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    route,
+    botsAvailable,
+    botsScopeHost,
+    botsScopeWorkspace,
+    botsScopeLocale,
+    botsReload,
+  ]);
+  // Stable files base: Bots snapshot refreshes must never reset the Files
+  // descriptor identity (mounted editor drafts/attempts). The bots layer
+  // rebuilds on snapshot change; the files base below never does.
+  const filesBaseRegistry = useMemo(
+    () =>
+      registerFilesRoute(
+        createRouteRegistry({
+          capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY],
+          fallbackId: BOTS_ROUTE_ID,
+        }),
+        filesGatedBridge,
+      ),
+    [filesGatedBridge],
+  );
+  const panelRegistry = useMemo(() => {
+    if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
+      return registerBotsRoute(
+        filesBaseRegistry,
+        botsGatedBridge,
+        buildBotsPanelProps(botsLoad.snapshot),
+      );
+    return filesBaseRegistry;
+  }, [
+    filesBaseRegistry,
+    botsGatedBridge,
+    botsLoad,
+    botsScopeHost,
+    botsScopeWorkspace,
+    botsScopeLocale,
+  ]);
+  const filesAvailable =
+    isFilesAvailable(liveCapabilities) &&
+    checkAvailability(
+      resolveRoute(filesBaseRegistry, FILES_ROUTE_ID),
+      liveCapabilities,
+    ) === "available";
+  const lastPropsRef = useRef<{
+    workspace: Workspace;
+    status: Status;
+  } | null>(null);
+  if (current && status) lastPropsRef.current = { workspace: current, status };
+  // Keep-alive: once user-routed while available, the panel survives
+  // route switches and transient refresh gaps (status null). Render
+  // stops immediately on explicit withhold (present status without
+  // files.v1, even while busy) and on settled workspace loss — never on
+  // switches, never on transients.
+  const filesAliveRef = useRef(false);
+  // First mount needs explicit user routing; keep-alive covers later
+  // switches and transients. Never auto-mounts unopened panels.
+  // Present status without files.v1 is an explicit withhold even mid-busy;
+  // status null is the only transient that preserves the mount.
+  const explicitWithhold =
+    status !== null && !isFilesAvailable(liveCapabilities);
+  if (route === FILES_ROUTE_ID && filesAvailable && current)
+    filesAliveRef.current = true;
+  else if (
+    explicitWithhold ||
+    (status && !current && !busy && !loadingSessions)
+  )
+    filesAliveRef.current = false;
+  const filesAlive = filesAliveRef.current;
+  const filesProps =
+    current && status ? { workspace: current, status } : lastPropsRef.current;
+  const filesSectionRef = useRef<HTMLElement>(null);
+  const botsSectionRef = useRef<HTMLElement>(null);
+  const prevRouteRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Real focus, only on explicit user navigation to a panel: background
+    // refreshes and re-renders must never steal focus.
+    const target =
+      route === FILES_ROUTE_ID
+        ? filesSectionRef.current
+        : route === BOTS_ROUTE_ID
+          ? botsSectionRef.current
+          : null;
+    if (route !== null && target && prevRouteRef.current !== route) {
+      applyPanelFocus(
+        resolveRoute(
+          route === BOTS_ROUTE_ID ? panelRegistry : filesBaseRegistry,
+          route,
+        ),
+        target,
+      );
+      target.focus();
+    }
+    prevRouteRef.current = route;
+  }, [route, panelRegistry, filesBaseRegistry]);
+  // Bots keep-alive mirrors files: survives switches and transients,
+  // unmounts on explicit withhold or settled workspace loss. The Bots
+  // panel is read-only (no drafts), so remounts on snapshot refresh are
+  // safe; scope mismatch never renders (no stale data).
+  const botsExplicitWithhold =
+    status !== null && !isBotsAvailable(liveCapabilities);
+  const botsAliveRef = useRef(false);
+  if (route === BOTS_ROUTE_ID && botsAvailable && current)
+    botsAliveRef.current = true;
+  else if (
+    botsExplicitWithhold ||
+    (status && !current && !busy && !loadingSessions)
+  )
+    botsAliveRef.current = false;
+  const botsAlive = botsAliveRef.current;
+  const botsScopeMatch =
+    botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope);
+  const botsDescriptor: PanelDescriptor | null =
+    botsAlive && filesProps && botsScopeMatch
+      ? resolveRoute(panelRegistry, BOTS_ROUTE_ID)
+      : null;
   const checked = <T,>(value: Result<T>): T => {
     if (!value.ok) throw new Error(value.error.message);
     return value.result;
@@ -209,7 +552,7 @@ export function App() {
         setSelected((value) =>
           result.workspaces.some((item) => item.id === value)
             ? value
-            : (result.workspaces[0]?.id ?? ""),
+            : resolveRestoredSelection(result.workspaces, loadSavedSelection()),
         );
         setRevision((value) => value + 1);
         const supportsHarnesses = supportsHarnessLaunch(connected.capabilities);
@@ -232,6 +575,16 @@ export function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    // Persists every confirmed selection once it settles against a known
+    // workspace, so the next reload's restore has an up-to-date target.
+    const workspace = workspaces.find((item) => item.id === selected);
+    if (workspace)
+      saveSavedSelection({
+        workspaceId: workspace.id,
+        hostId: workspace.hostId,
+      });
+  }, [selected, workspaces]);
   useEffect(() => {
     const wide = matchMedia("(min-width: 1101px)");
     const adapt = () => {
@@ -308,6 +661,24 @@ export function App() {
       setActive(result.id);
     }).then(() => launched);
   };
+  // Single write path for both the toolbar controls and the Settings panel:
+  // uiSettings() stays the only source of truth, React state just mirrors it.
+  const changeTheme = (next: Theme) => {
+    setTheme(next);
+    settings.set("theme", next);
+  };
+  // Inspector toggles persist through the settings store; the narrow-viewport
+  // guard below keeps overriding the pane shut on shrink without persisting,
+  // so an accidental shrink never becomes a saved "closed" choice.
+  const changeInspector = (next: boolean) => {
+    setInspector(next);
+    settings.set("inspectorVisible", next);
+  };
+  const toggleInspector = () => changeInspector(!inspector);
+  const cycleTheme = () =>
+    changeTheme(
+      theme === "system" ? "dark" : theme === "dark" ? "light" : "system",
+    );
   const close = (session: Session) =>
     action(async () => {
       const result = checked(
@@ -363,22 +734,19 @@ export function App() {
       setFolderPath("");
     });
   useEffect(() => {
+    const platform = navigator.userAgent.includes("Mac") ? "darwin" : "other";
+    const isDisabled = () => !selected || !status || busy || loadingSessions;
+    const registry = createShortcutRegistry();
+    registry.register({
+      id: "workspace.newTerminal",
+      chord: "CmdOrCtrl+Shift+N",
+      handler: guardHandler(() => void create(), isDisabled),
+    });
     const keydown = (event: KeyboardEvent) => {
-      const mod = navigator.userAgent.includes("Mac")
-        ? event.metaKey
-        : event.ctrlKey;
-      if (
-        mod &&
-        event.shiftKey &&
-        event.key.toLowerCase() === "n" &&
-        selected &&
-        status &&
-        !busy &&
-        !loadingSessions
-      ) {
-        event.preventDefault();
-        void create();
-      }
+      const action = registry.matchKeyEvent(event, platform);
+      if (!action || isDisabled()) return;
+      event.preventDefault();
+      action.handler();
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
@@ -407,7 +775,14 @@ export function App() {
                 data-current={workspace.id === selected}
                 aria-current={workspace.id === selected ? "page" : undefined}
                 onClick={() => {
-                  setSelected(workspace.id);
+                  // Re-clicking the already-active workspace must not clear
+                  // its visible live-session projection.
+                  const resolution = resolveWorkspaceSelection(
+                    selected,
+                    workspace.id,
+                  );
+                  if (!resolution.changed) return;
+                  setSelected(resolution.selected);
                   setActive("");
                   setSessions([]);
                 }}
@@ -416,6 +791,51 @@ export function App() {
                 <span>{workspace.name}</span>
               </button>
             ))}
+          </nav>
+          <div className="sidebar-label">
+            <span>Panels</span>
+          </div>
+          <nav aria-label="Panels">
+            <button
+              key="panel-terminals"
+              className="workspace-row"
+              disabled={busy || !current}
+              data-current={route === null}
+              onClick={() => setRoute(null)}
+            >
+              <TerminalSquare size={16} />
+              <span>Terminals</span>
+            </button>
+            <button
+              key="panel-files"
+              className="workspace-row"
+              disabled={busy || !current || !isFilesAvailable(liveCapabilities)}
+              data-current={route === FILES_ROUTE_ID}
+              title={
+                isFilesAvailable(liveCapabilities)
+                  ? "Files"
+                  : "Files unavailable: service does not advertise files.v1"
+              }
+              onClick={() => setRoute(FILES_ROUTE_ID)}
+            >
+              <Folder size={16} />
+              <span>Files</span>
+            </button>
+            <button
+              key="panel-bots"
+              className="workspace-row"
+              disabled={busy || !current || !isBotsAvailable(liveCapabilities)}
+              data-current={route === BOTS_ROUTE_ID}
+              title={
+                isBotsAvailable(liveCapabilities)
+                  ? "Bots"
+                  : "Bots unavailable: service does not advertise bot.snapshot.v1"
+              }
+              onClick={() => setRoute(BOTS_ROUTE_ID)}
+            >
+              <Bot size={16} />
+              <span>Bots</span>
+            </button>
           </nav>
           {adding && (
             <form
@@ -482,12 +902,21 @@ export function App() {
           </footer>
         </aside>
         <main className="session-area">
-          <header className="session-header">
+          <header className="session-header" style={{ position: "relative" }}>
             <div className="workspace-heading">
               <strong>{current?.name ?? "Your workspace"}</strong>
               {current && <span className="path">{current.path}</span>}
             </div>
             <div className="header-actions">
+              <IconButton label={`Theme: ${theme}`} onClick={cycleTheme}>
+                {theme === "system" ? (
+                  <Monitor size={16} />
+                ) : theme === "dark" ? (
+                  <Moon size={16} />
+                ) : (
+                  <Sun size={16} />
+                )}
+              </IconButton>
               <IconButton
                 label="Refresh connection"
                 disabled={busy}
@@ -497,11 +926,29 @@ export function App() {
               </IconButton>
               <IconButton
                 label="Toggle session details"
-                onClick={() => setInspector((value) => !value)}
+                onClick={toggleInspector}
               >
                 <PanelRight />
               </IconButton>
+              <IconButton
+                ref={settingsOpenerRef}
+                label="Settings"
+                aria-expanded={settingsOpen}
+                onClick={() => setSettingsOpen((value) => !value)}
+              >
+                <Settings size={16} />
+              </IconButton>
             </div>
+            {settingsOpen && (
+              <SettingsPanel
+                theme={theme}
+                onThemeChange={changeTheme}
+                inspectorVisible={inspector}
+                onInspectorChange={changeInspector}
+                onClose={() => setSettingsOpen(false)}
+                openerRef={settingsOpenerRef}
+              />
+            )}
           </header>
           {error && (
             <div className="error-banner" role="alert">
@@ -517,7 +964,17 @@ export function App() {
             </div>
           )}
           <div className="session-layout">
-            <section className="terminal-column" aria-label="Terminals">
+            <section
+              className="terminal-column"
+              aria-label="Terminals"
+              style={{
+                display:
+                  (route === FILES_ROUTE_ID && filesAlive) ||
+                  (route === BOTS_ROUTE_ID && botsAlive && filesProps !== null)
+                    ? "none"
+                    : undefined,
+              }}
+            >
               <div
                 className="terminal-tabs"
                 role="tablist"
@@ -559,9 +1016,31 @@ export function App() {
                       onClick={() => setActive(item.id)}
                     >
                       <TerminalSquare size={14} />
-                      <span>{sessionLabel(item, harnesses)}</span>
+                      <span>
+                        {recoveryTabLabel({
+                          label: sessionLabel(item, harnesses),
+                          verdict: item.verdict,
+                          id: item.id,
+                          incarnation: item.incarnation,
+                        })}
+                      </span>
                       <span className="session-verdict">{item.verdict}</span>
                     </button>
+                    {recoveryActionFor(item.verdict, {
+                      // A confirmed close removes the tab, so a still-listed
+                      // exited session is one the user did not request.
+                      exitExpected: false,
+                    }).kind === "retry-connection" && (
+                      <IconButton
+                        label="Retry connection"
+                        disabled={retryAffordanceDisabled({
+                          refreshInFlight: busy,
+                        })}
+                        onClick={() => void refresh()}
+                      >
+                        <RefreshCw />
+                      </IconButton>
+                    )}
                     <IconButton
                       label={`Close ${sessionLabel(item, harnesses)} session`}
                       disabled={busy || loadingSessions || !status}
@@ -599,6 +1078,28 @@ export function App() {
                 className="active-session-panel"
                 aria-busy={loadingSessions}
               >
+                {terminal &&
+                  status &&
+                  recoveryActionFor(terminal.verdict, {
+                    exitExpected: false,
+                  }).kind === "reveal-output+offer-new" && (
+                    <div className="error-banner" role="status">
+                      <span>
+                        This session exited (exit{" "}
+                        {terminal.exitCode ?? "unknown"}). Its output is kept
+                        below.
+                      </span>
+                      <Button
+                        size="sm"
+                        disabled={busy || loadingSessions}
+                        onClick={() =>
+                          current ? void create() : setAdding(true)
+                        }
+                      >
+                        New terminal
+                      </Button>
+                    </div>
+                  )}
                 {terminal && status ? (
                   <TerminalPane
                     key={`${terminal.id}:${revision}`}
@@ -645,6 +1146,80 @@ export function App() {
                 )}
               </div>
             </section>
+            {filesAlive && filesProps ? (
+              <section
+                ref={filesSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Files"
+                style={{
+                  display: route === FILES_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                <MountedPanel
+                  descriptor={resolveRoute(filesBaseRegistry, FILES_ROUTE_ID)}
+                  workspace={filesProps.workspace}
+                  status={filesProps.status}
+                />
+              </section>
+            ) : null}
+            {botsAlive && filesProps ? (
+              <section
+                ref={botsSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Bots"
+                style={{
+                  display: route === BOTS_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                {botsDescriptor ? (
+                  <MountedPanel
+                    descriptor={botsDescriptor}
+                    workspace={filesProps.workspace}
+                    status={filesProps.status}
+                  />
+                ) : (
+                  <div className="empty-state" role="status">
+                    {(() => {
+                      const fresh =
+                        botsLoad && botsScopeEquals(botsLoad.scope)
+                          ? botsLoad
+                          : null;
+                      if (fresh === null) return <p>Loading bots…</p>;
+                      if (fresh.status === "too_large")
+                        return (
+                          <>
+                            <p>
+                              Bots snapshot too large: {fresh.message} Narrow
+                              the workspace scope and retry.
+                            </p>
+                            <Button
+                              disabled={busy}
+                              onClick={() => setBotsReload((tick) => tick + 1)}
+                            >
+                              Retry
+                            </Button>
+                          </>
+                        );
+                      if (fresh.status === "error")
+                        return (
+                          <>
+                            <p>Bots unavailable: {fresh.message}</p>
+                            <Button
+                              disabled={busy}
+                              onClick={() => setBotsReload((tick) => tick + 1)}
+                            >
+                              Retry
+                            </Button>
+                          </>
+                        );
+                      return <p>Loading bots…</p>;
+                    })()}
+                  </div>
+                )}
+              </section>
+            ) : null}
             {inspector && (
               <aside className="session-details" aria-label="Session details">
                 <h2>Session</h2>

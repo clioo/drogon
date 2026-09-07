@@ -1,68 +1,22 @@
-//! The `bot.create` bridge, staged per the A6d principle (ROOT directive
-//! msg_ad4f2ca5cf2d): pure strict parse + scope authorization on the passed
-//! canonical connection + a DB-only body, so ROOT's wrapper owns the
-//! canonical `RequestLedger::run_atomic` (method+params fingerprint, its
-//! own mutex and transaction) without adapters or external locks.
-//!
-//! Request contract (strict; unknown fields denied): `{workspaceId*,
-//! hostId*, botId?, body*, locale?}`. `body` must be the FULL
-//! `parse_bot_create` shape -- no partials, no defaults; a params
-//! `requestId` is an unknown field because the native envelope carries it.
-//! `hostId` is a client assertion only: the derived host (ROOT's
-//! `Engine.host_id`) is the authority.
-//!
-//! Frozen wire codes only: `invalid_argument`, `unknown_workspace`,
-//! `foreign_workspace_host`, `storage_error`, plus the pre-existing crate
-//! code `unauthorized` for the worker-denied auth path. Replay/conflict
-//! is the canonical ledger's; minting (`botId` absent -> fresh uuid) is
-//! fresh-only here so a replay returns the stored DTO without minting.
-//!
-//! Born-empty is structural: a created Bot always has `responsibilities: []`
-//! and `currentSession: null`, verified in the DTO. The module has no
-//! dispatch seam, so it cannot spawn.
-//!
-//! run_atomic compatibility: [`create_in_connection`] is a guard-SELECT
-//! plus one INSERT through `bots::storage::create_bot` on the connection it
-//! receives; it never reacquires a lock, never begins or commits its own
-//! transaction, and composes inside `run_atomic`/`run_staged`'s
-//! caller-owned transaction. ROOT note: swap the minimal workspace lookup
-//! in [`authorize_create_scope`] for the promised `workspace::owned_path`
-//! at registration.
+//! Born-empty Bot creation under canonical atomic receipts and execution-host ownership.
 
 use rusqlite::Connection;
 use serde_json::Value;
 
-use drogon_core::bots::input::parse_bot_create;
-use drogon_core::bots::records::{Bot, DisplayIdentity, HarnessModelPolicy};
-use drogon_core::bots::storage as bots_storage;
+use crate::bots::input::parse_bot_create;
+use crate::bots::records::{Bot, DisplayIdentity, HarnessModelPolicy};
+use crate::bots::storage as bots_storage;
 use drogon_protocol::RpcError;
 
-/// Who is calling. ROOT's wiring maps the private auth layer's
-/// `WorkerBinding` onto [`BotCreateCaller::Worker`]; `bot.create` is
-/// desktop-only in v1.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BotCreateCaller {
-    Desktop,
-    Worker {
-        host_id: String,
-        run_id: String,
-        dispatch_id: String,
-    },
-}
-
-/// The strict, normalized request. The envelope `request_id` is deliberately
-/// absent: it keys the canonical ledger and never enters the params
-/// fingerprint.
+// The envelope request ID must not enter the params fingerprint.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BotCreateRequest {
+pub(crate) struct BotCreateRequest {
     pub workspace_id: String,
     /// Client assertion only; verified against the derived host.
     pub asserted_host_id: String,
-    /// Used as-given when present; minted fresh per admission when absent.
     pub bot_id: Option<String>,
-    /// The parse-normalized `parse_bot_create` body.
     pub body: Value,
-    pub locale: Option<String>,
+    pub _locale: Option<String>,
 }
 
 fn invalid_argument(message: impl Into<String>) -> RpcError {
@@ -79,18 +33,6 @@ fn foreign_workspace_host(message: impl Into<String>) -> RpcError {
 
 fn storage_error(message: impl Into<String>) -> RpcError {
     RpcError::new("storage_error", message.into())
-}
-
-/// Worker callers are denied on this auth path; ROOT's wrapper calls this
-/// before any ledger admission.
-pub fn ensure_desktop_caller(caller: &BotCreateCaller) -> Result<(), RpcError> {
-    if matches!(caller, BotCreateCaller::Worker { .. }) {
-        return Err(RpcError::new(
-            "unauthorized",
-            "bot.create is desktop-only: worker dispatch credentials are denied on this auth path",
-        ));
-    }
-    Ok(())
 }
 
 fn required_string(object: &Value, key: &str) -> Result<String, RpcError> {
@@ -117,10 +59,7 @@ fn optional_string(object: &Value, key: &str) -> Result<Option<String>, RpcError
     }
 }
 
-/// Strict parse: unknown top-level fields are denied (including a params
-/// `requestId` -- the envelope carries it), `workspaceId`/`hostId`/`body`
-/// are required, and `body` must be the FULL `parse_bot_create` shape.
-pub fn parse_bot_create_request(params: &Value) -> Result<BotCreateRequest, RpcError> {
+pub(crate) fn parse_bot_create_request(params: &Value) -> Result<BotCreateRequest, RpcError> {
     let object = params
         .as_object()
         .ok_or_else(|| invalid_argument("bot.create params must be an object"))?;
@@ -134,53 +73,34 @@ pub fn parse_bot_create_request(params: &Value) -> Result<BotCreateRequest, RpcE
         .get("body")
         .ok_or_else(|| invalid_argument("missing required field body"))?;
     let normalized_body = parse_bot_create(body).map_err(|e| invalid_argument(e.to_string()))?;
+    let bot_id = optional_string(params, "botId")?;
+    // Match the existing desktop ID boundary, including UTF-16 length.
+    if let Some(id) = &bot_id
+        && (id.is_empty()
+            || id.encode_utf16().count() > 128
+            || id.chars().any(|c| (c as u32) <= 0x1f || c == '\u{7f}'))
+    {
+        return Err(invalid_argument("Invalid Bot identifier"));
+    }
     Ok(BotCreateRequest {
         workspace_id: required_string(params, "workspaceId")?,
         asserted_host_id: required_string(params, "hostId")?,
-        bot_id: optional_string(params, "botId")?,
+        bot_id,
         body: normalized_body,
-        locale: optional_string(params, "locale")?,
+        _locale: optional_string(params, "locale")?,
     })
 }
 
-/// Scope authorization on the passed canonical connection: the derived host
-/// must own the workspace, and the client's asserted host must equal the
-/// derived host. Tx-safe and side-effect-free, so ROOT's wrapper can run it
-/// before the ledger admission on EVERY request -- replays included, so a
-/// scope change is never bypassed by a cached receipt.
-pub fn authorize_create_scope(
+// Replays must not bypass changed execution-host ownership.
+pub(crate) fn authorize_create_scope(
     conn: &Connection,
     derived_host_id: &str,
     request: &BotCreateRequest,
 ) -> Result<(), RpcError> {
-    let mut statement = conn
-        .prepare("SELECT host_id FROM workspaces WHERE id = ?1")
-        .map_err(|e| storage_error(format!("workspace lookup failed: {e}")))?;
-    let workspace_host_id: String = statement
-        .query_row([&request.workspace_id], |r| r.get(0))
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                unknown_workspace(format!("workspace {} not found", request.workspace_id))
-            }
-            other => storage_error(format!("workspace lookup failed: {other}")),
-        })?;
-    if workspace_host_id != derived_host_id {
-        return Err(foreign_workspace_host(format!(
-            "foreign workspace host: workspace {} belongs to host {}, not current host {}",
-            request.workspace_id, workspace_host_id, derived_host_id
-        )));
-    }
-    if request.asserted_host_id != derived_host_id {
-        return Err(foreign_workspace_host(format!(
-            "foreign workspace host: asserted host {} does not match derived host {}",
-            request.asserted_host_id, derived_host_id
-        )));
-    }
-    Ok(())
+    owned_folder(conn, derived_host_id, request).map(|_| ())
 }
 
-/// Builds the born-empty Bot from the parse-normalized body.
-fn build_bot(bot_id: &str, body: &Value, now_unix: u64) -> Result<Bot, RpcError> {
+fn build_bot(bot_id: &str, body: &Value, now_ms: u64) -> Result<Bot, RpcError> {
     let part = |key: &str| -> Result<Value, RpcError> {
         body.get(key)
             .cloned()
@@ -207,48 +127,68 @@ fn build_bot(bot_id: &str, body: &Value, now_unix: u64) -> Result<Bot, RpcError>
             .ok_or_else(|| storage_error("normalized body missing instructions"))?
             .to_string(),
         memories,
-        // Born-empty, structurally: a new Bot has no responsibilities and
-        // no session, whatever the parser admitted.
+        // Creation never inherits duties or starts execution.
         responsibilities: Vec::new(),
         current_session: None,
-        created_at: now_unix as f64,
-        updated_at: now_unix as f64,
+        created_at: now_ms as f64,
+        updated_at: now_ms as f64,
     })
 }
 
-/// DB body: mints `botId` when absent (fresh-only -- a replay never re-runs
-/// this, so the stored DTO keeps its stable id), creates the born-empty Bot
-/// in the caller's scope, and returns the DTO exactly as the snapshot
-/// `bots[]` projection. Never begins a transaction, never reacquires a
-/// lock, never spawns. Re-resolves the workspace path as the scope folder
-/// (defense in depth: [`authorize_create_scope`] must have run first).
-pub fn create_in_connection(
+// The caller's transaction commits the Bot and its exact receipt together.
+pub(crate) fn create_in_connection(
     conn: &Connection,
     derived_host_id: &str,
-    request_id: &str,
     request: &BotCreateRequest,
-    now_unix: u64,
+    now_ms: u64,
 ) -> Result<Value, RpcError> {
-    let _admission_marker = request_id; // wrapper tracing symmetry
-    let folder: String = conn
-        .query_row(
-            "SELECT path FROM workspaces WHERE id = ?1",
-            [&request.workspace_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                unknown_workspace(format!("workspace {} not found", request.workspace_id))
-            }
-            other => storage_error(format!("workspace lookup failed: {other}")),
-        })?;
+    let folder = owned_folder(conn, derived_host_id, request)?;
     let bot_id = match &request.bot_id {
         Some(id) => id.clone(),
         None => uuid::Uuid::new_v4().to_string(),
     };
-    let bot = build_bot(&bot_id, &request.body, now_unix)?;
-    // Guard-SELECT plus one INSERT inside the caller's transaction.
+    let bot = build_bot(&bot_id, &request.body, now_ms)?;
     bots_storage::create_bot(conn, derived_host_id, &folder, &bot)
         .map_err(|e| storage_error(format!("failed to create bot: {e}")))?;
     serde_json::to_value(&bot).map_err(|e| storage_error(format!("created bot unreadable: {e}")))
+}
+
+fn owned_folder(
+    conn: &Connection,
+    derived_host_id: &str,
+    request: &BotCreateRequest,
+) -> Result<String, RpcError> {
+    crate::workspace::owned_path(
+        conn,
+        derived_host_id,
+        &request.workspace_id,
+        &request.asserted_host_id,
+    )
+    .map_err(|error| match error.code.as_str() {
+        "unsupported_host" => foreign_workspace_host(error.message),
+        "not_found" => unknown_workspace(error.message),
+        _ => error,
+    })
+}
+
+impl crate::Engine {
+    pub(crate) fn bot_create(&self, request: &drogon_protocol::Request) -> Result<Value, RpcError> {
+        let parsed = parse_bot_create_request(&request.params)?;
+        let _gate = self.lifecycle_gate.read().unwrap();
+        self.ledger.run_atomic(
+            &self.db,
+            &request.request_id,
+            &request.method,
+            &request.params,
+            |tx| {
+                if self.quiescent.load(std::sync::atomic::Ordering::Acquire) {
+                    return Err(crate::error::runtime_busy(
+                        "service admission is frozen for shutdown",
+                    ));
+                }
+                authorize_create_scope(tx, &self.host_id, &parsed)
+            },
+            |tx| create_in_connection(tx, &self.host_id, &parsed, crate::now_unix_ms()),
+        )
+    }
 }

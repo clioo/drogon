@@ -19,6 +19,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
+  --color-editor-surface: var(--editor-surface);
   --radius-md: calc(var(--radius) * 0.8);
 }
 :root {
@@ -44,6 +45,7 @@
   --destructive: #e40014;
   --sidebar: #fafafa;
   --sidebar-accent: #f5f5f5;
+  --editor-surface: #ffffff;
   /* Floating menus/popovers that escape the editor surface, per the source style guide. */
   --shadow-floating: 0 10px 24px rgb(0 0 0 / 0.18);
   color-scheme: light;
@@ -67,7 +69,54 @@
     --destructive: #ff6568;
     --sidebar: #171717;
     --sidebar-accent: #262626;
+    --editor-surface: #1e1e1e;
     color-scheme: dark;
+  }
+}
+/* Explicit theme beats OS media: :root.dark/:root:not(.dark) are (0,2,0) over
+   media :root (0,1,0). Token values copied byte-for-byte; keep in sync. */
+:root.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --primary: #e5e5e5;
+  --primary-foreground: #171717;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted-foreground: #a1a1a1;
+  --accent: #404040;
+  --accent-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --border: rgb(255 255 255 / 0.07);
+  --input: rgb(255 255 255 / 0.15);
+  --ring: #737373;
+  --destructive: #ff6568;
+  --sidebar: #171717;
+  --sidebar-accent: #262626;
+  --editor-surface: #1e1e1e;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.dark) {
+    --background: #fff;
+    --foreground: #0a0a0a;
+    --primary: #171717;
+    --primary-foreground: #fafafa;
+    --secondary: #f5f5f5;
+    --secondary-foreground: #171717;
+    --muted-foreground: #737373;
+    --accent: #f5f5f5;
+    --accent-foreground: #171717;
+    --popover: #fff;
+    --popover-foreground: #0a0a0a;
+    --border: #e5e5e5;
+    --input: #e5e5e5;
+    --ring: #a1a1a1;
+    --destructive: #e40014;
+    --sidebar: #fafafa;
+    --sidebar-accent: #f5f5f5;
+    --editor-surface: #ffffff;
+    color-scheme: light;
   }
 }
 * {
@@ -206,6 +255,13 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* Long unbreakable repo names must ellipsize like the path below them, never
+   paint under the header action buttons at narrow widths. */
+.workspace-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .workspace-heading .path {
   overflow: hidden;
@@ -437,6 +493,165 @@ h2 {
   flex-direction: row !important;
   align-items: center;
   gap: 6px !important;
+}
+/* Files split (contrast-report.md Follow-up B, V2-owned half): the panel
+   mounts session-less; tree fixed 240px, editor canvas flexes on
+   --editor-surface (values byte-identical to the frozen source anchors).
+   Narrow widths stack tree-over-editor at the inspector breakpoint. */
+.files-panel {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  /* Anchor for the transient notice overlays below. */
+  position: relative;
+}
+.workspace-explorer {
+  width: 240px;
+  flex-shrink: 0;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid
+    color-mix(in srgb, var(--border) 72%, transparent);
+}
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--editor-surface);
+}
+.editor-pane-header {
+  min-height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--editor-surface);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--border) 72%, transparent);
+}
+.editor-pane-header .path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Editor canvas surface (ROOT-approved extras to Follow-up B): the emitted
+   textarea fills the pane column on --editor-surface in the mono scale. No
+   native resize grip may overflow the flex column, so resizing is off; the
+   focus ring mirrors the button pattern. */
+.editor-pane-surface {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 0;
+  resize: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--foreground);
+  background: var(--editor-surface);
+}
+.editor-pane-surface:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+/* Explorer tree rows (Follow-up B item 5 + approval): the emitted buttons
+   are vertical full-width flex rows mirroring .workspace-row, so selected
+   and hover reuse --sidebar-accent and the global button focus ring stays
+   intact. The chevron spacer matches the 14px lucide chevron it replaces. */
+.workspace-explorer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  margin: 2px 8px;
+  padding: 8px 12px;
+  border-radius: calc(var(--radius) * 0.8);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+}
+.workspace-explorer-row svg,
+.workspace-explorer-chevron-spacer,
+.workspace-explorer-badge {
+  flex-shrink: 0;
+}
+.workspace-explorer-chevron-spacer {
+  width: 14px;
+}
+.workspace-explorer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-explorer-badge {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.workspace-explorer-row:hover,
+.workspace-explorer-row[data-current="true"],
+.workspace-explorer-row[aria-selected="true"] {
+  background: var(--sidebar-accent);
+}
+/* Header badges stay V2-styled via existing hooks; content is V3's. */
+.editor-pane-unread {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.editor-pane-dirty {
+  font-size: 12px;
+}
+/* Truncation/symlink notices are transient siblings between the tree and
+   the editor: as flex items they would become columns squeezing the editor,
+   so they overlay the panel top instead (popover tokens, floating tier).
+   A V3 wrapper stacking them above the split remains the cleaner option. */
+.files-panel-truncated,
+.files-panel-selection {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  max-width: min(90%, 60ch);
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.8);
+  box-shadow: var(--shadow-floating);
+}
+.files-panel-symlink-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.6);
+  padding: 3px 8px;
+}
+@media (max-width: 1100px) {
+  .files-panel {
+    flex-direction: column;
+  }
+  .workspace-explorer {
+    width: auto;
+    max-height: 40%;
+    border-right: 0;
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--border) 72%, transparent);
+  }
 }
 @media (max-width: 1100px) {
   .session-details {

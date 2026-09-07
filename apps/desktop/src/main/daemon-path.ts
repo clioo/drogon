@@ -18,13 +18,18 @@ export function buildDaemonPath(
   const existing = (existingPath ?? "")
     .split(separator)
     .filter((entry) => entry.length > 0);
+  // `path.join` follows the *host* OS's separators, not the requested
+  // `platform`'s — building a Windows-launched app's POSIX-target PATH with
+  // it would silently emit backslash-joined entries. `path.posix.join`
+  // always yields forward slashes, matching what a POSIX target expects
+  // regardless of which OS this code is actually running on.
   const fallbacks =
     platform === "win32"
       ? []
       : [
-          path.join(home, ".local", "bin"),
-          path.join(home, ".opencode", "bin"),
-          path.join(home, ".bun", "bin"),
+          path.posix.join(home, ".local", "bin"),
+          path.posix.join(home, ".opencode", "bin"),
+          path.posix.join(home, ".bun", "bin"),
           "/opt/homebrew/bin",
           "/usr/local/bin",
           "/usr/bin",
