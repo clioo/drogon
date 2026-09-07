@@ -2,86 +2,70 @@
 //! RPC methods `protocol-v1.md` reserves for file read/write, this module
 //! gives `list_dir`/`read_file`/`write_file` a caller-supplied workspace-root
 //! boundary: every relative path is checked for traversal (`..`, absolute,
-//! NUL) up front, and the actual filesystem work below that check is done
-//! entirely through a single `cap_std::fs::Dir` handle opened once on the
-//! workspace root.
+//! NUL) up front by `validate_rel`, and everything below that is a walk
+//! through a single `cap_std::fs::Dir` handle opened once on the workspace
+//! root (`open_root_dir`).
 //!
-//! `Dir` resolves every path component against its own open file descriptor
-//! (openat-style), one component at a time, rather than building a string
+//! TOCTOU closure: `Dir` resolves each path component against its own open
+//! descriptor (openat-style), one at a time, rather than building a string
 //! and re-resolving it against the live filesystem the way `std::fs` +
-//! `canonicalize` does. That closes the classic TOCTOU window this module
-//! used to document: a concurrent actor can no longer swap a directory
-//! component for a symlink between "we checked this path is safe" and "we
-//! acted on it", because there is no separate check step for it to win a
-//! race against — each `Dir` method performs the walk-and-act as one
-//! sequence of syscalls relative to the held descriptor. A `..` or an
-//! absolute component encountered while walking a path, or while following a
-//! symlink's target, above the open root is refused outright (`Dir` has no
-//! parent-descriptor to escape into).
+//! `canonicalize` does — there is no separate check-then-act step for a
+//! concurrent actor to race. A `..`/absolute component, met while walking a
+//! path or a symlink target, above the open root is refused outright.
 //!
-//! What this does NOT close: the single ambient `Dir::open_ambient_dir` call
-//! below that turns the caller-supplied `root` path into a descriptor is
-//! still one check-then-open step (canonicalize, then open by that path);
-//! and identity is only pinned from that point down — if a *sibling*
-//! directory that is itself fully contained gets swapped for a different
-//! fully-contained directory between two separate calls into this module
-//! (e.g. between `write_file`'s write and its later read-back), both
-//! resolve successfully and neither is a violation `Dir` can detect, because
-//! containment, not identity-across-calls, is the guarantee it makes.
+//! What this does NOT close: the single ambient `Dir::open_ambient_dir`
+//! call in `open_root_dir` that turns the caller-supplied `root` into a
+//! descriptor is itself one check-then-open step, and identity is pinned
+//! only from that point down. If a *sibling*, fully-contained directory
+//! gets swapped for a different fully-contained one between two separate
+//! calls into this module (e.g. between `write_file`'s write and its later
+//! read-back), both resolve successfully and neither is a violation `Dir`
+//! can detect — containment, not identity-across-calls, is the guarantee.
 //!
-//! Symlink policy: a symlink whose target is a *relative* path that stays
-//! within the root is followed by `cap_std`'s own resolver — it holds
-//! directory descriptors down through the chain and refuses any `..` that
-//! would go above the open root. A symlink whose target is an *absolute*
-//! path is REFUSED UNCONDITIONALLY, including in the case where that target
-//! would itself resolve inside `root`. This is explicit UNMET behavior, not
-//! a considered security boundary: `cap_std`'s sandbox has no notion of the
-//! root's real absolute location to compare an absolute target against. A
-//! prior attempt at closing this gap (locating the redirect by walking
-//! single components and retrying through the same open handle) was
-//! implemented and then reverted by root ruling; do not reintroduce it, and
-//! any future attempt must not fall back to a string-canonicalize-and-
-//! compare check-then-act step to do so.
+//! Symlink policy: a *relative*-target symlink that stays within the root
+//! is followed by `cap_std`'s own resolver. An *absolute*-target symlink is
+//! REFUSED UNCONDITIONALLY, even one that would itself resolve inside
+//! `root` — `cap_std`'s sandbox has no notion of the root's real absolute
+//! location to compare against. This is explicit UNMET behavior, not a
+//! considered boundary. A prior attempt to close this gap was implemented
+//! and reverted by root ruling; do not reintroduce it, and any future
+//! attempt must not fall back to a string-canonicalize-and-compare
+//! check-then-act step.
 //!
-//! `read_file` does not trust a path-based stat taken before opening: a
-//! stat-then-open sequence has a window where the target can be swapped for
-//! something else (e.g. a FIFO) in between, and a plain (blocking) open of a
-//! FIFO with no writer attached hangs indefinitely regardless of what an
-//! earlier stat said. It opens non-blocking instead — see
-//! `read_file`'s own doc comment for how, given this crate has no direct
-//! dependency that names `O_NONBLOCK`'s value — and re-checks the type from
-//! the metadata of the handle it actually got, not from any earlier stat.
+//! No stat-then-open: `read_file` and `write_file`'s post-rename read-back
+//! both go through `open_regular_file`, which opens non-blocking on unix
+//! and validates the type from the metadata of the handle it actually got,
+//! never from a path-based stat taken beforehand — a stat-then-open
+//! sequence has a window where the target is swapped for something else
+//! (e.g. a FIFO) in between, and a plain blocking open of a writer-less
+//! FIFO hangs indefinitely regardless of what an earlier stat said. See
+//! `open_regular_file`'s own doc for the non-unix fallback.
 //!
-//! `list_dir` stops enumerating as soon as it has collected `max_entries`
-//! results rather than reading the whole directory and truncating
-//! afterward, so its cost is bounded by `max_entries`, not by how large the
-//! directory actually is (or by entries in it that would otherwise fail to
-//! process, e.g. a non-UTF-8 name past the cutoff this call was never going
-//! to return anyway).
+//! `list_dir` stops enumerating as soon as it has `max_entries` results
+//! rather than reading the whole directory and truncating afterward, so its
+//! cost is bounded by `max_entries`, not by the directory's real size.
 //!
-//! `write_file`'s temp file is created with `create_new` (`O_EXCL`
-//! semantics): its name embeds a fresh UUID and should never already exist,
-//! so if it does — a planted file, a symlink, or an (astronomically
-//! unlikely) UUID collision — creation fails instead of silently truncating
-//! whatever was already there. Its post-rename read-back is bounded to the
-//! expected length plus one byte, the same technique `read_file` uses to
-//! cap a read, rather than reading the whole (potentially since-grown) file
-//! into memory just to verify it.
+//! `write_file`'s temp file is created with `create_new` (`O_EXCL`): its
+//! name embeds a fresh UUID and should never already exist, so a collision
+//! fails loudly instead of silently truncating whatever was there. Its
+//! post-rename read-back is capped to `expected_len + 1` bytes rather than
+//! reading a possibly-since-grown file in full.
 //!
-//! `revalidate_containment` is kept as a `std`-path-based, best-effort
-//! diagnostic (its own two direct unit tests still exercise it), but is no
-//! longer called from `write_file`'s success path: re-checking a path with
-//! `canonicalize` after a `Dir`-relative write is a check-then-act step of
-//! exactly the kind this module now avoids, and the `Dir`-relative rename it
-//! used to guard already fails closed (an `escape_attempt`, mapped to
-//! `invalid_argument`) if its target can't be walked inside the root.
+//! `revalidate_containment` is a `std`-path-based, best-effort diagnostic
+//! kept only for its own tests (`#[cfg(test)]`): re-checking a path with
+//! `canonicalize` after a `Dir`-relative write would itself be a
+//! check-then-act step of the kind this module otherwise avoids, and the
+//! `Dir`-relative rename already fails closed on its own if its target
+//! can't be walked inside the root.
 
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cap_std::ambient_authority;
-use cap_std::fs::{Dir, OpenOptions, Permissions, PermissionsExt};
+use cap_std::fs::{Dir, OpenOptions};
+#[cfg(unix)]
+use cap_std::fs::{OpenOptionsExt, Permissions, PermissionsExt};
 use drogon_protocol::RpcError;
 
 use crate::error;
@@ -198,10 +182,10 @@ fn map_dir_error(e: std::io::Error) -> RpcError {
 }
 
 /// Re-canonicalizes `parent` and confirms it still lies under `root`. Kept
-/// as a `std`-path-based, best-effort diagnostic (see the module docs for
-/// why the write path no longer gates success on this): it is itself a
+/// only for its own tests below (see the module docs): it is itself a
 /// check-then-act step, not a lock, and is superseded for correctness by
 /// the `Dir`-relative rename in `write_file`, which fails closed on its own.
+#[cfg(test)]
 pub(crate) fn revalidate_containment(root: &Path, parent: &Path) -> Result<(), RpcError> {
     let root_canonical = std::fs::canonicalize(root)
         .map_err(|_| error::invalid_argument("workspace root does not exist"))?;
@@ -249,15 +233,12 @@ pub(crate) fn list_dir(
     }
     .map_err(|e| error::io_error(e.to_string()))?;
 
-    // Bounded enumeration: stop as soon as `max_entries` results have been
-    // collected instead of reading the whole directory and truncating
-    // afterward. This bounds both the work done and the memory used by
-    // `max_entries`, not by the directory's real size, and means an entry
-    // this call was never going to return anyway (e.g. a non-UTF-8 name
-    // past the cutoff) can never make it fail. Which entries land in the
-    // returned page therefore depends on the filesystem's own (unspecified)
-    // iteration order when there are more than `max_entries` of them; the
-    // page itself is still sorted below so its own order is deterministic.
+    // Stop as soon as `max_entries` results are collected instead of
+    // reading the whole directory and truncating afterward, so an entry
+    // past the cutoff (e.g. a non-UTF-8 name) can never make this call
+    // fail. The returned page depends on the filesystem's own iteration
+    // order when there are more entries than the cutoff, but is itself
+    // sorted below, so its own order is always deterministic.
     let mut entries = Vec::new();
     let mut truncated = false;
     for entry in read_dir {
@@ -266,17 +247,15 @@ pub(crate) fn list_dir(
             break;
         }
         let entry = entry.map_err(|e| error::io_error(e.to_string()))?;
-        // Reject a non-UTF-8 entry name outright rather than lossily
-        // rewriting it: a lossy rewrite can silently collide two distinct
-        // on-disk names onto the same reported string, which is exactly
-        // the kind of ambiguity a caller acting on this listing (e.g. to
-        // build a further `rel` path) must never be handed.
+        // Reject a non-UTF-8 name outright rather than lossily rewriting
+        // it: a lossy rewrite can collide two distinct on-disk names onto
+        // the same reported string.
         let name = entry
             .file_name()
             .into_string()
             .map_err(|_| error::invalid_argument("directory entry name is not valid UTF-8"))?;
-        // `DirEntry::metadata` is an `lstat`: it reports the entry itself,
-        // never the target of a symlink, so listing never silently follows.
+        // `lstat`, not `stat`: reports the entry itself, never a symlink's
+        // target, so listing never silently follows one.
         let meta = entry.metadata().map_err(|e| error::io_error(e.to_string()))?;
         entries.push(DirEntryInfo {
             name,
@@ -293,43 +272,53 @@ pub(crate) fn list_dir(
     Ok(DirListing { entries, truncated })
 }
 
+/// Opens `rel` (relative to `dir`) for reading and returns the handle
+/// together with the metadata of that exact handle, having verified
+/// `is_file` from it — never from a path-based stat taken beforehand. Both
+/// `read_file` and `write_file`'s post-rename read-back need this identical
+/// guarantee: a stat-then-open sequence has a window where a concurrent
+/// actor swaps the target for something else (e.g. a FIFO) in between, and
+/// a plain blocking open of a writer-less FIFO hangs indefinitely no matter
+/// what an earlier stat said.
+///
+/// On unix this opens with `O_NONBLOCK` (via `libc::O_NONBLOCK` through the
+/// public `cap_std::fs::OpenOptionsExt::custom_flags`): opening a
+/// writer-less FIFO non-blocking succeeds immediately (an empty read)
+/// instead of blocking, per POSIX, and has no effect on a regular file.
+/// Non-unix targets have no non-blocking-open primitive available through
+/// this crate's dependencies, so this is a plain blocking open there — a
+/// narrower, documented guarantee: a FIFO swapped in on such a target can
+/// still hang this call.
+fn open_regular_file(
+    dir: &Dir,
+    rel: &Path,
+    not_found_msg: &str,
+) -> Result<(cap_std::fs::File, cap_std::fs::Metadata), RpcError> {
+    let mut open_opts = OpenOptions::new();
+    open_opts.read(true);
+    #[cfg(unix)]
+    open_opts.custom_flags(libc::O_NONBLOCK);
+    let file = dir
+        .open_with(rel, &open_opts)
+        .map_err(|e| map_lookup_error(e, not_found_msg))?;
+    // Same triage as the open above, not a bare `io_error`: a concurrent
+    // unlink can still surface here as `NotFound` even though the open
+    // above already succeeded (observed live under `--release` contention
+    // in this module's own race tests), and an escape-shaped message
+    // deserves the same `invalid_argument` mapping either way.
+    let meta = file
+        .metadata()
+        .map_err(|e| map_lookup_error(e, not_found_msg))?;
+    if !meta.is_file() {
+        return Err(error::invalid_argument("path is not a regular file"));
+    }
+    Ok((file, meta))
+}
+
 pub(crate) fn read_file(root: &Path, rel: &str, max_bytes: u64) -> Result<FileContent, RpcError> {
     validate_rel(rel)?;
     let root_dir = open_root_dir(root)?;
-
-    // Open non-blocking and validate the type from the metadata of the
-    // handle actually opened — never from a path-based stat taken
-    // beforehand. A stat-then-open sequence has a window where a
-    // concurrent actor swaps the target for something else between the
-    // two, and a plain (blocking) open of a FIFO with no writer attached
-    // hangs indefinitely no matter what an earlier stat said.
-    //
-    // Setting `O_NONBLOCK` needs `_cap_fs_ext_nonblock`: the public,
-    // non-hidden `cap_std::fs::OpenOptionsExt` (unix) only exposes a raw
-    // `custom_flags(i32)` knob, and this crate has no direct dependency
-    // (`libc`/`rustix`) that names `O_NONBLOCK`'s platform value to pass
-    // through it. `_cap_fs_ext_nonblock` is `#[doc(hidden)]` — it exists so
-    // the `cap-fs-ext` crate can expose a friendly `nonblock()` extension —
-    // but it is a genuinely public method on the exact, pinned (`=4.0.3`)
-    // `cap_std::fs::OpenOptions` this crate depends on, and is what
-    // actually closes the swap-to-FIFO race a pre-open stat cannot: opening
-    // a FIFO non-blocking with no writer present succeeds immediately
-    // (returning an empty read) instead of blocking, per POSIX. Opening a
-    // regular file this way is unaffected.
-    let mut open_opts = OpenOptions::new();
-    open_opts.read(true);
-    open_opts._cap_fs_ext_nonblock(true);
-    let file = root_dir
-        .open_with(rel, &open_opts)
-        .map_err(|e| map_lookup_error(e, "file not found"))?;
-
-    // The authoritative type check, on the handle we actually got.
-    let handle_meta = file
-        .metadata()
-        .map_err(|e| error::io_error(e.to_string()))?;
-    if !handle_meta.is_file() {
-        return Err(error::invalid_argument("path is not a regular file"));
-    }
+    let (file, handle_meta) = open_regular_file(&root_dir, Path::new(rel), "file not found")?;
 
     // The byte cap is enforced by the bounded reader below, not by trusting
     // this stat's reported length: a file can grow between this check and
@@ -368,14 +357,11 @@ pub(crate) fn write_file(root: &Path, rel: &str, bytes: &[u8]) -> Result<WriteRe
         .ok_or_else(|| error::invalid_argument("path has no file name"))?;
 
     if let Some(parent_rel) = parent_rel {
-        // Check-then-create, not create-then-swallow-EEXIST-and-recheck:
-        // `Dir::create_dir_all` treats a `mkdir` failure on an
-        // already-occupied name as "maybe it's already a directory" and
-        // falls back to its own `is_dir` probe, which would swallow an
-        // escape attempt here (an existing name that resolves outside the
-        // root is neither creatable nor a directory) as the original,
-        // unhelpful `AlreadyExists` I/O error. Probing first keeps the
-        // escape mapped to `invalid_argument` instead.
+        // Probe first rather than calling `create_dir_all` and swallowing
+        // `AlreadyExists`: it falls back to its own `is_dir` probe on a
+        // `mkdir` failure, which would misreport an escape attempt (an
+        // existing name resolving outside the root) as that unhelpful I/O
+        // error instead of `invalid_argument`.
         match root_dir.metadata(parent_rel) {
             Ok(meta) => {
                 if !meta.is_dir() {
@@ -451,30 +437,19 @@ pub(crate) fn write_file(root: &Path, rel: &str, bytes: &[u8]) -> Result<WriteRe
         return Err(map_dir_error(e));
     }
 
-    // Bounded read-back: confirm the rename landed exactly the bytes we
-    // wrote without reading more than `expected_len + 1` bytes into memory
-    // to do it — the same technique `read_file` uses to cap a read. An
-    // unbounded read-back here would let a file that grew unexpectedly
-    // after the rename (e.g. another writer racing in) balloon this call's
-    // memory use in proportion to however large it grew, rather than to
-    // what this call actually expected to find.
+    // Bounded, type-checked read-back through the same `open_regular_file`
+    // helper `read_file` uses: confirms the rename landed exactly the bytes
+    // written, capped to `expected_len + 1` bytes rather than risking an
+    // unbounded read against a file that grew after the rename, and that
+    // what's now at `rel_path` is still a regular file — a concurrent actor
+    // could have swapped it for a FIFO (or anything else) between the
+    // rename above and this open.
     //
-    // `handle_meta` is fetched right after opening, before the read: its
-    // `mtime` is only informational, but its `len()` is deliberately never
-    // used for the reported `size` below. A separate stat taken *after*
-    // this read-back would race against exactly the same kind of
-    // concurrent growth the bounded read-back exists to be robust against
-    // — a writer appending between the read-back succeeding and that stat
-    // running would report a `size` that never matches what was actually
-    // verified. `expected_len` is what the bounded, content-matching
-    // read-back just proved the file held, and is what gets reported.
+    // `size` is always `expected_len`, never the handle's reported `len()`
+    // or a second, separately-raced stat: either would be free to disagree
+    // with what the read-back actually verified.
     let expected_len = bytes.len() as u64;
-    let readback_file = root_dir
-        .open(rel_path)
-        .map_err(|e| error::io_error(e.to_string()))?;
-    let handle_meta = readback_file
-        .metadata()
-        .map_err(|e| error::io_error(e.to_string()))?;
+    let (readback_file, handle_meta) = open_regular_file(&root_dir, rel_path, "file not found")?;
     let mut restored = Vec::new();
     readback_file
         .take(expected_len.saturating_add(1))
