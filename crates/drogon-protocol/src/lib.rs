@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::fmt;
 
 pub mod automation;
+pub mod browser;
 pub mod git;
 pub mod orchestration_common;
 pub mod orchestration_mail;

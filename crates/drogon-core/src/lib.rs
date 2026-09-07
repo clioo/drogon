@@ -23,11 +23,13 @@ mod coordination_receipts;
 mod coordination_runs;
 mod coordination_worker_control;
 mod coordination_workers;
+mod desktop_relay_rpc;
 pub mod locale_ordering;
 pub mod session_authority;
 
 mod agent_state;
 mod db;
+pub(crate) use desktop_relay_rpc::RelayState;
 mod error;
 pub mod git;
 pub mod git_process;
@@ -88,6 +90,7 @@ const CAPABILITIES: &[&str] = &[
     "harness.catalog.v1",
     "harness.launch.v1",
     "git.v1",
+    drogon_protocol::browser::BROWSER_RELAY_CAPABILITY,
     "runtime.quiescent-shutdown.v1",
     drogon_protocol::project::PROJECT_CAPABILITY,
     drogon_protocol::worktree::WORKTREE_CAPABILITY,
@@ -144,6 +147,9 @@ pub struct Engine {
     service_instance_id: String,
     sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
     ledger: RequestLedger,
+    /// In-memory desktop command relay (browser.relay.v1). Never persisted;
+    /// a daemon restart drops every queued command.
+    desktop_relay: Mutex<RelayState>,
     worker_cli: Option<PathBuf>,
     worker_operations: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     /// Lifecycle admission gate for quiescent shutdown. Every mutating
@@ -222,6 +228,7 @@ impl Engine {
             service_instance_id: uuid::Uuid::new_v4().to_string(),
             sessions: Mutex::new(HashMap::new()),
             ledger: RequestLedger::default(),
+            desktop_relay: Mutex::new(RelayState::default()),
             worker_cli: None,
             worker_operations: Mutex::new(HashMap::new()),
             lifecycle_gate: RwLock::new(()),
@@ -352,6 +359,14 @@ impl Engine {
             "files.list" => self.do_files_list(&request.params),
             "files.read" => self.do_files_read(&request.params),
             "files.write" => self.mutating(request, Self::do_files_write),
+            "desktop.commands.poll" => self.desktop_commands_poll(&request.params),
+            "desktop.commands.complete" => self.desktop_commands_complete(&request.params),
+            "browser.open" => self.do_browser_open(&request.params),
+            "browser.navigate" => self.do_browser_navigate(&request.params),
+            "browser.snapshot" => self.do_browser_snapshot(&request.params),
+            "browser.click" => self.do_browser_click(&request.params),
+            "browser.fill" => self.do_browser_fill(&request.params),
+            "browser.tabs" => self.do_browser_tabs(&request.params),
             "git.status" => self.do_git_status(&request.params),
             "git.diff" => self.do_git_diff(&request.params),
             "git.stage" => self.mutating(request, Self::do_git_stage),

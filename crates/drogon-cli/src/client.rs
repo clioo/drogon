@@ -640,6 +640,65 @@ pub fn check_automation_run_now(result: &AutomationRunNow) -> Result<(), String>
     Ok(())
 }
 
+/// One embedded browser pane tab, as executed by the desktop host and
+/// relayed through the daemon (`browser.relay.v1`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserTab {
+    pub tab_id: String,
+    pub workspace_id: String,
+    pub url: String,
+    pub title: String,
+    pub loading: bool,
+    pub can_go_back: bool,
+    pub can_go_forward: bool,
+    pub error: Option<String>,
+}
+
+/// Bounded page snapshot: URL, title and DOM text for agent use.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserSnapshot {
+    pub tab_id: String,
+    pub url: String,
+    pub title: String,
+    pub text: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserTabsList {
+    pub tabs: Vec<BrowserTab>,
+}
+
+/// Relay tab identities must be real and the snapshot text bounded: the
+/// daemon caps DOM text at 32768 characters, so anything larger is a
+/// contract violation, never a display problem.
+pub fn check_browser_tab(tab: &BrowserTab) -> Result<(), String> {
+    require_nonempty("tabId", &tab.tab_id)?;
+    require_nonempty("workspaceId", &tab.workspace_id)?;
+    Ok(())
+}
+
+pub fn check_browser_snapshot(snapshot: &BrowserSnapshot) -> Result<(), String> {
+    require_nonempty("tabId", &snapshot.tab_id)?;
+    if snapshot.text.chars().count() > 32_768 {
+        return Err(format!(
+            "snapshot text is {} characters, over the 32768 budget",
+            snapshot.text.chars().count()
+        ));
+    }
+    Ok(())
+}
+
+pub fn check_browser_tabs(list: &BrowserTabsList) -> Result<(), String> {
+    for tab in &list.tabs {
+        check_browser_tab(tab).map_err(|err| format!("tab {}: {err}", tab.tab_id))?;
+    }
+    Ok(())
+}
+
 /// The service must accept exactly the bytes the CLI sent, no more, no less.
 pub fn check_write(result: &WriteResult, expected_bytes: u64) -> Result<(), String> {
     if result.accepted_bytes != expected_bytes {

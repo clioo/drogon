@@ -14,6 +14,7 @@ import { registerSettingsProbes } from "./settings-probes";
 import { registerTasksBridge } from "./tasks-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
 import { registerNotificationsIpc } from "./notifications/service";
+import { startBrowserRelay } from "./browser/relay-poller";
 import { dispatchBotSnapshot } from "./bot-bridge";
 import {
   readCursorMismatches,
@@ -307,7 +308,7 @@ if (!holdsSingleInstanceLock) {
         event.senderFrame === window.webContents.mainFrame,
     );
     registerUsageIpc();
-    registerBrowserIpc(() => window);
+    startBrowserRelay(registerBrowserIpc(() => window));
     registerNotificationsIpc(() => window);
     await bootstrapDaemon();
     createWindow();

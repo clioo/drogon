@@ -3,7 +3,8 @@ name: drogon-cli
 description: >-
   Drive Drogon through the public `drogon-cli`: resolve the executable, check
   status and capabilities, manage workspaces, projects and worktrees, and
-  operate terminals (create, list, send, read, wait, close) plus harness
+  operate terminals (create, list, send, read, wait, close), the embedded
+  browser pane (open, navigate, snapshot, click, fill, tabs) plus harness
   launch. Use for terminal control, lightweight prompts and shell commands.
   Use the orchestration guide for supervised multi-agent coordination.
 ---
@@ -33,8 +34,9 @@ If the CLI is missing, say so explicitly instead of inspecting source files.
 capability list. Gate optional work on capabilities: `harness.catalog.v1`
 and `harness.launch.v1` for harness commands, `orchestration.native.v1`
 for the orchestration verbs, `project.v1` and `worktree.v1` for projects
-and worktrees, `git.v1` for Git operations, and `session.agent-state.v1`
-for agent-state fields on sessions.
+and worktrees, `git.v1` for Git operations, `session.agent-state.v1`
+for agent-state fields on sessions, and `browser.relay.v1` for the browser
+commands below (which additionally need a connected Drogon desktop).
 
 Run `drogon-cli status --json` first, then the narrowest command for the
 job. The full guide for supervised coordination is one guide away:
@@ -83,6 +85,22 @@ exits 0 once any terminal output exists or arrives. A blown budget exits
 non-zero with a `timeout` reason naming the last observed state. Always
 pass `--timeout-ms` (1 to 900000).
 
+## Browser
+
+The desktop owns one embedded browser pane per workspace. Each command
+enqueues a relay request and waits (bounded, `--timeout-ms 5000` overrides
+the 15000 default, range 1 to 25000) for the connected desktop to execute
+it; with no desktop connected the call fails with `desktop_not_connected`
+inside the timeout. Open a URL with
+`drogon-cli browser open --workspace <ID> <URL>`, move an open tab with
+`drogon-cli browser navigate --tab <ID> <URL>`, and read a tab's URL, title
+and bounded DOM text with `drogon-cli browser snapshot --tab <ID>`.
+Interact with the page through CSS selectors resolved with
+`document.querySelector` in the guest:
+`drogon-cli browser click --tab <ID> --selector <CSS>` clicks the match and
+`drogon-cli browser fill --tab <ID> --selector <CSS> --text <TEXT>` fills
+it. List a workspace's tabs with `drogon-cli browser tabs --workspace <ID>`.
+
 ## Harness Launch
 
 `drogon-cli harness list --json` shows the harnesses the service host can
@@ -113,6 +131,8 @@ never established). Only an observed exit is an exit.
 - `terminal close` exits 1 when the runtime cannot confirm the session
   exited, even though it prints the session line.
 - `terminal wait` exits 1 with code `timeout` when the budget expires.
+- `browser` commands exit 1 with code `desktop_not_connected` when no
+  Drogon desktop is connected to execute them.
 - The diagnostic passthrough `drogon-cli rpc status` sends one raw
   protocol method and prints the validated envelope.
 
