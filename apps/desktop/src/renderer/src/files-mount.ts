@@ -1,34 +1,26 @@
 // V2-owned mount adapter for the V3 files panel (handoff "Rutas y paneles").
-// Mirrors the relayed V3 seam (features/workspaces/files-panel.tsx exporting
-// FILES_ROUTE_ID/createFilesPanelDescriptor({bridge})/isFilesAvailable)
-// WITHOUT importing any V3 file: this module is built against the real
-// shared contract (FileBridge, FILES_CAPABILITY) and the V2
-// route-panel-contract only. V3 corrections are still active, so nothing
-// here is wired into App.tsx yet.
-//
-// Next step (explicit, once the V3 commit is stable): replace the local
-// seam below with ONE import swap to the real V3 factory
-// (`import { createFilesPanelDescriptor, FILES_ROUTE_ID as V3_FILES_ROUTE_ID }
-// from "../features/workspaces/files-panel"`) and register its descriptor in
-// App.tsx via this module's registerFilesRoute path — the single App mount
-// stays V2-owned.
+// Binds the REAL stabilized V3 factory (features/workspaces/files-panel,
+// assembled from cbe54ad) through the V2 route-panel-contract boundary.
+// The single App mount stays V2-owned; V3 never touches App.tsx.
 
 import type { ReactNode } from "react";
 import { FILES_CAPABILITY } from "../../shared/file-contract";
 import type { FileBridge } from "../../shared/file-contract";
+import {
+  createFilesPanelDescriptor,
+  FILES_ROUTE_ID as V3_FILES_ROUTE_ID,
+  isFilesAvailable,
+} from "./features/workspaces/files-panel";
 import {
   registerRoute,
   routeId,
 } from "./route-panel-contract";
 import type { PanelDescriptor, PanelProps, RouteRegistry } from "./route-panel-contract";
 
-/** Route id under which the files panel mounts; matches the relayed V3 constant. */
-export const FILES_ROUTE_ID = routeId("files.explorer");
+/** Branded form of the V3 route id; empty V3 ids throw at import. */
+export const FILES_ROUTE_ID = routeId(V3_FILES_ROUTE_ID);
 
-/** True iff the running service advertises files.v1. */
-export function isFilesAvailable(capabilities: readonly string[]): boolean {
-  return capabilities.includes(FILES_CAPABILITY);
-}
+export { isFilesAvailable };
 
 /**
  * Plain descriptor shape the real V3 factory returns: a string id, NOT a
@@ -73,21 +65,13 @@ export function registerFactoryRoute(
 }
 
 /**
- * Registers the files route (capability-gated on files.v1) through the V2
- * contract and returns the new registry. Single construction path with
- * registerFactoryRoute above; no duplicated factory definitions.
+ * Registers the REAL V3 files route (capability-gated on files.v1) through
+ * the V2 contract and returns the new registry. Single construction path
+ * with registerFactoryRoute above; no duplicated factory definitions.
  */
 export function registerFilesRoute(
   registry: RouteRegistry,
-  component: (props: PanelProps) => ReactNode,
+  bridge: FileBridge,
 ): RouteRegistry {
-  return registerRoute(
-    registry,
-    adaptFactoryDescriptor({
-      id: "files.explorer",
-      title: "Files",
-      component,
-      capability: FILES_CAPABILITY,
-    }),
-  );
+  return registerFactoryRoute(registry, createFilesPanelDescriptor, bridge);
 }
