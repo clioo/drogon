@@ -1,0 +1,382 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "recordedBy": "V4-B worker (task_de6680399532 / dispatch ctx_f035020e4207), 2026-09-07",
+  "method": "sha256 of `git -C /Users/carlos/Documents/Drogon-mentu-session show <pin>:<path>` output, run from the Drogon-rewrite worktree cwd; the reference checkout was never used as cwd and nothing was written to it",
+  "revisionProof": {
+    "referenceHead": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "pinnedObjectExists": true,
+    "headEqualsPin": true
+  },
+  "isolationRationale": "hash/read-only recording only; no source module was imported or executed, no runner wrote to the reference, no fixture was copied outside the declared frozen-port test files",
+  "license": {
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "notice": "tests/parity/ports/LICENSE.orca"
+  },
+  "portPackage": "WP-CAP-MENTU",
+  "scope": "Mentu workbench/review/execute/evidence/retry + quarantine, plus the skills/provider catalog surfaces Mentu review binds (Pi provider routes, skill byte snapshots, skill sharing contract)",
+  "placementRationale": "Skills/provider catalog files are recorded here because Mentu session review/policy digests consume exactly these surfaces (named Pi provider routes, configured skill bytes overriding caller snapshots); the account-catalog half of the group is recorded under WP-CAP-MEET with its own rationale",
+  "fileCount": 66,
+  "files": [
+    {
+      "path": "src/renderer/src/components/mentu/MentuPanel.tsx",
+      "sha256": "fd6635259c793bb4f3059fe31a3d8b90f0b6c30323662db4eccde690cc608293",
+      "bytes": 9085
+    },
+    {
+      "path": "src/renderer/src/components/mentu/RecipePane.tsx",
+      "sha256": "86716efe6c68632412653eeac4aa516aef1561c2de71b879222c6a771cb3d3fc",
+      "bytes": 565
+    },
+    {
+      "path": "src/renderer/src/components/mentu/RecipePaneContent.tsx",
+      "sha256": "10f0e2604bc90ef4f03b94b371b63def67625cbb626a7bce45a7c54e3204658b",
+      "bytes": 8118
+    },
+    {
+      "path": "src/renderer/src/components/mentu/RecipePaneHeader.tsx",
+      "sha256": "6c74f36d5ea84eb2d27602b3b2561260a8a6d73e4f9610dd5d653e89c262572f",
+      "bytes": 2685
+    },
+    {
+      "path": "src/renderer/src/components/mentu/RecipeVerification.tsx",
+      "sha256": "ad59faf5662b6e32481e21f24b0a305c38266c6f51efefb70750b3c35d8c7c63",
+      "bytes": 1910
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-pane-controller.ts",
+      "sha256": "ce0d12f94e4330c54dd1a52405e33987ac9054bc350468f3029af45051981141",
+      "bytes": 3825
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-pane-editor.ts",
+      "sha256": "e730632649d34edd27930f19a57377169ff59b8647c9dd4edc32219d0c21eb48",
+      "bytes": 3044
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-pane-inspector.tsx",
+      "sha256": "8e6f27501d30af9373cc8802b83170ef69ecc825d021b12be53f09e1f4dba26b",
+      "bytes": 9751
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-pane-run-controls.tsx",
+      "sha256": "3acae331d023c6f697fedc3bd928d71403f026aa4ee54cdfc1ce99ac5899c072",
+      "bytes": 10442
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-pane-runtime.ts",
+      "sha256": "e37e41f7fb5674e2f42ecdac3237830522063b940cdd4e55238c62e3f12641c2",
+      "bytes": 506
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-pane-views.tsx",
+      "sha256": "6fe6df8d99262f6eb9f7ce24d2b7842d9fbb4115f137e53bbb1976d9a6a8ce45",
+      "bytes": 14751
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-graph.ts",
+      "sha256": "2a6c3e7d514ef4a8f1ef36bc9f426ed1873d4dfe4b6702fe3b208f09c96c0484",
+      "bytes": 5225
+    },
+    {
+      "path": "src/renderer/src/components/mentu/mentu-session-draft-state.ts",
+      "sha256": "a871acdb093c937d43fda7316faae9a5e9ee16883aff24a8eb9016cd7034e85d",
+      "bytes": 1720
+    },
+    {
+      "path": "src/renderer/src/components/mentu/mentu-session-identity.ts",
+      "sha256": "463c96ed002e262a838eeab49d30aa608bca6faec09e6f23788eec24b0b168d5",
+      "bytes": 2148
+    },
+    {
+      "path": "src/renderer/src/components/mentu/mentu-session-navigation.ts",
+      "sha256": "a521206b86a721b71d88eef2fc2214ae80536d85b77d80b1a3f8fd7fe4768416",
+      "bytes": 1679
+    },
+    {
+      "path": "src/renderer/src/components/mentu/mentu-session-request-coalescer.ts",
+      "sha256": "effbaec8dc6f9a4cd802b27a1decc87f8548e97c825ba9a477827fa4692868ef",
+      "bytes": 3275
+    },
+    {
+      "path": "src/renderer/src/components/mentu/mentu-session-state-access.ts",
+      "sha256": "0c6bd05556d5bf0d2b3fc609c4840aa11f47c4e4b8852d0b308a94a353d71197",
+      "bytes": 807
+    },
+    {
+      "path": "src/renderer/src/components/mentu/use-mentu-session-actions.ts",
+      "sha256": "ac020cc03892d0f80c62e8ae14f3e999f634933ea8b5f1fa15b4cd7516e66577",
+      "bytes": 8049
+    },
+    {
+      "path": "src/renderer/src/components/mentu/use-mentu-session-evidence-restore.ts",
+      "sha256": "0744bd1ed056261637806306f829f5567c218ee098f0f28582bea977550c86b2",
+      "bytes": 2671
+    },
+    {
+      "path": "src/renderer/src/components/mentu/use-mentu-session-execution-actions.ts",
+      "sha256": "e999cede0c8c6339a9c1ef50fa3405da15d6e2b2e26a841a731f8987a274f654",
+      "bytes": 7353
+    },
+    {
+      "path": "src/renderer/src/components/mentu/use-mentu-session-loading.ts",
+      "sha256": "83d3f199539a7c9ee24ca1bdffa22b38bbbae2393fc821f0b7280db35203c096",
+      "bytes": 8743
+    },
+    {
+      "path": "src/renderer/src/components/mentu/use-recipe-pane-controller.ts",
+      "sha256": "c0b689478b3faa961a4ff6d4c62711293e2ebe623f469fdb21bb9fd4681562d1",
+      "bytes": 136
+    },
+    {
+      "path": "src/renderer/src/components/mentu/RecipePane.test.tsx",
+      "sha256": "4878edcc1946c0b9fd615c61bce6e6e009155f23d2a6b251e2c2e2ad28ec6c98",
+      "bytes": 10973
+    },
+    {
+      "path": "src/renderer/src/components/mentu/mentu-evidence-restore.test.tsx",
+      "sha256": "b42daef8ca8c7c7a5ac788d23fe0e6696c7cb18e85b9cc2be0f1fa16d96a98cf",
+      "bytes": 6756
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-evidence-verification.test.tsx",
+      "sha256": "bc9d1f7ffb2d2b37f7fde7c2a214c90274de9803b5b220027ac255152e831a5f",
+      "bytes": 2894
+    },
+    {
+      "path": "src/renderer/src/components/mentu/recipe-retry-evidence.test.tsx",
+      "sha256": "fecc90215c7bb0ef13b7f61eb05e9a30a665ca933ae092b490895e3cd39d10c1",
+      "bytes": 9526
+    },
+    {
+      "path": "src/renderer/src/components/mentu/session-mentu-surface.test.tsx",
+      "sha256": "7041caac7fb4c7194353e901772d6ce78d6b3c10f127eaa909c025142c6aa509",
+      "bytes": 11427
+    },
+    {
+      "path": "src/shared/mentu-pane-types.ts",
+      "sha256": "a24a74da344b24689574a0a193e81b809eb8bf897ab7af7f695f321b347cd0ab",
+      "bytes": 268
+    },
+    {
+      "path": "src/shared/mentu-session-state-types.ts",
+      "sha256": "4d16f4f48e0a07c1cd67ff9e1801e52e733971bdafdb7e957c2a4403a51fce1d",
+      "bytes": 2350
+    },
+    {
+      "path": "src/shared/mentu-recipe-contract.ts",
+      "sha256": "5089b336a0e2590b10b64bea57d0528b7487b7a30af3667f1d0101a9f356c55f",
+      "bytes": 2942
+    },
+    {
+      "path": "src/shared/mentu-recipe-contract.test.ts",
+      "sha256": "d5dc7fd5999e487c0f54e5d27a79f1fbd4e2fffe2a3c2a6ee09ae4edcb5a0418",
+      "bytes": 6214
+    },
+    {
+      "path": "src/shared/mentu-recipe-validation.ts",
+      "sha256": "6d6cec8ff4117db567f52a6d097ea000fb862c701c951e2da0ad32a7f187f369",
+      "bytes": 6273
+    },
+    {
+      "path": "src/shared/mentu-recipe-entry-validation.ts",
+      "sha256": "15e01d76b6b63a1eb05e5e56dfc9e7118e88791658034bc1e8d2bc32c47212fe",
+      "bytes": 5095
+    },
+    {
+      "path": "src/shared/mentu-recipe-root-validation.ts",
+      "sha256": "a709a0dad65f4b1e0c24d456cf6d3356bfeaea2d6c3a2b48e6edc9be0f3fe1ed",
+      "bytes": 3025
+    },
+    {
+      "path": "src/shared/mentu-recipe-verify-validation.ts",
+      "sha256": "0507abaec4f8f7e525e43dacadeba8d2b20d8388352863dc24f8ee5b6cf2c51d",
+      "bytes": 5703
+    },
+    {
+      "path": "src/shared/mentu-recipe-serialization.ts",
+      "sha256": "36c65589aac00c8c7e5f8b9ebcc510b13efe77f7879b3708f84c732af7047d7b",
+      "bytes": 2160
+    },
+    {
+      "path": "src/shared/mentu-recipe-dependencies.ts",
+      "sha256": "99aa74848d7660c740c80a88bfb3f90220fc0e9c3dffb6e6759c153f37d1c7a7",
+      "bytes": 1158
+    },
+    {
+      "path": "src/shared/mentu-recipe-fields.ts",
+      "sha256": "f9ba7e8aa2abdbb035f1eb5f10005c5f73394f77e679ee9574c6b5facfc829e1",
+      "bytes": 669
+    },
+    {
+      "path": "src/shared/mentu-recipe-file-contract.ts",
+      "sha256": "b0b3be91ac9a53385534c68ae154d70c8a1316c7b2019ab3644c36e216cd3ad3",
+      "bytes": 1331
+    },
+    {
+      "path": "src/shared/mentu-recipe-value-validation.ts",
+      "sha256": "98caec68013da3bb993115d843b4b4efb5f584ec58d66167af10848ed7d204ee",
+      "bytes": 2567
+    },
+    {
+      "path": "src/shared/mentu-run-contract.ts",
+      "sha256": "29a1ee32ef1352166322a1390c12191a38b37d3d6506afe0ea4c7d5e18ef4988",
+      "bytes": 8520
+    },
+    {
+      "path": "src/shared/mentu-run-status.ts",
+      "sha256": "03f3d88292f5134fd9de81f9108eb3648bd1b9f799b9f1f50bb8cb94c20d820a",
+      "bytes": 450
+    },
+    {
+      "path": "src/shared/mentu-session-approval.ts",
+      "sha256": "0380eb2e189bee419f5ca3c25c4982b8a651b940cc6e61409ba308c38b0a10ec",
+      "bytes": 4202
+    },
+    {
+      "path": "src/shared/mentu-session-approval.test.ts",
+      "sha256": "ac603a306e17f19bedda7ef9cf021f1a84df9cf0e55ca6b3e488e4a498a690f8",
+      "bytes": 2114
+    },
+    {
+      "path": "src/shared/mentu-session-identity.ts",
+      "sha256": "37f7f1dc8a82e23963e8cdcd15fc679c87e0467bccb52c085ccd27551a0fdcfb",
+      "bytes": 648
+    },
+    {
+      "path": "src/shared/mentu-session-state.test-fixture.ts",
+      "sha256": "1e203a0cfef77f2c949df239a2d06e9269708a9519566a327247d0d4f40c43c7",
+      "bytes": 381
+    },
+    {
+      "path": "src/main/mentu/mentu-runtime.ts",
+      "sha256": "782af11839f8e4672878d5cc66f4f3ec7e588c5c9a6f0caff7206badf3291960",
+      "bytes": 5695
+    },
+    {
+      "path": "src/main/mentu/mentu-runtime.test.ts",
+      "sha256": "32ad8767932ec2d609190543273b03dd069a9980b93782ad0285c61202231604",
+      "bytes": 18761
+    },
+    {
+      "path": "src/main/mentu/mentu-session-execution.ts",
+      "sha256": "12161e62d6d6805e2c234fbea39e2a299831a980b616455072ae06bd9be59788",
+      "bytes": 6134
+    },
+    {
+      "path": "src/main/mentu/mentu-session-execution.test.ts",
+      "sha256": "c1ba4423275ca6f4293ede33217919c94a73de4f63b090a2bed46a68f000f80e",
+      "bytes": 20755
+    },
+    {
+      "path": "src/main/mentu/mentu-session-review-builder.ts",
+      "sha256": "10122150efc936f1b4c67f145b84db9eaa72de5f994bcc160ac3d14edee58d2f",
+      "bytes": 7531
+    },
+    {
+      "path": "src/main/mentu/mentu-session-review-plan.ts",
+      "sha256": "a09b162583f3500affc887e003eaa6987a821f2a592adc9c9c912333b906e4e0",
+      "bytes": 6383
+    },
+    {
+      "path": "src/main/mentu/mentu-session-recovery.ts",
+      "sha256": "d3841ef47556d4faed347e88eeed06bcdecd8a6661cb78864632fb799d97092c",
+      "bytes": 3679
+    },
+    {
+      "path": "src/main/mentu/mentu-session-launch.ts",
+      "sha256": "74f363f80ad2a10602c401528209e7b73cb020674faa312df5fd375bc2393004",
+      "bytes": 6853
+    },
+    {
+      "path": "src/main/mentu/mentu-session-pi-profile.ts",
+      "sha256": "d545acb8d80ee1bb058e3b090e18f45e8850f0af9ae3783d5ff2be348f9d83af",
+      "bytes": 2515
+    },
+    {
+      "path": "src/main/mentu/mentu-session-input-snapshots.ts",
+      "sha256": "946d3e4675134f71bf01512576e36d2683e9bf9e2e4092ea06412e03056d4b29",
+      "bytes": 5033
+    },
+    {
+      "path": "src/main/mentu/mentu-run-evidence.ts",
+      "sha256": "897f700d260c18fd275dd459d89558956d287493f6a962fe9e4fc05bdbde9542",
+      "bytes": 8448
+    },
+    {
+      "path": "src/main/mentu/mentu-run-evidence-files.ts",
+      "sha256": "2c059b59f5b75b6f83bbf331531de6ba8378128497f03e3ebf010c46caa5812b",
+      "bytes": 4504
+    },
+    {
+      "path": "src/main/mentu/mentu-run-parsing.ts",
+      "sha256": "7091e2e7933335f844613a7f111f4f804c01c39edffef259a3f7bf6d9e6bcc44",
+      "bytes": 9986
+    },
+    {
+      "path": "src/main/mentu/mentu-recipe-files.ts",
+      "sha256": "caef9af2cc989a848de177cc4b3595e46658d10d9dcb574103d7fbc77fcedd4e",
+      "bytes": 7614
+    },
+    {
+      "path": "src/main/mentu/mentu-recipe-save.ts",
+      "sha256": "a7087cd7f82ba832dc6b3f9d1f78d521f2b7259cb980d739eca9d274a1d3f7ec",
+      "bytes": 4269
+    },
+    {
+      "path": "src/main/mentu/mentu-cli-operations.ts",
+      "sha256": "df00b5eaac362b489d8b6880ebfaafb3698f409e896dd932aa53c8b9e0da8ad8",
+      "bytes": 5245
+    },
+    {
+      "path": "src/main/mentu/mentu-runtime-identity.ts",
+      "sha256": "3f2a5214bfb72f49d82860a2a75b35b77b3980b9ee4d5bae3ec5076716f77cd0",
+      "bytes": 5095
+    },
+    {
+      "path": "src/main/ipc/mentu.ts",
+      "sha256": "1add7951181cc6cb353bc663d922d15f2a2bdd4f735ec54f4ddecaf9e4da93be",
+      "bytes": 2740
+    },
+    {
+      "path": "src/shared/agent-skill-sharing-contract.ts",
+      "sha256": "c421ef3c78680e1771b746a13d8391766b63cafc96c567207789656c8c081d75",
+      "bytes": 1555
+    },
+    {
+      "path": "src/shared/agent-skill-sharing-contract.test.ts",
+      "sha256": "6755dc9e58eb62727b93f7c710fd4b416bcc665fc5aad7524c17fc50b79d84ef",
+      "bytes": 1006
+    }
+  ],
+  "frozenPortCopies": [
+    {
+      "portPath": "tests/parity/ports/WP-CAP-MENTU/recipe-contract/src/shared/mentu-recipe-contract.test.ts",
+      "sourcePath": "src/shared/mentu-recipe-contract.test.ts",
+      "expected": "d5dc7fd5999e487c0f54e5d27a79f1fbd4e2fffe2a3c2a6ee09ae4edcb5a0418",
+      "actual": "d5dc7fd5999e487c0f54e5d27a79f1fbd4e2fffe2a3c2a6ee09ae4edcb5a0418",
+      "match": true
+    },
+    {
+      "portPath": "tests/parity/ports/WP-CAP-MENTU/runtime-suite/src/main/mentu/mentu-runtime.test.ts",
+      "sourcePath": "src/main/mentu/mentu-runtime.test.ts",
+      "expected": "32ad8767932ec2d609190543273b03dd069a9980b93782ad0285c61202231604",
+      "actual": "32ad8767932ec2d609190543273b03dd069a9980b93782ad0285c61202231604",
+      "match": true
+    },
+    {
+      "portPath": "tests/parity/ports/WP-CAP-MENTU/session-execution-suite/src/main/mentu/mentu-session-execution.test.ts",
+      "sourcePath": "src/main/mentu/mentu-session-execution.test.ts",
+      "expected": "c1ba4423275ca6f4293ede33217919c94a73de4f63b090a2bed46a68f000f80e",
+      "actual": "c1ba4423275ca6f4293ede33217919c94a73de4f63b090a2bed46a68f000f80e",
+      "match": true
+    },
+    {
+      "portPath": "tests/parity/ports/WP-CAP-MENTU/catalogs/src/shared/agent-skill-sharing-contract.test.ts",
+      "sourcePath": "src/shared/agent-skill-sharing-contract.test.ts",
+      "expected": "6755dc9e58eb62727b93f7c710fd4b416bcc665fc5aad7524c17fc50b79d84ef",
+      "actual": "6755dc9e58eb62727b93f7c710fd4b416bcc665fc5aad7524c17fc50b79d84ef",
+      "match": true
+    }
+  ]
+}

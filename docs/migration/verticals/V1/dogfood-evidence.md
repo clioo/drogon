@@ -947,5 +947,3 @@ cases, and the docs/code comments no longer promise an unconditional
 never-leak guarantee based on the force-signal alone.
 
 Ready for independent review: yes.
-
-Ready for independent review: yes.

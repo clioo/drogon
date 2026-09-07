@@ -348,29 +348,22 @@ mod unix {
 #[cfg(unix)]
 pub use unix::{SOCKET_FILE_NAME, establish};
 
-/// Windows named-pipe transport, real listener/connection API. Rewritten
-/// under the root grant to use `windows-sys` bindings (verified against the
-/// installed `windows-sys-0.61.2` source tree, not memory — see the
-/// evidence doc's Completion section for the exact feature list) instead of
-/// hand-rolled `extern "system"` declarations, everywhere `windows-sys` has
-/// a matching declaration. `windows-sys` is **not yet a dependency of
-/// `drogond`** — this vertical cannot edit `Cargo.toml` — so this module
-/// still cannot compile on any host until root adds it; see the evidence
-/// doc for the exact blocking Cargo line. Because this entire module is
-/// `#[cfg(windows)]`, that is not a problem for *this* build: cfg-stripping
-/// removes it before name resolution, so `use windows_sys::...` here never
-/// needs the crate to exist for `cargo build --locked` to stay green on
-/// this (Unix) host. Nothing below has been compiled by any Rust toolchain;
-/// see the evidence doc for exactly which parts are still a design sketch
-/// rather than a verified implementation.
-///
-/// Still hand-written, not moved to `windows-sys` (nothing there could
-/// replace them; they are this crate's own logic sitting on top of the raw
-/// bindings, not FFI declarations): the explicit-DACL SID/SDDL-selection
-/// logic (`dacl_sddl_for_user_sid`, `token_user_sid_string`), the
-/// `SecurityDescriptorGuard`/`HandleGuard` RAII wrappers around
-/// `LocalFree`/`CloseHandle`, and the `to_wide` UTF-16 helper. No other
-/// hand-written FFI was added.
+// Explicit-user pipe ACLs and overlapped lifetime ownership are tested on Windows.
+//
+// Windows named-pipe transport, real listener/connection API, built on
+// `windows-sys` bindings (verified against the installed
+// `windows-sys-0.61.2` source tree — see the evidence doc's Completion
+// section for the exact feature list) instead of hand-rolled
+// `extern "system"` declarations, everywhere `windows-sys` has a matching
+// declaration. Still hand-written, not moved to `windows-sys` (nothing
+// there could replace them; this crate's own logic on top of the raw
+// bindings, not FFI declarations): the explicit-DACL SID/SDDL-selection
+// logic (`dacl_sddl_for_user_sid`, `token_user_sid_string`), the
+// `SecurityDescriptorGuard`/`HandleGuard` RAII wrappers around
+// `LocalFree`/`CloseHandle`, and the `to_wide` UTF-16 helper. No other
+// hand-written FFI was added. The `cfg(windows)` path has not been
+// compiled by any Rust toolchain on this vertical's Unix host; it is
+// exercised by the isolated Windows runner.
 #[cfg(windows)]
 mod windows_pipe {
     use std::cell::Cell;

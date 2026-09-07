@@ -93,16 +93,9 @@ mod unix {
 #[cfg(unix)]
 pub use unix::{DataDirLock, acquire_exclusive};
 
-/// Rewritten under the root grant to use `windows-sys` (`LockFileEx`)
-/// instead of inventing new raw FFI — `windows-sys` is not yet a dependency
-/// of `drogond`; see the evidence doc's Completion section for the exact
-/// blocking Cargo line. This entire module is `cfg(windows)`, so — same as
-/// `endpoint.rs`'s `windows_pipe` module — that gap does not block this
-/// (Unix) build: cfg-stripping removes it before name resolution.
-/// Unverified by any compiler; no ACL-hardening beyond `LockFileEx`'s own
-/// exclusivity was added (no new hand-written security-descriptor FFI
-/// beyond what `endpoint.rs` already justifies) — see the evidence doc for
-/// the resulting gap versus the Unix side's explicit `0600`/DACL hardening.
+// Windows uses the OS file lock (`LockFileEx` via `windows-sys`);
+// data-file ACLs are inherited from the parent (no explicit DACL
+// hardening on this path, unlike the Unix side's `0600`).
 #[cfg(windows)]
 mod windows {
     use std::fs::OpenOptions;
