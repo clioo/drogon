@@ -1,28 +1,33 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  assertNoHorizontalOverflow,
+  browserSnapshotShowsGuest,
   classifyTasksList,
   declaredStatusBarHeight,
   fixtureHasBinary,
   FIXTURE_PATH,
   paletteOpenChord,
+  registryLiveness,
+  summarizeAutomationHistory,
 } from "./probe-packaged-surfaces.mjs";
+import { extractTerminalText } from "./acceptance-terminal-text.mjs";
 
 describe("paletteOpenChord", () => {
-  it("reads the current CmdOrCtrl+K registration", () => {
-    const chord = paletteOpenChord(
-      'export const X = [\n  { id: "palette.openCommands", chord: "CmdOrCtrl+K" },\n];',
-    );
-    assert.equal(chord.chord, "CmdOrCtrl+K");
-    assert.equal(chord.key, "k");
+  const entry = (darwin) =>
+    `{\n    id: "worktree.palette",\n    defaultBindings: {\n      darwin: [${darwin}],\n    },\n  },`;
+
+  it("reads the current Mod+J darwin registration", () => {
+    const chord = paletteOpenChord(entry('"Mod+J"'));
+    assert.equal(chord.chord, "Mod+J");
+    assert.equal(chord.key, "j");
     assert.equal(chord.shift, false);
   });
 
-  it("follows the registry to CmdOrCtrl+J without a code change", () => {
-    const chord = paletteOpenChord(
-      'export const X = [\n  { id: "palette.openCommands", chord: "CmdOrCtrl+J" },\n];',
-    );
+  it("follows the registry without a code change", () => {
+    const chord = paletteOpenChord(entry('"Mod+Shift+J", "Mod+J"'));
     assert.equal(chord.key, "j");
+    assert.equal(chord.shift, true);
   });
 
   it("fails closed when the registration disappears", () => {
@@ -31,15 +36,17 @@ describe("paletteOpenChord", () => {
 });
 
 describe("declaredStatusBarHeight", () => {
-  it("parses the .status-bar rule", () => {
+  it("parses the min-h arbitrary value", () => {
     assert.equal(
-      declaredStatusBarHeight(".status-bar {\n  height: 26px;\n}"),
-      26,
+      declaredStatusBarHeight(
+        'className="flex items-center h-6 min-h-[24px] px-3 gap-4"',
+      ),
+      24,
     );
   });
 
   it("fails closed without a px declaration", () => {
-    assert.throws(() => declaredStatusBarHeight(".other { height: 1px; }"));
+    assert.throws(() => declaredStatusBarHeight('className="flex h-6"'));
   });
 });
 
@@ -91,5 +98,128 @@ describe("classifyTasksList", () => {
         "unexpected:",
       ),
     );
+  });
+});
+
+describe("extractTerminalText", () => {
+  const terminal = (rows) => ({
+    buffer: {
+      active: {
+        length: rows.length,
+        getLine: (row) => ({
+          translateToString: () => rows[row],
+        }),
+      },
+    },
+  });
+
+  it("joins every buffer row across terminals", () => {
+    assert.equal(
+      extractTerminalText([terminal(["a", "b"]), terminal(["c"])]),
+      "a\nb\nc",
+    );
+  });
+
+  it("tolerates sparse registries and null rows", () => {
+    assert.equal(
+      extractTerminalText([
+        null,
+        { buffer: null },
+        {
+          buffer: {
+            active: {
+              length: 2,
+              getLine: (row) => (row === 0 ? null : { translateToString: () => "x" }),
+            },
+          },
+        },
+      ]),
+      "\nx",
+    );
+  });
+
+  it("is empty without terminals", () => {
+    assert.equal(extractTerminalText([]), "");
+    assert.equal(extractTerminalText(null), "");
+  });
+});
+
+describe("summarizeAutomationHistory", () => {
+  it("counts one manual run after run-once", () => {
+    assert.deepEqual(
+      summarizeAutomationHistory({
+        runs: [{ id: "r1", trigger: "manual", status: "completed" }],
+      }),
+      { total: 1, manual: 1, scheduled: 0, statuses: ["completed"] },
+    );
+  });
+
+  it("separates scheduled from manual runs", () => {
+    const summary = summarizeAutomationHistory({
+      runs: [
+        { trigger: "scheduled", status: "completed" },
+        { trigger: "manual", status: "dispatch_failed" },
+      ],
+    });
+    assert.equal(summary.total, 2);
+    assert.equal(summary.manual, 1);
+    assert.equal(summary.scheduled, 1);
+  });
+
+  it("is empty without runs", () => {
+    assert.deepEqual(summarizeAutomationHistory({ runs: [] }), {
+      total: 0,
+      manual: 0,
+      scheduled: 0,
+      statuses: [],
+    });
+  });
+});
+
+describe("assertNoHorizontalOverflow", () => {
+  it("accepts an exact fit", () => {
+    assertNoHorizontalOverflow({ clientWidth: 760, scrollWidth: 760 }, "strip");
+  });
+
+  it("fails closed on overflow", () => {
+    assert.throws(() =>
+      assertNoHorizontalOverflow(
+        { clientWidth: 760, scrollWidth: 900 },
+        "status-bar@760px",
+      ),
+    );
+  });
+});
+
+describe("browserSnapshotShowsGuest", () => {
+  it("finds the guest marker in the envelope", () => {
+    assert.equal(
+      browserSnapshotShowsGuest(
+        { url: "data:text/html", text: "hello DROGON_BROWSER_GUEST_1" },
+        "DROGON_BROWSER_GUEST_1",
+      ),
+      true,
+    );
+  });
+
+  it("rejects a snapshot without the marker", () => {
+    assert.equal(
+      browserSnapshotShowsGuest({ text: "blank page" }, "DROGON_BROWSER_GUEST_1"),
+      false,
+    );
+  });
+});
+
+describe("registryLiveness", () => {
+  it("names live buffers", () => {
+    assert.equal(registryLiveness(2, 120), "live-buffers");
+  });
+
+  it("names a rowless registry distinctly", () => {
+    assert.equal(registryLiveness(1, 0), "registry-without-rows");
+  });
+
+  it("names an empty registry", () => {
+    assert.equal(registryLiveness(0, 0), "empty");
   });
 });

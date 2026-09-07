@@ -18,6 +18,7 @@ import {
   probeGhUnavailable,
   probePackagedSurfaces,
 } from "./probe-packaged-surfaces.mjs";
+import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import {
   bundlePaths,
   sealedBundleDigest,
@@ -215,12 +216,11 @@ try {
       (await page.evaluate(() => window.drogon.buildInfo()))?.revision,
       build.revision,
     );
-    await page
-      .locator(".build-revision")
-      .filter({ hasText: build.revision.slice(0, 7) })
-      .waitFor();
+    // R9-B removed the footer's revision display (fidelity to the source
+    // toolbar), so the sealed identity is proved through buildInfo, not a
+    // rendered revision string.
     report.checks.push(
-      "packaged-app-starts-bundled-runtime-with-minimal-path-and-displays-revision",
+      "packaged-app-starts-bundled-runtime-with-minimal-path-and-reports-revision",
     );
   }
   assert.deepEqual(
@@ -277,24 +277,7 @@ try {
       : `printf 'DROGON_%s\\n' '${nonce}'`;
   await page.keyboard.type(command);
   await page.keyboard.press("Enter");
-  await page.waitForFunction(
-    (value) =>
-      (() => {
-        const registry = window.__drogonTerminals;
-        if (registry && registry.size > 0) {
-          const lines = [];
-          for (const terminal of registry.values()) {
-            const buffer = terminal.buffer.active;
-            for (let row = 0; row < buffer.length; row += 1) {
-              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
-            }
-          }
-          return lines.join("\n");
-        }
-        return document.querySelector(".xterm-screen")?.textContent ?? "";
-      })().includes(value),
-    marker,
-  );
+  await waitForTerminalText(page, marker);
   report.checks.push("rendered-terminal-command-output");
   const original = await page.evaluate(async (id) => {
     const value = await window.drogon.sessions(id);
@@ -302,24 +285,7 @@ try {
   }, registered.id);
   assert.ok(original?.incarnation);
   await page.reload();
-  await page.waitForFunction(
-    (value) =>
-      (() => {
-        const registry = window.__drogonTerminals;
-        if (registry && registry.size > 0) {
-          const lines = [];
-          for (const terminal of registry.values()) {
-            const buffer = terminal.buffer.active;
-            for (let row = 0; row < buffer.length; row += 1) {
-              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
-            }
-          }
-          return lines.join("\n");
-        }
-        return document.querySelector(".xterm-screen")?.textContent ?? "";
-      })().includes(value),
-    marker,
-  );
+  await waitForTerminalText(page, marker);
   const reconnected = await page.evaluate(async (id) => {
     const value = await window.drogon.sessions(id);
     return value.ok ? value.result.sessions[0] : null;
@@ -338,24 +304,7 @@ try {
     assert.equal(whileClosed.serviceInstanceId, before.serviceInstanceId);
     assert.ok(before.serviceInstanceId);
     await launchDesktop();
-    await page.waitForFunction(
-      (value) =>
-        (() => {
-        const registry = window.__drogonTerminals;
-        if (registry && registry.size > 0) {
-          const lines = [];
-          for (const terminal of registry.values()) {
-            const buffer = terminal.buffer.active;
-            for (let row = 0; row < buffer.length; row += 1) {
-              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
-            }
-          }
-          return lines.join("\n");
-        }
-        return document.querySelector(".xterm-screen")?.textContent ?? "";
-      })().includes(value),
-      marker,
-    );
+    await waitForTerminalText(page, marker);
     const after = await fixtureDaemon.rpc("status");
     assert.equal(after.serviceInstanceId, before.serviceInstanceId);
     const { sessions } = await fixtureDaemon.rpc("session.list", {
@@ -400,24 +349,7 @@ try {
   await page.waitForFunction(
     () => document.querySelectorAll('[role="tab"]').length === 1,
   );
-  await page.waitForFunction(
-    (value) =>
-      (() => {
-        const registry = window.__drogonTerminals;
-        if (registry && registry.size > 0) {
-          const lines = [];
-          for (const terminal of registry.values()) {
-            const buffer = terminal.buffer.active;
-            for (let row = 0; row < buffer.length; row += 1) {
-              lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
-            }
-          }
-          return lines.join("\n");
-        }
-        return document.querySelector(".xterm-screen")?.textContent ?? "";
-      })().includes(value),
-    marker,
-  );
+  await waitForTerminalText(page, marker);
   report.checks.push("keyboard-tab-navigation-and-sibling-close");
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });
