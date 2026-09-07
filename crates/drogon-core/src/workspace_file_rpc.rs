@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use drogon_protocol::workspace_files::{
-    FileListParams, FileReadParams, FileScope, FileWriteParams, MAX_FILE_BYTES,
+    FileCreateKind, FileCreateParams, FileDeleteParams, FileListParams, FileReadParams,
+    FileRenameParams, FileScope, FileWriteParams, MAX_FILE_BYTES,
 };
 use drogon_protocol::{MAX_FRAME_BYTES, RpcError};
 use serde::de::DeserializeOwned;
@@ -25,7 +26,12 @@ impl Engine {
     pub(super) fn do_files_list(&self, value: &Value) -> Result<Value, RpcError> {
         let params: FileListParams = decode(value)?;
         let root = self.file_workspace_root(&params.scope)?;
-        let listing = workspace_files::list_dir(&root, &params.scope.path, params.limit()?)?;
+        let listing = workspace_files::list_dir(
+            &root,
+            &params.scope.path,
+            params.limit()?,
+            params.include_hidden_or_default(),
+        )?;
         let mut result = scope_result(&params.scope);
         let mut entries = Vec::new();
         let mut truncated = listing.truncated;
@@ -89,6 +95,61 @@ impl Engine {
         result["size"] = json!(file.size);
         result["mtime"] = json!(file.mtime);
         Ok(result)
+    }
+
+    // NOT YET DISPATCHED: `lib.rs` (coordinator-owned) has no
+    // `files.create`/`files.rename`/`files.delete` arms yet, so these are
+    // unreachable until that three-line wiring lands — the PR body carries
+    // the exact patch. The `allow` keeps the workspace `-D warnings` gates
+    // green meanwhile; the primitives underneath are covered by the
+    // standalone `tests/workspace_files_explorer.rs` suite.
+    #[allow(dead_code)]
+    pub(super) fn do_files_create(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: FileCreateParams = decode(value)?;
+        let root = self.file_workspace_root(&params.scope)?;
+        let kind = match params.kind {
+            FileCreateKind::File => workspace_files::EntryKind::File,
+            FileCreateKind::Directory => workspace_files::EntryKind::Dir,
+        };
+        workspace_files::create_path(&root, &params.scope.path, kind)?;
+        let mut result = scope_result(&params.scope);
+        result["kind"] = json!(match params.kind {
+            FileCreateKind::File => "file",
+            FileCreateKind::Directory => "directory",
+        });
+        Ok(result)
+    }
+
+    // NOT YET DISPATCHED: see `do_files_create`.
+    #[allow(dead_code)]
+    pub(super) fn do_files_rename(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: FileRenameParams = decode(value)?;
+        params.validate_target(&self.host_id)?;
+        let scope = FileScope {
+            host_id: params.host_id.clone(),
+            workspace_id: params.workspace_id.clone(),
+            path: params.from.clone(),
+        };
+        let root = self.file_workspace_root(&scope)?;
+        workspace_files::rename_path(&root, &params.from, &params.to)?;
+        Ok(
+            json!({"hostId":params.host_id, "workspaceId":params.workspace_id, "from":params.from, "to":params.to}),
+        )
+    }
+
+    // NOT YET DISPATCHED: see `do_files_create`.
+    #[allow(dead_code)]
+    pub(super) fn do_files_delete(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: FileDeleteParams = decode(value)?;
+        params.validate_target(&self.host_id)?;
+        let scope = FileScope {
+            host_id: params.host_id.clone(),
+            workspace_id: params.workspace_id.clone(),
+            path: params.paths[0].clone(),
+        };
+        let root = self.file_workspace_root(&scope)?;
+        let deleted = workspace_files::delete_paths(&root, &params.paths)?;
+        Ok(json!({"hostId":params.host_id, "workspaceId":params.workspace_id, "deleted":deleted}))
     }
 }
 

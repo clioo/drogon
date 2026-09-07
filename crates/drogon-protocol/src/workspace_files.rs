@@ -43,6 +43,9 @@ pub struct FileListParams {
     #[serde(flatten)]
     pub scope: FileScope,
     pub limit_entries: Option<usize>,
+    /// When false, dotfile entries are filtered from the listing. Omitted
+    /// (None) preserves the historical behavior of returning every entry.
+    pub include_hidden: Option<bool>,
 }
 
 impl FileListParams {
@@ -55,6 +58,105 @@ impl FileListParams {
             ));
         }
         Ok(limit)
+    }
+
+    /// Historical listings returned every entry, so an omitted flag keeps
+    /// showing hidden entries; only an explicit `false` filters dotfiles.
+    pub fn include_hidden_or_default(&self) -> bool {
+        self.include_hidden.unwrap_or(true)
+    }
+}
+
+/// Target kind for `files.create`, mirroring the explorer's New File /
+/// New Folder row actions.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileCreateKind {
+    File,
+    Directory,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCreateParams {
+    #[serde(flatten)]
+    pub scope: FileScope,
+    pub kind: FileCreateKind,
+}
+
+/// Two-path scope for `files.rename`: `from` is the existing entry, `to`
+/// is the destination. Both are workspace-relative, like `FileScope::path`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRenameParams {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub from: String,
+    pub to: String,
+}
+
+impl FileRenameParams {
+    pub fn validate_target(&self, host_id: &str) -> Result<(), RpcError> {
+        validate_opaque_token(&self.host_id, 128, "Invalid file execution host.")?;
+        validate_opaque_token(&self.workspace_id, 128, "Invalid file workspace identity.")?;
+        if self.host_id != host_id {
+            return Err(RpcError::new(
+                "unsupported_host",
+                "The file execution host is not served by this endpoint.",
+            ));
+        }
+        for path in [&self.from, &self.to] {
+            if path.len() > MAX_FILE_PATH_BYTES || path.contains('\0') {
+                return Err(RpcError::new(
+                    "invalid_argument",
+                    "Invalid workspace-relative file path.",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Bounded multi-path scope for `files.delete`. The daemon deletes
+/// permanently (no OS-trash dependency); the renderer owns the source's
+/// confirmation copy before calling.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDeleteParams {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub paths: Vec<String>,
+}
+
+/// Upper bound on one `files.delete` call; larger batches must be split by
+/// the caller so a single request cannot hold the mutation ledger open.
+pub const MAX_DELETE_PATHS: usize = 128;
+
+impl FileDeleteParams {
+    pub fn validate_target(&self, host_id: &str) -> Result<(), RpcError> {
+        validate_opaque_token(&self.host_id, 128, "Invalid file execution host.")?;
+        validate_opaque_token(&self.workspace_id, 128, "Invalid file workspace identity.")?;
+        if self.host_id != host_id {
+            return Err(RpcError::new(
+                "unsupported_host",
+                "The file execution host is not served by this endpoint.",
+            ));
+        }
+        if self.paths.is_empty() || self.paths.len() > MAX_DELETE_PATHS {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Invalid file deletion batch size.",
+            ));
+        }
+        for path in &self.paths {
+            if path.len() > MAX_FILE_PATH_BYTES || path.contains('\0') {
+                return Err(RpcError::new(
+                    "invalid_argument",
+                    "Invalid workspace-relative file path.",
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -124,6 +226,129 @@ mod tests {
     }
 
     #[test]
+    fn list_shows_hidden_by_default_and_hides_only_on_explicit_false() {
+        let scope = FileScope {
+            host_id: "host".into(),
+            workspace_id: "workspace".into(),
+            path: "".into(),
+        };
+        // Omitted flag (the historical wire shape) keeps showing everything.
+        let legacy: FileListParams =
+            serde_json::from_value(json!({"hostId":"host","workspaceId":"workspace","path":""}))
+                .unwrap();
+        assert!(legacy.include_hidden_or_default());
+        assert_eq!(legacy.limit().unwrap(), MAX_DIRECTORY_ENTRIES);
+        for (flag, expected) in [(None, true), (Some(true), true), (Some(false), false)] {
+            assert_eq!(
+                FileListParams {
+                    scope: scope.clone(),
+                    limit_entries: None,
+                    include_hidden: flag
+                }
+                .include_hidden_or_default(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn create_kind_round_trips_and_rejects_unknown_kinds() {
+        let params: FileCreateParams = serde_json::from_value(
+            json!({"hostId":"host","workspaceId":"workspace","path":"a/b","kind":"directory"}),
+        )
+        .unwrap();
+        assert_eq!(params.kind, FileCreateKind::Directory);
+        params.scope.validate_target("host").unwrap();
+        assert!(
+            serde_json::from_value::<FileCreateParams>(
+                json!({"hostId":"host","workspaceId":"workspace","path":"a","kind":"symlink"})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rename_validates_both_paths_and_the_serving_host() {
+        let params = FileRenameParams {
+            host_id: "host".into(),
+            workspace_id: "workspace".into(),
+            from: "a.txt".into(),
+            to: "b.txt".into(),
+        };
+        params.validate_target("host").unwrap();
+        assert_eq!(
+            FileRenameParams {
+                host_id: "other".into(),
+                ..params.clone()
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "unsupported_host"
+        );
+        assert_eq!(
+            FileRenameParams {
+                to: "x\0y".into(),
+                ..params.clone()
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "invalid_argument"
+        );
+        assert_eq!(
+            FileRenameParams {
+                from: "x".repeat(MAX_FILE_PATH_BYTES + 1),
+                ..params
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "invalid_argument"
+        );
+    }
+
+    #[test]
+    fn delete_bounds_batch_size_and_validates_each_path() {
+        let valid = FileDeleteParams {
+            host_id: "host".into(),
+            workspace_id: "workspace".into(),
+            paths: vec!["a.txt".into()],
+        };
+        valid.validate_target("host").unwrap();
+        assert_eq!(
+            FileDeleteParams {
+                paths: vec![],
+                ..valid.clone()
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "invalid_argument"
+        );
+        assert_eq!(
+            FileDeleteParams {
+                paths: vec!["a".into(); MAX_DELETE_PATHS + 1],
+                ..valid.clone()
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "invalid_argument"
+        );
+        assert_eq!(
+            FileDeleteParams {
+                paths: vec!["x\0y".into()],
+                ..valid
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "invalid_argument"
+        );
+    }
+
+    #[test]
     fn directory_and_file_limits_are_bounded() {
         let scope = FileScope {
             host_id: "host".into(),
@@ -134,7 +359,8 @@ mod tests {
             assert!(
                 FileListParams {
                     scope: scope.clone(),
-                    limit_entries: Some(limit)
+                    limit_entries: Some(limit),
+                    include_hidden: None,
                 }
                 .limit()
                 .is_err()

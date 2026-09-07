@@ -15,9 +15,20 @@ mod workspace_files;
 use std::fs;
 
 use tempfile::tempdir;
-use workspace_files::{EntryKind, list_dir, read_file, write_file};
+use workspace_files::{EntryKind, read_file, write_file};
 
 const MANY: usize = 1000;
+
+/// Historical three-arg shape: the suites below predate the `include_hidden`
+/// flag and assert the show-everything behavior, so the wrapper pins `true`
+/// and new suites call `workspace_files::list_dir` with all four args.
+fn list_dir(
+    root: &std::path::Path,
+    rel_path: &str,
+    max_entries: usize,
+) -> Result<workspace_files::DirListing, drogon_protocol::RpcError> {
+    workspace_files::list_dir(root, rel_path, max_entries, true)
+}
 
 fn make_root() -> tempfile::TempDir {
     tempdir().unwrap()
@@ -875,4 +886,238 @@ fn write_file_refuses_a_parent_directory_pre_swapped_to_an_escaping_symlink() {
     let err = write_file(root.path(), "escape/newfile.txt", b"payload").unwrap_err();
     assert_eq!(err.code, "invalid_argument");
     assert!(!outside.path().join("newfile.txt").exists());
+}
+
+// --- list_dir include_hidden ------------------------------------------------
+
+#[test]
+fn list_dir_hides_dotfiles_only_on_explicit_false() {
+    use workspace_files::list_dir as list_dir_full;
+
+    let root = make_root();
+    fs::write(root.path().join(".hidden"), b"h").unwrap();
+    fs::write(root.path().join("visible.txt"), b"v").unwrap();
+
+    let shown = list_dir_full(root.path(), "", MANY, true).unwrap();
+    assert_eq!(shown.entries.len(), 2);
+
+    let filtered = list_dir_full(root.path(), "", MANY, false).unwrap();
+    assert_eq!(
+        filtered
+            .entries
+            .iter()
+            .map(|e| e.name.clone())
+            .collect::<Vec<_>>(),
+        vec!["visible.txt".to_string()]
+    );
+    assert!(!filtered.truncated);
+}
+
+// --- create_path ------------------------------------------------------------
+
+#[test]
+fn create_path_makes_empty_files_and_directories_with_parents() {
+    use workspace_files::create_path;
+
+    let root = make_root();
+    create_path(root.path(), "notes/today.txt", EntryKind::File).unwrap();
+    assert_eq!(fs::read(root.path().join("notes/today.txt")).unwrap(), b"");
+    create_path(root.path(), "notes/archive", EntryKind::Dir).unwrap();
+    assert!(root.path().join("notes/archive").is_dir());
+}
+
+#[test]
+fn create_path_refuses_collisions_traversal_and_empty_paths() {
+    use workspace_files::create_path;
+
+    let root = make_root();
+    fs::write(root.path().join("taken.txt"), b"x").unwrap();
+
+    // Collisions of any existing kind refuse, never overwrite or no-op.
+    for (rel, kind) in [
+        ("taken.txt", EntryKind::File),
+        ("taken.txt", EntryKind::Dir),
+        ("missing.txt", EntryKind::Symlink),
+        ("", EntryKind::File),
+    ] {
+        assert_eq!(
+            create_path(root.path(), rel, kind).unwrap_err().code,
+            "invalid_argument"
+        );
+    }
+    assert_eq!(
+        create_path(root.path(), "new.txt", EntryKind::File).map(|_| ()),
+        Ok(())
+    );
+    assert_eq!(
+        create_path(root.path(), "new.txt", EntryKind::File)
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+
+    // Traversal is rejected syntactically before the root is ever opened,
+    // so nothing is created anywhere; the root itself stays clean.
+    for rel in ["../escape.txt", "/abs.txt", "sub/../../escape.txt"] {
+        assert_eq!(
+            create_path(root.path(), rel, EntryKind::File)
+                .unwrap_err()
+                .code,
+            "invalid_argument"
+        );
+    }
+    assert!(!root.path().join("escape.txt").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn create_path_refuses_a_symlink_planted_between_probe_and_create() {
+    use std::os::unix::fs::symlink;
+    use workspace_files::create_path;
+
+    let root = make_root();
+    // A dangling symlink at the target still counts as "exists": creation
+    // refuses instead of following it.
+    symlink("nowhere", root.path().join("link.txt")).unwrap();
+    assert_eq!(
+        create_path(root.path(), "link.txt", EntryKind::File)
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+}
+
+// --- rename_path ------------------------------------------------------------
+
+#[test]
+fn rename_path_moves_entries_and_refuses_collisions() {
+    use workspace_files::rename_path;
+
+    let root = make_root();
+    fs::write(root.path().join("a.txt"), b"a").unwrap();
+    fs::write(root.path().join("b.txt"), b"b").unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+
+    rename_path(root.path(), "a.txt", "moved/c.txt").unwrap();
+    assert!(!root.path().join("a.txt").exists());
+    assert_eq!(fs::read(root.path().join("moved/c.txt")).unwrap(), b"a");
+
+    // Destination collisions refuse, never overwrite.
+    assert_eq!(
+        rename_path(root.path(), "moved/c.txt", "b.txt")
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    assert_eq!(fs::read(root.path().join("b.txt")).unwrap(), b"b");
+
+    // Missing sources and identical paths are explicit errors.
+    assert_eq!(
+        rename_path(root.path(), "nope.txt", "dest.txt")
+            .unwrap_err()
+            .code,
+        "not_found"
+    );
+    assert_eq!(
+        rename_path(root.path(), "b.txt", "b.txt").unwrap_err().code,
+        "invalid_argument"
+    );
+
+    // Directories rename with their contents.
+    rename_path(root.path(), "dir", "dir2").unwrap();
+    assert!(root.path().join("dir2").is_dir());
+}
+
+#[test]
+fn rename_path_refuses_traversal_on_either_side() {
+    use workspace_files::rename_path;
+
+    let root = make_root();
+    fs::write(root.path().join("a.txt"), b"a").unwrap();
+
+    for (from, to) in [
+        ("../a.txt", "b.txt"),
+        ("a.txt", "../b.txt"),
+        ("a.txt", "/abs.txt"),
+    ] {
+        assert_eq!(
+            rename_path(root.path(), from, to).unwrap_err().code,
+            "invalid_argument"
+        );
+    }
+    assert!(!root.path().join("b.txt").exists());
+    assert_eq!(fs::read(root.path().join("a.txt")).unwrap(), b"a");
+}
+
+// --- delete_paths -----------------------------------------------------------
+
+#[test]
+fn delete_paths_removes_files_dirs_and_symlink_links_not_targets() {
+    use workspace_files::delete_paths;
+
+    let root = make_root();
+    fs::write(root.path().join("gone.txt"), b"x").unwrap();
+    fs::create_dir_all(root.path().join("tree/sub")).unwrap();
+    fs::write(root.path().join("tree/sub/deep.txt"), b"deep").unwrap();
+    fs::write(root.path().join("kept.txt"), b"keep").unwrap();
+
+    let deleted = delete_paths(root.path(), &["gone.txt".to_string(), "tree".to_string()]).unwrap();
+    assert_eq!(deleted, vec!["gone.txt".to_string(), "tree".to_string()]);
+    assert!(!root.path().join("gone.txt").exists());
+    assert!(!root.path().join("tree").exists());
+    assert!(root.path().join("kept.txt").exists());
+
+    // A symlink deletes the LINK; its target (even outside the root) stays.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("target.txt"), b"t").unwrap();
+        symlink(
+            outside.path().join("target.txt"),
+            root.path().join("link.txt"),
+        )
+        .unwrap();
+        delete_paths(root.path(), &["link.txt".to_string()]).unwrap();
+        assert!(!root.path().join("link.txt").exists());
+        assert!(outside.path().join("target.txt").exists());
+    }
+}
+
+#[test]
+fn delete_paths_refuses_traversal_missing_and_bad_batches() {
+    use workspace_files::delete_paths;
+
+    let root = make_root();
+    fs::write(root.path().join("a.txt"), b"a").unwrap();
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("secret.txt"), b"s").unwrap();
+
+    assert_eq!(
+        delete_paths(root.path(), &["../secret.txt".to_string()])
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    assert!(outside.path().join("secret.txt").exists());
+    assert_eq!(
+        delete_paths(root.path(), &["missing.txt".to_string()])
+            .unwrap_err()
+            .code,
+        "not_found"
+    );
+    assert_eq!(
+        delete_paths(root.path(), &[]).unwrap_err().code,
+        "invalid_argument"
+    );
+    assert_eq!(
+        delete_paths(
+            root.path(),
+            &vec!["a.txt".to_string(); drogon_protocol::workspace_files::MAX_DELETE_PATHS + 1],
+        )
+        .unwrap_err()
+        .code,
+        "invalid_argument"
+    );
+    assert!(root.path().join("a.txt").exists());
 }

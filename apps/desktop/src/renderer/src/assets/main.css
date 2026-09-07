@@ -2222,3 +2222,42 @@
 .sidebar-menu-filter {
   padding: 4px;
 }
+
+/* File Explorer (R10-D): rows mirror the reference's FileExplorerRow —
+   full-width 26px rows, 16px-per-level indent, chevron/file affordances —
+   with the reference's selected-row treatment (mixed accent fill plus an
+   inset ring, which stays legible where flat bg-accent ≈ panel). Menus
+   and the delete dialog ride the popover tokens. */
+.file-explorer-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+}
+.file-explorer-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.file-explorer-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-radius: 4px;
+}
+.file-explorer-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-file-explorer-row][data-selected="true"] {
+  background: color-mix(in srgb, var(--foreground) 8%, var(--accent));
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--accent-foreground);
+}
+[data-file-explorer-row][data-selected="true"]:hover {
+  background: color-mix(in srgb, var(--foreground) 10%, var(--accent));
+}
+.dark [data-file-explorer-row][data-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.dark [data-file-explorer-row][data-selected="true"]:hover {
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+}
+[data-file-explorer-inline-input] input:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}

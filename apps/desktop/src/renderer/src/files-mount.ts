@@ -90,6 +90,27 @@ export function createGatedFileBridge(
     fileList: (input) => (isAllowed() ? source.fileList(input) : refused()),
     fileRead: (input) => (isAllowed() ? source.fileRead(input) : refused()),
     fileWrite: (input) => (isAllowed() ? source.fileWrite(input) : refused()),
+    // Explorer mutations are optional on the source until the daemon wires
+    // dispatch and the preload exposes the channels: absent methods stay
+    // absent (the explorer disables the UI), never synthesized here.
+    ...(source.fileCreate
+      ? {
+          fileCreate: (input: Parameters<NonNullable<FileBridge["fileCreate"]>>[0]) =>
+            isAllowed() ? source.fileCreate!(input) : refused(),
+        }
+      : {}),
+    ...(source.fileRename
+      ? {
+          fileRename: (input: Parameters<NonNullable<FileBridge["fileRename"]>>[0]) =>
+            isAllowed() ? source.fileRename!(input) : refused(),
+        }
+      : {}),
+    ...(source.fileDelete
+      ? {
+          fileDelete: (input: Parameters<NonNullable<FileBridge["fileDelete"]>>[0]) =>
+            isAllowed() ? source.fileDelete!(input) : refused(),
+        }
+      : {}),
   };
 }
 

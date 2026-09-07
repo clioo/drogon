@@ -187,6 +187,7 @@ pub(crate) fn list_dir(
     root: &Path,
     rel_path: &str,
     max_entries: usize,
+    include_hidden: bool,
 ) -> Result<DirListing, RpcError> {
     validate_rel(rel_path)?;
     let root_dir = open_root_dir(root)?;
@@ -228,6 +229,16 @@ pub(crate) fn list_dir(
             .file_name()
             .into_string()
             .map_err(|_| error::invalid_argument("directory entry name is not valid UTF-8"))?;
+        // Dotfile filter applies AFTER the cutoff above, never before: the
+        // loop's bounded-cost and past-cutoff-never-fails properties stay
+        // exactly as documented. A filtered dotfile therefore still consumes
+        // one raw entry slot, so a directory holding more dotfiles than
+        // `max_entries` can report a short truncated page; with the
+        // production cap (1000) and the renderer's default of showing
+        // dotfiles, that shape is never produced in practice.
+        if !include_hidden && name.starts_with('.') {
+            continue;
+        }
         // `lstat`, not `stat`: reports the entry itself, never a symlink's
         // target, so listing never silently follows one.
         let meta = entry
@@ -442,6 +453,182 @@ pub(crate) fn write_file(root: &Path, rel: &str, bytes: &[u8]) -> Result<WriteRe
             .map(format_rfc3339)
             .unwrap_or_default(),
     })
+}
+
+/// Ensures the parent chain of `rel_path` exists, creating missing
+/// directories. Same probe-first shape as `write_file`'s own preamble (see
+/// its comment): an existing non-directory parent is `invalid_argument`,
+/// and an escape attempt surfaces as `invalid_argument` instead of a bare
+/// I/O error. Deliberately not shared with `write_file`: that path is
+/// frozen behavior and must not shift under this addition.
+fn ensure_parent_dirs(root_dir: &Dir, rel_path: &Path) -> Result<(), RpcError> {
+    let parent_rel = rel_path.parent().filter(|p| !p.as_os_str().is_empty());
+    let Some(parent_rel) = parent_rel else {
+        return Ok(());
+    };
+    match root_dir.metadata(parent_rel) {
+        Ok(meta) => {
+            if !meta.is_dir() {
+                return Err(error::invalid_argument(
+                    "workspace path's parent is not a directory",
+                ));
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            root_dir.create_dir_all(parent_rel).map_err(map_dir_error)
+        }
+        Err(e) => Err(map_dir_error(e)),
+    }
+}
+
+/// Creates one empty file or directory at `rel`, creating missing parents
+/// like `write_file` does. An existing entry of ANY kind at `rel` (file,
+/// directory, or symlink — `symlink_metadata` never follows the final
+/// component, so a dangling symlink still counts) refuses with
+/// `invalid_argument`: creation never overwrites and never succeeds as a
+/// silent no-op. Containment and symlink-escape handling ride on the same
+/// `Dir`-relative walk as every other mutation here.
+pub(crate) fn create_path(root: &Path, rel: &str, kind: EntryKind) -> Result<(), RpcError> {
+    if matches!(kind, EntryKind::Symlink) {
+        return Err(error::invalid_argument(
+            "a symlink cannot be created through this call",
+        ));
+    }
+    validate_rel(rel)?;
+    if rel.is_empty() {
+        return Err(error::invalid_argument("path must not be empty"));
+    }
+    let root_dir = open_root_dir(root)?;
+    let rel_path = Path::new(rel);
+    rel_path
+        .file_name()
+        .ok_or_else(|| error::invalid_argument("path has no file name"))?;
+    match root_dir.symlink_metadata(rel_path) {
+        Ok(_) => {
+            return Err(error::invalid_argument("workspace path already exists"));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(map_lookup_error(e, "workspace path not found")),
+    }
+    ensure_parent_dirs(&root_dir, rel_path)?;
+    match kind {
+        EntryKind::Dir => {
+            // `create_dir`, not `create_dir_all`: the parents above already
+            // exist, so `AlreadyExists` here is a lost creation race and
+            // fails loudly as a collision rather than succeeding silently.
+            root_dir.create_dir(rel_path).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    error::invalid_argument("workspace path already exists")
+                } else {
+                    map_dir_error(e)
+                }
+            })
+        }
+        EntryKind::File => {
+            // Exclusive create (`O_EXCL` semantics via `create_new`), the
+            // same shape as `write_file`'s temp file: a planted entry that
+            // won the race after the probe above fails here, never silently.
+            let mut create_opts = OpenOptions::new();
+            create_opts.write(true).create_new(true);
+            root_dir
+                .open_with(rel_path, &create_opts)
+                .map(|_| ())
+                .map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        error::invalid_argument("workspace path already exists")
+                    } else {
+                        map_dir_error(e)
+                    }
+                })
+        }
+        EntryKind::Symlink => Err(error::invalid_argument(
+            "a symlink cannot be created through this call",
+        )),
+    }
+}
+
+/// Atomically renames `from` to `to` inside one workspace. The destination
+/// is probed first so a collision reports `invalid_argument` instead of
+/// silently overwriting; a concurrent creation winning the race between
+/// that probe and the `rename` below can still overwrite (the OS offers no
+/// `rename_noreplace` through this crate's dependencies — accepted, same
+/// class as the module's documented sibling-swap limitation). Destination
+/// parents are created like `write_file` does, and the `rename` itself runs
+/// `Dir`-relative on both sides, so a swapped directory that would walk
+/// outside the root fails closed.
+pub(crate) fn rename_path(root: &Path, from: &str, to: &str) -> Result<(), RpcError> {
+    validate_rel(from)?;
+    validate_rel(to)?;
+    if from.is_empty() || to.is_empty() {
+        return Err(error::invalid_argument("path must not be empty"));
+    }
+    if from == to {
+        return Err(error::invalid_argument(
+            "source and destination paths are identical",
+        ));
+    }
+    let root_dir = open_root_dir(root)?;
+    let (from_path, to_path) = (Path::new(from), Path::new(to));
+    // `symlink_metadata` never follows the final component: an existing
+    // symlink destination is still a collision, never an overwrite-through.
+    match root_dir.symlink_metadata(to_path) {
+        Ok(_) => {
+            return Err(error::invalid_argument("destination path already exists"));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(map_lookup_error(e, "destination path not found")),
+    }
+    ensure_parent_dirs(&root_dir, to_path)?;
+    root_dir.rename(from_path, &root_dir, to_path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            error::not_found("source path not found")
+        } else {
+            map_dir_error(e)
+        }
+    })
+}
+
+/// Permanently deletes each path in order and returns the deleted paths.
+/// Directories go with their contents (`remove_dir_all` through the open
+/// `Dir`, so inner traversal stays sandboxed); a symlink deletes the LINK
+/// itself (`remove_file`), never its target. There is deliberately no Trash
+/// step: the daemon takes no OS-trash dependency, and the renderer owns the
+/// source's confirmation copy before calling. Best-effort in order: entries
+/// before a failure stay deleted and the returned error names the failing
+/// path; callers needing atomicity must delete one entry per call.
+pub(crate) fn delete_paths(root: &Path, paths: &[String]) -> Result<Vec<String>, RpcError> {
+    if paths.is_empty() {
+        return Err(error::invalid_argument("no workspace paths to delete"));
+    }
+    if paths.len() > drogon_protocol::workspace_files::MAX_DELETE_PATHS {
+        return Err(error::invalid_argument(
+            "too many workspace paths to delete",
+        ));
+    }
+    let root_dir = open_root_dir(root)?;
+    let mut deleted = Vec::with_capacity(paths.len());
+    for rel in paths {
+        validate_rel(rel)?;
+        if rel.is_empty() {
+            return Err(error::invalid_argument("path must not be empty"));
+        }
+        let rel_path = Path::new(rel);
+        let meta = root_dir
+            .symlink_metadata(rel_path)
+            .map_err(|e| map_lookup_error(e, "workspace path not found"))?;
+        if meta.file_type().is_dir() {
+            root_dir
+                .remove_dir_all(rel_path)
+                .map_err(|e| map_lookup_error(e, "workspace path not found"))?;
+        } else {
+            root_dir
+                .remove_file(rel_path)
+                .map_err(|e| map_lookup_error(e, "workspace path not found"))?;
+        }
+        deleted.push(rel.clone());
+    }
+    Ok(deleted)
 }
 
 /// `cap_std`'s `Metadata::modified` returns its own `cap_std::time::SystemTime`
