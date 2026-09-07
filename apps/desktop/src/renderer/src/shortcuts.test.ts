@@ -188,8 +188,8 @@ describe("PALETTE_SHORTCUTS", () => {
 
   test("declares the palette, quick open and tab chords", () => {
     expect(registeredIds()).toEqual([
-      "palette.openCommands",
-      "palette.openQuickOpen",
+      "worktree.palette",
+      "worktree.quickOpen",
       "tabs.select1",
       "tabs.select2",
       "tabs.select3",
@@ -204,16 +204,16 @@ describe("PALETTE_SHORTCUTS", () => {
     ]);
   });
 
-  test("CmdOrCtrl+K opens the palette on darwin and ctrl+k elsewhere", () => {
-    const parsed = parseChord("CmdOrCtrl+K");
+  test("CmdOrCtrl+J opens the palette on darwin and ctrl+j elsewhere", () => {
+    const parsed = parseChord("CmdOrCtrl+J");
     expect(
-      matchesChord(parsed, event({ metaKey: true, key: "k" }), "darwin"),
+      matchesChord(parsed, event({ metaKey: true, key: "j" }), "darwin"),
     ).toBe(true);
     expect(
-      matchesChord(parsed, event({ ctrlKey: true, key: "k" }), "linux"),
+      matchesChord(parsed, event({ ctrlKey: true, key: "j" }), "linux"),
     ).toBe(true);
     expect(
-      matchesChord(parsed, event({ ctrlKey: true, key: "k" }), "darwin"),
+      matchesChord(parsed, event({ ctrlKey: true, key: "j" }), "darwin"),
     ).toBe(false);
   });
 
@@ -272,10 +272,10 @@ describe("PALETTE_SHORTCUTS", () => {
     for (const def of PALETTE_SHORTCUTS)
       expect(registry.register({ ...def, handler: () => {} })).toBe(true);
     const match = registry.matchKeyEvent(
-      event({ metaKey: true, key: "k" }),
+      event({ metaKey: true, key: "j" }),
       "darwin",
     );
-    expect(match?.id).toBe("palette.openCommands");
+    expect(match?.id).toBe("worktree.palette");
   });
 });
 

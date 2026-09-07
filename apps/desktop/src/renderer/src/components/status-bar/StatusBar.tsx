@@ -165,14 +165,19 @@ export function StatusBar({
   }, [snapshot]);
 
   const awake = snapshot?.awake;
+  const awakeModeLabel = awake ? (awake.mode === "on" ? "On" : "Off") : null;
   const awakeTitle = awake
     ? awake.supported
-      ? `Keep awake ${awake.mode === "on" ? "On — holding caffeinate" : "Off — normal sleep"}`
-      : "Keep awake is not supported on this platform"
+      ? `Keep computer awake, ${awakeModeLabel}`
+      : "Keep computer awake is not supported on this platform"
     : "Awake state unavailable";
 
   return (
-    <footer className="status-bar" aria-label="Status bar" data-testid="status-bar">
+    <footer
+      className="flex items-center h-6 min-h-[24px] px-3 gap-4 border-t border-border bg-[var(--bg-titlebar,var(--card))] text-xs select-none shrink-0 relative"
+      aria-label="Status bar"
+      data-testid="status-bar"
+    >
       <div className="status-bar-group">
         <button
           type="button"
@@ -228,7 +233,7 @@ export function StatusBar({
           disabled={!awake}
         >
           <Coffee size={12} />
-          <span>{awake ? (awake.mode === "on" ? "On" : "Off") : "…"}</span>
+          <span>{awakeModeLabel ?? "…"}</span>
           <span
             aria-hidden
             className={`status-bar-dot${awake?.active ? " status-bar-dot-active" : ""}`}

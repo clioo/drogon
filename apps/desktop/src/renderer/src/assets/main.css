@@ -22,6 +22,12 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-worktree-sidebar: var(--worktree-sidebar);
+  --color-worktree-sidebar-foreground: var(--worktree-sidebar-foreground);
+  --color-worktree-sidebar-accent: var(--worktree-sidebar-accent);
+  --color-worktree-sidebar-accent-foreground: var(--worktree-sidebar-accent-foreground);
+  --color-worktree-sidebar-border: var(--worktree-sidebar-border);
+  --color-worktree-sidebar-ring: var(--worktree-sidebar-ring);
   --color-destructive: var(--destructive);
   --color-editor-surface: var(--editor-surface);
   --radius-md: calc(var(--radius) * 0.8);
@@ -49,8 +55,15 @@
   --input: #e5e5e5;
   --ring: #a1a1a1;
   --destructive: #e40014;
+  --card: #fff;
   --sidebar: #fafafa;
   --sidebar-accent: #f5f5f5;
+  --worktree-sidebar: #f5f5f5;
+  --worktree-sidebar-foreground: #0a0a0a;
+  --worktree-sidebar-accent: #eaeaea;
+  --worktree-sidebar-accent-foreground: #171717;
+  --worktree-sidebar-border: #e5e5e5;
+  --worktree-sidebar-ring: #a1a1a1;
   --editor-surface: #ffffff;
   /* Floating menus/popovers that escape the editor surface, per the source style guide. */
   --shadow-floating: 0 10px 24px rgb(0 0 0 / 0.18);
@@ -75,8 +88,15 @@
     --input: rgb(255 255 255 / 0.15);
     --ring: #737373;
     --destructive: #ff6568;
+    --card: #171717;
     --sidebar: #171717;
     --sidebar-accent: #262626;
+    --worktree-sidebar: #2a2a2a;
+    --worktree-sidebar-foreground: #fafafa;
+    --worktree-sidebar-accent: #353535;
+    --worktree-sidebar-accent-foreground: #fafafa;
+    --worktree-sidebar-border: rgb(255 255 255 / 0.07);
+    --worktree-sidebar-ring: #737373;
     --editor-surface: #1e1e1e;
     color-scheme: dark;
   }
@@ -101,8 +121,15 @@
   --input: rgb(255 255 255 / 0.15);
   --ring: #737373;
   --destructive: #ff6568;
+  --card: #171717;
   --sidebar: #171717;
   --sidebar-accent: #262626;
+  --worktree-sidebar: #2a2a2a;
+  --worktree-sidebar-foreground: #fafafa;
+  --worktree-sidebar-accent: #353535;
+  --worktree-sidebar-accent-foreground: #fafafa;
+  --worktree-sidebar-border: rgb(255 255 255 / 0.07);
+  --worktree-sidebar-ring: #737373;
   --editor-surface: #1e1e1e;
   color-scheme: dark;
 }
@@ -125,8 +152,15 @@
     --input: #e5e5e5;
     --ring: #a1a1a1;
     --destructive: #e40014;
+    --card: #fff;
     --sidebar: #fafafa;
     --sidebar-accent: #f5f5f5;
+    --worktree-sidebar: #f5f5f5;
+    --worktree-sidebar-foreground: #0a0a0a;
+    --worktree-sidebar-accent: #eaeaea;
+    --worktree-sidebar-accent-foreground: #171717;
+    --worktree-sidebar-border: #e5e5e5;
+    --worktree-sidebar-ring: #a1a1a1;
     --editor-surface: #ffffff;
     color-scheme: light;
   }
@@ -161,11 +195,85 @@ h2 {
 }
 .app-shell {
   display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
 }
+.app-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+/* R6-A titlebar (Orca port, MIT Copyright (c) 2026 Lovecast Inc.):
+   36px strip above the content row; buttons opt out of the drag region. */
+.titlebar {
+  height: 36px;
+  min-height: 36px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  background: var(--bg-titlebar, var(--card));
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  user-select: none;
+  flex-shrink: 0;
+}
+.titlebar-traffic-light-pad {
+  width: 80px;
+  flex-shrink: 0;
+}
+.titlebar-app-name {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  max-width: min(280px, 32vw);
+  padding: 0 4px 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.titlebar-app-name-main {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-toggle {
+  -webkit-app-region: no-drag;
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 150ms;
+}
+.sidebar-toggle:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.sidebar-toggle-compact {
+  padding: 4px 5px;
+  color: var(--foreground);
+}
+.sidebar-toggle-compact:disabled {
+  color: var(--muted-foreground);
+}
+.sidebar-toggle:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.sidebar-toggle:disabled:hover {
+  background: none;
+  color: var(--muted-foreground);
+}
 .workspace-sidebar {
-  width: 240px;
   flex-shrink: 0;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
@@ -873,20 +981,9 @@ h2 {
   min-height: 0;
   height: auto;
 }
-.status-bar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 26px;
-  min-height: 26px;
-  padding: 0 12px;
-  border-top: 1px solid var(--border);
-  background: var(--sidebar);
-  color: var(--muted-foreground);
-  font-size: 11px;
-  user-select: none;
-  flex-shrink: 0;
-}
+/* R6-A: the status-bar container now uses the source's exact Tailwind class
+   list (h-6/min-h-[24px]) in StatusBar.tsx; below are only the inner
+   segment recipes. */
 .status-bar-group {
   display: flex;
   align-items: center;

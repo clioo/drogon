@@ -36,6 +36,22 @@ import {
 import { HarnessLaunchMenu } from "./HarnessLaunchMenu";
 import { Sidebar } from "./features/shell/Sidebar";
 import { TabBar } from "./features/shell/TabBar";
+import { TitlebarLeftControls } from "./features/shell/TitlebarLeftControls";
+import {
+  canGoBackView,
+  canGoForwardView,
+  goBackView,
+  goForwardView,
+  initialViewHistory,
+  pushView,
+} from "./features/shell/view-history";
+import {
+  loadSidebarOpen,
+  loadSidebarWidth,
+  saveSidebarOpen,
+  saveSidebarWidth,
+} from "./features/shell/sidebar-width";
+import { Landing } from "./features/landing/Landing";
 import {
   findWorkspaceForPath,
   gitProjectForWorkspace,
@@ -50,7 +66,7 @@ import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import { openCommandPalette } from "./features/shell/open-palette";
 import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
-import { TerminalPane } from "./TerminalPane";
+import { TERMINAL_CLEAR_EVENT, TerminalPane } from "./TerminalPane";
 import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
 import {
@@ -423,6 +439,24 @@ export function App() {
   // fail-closed gate below. Draft survival across a true capability loss
   // needs V3 draft-state hoisting (their item).
   const [route, setRoute] = useState<string | null>(null);
+  // R6-A shell chrome: sidebar collapse + width persist in the shell's own
+  // localStorage keys (settings-store.ts is owned by another task), and the
+  // titlebar back/forward pair walks a small workspace/view history stack.
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    loadSidebarOpen(window.localStorage),
+  );
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    loadSidebarWidth(window.localStorage),
+  );
+  const [viewHistory, setViewHistory] = useState(() =>
+    initialViewHistory({ route: null, workspaceId: "" }),
+  );
+  const historySeeded = useRef(false);
+  const applyingHistory = useRef(false);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const liveCapabilities = status?.capabilities ?? [];
   // Gate refs update in an effect (never during render): steady-state
   // exact, bounded one-commit staleness on transitions. The render guard
@@ -991,6 +1025,68 @@ export function App() {
     setActive("");
     setSessions([]);
   };
+  const toggleSidebar = () => {
+    setSidebarOpen((open) => {
+      saveSidebarOpen(window.localStorage, !open);
+      return !open;
+    });
+  };
+  const changeSidebarWidth = (width: number) => {
+    setSidebarWidth(width);
+    saveSidebarWidth(window.localStorage, width);
+  };
+  // Titlebar history: every user navigation pushes {route, workspace}; the
+  // back/forward pair applies entries without pushing (applyingHistory).
+  useEffect(() => {
+    if (applyingHistory.current) {
+      applyingHistory.current = false;
+      return;
+    }
+    if (!historySeeded.current) {
+      historySeeded.current = true;
+      setViewHistory(initialViewHistory({ route, workspaceId: selected }));
+      return;
+    }
+    setViewHistory((history) => pushView(history, { route, workspaceId: selected }));
+  }, [route, selected]);
+  const applyViewEntry = (entry: { route: string | null; workspaceId: string }) => {
+    applyingHistory.current = true;
+    if (entry.workspaceId !== selectedRef.current) {
+      const resolution = resolveWorkspaceSelection(
+        selectedRef.current,
+        entry.workspaceId,
+      );
+      if (resolution.changed) {
+        setSelected(resolution.selected);
+        setActive("");
+        setSessions([]);
+      }
+    }
+    if (entry.route !== routeRef.current) setRoute(entry.route);
+    else applyingHistory.current = false;
+  };
+  const goBackViewHistory = () => {
+    const next = goBackView(viewHistory);
+    if (next === viewHistory) return;
+    setViewHistory(next);
+    applyViewEntry(next.present);
+  };
+  const goForwardViewHistory = () => {
+    const next = goForwardView(viewHistory);
+    if (next === viewHistory) return;
+    setViewHistory(next);
+    applyViewEntry(next.present);
+  };
+  // Add-project entry point shared by the sidebar, the landing empty state
+  // and the workspace.create (Cmd+N) chord.
+  const requestAddProject = () => {
+    if (
+      isProjectsAvailable(liveCapabilities) &&
+      typeof windowProjectBridge(window.drogon).projectAdd === "function"
+    )
+      setProjectAction({ kind: "add" });
+    else setAdding((value) => !value);
+  };
   // Project/worktree RPCs behind the sidebar dialogs. Each submit resolves
   // a verbatim daemon error for the form, or null on success (the dialog
   // then closes and the lists refresh through `refresh`, which also
@@ -1260,10 +1356,72 @@ export function App() {
       chord: "CmdOrCtrl+,",
       handler: () => openSettings(),
     });
+    // R6-A source chords (definitions-core-1/3): Cmd+N creates a workspace,
+    // Cmd+K clears the focused terminal pane (reserved: never the palette),
+    // Cmd+B toggles the sidebar, Mod+Alt+arrows walk the view history.
+    registry.register({
+      id: "workspace.create",
+      chord: "CmdOrCtrl+N",
+      handler: guardHandler(requestAddProject, () => busy),
+    });
+    registry.register({
+      id: "terminal.clear",
+      chord: "CmdOrCtrl+K",
+      handler: () => {
+        window.dispatchEvent(new CustomEvent(TERMINAL_CLEAR_EVENT));
+      },
+    });
+    registry.register({
+      id: "sidebar.left.toggle",
+      chord: "CmdOrCtrl+B",
+      handler: toggleSidebar,
+    });
+    registry.register({
+      id: "worktree.history.back",
+      chord: "CmdOrCtrl+Alt+ArrowLeft",
+      handler: guardHandler(goBackViewHistory, () =>
+        !canGoBackView(viewHistory),
+      ),
+    });
+    registry.register({
+      id: "worktree.history.forward",
+      chord: "CmdOrCtrl+Alt+ArrowRight",
+      handler: guardHandler(goForwardViewHistory, () =>
+        !canGoForwardView(viewHistory),
+      ),
+    });
     const keydown = (event: KeyboardEvent) => {
       const action = registry.matchKeyEvent(event, platform);
       if (!action) return;
-      if (action.id !== "settings.open" && isDisabled()) return;
+      // terminal.clear is terminal-scoped: anywhere else the chord stays
+      // reserved (no global handler may claim Cmd+K).
+      if (action.id === "terminal.clear") {
+        const target = event.target;
+        const inTerminal =
+          target instanceof HTMLElement &&
+          target.closest("#active-session-panel") !== null;
+        if (!inTerminal) return;
+        event.preventDefault();
+        action.handler();
+        return;
+      }
+      // The palette owns its keys while open; only Settings tunnels through.
+      if (
+        action.id !== "settings.open" &&
+        document.querySelector(".command-palette-overlay") !== null
+      )
+        return;
+      if (action.id !== "settings.open" && isDisabled()) {
+        // Window-level shell chords stay live without a workspace.
+        if (
+          action.id !== "workspace.create" &&
+          action.id !== "sidebar.left.toggle" &&
+          action.id !== "worktree.history.back" &&
+          action.id !== "worktree.history.forward"
+        )
+          return;
+        if (action.id === "workspace.create" && busy) return;
+      }
       event.preventDefault();
       action.handler();
     };
@@ -1278,17 +1436,30 @@ export function App() {
       `${terminalFontSize}px`,
     );
   }, [terminalFontSize]);
+  const platformIsMac =
+    typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+  const shortcutLabel = (key: string) => `${platformIsMac ? "⌘" : "Ctrl"}${key}`;
   return (
     <Tooltip.Provider delayDuration={400}>
       <div className="app-shell">
+        <div className="titlebar" data-testid="app-titlebar">
+          <TitlebarLeftControls
+            canGoBack={canGoBackView(viewHistory)}
+            canGoForward={canGoForwardView(viewHistory)}
+            backShortcutLabel={shortcutLabel("⌥←")}
+            forwardShortcutLabel={shortcutLabel("⌥→")}
+            toggleShortcutLabel={shortcutLabel("B")}
+            onToggleSidebar={toggleSidebar}
+            onGoBack={goBackViewHistory}
+            onGoForward={goForwardViewHistory}
+          />
+        </div>
+        <div className="app-content">
         <Sidebar
+          open={sidebarOpen}
+          width={sidebarWidth}
+          onWidthChange={changeSidebarWidth}
           route={route}
-          panelsDisabled={busy || !current}
-          filesAvailable={isFilesAvailable(liveCapabilities)}
-          changesAvailable={isChangesAvailable(liveCapabilities)}
-          botsAvailable={isBotsAvailable(liveCapabilities)}
-          browserEnabled={true}
-          automationsAvailable={isAutomationsAvailable(liveCapabilities)}
           onSelectRoute={setRoute}
           onOpenPalette={openCommandPalette}
           groups={projectGroups}
@@ -1298,13 +1469,7 @@ export function App() {
           workspaceDisabled={busy}
           addDisabled={!status || busy}
           onSelectWorkspace={selectWorkspaceId}
-          onAddProject={() =>
-            isProjectsAvailable(liveCapabilities) &&
-            typeof windowProjectBridge(window.drogon).projectAdd ===
-              "function"
-              ? setProjectAction({ kind: "add" })
-              : setAdding((value) => !value)
-          }
+          onAddProject={requestAddProject}
           worktreesAvailable={isWorktreesAvailable(liveCapabilities)}
           projectAction={projectAction}
           onOpenProjectAction={setProjectAction}
@@ -1379,7 +1544,15 @@ export function App() {
           onOpenSettings={() => openSettings()}
           settingsExpanded={route === SETTINGS_ROUTE_ID}
         />
-        <main className="session-area">
+        <main className="session-area" style={{ position: "relative" }}>
+          {workspaces.length === 0 ? (
+            <Landing
+              hasProjects={false}
+              onAddProject={requestAddProject}
+              onCreateWorkspace={() => setAdding(true)}
+            />
+          ) : (
+            <>
           <header className="session-header" style={{ position: "relative" }}>
             <div className="workspace-heading">
               <strong>{current?.name ?? "Your workspace"}</strong>
@@ -1795,7 +1968,10 @@ export function App() {
             )}
           </div>
           )}
+            </>
+          )}
         </main>
+        </div>
       </div>
       <CommandPaletteHost
         fileBridge={filesGatedBridge}

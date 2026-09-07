@@ -83,8 +83,10 @@ describe("shortcut labels", () => {
     const ids = entries.map((e) => e.id);
     expect(ids).toContain("settings.open");
     expect(ids).toContain("workspace.newTerminal");
-    expect(ids).toContain("palette.openCommands");
-    expect(ids).toContain("palette.openQuickOpen");
+    expect(ids).toContain("workspace.create");
+    expect(ids).toContain("terminal.clear");
+    expect(ids).toContain("worktree.palette");
+    expect(ids).toContain("worktree.quickOpen");
     expect(ids).toContain("tabs.select1");
     expect(ids).toContain("tabs.prev");
     // No duplicate ids: the read-only list must not double-count.
@@ -123,7 +125,7 @@ describe("shortcut labels", () => {
     const terminal = filterShortcuts(entries, "terminal");
     expect(terminal.map((e) => e.id)).toContain("workspace.newTerminal");
     expect(filterShortcuts(entries, "CMDORCTRL+P")).toContainEqual(
-      expect.objectContaining({ id: "palette.openQuickOpen" }),
+      expect.objectContaining({ id: "worktree.quickOpen" }),
     );
     expect(filterShortcuts(entries, "no-such-shortcut")).toEqual([]);
   });
