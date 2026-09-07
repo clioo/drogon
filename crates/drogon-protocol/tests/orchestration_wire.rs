@@ -624,6 +624,8 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
         wait: Some(WaitPolicy { timeout_ms: 1_000 }),
         kinds: vec![MessageKind::Guidance, MessageKind::Escalation],
         inject: false,
+        cursor: None,
+        limit: None,
     };
     check.validate_shape("host-a").unwrap();
     let check_json = serde_json::to_value(&check).unwrap();
@@ -677,6 +679,8 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
         wait: None,
         kinds: vec![],
         inject: false,
+        cursor: None,
+        limit: None,
     };
     peek.validate_shape("host-a").unwrap();
     assert!(!peek.mode.allows_wait());
@@ -839,6 +843,8 @@ fn additive_params_and_result_fields_are_ignored_not_identity() {
         wait: None,
         kinds: vec![],
         inject: false,
+        cursor: None,
+        limit: None,
     })
     .unwrap();
     check["futureMode"] = json!("later");
@@ -1017,6 +1023,8 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
         }),
         kinds: vec![],
         inject: false,
+        cursor: None,
+        limit: None,
     };
     ack_then_wait.validate_shape("host-a").unwrap();
 
@@ -1030,6 +1038,8 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
             }),
             kinds: vec![],
             inject: false,
+            cursor: None,
+            limit: None,
         };
         assert_eq!(
             over.validate_shape("host-a").unwrap_err().code,

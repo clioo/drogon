@@ -342,12 +342,27 @@ pub struct CheckParams {
     /// Preamble/inject presentation flag (source: `inject`).
     #[serde(default)]
     pub inject: bool,
+    /// Inspection-only pagination; consuming checks cannot split a FIFO delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<OpaqueCursor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
 }
 
 impl CheckParams {
     pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
         self.scope.validate_shape(execution_host_id)?;
         self.mode.validate_shape()?;
+        if self.mode.allows_wait() && (self.cursor.is_some() || self.limit.is_some()) {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Only inspection checks accept pagination.",
+            ));
+        }
+        crate::orchestration_common::validate_page_limit(self.limit)?;
+        if let Some(cursor) = &self.cursor {
+            cursor.validate()?;
+        }
         if let Some(wait) = &self.wait {
             if !self.mode.allows_wait() {
                 return Err(RpcError::new(
