@@ -864,7 +864,7 @@ async function candSetup(page, state, ctx) {
       return false;
     }
     try {
-      await page.getByLabel("Folder path").fill(ctx.workspace);
+      await page.getByLabel(/^Folder( or repository)? path$/).fill(ctx.workspace);
       await page.getByRole("button", { name: "Add", exact: true }).click();
       await page.waitForFunction(
         () => !document.querySelector(".sidebar-empty"),
