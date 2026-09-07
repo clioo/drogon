@@ -3,7 +3,7 @@
 //! environment." A fresh token is minted every `drogond` start; nothing
 //! about session recovery depends on the token surviving a restart.
 
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::Path;
 
 pub const TOKEN_FILE_NAME: &str = "auth.token";
@@ -37,25 +37,10 @@ pub fn ensure_token(data_dir: &Path) -> io::Result<String> {
 }
 
 fn random_token() -> io::Result<String> {
+    use base64::Engine as _;
     let mut buf = [0u8; 32];
-    #[cfg(unix)]
-    {
-        // `/dev/urandom` is the portable CSPRNG source across macOS/Linux
-        // without adding a `rand`/`getrandom` dependency to the workspace.
-        std::fs::File::open("/dev/urandom")?.read_exact(&mut buf)?;
-    }
-    #[cfg(not(unix))]
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "token generation is not implemented on this platform yet",
-        ));
-    }
-    #[allow(unreachable_code)]
-    {
-        use base64::Engine as _;
-        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf))
-    }
+    getrandom::fill(&mut buf).map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf))
 }
 
 #[cfg(test)]
@@ -64,10 +49,29 @@ mod tests {
 
     #[test]
     fn tokens_are_long_and_distinct() {
+        use base64::Engine as _;
         let dir = tempfile::tempdir().unwrap();
         let a = ensure_token(dir.path()).unwrap();
         let b = ensure_token(dir.path()).unwrap();
-        assert!(a.len() >= 32);
+        assert_eq!(a.len(), 43);
+        assert_eq!(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(&a)
+                .unwrap()
+                .len(),
+            32
+        );
+        assert_eq!(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(&b)
+                .unwrap()
+                .len(),
+            32
+        );
         assert_ne!(a, b, "each drogond start mints a fresh token");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(TOKEN_FILE_NAME)).unwrap(),
+            b
+        );
     }
 }

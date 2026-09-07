@@ -327,11 +327,13 @@ dependencies = [
  "clap",
  "drogon-core",
  "drogon-protocol",
+ "getrandom",
  "libc",
  "rusqlite",
  "serde_json",
  "sha2",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

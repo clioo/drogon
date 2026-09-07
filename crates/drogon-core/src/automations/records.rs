@@ -340,6 +340,19 @@ pub struct AutomationRun {
     pub occurrence_count: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_occurrence_at: Option<f64>,
+    /// Native-glue addition (not a source `automations-types.ts` field):
+    /// the admitted session's incarnation, for `SessionKind::Terminal` runs
+    /// only -- see `automations::runner::record_run_outcome`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_incarnation: Option<String>,
+    /// Native-glue addition: the observed numeric exit code, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    /// Native-glue addition: the wall-clock time of the specific
+    /// `session.read` (or failed-observation) call that produced this
+    /// row's current status, used to reject out-of-order stale replays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<f64>,
 }
 
 impl Automation {
