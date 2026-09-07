@@ -82,7 +82,62 @@
 //! and stays visible under any bot_id match, exactly like the pre-fence
 //! behavior -- its true original scope was never recorded and cannot be
 //! reconstructed, so this fence only closes the exposure for rows written
-//! after it exists.
+//! after it exists. [`create_bot`]'s create-deny fence below closes the
+//! *write* side of this same exposure going forward: it stops a freed id
+//! from ever being reused at all, in any scope.
+//!
+//! ## Create-deny fence (W1)
+//!
+//! [`create_bot`] refuses to INSERT a new Bot whose `id` already names any
+//! row in `bot_responsibility_runs` -- stamped or not, same scope as the
+//! create attempt or a different one -- with [`StorageError::BotIdCollision`].
+//! A retained run's true origin (whether it predates the scope stamp,
+//! whether it was written under the exact scope now attempting the
+//! recreate, or under a different one entirely) is not reliably
+//! distinguishable from this check's vantage point, so this is
+//! deliberately coarse: even a same-scope recreate of a just-deleted Bot is
+//! denied, not only a cross-scope one. Callers must mint a new id for the
+//! recreated Bot; this is what actually prevents the id-reuse reattachment
+//! risk the read-side fence above only excludes at query time, never
+//! deletes.
+//!
+//! ## Partial scope stamp (W2)
+//!
+//! [`upsert_run_row`] (via [`record_responsibility_run`]) always writes
+//! `scope_host`/`scope_folder` together, never just one -- so a
+//! [`StoredRun`] envelope carrying exactly one of the two cannot be a
+//! genuine row from this module's own write path. Both [`history_for_bot`]
+//! and [`record_responsibility_run`]'s dedup merge (see below) fail closed
+//! with [`StorageError::PartialScopeStamp`] on this shape rather than
+//! guessing whether it means "legacy" (both `None`) or "scoped" (both
+//! `Some`).
+//!
+//! ## Dedup restamp guard (W3)
+//!
+//! [`record_responsibility_run`]'s merge-on-`(bot_id, automation_run_id)`
+//! path never blindly re-stamps the row it merges onto with the calling
+//! scope:
+//!
+//! - an existing **fully-stamped** row whose `(scope_host, scope_folder)`
+//!   does not match this call's `(host_id, folder)` refuses the whole
+//!   write with [`StorageError::OwnershipViolation`] -- the merge never
+//!   happens and the existing row is left completely untouched;
+//! - an existing **unstamped** (legacy) row stays unstamped after a merge,
+//!   even though the calling scope is always concretely known --
+//!   attaching a stamp here would launder a legacy row into a scope it was
+//!   never actually proven to belong to, merely because some caller later
+//!   replayed its `automation_run_id`.
+//!
+//! Residual limitation, stated honestly rather than silently narrowed: a
+//! database that, before this guard (and the create-deny fence above)
+//! existed, already accumulated two *separate* unstamped rows for the same
+//! reused bot id -- one written while that id lived in scope A with its
+//! own runs, one after an (also pre-fence) recreate of that same id in
+//! scope B -- still shows scope A's legacy rows under scope B's
+//! `history_for_bot` queries. Nothing in W1/W2/W3 detects or corrects that
+//! already-collided history; closing it needs a real backfill pass over
+//! existing data, which is explicitly out of scope here (no DDL, no
+//! backfill).
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -119,6 +174,11 @@ pub enum StorageError {
     /// never silently overwritten/hijacked; see
     /// `automations::storage::insert_new_automation`).
     AutomationIdCollision,
+    /// [`create_bot`] refuses to insert a new Bot whose `id` already names
+    /// any retained row in `bot_responsibility_runs`, regardless of scope
+    /// or stamp state (see the module doc's "Create-deny fence"). Mint a
+    /// new id instead of recreating this one.
+    BotIdCollision,
     /// The caller's expected automation owner (see
     /// `automations::storage::AutomationOwnerPrecondition`) does not match
     /// its actual current owner.
@@ -133,6 +193,12 @@ pub enum StorageError {
     /// host-default-locale value; this error surfaces that unresolved input
     /// rather than silently falling back to a different order.
     LocaleOrdering(LocaleOrderingError),
+    /// A stored run's JSON envelope carries exactly one of
+    /// `scope_host`/`scope_folder` -- never both, never neither -- which
+    /// this module's own writer never produces (see the module doc's
+    /// "Partial scope stamp"). Refused rather than guessed at as legacy or
+    /// fully scoped.
+    PartialScopeStamp,
 }
 
 impl From<rusqlite::Error> for StorageError {
@@ -180,6 +246,10 @@ impl std::fmt::Display for StorageError {
             Self::StaleUpdate => write!(f, "stale update: row changed since it was read"),
             Self::OwnershipViolation(what) => write!(f, "{what}"),
             Self::AutomationIdCollision => write!(f, "an automation with this id already exists"),
+            Self::BotIdCollision => write!(
+                f,
+                "a bot with this id already has retained responsibility-run history; use a new id"
+            ),
             Self::AutomationOwnerConflict => {
                 write!(
                     f,
@@ -195,6 +265,10 @@ impl std::fmt::Display for StorageError {
                 "{component} schema version {found} is newer than the {supported} this build supports; refusing to modify it"
             ),
             Self::LocaleOrdering(e) => write!(f, "{e}"),
+            Self::PartialScopeStamp => write!(
+                f,
+                "stored responsibility run carries a partial scope stamp (exactly one of scope_host/scope_folder)"
+            ),
         }
     }
 }
@@ -416,7 +490,25 @@ fn row_to_bot(json: String) -> Result<Bot> {
 /// generate them, preserving "creating a Bot keeps its ID and original
 /// creation time" as the caller's own invariant to uphold on every
 /// subsequent update. `rev` starts at `0`.
+///
+/// Before inserting, probes `bot_responsibility_runs` for ANY retained row
+/// naming this `bot.id` -- regardless of scope stamp -- and refuses with
+/// [`StorageError::BotIdCollision`] if one exists (see the module doc's
+/// "Create-deny fence (W1)"). This is what actually prevents a freed id
+/// from ever being reused, in the same scope or a different one; the
+/// [`history_for_bot`] scope fence only ever excluded a reused id's cross-
+/// era rows at read time, never deleted them.
 pub fn create_bot(conn: &Connection, host_id: &str, folder: &str, bot: &Bot) -> Result<()> {
+    let retained_run: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM bot_responsibility_runs WHERE bot_id = ?1 LIMIT 1",
+            params![bot.id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if retained_run.is_some() {
+        return Err(StorageError::BotIdCollision);
+    }
     let payload = serde_json::to_string(bot)?;
     conn.execute(
         "INSERT INTO bots (id, host_id, folder, updated_at, rev, payload_json) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
@@ -780,15 +872,34 @@ pub fn record_responsibility_run(
     }
 
     let result = if let Some(automation_run_id) = &run.automation_run_id {
-        if let Some(existing) = find_run_by_automation_run_id(conn, &run.bot_id, automation_run_id)?
+        if let Some(existing_stored) =
+            find_stored_run_by_automation_run_id(conn, &run.bot_id, automation_run_id)?
         {
+            // W3 dedup restamp guard (see the module doc): never blindly
+            // re-stamp whatever this call merges onto with the calling
+            // scope.
+            let existing_scope = classify_scope_stamp(&existing_stored)?;
+            if let ScopeStamp::Full { host, folder: f } = &existing_scope
+                && (host != host_id || f != folder)
+            {
+                return Err(StorageError::OwnershipViolation(
+                    "responsibility run's existing scope stamp does not match this call's scope",
+                ));
+            }
+            let existing = existing_stored.run;
             let merged = ResponsibilityRun {
                 ended_at: run.ended_at.or(existing.ended_at),
                 recipe: run.recipe.clone().or(existing.recipe.clone()),
                 host_observation: run.host_observation.or(existing.host_observation),
                 ..existing
             };
-            upsert_run_row(conn, host_id, folder, &merged)?;
+            match existing_scope {
+                ScopeStamp::Full { .. } => upsert_run_row(conn, host_id, folder, &merged)?,
+                // Keep an unstamped (legacy) row unstamped: attaching this
+                // call's scope here would launder it into a scope it was
+                // never actually proven to belong to.
+                ScopeStamp::Legacy => upsert_run_row_with_stamp(conn, &merged, None)?,
+            }
             merged
         } else {
             upsert_run_row(conn, host_id, folder, &run)?;
@@ -802,11 +913,11 @@ pub fn record_responsibility_run(
     Ok(result)
 }
 
-fn find_run_by_automation_run_id(
+fn find_stored_run_by_automation_run_id(
     conn: &Connection,
     bot_id: &str,
     automation_run_id: &str,
-) -> Result<Option<ResponsibilityRun>> {
+) -> Result<Option<StoredRun>> {
     conn.query_row(
         "SELECT payload_json FROM bot_responsibility_runs WHERE bot_id = ?1 AND automation_run_id = ?2",
         params![bot_id, automation_run_id],
@@ -815,6 +926,28 @@ fn find_run_by_automation_run_id(
     .optional()?
     .map(|json| Ok(serde_json::from_str(&json)?))
     .transpose()
+}
+
+/// A [`StoredRun`]'s scope stamp, classified once so every reader (the
+/// dedup merge below, [`history_for_bot`]) applies the exact same
+/// three-way rule instead of re-deriving it ad hoc: see the module doc's
+/// "Partial scope stamp (W2)" for why the third shape -- exactly one of
+/// `scope_host`/`scope_folder` present -- is refused rather than treated
+/// as either of the other two.
+enum ScopeStamp {
+    Full { host: String, folder: String },
+    Legacy,
+}
+
+fn classify_scope_stamp(stored: &StoredRun) -> Result<ScopeStamp> {
+    match (&stored.scope_host, &stored.scope_folder) {
+        (Some(h), Some(f)) => Ok(ScopeStamp::Full {
+            host: h.clone(),
+            folder: f.clone(),
+        }),
+        (None, None) => Ok(ScopeStamp::Legacy),
+        _ => Err(StorageError::PartialScopeStamp),
+    }
 }
 
 /// Storage-internal envelope written into
@@ -845,10 +978,26 @@ fn upsert_run_row(
     folder: &str,
     run: &ResponsibilityRun,
 ) -> Result<()> {
+    upsert_run_row_with_stamp(conn, run, Some((host_id, folder)))
+}
+
+/// `stamp = None` writes the row with no scope stamp at all (both
+/// `scope_host`/`scope_folder` `None`) -- used only by
+/// [`record_responsibility_run`]'s dedup merge path when the existing row
+/// being merged onto is itself unstamped (legacy), so a merge never
+/// "launders" a legacy row into a newly-stamped scope merely because the
+/// calling scope happens to be known (see the module doc's "Dedup restamp
+/// guard (W3)"). Every other caller goes through [`upsert_run_row`], which
+/// always stamps with the caller's own scope.
+fn upsert_run_row_with_stamp(
+    conn: &Connection,
+    run: &ResponsibilityRun,
+    stamp: Option<(&str, &str)>,
+) -> Result<()> {
     let stored = StoredRun {
         run: run.clone(),
-        scope_host: Some(host_id.to_string()),
-        scope_folder: Some(folder.to_string()),
+        scope_host: stamp.map(|(h, _)| h.to_string()),
+        scope_folder: stamp.map(|(_, f)| f.to_string()),
     };
     let payload = serde_json::to_string(&stored)?;
     conn.execute(
@@ -887,11 +1036,11 @@ pub fn history_for_bot(
     rows.into_iter()
         .map(|json| -> Result<Option<HistoryEntry>> {
             let stored: StoredRun = serde_json::from_str(&json)?;
-            let in_scope = match (&stored.scope_host, &stored.scope_folder) {
-                (Some(h), Some(f)) => h == host_id && f == folder,
+            let in_scope = match classify_scope_stamp(&stored)? {
+                ScopeStamp::Full { host, folder: f } => host == host_id && f == folder,
                 // Legacy unstamped row: original scope was never recorded,
                 // so it stays visible under any bot_id match.
-                _ => true,
+                ScopeStamp::Legacy => true,
             };
             if !in_scope {
                 return Ok(None);
