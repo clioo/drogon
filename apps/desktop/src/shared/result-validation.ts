@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fileResultSchemas } from "./file-validation";
 
 const id = z.string().min(1).max(128);
 const workspace = z.object({
@@ -49,6 +50,7 @@ const supportedHarnessIds = new Set([
   "antigravity",
 ]);
 export const resultSchemas: Record<string, z.ZodType> = {
+  ...fileResultSchemas,
   status: z.object({
     hostId: id,
     serviceInstanceId: id,

@@ -1,3 +1,5 @@
+import type { FileBridge } from "./file-contract";
+
 export type Verdict = "live" | "unverifiable" | "exited";
 export type Workspace = {
   id: string;
@@ -57,7 +59,7 @@ export type ReadResult = {
 export type Result<T> =
   | { ok: true; result: T }
   | { ok: false; error: { code: string; message: string; retryable: boolean } };
-export interface DesktopBridge {
+export interface DesktopBridge extends FileBridge {
   status(): Promise<Result<Status>>;
   workspaces(): Promise<Result<{ workspaces: Workspace[] }>>;
   addWorkspace(path: string): Promise<Result<Workspace>>;
