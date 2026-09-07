@@ -223,7 +223,7 @@ try {
     { require: "undefined", process: "undefined" },
   );
   await page
-    .getByRole("button", { name: "Add workspace", exact: true })
+    .getByRole("button", { name: "Create workspace", exact: true })
     .last()
     .click();
   await page.getByLabel("Folder path").fill(workspace);
