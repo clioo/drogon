@@ -41,6 +41,8 @@ export function HarnessLaunchMenu({
   onLaunch,
   defaultHarnessId,
   launchDefaults,
+  onOpenMentu,
+  mentuAvailable,
 }: {
   workspaceId: string;
   /** The execution host this recovery record is scoped to; `null` while disconnected — recovery is a no-op without it. */
@@ -52,6 +54,10 @@ export function HarnessLaunchMenu({
   /** J10: stored default harness (badged in the menu) and per-harness field defaults used to pre-fill a pristine form. Read-only here; edited in Settings. */
   defaultHarnessId?: string;
   launchDefaults?: Record<string, HarnessAgentDefault>;
+  /** R5-S: opens the wider Mentu tab for the selected workspace. Optional
+   *  so existing callers/tests that predate Mentu keep compiling. */
+  onOpenMentu?: () => void;
+  mentuAvailable?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [selected, setSelected] = useState<Harness | null>(null);
@@ -197,6 +203,14 @@ export function HarnessLaunchMenu({
               >
                 New terminal
               </DropdownMenu.Item>
+              {onOpenMentu && mentuAvailable && (
+                <DropdownMenu.Item
+                  className="harness-menu-item"
+                  onSelect={onOpenMentu}
+                >
+                  Open Mentu
+                </DropdownMenu.Item>
+              )}
               {harnesses.length > 0 && (
                 <DropdownMenu.Separator className="harness-menu-separator" />
               )}

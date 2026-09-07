@@ -12,6 +12,7 @@ use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension};
 use crate::automations::storage as automations_storage;
 use crate::bots::storage as bots_storage;
 use crate::coordination_access;
+use crate::mentu::storage as mentu_storage;
 
 pub const DB_FILE_NAME: &str = "drogon.sqlite3";
 
@@ -173,6 +174,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     create_tables(&tx)?;
     automations_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Automations)?;
     bots_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Bots)?;
+    mentu_storage::apply_pending_steps_in_tx(&tx)?;
     crate::project::apply_pending_steps_in_tx(&tx)?;
     coordination_access::apply_pending_steps_in_tx(&tx)?;
     drogon_orchestration::schema::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;

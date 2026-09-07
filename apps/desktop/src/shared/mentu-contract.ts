@@ -1,0 +1,227 @@
+// Mentu (journey J9) contract: workspace recipes, a content-bound approval,
+// execution through the pinned `mentu-recipes` runtime, run evidence and
+// retry. Shapes mirror the serde camelCase JSON projections of
+// `crates/drogon-protocol/src/mentu.rs`. This is the panel/tab's own
+// display contract, not a second storage authority.
+
+import { z } from "zod";
+import type { Result } from "./session-contract";
+
+export const MENTU_CAPABILITY = "mentu.v1";
+
+export type MentuRunStatus =
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "unavailable";
+
+export type MentuRecipeSummary = {
+  id: string;
+  path: string;
+  name: string | null;
+  valid: boolean;
+  issue: string | null;
+};
+
+export type MentuStep = {
+  label: string;
+  backend: string;
+  description: string | null;
+  dependsOn: string[];
+  timeoutSeconds: number | null;
+};
+
+export type MentuRecipeDetail = {
+  id: string;
+  path: string;
+  name: string;
+  description: string | null;
+  contentHash: string;
+  steps: MentuStep[];
+  source: string;
+};
+
+export type MentuRuntimeInfo = {
+  available: boolean;
+  path: string | null;
+  version: string | null;
+  expectedRevision: string;
+  expectedSha256: string;
+  actualSha256: string | null;
+  lockMatches: boolean;
+  message: string | null;
+};
+
+export type MentuApproval = {
+  id: string;
+  workspaceId: string;
+  recipeId: string;
+  contentHash: string;
+  approvedAt: string;
+};
+
+export type MentuStepRun = {
+  label: string;
+  backend: string;
+  status: MentuRunStatus;
+  exitCode: number | null;
+  durationSeconds: number | null;
+  attempts: number | null;
+  outputPath: string | null;
+  errorPath: string | null;
+  error: string | null;
+};
+
+export type MentuRun = {
+  id: string;
+  workspaceId: string;
+  recipeId: string;
+  approvalId: string;
+  mentuRunId: string | null;
+  status: MentuRunStatus;
+  startedAt: string;
+  endedAt: string | null;
+  steps: MentuStepRun[];
+  error: string | null;
+  retryOf: string | null;
+};
+
+export type MentuRecipesResult = { recipes: MentuRecipeSummary[] };
+export type MentuRecipeResult = { recipe: MentuRecipeDetail };
+export type MentuRuntimeResult = { runtime: MentuRuntimeInfo };
+export type MentuApproveResult = { approval: MentuApproval };
+export type MentuRunResult = { run: MentuRun };
+export type MentuRunsResult = { runs: MentuRun[] };
+
+export interface MentuBridge {
+  mentuRecipes(input: { workspaceId: string }): Promise<Result<MentuRecipesResult>>;
+  mentuRecipe(input: {
+    workspaceId: string;
+    recipeId: string;
+  }): Promise<Result<MentuRecipeResult>>;
+  mentuRuntime(): Promise<Result<MentuRuntimeResult>>;
+  mentuApprove(input: {
+    workspaceId: string;
+    recipeId: string;
+    contentHash: string;
+  }): Promise<Result<MentuApproveResult>>;
+  mentuRun(input: {
+    workspaceId: string;
+    recipeId: string;
+    approvalId: string;
+  }): Promise<Result<MentuRunResult>>;
+  mentuRuns(input: {
+    workspaceId: string;
+    limit?: number;
+  }): Promise<Result<MentuRunsResult>>;
+  mentuRunStatus(input: { runId: string }): Promise<Result<MentuRunResult>>;
+  mentuRetry(input: { runId: string }): Promise<Result<MentuRunResult>>;
+  mentuCancel(input: { runId: string }): Promise<Result<MentuRunResult>>;
+}
+
+const id = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[^\s\x00-\x1f\x7f]+$/u);
+const workspaceId = z.object({ workspaceId: id });
+
+export const mentuBridgeSchemas = {
+  mentuRecipes: workspaceId,
+  mentuRecipe: workspaceId.extend({ recipeId: id }),
+  mentuRuntime: z.object({}),
+  mentuApprove: workspaceId.extend({
+    recipeId: id,
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  }),
+  mentuRun: workspaceId.extend({ recipeId: id, approvalId: id }),
+  mentuRuns: workspaceId.extend({ limit: z.number().int().positive().max(200).optional() }),
+  mentuRunStatus: z.object({ runId: id }),
+  mentuRetry: z.object({ runId: id }),
+  mentuCancel: z.object({ runId: id }),
+};
+
+const status = z.enum([
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "unavailable",
+]);
+const recipeSummary = z.object({
+  id: z.string().min(1),
+  path: z.string().min(1),
+  name: z.string().nullable().optional().default(null),
+  valid: z.boolean(),
+  issue: z.string().nullable().optional().default(null),
+});
+const step = z.object({
+  label: z.string().min(1),
+  backend: z.string().min(1),
+  description: z.string().nullable().optional().default(null),
+  dependsOn: z.array(z.string()).optional().default([]),
+  timeoutSeconds: z.number().nullable().optional().default(null),
+});
+const recipeDetail = z.object({
+  id: z.string().min(1),
+  path: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().nullable().optional().default(null),
+  contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  steps: z.array(step),
+  source: z.string(),
+});
+const runtimeInfo = z.object({
+  available: z.boolean(),
+  path: z.string().nullable().optional().default(null),
+  version: z.string().nullable().optional().default(null),
+  expectedRevision: z.string(),
+  expectedSha256: z.string(),
+  actualSha256: z.string().nullable().optional().default(null),
+  lockMatches: z.boolean(),
+  message: z.string().nullable().optional().default(null),
+});
+const approval = z.object({
+  id: z.string().min(1),
+  workspaceId: z.string().min(1),
+  recipeId: z.string().min(1),
+  contentHash: z.string().min(1),
+  approvedAt: z.string().min(1),
+});
+const stepRun = z.object({
+  label: z.string().min(1),
+  backend: z.string().min(1),
+  status,
+  exitCode: z.number().nullable().optional().default(null),
+  durationSeconds: z.number().nullable().optional().default(null),
+  attempts: z.number().nullable().optional().default(null),
+  outputPath: z.string().nullable().optional().default(null),
+  errorPath: z.string().nullable().optional().default(null),
+  error: z.string().nullable().optional().default(null),
+});
+const run = z.object({
+  id: z.string().min(1),
+  workspaceId: z.string().min(1),
+  recipeId: z.string().min(1),
+  approvalId: z.string().min(1),
+  mentuRunId: z.string().nullable().optional().default(null),
+  status,
+  startedAt: z.string().min(1),
+  endedAt: z.string().nullable().optional().default(null),
+  steps: z.array(stepRun),
+  error: z.string().nullable().optional().default(null),
+  retryOf: z.string().nullable().optional().default(null),
+});
+
+export const mentuResultSchemas = {
+  "mentu.recipes": z.object({ recipes: z.array(recipeSummary) }),
+  "mentu.recipe": z.object({ recipe: recipeDetail }),
+  "mentu.runtime": z.object({ runtime: runtimeInfo }),
+  "mentu.approve": z.object({ approval }),
+  "mentu.run": z.object({ run }),
+  "mentu.runs": z.object({ runs: z.array(run) }),
+  "mentu.run_status": z.object({ run }),
+  "mentu.retry": z.object({ run }),
+  "mentu.cancel": z.object({ run }),
+};

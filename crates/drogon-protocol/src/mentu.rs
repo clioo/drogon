@@ -1,0 +1,414 @@
+//! Wire types for Mentu (journey J9): workspace recipes, an explicit
+//! content-bound approval, execution through the pinned `mentu-recipes`
+//! runtime, run records with per-step evidence, and retry. Shape validation
+//! only: the execution host verifies workspace ownership, recipe
+//! containment and the runtime lock, same division of labor as `tasks.rs`.
+
+use crate::RpcError;
+use crate::orchestration_common::validate_opaque_token;
+use serde::{Deserialize, Serialize};
+
+pub const MENTU_CAPABILITY: &str = "mentu.v1";
+pub const MAX_MENTU_ID_BYTES: usize = 200;
+
+fn validate_workspace_id(value: &str) -> Result<(), RpcError> {
+    validate_opaque_token(value, 128, "Invalid Mentu workspace identity.")
+}
+
+fn validate_recipe_id(value: &str) -> Result<(), RpcError> {
+    validate_opaque_token(value, MAX_MENTU_ID_BYTES, "Invalid Mentu recipe identity.")
+}
+
+fn validate_run_id(value: &str) -> Result<(), RpcError> {
+    validate_opaque_token(value, MAX_MENTU_ID_BYTES, "Invalid Mentu run identity.")
+}
+
+/// One entry in `.mentu/recipes` for a workspace: valid recipes carry a
+/// `name`; a recipe that fails to parse still lists its path with `issue`
+/// set, mirroring the fork's tolerant catalog (a bad recipe never hides the
+/// rest of the list).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipeSummary {
+    pub id: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub valid: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuStep {
+    pub label: String,
+    pub backend: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
+}
+
+/// A parsed recipe plus its raw source text (the client-local "draft" seed)
+/// and the sha256 of its exact on-disk bytes, which `mentu.approve` binds
+/// approval to.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipeDetail {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub content_hash: String,
+    pub steps: Vec<MentuStep>,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRuntimeInfo {
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub expected_revision: String,
+    pub expected_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_sha256: Option<String>,
+    pub lock_matches: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuApproval {
+    pub id: String,
+    pub workspace_id: String,
+    pub recipe_id: String,
+    pub content_hash: String,
+    pub approved_at: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MentuRunStatus {
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+    /// The host process could not confirm an outcome (e.g. it never produced
+    /// a run record). Never reported as `succeeded`/`failed`.
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuStepRun {
+    pub label: String,
+    pub backend: String,
+    pub status: MentuRunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempts: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRun {
+    pub id: String,
+    pub workspace_id: String,
+    pub recipe_id: String,
+    pub approval_id: String,
+    /// The id `mentu-recipes` itself minted for this run (`run_...`), once
+    /// known. Absent only in the brief window between spawn and the CLI
+    /// creating its run directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mentu_run_id: Option<String>,
+    pub status: MentuRunStatus,
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    pub steps: Vec<MentuStepRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_of: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuWorkspaceScopeParams {
+    pub workspace_id: String,
+}
+
+impl MentuWorkspaceScopeParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_workspace_id(&self.workspace_id)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipeParams {
+    pub workspace_id: String,
+    pub recipe_id: String,
+}
+
+impl MentuRecipeParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_workspace_id(&self.workspace_id)?;
+        validate_recipe_id(&self.recipe_id)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuApproveParams {
+    pub workspace_id: String,
+    pub recipe_id: String,
+    pub content_hash: String,
+}
+
+impl MentuApproveParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_workspace_id(&self.workspace_id)?;
+        validate_recipe_id(&self.recipe_id)?;
+        if self.content_hash.len() != 64
+            || !self.content_hash.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Invalid Mentu recipe content hash.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunParams {
+    pub workspace_id: String,
+    pub recipe_id: String,
+    pub approval_id: String,
+}
+
+impl MentuRunParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_workspace_id(&self.workspace_id)?;
+        validate_recipe_id(&self.recipe_id)?;
+        validate_opaque_token(&self.approval_id, 128, "Invalid Mentu approval identity.")
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunsParams {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+pub const DEFAULT_MENTU_RUNS_LIMIT: u32 = 50;
+pub const MAX_MENTU_RUNS_LIMIT: u32 = 200;
+
+impl MentuRunsParams {
+    pub fn validate(&self) -> Result<u32, RpcError> {
+        validate_workspace_id(&self.workspace_id)?;
+        Ok(self
+            .limit
+            .unwrap_or(DEFAULT_MENTU_RUNS_LIMIT)
+            .clamp(1, MAX_MENTU_RUNS_LIMIT))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunIdParams {
+    pub run_id: String,
+}
+
+impl MentuRunIdParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_run_id(&self.run_id)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipesResult {
+    pub recipes: Vec<MentuRecipeSummary>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipeResult {
+    pub recipe: MentuRecipeDetail,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRuntimeResult {
+    pub runtime: MentuRuntimeInfo,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuApproveResult {
+    pub approval: MentuApproval,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunResult {
+    pub run: MentuRun,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunsResult {
+    pub runs: Vec<MentuRun>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuCancelResult {
+    pub run: MentuRun,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample_run() -> MentuRun {
+        MentuRun {
+            id: "internal-1".into(),
+            workspace_id: "ws1".into(),
+            recipe_id: "hello".into(),
+            approval_id: "approval-1".into(),
+            mentu_run_id: Some("run_20260907202509_15F1772D".into()),
+            status: MentuRunStatus::Succeeded,
+            started_at: "2026-09-07T20:25:09Z".into(),
+            ended_at: Some("2026-09-07T20:25:09Z".into()),
+            steps: vec![MentuStepRun {
+                label: "say-hello".into(),
+                backend: "shell".into(),
+                status: MentuRunStatus::Succeeded,
+                exit_code: Some(0),
+                duration_seconds: Some(0),
+                attempts: Some(1),
+                output_path: Some("say-hello.stdout".into()),
+                error_path: Some("say-hello.stderr".into()),
+                error: None,
+            }],
+            error: None,
+            retry_of: None,
+        }
+    }
+
+    #[test]
+    fn run_round_trips_with_exact_wire_keys_and_snake_case_status() {
+        let value = serde_json::to_value(sample_run()).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "id": "internal-1",
+                "workspaceId": "ws1",
+                "recipeId": "hello",
+                "approvalId": "approval-1",
+                "mentuRunId": "run_20260907202509_15F1772D",
+                "status": "succeeded",
+                "startedAt": "2026-09-07T20:25:09Z",
+                "endedAt": "2026-09-07T20:25:09Z",
+                "steps": [{
+                    "label": "say-hello",
+                    "backend": "shell",
+                    "status": "succeeded",
+                    "exitCode": 0,
+                    "durationSeconds": 0,
+                    "attempts": 1,
+                    "outputPath": "say-hello.stdout",
+                    "errorPath": "say-hello.stderr",
+                }],
+            })
+        );
+        let back: MentuRun = serde_json::from_value(value).unwrap();
+        assert_eq!(back, sample_run());
+    }
+
+    #[test]
+    fn approve_params_require_a_64_char_hex_content_hash() {
+        let base = MentuApproveParams {
+            workspace_id: "ws1".into(),
+            recipe_id: "hello".into(),
+            content_hash: "a".repeat(64),
+        };
+        base.validate().unwrap();
+        for bad in ["", "a".repeat(63).as_str(), "z".repeat(64).as_str()] {
+            let mut params = base.clone();
+            params.content_hash = bad.to_string();
+            assert_eq!(params.validate().unwrap_err().code, "invalid_argument");
+        }
+    }
+
+    #[test]
+    fn runs_params_default_and_clamp_the_limit() {
+        let params = MentuRunsParams {
+            workspace_id: "ws1".into(),
+            limit: None,
+        };
+        assert_eq!(params.validate().unwrap(), DEFAULT_MENTU_RUNS_LIMIT);
+        let params = MentuRunsParams {
+            workspace_id: "ws1".into(),
+            limit: Some(MAX_MENTU_RUNS_LIMIT + 500),
+        };
+        assert_eq!(params.validate().unwrap(), MAX_MENTU_RUNS_LIMIT);
+        let params = MentuRunsParams {
+            workspace_id: "".into(),
+            limit: None,
+        };
+        assert!(params.validate().is_err());
+    }
+
+    #[test]
+    fn scope_params_accept_additive_fields_and_reject_empty_ids() {
+        let value = json!({"workspaceId": "ws1", "recipeId": "hello", "future": true});
+        let params: MentuRecipeParams = serde_json::from_value(value).unwrap();
+        params.validate().unwrap();
+        let bad = MentuRecipeParams {
+            workspace_id: "".into(),
+            recipe_id: "hello".into(),
+        };
+        assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn recipe_summary_omits_optional_fields_when_absent() {
+        let summary = MentuRecipeSummary {
+            id: "hello".into(),
+            path: ".mentu/recipes/hello.json".into(),
+            name: Some("hello".into()),
+            valid: true,
+            issue: None,
+        };
+        let value = serde_json::to_value(summary).unwrap();
+        assert!(value.get("issue").is_none());
+        assert_eq!(value["name"], "hello");
+    }
+}
