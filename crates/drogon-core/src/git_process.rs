@@ -278,25 +278,21 @@ fn run_worktree_list(
 /// NOT a general "looks like an unsupported-flag error" heuristic — a
 /// blanket rule (any non-zero exit, or any stderr mentioning `-z`) would
 /// silently reclassify a real failure (permission denied, not-a-git-
-/// repository, corrupted `.git`) as a mere version gap. In particular this
-/// must NOT match the already-live-verified-on-this-host error `fatal: the
-/// option '-z' requires '--porcelain'` (`git-capability-baseline.md` /
-/// `git-worktree-safety.md`): that string contains a quoted `-z` (with the
-/// dash), which is exactly why this predicate looks for the unquoted `z`
-/// alone, as Git's short-option `unknown switch` message quotes only the
-/// letter after stripping the leading dash (`error: unknown switch `z'`).
-/// The preferred command here already carries `--porcelain`, so that
-/// specific "requires --porcelain" error should never occur for this
-/// wrapper's fixed argv in the first place.
+/// repository, corrupted `.git`) as a mere version gap. Must NOT match the
+/// already-live-verified `fatal: the option '-z' requires '--porcelain'`
+/// (`git-capability-baseline.md`): that quotes `-z` WITH the dash, unlike
+/// Git's short-option `unknown switch `z'` phrasing this predicate targets,
+/// which quotes only the bare letter.
 ///
-/// UNVERIFIED against a real pre-2.36 binary (none installed on this
-/// development host — same gap `git-worktree-safety.md`'s "Synthetic-only on
-/// this host" section already documents for the identical predicate shape).
-/// The exact stderr text is modeled on Git's conventional short-option
-/// `parse-options.c` phrasing, not a captured live string, and MUST be
-/// corrected against a real 2.25.x/2.3x.x binary (this project's own CI
-/// matrix, `docs/migration/verticals/V3/docs-reference-git-compatibility.md`
-/// "CI Contract") before being trusted in production.
+/// Bounded citation, not a local run: no pre-2.36 Git binary is installed on
+/// this development host (same gap `git-worktree-safety.md`'s
+/// "Synthetic-only on this host" section documents for the identical
+/// predicate shape), so this predicate is verified against ROOT's own
+/// captured real-Git 2.25.5 receipt rather than a binary run here: for
+/// `git worktree list --porcelain -z`, real Git 2.25.5 exits 129 with
+/// stderr containing exactly `unknown switch `z'`, and the fallback
+/// `git worktree list --porcelain` (no `-z`) exits 0. Quoted textually from
+/// that receipt, not re-derived from `parse-options.c` phrasing.
 pub(crate) fn is_worktree_list_z_unsupported(stderr: &str) -> bool {
     let mentions_unknown_switch =
         stderr.contains("unknown switch") || stderr.contains("unknown option");
@@ -407,19 +403,33 @@ pub(crate) fn worktree_list_fallback_argv() -> Vec<String> {
 ///   worse, matching by accident).
 pub(crate) const BOUNDED_ENV: &[(&str, &str)] = &[("GIT_OPTIONAL_LOCKS", "0"), ("LC_ALL", "C")];
 
-/// Fixed denylist of Git worktree/index-selection variables this wrapper
-/// must never inherit from its own process, mirroring `src/session.rs`'s
-/// inherited-env scrub for the same class of ambient state: an inherited
-/// `GIT_DIR`/`GIT_WORK_TREE`/etc. from whatever spawned THIS process could
-/// silently redirect either read-only operation at a different
-/// repository/worktree/index than `cwd` implies. `pub(crate)` alongside
-/// `BOUNDED_ENV` so tests can assert removal via `Command::get_envs`.
+/// Fixed denylist of Git worktree/index-selection and top-level env-config
+/// variables this wrapper must never inherit from its own process,
+/// mirroring `src/session.rs`'s inherited-env scrub for the same class of
+/// ambient state: an inherited `GIT_DIR`/`GIT_WORK_TREE`/etc. from whatever
+/// spawned THIS process could silently redirect either read-only operation
+/// at a different repository/worktree/index than `cwd` implies, and an
+/// inherited `GIT_CONFIG_COUNT`/`GIT_CONFIG_PARAMETERS` could inject
+/// arbitrary config into it. `pub(crate)` alongside `BOUNDED_ENV` so tests
+/// can assert removal via `Command::get_envs` even when the ambient test
+/// process happens not to have these set.
+///
+/// `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>` are deliberately NOT listed
+/// here: their index `<n>` is unbounded (as many pairs as
+/// `GIT_CONFIG_COUNT` declares), so no fixed list can name them all ahead of
+/// time. `build_git_command` closes that gap separately, by scanning the
+/// real ambient environment for every `GIT_`-prefixed variable (case-
+/// insensitively, for Windows) rather than relying on a fixed list for that
+/// part — this fixed list exists only so the always-removed core set stays
+/// deterministic and test-assertable independent of ambient environment.
 pub(crate) const ENV_REMOVE_DENYLIST: &[&str] = &[
     "GIT_DIR",
     "GIT_WORK_TREE",
     "GIT_INDEX_FILE",
     "GIT_COMMON_DIR",
     "GIT_PREFIX",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
 ];
 
 pub(crate) fn build_git_command(cwd: &Path, argv: &[String]) -> Command {
@@ -431,6 +441,26 @@ pub(crate) fn build_git_command(cwd: &Path, argv: &[String]) -> Command {
         .stderr(Stdio::piped());
     for key in ENV_REMOVE_DENYLIST {
         cmd.env_remove(key);
+    }
+    // Broad scrub, on top of the fixed list above: an inherited
+    // `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>` pair (any index) — or any
+    // other ambient `GIT_`-prefixed variable — can inject arbitrary Git
+    // config into every invocation this wrapper makes (proven live: with
+    // `GIT_CONFIG_COUNT=1`/`GIT_CONFIG_KEY_0=core.worktree`/
+    // `GIT_CONFIG_VALUE_0=<foreign path>` inherited, plain `git config --get
+    // core.worktree` echoes the foreign path back). Removing only the fixed
+    // names above would miss any index other than a hand-picked one, so
+    // this scans this process's REAL environment instead of guessing
+    // indices, mirroring `src/session.rs`'s `ORCA_`/`DROGON_` prefix scrub
+    // for the same class of ambient-state closure. `BOUNDED_ENV` below is
+    // reapplied after this scrub, so `GIT_OPTIONAL_LOCKS` (also
+    // `GIT_`-prefixed) ends up set to this wrapper's own documented value,
+    // never left removed nor left at whatever the ambient environment had.
+    for (key, _) in std::env::vars_os() {
+        let upper = key.to_string_lossy().to_ascii_uppercase();
+        if upper.starts_with("GIT_") {
+            cmd.env_remove(key);
+        }
     }
     for (key, value) in BOUNDED_ENV {
         cmd.env(key, value);
@@ -609,28 +639,51 @@ pub(crate) fn spawn_stream_reader(
 }
 
 /// A bounded snapshot of one `SharedStream`, taken by `drain_or_snapshot`.
-struct DrainedStream {
-    bytes: Vec<u8>,
+/// `pub(crate)` fields alongside `drain_or_snapshot` itself, for the same
+/// test-only reason.
+pub(crate) struct DrainedStream {
+    pub(crate) bytes: Vec<u8>,
     /// False when the reader thread had not reached EOF/error/cap by
     /// `deadline` — e.g. a grandchild still holds the pipe's write end
     /// open. The caller must never treat `bytes` as a complete capture when
     /// this is false.
-    finished: bool,
-    read_error: Option<String>,
+    pub(crate) finished: bool,
+    pub(crate) read_error: Option<String>,
 }
 
 /// Waits for `stream`'s reader thread to finish, up to `deadline`, then
 /// takes a snapshot of whatever bytes/state it has so far regardless. Never
 /// joins the thread — see the module-level "Bounded cleanup strategy" doc
 /// comment above.
-fn drain_or_snapshot(stream: &SharedStream, deadline: Instant) -> DrainedStream {
+///
+/// Loads `finished` BEFORE cloning `buf` — never the reverse. The reader
+/// thread's own program order (`spawn_stream_reader`) always appends a
+/// chunk to `buf` before it can possibly set `finished`, so observing
+/// `finished == true` here guarantees every byte the reader will ever write
+/// is already visible when `buf` is cloned immediately after. Cloning `buf`
+/// first would let the reader append its final chunk and flip `finished` to
+/// true in the gap between the two reads, so this function would report a
+/// short, PRE-final `buf` snapshot as if `finished == true` meant it was
+/// complete. If `finished` is observed false here, this reports false even
+/// if the reader completes a moment later — a genuinely unfinished snapshot,
+/// never mislabeled either way.
+///
+/// `pub(crate)` (with `pub(crate)` fields on `DrainedStream` below) solely so
+/// `tests/git_process_bounds.rs` can drive this exact ordering with a
+/// barrier-synchronized synthetic writer thread, deterministically
+/// reproducing the race window this fix closes instead of relying on
+/// `thread::sleep` timing to hope for it.
+pub(crate) fn drain_or_snapshot(stream: &SharedStream, deadline: Instant) -> DrainedStream {
     while !stream.finished.load(Ordering::SeqCst) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(2));
     }
+    let finished = stream.finished.load(Ordering::SeqCst);
+    let bytes = stream.buf.lock().unwrap().clone();
+    let read_error = stream.read_error.lock().unwrap().clone();
     DrainedStream {
-        bytes: stream.buf.lock().unwrap().clone(),
-        finished: stream.finished.load(Ordering::SeqCst),
-        read_error: stream.read_error.lock().unwrap().clone(),
+        bytes,
+        finished,
+        read_error,
     }
 }
 
@@ -671,12 +724,135 @@ pub(crate) fn kill_and_reap(child: &mut Child) -> ReapOutcome {
     }
 }
 
+// --- cross-call admission bound ---------------------------------------------
+//
+// Every call above this point bounds ITS OWN resource use (timeout, combined
+// byte cap, bounded reap, bounded reader-drain). Nothing previously bounded
+// resource use ACROSS repeated calls: the module's own "Bounded cleanup
+// strategy" doc comment already documents that a `CaptureUnfinished` reader
+// thread (grandchild holding a pipe open) or an `UnreapedAfterKill` child is
+// deliberately left running/unreaped past that ONE call's return — a
+// documented per-call trade-off, not a per-process one. With no cross-call
+// bound, repeated calls that each hit that trade-off could still accumulate
+// an unbounded number of live threads/processes over time. This gate is
+// process-wide (not per-workspace/per-scope) admission control for exactly
+// that: a call is refused outright, before it spawns anything, once too many
+// prior calls' resources are still genuinely in use.
+
+/// Maximum bounded git probes (`spawn_and_capture_bounded` calls) allowed in
+/// flight across this process at once. A judgment call — this crate's own
+/// real callers spawn at most a handful of concurrent read-only probes today
+/// (per `git-readonly-wrapper-proposal.md`'s scope: exactly two operations,
+/// no fan-out), so this is generously far above realistic concurrency while
+/// still being a REAL, fail-closed bound rather than an unbounded resource
+/// sink. `pub(crate)` so `tests/git_process_bounds.rs` can size its
+/// exhaustion/recovery test against the real constant instead of duplicating
+/// it.
+pub(crate) const MAX_CONCURRENT_PROBES: usize = 64;
+
+static IN_FLIGHT_PROBES: AtomicUsize = AtomicUsize::new(0);
+
+/// RAII admission slot: acquired by `try_acquire_admission` before a probe's
+/// child is spawned, released on `Drop` — which callers must delay until
+/// this probe's resources (reader threads, and any retained unreaped child)
+/// are ACTUALLY done, never merely until `spawn_and_capture_bounded` returns
+/// to its own caller. See `release_when_finished`.
+pub(crate) struct AdmissionPermit;
+
+impl Drop for AdmissionPermit {
+    fn drop(&mut self) {
+        IN_FLIGHT_PROBES.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Attempts to acquire one of `MAX_CONCURRENT_PROBES` cross-call admission
+/// slots, fail-closed (`None`, never blocking) once they are exhausted.
+/// `pub(crate)` so `tests/git_process_bounds.rs` can exercise exhaustion and
+/// exact-recovery directly against the real production counter, without
+/// needing to actually spawn `MAX_CONCURRENT_PROBES` real child processes to
+/// do it.
+pub(crate) fn try_acquire_admission() -> Option<AdmissionPermit> {
+    let mut current = IN_FLIGHT_PROBES.load(Ordering::SeqCst);
+    loop {
+        if current >= MAX_CONCURRENT_PROBES {
+            return None;
+        }
+        match IN_FLIGHT_PROBES.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => return Some(AdmissionPermit),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+/// True once a probe's outstanding resources are genuinely done: both
+/// reader threads finished (EOF, read error, or byte cap — see
+/// `SharedStream::finished`), AND, if a child is still being retained
+/// because a prior kill's reap was unconfirmed, `try_wait` now confirms it
+/// exited. A poll error on the retained child also counts as done — it
+/// means this process can learn nothing further from `try_wait`, so
+/// continuing to poll would only add another orphaned thread on top of an
+/// already-unverifiable child, never actually resolving it. `pub(crate)` so
+/// `tests/git_process_bounds.rs` can exercise this exact predicate
+/// deterministically with synthetic streams, without needing a real
+/// unreaped-after-kill child (not reliably producible on demand) to prove
+/// the retention logic.
+pub(crate) fn resources_are_finished(
+    stdout: &SharedStream,
+    stderr: &SharedStream,
+    retained_child: &mut Option<Child>,
+) -> bool {
+    let streams_done =
+        stdout.finished.load(Ordering::SeqCst) && stderr.finished.load(Ordering::SeqCst);
+    let child_done = match retained_child {
+        None => true,
+        Some(child) => !matches!(child.try_wait(), Ok(None)),
+    };
+    streams_done && child_done
+}
+
+/// Releases `permit` (and waits out `retained_child`, if any) only once
+/// `resources_are_finished` is true — never merely once this is called. If
+/// everything is already finished, this releases immediately with no extra
+/// thread; otherwise it spawns exactly one background watcher that owns
+/// `permit`/`retained_child`/the stream handles until they are genuinely
+/// done, then drops them. An unreaped `retained_child` is therefore never
+/// simply discarded: dropping a `Child` neither kills nor waits it, which
+/// would leave its true fate (and, on Unix, a potential zombie) unknown
+/// forever — this keeps it as an active, polled cleanup owner until
+/// `try_wait` actually confirms it exited.
+fn release_when_finished(
+    permit: AdmissionPermit,
+    stdout: SharedStream,
+    stderr: SharedStream,
+    retained_child: Option<Child>,
+) {
+    let mut retained_child = retained_child;
+    if resources_are_finished(&stdout, &stderr, &mut retained_child) {
+        drop(retained_child);
+        drop(permit);
+        return;
+    }
+    thread::spawn(move || {
+        while !resources_are_finished(&stdout, &stderr, &mut retained_child) {
+            thread::sleep(POLL_INTERVAL);
+        }
+        drop(retained_child);
+        drop(permit);
+    });
+}
+
 /// The generic bounded spawn+capture primitive: takes an already-built
 /// `Command` (stdout/stderr must already be `Stdio::piped()`) and applies
-/// the poll/timeout/combined-byte-cap/kill/reap policy above, independent of
-/// any Git-specific argv. `pub(crate)` so `tests/git_process.rs` can drive
-/// it directly with a synthetic long-running/high-output child, isolating
-/// the timeout and byte-cap mechanisms from Git specifics — mirroring
+/// the admission/poll/timeout/combined-byte-cap/kill/reap policy above,
+/// independent of any Git-specific argv. `pub(crate)` so
+/// `tests/git_process.rs` can drive it directly with a synthetic
+/// long-running/high-output child, isolating the timeout and byte-cap
+/// mechanisms from Git specifics — mirroring
 /// `docs/migration/verticals/V3/git-readonly-wrapper-proposal.md`'s own test
 /// design note ("Spawn a trivial long-sleeping child... to isolate the
 /// timeout mechanism from Git specifics").
@@ -684,11 +860,22 @@ pub(crate) fn spawn_and_capture_bounded(
     mut cmd: Command,
     budget: &GitProbeBudget,
 ) -> Result<SpawnOutcome, RpcError> {
-    let mut child = cmd.spawn().map_err(|e| {
-        error::io_error(format!(
-            "failed to spawn process for bounded git probe: {e}"
+    let permit = try_acquire_admission().ok_or_else(|| {
+        error::runtime_busy(format!(
+            "bounded git probe admission exhausted: {MAX_CONCURRENT_PROBES} probes already in \
+             flight; retry once an earlier probe's resources finish"
         ))
     })?;
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            drop(permit);
+            return Err(error::io_error(format!(
+                "failed to spawn process for bounded git probe: {e}"
+            )));
+        }
+    };
     let stdout = child
         .stdout
         .take()
@@ -722,9 +909,28 @@ pub(crate) fn spawn_and_capture_bounded(
             Ok(Some(status)) => break PollResult::Exited(status),
             Ok(None) => {}
             Err(e) => {
-                return Err(error::io_error(format!(
-                    "failed to poll bounded git probe child status: {e}"
-                )));
+                // Preserve owned cleanup on this branch too: never return
+                // early leaving the child unkilled/unreaped and the reader
+                // threads' admission slot unaccounted for. A confirmed
+                // reap still surfaces the original poll failure (`io_error`);
+                // an unconfirmed one maps to `unverifiable` (the child's
+                // true fate is now unknown) and is retained, never dropped.
+                let reap = kill_and_reap(&mut child);
+                let deadline = Instant::now() + READER_DRAIN_GRACE;
+                drain_or_snapshot(&stdout_stream, deadline);
+                drain_or_snapshot(&stderr_stream, deadline);
+                let retained_child = if reap.reaped { None } else { Some(child) };
+                release_when_finished(permit, stdout_stream, stderr_stream, retained_child);
+                return if reap.reaped {
+                    Err(error::io_error(format!(
+                        "failed to poll bounded git probe child status: {e}"
+                    )))
+                } else {
+                    Err(error::unverifiable(format!(
+                        "failed to poll bounded git probe child status ({e}) and the child \
+                         could not be confirmed reaped after an attempted kill"
+                    )))
+                };
             }
         }
         if start.elapsed() >= budget.timeout {
@@ -745,6 +951,7 @@ pub(crate) fn spawn_and_capture_bounded(
             // above waited up to `READER_DRAIN_GRACE`, far longer than the
             // reader threads need to publish the flag).
             if cap_hit.load(Ordering::SeqCst) {
+                release_when_finished(permit, stdout_stream, stderr_stream, None);
                 return Ok(SpawnOutcome::CapExceeded);
             }
             // EOF/error-proven capture: a read error on either stream is a
@@ -755,47 +962,57 @@ pub(crate) fn spawn_and_capture_bounded(
                 .take()
                 .or(stderr_drained.read_error)
             {
+                release_when_finished(permit, stdout_stream, stderr_stream, None);
                 return Ok(SpawnOutcome::CaptureReadError(err));
             }
             // Never report success on a mere 200ms (`READER_DRAIN_GRACE`)
             // snapshot of a stream that hasn't actually reached EOF yet.
             if !stdout_drained.finished || !stderr_drained.finished {
+                release_when_finished(permit, stdout_stream, stderr_stream, None);
                 return Ok(SpawnOutcome::CaptureUnfinished);
             }
-            match (
+            let outcome = match (
                 String::from_utf8(stdout_drained.bytes),
                 String::from_utf8(stderr_drained.bytes),
             ) {
-                (Ok(stdout), Ok(stderr)) => Ok(SpawnOutcome::Exited {
+                (Ok(stdout), Ok(stderr)) => SpawnOutcome::Exited {
                     status,
                     stdout,
                     stderr,
-                }),
-                (Err(_), _) => Ok(SpawnOutcome::CaptureInvalidUtf8("stdout")),
-                (_, Err(_)) => Ok(SpawnOutcome::CaptureInvalidUtf8("stderr")),
-            }
+                },
+                (Err(_), _) => SpawnOutcome::CaptureInvalidUtf8("stdout"),
+                (_, Err(_)) => SpawnOutcome::CaptureInvalidUtf8("stderr"),
+            };
+            release_when_finished(permit, stdout_stream, stderr_stream, None);
+            Ok(outcome)
         }
         PollResult::TimedOut => {
             let reap = kill_and_reap(&mut child);
             let deadline = Instant::now() + READER_DRAIN_GRACE;
             drain_or_snapshot(&stdout_stream, deadline);
             drain_or_snapshot(&stderr_stream, deadline);
-            if reap.reaped {
-                Ok(SpawnOutcome::TimedOut)
+            let outcome = if reap.reaped {
+                SpawnOutcome::TimedOut
             } else {
-                Ok(SpawnOutcome::UnreapedAfterKill)
-            }
+                SpawnOutcome::UnreapedAfterKill
+            };
+            let retained_child = if reap.reaped { None } else { Some(child) };
+            release_when_finished(permit, stdout_stream, stderr_stream, retained_child);
+            Ok(outcome)
         }
         PollResult::CapExceeded => {
             let reap = kill_and_reap(&mut child);
             let deadline = Instant::now() + READER_DRAIN_GRACE;
             drain_or_snapshot(&stdout_stream, deadline);
             drain_or_snapshot(&stderr_stream, deadline);
-            if reap.reaped {
-                Ok(SpawnOutcome::CapExceeded)
+            let outcome = if reap.reaped {
+                SpawnOutcome::CapExceeded
             } else {
-                Ok(SpawnOutcome::UnreapedAfterKill)
-            }
+                SpawnOutcome::UnreapedAfterKill
+            };
+            let retained_child = if reap.reaped { None } else { Some(child) };
+            release_when_finished(permit, stdout_stream, stderr_stream, retained_child);
+            Ok(outcome)
         }
     }
 }

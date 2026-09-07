@@ -1,12 +1,15 @@
-//! Behavioral tests for the four production corrections applied to the
-//! bounded read-only Git process wrapper (`src/git_process.rs`): EOF/error-
-//! proven capture (never `String::from_utf8_lossy`, never a success built
-//! from an unfinished/errored stream snapshot), bounded reap (never an
-//! unbounded `wait()`), Follower coalescing (a Follower never spawns the
-//! preferred probe), and the fixed `GIT_DIR`/etc. env denylist. Companion to
-//! `tests/git_process.rs` (which owns the original happy-path/timeout/byte-
-//! cap/argv-determinism coverage) — this file only covers the new
-//! corrections, so it does not duplicate that file's scope. Compiles
+//! Behavioral tests for the production corrections applied to the bounded
+//! read-only Git process wrapper (`src/git_process.rs`): EOF/error-proven
+//! capture (never `String::from_utf8_lossy`, never a success built from an
+//! unfinished/errored stream snapshot), bounded reap (never an unbounded
+//! `wait()`), Follower coalescing (a Follower never spawns the preferred
+//! probe), the fixed `GIT_DIR`/etc. env denylist, the `drain_or_snapshot`
+//! finished-before-buf ordering fix, the broad `GIT_`-prefixed config-
+//! injection env scrub, and the cross-call admission bound (fail-closed at
+//! capacity, permits/retained children released only once genuinely done).
+//! Companion to `tests/git_process.rs` (which owns the original happy-path/
+//! timeout/byte-cap/argv-determinism coverage) — this file only covers the
+//! new corrections, so it does not duplicate that file's scope. Compiles
 //! `src/error.rs`, `src/git.rs`, `src/git_worktree.rs` and
 //! `src/git_process.rs` directly via `#[path]`, the same trick both
 //! `tests/git_baseline.rs` and `tests/git_process.rs` already use.
@@ -34,10 +37,11 @@ mod git_worktree;
 mod git_process;
 
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use git::{Capability, CapabilityCache, HostScope, ProbeOutcome};
@@ -519,5 +523,406 @@ fn build_git_command_removes_the_fixed_git_context_denylist() {
             Some(&None),
             "{key} must be explicitly removed (Some(None) from get_envs), not merely absent"
         );
+    }
+}
+
+// =============================================================================
+// Correction 1(a): drain_or_snapshot never mislabels a stale buf snapshot
+// as complete
+// =============================================================================
+
+fn synthetic_shared_stream() -> git_process::SharedStream {
+    git_process::SharedStream {
+        buf: Arc::new(Mutex::new(Vec::new())),
+        finished: Arc::new(AtomicBool::new(false)),
+        read_error: Arc::new(Mutex::new(None)),
+    }
+}
+
+#[test]
+fn drain_or_snapshot_never_reports_finished_true_with_a_pre_final_buf_snapshot() {
+    // Deterministic, barrier-synchronized regression for the fix: a writer
+    // thread mirrors `spawn_stream_reader`'s own program order exactly
+    // (append the final chunk to `buf`, THEN set `finished`) while the main
+    // thread calls `drain_or_snapshot` with an ALREADY-EXPIRED deadline, so
+    // its internal wait loop never spins — it reads `finished`/`buf`
+    // immediately, racing the writer as tightly as two real threads can. A
+    // `Barrier` synchronizes only the START of the race (never used to
+    // "hope" for a specific interleave via sleep timing); the invariant
+    // checked below must hold regardless of how the two threads are then
+    // scheduled, and is run over many iterations to make a real regression
+    // overwhelmingly likely to surface.
+    const ITERATIONS: usize = 500;
+    const FINAL_CHUNK: &[u8] = b"final-chunk-bytes";
+
+    for _ in 0..ITERATIONS {
+        let stream = synthetic_shared_stream();
+        let buf = Arc::clone(&stream.buf);
+        let finished = Arc::clone(&stream.finished);
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_writer = Arc::clone(&barrier);
+
+        let writer = thread::spawn(move || {
+            barrier_writer.wait();
+            buf.lock().unwrap().extend_from_slice(FINAL_CHUNK);
+            finished.store(true, Ordering::SeqCst);
+        });
+
+        barrier.wait();
+        // Already in the past: `drain_or_snapshot`'s bounded wait loop exits
+        // immediately without spinning, maximizing overlap with the writer
+        // thread above instead of waiting it out.
+        let expired_deadline = Instant::now() - Duration::from_millis(1);
+        let drained = git_process::drain_or_snapshot(&stream, expired_deadline);
+
+        writer.join().unwrap();
+
+        // The only invariant the fix guarantees: whenever `finished` reads
+        // true, the bytes must be the COMPLETE final content — never a
+        // shorter, pre-final snapshot mislabeled as complete. Observing
+        // `finished == false` here is also valid (the writer simply hadn't
+        // run yet) and asserts nothing further.
+        if drained.finished {
+            assert_eq!(
+                drained.bytes, FINAL_CHUNK,
+                "finished == true must never be paired with a buf snapshot taken \
+                 before the writer's final append"
+            );
+        }
+    }
+}
+
+// =============================================================================
+// Correction 2: config-injection env scrub (broad GIT_-prefixed removal)
+// =============================================================================
+
+/// Self-spawn helper test: when invoked directly (via the env vars the
+/// parent test below sets), proves two things inside a process that
+/// genuinely inherits ROOT's exact captured injection shape
+/// (`GIT_CONFIG_COUNT=1`/`GIT_CONFIG_KEY_0=core.worktree`/
+/// `GIT_CONFIG_VALUE_0=<foreign path>`), never via `get_envs()` assertions
+/// alone:
+/// (1) a raw `git <GLOBAL_ARGS> config --get core.worktree` probe, built
+///     and spawned through this module's own `build_git_command`/
+///     `spawn_and_capture_bounded`, must never echo the foreign path back —
+///     proving the scrub actually reaches a real spawned `git` process
+///     (mirrors ROOT's own captured receipt, which used exactly this
+///     `config --get` shape to demonstrate the injection).
+/// (2) `run_read_only_git`'s real `WorktreeList` operation, called against
+///     the SELECTED of two real owned repos, must report the selected
+///     repo's own path — never the foreign one — despite the injected env.
+/// Under a normal `cargo test` run (no env vars set) this is a fast no-op.
+#[test]
+fn helper_assert_config_env_injection_is_scrubbed_and_selected_cwd_is_read() {
+    let (Ok(selected_dir), Ok(foreign_dir)) = (
+        std::env::var("DROGON_TEST_SELECTED_REPO_DIR"),
+        std::env::var("DROGON_TEST_FOREIGN_REPO_DIR"),
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        std::env::var("GIT_CONFIG_COUNT").as_deref(),
+        Ok("1"),
+        "test setup error: the injected env must be present in THIS process for the scrub \
+         (which scans this process's real environment) to have anything real to remove"
+    );
+
+    let mut argv: Vec<String> = git_process::GLOBAL_ARGS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    argv.extend(
+        ["config", "--get", "core.worktree"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    let cmd = git_process::build_git_command(Path::new(&selected_dir), &argv);
+    let outcome = git_process::spawn_and_capture_bounded(cmd, &generous_budget())
+        .expect("spawning the config probe itself must not fail");
+    match outcome {
+        SpawnOutcome::Exited { status, stdout, .. } => {
+            assert!(
+                !status.success(),
+                "core.worktree must read back unset once the injected env is scrubbed \
+                 (a freshly-init'd repo never sets it itself), got stdout: {stdout:?}"
+            );
+            assert!(
+                !stdout.contains(&foreign_dir),
+                "the foreign injected core.worktree value must never leak into a spawned \
+                 git process, got stdout: {stdout:?}"
+            );
+        }
+        other => panic!("expected a completed config probe, got {other:?}"),
+    }
+
+    let cache = CapabilityCache::new();
+    let scope = HostScope::native();
+    let result = run_read_only_git(
+        ReadOnlyGitOperation::WorktreeList,
+        Path::new(&selected_dir),
+        &scope,
+        &cache,
+        generous_budget(),
+    )
+    .expect("run_read_only_git must succeed against the selected repo despite injected config");
+
+    match result {
+        ParsedGitOutput::WorktreeList(entries) => {
+            assert_eq!(
+                entries.len(),
+                1,
+                "the selected repo has exactly one worktree entry"
+            );
+            let reported = std::fs::canonicalize(&entries[0].path)
+                .expect("reported worktree path must resolve to a real directory");
+            let expected = std::fs::canonicalize(&selected_dir)
+                .expect("selected fixture dir must exist and canonicalize");
+            assert_eq!(
+                reported, expected,
+                "must report the SELECTED repo's own path, never the foreign one"
+            );
+            assert!(
+                !entries[0].path.contains(&foreign_dir),
+                "must never leak the foreign injected worktree path into real output"
+            );
+        }
+        other => panic!("expected WorktreeList output, got {other:?}"),
+    }
+}
+
+#[test]
+fn worktree_list_and_config_reads_ignore_injected_git_config_env_pointing_at_a_foreign_worktree() {
+    let selected = TempRepo::init("config-injection-selected");
+    let foreign = TempRepo::init("config-injection-foreign");
+    let isolated_home = unique_dir("config-injection-isolated-home");
+    std::fs::create_dir_all(&isolated_home).expect("create isolated HOME for fixture hygiene");
+
+    let exe = std::env::current_exe().expect("current_exe for self-spawn fixture");
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args([
+        "helper_assert_config_env_injection_is_scrubbed_and_selected_cwd_is_read",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    cmd.env(
+        "DROGON_TEST_SELECTED_REPO_DIR",
+        selected.dir.to_string_lossy().into_owned(),
+    );
+    cmd.env(
+        "DROGON_TEST_FOREIGN_REPO_DIR",
+        foreign.dir.to_string_lossy().into_owned(),
+    );
+    // ROOT's exact captured injection shape.
+    cmd.env("GIT_CONFIG_COUNT", "1");
+    cmd.env("GIT_CONFIG_KEY_0", "core.worktree");
+    cmd.env(
+        "GIT_CONFIG_VALUE_0",
+        foreign.dir.to_string_lossy().into_owned(),
+    );
+    // Isolate the fixture's own git config: no inherited hooks/signing/
+    // attributes from this development host's real user or system config —
+    // never the user's real repo/config, and never mutated in place.
+    cmd.env("HOME", &isolated_home);
+    cmd.env("XDG_CONFIG_HOME", &isolated_home);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let output = cmd.output().expect("spawn self-spawn helper process");
+    assert!(
+        output.status.success(),
+        "helper assertion failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(&isolated_home);
+}
+
+// =============================================================================
+// Correction 3: cross-call admission bound
+// =============================================================================
+
+/// Self-spawn helper test: when invoked directly (env var set), drains
+/// EVERY real admission slot and asserts exhaustion/exact-recovery. Run in
+/// its OWN process (own fresh `IN_FLIGHT_PROBES`), never inline in this
+/// binary's normal parallel test run — intentionally draining the ENTIRE
+/// process-wide admission pool would otherwise race every other
+/// concurrently-running test in this file that also acquires a real
+/// admission permit (there are several), exactly the kind of cross-test
+/// interference this file's other `helper_*` self-spawn fixtures already
+/// avoid for other shared, ambient state. Under a normal `cargo test` run
+/// (no env var set) this is a fast no-op.
+#[test]
+fn helper_admission_gate_fails_closed_at_capacity_then_recovers_exactly_on_release() {
+    if std::env::var("DROGON_TEST_RUN_ADMISSION_GATE_CHECK").is_err() {
+        return;
+    }
+
+    let mut permits = Vec::with_capacity(git_process::MAX_CONCURRENT_PROBES);
+    for _ in 0..git_process::MAX_CONCURRENT_PROBES {
+        permits.push(
+            git_process::try_acquire_admission()
+                .expect("must be able to acquire up to MAX_CONCURRENT_PROBES permits"),
+        );
+    }
+
+    assert!(
+        git_process::try_acquire_admission().is_none(),
+        "admission must fail closed once MAX_CONCURRENT_PROBES permits are held"
+    );
+
+    // Recovery is exact, not all-or-nothing: releasing exactly one permit
+    // must free exactly one admission slot.
+    permits.pop();
+    let recovered = git_process::try_acquire_admission();
+    assert!(
+        recovered.is_some(),
+        "releasing exactly one permit must free exactly one admission slot"
+    );
+    assert!(
+        git_process::try_acquire_admission().is_none(),
+        "the pool must be exhausted again immediately after that one recovered slot is retaken"
+    );
+
+    drop(recovered);
+    drop(permits);
+}
+
+#[test]
+fn admission_gate_fails_closed_at_capacity_then_recovers_exactly_on_release() {
+    let exe = std::env::current_exe().expect("current_exe for self-spawn fixture");
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args([
+        "helper_admission_gate_fails_closed_at_capacity_then_recovers_exactly_on_release",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    cmd.env("DROGON_TEST_RUN_ADMISSION_GATE_CHECK", "1");
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let output = cmd.output().expect("spawn self-spawn helper process");
+    assert!(
+        output.status.success(),
+        "admission gate exhaustion/recovery check failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn resources_are_finished_is_false_until_both_streams_finish() {
+    let stdout = synthetic_shared_stream();
+    let stderr = synthetic_shared_stream();
+    let mut no_child: Option<std::process::Child> = None;
+
+    assert!(
+        !git_process::resources_are_finished(&stdout, &stderr, &mut no_child),
+        "neither stream has finished yet"
+    );
+
+    stdout.finished.store(true, Ordering::SeqCst);
+    assert!(
+        !git_process::resources_are_finished(&stdout, &stderr, &mut no_child),
+        "only one of the two streams has finished"
+    );
+
+    stderr.finished.store(true, Ordering::SeqCst);
+    assert!(
+        git_process::resources_are_finished(&stdout, &stderr, &mut no_child),
+        "both streams finished and there is no child left to confirm"
+    );
+}
+
+#[test]
+fn resources_are_finished_also_waits_for_a_retained_child_to_be_confirmed_exited() {
+    // Real self-spawn child (never a synthetic Read) so `Child::try_wait`
+    // reflects a genuine, observable process lifecycle — deterministic in
+    // outcome even though the exact moment of exit depends on the OS
+    // scheduler, since the test only asserts before/after a bounded wait
+    // for that exit, never a race window.
+    let exe = std::env::current_exe().expect("current_exe for self-spawn fixture");
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args([
+        "helper_sleep_ms",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    cmd.env("DROGON_TEST_SLEEP_MS", "300");
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
+    let child = cmd
+        .spawn()
+        .expect("spawn a real short-lived self-spawn child");
+
+    let stdout = synthetic_shared_stream();
+    let stderr = synthetic_shared_stream();
+    stdout.finished.store(true, Ordering::SeqCst);
+    stderr.finished.store(true, Ordering::SeqCst);
+    let mut retained = Some(child);
+
+    assert!(
+        !git_process::resources_are_finished(&stdout, &stderr, &mut retained),
+        "both streams are finished, but the retained child has not exited yet — \
+         it must still be waited on, never discarded early"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut confirmed = false;
+    while Instant::now() < deadline {
+        if git_process::resources_are_finished(&stdout, &stderr, &mut retained) {
+            confirmed = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        confirmed,
+        "must eventually confirm the retained child exited, bounded by this test's own deadline"
+    );
+}
+
+#[test]
+fn spawn_and_capture_bounded_repeated_calls_never_leak_admission_permits() {
+    // Regression for "no cross-call bound": if admission were leaked (never
+    // released) across calls, this loop would eventually start failing with
+    // `runtime_busy` well before `MAX_CONCURRENT_PROBES` sequential
+    // (non-overlapping) calls complete — real recovery, proven repeatedly,
+    // not just once.
+    for _ in 0..(git_process::MAX_CONCURRENT_PROBES * 2) {
+        let exe = std::env::current_exe().expect("current_exe for self-spawn fixture");
+        let mut cmd = std::process::Command::new(exe);
+        cmd.args([
+            "helper_sleep_ms",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ]);
+        cmd.env("DROGON_TEST_SLEEP_MS", "1");
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        // Only the admission claim is asserted here, not the outcome shape:
+        // under real scheduler load a self-spawned fixture can legitimately
+        // land on `CaptureUnfinished`/`TimedOut` for reasons unrelated to
+        // admission, and this test must not be sensitive to that. The one
+        // thing that must never happen, repeatedly, is `runtime_busy` —
+        // which is exactly what a leaked-forever admission slot would cause
+        // well before `MAX_CONCURRENT_PROBES * 2` sequential calls complete.
+        match git_process::spawn_and_capture_bounded(cmd, &generous_budget()) {
+            Ok(_) => {}
+            Err(e) => panic!(
+                "a sequential call must never be rejected by a leaked-forever admission bound, \
+                 got: {e:?}"
+            ),
+        }
     }
 }
