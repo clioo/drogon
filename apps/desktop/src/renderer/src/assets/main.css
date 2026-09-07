@@ -849,6 +849,7 @@ h2 {
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--muted-foreground);
+}
 /* R1-A bottom status bar (journey J12). Monochrome tokens only; the bar is a
    flex sibling under .app-shell, so #root stacks vertically. */
 #root {
