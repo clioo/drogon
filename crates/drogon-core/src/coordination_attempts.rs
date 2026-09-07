@@ -15,6 +15,8 @@ pub(crate) struct Attempt {
     pub(crate) launch: LaunchPreferences,
     pub(crate) outcome: Option<ReportOutcome>,
     pub(crate) report_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) report_result: Option<serde_json::Value>,
     pub(crate) cleanup_owned: bool,
 }
 
@@ -243,6 +245,7 @@ pub(crate) enum Settlement {
 }
 
 /// The caller commits the final mailbox message in this same transaction.
+#[cfg(test)]
 pub(crate) fn settle(
     tx: &Transaction<'_>,
     scope: &CoordinatorScope,
@@ -250,6 +253,26 @@ pub(crate) fn settle(
     outcome: ReportOutcome,
     message_id: &str,
 ) -> Result<Settlement, RpcError> {
+    settle_with_result(tx, scope, dispatch_id, outcome, message_id, None)
+}
+
+pub(crate) fn settle_with_result(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    dispatch_id: &str,
+    outcome: ReportOutcome,
+    message_id: &str,
+    report_result: Option<&serde_json::Value>,
+) -> Result<Settlement, RpcError> {
+    if report_result.is_some_and(|value| {
+        serde_json::to_vec(value).map_or(true, |bytes| {
+            bytes.len() > drogon_protocol::orchestration_common::MAX_TASK_TEXT_BYTES
+        })
+    }) {
+        return Err(error::invalid_argument(
+            "Final report metadata exceeds the task result budget.",
+        ));
+    }
     require_current_unfenced(tx, scope, dispatch_id)?;
     let mut attempt = show(tx, scope, dispatch_id)?;
     if let Some(prior) = attempt.outcome {
@@ -282,6 +305,7 @@ pub(crate) fn settle(
     }
     attempt.outcome = Some(outcome);
     attempt.report_message_id = Some(message_id.into());
+    attempt.report_result = report_result.cloned();
     attempt.result.assignment_state = match outcome {
         ReportOutcome::Succeeded => AssignmentState::Completed,
         ReportOutcome::Failed => AssignmentState::Failed,
@@ -307,6 +331,21 @@ pub(crate) fn require_current_unfenced(
         return Err(RpcError::new(
             "attempt_fenced",
             "Attempt authority has been fenced.",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn require_mail_recipient(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    dispatch_id: &str,
+) -> Result<(), RpcError> {
+    require_current_unfenced(tx, scope, dispatch_id)?;
+    if show(tx, scope, dispatch_id)?.outcome.is_some() {
+        return Err(RpcError::new(
+            "attempt_settled",
+            "Reported attempt can no longer consume mail.",
         ));
     }
     Ok(())

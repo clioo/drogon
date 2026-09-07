@@ -156,13 +156,17 @@ impl Engine {
                 MailRecipient::Dispatch(dispatch_id.clone())
             }
             Some(SendTarget::Group { .. }) => {
-                return Err(error::invalid_argument(
-                    "Group addressing is root's fanout responsibility, not implemented here.",
-                ));
+                return crate::coordination_mail_groups::send_group_in_tx(
+                    tx,
+                    scope,
+                    sender,
+                    params,
+                    origin_request_id,
+                );
             }
         };
         if let MailRecipient::Dispatch(id) = &recipient {
-            attempts::require_current_unfenced(tx, scope, id)?;
+            attempts::require_mail_recipient(tx, scope, id)?;
         }
         if params.kind != MessageKind::FinalReport {
             let message_id = new_id("msg");
@@ -234,23 +238,26 @@ impl Engine {
             let original_message_id = existing_attempt.report_message_id.ok_or_else(|| {
                 error::internal_error("Reported attempt has no message identity.")
             })?;
-            let original_request_id = coordination_mail::get_message_in_tx(
+            let original = coordination_mail::get_message_in_tx(
                 tx,
                 &scope.host.host_id,
                 &scope.run_id,
                 &original_message_id,
             )?
-            .map(|stored| stored.origin_request_id)
             .ok_or_else(|| error::internal_error("Original report message is missing."))?;
             return encode(SendResult {
-                message: None,
+                message: Some(MessageReceipt {
+                    message_id: original_message_id.clone(),
+                    sequence: Some(original.summary.sequence),
+                    run_id: Some(scope.run_id.clone()),
+                }),
                 batch: None,
                 lifecycle: Some(LifecycleVerdict::Settled {
                     outcome: prior_outcome,
                     duplicate: true,
                 }),
                 duplicate: Some(DuplicateReportReceipt {
-                    original_request_id,
+                    original_request_id: original.origin_request_id,
                     original_message_id: Some(original_message_id),
                 }),
                 warnings: vec![],
@@ -283,7 +290,14 @@ impl Engine {
             sequence: Some(summary.sequence),
             run_id: Some(scope.run_id.clone()),
         };
-        match attempts::settle(tx, scope, dispatch_id, final_report.outcome, &message_id)? {
+        match attempts::settle_with_result(
+            tx,
+            scope,
+            dispatch_id,
+            final_report.outcome,
+            &message_id,
+            final_report.result.as_ref(),
+        )? {
             Settlement::New(attempt) => {
                 let task_status = match final_report.outcome {
                     drogon_protocol::orchestration_common::ReportOutcome::Succeeded => {
@@ -348,7 +362,7 @@ impl Engine {
                     params,
                 )
             }),
-            CheckMode::Unread { .. } => {
+            CheckMode::Unread { acknowledge } => {
                 let actor = coordinator_actor(&scope);
                 let key = actor.receipt_key(&request.request_id)?;
                 if self.ledger_receipt_exists(&key, request, |tx| {
@@ -378,6 +392,8 @@ impl Engine {
                     &scope.host.host_id,
                     &scope.run_id,
                     &MailRecipient::RunHome,
+                    &consumer,
+                    acknowledge.as_deref(),
                     &params.kinds,
                     params.wait.as_ref(),
                     |tx| runs::require_coordinator(tx, &scope),
@@ -437,7 +453,7 @@ impl Engine {
                     params,
                 )
             }),
-            CheckMode::Unread { .. } => {
+            CheckMode::Unread { acknowledge } => {
                 let binding_owned = binding.clone();
                 let actor = worker_actor(binding);
                 let key = actor.receipt_key(&request.request_id)?;
@@ -472,6 +488,8 @@ impl Engine {
                     &binding_owned.host_id,
                     &binding_owned.run_id,
                     &recipient,
+                    &delivery::Consumer::Dispatch,
+                    acknowledge.as_deref(),
                     &params.kinds,
                     params.wait.as_ref(),
                     |tx| {
@@ -548,6 +566,8 @@ impl Engine {
         host_id: &str,
         run_id: &str,
         recipient: &MailRecipient,
+        consumer: &delivery::Consumer,
+        pending_acknowledge: Option<&str>,
         kinds: &[MessageKind],
         wait: Option<&drogon_protocol::orchestration_common::WaitPolicy>,
         authorize: impl Fn(&Transaction<'_>) -> Result<(), RpcError>,
@@ -561,12 +581,24 @@ impl Engine {
             if self.quiescent.load(Ordering::Acquire) {
                 return Ok(WaitObservation::Cancelled);
             }
-            let found = self
-                .coordination_read(|tx| {
-                    authorize(tx)?;
-                    delivery::inspect_in_tx(tx, host_id, run_id, recipient, true, kinds, None, 1)
-                })
-                .map(|(messages, _)| !messages.is_empty())?;
+            let found = self.coordination_read(|tx| {
+                authorize(tx)?;
+                // A batch this same call is about to acknowledge must not
+                // count as "unread" here: otherwise a wait that both acks an
+                // outstanding batch and asks to wait for the *next* one wakes
+                // immediately on the old batch, then the commit acks it and
+                // returns whatever (possibly nothing) is left instead of
+                // actually waiting for new mail.
+                let floor = delivery::wait_floor_in_tx(
+                    tx,
+                    host_id,
+                    run_id,
+                    recipient,
+                    consumer,
+                    pending_acknowledge,
+                )?;
+                delivery::unread_exists_after_in_tx(tx, host_id, run_id, recipient, floor, kinds)
+            })?;
             if found {
                 return Ok(WaitObservation::Found);
             }

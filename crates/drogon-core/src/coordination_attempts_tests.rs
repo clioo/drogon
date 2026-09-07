@@ -43,6 +43,7 @@ fn attempt(id: &str) -> Attempt {
         },
         outcome: None,
         report_message_id: None,
+        report_result: None,
         cleanup_owned: true,
     }
 }

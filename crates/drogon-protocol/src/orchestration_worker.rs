@@ -187,6 +187,9 @@ pub struct WorkerShowResult {
     pub process_verdict: ProcessVerdict,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<ReportOutcome>,
+    /// Original task-authored final-report metadata; absent on older hosts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_result: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_identity: Option<SessionIdentity>,
     /// As accepted, not as argv; argv never leaves the engine.

@@ -347,13 +347,14 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     assert_eq!(result_json["effects"][0]["resourceId"], json!("ws-1"));
     assert_camel_case_round_trip(&result, "effects");
 
-    let show = WorkerShowResult {
+    let mut show = WorkerShowResult {
         dispatch_id: "dispatch-1".into(),
         task_id: "task-1".into(),
         assignment_state: AssignmentState::Ready,
         readiness: ReadinessObservation::WorkerObserved,
         process_verdict: ProcessVerdict::Live,
         outcome: None,
+        report_result: None,
         session_identity: Some(SessionIdentity {
             session_id: "session-1".into(),
             incarnation: "f2b4c995-0e6c-4a0a-9e6f-1f2a3b4c5d6e".into(),
@@ -364,6 +365,16 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
         warning: None,
     };
     assert_camel_case_round_trip(&show, "sessionIdentity");
+    let old_shape = serde_json::to_value(&show).unwrap();
+    assert!(old_shape.get("reportResult").is_none());
+    assert!(
+        serde_json::from_value::<WorkerShowResult>(old_shape)
+            .unwrap()
+            .report_result
+            .is_none()
+    );
+    show.report_result = Some(json!({"files":["src/example.rs"],"testsPassed":true}));
+    assert_camel_case_round_trip(&show, "reportResult");
     assert_camel_case_round_trip(
         &WorkerShowParams {
             scope: coordinator_scope(),
@@ -469,6 +480,7 @@ fn prompt_stall_failure_and_late_first_report_serialize_without_resume_claims() 
         readiness: ReadinessObservation::NotObserved,
         process_verdict: ProcessVerdict::Unverifiable,
         outcome: None,
+        report_result: None,
         session_identity: Some(SessionIdentity {
             session_id: "session-7".into(),
             incarnation: "7c1d5a2b-3e4f-4a5b-8c9d-0e1f2a3b4c5d".into(),

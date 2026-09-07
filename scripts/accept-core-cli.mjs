@@ -22,6 +22,10 @@ import { probeNativeProtocol } from "./probe-native-protocol.mjs";
 import { probeSessionBoundaries } from "./probe-session-boundaries.mjs";
 import { probeHarnessLaunch } from "./probe-harness-launch.mjs";
 import { probeNativeCoordination } from "./probe-native-coordination.mjs";
+import {
+  prepareWorkerReportFixture,
+  probeWorkerReportCli,
+} from "./probe-worker-report-cli.mjs";
 
 const withHarness = process.argv.slice(2).join(" ") === "--harness pi";
 const withCoordination = process.argv.slice(2).join(" ") === "--coordination";
@@ -39,6 +43,9 @@ const fixture = await mkdtemp(path.join(tmpdir(), "dg-"));
 const dataDir = path.join(fixture, "data");
 const workspacePath = path.join(fixture, "folder");
 await mkdir(workspacePath);
+const workerFixtureEnv = withCoordination
+  ? await prepareWorkerReportFixture(fixture)
+  : {};
 const report = {
   startedAt: new Date().toISOString(),
   platform: process.platform,
@@ -131,6 +138,7 @@ function startDaemon() {
     stdio: ["ignore", "ignore", "ignore"],
     env: {
       ...process.env,
+      ...workerFixtureEnv,
       ORCA_ACCEPTANCE_SENTINEL: "must-not-reach-new-runtime-children",
       ...(withHarness ? { PI_CODING_AGENT_DIR: path.join(fixture, "pi") } : {}),
     },
@@ -315,6 +323,18 @@ try {
     );
   }
   // No live children remain: this proves real service-crash persistence, not live-child recovery.
+  if (withCoordination) {
+    report.checks.push(
+      ...(await probeWorkerReportCli({
+        cli,
+        rpc,
+        eventually,
+        workspace,
+        sessions,
+        fixture,
+      })),
+    );
+  }
   for (const session of sessions) {
     assert.equal(
       (

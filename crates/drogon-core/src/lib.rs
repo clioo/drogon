@@ -11,6 +11,7 @@ mod coordination_attempts;
 mod coordination_identity;
 mod coordination_launch;
 mod coordination_mail;
+mod coordination_mail_groups;
 mod coordination_mail_rpc;
 mod coordination_output;
 mod coordination_question_rpc;
@@ -58,6 +59,7 @@ use serde_json::{Value, json};
 use session::SessionHandle;
 
 const CAPABILITIES: &[&str] = &[
+    "orchestration.native.v1",
     "workspace.v1",
     "session.pty.v1",
     "session.cursor-read.v1",

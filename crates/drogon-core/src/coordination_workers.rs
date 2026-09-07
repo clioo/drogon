@@ -73,6 +73,7 @@ impl Engine {
                     readiness: attempt.result.readiness,
                     process_verdict: verdict,
                     outcome: attempt.outcome,
+                    report_result: attempt.report_result,
                     session_identity: attempt.result.session_identity,
                     launch: Some(attempt.launch),
                     residual_resources: attempt.result.residual_resources,

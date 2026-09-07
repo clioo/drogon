@@ -251,6 +251,7 @@ impl Engine {
             launch: plan.preferences,
             outcome: None,
             report_message_id: None,
+            report_result: None,
             cleanup_owned: true,
         };
         if let Some(replaced) =

@@ -309,9 +309,21 @@ fn new_id_duplicate_outcome_is_marked_not_resettled() {
     let dup_result = dup.result.unwrap();
     assert_eq!(dup_result["lifecycle"]["duplicate"], true);
     assert_eq!(dup_result["duplicate"]["originalRequestId"], "report-1");
-    assert!(
-        dup_result["message"].is_null(),
-        "duplicate classification must not append a new message"
+    assert_eq!(dup_result["message"], first.result.unwrap()["message"]);
+    let decoded: drogon_protocol::orchestration_mail::SendResult =
+        serde_json::from_value(dup_result).unwrap();
+    decoded.validate_shape().unwrap();
+    let conn = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM orchestration_mail_messages",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        count, 1,
+        "duplicate returns the original receipt without appending mail"
     );
 }
 
@@ -809,6 +821,253 @@ fn check_unread_wait_shutdown_cancellation_is_graceful_not_an_error() {
     assert!(result["delivery"].is_null());
 }
 
+/// The prewait poll must not treat the very batch this call is about to
+/// acknowledge as "unread": otherwise a call that both acks an outstanding
+/// batch and asks to wait wakes on that old batch immediately, and the
+/// commit then acks it and returns whatever (here: nothing) is left instead
+/// of actually waiting for the next batch to arrive.
+#[test]
+fn check_unread_wait_acks_old_batch_then_waits_for_the_next_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(Engine::open(dir.path()).unwrap());
+    let fx = setup(&engine);
+    let secret = "m".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+
+    ok(
+        &engine,
+        "orchestration.send",
+        "old-batch-send",
+        json!({"scope": coordinator_scope(&fx), "kind":"guidance",
+            "to": {"kind":"dispatch","dispatchId":"dispatch-1"}, "subject":"old"}),
+    );
+    let old_check = worker_call(
+        &engine,
+        "orchestration.check",
+        "old-check",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode":"unread"}),
+    );
+    assert!(old_check.ok, "{:?}", old_check.error);
+    let old_delivery_id = old_check.result.unwrap()["delivery"]["deliveryId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let sender_engine = engine.clone();
+    let fx_scope = coordinator_scope(&fx);
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        ok(
+            &sender_engine,
+            "orchestration.send",
+            "new-batch-send",
+            json!({"scope": fx_scope, "kind":"guidance",
+                "to": {"kind":"dispatch","dispatchId":"dispatch-1"}, "subject":"new"}),
+        );
+    });
+
+    let started = std::time::Instant::now();
+    let response = worker_call(
+        &engine,
+        "orchestration.check",
+        "ack-and-wait",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode":"unread",
+            "acknowledge": old_delivery_id, "wait": {"timeoutMs": 5000}}),
+    );
+    sender.join().unwrap();
+    let elapsed = started.elapsed();
+    assert!(response.ok, "{:?}", response.error);
+    let result = response.result.unwrap();
+    assert_eq!(
+        result["acknowledged"]["deliveryId"], old_delivery_id,
+        "must ack the old batch as requested"
+    );
+    assert_eq!(result["acknowledged"]["alreadyAcknowledged"], false);
+    assert_eq!(
+        result["timedOut"], false,
+        "must have woken on the new message, not timed out"
+    );
+    assert_eq!(
+        result["messages"][0]["subject"], "new",
+        "must deliver the NEXT batch, not an empty result for the old one"
+    );
+    assert!(
+        elapsed >= std::time::Duration::from_millis(150),
+        "must have actually waited for the next message, not returned instantly: {elapsed:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(3000),
+        "must wake promptly once the new message lands: {elapsed:?}"
+    );
+}
+
+/// A same-request-id replay of a bounded ack+wait must never re-run the wait
+/// loop or re-apply the acknowledgement: the ledger already decided the
+/// outcome, including the ack, so replay returns the identical receipt.
+#[test]
+fn check_unread_wait_with_ack_same_id_replay_preserves_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "n".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+
+    ok(
+        &engine,
+        "orchestration.send",
+        "old-batch-send",
+        json!({"scope": coordinator_scope(&fx), "kind":"guidance",
+            "to": {"kind":"dispatch","dispatchId":"dispatch-1"}, "subject":"old"}),
+    );
+    let old_check = worker_call(
+        &engine,
+        "orchestration.check",
+        "old-check",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode":"unread"}),
+    );
+    assert!(old_check.ok, "{:?}", old_check.error);
+    let old_delivery_id = old_check.result.unwrap()["delivery"]["deliveryId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let params = json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode":"unread",
+        "acknowledge": old_delivery_id, "wait": {"timeoutMs": 200}});
+    let first = worker_call(
+        &engine,
+        "orchestration.check",
+        "ack-wait-replay",
+        &secret,
+        params.clone(),
+    );
+    assert!(first.ok, "{:?}", first.error);
+    assert_eq!(first.result.as_ref().unwrap()["timedOut"], true);
+    assert_eq!(
+        first.result.as_ref().unwrap()["acknowledged"]["alreadyAcknowledged"],
+        false
+    );
+
+    let started = std::time::Instant::now();
+    let replay = worker_call(
+        &engine,
+        "orchestration.check",
+        "ack-wait-replay",
+        &secret,
+        params,
+    );
+    let elapsed = started.elapsed();
+    assert!(replay.ok, "{:?}", replay.error);
+    assert_eq!(
+        serde_json::to_value(&first.result).unwrap(),
+        serde_json::to_value(&replay.result).unwrap(),
+        "same request id must replay the identical committed receipt, including the ack"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(150),
+        "replay must skip the wait loop entirely (budget was 200ms), took {elapsed:?}"
+    );
+
+    let acknowledged_count: i64 =
+        rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME))
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM orchestration_mail_deliveries
+                  WHERE delivery_id = ?1 AND acknowledged = 1",
+                [&old_delivery_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+    assert_eq!(
+        acknowledged_count, 1,
+        "the old batch must be acknowledged exactly once, never re-applied by a replay"
+    );
+}
+
+/// Real shutdown arriving *while* a wait is already blocked (not before it
+/// starts) must interrupt it gracefully, well before the requested deadline.
+#[test]
+fn check_unread_wait_real_shutdown_midwait_is_cancelled_before_deadline() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    std::thread::scope(|threads| {
+        let waiting = threads.spawn(|| {
+            engine.dispatch(req(
+                "orchestration.check",
+                "shutdown-midwait",
+                None,
+                json!({"scope": coordinator_scope(&fx), "mode":"unread", "wait":{"timeoutMs":5000}}),
+            ))
+        });
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        let status = ok(&engine, "status", "shutdown-status", json!({}));
+        let started = std::time::Instant::now();
+        ok(
+            &engine,
+            "runtime.shutdown",
+            "shutdown-1",
+            json!({"hostId": fx.host, "serviceInstanceId": status["serviceInstanceId"]}),
+        );
+        let response = waiting.join().unwrap();
+        assert!(response.ok, "{:?}", response.error);
+        let result = response.result.unwrap();
+        assert_eq!(result["cancelled"], true);
+        assert_eq!(result["timedOut"], false);
+        assert!(result["delivery"].is_null());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "an already-blocked wait must be cancelled promptly by a later shutdown, not held to the deadline"
+        );
+    });
+}
+
+/// A worker's credential revoked (e.g. by an explicit stop) *while* its own
+/// unread wait is already blocked must refuse that in-flight call promptly,
+/// not silently keep waiting on a now-dead credential until the deadline.
+#[test]
+fn check_unread_wait_worker_revocation_midwait_is_refused_before_deadline() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "o".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+
+    std::thread::scope(|threads| {
+        let waiting = threads.spawn(|| {
+            worker_call(
+                &engine,
+                "orchestration.check",
+                "revoke-midwait",
+                &secret,
+                json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode":"unread",
+                    "wait":{"timeoutMs":5000}}),
+            )
+        });
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        let started = std::time::Instant::now();
+        ok(
+            &engine,
+            "orchestration.workerStop",
+            "stop-midwait",
+            json!({"contractVersion":1,"hostId":fx.host,"runId":fx.run,"coordinatorId":"owner",
+                "consumerGeneration":1,"dispatchId":"dispatch-1"}),
+        );
+        let response = waiting.join().unwrap();
+        assert!(
+            !response.ok,
+            "a revoked credential's in-flight wait must be refused, not fabricate a delivery"
+        );
+        assert_eq!(response.error.unwrap().code, "unauthorized");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "revocation must interrupt an already-blocked wait promptly, not wait for the deadline"
+        );
+    });
+}
+
 #[test]
 fn settled_credential_recovery_requires_valid_own_report_evidence() {
     for corruption in ["outcome", "missing", "sender", "kind", "identity"] {
@@ -915,4 +1174,108 @@ fn send_to_unknown_dispatch_is_refused_without_appending_mail() {
         )
         .unwrap();
     assert_eq!(count, 0);
+}
+
+#[test]
+fn final_report_metadata_survives_reopen_and_cannot_be_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "metadata".repeat(8);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-meta", &secret);
+    let metadata = json!({"files":["src/example.rs"],"tests":{"passed":7}});
+    let report = |value| {
+        json!({"scope":dispatch_scope(&fx,"dispatch-meta"),"kind":"finalReport",
+        "subject":"done","finalReport":{"outcome":"succeeded","result":value}})
+    };
+    let first = worker_call(
+        &engine,
+        "orchestration.send",
+        "meta-first",
+        &secret,
+        report(metadata.clone()),
+    );
+    assert!(first.ok, "{:?}", first.error);
+    let late = engine.dispatch(req(
+        "orchestration.send",
+        "late-guidance",
+        None,
+        json!({"scope":coordinator_scope(&fx),"kind":"guidance","subject":"too late",
+            "to":{"kind":"dispatch","dispatchId":"dispatch-meta"}}),
+    ));
+    assert!(
+        !late.ok,
+        "reported worker cannot consume newly accepted guidance"
+    );
+    let show = || json!(dispatch_scope_admin(&fx, "dispatch-meta"));
+    assert_eq!(
+        ok(&engine, "orchestration.workerShow", "meta-show", show())["reportResult"],
+        metadata
+    );
+    let duplicate = worker_call(
+        &engine,
+        "orchestration.send",
+        "meta-duplicate",
+        &secret,
+        report(json!({"changed":true})),
+    );
+    assert!(duplicate.ok, "{:?}", duplicate.error);
+    assert_eq!(duplicate.result.unwrap()["lifecycle"]["duplicate"], true);
+    drop(engine);
+    let engine = Engine::open(dir.path()).unwrap();
+    assert_eq!(
+        ok(&engine, "orchestration.workerShow", "meta-reopened", show())["reportResult"],
+        metadata
+    );
+}
+
+#[test]
+fn invalid_or_corrupted_ack_is_rejected_before_wait_budget() {
+    for corruption in ["missing", "negative", "beyond"] {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(dir.path()).unwrap();
+        let fx = setup(&engine);
+        ok(
+            &engine,
+            "orchestration.send",
+            "floor-message",
+            json!({"scope":coordinator_scope(&fx),"kind":"status","subject":"old"}),
+        );
+        let batch = ok(
+            &engine,
+            "orchestration.check",
+            "floor-batch",
+            json!({"scope":coordinator_scope(&fx),"mode":"unread"}),
+        );
+        let mut id = batch["delivery"]["deliveryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        if corruption == "missing" {
+            id = "unknown-ack".into();
+        } else {
+            let conn =
+                rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+            conn.execute(
+                "UPDATE orchestration_mail_deliveries SET max_sequence=?1 WHERE delivery_id=?2",
+                rusqlite::params![
+                    if corruption == "negative" {
+                        -1i64
+                    } else {
+                        999999
+                    },
+                    id
+                ],
+            )
+            .unwrap();
+        }
+        let start = std::time::Instant::now();
+        let response = engine.dispatch(req("orchestration.check","floor-wait",None,
+            json!({"scope":coordinator_scope(&fx),"mode":"unread","acknowledge":id,"kinds":["guidance"],"wait":{"timeoutMs":1500}})));
+        assert!(!response.ok, "{corruption}");
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(750),
+            "{corruption} waited before rejecting"
+        );
+    }
 }

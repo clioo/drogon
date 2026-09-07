@@ -150,7 +150,7 @@ impl Engine {
                     |tx| actor.authorize(tx, &request.method),
                     |tx| {
                         if let Recipient::Dispatch(id) = &recipient {
-                            coordination_attempts::require_current_unfenced(tx, &actor.scope, id)?;
+                            coordination_attempts::require_mail_recipient(tx, &actor.scope, id)?;
                         }
                         let id = format!("msg_{}", uuid::Uuid::new_v4());
                         let row = questions::ask_new_in_tx(

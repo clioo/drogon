@@ -283,14 +283,69 @@ fn any_unread_matches_kind(
         .map_err(super::mail_storage_error)
 }
 
-fn ack_in_tx(
+/// The unread floor a lock-free wait pre-check must poll against: the real
+/// read pointer, raised to also cover a delivery the caller's own commit is
+/// about to acknowledge. Without this, a wait that both acknowledges an
+/// outstanding batch and asks to wait for the *next* one would see that
+/// still-unacknowledged old batch as "unread" and wake immediately -- the
+/// commit then acks it and returns whatever (possibly nothing) is left,
+/// instead of actually waiting for new mail. This never mutates anything and
+/// never itself performs the acknowledgement; an unknown/foreign/mismatched
+/// `pending_acknowledge` id is left to the real `ack_in_tx` inside the
+/// caller's single committed attempt to accept or refuse.
+pub(crate) fn wait_floor_in_tx(
+    tx: &Transaction,
+    host_id: &str,
+    run_id: &str,
+    recipient: &Recipient,
+    consumer: &Consumer,
+    pending_acknowledge: Option<&str>,
+) -> Result<u64, RpcError> {
+    recipient.validate()?;
+    consumer.validate(recipient)?;
+    let pointer = read_pointer_in_tx(tx, host_id, run_id, recipient)?;
+    let Some(delivery_id) = pending_acknowledge else {
+        return Ok(pointer);
+    };
+    let (_, max_sequence) =
+        inspect_ack_in_tx(tx, host_id, run_id, recipient, consumer, delivery_id)?;
+    Ok(pointer.max(max_sequence))
+}
+
+/// Whether any unread message past `after_sequence` exists, searching the
+/// *entire* backlog (never capped at the delivery batch size), optionally
+/// restricted to `kinds`. Used only by the lock-free wait pre-check: existence
+/// alone, never a candidate batch or a delivered answer.
+pub(crate) fn unread_exists_after_in_tx(
+    tx: &Transaction,
+    host_id: &str,
+    run_id: &str,
+    recipient: &Recipient,
+    after_sequence: u64,
+    kinds: &[MessageKind],
+) -> Result<bool, RpcError> {
+    if !kinds.is_empty() {
+        return any_unread_matches_kind(tx, host_id, run_id, recipient, after_sequence, kinds);
+    }
+    tx.query_row(
+        "SELECT 1 FROM orchestration_mail_messages
+          WHERE host_id = ?1 AND run_id = ?2 AND to_dispatch_id = ?3 AND sequence > ?4 LIMIT 1",
+        params![host_id, run_id, recipient.column(), after_sequence as i64],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|found| found.is_some())
+    .map_err(super::mail_storage_error)
+}
+
+fn inspect_ack_in_tx(
     tx: &Transaction,
     host_id: &str,
     run_id: &str,
     recipient: &Recipient,
     consumer: &Consumer,
     delivery_id: &str,
-) -> Result<AckReceipt, RpcError> {
+) -> Result<(AckReceipt, u64), RpcError> {
     validate_opaque_token(delivery_id, 128, "Invalid delivery id.")?;
     let row: Option<(String, i64, i64)> = tx
         .query_row(
@@ -345,24 +400,36 @@ fn ack_in_tx(
         &message_ids,
         max_sequence,
     )?;
-    if acknowledged != 0 {
-        return Ok(AckReceipt {
+    Ok((
+        AckReceipt {
             delivery_id: delivery_id.to_string(),
-            already_acknowledged: true,
+            already_acknowledged: acknowledged != 0,
             message_ids,
-        });
+        },
+        max_sequence as u64,
+    ))
+}
+
+fn ack_in_tx(
+    tx: &Transaction,
+    host_id: &str,
+    run_id: &str,
+    recipient: &Recipient,
+    consumer: &Consumer,
+    delivery_id: &str,
+) -> Result<AckReceipt, RpcError> {
+    let (receipt, max_sequence) =
+        inspect_ack_in_tx(tx, host_id, run_id, recipient, consumer, delivery_id)?;
+    if receipt.already_acknowledged {
+        return Ok(receipt);
     }
     tx.execute(
         "UPDATE orchestration_mail_deliveries SET acknowledged = 1 WHERE delivery_id = ?1",
         params![delivery_id],
     )
     .map_err(super::mail_storage_error)?;
-    advance_read_pointer_in_tx(tx, host_id, run_id, recipient, max_sequence as u64)?;
-    Ok(AckReceipt {
-        delivery_id: delivery_id.to_string(),
-        already_acknowledged: false,
-        message_ids,
-    })
+    advance_read_pointer_in_tx(tx, host_id, run_id, recipient, max_sequence)?;
+    Ok(receipt)
 }
 
 /// One poll of a consuming check: optionally ACKs a prior delivery, then
