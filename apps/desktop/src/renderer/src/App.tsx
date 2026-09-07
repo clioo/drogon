@@ -2137,6 +2137,7 @@ export function App() {
                     onOpenTerminal={(workspaceId) => {
                       void openTaskTerminal(workspaceId);
                     }}
+                    onClose={goBackViewHistory}
                   />
                 )}
               </section>
