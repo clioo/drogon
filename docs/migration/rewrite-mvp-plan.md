@@ -117,7 +117,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J1 sidebar y pestañas | R2 | Muse A | fusionada; estado de agente real llega con R1-S | #22 |
 | J7 Automations | R2 | Muse B | fusionada; horarios solo UTC | #29 |
 | J4 Browser | R2 | Muse C | fusionada (pane); CLI browser pendiente | #27 |
-| J9 Mentu | R3 | Sonnet | lanzada | |
+| J9 Mentu | R3 | Sonnet | fusionada: recetas .mentu, aprobación por hash, runtime fijado con lock, ejecución cancelable, panel y tab con estado compartido; faltan Graph/Metrics y streaming por paso | #52 |
 | J6 Tasks | R3 | Muse A | fusionada: GitHub Issues, start crea worktree con badge #n | #38 |
 | J3 CLI | R3 | Muse B | fusionada: terminal wait y guías skills get; browser CLI pendiente | #30 |
 | J1 notificaciones | R3 | Muse C | fusionada: needs_input por hooks y notificación nativa | #35 |
@@ -129,3 +129,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | Fidelidad R6-B: activity bar derecha (Files, Changes), menú + de pestañas, browser como tab | R6 | Muse | lanzada | |
 | J1 UI: añadir proyecto, crear y quitar worktree, pulido | R4 | Muse C | fusionada | #40 |
 | J4 CLI browser por relay daemon → desktop | R4 | Muse B | fusionada: open, navigate, snapshot, click, fill, tabs | #41 |
+| J1 R7-A: composer de nuevo workspace y Add Project desde carpeta del fuente; quita el formulario legado | R7 | Muse | lanzada | |
+| J3 R7-C: shim `drogon-cli` en cada terminal, DROGON_* en el entorno de sesión | R7 | Muse | lanzada | |
+| J8 R7-E: responsabilidades de Bots (tarjetas, alta con cron, historial, Back) | R7 | Muse | lanzada | |
+| J5/J10 R7-I: tabla de atajos del fuente, dispatcher por scope, sección de shortcuts en Settings | R7 | Muse | lanzada | |
