@@ -1,32 +1,23 @@
 // NR-1 final-bundle notices verifier (leaf task, read-only inputs).
 //
-// Verifies the DEPENDENCY-NOTICES.txt bytes actually shipped inside a packaged
-// bundle against an expected-manifest whose section texts were transcribed
-// VERBATIM from accepted E5 evidence (never from generator output or any
-// generated shipped artifact). Byte-exact per section: sha256 over the exact
-// byte span, preserving full text, encoding and newlines. Fails closed on
-// missing, changed, duplicate or extra sections; on any expected entry whose
-// corpus is still incomplete (font/Seti notice texts are not embedded in
-// checked-in evidence yet — hashes/pointers only); on a structurally invalid
-// expected manifest (wrong/missing schema, no sections, not exactly one root
-// preamble, empty/non-unique keys, or a non-corpusIncomplete entry whose own
-// sha256 doesn't match its own text); and on shipped bytes that are not
-// valid UTF-8.
+// Byte-exact sha256 per section of shipped DEPENDENCY-NOTICES.txt bytes vs an
+// expected manifest transcribed VERBATIM from accepted E5 evidence (never
+// generator/shipped-artifact output). Fails closed on missing/changed/
+// duplicate/extra sections, incomplete-corpus entries, an invalid manifest,
+// invalid UTF-8, or a grammar-violating inter-section byte.
 //
 // The checked-in manifest is a SOURCE-CORPUS slice, not proof of complete
 // packaged-dependency closure: it pins lucide-react@0.577.0/1.26.0 from the
 // historical source, while the rewrite runtime's own package.json pins
 // lucide 1.41.0 and @fontsource-variable/geist 5.3.0. A green result here
-// attests only that the held source-corpus notices are byte-exact — never
-// that the currently-packaged dependency set is fully covered.
+// attests only that the held source-corpus notices are byte-exact.
 //
 // Section grammar (read from scripts/package-notices.mjs, not imported):
 // elements joined with a single "\n"; element 0 is the root LICENSE file and
-// element 1 the root THIRD_PARTY_NOTICES.md (together the "rootPreamble",
-// expected as LICENSE + "\n" + THIRD_PARTY); each package element is
-// "\n\n## <key> — <license>\n" followed either by the pinned fallback
-// ("Source: <url>\n" + "\n" + text, react-remove-scroll-bar@2.3.8 only) or
-// one "### <filename>\n<text>" block per bundled license file.
+// element 1 the root THIRD_PARTY_NOTICES.md (together the "rootPreamble");
+// each package element is "\n\n## <key> — <license>\n" followed either by
+// the pinned fallback ("Source: <url>\n\n" + text, react-remove-scroll-bar
+// only) or one "### <filename>\n<text>" block per bundled license file.
 import crypto from "node:crypto";
 
 export function sha256Hex(bytes) {
@@ -36,18 +27,14 @@ export function sha256Hex(bytes) {
 const HEADING_PATTERN = /\n\n## ([^\n]*) — ([^\n]*)\n/g;
 const SUPPORTED_SCHEMAS = new Set(["drogon.release.final-bundle-notices.v1"]);
 
-/**
- * Splits shipped DEPENDENCY-NOTICES.txt bytes into sections per the grammar.
- * Package sections are anchored on full heading lines of the shape
- * "\n\n## <key> — <license>\n" (em-dash included); the root root files'
- * own markdown headings carry no em-dash, so they never split a package.
- * Returns [{ key, license, start, end, sha256, text }] where [start, end) is
- * the exact UTF-8 BYTE span of the element (excluding the single "\n" join
- * between elements), plus a leading { key: "__root_preamble__" } span for
- * everything before the first package heading. start/end are always byte
- * offsets, never JS string character indexes — a multi-byte character
- * anywhere in the preamble (e.g. "©") must not shift the span.
- */
+// Splits shipped bytes into sections anchored on package heading lines
+// "\n\n## <key> — <license>\n" (root files' own headings carry no em-dash,
+// so they never split a package). Returns [{ key, license, start, end,
+// sha256, text }] with byte-offset (never char-index) [start, end) spans,
+// excluding the single "\n" join between elements, plus a leading
+// { key: "__root_preamble__" } span for everything before the first heading.
+// NOTE: this only locates spans; it does not itself validate the excluded
+// byte is really a lone LF — verifyFinalBundleNotices's separator check does.
 export function parseNoticeSections(shippedBytes) {
   const text = Buffer.from(shippedBytes).toString("utf8");
   const matches = [...text.matchAll(HEADING_PATTERN)];
@@ -82,21 +69,38 @@ export function parseNoticeSections(shippedBytes) {
   return sections;
 }
 
-// True only when re-encoding the UTF-8-decoded string reproduces the exact
-// input bytes. Buffer#toString("utf8") silently substitutes U+FFFD for
-// invalid sequences instead of throwing, so this round-trip is required to
-// actually detect invalid UTF-8 shipped bytes rather than passing them
-// through unnoticed.
+// Buffer#toString("utf8") silently substitutes U+FFFD instead of throwing on
+// invalid sequences, so a round-trip compare is required to actually detect
+// invalid UTF-8 shipped bytes.
 function isValidUtf8(bytes) {
   return Buffer.compare(Buffer.from(bytes.toString("utf8"), "utf8"), bytes) === 0;
 }
 
+// Every byte excluded from a hashed span (the gap between consecutive
+// sections) must be exactly one 0x0A join byte — otherwise a mutated,
+// added, or removed separator byte sits outside every span and is never
+// hashed or checked, letting it pass unnoticed. Byte-domain (Buffer
+// indexes), not char arithmetic, so multi-byte characters adjacent to a
+// boundary can't shift or split a span.
+function validateSeparators(bytes, sections) {
+  const errors = [];
+  for (let i = 0; i + 1 < sections.length; i++) {
+    const prev = sections[i];
+    const next = sections[i + 1];
+    const gap = bytes.subarray(prev.end, next.start);
+    if (gap.length !== 1 || gap[0] !== 0x0a) {
+      errors.push(
+        `separator between "${prev.key}" and "${next.key}" must be exactly one 0x0A (LF) byte, found ${gap.length} byte(s): ${JSON.stringify([...gap])}`,
+      );
+    }
+  }
+  return errors;
+}
+
 // Structural validation of the expected manifest itself, independent of any
-// shipped bytes. Returns a list of human-readable cause strings; empty means
-// the manifest is well-formed enough to compare against shipped bytes. This
-// is what makes an empty or malformed manifest (e.g. { sections: [] }) fail
-// CLOSED instead of vacuously reporting ok:true because every diff array
-// happened to stay empty.
+// shipped bytes. Empty result means well-formed enough to compare; this is
+// what makes an empty/malformed manifest fail CLOSED instead of vacuously
+// reporting ok:true because every diff array happened to stay empty.
 function validateManifest(expectedManifest) {
   const errors = [];
   if (!expectedManifest || typeof expectedManifest !== "object") {
@@ -158,11 +162,11 @@ function validateManifest(expectedManifest) {
  *   extra[], duplicates[], corpusIncomplete[] }.
  *
  * ok is true only when every array is empty. `errors` names structural
- * problems that make comparison meaningless — an invalid/empty manifest, or
- * shipped bytes that are not valid UTF-8 — and always fails closed without
- * attempting the per-key comparison. Manifest entries with
- * corpusIncomplete: true (no verbatim text held) never match shipped bytes
- * and always fail the verification closed.
+ * problems that make comparison meaningless — an invalid/empty manifest,
+ * non-UTF-8 shipped bytes, or a grammar-violating inter-section byte — and
+ * always fails closed without attempting the per-key comparison.
+ * corpusIncomplete: true entries never match shipped bytes and always fail
+ * closed.
  */
 export function verifyFinalBundleNotices({ shippedBytes, expectedManifest } = {}) {
   const errors = validateManifest(expectedManifest);
@@ -184,6 +188,12 @@ export function verifyFinalBundleNotices({ shippedBytes, expectedManifest } = {}
   }
 
   const shipped = parseNoticeSections(bytes);
+  const separatorErrors = validateSeparators(bytes, shipped);
+  if (separatorErrors.length > 0) {
+    result.errors.push(...separatorErrors);
+    return result;
+  }
+
   const shippedByKey = new Map();
   for (const section of shipped) {
     if (section.key === null) {
