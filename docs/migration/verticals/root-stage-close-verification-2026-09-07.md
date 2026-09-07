@@ -43,5 +43,19 @@ Windows runtime acceptance still requires the Windows CI result.
 
 ## Final combined gates
 
-Recorded below when complete. Test counts are not measured line/branch
-coverage, and neither these checks nor the source audit certify 90% parity.
+On `9c1b51d`, independent local `cargo test --workspace --locked`, strict
+workspace/all-targets clippy, rustfmt, 70 packaging tests, 72 renderer-contract
+tests and renderer-contract typecheck all exited zero. Test counts are not
+measured line/branch coverage; these checks do not certify 90% parity.
+
+CI run `34140146360`: macOS passed; Windows passed, including actual daemon
+26 unit + 4 transport tests, plus 27 JS pipe-fixture tests (one skipped).
+The Windows auth regression now passes on Windows. These are not full Windows
+Electron/install or cross-process cancel/reap acceptance.
+
+Linux failed the copied executable fixture at `coordination_access.rs:55`
+with OS error 26, `ExecutableFileBusy` / `Text file busy`. ROOT serialized
+only executable copy + spawn with a test-local mutex (`7122c66`), preventing
+another fixture fork from inheriting the copy's writable FD until exec.
+Daemon interactions remain concurrent; all six assertions remain unchanged.
+The six tests pass locally, strict clippy/fmt pass; Linux rerun is required.
