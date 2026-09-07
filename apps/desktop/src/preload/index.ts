@@ -8,6 +8,7 @@ import { project } from "./project";
 import { browser } from "./browser";
 import { settings } from "./settings";
 import { notifications } from "./notifications";
+import { shellBridge } from "./shell";
 import { tasks } from "./tasks";
 import { mentu } from "./mentu";
 import { botBridgeExtras } from "./bot";
@@ -43,6 +44,7 @@ const bridge: DesktopBridge = {
 Object.assign(
   bridge,
   { git, browser, notifications, tasks, project, mentu },
+  { shell: shellBridge },
   botBridgeExtras,
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

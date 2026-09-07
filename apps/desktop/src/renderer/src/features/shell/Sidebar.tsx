@@ -1,11 +1,10 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/sidebar/index.tsx shell recipe and
-   SidebarSettingsHelpMenu.tsx footer recipe (adapter: props, no store;
-   the worktree list, kanban board and dialogs are this repo's own).
+   SidebarToolbar.tsx footer recipe (adapter: props, no store; the
+   worktree list, kanban board and dialogs are this repo's own).
    Like the source this is a plain div, not a landmark: the reference
    sidebar carries no complementary role. */
 import { useRef, useState } from "react";
-import { LifeBuoy, Settings } from "lucide-react";
 import type {
   Session,
   Worktree,
@@ -15,7 +14,8 @@ import type { ProjectGroup } from "./project-adapter";
 import { SidebarNav } from "./SidebarNav";
 import { ProjectList } from "./ProjectList";
 import type { ProjectAction } from "./ProjectList";
-import { ShellIconButton } from "./ShellIconButton";
+import { SidebarFooter } from "./sidebar-footer";
+import type { SettingsSectionId } from "../settings/settings-sections";
 import {
   clearLiveSidebarWidth,
   nextSidebarWidth,
@@ -47,11 +47,7 @@ export function Sidebar({
   onBrowseProject,
   onSubmitAddProject,
   onSubmitRemoveWorktree,
-  serviceLabel,
-  buildRevision,
-  buildTitle,
   onOpenSettings,
-  settingsExpanded,
 }: {
   open: boolean;
   width: number;
@@ -82,16 +78,12 @@ export function Sidebar({
     worktree: Worktree,
     force: boolean,
   ) => Promise<string | null>;
-  serviceLabel: string;
-  buildRevision: string | null;
-  buildTitle?: string;
-  onOpenSettings: () => void;
-  settingsExpanded: boolean;
+  onOpenSettings: (initialSection?: SettingsSectionId) => void;
 }) {
-  const [helpOpen, setHelpOpen] = useState(false);
   const [resizing, setResizing] = useState(false);
   const dragRef = useRef({ startX: 0, startWidth: width });
   dragRef.current.startWidth = resizing ? dragRef.current.startWidth : width;
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const onResizeStart = (event: React.MouseEvent) => {
     event.preventDefault();
@@ -115,6 +107,12 @@ export function Sidebar({
     window.addEventListener("mouseup", onUp);
   };
 
+  const revealActiveWorkspace = () => {
+    scrollRef.current
+      ?.querySelector('[data-active="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  };
+
   return (
     <div
       className="workspace-sidebar shell-sidebar relative min-h-0 flex-shrink-0 flex flex-col overflow-hidden"
@@ -127,7 +125,7 @@ export function Sidebar({
             onSelectRoute={onSelectRoute}
             onOpenPalette={onOpenPalette}
           />
-          <div className="shell-sidebar-scroll">
+          <div ref={scrollRef} className="shell-sidebar-scroll">
             <ProjectList
               groups={groups}
               workspaces={workspaces}
@@ -135,6 +133,7 @@ export function Sidebar({
               selectedWorkspaceId={selectedWorkspaceId}
               disabled={workspaceDisabled}
               addDisabled={addDisabled}
+              sidebarWidth={width}
               worktreesAvailable={worktreesAvailable}
               action={projectAction}
               onSelectWorkspace={onSelectWorkspace}
@@ -146,44 +145,11 @@ export function Sidebar({
               onSubmitAdd={onSubmitAddProject}
               onSubmitRemove={onSubmitRemoveWorktree}
             />
-            {groups.length === 0 && (
-              <p className="sidebar-empty">
-                Open a folder or repository to begin.
-              </p>
-            )}
           </div>
-          <footer className="sidebar-footer shell-footer">
-            <span className="shell-footer-row">
-              <span>{serviceLabel}</span>
-              <span className="shell-footer-actions">
-                <ShellIconButton
-                  label="Settings"
-                  aria-expanded={settingsExpanded}
-                  onClick={onOpenSettings}
-                >
-                  <Settings size={16} />
-                </ShellIconButton>
-                <ShellIconButton
-                  label="Help"
-                  aria-expanded={helpOpen}
-                  onClick={() => setHelpOpen((value) => !value)}
-                >
-                  <LifeBuoy size={16} />
-                </ShellIconButton>
-              </span>
-            </span>
-            {buildRevision && (
-              <span className="build-revision" title={buildTitle}>
-                {buildRevision}
-              </span>
-            )}
-            {helpOpen && (
-              <p className="shell-help-popover" role="status">
-                Press ⌘J for the worktree palette, ⌘P to jump to a file.
-                Sessions stay with the service when this window closes.
-              </p>
-            )}
-          </footer>
+          <SidebarFooter
+            onOpenSettings={onOpenSettings}
+            onRevealActiveWorkspace={revealActiveWorkspace}
+          />
         </>
       )}
       {open && (

@@ -1,8 +1,10 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/Landing.tsx (adapter: props instead of the
-   zustand store; the preflight banner and the Star-on-GitHub card are out
-   of MVP scope and are omitted, not stubbed). */
+   zustand store; the preflight banner needs Orca runtime and is omitted,
+   not stubbed; the star button keeps local state only, see
+   github-star.tsx). */
 import { FolderPlus, GitBranchPlus } from "lucide-react";
+import { GitHubStarButton } from "./github-star";
 import logo from "./logo.svg";
 
 function isMacPlatform(): boolean {
@@ -93,6 +95,10 @@ export function Landing({
             <ShortcutRow action="Move down workspace" keys={[mod, "Shift", "↓"]} />
           </div>
         </div>
+      </div>
+
+      <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+        <GitHubStarButton />
       </div>
     </div>
   );

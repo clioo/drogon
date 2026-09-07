@@ -258,7 +258,11 @@ export async function probePackagedSurfaces({
   // The sidebar project view loads at App refresh, so reload after the
   // CLI-side project add: the Tasks mount then reads the fresh groups.
   await page.reload();
-  await page.getByText("Service 0.1.0", { exact: true }).waitFor();
+  // R9-B: the sidebar footer is the source toolbar; its Reveal button is the
+  // readiness anchor (the "Service x.y.z" text is gone).
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor();
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
   // R8-G1 ported the source task-page: the page lives in the Tasks section,
   // the project source is the SourceBar select, rows are role=button

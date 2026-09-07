@@ -155,7 +155,11 @@ async function launchDesktop() {
   page = browser.contexts()[0].pages()[0];
   assert.ok(page, "Electron must create a rendered page");
   page.setDefaultTimeout(15000);
-  await page.getByText("Service 0.1.0", { exact: true }).waitFor();
+  // R9-B: the sidebar footer is the source toolbar now (settings, help,
+  // reveal) — the "Service x.y.z" text is gone, so readiness waits for it.
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor();
 }
 try {
   let daemonError;
@@ -463,7 +467,13 @@ try {
   await runAcceptanceProcess("git", [...gitIdentity, "commit", "-m", "composer fixture"], {
     cwd: gitDir,
   });
-  await page.getByRole("button", { name: "Add project", exact: true }).click();
+  // R9-B: Add Project lives in the source's Workspace options menu now.
+  await page
+    .getByRole("button", { name: "Workspace options", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Add Project", exact: true })
+    .click();
   const addGitDialog = page.getByRole("dialog", { name: "Add Project" });
   await addGitDialog.getByLabel("Folder or repository path").fill(gitDir);
   await addGitDialog

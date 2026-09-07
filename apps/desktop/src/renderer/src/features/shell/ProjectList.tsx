@@ -1,18 +1,38 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/sidebar/SidebarHeader.tsx project-group
-   recipe (adapter: props instead of the project store; add opens the
-   folder dialog, the "+" opens the new-workspace composer like the
-   source's "New workspace" control, filter narrows the visible cards). */
+   src/renderer/src/components/sidebar/SidebarHeader.tsx (header recipe:
+   title + activity toggle + options + new-workspace, with the compact
+   branch below SIDEBAR_HEADER_WIDE_MIN_WIDTH) and
+   sidebar-header-actions.tsx (adapter: props instead of the project
+   store; the options menu carries this repo's text filter and Add
+   Project entry instead of the source's sort/group/host sections, which
+   need Orca runtime; the activity toggle narrows to groups with a live
+   session instead of the source's agents view, which is out of MVP
+   scope). The "+" opens the new-workspace composer (preselected per
+   row, unselected in the header), like the source's "New workspace"
+   control; each removable card's kebab menu opens the remove confirm
+   dialog. All RPCs run in App; every submit resolves a verbatim error
+   string or null on success. */
 import { useState } from "react";
-import { FolderGit2, FolderPlus, Plus, SlidersHorizontal } from "lucide-react";
+import {
+  Bell,
+  CircleX,
+  Ellipsis,
+  FolderGit2,
+  FolderPlus,
+  Plus,
+  SlidersHorizontal,
+} from "lucide-react";
+import { DropdownMenu, Tooltip } from "radix-ui";
 import type {
   Project,
   Session,
   Worktree,
   Workspace,
 } from "../../../../shared/session-contract";
+import { Button } from "../../components/ui/button";
 import type { ProjectGroup } from "./project-adapter";
 import { filterProjectGroups } from "./project-adapter";
+import { isWideSidebarHeader } from "./app-chrome-layout";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { RemoveWorktreeDialog } from "./RemoveWorktreeDialog";
 import { WorktreeCard } from "./WorktreeCard";
@@ -22,14 +42,86 @@ export type ProjectAction =
   | { kind: "add" }
   | { kind: "remove"; worktreeId: string };
 
+/** Small ghost icon button with a tooltip, like the source header uses. */
+function HeaderIconButton({
+  label,
+  active,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          type="button"
+          className={`size-6 text-muted-foreground${active ? " bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+          aria-label={label}
+          aria-pressed={active}
+          onClick={onClick}
+          disabled={disabled}
+        >
+          {children}
+        </Button>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content className="tooltip" side="bottom" sideOffset={6}>
+          {label}
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
+
+/** The options menu body: Add Project plus this repo's text filter. */
+function OptionsMenuContent({
+  filter,
+  onFilterChange,
+  addDisabled,
+  onAddProject,
+}: {
+  filter: string;
+  onFilterChange: (value: string) => void;
+  addDisabled: boolean;
+  onAddProject: () => void;
+}): React.JSX.Element {
+  return (
+    <>
+      <DropdownMenu.Item
+        className="sidebar-menu-item"
+        disabled={addDisabled}
+        onSelect={onAddProject}
+      >
+        <FolderPlus className="size-3.5" />
+        Add Project
+      </DropdownMenu.Item>
+      <DropdownMenu.Separator className="sidebar-menu-separator" />
+      <div className="sidebar-menu-filter">
+        <input
+          className="shell-filter-input"
+          aria-label="Filter projects and worktrees"
+          placeholder="Filter projects…"
+          value={filter}
+          onChange={(event) => onFilterChange(event.target.value)}
+          onKeyDown={(event) => event.stopPropagation()}
+        />
+      </div>
+    </>
+  );
+}
+
 /**
- * Projects section: header with add/composer/filter icons, one row per
- * project with its worktree cards underneath. The "+" opens the
- * new-workspace composer (preselected per row, unselected in the
- * header), like the source's "New workspace" control; each removable
- * card's kebab menu opens the remove confirm dialog. All RPCs run in
- * App; every submit resolves a verbatim error string or null on
- * success.
+ * Projects section: header with activity/options/new-workspace controls,
+ * one row per project with its worktree cards underneath. Mirrors the
+ * source's SidebarHeader order: activity toggle, workspace options, "+".
  */
 export function ProjectList({
   groups,
@@ -38,6 +130,7 @@ export function ProjectList({
   selectedWorkspaceId,
   disabled,
   addDisabled,
+  sidebarWidth,
   worktreesAvailable,
   action,
   onSelectWorkspace,
@@ -55,6 +148,7 @@ export function ProjectList({
   selectedWorkspaceId: string;
   disabled: boolean;
   addDisabled: boolean;
+  sidebarWidth: number;
   worktreesAvailable: boolean;
   action: ProjectAction | null;
   onSelectWorkspace: (workspaceId: string) => void;
@@ -70,50 +164,158 @@ export function ProjectList({
   }) => Promise<string | null>;
   onSubmitRemove: (worktree: Worktree, force: boolean) => Promise<string | null>;
 }) {
-  const [filterOpen, setFilterOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const [activityOnly, setActivityOnly] = useState(false);
   const visible = filterProjectGroups(groups, workspaces, filter);
+  const active = activityOnly
+    ? visible.filter((group) => groupHasLiveSession(group, sessions))
+    : visible;
+  const filterActive = filter.trim() !== "";
   const removeTarget = findWorktree(groups, action);
+  const activityLabel = activityOnly ? "Turn off activity view" : "View activity";
+  const optionsLabel = filterActive
+    ? "Workspace options (1 filter active)"
+    : "Workspace options";
+  const wide = isWideSidebarHeader(sidebarWidth);
+  const clearFilters = () => {
+    setFilter("");
+    setActivityOnly(false);
+  };
   return (
-    <section aria-label="Projects" className="shell-projects">
-      <div className="shell-section-header">
-        <span>Projects</span>
-        <span className="shell-section-actions">
-          <button
-            type="button"
-            className="shell-icon-button"
-            aria-label="Add project"
-            aria-expanded={undefined}
-            disabled={addDisabled}
-            title="Add a folder or repository"
-            onClick={onAddProject}
+    <section className="shell-projects">
+      <div className="mt-2 flex h-8 min-w-0 items-center justify-between gap-1.5 px-2">
+        <div className="flex min-w-0 items-center gap-1">
+          <span
+            className="select-none pl-2 pr-0.5 text-xs font-semibold text-muted-foreground/80"
+            data-sidebar-section-title="projects"
           >
-            <FolderPlus size={15} />
-          </button>
-          <button
-            type="button"
-            className="shell-icon-button"
-            aria-label="New workspace"
-            disabled={addDisabled}
-            title="New workspace"
+            Projects
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <HeaderIconButton
+            label={activityLabel}
+            active={activityOnly}
+            onClick={() => setActivityOnly((value) => !value)}
+          >
+            <Bell className="size-3.5" strokeWidth={2.25} />
+          </HeaderIconButton>
+          {wide ? (
+            <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <DropdownMenu.Trigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      type="button"
+                      className="relative size-6 text-muted-foreground"
+                      aria-label={optionsLabel}
+                    >
+                      <SlidersHorizontal
+                        className="size-3.5"
+                        strokeWidth={2.25}
+                      />
+                      {filterActive && (
+                        <span
+                          aria-hidden
+                          className="absolute -top-0.5 -right-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-medium leading-none text-primary-foreground"
+                        >
+                          1
+                        </span>
+                      )}
+                    </Button>
+                  </DropdownMenu.Trigger>
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Content
+                    className="tooltip"
+                    side="bottom"
+                    sideOffset={6}
+                  >
+                    {optionsLabel}
+                  </Tooltip.Content>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="sidebar-menu"
+                  side="right"
+                  align="start"
+                  sideOffset={8}
+                >
+                  <OptionsMenuContent
+                    filter={filter}
+                    onFilterChange={setFilter}
+                    addDisabled={addDisabled}
+                    onAddProject={onAddProject}
+                  />
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          ) : null}
+          <HeaderIconButton
+            label="New workspace"
             onClick={() => onCreateWorkspace()}
+            disabled={addDisabled}
           >
-            <Plus size={15} />
-          </button>
-          <button
-            type="button"
-            className="shell-icon-button"
-            aria-label="Filter projects"
-            aria-expanded={filterOpen}
-            title="Filter projects and worktrees"
-            onClick={() => {
-              setFilterOpen((value) => !value);
-              setFilter("");
-            }}
-          >
-            <SlidersHorizontal size={15} />
-          </button>
-        </span>
+            <span data-contextual-tour-target="workspace-create-control">
+              <Plus className="size-3.5" strokeWidth={2.25} />
+            </span>
+          </HeaderIconButton>
+          {wide ? null : (
+            <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <DropdownMenu.Trigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      type="button"
+                      className="relative size-6 text-muted-foreground"
+                      aria-label="More workspace actions"
+                    >
+                      <Ellipsis className="size-3.5" strokeWidth={2.25} />
+                      {filterActive && (
+                        <span
+                          aria-hidden
+                          className="absolute -top-0.5 -right-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-medium leading-none text-primary-foreground"
+                        >
+                          1
+                        </span>
+                      )}
+                    </Button>
+                  </DropdownMenu.Trigger>
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Content
+                    className="tooltip"
+                    side="bottom"
+                    sideOffset={6}
+                  >
+                    More workspace actions
+                  </Tooltip.Content>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="sidebar-menu"
+                  side="right"
+                  align="start"
+                  sideOffset={8}
+                >
+                  <OptionsMenuContent
+                    filter={filter}
+                    onFilterChange={setFilter}
+                    addDisabled={addDisabled}
+                    onAddProject={onAddProject}
+                  />
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          )}
+        </div>
       </div>
       {action?.kind === "add" && (
         <AddProjectDialog
@@ -123,17 +325,7 @@ export function ProjectList({
           onClose={onCloseAction}
         />
       )}
-      {filterOpen && (
-        <input
-          className="shell-filter-input"
-          aria-label="Filter projects and worktrees"
-          placeholder="Filter projects…"
-          autoFocus
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        />
-      )}
-      {visible.map((group) => (
+      {active.map((group) => (
         <ProjectRow
           key={group.project.id}
           group={group}
@@ -158,10 +350,36 @@ export function ProjectList({
           onClose={onCloseAction}
         />
       )}
-      {groups.length > 0 && visible.length === 0 && (
-        <p className="sidebar-empty">No projects match this filter.</p>
+      {active.length === 0 && (
+        <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground">
+          <span>No workspaces found</span>
+          {(filterActive || activityOnly) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="gap-1.5 border border-border/80 text-[11px]"
+              onClick={clearFilters}
+            >
+              <CircleX className="size-3.5" />
+              Clear Filters
+            </Button>
+          )}
+        </div>
       )}
     </section>
+  );
+}
+
+/** Groups with at least one live session on any of their worktrees. */
+function groupHasLiveSession(
+  group: ProjectGroup,
+  sessions: Session[],
+): boolean {
+  const ids = new Set(
+    group.worktrees.map((worktree) => worktree.workspaceId),
+  );
+  return sessions.some(
+    (session) => session.verdict === "live" && ids.has(session.workspaceId),
   );
 }
 

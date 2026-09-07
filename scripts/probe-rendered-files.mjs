@@ -125,7 +125,10 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     if (originalViewport) await page.setViewportSize(originalViewport);
   }
   await page.reload();
-  await page.getByText("Service 0.1.0", { exact: true }).waitFor();
+  // R9-B: sidebar footer readiness (the "Service x.y.z" text is gone).
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor();
   await ensureFilesVisible();
   await files.click();
   await panel.getByRole("treeitem", { name: first, exact: true }).click();

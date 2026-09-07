@@ -138,6 +138,16 @@ and their support modules (source context, pagination page numbers, empty
 state, work-item status badge, localized options, user avatar, repo badge),
 all at the pinned source revision above. Each ported file keeps the MIT notice.
 
+The titlebar chrome layout, view history model, Projects header and sidebar
+footer in `apps/desktop/src/renderer/src/features/shell/{app-chrome-layout,view-history,TitlebarLeftControls,ProjectList,sidebar-footer,SidebarNav}.ts(x)`
+and the Landing star button in `features/landing/github-star.tsx` port Orca's
+`src/renderer/src/app-shell/{TitlebarLeftControls,use-app-chrome-layout,AppWorkspaceShell,TitlebarMainStrip}.tsx`,
+`src/renderer/src/lib/{titlebar-left-chrome,titlebar-worktree-history-controls}.ts`,
+`src/renderer/src/store/slices/worktree-nav-history.ts`,
+`components/sidebar/{SidebarHeader,sidebar-header-actions,SidebarWorkspaceOptionsMenu,SidebarSettingsHelpMenu,SidebarToolbar,ScrollToCurrentWorkspaceToolbarButton,SidebarNav}.tsx`,
+`components/worktree-list/listing/EmptyState.tsx` and `components/Landing.tsx`,
+all at the pinned source revision above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
