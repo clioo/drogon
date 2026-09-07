@@ -8,29 +8,38 @@
 //! `crate::git_worktree`'s parser, both pure/std-only; this module is the
 //! first thing in the crate that actually spawns `git`.
 //!
-//! Not wired into `lib.rs` yet (see this crate's other V3 modules' doc
-//! comments for the same note) — root registers it. Exercised today only via
-//! `tests/git_process.rs`'s `#[path]` inclusion, the same trick
-//! `tests/git_baseline.rs` already uses for `src/git.rs`.
+//! Wired into `lib.rs` as `pub mod git_process`, alongside `crate::git` and
+//! `crate::git_worktree`. Exercised both by this crate's own real build and
+//! by `tests/git_process.rs`'s/`tests/git_process_bounds.rs`'s pre-existing
+//! `#[path]` inclusion (kept for those files' own reasons; no longer needed
+//! for this module to compile as part of the crate) and by
+//! `tests/git_public_api.rs`, which exercises it purely through this crate's
+//! public API.
 //!
-//! # (2) Host scope is a cache key here, never a routing instruction
+//! # (2) Host scope is a cache key for the native case, a fail-closed gate
+//! # for every remote case, and never a routing instruction
 //!
 //! `run_read_only_git` takes an explicit `workspace_root: &Path` and
 //! `scope: &HostScope`. This module ALWAYS spawns `git` as a plain child
-//! process of the OS process it runs in — `scope` is used exclusively to key
-//! `CapabilityCache` lookups/writes, never to decide *where* to run the
-//! command. There is no WSL/SSH/relay transport here (per the proposal's
-//! "Scope" section, this wrapper only runs a probe once a caller has already
-//! resolved which host is authoritative). Concretely: **resolving which
-//! physical host is authoritative for a given registered workspace happens
-//! later, at the RPC boundary** (not in this module, and not built by this
-//! change). A caller must not invoke this function's `Wsl`/`Ssh`/`Relay`
-//! scopes unless the *current process* is already physically running on
-//! that host (e.g. inside the right WSL distro, or as the right SSH
-//! provider's remote agent) — output produced by calling this function
-//! locally and merely labeling it with a remote `HostScope` is NOT remote
-//! output; it is local output mislabeled with someone else's cache key, and
-//! must never be reported to a caller as if it came from that remote host.
+//! process of the OS process it runs in. For `HostScope::Native`, `scope` is
+//! used exclusively to key `CapabilityCache` lookups/writes, never to decide
+//! *where* to run the command. There is no WSL/SSH/relay transport here (per
+//! the proposal's "Scope" section, this wrapper only runs a probe once a
+//! caller has already resolved which host is authoritative), so for
+//! `HostScope::Wsl`/`Ssh`/`Relay` both public entry points (`run_read_only_git`
+//! and `run_read_only_git_with_bin`) refuse with `unsupported_host` before
+//! any admission/cache/spawn — see `reject_remote_scope` — rather than
+//! silently running the command locally and merely labeling the result with
+//! a remote scope. Concretely: **resolving which physical host is
+//! authoritative for a given registered workspace, and actually executing on
+//! a non-native host, happens later, at the RPC boundary, in a future
+//! execution-host adapter** (not in this module, and not built by this
+//! change). This mirrors `crate::workspace::owned_path`'s `unsupported_host`
+//! precedent: a process must never mislabel its own local output as another
+//! host's output — calling this function locally and merely labeling the
+//! result with a remote `HostScope` would be exactly that, which is why the
+//! remote variants are refused outright instead of ever being allowed to
+//! reach a spawn.
 
 use std::io::Read;
 use std::path::Path;
@@ -172,12 +181,35 @@ pub fn run_read_only_git_with_bin(
     budget: GitProbeBudget,
     git_bin: &Path,
 ) -> Result<ParsedGitOutput, RpcError> {
+    reject_remote_scope(scope)?;
     match operation {
         ReadOnlyGitOperation::Status => run_status(workspace_root, &budget, git_bin),
         ReadOnlyGitOperation::WorktreeList => {
             run_worktree_list(workspace_root, scope, cache, &budget, git_bin)
         }
     }
+}
+
+/// Fail-closed guard for every non-native `HostScope`: this module has no
+/// execution-host adapter for WSL/SSH/relay (see this module's doc comment,
+/// "(2)"), so a caller-supplied remote scope must be refused before this
+/// function's admission gate, `CapabilityCache` lookup, or process spawn
+/// ever run — never merely spawned locally and mislabeled as remote output.
+/// Mirrors `crate::workspace::owned_path`'s `unsupported_host` precedent.
+fn reject_remote_scope(scope: &HostScope) -> Result<(), RpcError> {
+    let (kind, detail) = match scope {
+        HostScope::Native => return Ok(()),
+        HostScope::Wsl(distro) => ("WSL", distro.as_str()),
+        HostScope::Ssh(provider) => ("SSH", provider.as_str()),
+        HostScope::Relay(relay_id) => ("relay", relay_id.as_str()),
+    };
+    Err(RpcError::new(
+        "unsupported_host",
+        format!(
+            "this process has no execution-host adapter for {kind} scope \"{detail}\"; \
+             refusing to run git locally and mislabel the output as remote output"
+        ),
+    ))
 }
 
 fn run_status(
@@ -462,6 +494,13 @@ pub(crate) const ENV_REMOVE_DENYLIST: &[&str] = &[
     "GIT_CONFIG_PARAMETERS",
 ];
 
+/// `#[allow(dead_code)]`: every real production call site resolves through
+/// `build_git_command_with_bin` directly (via `spawn_git_and_capture`); this
+/// PATH-resolving wrapper exists solely as the `tests/git_process.rs`/
+/// `tests/git_process_bounds.rs` seam described above, mirroring
+/// `crate::git::CapabilityCache::is_in_flight`'s identical `#[allow(dead_code)]`
+/// precedent for a pub(crate) test-only item.
+#[allow(dead_code)]
 pub(crate) fn build_git_command(cwd: &Path, argv: &[String]) -> Command {
     build_git_command_with_bin(Path::new("git"), cwd, argv)
 }
@@ -897,6 +936,13 @@ pub(crate) fn probe_readiness(
 /// deterministically with synthetic streams, without needing a real
 /// unreaped-after-kill child (not reliably producible on demand) to prove
 /// the retention logic.
+///
+/// `#[allow(dead_code)]`: every real production call site uses
+/// `probe_readiness` directly (`release_when_finished`); this convenience
+/// wrapper exists solely as the `tests/git_process_bounds.rs` seam described
+/// above, mirroring `crate::git::CapabilityCache::is_in_flight`'s identical
+/// `#[allow(dead_code)]` precedent for a pub(crate) test-only item.
+#[allow(dead_code)]
 pub(crate) fn resources_are_finished(
     stdout: &SharedStream,
     stderr: &SharedStream,

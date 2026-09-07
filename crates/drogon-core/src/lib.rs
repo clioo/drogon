@@ -26,6 +26,9 @@ pub mod session_authority;
 
 mod db;
 mod error;
+pub mod git;
+pub mod git_process;
+pub mod git_worktree;
 mod harness;
 mod ring;
 mod session;

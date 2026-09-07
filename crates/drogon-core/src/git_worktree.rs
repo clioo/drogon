@@ -3,9 +3,10 @@
 //! `docs/migration/verticals/V3/git-worktree-safety.md` and the
 //! `worktree-list-z` row in `docs/reference/git-compatibility.md`. This
 //! module is pure/std-only: no process spawning, no I/O. It does not import
-//! `crate::git` (that module is not wired into this crate's module tree yet,
-//! per `git_baseline.rs`'s test comment), so the `worktree-list-z`
-//! capability is referenced by its exact string key rather than the enum.
+//! `crate::git` (both modules are wired into this crate's module tree, but
+//! this module deliberately keeps no source dependency on that one), so the
+//! `worktree-list-z` capability is referenced by its exact string key rather
+//! than the enum.
 
 use std::path::Path;
 
@@ -148,10 +149,12 @@ pub fn parse_worktree_list_porcelain(input: &str) -> Result<Vec<WorktreeEntry>, 
 /// The exact `docs/reference/git-compatibility.md#current-capabilities`
 /// identifier for this capability, matching
 /// `crate::git::Capability::WorktreeListZ.key()`. Referenced by string
-/// because `crate::git` is not wired into this crate's module tree (see the
-/// module doc comment); a `tests/git_worktree.rs` case cross-checks this
-/// constant against the real enum via a `#[path]` include, so the two
-/// cannot silently drift.
+/// because this module deliberately keeps no source dependency on
+/// `crate::git` (see the module doc comment), even though both are wired
+/// into this crate's module tree; `tests/git_worktree.rs`'s pre-existing
+/// `#[path]` include and `tests/git_public_api.rs`'s public-API test both
+/// cross-check this constant against the real enum, so the two cannot
+/// silently drift.
 pub const WORKTREE_LIST_Z_CAPABILITY_KEY: &str = "worktree-list-z";
 
 /// The preferred/fallback command pair for listing worktrees. Data only:
