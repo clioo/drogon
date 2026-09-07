@@ -78,17 +78,31 @@ describe("agent defaults resolution", () => {
 });
 
 describe("shortcut labels", () => {
-  test("the list covers window actions plus every palette registry chord", () => {
-    const entries = buildShortcutList();
+  test("the list covers the source-parity table in source order", () => {
+    const entries = buildShortcutList("other");
     const ids = entries.map((e) => e.id);
-    expect(ids).toContain("settings.open");
-    expect(ids).toContain("workspace.newTerminal");
+    expect(ids).toContain("app.settings");
+    expect(ids).toContain("tab.newTerminal");
     expect(ids).toContain("workspace.create");
     expect(ids).toContain("terminal.clear");
     expect(ids).toContain("worktree.palette");
     expect(ids).toContain("worktree.quickOpen");
-    expect(ids).toContain("tabs.select1");
-    expect(ids).toContain("tabs.prev");
+    expect(ids).toContain("tab.selectByIndex");
+    expect(ids).toContain("tab.previousAllTypes");
+    // Source group order: Global rows precede Tabs, Tab Navigation,
+    // Settings and Terminal Panes rows.
+    expect(ids.indexOf("worktree.quickOpen")).toBeLessThan(
+      ids.indexOf("tab.newTerminal"),
+    );
+    expect(ids.indexOf("tab.newTerminal")).toBeLessThan(
+      ids.indexOf("tab.nextAllTypes"),
+    );
+    expect(ids.indexOf("tab.nextAllTypes")).toBeLessThan(
+      ids.indexOf("settings.search"),
+    );
+    expect(ids.indexOf("settings.search")).toBeLessThan(
+      ids.indexOf("terminal.clear"),
+    );
     // No duplicate ids: the read-only list must not double-count.
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -114,17 +128,17 @@ describe("shortcut labels", () => {
     expect(resolveShortcutPlatform("Macintosh")).toBe("darwin");
     expect(resolveShortcutPlatform("Windows")).toBe("other");
   });
-  test("displayKey uppercases single chars and capitalises names", () => {
+  test("displayKey uppercases single chars and uses source key labels", () => {
     expect(displayKey("n")).toBe("N");
     expect(displayKey(",")).toBe(",");
-    expect(displayKey("escape")).toBe("Escape");
+    expect(displayKey("escape")).toBe("Esc");
   });
-  test("filtering matches title, id or chord and ignores case", () => {
-    const entries = buildShortcutList();
+  test("filtering matches title, id, group or chord and ignores case", () => {
+    const entries = buildShortcutList("other");
     expect(filterShortcuts(entries, "").length).toBe(entries.length);
     const terminal = filterShortcuts(entries, "terminal");
-    expect(terminal.map((e) => e.id)).toContain("workspace.newTerminal");
-    expect(filterShortcuts(entries, "CMDORCTRL+P")).toContainEqual(
+    expect(terminal.map((e) => e.id)).toContain("terminal.clear");
+    expect(filterShortcuts(entries, "MOD+P")).toContainEqual(
       expect.objectContaining({ id: "worktree.quickOpen" }),
     );
     expect(filterShortcuts(entries, "no-such-shortcut")).toEqual([]);

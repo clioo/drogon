@@ -1,86 +1,29 @@
-// Read-only shortcut reference for the Shortcuts section: titles for the
-// palette registry plus the window-level actions App registers, rendered
-// with platform-correct labels (⌘ on macOS, Ctrl elsewhere).
-import { PALETTE_SHORTCUTS } from "../../shortcuts";
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Ported from the Orca reference (read-only):
+//   src/renderer/src/components/settings/ShortcutRowsList.tsx
+//     (group headers with rows underneath, empty-filter state)
+//   src/shared/keybindings/formatting.ts (platform-correct labels)
+// Adapted: read-only rows (no recording/removal), chords/titles/groups from
+// the keybinding core table; disabled rows keep their reason visible.
+import {
+  bindingsForPlatform,
+  KEYBINDING_DEFINITIONS,
+  resolveKeybindingPlatform,
+  type KeybindingDefinition,
+} from "../../keybindings/definitions";
+import { formatKeybinding } from "../../keybindings/labels";
+import type { KeybindingPlatform } from "../../keybindings/definitions";
 
-export type ShortcutGroup = "Settings" | "Terminals" | "Commands" | "Tabs";
+export type ShortcutGroup = string;
 
 export type ShortcutListEntry = {
   id: string;
   title: string;
-  chord: string;
   group: ShortcutGroup;
+  definition: KeybindingDefinition;
+  /** Platform-resolved stored chords for this entry. */
+  bindings: readonly string[];
 };
-
-function paletteTitle(id: string): { title: string; group: ShortcutGroup } {
-  if (id === "worktree.palette")
-    return { title: "Switch worktree", group: "Commands" };
-  if (id === "worktree.quickOpen")
-    return { title: "Go to File", group: "Commands" };
-  const tabSelect = /^tabs\.select([1-9])$/.exec(id);
-  if (tabSelect)
-    return { title: `Select tab ${tabSelect[1]}`, group: "Tabs" };
-  if (id === "tabs.prev") return { title: "Previous tab", group: "Tabs" };
-  if (id === "tabs.next") return { title: "Next tab", group: "Tabs" };
-  return { title: id, group: "Commands" };
-}
-
-const WINDOW_SHORTCUTS: ShortcutListEntry[] = [
-  {
-    id: "settings.open",
-    title: "Open Settings",
-    chord: "CmdOrCtrl+,",
-    group: "Settings",
-  },
-  {
-    id: "workspace.create",
-    title: "Create workspace",
-    chord: "CmdOrCtrl+N",
-    group: "Commands",
-  },
-  {
-    id: "workspace.newTerminal",
-    title: "New terminal",
-    chord: "CmdOrCtrl+Shift+N",
-    group: "Terminals",
-  },
-  {
-    id: "terminal.clear",
-    title: "Clear active pane",
-    chord: "CmdOrCtrl+K",
-    group: "Terminals",
-  },
-  {
-    id: "sidebar.left.toggle",
-    title: "Toggle Sidebar",
-    chord: "CmdOrCtrl+B",
-    group: "Commands",
-  },
-  {
-    id: "worktree.history.back",
-    title: "Worktree History Back",
-    chord: "CmdOrCtrl+Alt+ArrowLeft",
-    group: "Commands",
-  },
-  {
-    id: "worktree.history.forward",
-    title: "Worktree History Forward",
-    chord: "CmdOrCtrl+Alt+ArrowRight",
-    group: "Commands",
-  },
-];
-
-/** Every shortcut the Shortcuts section lists, window actions first. */
-export function buildShortcutList(): ShortcutListEntry[] {
-  return [
-    ...WINDOW_SHORTCUTS,
-    ...PALETTE_SHORTCUTS.map((def) => ({
-      id: def.id,
-      chord: def.chord,
-      ...paletteTitle(def.id),
-    })),
-  ];
-}
 
 export type ShortcutPlatform = "darwin" | "other";
 
@@ -88,46 +31,56 @@ export function resolveShortcutPlatform(userAgent: string): ShortcutPlatform {
   return userAgent.includes("Mac") ? "darwin" : "other";
 }
 
+function toKeybindingPlatform(platform: ShortcutPlatform): KeybindingPlatform {
+  return resolveKeybindingPlatform(platform);
+}
+
+/** Every shortcut the Shortcuts section lists, in source table order. */
+export function buildShortcutList(
+  platform: ShortcutPlatform = "other",
+): ShortcutListEntry[] {
+  const resolved = toKeybindingPlatform(platform);
+  return KEYBINDING_DEFINITIONS.map((definition) => ({
+    id: definition.id,
+    title: definition.title,
+    group: definition.group,
+    definition,
+    bindings: bindingsForPlatform(definition, resolved),
+  }));
+}
+
 /**
- * Splits a registry chord ("CmdOrCtrl+Shift+N") into display labels:
- * symbols on macOS (⌘⇧⌥, no separator), words elsewhere (Ctrl+Shift+N).
+ * Splits a stored chord ("Mod+Shift+N") into display labels: symbols on
+ * macOS (⌘⇧⌥, no separator), words elsewhere (Ctrl+Shift+N). The legacy
+ * `CmdOrCtrl` spelling renders identically.
  */
 export function formatChordForPlatform(
   chord: string,
   platform: ShortcutPlatform,
 ): string[] {
-  const parts = chord.split("+").map((part) => part.trim());
-  const labels: string[] = [];
-  for (const part of parts) {
-    const token = part.toLowerCase();
-    if (token === "cmdorctrl") labels.push(platform === "darwin" ? "⌘" : "Ctrl");
-    else if (token === "shift") labels.push(platform === "darwin" ? "⇧" : "Shift");
-    else if (token === "alt") labels.push(platform === "darwin" ? "⌥" : "Alt");
-    else if (part !== "") labels.push(displayKey(part));
-  }
-  return labels;
+  return formatKeybinding(chord, toKeybindingPlatform(platform));
 }
 
-/**
- * Single-char keys render uppercased; arrow keys render as glyphs; other
- * named keys keep a capitalised form.
- */
+/** Display label for one stored binding of an entry. */
+export function formatEntryBinding(
+  binding: string,
+  platform: ShortcutPlatform,
+): string[] {
+  return formatChordForPlatform(binding, platform);
+}
+
+/** Single-key display label (legacy helper kept for the section tests). */
 export function displayKey(key: string): string {
+  const labels = formatKeybinding(`Mod+${key}`, "linux");
+  const last = labels[labels.length - 1];
+  if (last !== undefined && last !== "Mod" && last !== "Ctrl") return last;
   const trimmed = key.trim();
   if (trimmed === "") return key;
   if (trimmed.length === 1) return trimmed.toUpperCase();
-  const arrows: Record<string, string> = {
-    arrowleft: "←",
-    arrowright: "→",
-    arrowup: "↑",
-    arrowdown: "↓",
-  };
-  const arrow = arrows[trimmed.toLowerCase()];
-  if (arrow) return arrow;
   return trimmed[0].toUpperCase() + trimmed.slice(1).toLowerCase();
 }
 
-/** Case-insensitive substring match over title, id and raw chord. */
+/** Case-insensitive substring match over title, id, group and raw chords. */
 export function filterShortcuts(
   entries: ShortcutListEntry[],
   query: string,
@@ -138,6 +91,9 @@ export function filterShortcuts(
     (entry) =>
       entry.title.toLowerCase().includes(needle) ||
       entry.id.toLowerCase().includes(needle) ||
-      entry.chord.toLowerCase().includes(needle),
+      entry.group.toLowerCase().includes(needle) ||
+      entry.bindings.some((binding) =>
+        binding.toLowerCase().includes(needle),
+      ),
   );
 }
