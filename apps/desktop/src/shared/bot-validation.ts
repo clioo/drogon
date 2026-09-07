@@ -77,3 +77,29 @@ export const botSnapshotResultSchema = scope.extend({
   bots: z.array(bot),
   history: z.array(history),
 });
+
+// Structural transport validation only; native owns preset, harness and text policy.
+export const botCreateInputSchema = scope
+  .extend({
+    requestId: id,
+    botId: id.nullable().optional(),
+    locale: z.string().nullable().optional(),
+    body: bot
+      .omit({ id: true, createdAt: true, updatedAt: true })
+      .extend({
+        displayIdentity: bot.shape.displayIdentity.strict(),
+        harnessPolicy: bot.shape.harnessPolicy
+          .extend({ explicitModel: z.null() })
+          .strict(),
+        responsibilities: z.array(z.never()).max(0).optional(),
+        currentSession: z.null().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const botCreateResultSchema = bot.extend({
+  id,
+  responsibilities: z.array(z.never()).max(0),
+  currentSession: z.null(),
+});
