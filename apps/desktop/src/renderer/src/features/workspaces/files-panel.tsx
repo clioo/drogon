@@ -321,6 +321,12 @@ export function createRequestIdSource(options?: {
       file.byDraft.delete(draft);
       // This confirmed write supersedes every attempt minted before it.
       file.successSeq = sequence;
+      // SAFE PRUNE: drop only superseded-now-safe attempts (minted before
+      // this success); a valid retry minted AFTER the previous success is
+      // never pruned, so the cap cannot stay full after a success.
+      for (const [payload, attempt] of file.byDraft) {
+        if (attempt.seq <= file.successSeq) file.byDraft.delete(payload);
+      }
       if (file.byDraft.size === 0) files.delete(key);
     },
   };
@@ -367,8 +373,13 @@ function UnavailableFallback({ capability }: { capability: string }) {
 function FilesPanel({
   bridge,
   drafts,
+  requestIds,
   ...props
-}: FilesPanelProps & { bridge: FileBridge; drafts: FilesDraftStore }) {
+}: FilesPanelProps & {
+  bridge: FileBridge;
+  drafts: FilesDraftStore;
+  requestIds: RequestIdSource;
+}) {
   const { workspace, status } = props;
   // Files panels never need a terminal session: `session` is deliberately
   // ignored (fully supported as null) and never gates any call here.
@@ -379,8 +390,9 @@ function FilesPanel({
     () => ({ hostId, workspaceId }),
     [hostId, workspaceId],
   );
-  // Per-mount request-id identity: distinct mounts never share write ids.
-  const requestIds = useMemo(() => createRequestIdSource(), []);
+  // Request-id identity lives at DESCRIPTOR lifetime (injected from the
+  // factory), not per mount: an unresolved retry keeps its id across
+  // unmount/remount while the draft store claims persistence.
   const [open, setOpen] = useState<FilesOpenEntry | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [selection, setSelection] = useState<{
@@ -543,6 +555,14 @@ function FilesPanel({
         readError={readErrorFor(read, scope, effectiveOpenPath)}
         onReload={reload}
         onSave={onSave}
+        onDraftChange={(draft) => {
+          // Per-edit recording: every keystroke lands in the descriptor-
+          // owned store for the open scope+path, so type-without-save
+          // survives unmount/remount.
+          if (effectiveOpenPath !== null) {
+            drafts.recordDraft(scope, effectiveOpenPath, draft);
+          }
+        }}
       />
     </section>
   );
@@ -551,22 +571,31 @@ function FilesPanel({
 /**
  * Factory for the files.explorer panel descriptor. The bridge is injected
  * once here and every render path (list/read/write) goes through it —
- * no Node/Electron APIs, no local fallbacks. The factory also owns the
- * descriptor-lifetime draft store: because V2 unmounts the panel on
- * navigation, drafts live HERE (not in component state) so they survive
- * unmount/remount. `deps.drafts` is an optional test/alt-host injection;
- * the public `createFilesPanelDescriptor({ bridge })` call is unchanged.
+ * no Node/Electron APIs, no local fallbacks. The factory also owns BOTH
+ * descriptor-lifetime stores — the draft store AND the request-id source —
+ * because V2 unmounts the panel on navigation: drafts and unresolved
+ * retry identities live HERE (not in component state) so they survive
+ * unmount/remount. `deps.drafts`/`deps.requestIds` are optional test/
+ * alt-host injections; the public `createFilesPanelDescriptor({ bridge })`
+ * call is unchanged.
  */
 export function createFilesPanelDescriptor(deps: {
   bridge: FileBridge;
   drafts?: FilesDraftStore;
+  requestIds?: RequestIdSource;
 }): FilesPanelDescriptor {
   const drafts = deps.drafts ?? createFilesDraftStore();
+  const requestIds = deps.requestIds ?? createRequestIdSource();
   return {
     id: FILES_ROUTE_ID,
     title: "Files",
     component: (props: FilesPanelProps) => (
-      <FilesPanel {...props} bridge={deps.bridge} drafts={drafts} />
+      <FilesPanel
+        {...props}
+        bridge={deps.bridge}
+        drafts={drafts}
+        requestIds={requestIds}
+      />
     ),
     capability: FILES_CAPABILITY,
   };

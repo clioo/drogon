@@ -454,17 +454,30 @@ describe("request ids: per-attempt identity with settle-on-success", () => {
     expect(wire[3]).not.toBe(wire[0]);
   });
 
-  test("per-file generation retire: A unresolved -> B confirmed -> A mints a FRESH id", () => {
+  test("per-file generation retire: A unresolved -> B (same file) confirmed -> A mints a FRESH id", () => {
     const source = createRequestIdSource();
     const idA = source.next(KEY_A, "draft A");
-    // B (same file, later payload) is confirmed successful:
+    // B — a later payload for the SAME file — is confirmed successful:
     const idB = source.next(KEY_A, "draft B");
     source.settle(KEY_A, "draft B");
-    // A's unresolved attempt was minted before B's success — it is
-    // superseded: writing A now is a NEW logical write with a fresh id.
+    // A's unresolved attempt was minted before B's success — superseded:
+    // writing A now is a NEW logical write with a fresh id.
     const idA2 = source.next(KEY_A, "draft A");
     expect(idA2).not.toBe(idA);
     expect(idA2).not.toBe(idB);
+    // B's own id was settled; retrying B is also a new attempt:
+    expect(source.next(KEY_A, "draft B")).not.toBe(idB);
+  });
+
+  test("settle safely prunes superseded attempts: the cap is usable again after a success", () => {
+    const source = createRequestIdSource({ maxRetained: 2 });
+    source.next(KEY_A, "A body"); // unresolved attempt for the file
+    source.next(KEY_A, "B body"); // later payload, file cap now full
+    // B confirms success: A's attempt (minted before B's success) is
+    // superseded-now-safe and must be PRUNED — never retained to jam the cap.
+    source.settle(KEY_A, "B body");
+    // The pruned space means a brand-new payload still fits without throw:
+    expect(() => source.next(KEY_A, "C body")).not.toThrow();
   });
 
   test("exact-A retry is preserved only while no intervening success exists", () => {
@@ -535,6 +548,61 @@ describe("request ids: per-attempt identity with settle-on-success", () => {
     expect(idOne).not.toBe(idTwo);
     expect(mountOne.next(KEY_A, "body")).toBe(idOne);
     expect(mountTwo.next(KEY_A, "body")).toBe(idTwo);
+  });
+
+  test("request-id identity survives unmount/remount at descriptor lifetime", () => {
+    // The source is owned by the DESCRIPTOR (injected here exactly as the
+    // factory owns it), so a V2 unmount/remount must not orphan an
+    // unresolved retry the way the old per-mount useMemo did.
+    const descriptorSource = createRequestIdSource();
+    const descriptor = createFilesPanelDescriptor({
+      bridge: fakeBridge().bridge,
+      requestIds: descriptorSource,
+    });
+    expect(descriptor.id).toBe(FILES_ROUTE_ID);
+    // "Mount 1": a save attempt goes unresolved (deferred write never
+    // settles in this scenario).
+    const attemptId = descriptorSource.next(KEY_A, "remount body");
+    // V2 unmounts and remounts the panel — same descriptor, same source.
+    // A retry of the exact payload reuses the attempt id:
+    expect(descriptorSource.next(KEY_A, "remount body")).toBe(attemptId);
+    // And a wire write through the factory wiring carries that same id:
+    const wire: string[] = [];
+    const bridge: FileBridge = {
+      fileList: () => Promise.reject(new Error("unused")),
+      fileRead: () => Promise.reject(new Error("unused")),
+      fileWrite: (input) => {
+        wire.push(input.requestId);
+        return Promise.resolve({
+          ok: true,
+          result: { hostId: "h1", workspaceId: "w1", path: input.path, size: 1, mtime: "t" },
+        });
+      },
+    };
+    const retrySaver = makeFileSaver(
+      bridge,
+      { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+      descriptorSource,
+      KEY_A,
+    );
+    return retrySaver("remount body").then(() => {
+      expect(wire).toEqual([attemptId]);
+    });
+  });
+
+  test("safe prune never removes a valid retry (minted after the last success)", () => {
+    const source = createRequestIdSource({ maxRetained: 2 });
+    const v1 = source.next(KEY_A, "v1");
+    source.settle(KEY_A, "v1"); // success prunes v1 (superseded-now-safe)
+    // Minted AFTER the success: this is a valid unresolved retry…
+    const v2 = source.next(KEY_A, "v2");
+    expect(v2).not.toBe(v1);
+    source.next(KEY_A, "v3"); // second unresolved payload, cap now full
+    // …and it survives: nothing has superseded it, so even at cap it is
+    // returned rather than silently replaced…
+    expect(source.next(KEY_A, "v2")).toBe(v2);
+    // …while a genuinely new payload still fails closed at the cap.
+    expect(() => source.next(KEY_A, "v4")).toThrowError(FilesRequestIdCapError);
   });
 
   test("a service refusal passes through verbatim (no rewriting into success)", async () => {
