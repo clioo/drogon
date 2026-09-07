@@ -216,12 +216,11 @@ try {
       (await page.evaluate(() => window.drogon.buildInfo()))?.revision,
       build.revision,
     );
-    await page
-      .locator(".build-revision")
-      .filter({ hasText: build.revision.slice(0, 7) })
-      .waitFor();
+    // R9-B removed the footer's revision display (fidelity to the source
+    // toolbar), so the sealed identity is proved through buildInfo, not a
+    // rendered revision string.
     report.checks.push(
-      "packaged-app-starts-bundled-runtime-with-minimal-path-and-displays-revision",
+      "packaged-app-starts-bundled-runtime-with-minimal-path-and-reports-revision",
     );
   }
   assert.deepEqual(
