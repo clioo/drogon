@@ -234,15 +234,18 @@ async function probeMentuSurface({ page, workspace, output }) {
 
 /** Source Control (right sidebar): the unstaged edit stages into Staged. */
 async function probeSourceControlStage({ page, output }) {
-  await page.getByRole("button", { name: "Source Control" }).click();
+  await page.getByRole("button", { name: /^Source Control( \(.*\))?$/ }).click();
   const panel = page.locator('section[aria-label="Changes"]');
   await panel.waitFor();
-  // ChangesView renders one "Stage all" per non-empty group in staged,
-  // unstaged, untracked order: the first is the Unstaged group's. The
-  // Staged (1) assertion below fails closed if the wrong group was staged
-  // (the untracked group holds two fixture files).
+  // The ported listing renders one "Stage all" per non-empty stageable group
+  // in Changes, Untracked order: the first is the Changes group's. The
+  // "Staged Changes 1" assertion below fails closed if the wrong group was
+  // staged (the untracked group holds two fixture files).
   await panel.getByRole("button", { name: "Stage all", exact: true }).first().click();
-  await panel.getByRole("heading", { name: "Staged (1)", exact: true }).waitFor();
+  // R10-B section headers are toggle buttons named "<label> <count>".
+  await panel
+    .getByRole("button", { name: "Staged Changes 1", exact: true })
+    .waitFor();
   await page.screenshot({
     path: path.join(output, "changes-staged.png"),
     animations: "disabled",
@@ -672,14 +675,16 @@ export async function probePackagedSurfaces({
   // in the right activity bar as "Source Control"; the bare "Changes" name
   // is gone, so the match stays non-exact for the chord suffix.)
   const changedFile = await prepareChangesRepo(workspace);
-  const changesNav = page.getByRole("button", { name: "Source Control" });
+  const changesNav = page.getByRole("button", { name: /^Source Control( \(.*\))?$/ });
   assert.equal(await changesNav.isEnabled(), true);
   await changesNav.click();
   // The Changes view is a keep-alive mount that also renders off-route:
   // scope to the right-sidebar section so rows/buttons resolve exactly once.
   const changesPanel = page.locator('section[aria-label="Changes"]');
   await changesPanel.waitFor();
-  await page.getByLabel("Changed files", { exact: true }).waitFor();
+  // R10-B ported the source listing: rows are data-testid="source-control-entry"
+  // (the old "Changed files" list label is gone).
+  await changesPanel.locator('[data-testid="source-control-entry"]').first().waitFor();
   await changesPanel.getByText(changedFile, { exact: true }).waitFor();
   await page.getByLabel("Commit message", { exact: true }).waitFor();
   await screenshot("changes.png");
