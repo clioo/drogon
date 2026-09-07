@@ -1,0 +1,205 @@
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
+import { describe, expect, test } from "vitest";
+import { Tooltip } from "radix-ui";
+import { UncommittedEntryRow } from "./uncommitted-entry-row";
+import { SectionHeader } from "./section-header";
+import { CommitMessageComposer } from "./commit-message-composer";
+import { CommitArea } from "./commit-area";
+import { SourceControlDiscardDialog } from "./discard-dialog";
+import { SourceControlBranchLineTotalChip } from "./branch-line-total-chip";
+import { SourceControlBranchContextRow } from "./branch-context-row";
+import { SyncRow } from "./sync-row";
+import { EmptyState } from "./empty-state";
+import { DiffLineCounts } from "./diff-line-counts";
+import type { SourceControlEntry } from "./source-control-entry";
+
+function html(node: React.ReactElement): string {
+  // Like App's single Tooltip.Provider: every Radix tooltip trigger below
+  // requires a provider ancestor to render.
+  return renderToString(
+    createElement(Tooltip.Provider, { delayDuration: 400, children: node }),
+  ).replace(/<!-- -->/g, "");
+}
+
+const entry: SourceControlEntry = {
+  path: "src/App.tsx",
+  area: "unstaged",
+  status: "modified",
+  added: 3,
+  removed: 1,
+};
+
+const rowProps = {
+  entryKey: "unstaged::src/App.tsx",
+  entry,
+  onOpen: () => {},
+  onStage: () => Promise.resolve(),
+  onUnstage: () => Promise.resolve(),
+  onDiscard: () => {},
+};
+
+describe("source control render", () => {
+  test("untracked directory entries name the directory", () => {
+    const out = html(
+      createElement(UncommittedEntryRow, {
+        ...rowProps,
+        entryKey: "untracked::fresh-dir/",
+        entry: { path: "fresh-dir/", area: "untracked", status: "untracked" },
+      }),
+    );
+    expect(out).toContain('aria-label="fresh-dir (U)"');
+    expect(out).toContain("fresh-dir");
+  });
+
+  test("file rows show the status letter, name, dimmed directory and line counts", () => {
+    const out = html(createElement(UncommittedEntryRow, rowProps));
+    expect(out).toContain('data-source-control-path="src/App.tsx"');
+    expect(out).toContain('data-source-control-area="unstaged"');
+    expect(out).toContain(">M<");
+    expect(out).toContain("App.tsx");
+    expect(out).toContain("src");
+    expect(out).toContain("+3");
+    expect(out).toContain("-1");
+    expect(out).toContain("Stage");
+    expect(out).toContain("Discard changes");
+  });
+
+  test("staged rows offer unstage instead of stage", () => {
+    const out = html(
+      createElement(UncommittedEntryRow, {
+        ...rowProps,
+        entry: { ...entry, area: "staged" },
+      }),
+    );
+    expect(out).toContain("Unstage");
+    expect(out).not.toContain('"Stage"');
+  });
+
+  test("section headers show the label and count", () => {
+    const out = html(
+      createElement(SectionHeader, {
+        label: "Staged Changes",
+        count: 2,
+        isCollapsed: false,
+        onToggle: () => {},
+      }),
+    );
+    expect(out).toContain("Staged Changes");
+    expect(out).toContain(">2<");
+  });
+
+  test("commit composer keeps the source placeholder and label", () => {
+    const out = html(
+      createElement(CommitMessageComposer, {
+        rows: 2,
+        commitMessage: "",
+        disabled: false,
+        onCommitMessageChange: () => {},
+        describedBy: "",
+      }),
+    );
+    expect(out).toContain('placeholder="Message"');
+    expect(out).toContain('aria-label="Commit message"');
+  });
+
+  test("commit button needs a message and staged rows", () => {
+    const base = {
+      commitError: null,
+      remoteActionError: null,
+      prNotice: null,
+      prUrl: null,
+      isCommitting: false,
+      isSecondaryBusy: false,
+      stagedCount: 1,
+      hasPartiallyStagedChanges: false,
+      isBusy: false,
+      amend: false,
+      canAmend: true,
+      onCommitMessageChange: () => {},
+      onCommit: () => {},
+      onCommitAndPush: () => {},
+      onToggleAmend: () => {},
+    };
+    const empty = html(createElement(CommitArea, { ...base, commitMessage: "" }));
+    expect(empty).toContain("Commit");
+    // NB: the `disabled=` attribute, not the Tailwind `disabled:` classes
+    // that appear in every render.
+    expect(empty).toContain("disabled=");
+    const ready = html(createElement(CommitArea, { ...base, commitMessage: "fix it" }));
+    expect(ready).toContain("Commit");
+    expect(ready).not.toContain("disabled=");
+    // The chevron menu items portal out of SSR; the trigger proves the
+    // Commit & Push / amend menu is wired.
+    expect(ready).toContain('aria-label="More commit and remote actions"');
+  });
+
+  test("discard dialog stays unmounted without a pending confirmation", () => {
+    // Radix portals do not SSR, so the open dialog's copy is pinned by
+    // discard-copy.test.ts; here the closed dialog must render nothing.
+    expect(
+      html(
+        createElement(SourceControlDiscardDialog, {
+          pendingDiscard: null,
+          onCancel: () => {},
+          onConfirm: () => {},
+        }),
+      ),
+    ).toBe("");
+  });
+
+  test("branch line-total chip announces raw counts", () => {
+    const out = html(
+      createElement(SourceControlBranchLineTotalChip, { added: 12, removed: 4 }),
+    );
+    expect(out).toContain('data-testid="source-control-branch-line-total"');
+    expect(out).toContain('aria-label="12 lines added, 4 lines deleted"');
+    expect(html(createElement(SourceControlBranchLineTotalChip, { added: 0, removed: 0 }))).toBe(
+      "",
+    );
+  });
+
+  test("branch row names the branch and upstream", () => {
+    const out = html(
+      createElement(SourceControlBranchContextRow, {
+        branchHead: "feature-x",
+        upstream: "origin/main",
+        ahead: 2,
+        behind: 0,
+        lineTotalAdded: 5,
+        lineTotalRemoved: 0,
+      }),
+    );
+    expect(out).toContain("feature-x");
+    expect(out).toContain("origin/main");
+    expect(out).toContain("↑2");
+  });
+
+  test("sync row reports upstream and gates push without it", () => {
+    const props = {
+      busyKind: null as null,
+      actionsAvailable: { pull: true, fetch: true },
+      onPush: () => {},
+      onPull: () => {},
+      onFetch: () => {},
+      onCreatePr: () => {},
+    };
+    const withUpstream = html(
+      createElement(SyncRow, { ...props, upstream: "origin/main", ahead: 1, behind: 0 }),
+    );
+    expect(withUpstream).toContain("origin/main");
+    expect(withUpstream).toContain("New PR");
+    const withoutUpstream = html(
+      createElement(SyncRow, { ...props, upstream: null, ahead: null, behind: null }),
+    );
+    expect(withoutUpstream).toContain("No upstream");
+  });
+
+  test("empty state and diff counts render their copy", () => {
+    expect(
+      html(createElement(EmptyState, { heading: "No changes on this branch", supportingText: "Clean." })),
+    ).toContain("No changes on this branch");
+    expect(html(createElement(DiffLineCounts, { added: 2, removed: 0 }))).toContain("+2");
+    expect(html(createElement(DiffLineCounts, {}))).toBe("");
+  });
+});

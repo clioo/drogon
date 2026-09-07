@@ -2,13 +2,10 @@ export {
   CHANGES_ROUTE_ID,
   CHANGES_TITLE,
   ChangesPanel,
-  ChangesView,
   createChangesPanelDescriptor,
   isChangesAvailable,
   type ChangesPanelDescriptor,
   type ChangesPanelProps,
-  type ChangesViewCallbacks,
-  type ChangesViewData,
 } from "./ChangesPanel";
 export {
   badgeFor,

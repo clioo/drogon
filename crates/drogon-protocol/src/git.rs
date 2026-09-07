@@ -135,6 +135,9 @@ pub struct GitCommitParams {
     #[serde(flatten)]
     pub scope: GitScope,
     pub message: String,
+    /// Fold into the previous commit instead of creating a new one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amend: Option<bool>,
 }
 
 impl GitCommitParams {
@@ -150,6 +153,57 @@ impl GitCommitParams {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPushParams {
+    #[serde(flatten)]
+    pub scope: GitScope,
+}
+
+/// Discard working-tree changes for exactly the given paths: tracked paths
+/// are restored via `git checkout -- <paths>`, untracked paths are removed
+/// via `git clean -fd -- <paths>` (never `-x`: ignored files survive). The
+/// caller unstages first when discarding staged work.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiscardParams {
+    #[serde(flatten)]
+    pub scope: GitScope,
+    pub paths: Vec<String>,
+    pub untracked: bool,
+}
+
+impl GitDiscardParams {
+    pub fn validate_paths(&self) -> Result<(), RpcError> {
+        validate_path_list(&self.paths)
+    }
+}
+
+/// Per-file line counts for the given paths: staged counts come from
+/// `git diff --numstat --cached`, unstaged from `git diff --numstat`, and
+/// untracked files report their full line count as unstaged additions.
+/// `None` per side means unavailable (binary, missing, or over budget).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLineCountsParams {
+    #[serde(flatten)]
+    pub scope: GitScope,
+    pub paths: Vec<String>,
+}
+
+impl GitLineCountsParams {
+    pub fn validate_paths(&self) -> Result<(), RpcError> {
+        validate_path_list(&self.paths)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPullParams {
+    #[serde(flatten)]
+    pub scope: GitScope,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFetchParams {
     #[serde(flatten)]
     pub scope: GitScope,
 }
@@ -252,6 +306,54 @@ pub struct GitPrCreateResult {
     pub url: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiscardResult {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub paths: Vec<String>,
+}
+
+/// One file's line counts. Counts are `None` (not zero) when unavailable:
+/// binary files, unreadable paths, or files over the read budget.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLineCount {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staged_added: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staged_removed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unstaged_added: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unstaged_removed: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLineCountsResult {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub counts: Vec<GitLineCount>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPullResult {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFetchResult {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub detail: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,6 +451,14 @@ mod tests {
         GitCommitParams {
             scope: scope(),
             message: "fix: it\n\nbody line".into(),
+            amend: None,
+        }
+        .validate_message()
+        .unwrap();
+        GitCommitParams {
+            scope: scope(),
+            message: "fold in".into(),
+            amend: Some(true),
         }
         .validate_message()
         .unwrap();
@@ -356,7 +466,8 @@ mod tests {
             assert!(
                 GitCommitParams {
                     scope: scope(),
-                    message: bad.into()
+                    message: bad.into(),
+                    amend: None,
                 }
                 .validate_message()
                 .is_err()

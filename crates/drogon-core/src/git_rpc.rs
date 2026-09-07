@@ -8,8 +8,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use drogon_protocol::git::{
-    GitCommitParams, GitDiffParams, GitPrCreateParams, GitPushParams, GitScope, GitStageParams,
-    GitStatusParams, GitUnstageParams, MAX_GIT_DIFF_BYTES,
+    GitCommitParams, GitDiffParams, GitDiscardParams, GitFetchParams, GitLineCountsParams,
+    GitPrCreateParams, GitPullParams, GitPushParams, GitScope, GitStageParams, GitStatusParams,
+    GitUnstageParams, MAX_GIT_DIFF_BYTES,
 };
 use drogon_protocol::{MAX_FRAME_BYTES, RpcError};
 use serde::de::DeserializeOwned;
@@ -138,6 +139,7 @@ impl Engine {
             &root,
             &git_process::GitMutation::Commit {
                 message: params.message.clone(),
+                amend: params.amend.unwrap_or(false),
             },
             &budget,
         )?;
@@ -157,6 +159,105 @@ impl Engine {
         )?;
         let mut result = scope_result(&params.scope);
         result["pushed"] = json!(true);
+        result["detail"] = json!(last_line(&format!("{}\n{}", output.stdout, output.stderr)));
+        Ok(result)
+    }
+
+    pub(super) fn do_git_discard(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: GitDiscardParams = decode(value)?;
+        params.validate_paths()?;
+        let root = self.git_workspace_root(&params.scope)?;
+        let mutation = if params.untracked {
+            git_process::GitMutation::DiscardUntracked {
+                paths: params.paths.clone(),
+            }
+        } else {
+            git_process::GitMutation::DiscardTracked {
+                paths: params.paths.clone(),
+            }
+        };
+        git_process::run_git_mutation(&root, &mutation, &git_process::git_mutation_budget())?;
+        let mut result = scope_result(&params.scope);
+        result["paths"] = json!(params.paths);
+        Ok(result)
+    }
+
+    pub(super) fn do_git_line_counts(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: GitLineCountsParams = decode(value)?;
+        params.validate_paths()?;
+        let root = self.git_workspace_root(&params.scope)?;
+        let budget = git_process::git_diff_budget();
+        let (staged, unstaged) = git_process::run_git_numstat(&root, &params.paths, &budget)?;
+        let mut staged_map = std::collections::HashMap::new();
+        for (path, count) in staged {
+            staged_map.insert(path, count);
+        }
+        let mut unstaged_map = std::collections::HashMap::new();
+        for (path, count) in unstaged {
+            unstaged_map.insert(path, count);
+        }
+        let mut counts = Vec::with_capacity(params.paths.len());
+        for path in &params.paths {
+            let staged_count = staged_map
+                .get(path)
+                .copied()
+                .unwrap_or(git_process::NumstatCount {
+                    added: None,
+                    removed: None,
+                });
+            let unstaged_count =
+                unstaged_map
+                    .get(path)
+                    .copied()
+                    .unwrap_or(git_process::NumstatCount {
+                        added: None,
+                        removed: None,
+                    });
+            // Untracked files never appear in either numstat output: count
+            // their lines as unstaged additions so the row badge stays
+            // truthful. Tracked-but-unchanged files keep explicit nulls.
+            let (unstaged_added, unstaged_removed) =
+                if unstaged_map.contains_key(path) || staged_map.contains_key(path) {
+                    (unstaged_count.added, unstaged_count.removed)
+                } else {
+                    let lines = git_process::count_untracked_lines(&root.join(path));
+                    (lines, lines.map(|_| 0))
+                };
+            counts.push(json!({
+                "path": path,
+                "stagedAdded": staged_count.added,
+                "stagedRemoved": staged_count.removed,
+                "unstagedAdded": unstaged_added,
+                "unstagedRemoved": unstaged_removed,
+            }));
+        }
+        let mut result = scope_result(&params.scope);
+        result["counts"] = Value::Array(counts);
+        Ok(result)
+    }
+
+    pub(super) fn do_git_pull(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: GitPullParams = decode(value)?;
+        let root = self.git_workspace_root(&params.scope)?;
+        let output = git_process::run_git_mutation(
+            &root,
+            &git_process::GitMutation::Pull,
+            &git_process::git_mutation_budget(),
+        )?;
+        let mut result = scope_result(&params.scope);
+        result["detail"] = json!(last_line(&format!("{}\n{}", output.stdout, output.stderr)));
+        Ok(result)
+    }
+
+    pub(super) fn do_git_fetch(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: GitFetchParams = decode(value)?;
+        let root = self.git_workspace_root(&params.scope)?;
+        let output = git_process::run_git_mutation(
+            &root,
+            &git_process::GitMutation::Fetch,
+            &git_process::git_mutation_budget(),
+        )?;
+        let mut result = scope_result(&params.scope);
         result["detail"] = json!(last_line(&format!("{}\n{}", output.stdout, output.stderr)));
         Ok(result)
     }

@@ -28,6 +28,10 @@ const nativeMethodFor: Record<GitMethod, string> = {
   gitUnstage: "git.unstage",
   gitCommit: "git.commit",
   gitPush: "git.push",
+  gitDiscard: "git.discard",
+  gitLineCounts: "git.line_counts",
+  gitPull: "git.pull",
+  gitFetch: "git.fetch",
   gitPrCreate: "git.pr_create",
 };
 
@@ -84,6 +88,10 @@ const channelFor: Record<GitMethod, string> = {
   gitUnstage: "drogon:gitUnstage",
   gitCommit: "drogon:gitCommit",
   gitPush: "drogon:gitPush",
+  gitDiscard: "drogon:gitDiscard",
+  gitLineCounts: "drogon:gitLineCounts",
+  gitPull: "drogon:gitPull",
+  gitFetch: "drogon:gitFetch",
   gitPrCreate: "drogon:gitPrCreate",
 };
 

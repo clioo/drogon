@@ -38,6 +38,16 @@ export type GitPathsResult = GitScope & { paths: string[] };
 export type GitCommitResult = GitScope & { commit: string };
 export type GitPushResult = GitScope & { pushed: boolean; detail: string };
 export type GitPrCreateResult = GitScope & { url: string };
+export type GitLineCount = {
+  path: string;
+  stagedAdded: number | null;
+  stagedRemoved: number | null;
+  unstagedAdded: number | null;
+  unstagedRemoved: number | null;
+};
+export type GitLineCountsResult = GitScope & { counts: GitLineCount[] };
+export type GitPullResult = GitScope & { detail: string };
+export type GitFetchResult = GitScope & { detail: string };
 
 export interface GitBridge {
   gitStatus(input: GitScope): Promise<Result<GitStatusResult>>;
@@ -48,11 +58,24 @@ export interface GitBridge {
   gitUnstage(
     input: GitScope & { paths: string[] },
   ): Promise<Result<GitPathsResult>>;
-  gitCommit(input: GitScope & { message: string }): Promise<Result<GitCommitResult>>;
+  gitCommit(
+    input: GitScope & { message: string; amend?: boolean },
+  ): Promise<Result<GitCommitResult>>;
   gitPush(input: GitScope): Promise<Result<GitPushResult>>;
   gitPrCreate(
     input: GitScope & { title: string; body?: string },
   ): Promise<Result<GitPrCreateResult>>;
+  // Additive R10-B surface: optional so older bridges and the gated
+  // mount adapter keep typechecking; the panel probes availability
+  // at runtime and hides the action when absent.
+  gitDiscard?: (
+    input: GitScope & { paths: string[]; untracked: boolean },
+  ) => Promise<Result<GitPathsResult>>;
+  gitLineCounts?: (
+    input: GitScope & { paths: string[] },
+  ) => Promise<Result<GitLineCountsResult>>;
+  gitPull?: (input: GitScope) => Promise<Result<GitPullResult>>;
+  gitFetch?: (input: GitScope) => Promise<Result<GitFetchResult>>;
 }
 
 const id = z
@@ -84,8 +107,13 @@ export const gitBridgeSchemas = {
       .min(1)
       .max(8_192)
       .refine((value) => !value.includes("\0")),
+    amend: z.boolean().optional(),
   }),
   gitPush: scope,
+  gitDiscard: scope.extend({ paths, untracked: z.boolean() }),
+  gitLineCounts: scope.extend({ paths }),
+  gitPull: scope,
+  gitFetch: scope,
   gitPrCreate: scope.extend({
     title: z
       .string()
@@ -133,5 +161,21 @@ export const gitResultSchemas = {
   "git.unstage": scope.extend({ paths: z.array(z.string()).max(MAX_GIT_PATHS) }),
   "git.commit": scope.extend({ commit: z.string().min(1).max(128) }),
   "git.push": scope.extend({ pushed: z.boolean(), detail: z.string().max(2_048) }),
+  "git.discard": scope.extend({ paths: z.array(z.string()).max(MAX_GIT_PATHS) }),
+  "git.line_counts": scope.extend({
+    counts: z
+      .array(
+        z.object({
+          path: z.string().min(1).max(32_768),
+          stagedAdded: z.number().int().min(0).nullable(),
+          stagedRemoved: z.number().int().min(0).nullable(),
+          unstagedAdded: z.number().int().min(0).nullable(),
+          unstagedRemoved: z.number().int().min(0).nullable(),
+        }),
+      )
+      .max(MAX_GIT_PATHS),
+  }),
+  "git.pull": scope.extend({ detail: z.string().max(2_048) }),
+  "git.fetch": scope.extend({ detail: z.string().max(2_048) }),
   "git.pr_create": scope.extend({ url: z.string().min(1).max(2_048) }),
 };
