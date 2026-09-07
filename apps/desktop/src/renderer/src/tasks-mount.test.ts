@@ -12,7 +12,10 @@ import { createRouteRegistry, routeId } from "./route-panel-contract";
 import { TASKS_CAPABILITY } from "../../shared/tasks-contract";
 
 const okBridge = {
-  tasksList: async () => ({ ok: true as const, result: { repo: "o/r", issues: [] } }),
+  tasksList: async () => ({
+    ok: true as const,
+    result: { repo: "o/r", issues: [], page: 1, perPage: 36, hasNextPage: false },
+  }),
   tasksShow: async () => ({
     ok: true as const,
     result: {

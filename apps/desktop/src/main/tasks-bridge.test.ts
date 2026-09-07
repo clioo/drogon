@@ -19,6 +19,9 @@ const listResult = {
       url: "https://github.com/example/repo/issues/7",
     },
   ],
+  page: 1,
+  perPage: 36,
+  hasNextPage: false,
 };
 
 describe("tasks bridge admission", () => {
@@ -113,6 +116,66 @@ describe("tasks bridge admission", () => {
       async () => ({ ok: true, result: listResult }),
     );
     expect(result.ok).toBe(true);
+  });
+
+  it("passes paging fields through to the daemon and back", async () => {
+    let seen: unknown = null;
+    const paged = {
+      ...listResult,
+      page: 2,
+      perPage: 50,
+      hasNextPage: true,
+      total: 87,
+    };
+    const result = await dispatchTasksRequest(
+      "tasksList",
+      { projectId: "p", page: 2, perPage: 50, state: "all" },
+      async (_method, params) => {
+        seen = params;
+        return { ok: true, result: paged };
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(seen).toMatchObject({ projectId: "p", page: 2, perPage: 50 });
+    if (!result.ok) return;
+    expect(result.result).toMatchObject({
+      page: 2,
+      perPage: 50,
+      hasNextPage: true,
+      total: 87,
+    });
+  });
+
+  it("refuses out-of-bounds paging locally", async () => {
+    let called = false;
+    for (const input of [
+      { projectId: "p", page: 0 },
+      { projectId: "p", page: 11 },
+      { projectId: "p", perPage: 0 },
+      { projectId: "p", perPage: 101 },
+    ]) {
+      const result = await dispatchTasksRequest("tasksList", input, async () => {
+        called = true;
+        return { ok: true, result: listResult };
+      });
+      expect(result.ok).toBe(false);
+    }
+    expect(called).toBe(false);
+  });
+
+  it("refuses a list response missing the paging echo", async () => {
+    const result = await dispatchTasksRequest(
+      "tasksList",
+      { projectId: "p" },
+      async () => ({
+        ok: true,
+        result: { repo: "example/repo", issues: [] },
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "internal_error" },
+    });
   });
 });
 

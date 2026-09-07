@@ -131,6 +131,13 @@ Settings shortcuts section port Orca's `src/shared/keybindings/{definitions-core
 `components/settings/ShortcutRowsList.tsx`, all at the pinned source revision
 above. Each ported file keeps the MIT notice.
 
+The Tasks page in `apps/desktop/src/renderer/src/features/tasks/` ports Orca's
+`src/renderer/src/components/task-page/{TaskPage,Surface,Frame,Content,ListChrome,SourceBar,ProviderFilters,PaginationBar}.tsx`,
+`task-page/github/{List,Rows,Filters,ModeControls,StatusCell,AssigneesCell,Avatars,IssueSelectors}.tsx`
+and their support modules (source context, pagination page numbers, empty
+state, work-item status badge, localized options, user avatar, repo badge),
+all at the pinned source revision above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

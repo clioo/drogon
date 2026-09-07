@@ -129,6 +129,24 @@ fn fake_gh_list_view() -> String {
     )
 }
 
+/// A fake `gh` whose `issue list` honors `--limit N` and emits N synthetic
+/// issues (newest first: numbers 100..1) so paging windows and the
+/// fetch-one-extra `hasNextPage` probe are exercised end to end.
+fn fake_gh_list_paged(total: u64) -> String {
+    format!(
+        "#!/bin/sh\necho \"$*\" > \"$PWD/.gh-argv-last\"\n\
+         if [ \"$2\" = \"list\" ]; then\n\
+         LIMIT={total}; prev=\"\"; for a in \"$@\"; do \
+         [ \"$prev\" = \"--limit\" ] && LIMIT=$a; prev=\"$a\"; done; \
+         [ \"$LIMIT\" -gt {total} ] && LIMIT={total}; \
+         i=0; printf '['; while [ \"$i\" -lt \"$LIMIT\" ]; do i=$((i+1)); \
+         [ \"$i\" -gt 1 ] && printf ','; n=$((101-i)); \
+         printf '{{\"number\":%d,\"title\":\"Issue %d\",\"state\":\"OPEN\",\"labels\":[],\"assignees\":[],\"updatedAt\":\"2026-09-06T12:00:00Z\",\"url\":\"https://github.com/example/repo/issues/%d\"}}' \"$n\" \"$n\" \"$n\"; done; printf ']'; echo; \
+         elif [ \"$2\" = \"view\" ] && [ \"$3\" = \"7\" ]; then\ncat <<'EOF'\n{VIEW_JSON_7}\nEOF\n\
+         else\necho 'could not resolve to an Issue' >&2\nexit 1\nfi\n"
+    )
+}
+
 struct Fixture {
     _root: tempfile::TempDir,
     _override: GhOverride,
@@ -208,6 +226,12 @@ fn list_returns_open_issues_and_derives_repo_and_state() {
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0]["number"], 9);
 
+    // The paging echo: default window is page 1 x the source page size, and
+    // two rows can never prove a next page.
+    assert_eq!(listed["page"], 1);
+    assert_eq!(listed["perPage"], 36);
+    assert_eq!(listed["hasNextPage"], false);
+    assert!(listed.get("total").is_none());
     let by_number = ok(
         &fx.engine,
         "tasks.list",
@@ -224,6 +248,84 @@ fn list_returns_open_issues_and_derives_repo_and_state() {
         fx.last_argv().contains("--state closed"),
         "state param must reach gh"
     );
+}
+
+#[test]
+fn list_pages_through_the_gh_stream_with_proven_has_next() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_list_paged(5)),
+    );
+    let params = |page: u64, per_page: u64| json!({"projectId": fx.project_id, "page": page, "perPage": per_page});
+
+    let page1 = ok(&fx.engine, "tasks.list", params(1, 2));
+    assert_eq!(page1["page"], 1);
+    assert_eq!(page1["perPage"], 2);
+    let issues = page1["issues"].as_array().unwrap();
+    let numbers: Vec<u64> = issues
+        .iter()
+        .map(|issue| issue["number"].as_u64().unwrap())
+        .collect();
+    assert_eq!(numbers, vec![100, 99], "newest first, first window");
+    assert_eq!(page1["hasNextPage"], true);
+
+    let page3 = ok(&fx.engine, "tasks.list", params(3, 2));
+    let issues = page3["issues"].as_array().unwrap();
+    let numbers: Vec<u64> = issues
+        .iter()
+        .map(|issue| issue["number"].as_u64().unwrap())
+        .collect();
+    assert_eq!(numbers, vec![96], "5 rows total: page 3 holds the tail row");
+    assert_eq!(page3["hasNextPage"], false);
+
+    // A page past the data end is honestly empty, not an error.
+    let page4 = ok(&fx.engine, "tasks.list", params(4, 2));
+    assert_eq!(page4["issues"].as_array().unwrap().len(), 0);
+    assert_eq!(page4["hasNextPage"], false);
+
+    // The full page window is fetched in one call: --limit carries the
+    // requested window plus the single has-next probe row.
+    ok(&fx.engine, "tasks.list", params(2, 2));
+    assert!(
+        fx.last_argv().contains("--limit 5"),
+        "fetch limit must be page*perPage+1, got: {}",
+        fx.last_argv()
+    );
+
+    // A full window proves another page exists.
+    let full = ok(&fx.engine, "tasks.list", params(1, 36));
+    assert_eq!(full["issues"].as_array().unwrap().len(), 5);
+    assert_eq!(full["hasNextPage"], false, "5 < 36-row window");
+}
+
+#[test]
+fn list_state_filter_reaches_gh_and_rejects_out_of_bounds_pages() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_list_paged(3)),
+    );
+    ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "state": "all", "page": 2, "perPage": 2}),
+    );
+    let argv = fx.last_argv();
+    assert!(
+        argv.contains("--state all") && argv.contains("--limit 5"),
+        "state and the page-2 window must reach gh, got: {argv}"
+    );
+    for bad in [
+        json!({"projectId": fx.project_id, "page": 0}),
+        json!({"projectId": fx.project_id, "page": 11}),
+        json!({"projectId": fx.project_id, "perPage": 0}),
+        json!({"projectId": fx.project_id, "perPage": 101}),
+    ] {
+        assert_eq!(
+            err_code(&fx.engine, "tasks.list", bad),
+            "invalid_argument",
+            "out-of-bounds paging must be refused"
+        );
+    }
 }
 
 #[test]

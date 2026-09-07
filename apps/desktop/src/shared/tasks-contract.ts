@@ -12,6 +12,8 @@ export type TaskIssue = {
   state: "open" | "closed";
   labels: TaskIssueLabel[];
   assignees: string[];
+  /** Author login, when the upstream returned one. */
+  author?: string;
   updatedAt: string;
   url: string;
   body: string | null;
@@ -23,7 +25,17 @@ export type TaskLink = {
   branch: string;
   createdAt: string;
 };
-export type TasksListResult = { repo: string; issues: TaskIssue[] };
+export type TasksListResult = {
+  repo: string;
+  issues: TaskIssue[];
+  /** Echoed 1-based page and effective page size of this window. */
+  page: number;
+  perPage: number;
+  /** True when at least one more row exists past this page. */
+  hasNextPage: boolean;
+  /** Total matching issues, only when the upstream exposes one. */
+  total?: number;
+};
 export type TasksShowResult = { issue: TaskIssue };
 export type TasksStartResult = {
   issueNumber: number;
@@ -46,6 +58,9 @@ export interface TasksBridge {
     projectId: string;
     state?: TaskIssueState;
     query?: string;
+    /** 1-based page; the daemon defaults to the source page size. */
+    page?: number;
+    perPage?: number;
   }): Promise<Result<TasksListResult>>;
   tasksShow(input: {
     projectId: string;
@@ -97,6 +112,8 @@ const id = z
   .regex(/^[^\s\x00-\x1f\x7f]+$/u);
 const projectId = z.object({ projectId: id });
 
+export const TASKS_PAGE_SIZE = 36;
+
 export const tasksBridgeSchemas = {
   tasksList: projectId.extend({
     state: z.enum(["open", "closed", "all"]).optional(),
@@ -105,6 +122,8 @@ export const tasksBridgeSchemas = {
       .max(MAX_TASKS_QUERY_CHARS)
       .refine((value) => !value.includes("\0"))
       .optional(),
+    page: z.number().int().min(1).max(10).optional(),
+    perPage: z.number().int().min(1).max(100).optional(),
   }),
   tasksShow: projectId.extend({ number: z.number().int().positive() }),
   tasksStart: projectId.extend({ number: z.number().int().positive() }),
@@ -123,6 +142,7 @@ const issue = z.object({
   state: z.enum(["open", "closed"]),
   labels: z.array(label).max(100),
   assignees: z.array(z.string().min(1).max(128)).max(100),
+  author: z.string().min(1).max(128).optional(),
   updatedAt: z.string().max(128),
   url: z.string().min(1).max(2048),
   body: z.string().max(1_048_576).nullable().optional(),
@@ -168,6 +188,10 @@ export const tasksResultSchemas = {
   "tasks.list": z.object({
     repo: z.string().min(1).max(256),
     issues: z.array(issue).max(100),
+    page: z.number().int().min(1),
+    perPage: z.number().int().min(1).max(100),
+    hasNextPage: z.boolean(),
+    total: z.number().int().min(0).optional(),
   }),
   "tasks.show": z.object({ issue }),
   "tasks.start": z.object({

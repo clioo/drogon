@@ -107,7 +107,12 @@ export function classifyTasksList(text, hasRows) {
     return "gh-unauthenticated";
   if (/no origin remote|no_github_remote/i.test(text))
     return "no-github-remote";
-  if (/No .* issues in |match this filter/i.test(text)) return "empty-list";
+  if (
+    /No .* issues in |match this filter|No matching GitHub work|No project sources selected/i.test(
+      text,
+    )
+  )
+    return "empty-list";
   if (/exited with|timed out|killed/i.test(text)) return "gh-error";
   return `unexpected:${text.slice(0, 160)}`;
 }
@@ -255,14 +260,18 @@ export async function probePackagedSurfaces({
   await page.reload();
   await page.getByText("Service 0.1.0", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
-  const tasksList = page.locator(".tasks-list");
+  // R8-G1 ported the source task-page: the page lives in the Tasks section,
+  // the project source is the SourceBar select, rows are role=button
+  // "Issue #n", and the list root is the github list scroll container.
+  const tasksList = page.locator('section[aria-label="Tasks"]');
   await tasksList.waitFor();
   const repoBase = path.basename(tasksRepo);
   const projectOptionReady = (name) =>
-    [...document.querySelectorAll(".tasks-page select")].some((select) =>
-      [...select.options].some((option) =>
-        (option.textContent ?? "").includes(name),
-      ),
+    [...document.querySelectorAll('section[aria-label="Tasks"] select')].some(
+      (select) =>
+        [...select.options].some((option) =>
+          (option.textContent ?? "").includes(name),
+        ),
     );
   try {
     await page.waitForFunction(projectOptionReady, repoBase, {
@@ -271,21 +280,31 @@ export async function probePackagedSurfaces({
   } catch {
     // The mount raced the project view refresh: one user Refresh re-reads
     // the groups through the same path the toolbar always uses.
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: /^Refresh GitHub work/ }).click();
     await page.waitForFunction(projectOptionReady, repoBase, {
       timeout: 15000,
     });
   }
   await page.waitForFunction(
-    () =>
-      !/Loading issues/.test(
-        document.querySelector(".tasks-list")?.textContent ?? "Loading issues",
-      ),
+    () => {
+      const root = document.querySelector('section[aria-label="Tasks"]');
+      if (!root) return false;
+      const text = root.textContent ?? "";
+      return (
+        root.querySelector('[role="button"][aria-label^="Issue #"]') !== null ||
+        root.querySelector('[role="alert"]') !== null ||
+        /No matching GitHub work|No project sources selected|could not|not authenticated|no origin remote|exited with|timed out|killed/i.test(
+          text,
+        )
+      );
+    },
     null,
     { timeout: 60000 },
   );
   const tasksText = (await tasksList.textContent()) ?? "";
-  const tasksRows = await tasksList.locator(".tasks-row").count();
+  const tasksRows = await tasksList
+    .locator('[role="button"][aria-label^="Issue #"]')
+    .count();
   const outcome = classifyTasksList(tasksText, tasksRows > 0);
   await screenshot("tasks.png");
   assert.ok(
