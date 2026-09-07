@@ -10,21 +10,22 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, Cli, Command, HarnessAction, ProjectAction, TerminalAction, WorkspaceAction,
-    WorktreeAction,
+    AutomationAction, Cli, Command, HarnessAction, ProjectAction, TerminalAction, WaitFor,
+    WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
-    AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, CallOk, Client,
-    HarnessCatalog, Project, ProjectList, ReadResult, Removed, Session, SessionList, StatusResult,
-    Verdict, Workspace, WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation,
-    check_automation_history, check_automation_list, check_automation_run_now,
+    AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, CallOk,
+    Client, HarnessCatalog, Project, ProjectList, ReadResult, Removed, Session, SessionList,
+    StatusResult, Verdict, Workspace, WorkspaceList, Worktree, WorktreeList, WriteResult,
+    check_automation, check_automation_history, check_automation_list, check_automation_run_now,
     check_harness_catalog, check_project, check_project_list, check_read, check_removed,
     check_session, check_session_list, check_status, check_workspace, check_workspace_list,
     check_worktree, check_worktree_list, check_write,
 };
-use crate::error::{CliError, method_not_found};
+use crate::error::{CliError, method_not_found, timeout};
 use crate::output;
 use crate::paths;
+use crate::skills;
 use crate::transport::DEFAULT_TIMEOUT;
 
 /// What one successful (RPC-level) invocation printed and how the process
@@ -48,8 +49,13 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         (None, None) => uuid::Uuid::new_v4().to_string(),
     };
     let data_dir = paths::resolve_data_dir(cli.data_dir.as_deref());
-    let client = Client::open(&data_dir, &request_id)?;
     let json = cli.json;
+    // Skill guides are bundled with the binary: they never touch the runtime,
+    // so they work with no daemon and no data directory at all.
+    if let Command::Skills { action } = &cli.command {
+        return skills::run(&request_id, json, action);
+    }
+    let client = Client::open(&data_dir, &request_id)?;
 
     match &cli.command {
         Command::Status => {
@@ -89,6 +95,11 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
         Command::Orchestration { command } => {
             crate::orchestration_commands::run(&client, &request_id, json, command).await
+        }
+        // Served locally above without a runtime; this arm is unreachable
+        // (output.rs `render` uses the same convention for impossible pairs).
+        Command::Skills { .. } => {
+            unreachable!("skills commands are served locally before the client opens")
         }
         Command::Rpc { method, params } => {
             let params: Value = match params {
@@ -210,6 +221,23 @@ async fn terminal(
                 None,
             )
         }
+        TerminalAction::Wait {
+            session,
+            incarnation,
+            r#for,
+            timeout_ms,
+        } => {
+            terminal_wait(
+                client,
+                request_id,
+                json,
+                session,
+                incarnation,
+                *r#for,
+                *timeout_ms,
+            )
+            .await
+        }
         TerminalAction::Close {
             session,
             incarnation,
@@ -251,6 +279,109 @@ async fn terminal(
                 }
             }
         }
+    }
+}
+
+/// Client-side wait over the existing `session.read`: no new RPC was added
+/// for this. Each poll reads from cursor 0; success returns the satisfying
+/// read's envelope (JSON mode) or a one-line summary (human mode) with exit
+/// 0. Budget exhaustion is exit 1 with a `timeout` reason naming the last
+/// observed state, never a guess about what happened after the deadline.
+async fn terminal_wait(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    session: &str,
+    incarnation: &str,
+    wait_for: WaitFor,
+    timeout_ms: u64,
+) -> Result<RunOutcome, CliError> {
+    use std::time::{Duration, Instant};
+
+    let budget = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+    let deadline = start + budget;
+    let mut polls: u32 = 0;
+    let mut attempts: u32 = 0;
+    let mut last_state = String::from("no successful poll yet");
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let remaining = deadline - now;
+        let params = json!({
+            "sessionId": session,
+            "incarnation": incarnation,
+            "cursor": 0,
+        });
+        // One poll never outlives the remaining budget: a hung RPC costs at
+        // most the rest of the wait, and the loop still reports `timeout`.
+        let call_timeout = remaining.min(DEFAULT_TIMEOUT);
+        match client
+            .call("session.read", params, request_id, call_timeout)
+            .await
+        {
+            Ok(call) => {
+                let read: ReadResult = Client::decode_checked(&call, "session.read", check_read)?;
+                polls += 1;
+                if wait_satisfied(&read, wait_for) {
+                    let elapsed_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                    let condition = wait_for.as_wire();
+                    return emit(
+                        call,
+                        json,
+                        || output::session_waited(&read, condition, polls, elapsed_ms),
+                        0,
+                        None,
+                    );
+                }
+                last_state = format!(
+                    "verdict is {} agent={}",
+                    read.session.verdict_str(),
+                    read.session.agent_state.as_wire()
+                );
+            }
+            // Authoritative refusals (unknown session, stale incarnation):
+            // repolling cannot change the answer, so fail fast.
+            Err(err @ CliError::Server { .. }) => return Err(err),
+            // Transport loss never proves exit (or idleness, or output):
+            // keep polling inside the budget and report `timeout` if nothing
+            // recovers. Malformed service results land here too; a service
+            // that stays malformed times out rather than guessing.
+            Err(err) => {
+                last_state = format!("last poll failed: {}", err.rpc_error().message);
+            }
+        }
+        attempts += 1;
+        // Bounded backoff: 50ms doubling to a 500ms cap, clipped to the
+        // remaining budget so the loop cannot sleep past its deadline.
+        let backoff_ms = 50u64.saturating_mul(1u64 << attempts.min(4)).min(500);
+        let sleep = Duration::from_millis(backoff_ms)
+            .min(deadline.saturating_duration_since(Instant::now()));
+        if !sleep.is_zero() {
+            tokio::time::sleep(sleep).await;
+        }
+    }
+    Err(CliError::local(
+        timeout(format!(
+            "terminal wait timed out after {timeout_ms}ms waiting for {} on session {session}; {last_state}",
+            wait_for.as_wire(),
+        )),
+        request_id,
+    ))
+}
+
+fn wait_satisfied(read: &ReadResult, wait_for: WaitFor) -> bool {
+    match wait_for {
+        WaitFor::Exited => read.session.verdict == Verdict::Exited,
+        // An exited session will never work again, so it satisfies an
+        // idleness wait; the success line still reports the verdict.
+        WaitFor::Idle => matches!(
+            read.session.agent_state,
+            AgentState::Idle | AgentState::Exited
+        ),
+        WaitFor::Output => read.next_cursor > read.start_cursor,
     }
 }
 

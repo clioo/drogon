@@ -100,3 +100,10 @@ pub fn internal_error(message: impl Into<String>) -> RpcError {
 pub fn method_not_found(message: impl Into<String>) -> RpcError {
     RpcError::new("method_not_found", message)
 }
+
+/// A bounded wait (`terminal wait`) that exhausted its budget without the
+/// condition holding. Exit 1 with the last observed session state in the
+/// message, never a guess about what the session did after the deadline.
+pub fn timeout(message: impl Into<String>) -> RpcError {
+    RpcError::new("timeout", message)
+}
