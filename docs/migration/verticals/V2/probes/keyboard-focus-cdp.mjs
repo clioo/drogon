@@ -41,6 +41,13 @@ const dataDir = path.join(fixture, "data");
 await mkdir(dataDir, { recursive: true });
 const folder = path.join(fixture, "folder");
 await mkdir(folder);
+// A realistically long repository name: everyday repo names exceed the
+// header space a narrow window can give the workspace heading.
+const longFolder = path.join(
+  fixture,
+  "responsiveshellprobewithadeliberatelylongrepositoryname",
+);
+await mkdir(longFolder);
 const shots = path.join(ROOT, ".preflight", `v2-kbd-${Date.now()}`);
 await mkdir(shots, { recursive: true });
 
@@ -89,6 +96,114 @@ function checked(envelope, what) {
   if (!envelope || envelope.ok !== true)
     throw new Error(`${what} not ok: ${JSON.stringify(envelope?.error ?? envelope)}`);
   return envelope.result;
+}
+
+// Layout-matrix helpers (V2 shell breadth): pure in-page measurements, no mocks.
+async function layoutAudit() {
+  return page.evaluate(() => {
+    const targets = [];
+    const sidebar = document.querySelector('aside[aria-label="Workspaces"]');
+    if (sidebar) targets.push(["sidebar", sidebar]);
+    document
+      .querySelectorAll('nav[aria-label="Panels"] button')
+      .forEach((b) => targets.push(["panels-nav", b]));
+    document
+      .querySelectorAll(".header-actions button")
+      .forEach((b, i) => targets.push([`header-action-${i}`, b]));
+    return {
+      scrollWidth: document.scrollingElement.scrollWidth,
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      headingSpill: (() => {
+        const name = document.querySelector(".workspace-heading strong");
+        if (!name) return 0;
+        return {
+          spill: name.scrollWidth - name.clientWidth,
+          clipped: getComputedStyle(name).overflowX === "hidden",
+        };
+      })(),
+      targets: targets.map(([name, el]) => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          r.left + r.width / 2,
+          r.top + r.height / 2,
+        );
+        return {
+          name,
+          label: (el.textContent ?? "").trim().slice(0, 24),
+          disabled: el.disabled === true,
+          rect: [
+            Math.round(r.left),
+            Math.round(r.top),
+            Math.round(r.right),
+            Math.round(r.bottom),
+          ],
+          inViewport:
+            r.width > 0 &&
+            r.height > 0 &&
+            r.left >= 0 &&
+            r.top >= 0 &&
+            r.right <= window.innerWidth &&
+            r.bottom <= window.innerHeight,
+          hitOk: hit === el || el.contains(hit),
+          hit: hit
+            ? `${hit.tagName}.${String(hit.className?.baseVal ?? hit.className ?? "").slice(0, 50)}`
+            : null,
+        };
+      }),
+    };
+  });
+}
+
+async function assertLayout(label, { withTargets }) {
+  // Audit only a settled shell: transient busy states legitimately disable
+  // controls (disabled = pointer-events-none), which is behavior, not layout.
+  await page.waitForFunction(
+    () => {
+      const buttons = [...document.querySelectorAll(".header-actions button")];
+      return buttons.length > 0 && buttons.every((b) => !b.disabled);
+    },
+    { timeout: 20000 },
+  );
+  const audit = await layoutAudit();
+  assert.ok(
+    audit.scrollWidth <= audit.innerWidth,
+    `${label}: horizontal overflow scrollWidth ${audit.scrollWidth} > innerWidth ${audit.innerWidth}`,
+  );
+  report.checks.push(
+    `layout-no-h-overflow-${label}(${audit.scrollWidth}<=${audit.innerWidth})`,
+  );
+  // The workspace heading must be clip-contained: a long unbroken name must
+  // ellipsize inside its box, never paint under the header action buttons
+  // (the sibling .path rule already behaves this way).
+  assert.ok(
+    audit.headingSpill.clipped === true,
+    `${label}: workspace heading not clip-contained (overflow-x visible, spill ${audit.headingSpill.spill}px)`,
+  );
+  report.checks.push(
+    `layout-heading-clip-contained-${label}(spill ${audit.headingSpill.spill}px)`,
+  );
+  if (!withTargets) return;
+  const broken = audit.targets.filter((t) => !t.inViewport || !t.hitOk);
+  assert.deepEqual(
+    broken,
+    [],
+    `${label}: clipped/covered primary controls ${JSON.stringify(broken)} audit=${JSON.stringify(audit)}`,
+  );
+  report.checks.push(
+    `layout-primary-controls-clickable-${label}(${audit.targets.length})`,
+  );
+}
+
+async function setSystemTheme() {
+  await page.evaluate(() => {
+    window.localStorage.setItem(
+      "drogon:settings:ui",
+      JSON.stringify({ settings: { theme: "system" } }),
+    );
+  });
+  await page.reload();
+  await page.getByText("Service 0.1.0", { exact: true }).waitFor();
 }
 
 async function pageUsable() {
@@ -304,6 +419,75 @@ try {
   assert.equal(await page.getByRole("tab").count(), 2);
   report.checks.push("hidden-files-mount-stays-disabled-with-reason");
   await page.screenshot({ path: path.join(shots, "panels-hidden-mount.png") });
+
+  // 6. Layout matrix: responsive shell invariants at 1440x1000 and 760x600
+  // in light and dark - no horizontal overflow, sidebar/Panels/header
+  // controls visible and clickable (no clipped primary action), and the
+  // inspector auto-hides at <=1100px while its toggle still works.
+  await setSystemTheme();
+  // Select the long-named workspace so the header carries realistic content
+  // through every matrix size (short demo names never stress the heading).
+  await page
+    .getByRole("button", { name: "Add workspace", exact: true })
+    .first()
+    .click();
+  await page.getByLabel("Folder path").fill(longFolder);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: "responsiveshellprobewithadeliberatelylongrepositoryname",
+    })
+    .click();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await assertLayout("1440-light", { withTargets: true });
+  await page.screenshot({ path: path.join(shots, "layout-1440-light.png") });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await assertLayout("1440-dark", { withTargets: false });
+  await page.screenshot({ path: path.join(shots, "layout-1440-dark.png") });
+
+  await page.setViewportSize({ width: 760, height: 600 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await assertLayout("760-light", { withTargets: true });
+  // A real primary action must complete at the small size: open and cancel
+  // the add-workspace form end to end.
+  await page
+    .getByRole("button", { name: "Add workspace", exact: true })
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  report.checks.push("layout-760-add-workspace-form-cycle");
+  await page.screenshot({ path: path.join(shots, "layout-760-light.png") });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await assertLayout("760-dark", { withTargets: true });
+  await page.screenshot({ path: path.join(shots, "layout-760-dark.png") });
+
+  // Inspector: open wide, shrink below 1101px -> auto-hidden by the shell
+  // effect; the toggle must still work at the small size (overlay mode).
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page
+    .getByRole("button", { name: "Toggle session details", exact: true })
+    .click();
+  await page.locator('aside[aria-label="Session details"]').waitFor();
+  report.checks.push("inspector-opens-wide");
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await page.waitForFunction(
+    () => !document.querySelector('aside[aria-label="Session details"]'),
+  );
+  report.checks.push("inspector-auto-hides-below-1101");
+  await page
+    .getByRole("button", { name: "Toggle session details", exact: true })
+    .click();
+  await page.locator('aside[aria-label="Session details"]').waitFor();
+  await page.screenshot({ path: path.join(shots, "inspector-overlay-1000.png") });
+  await page
+    .getByRole("button", { name: "Toggle session details", exact: true })
+    .click();
+  await page.waitForFunction(
+    () => !document.querySelector('aside[aria-label="Session details"]'),
+  );
+  report.checks.push("inspector-toggle-works-below-1101");
+  await assertLayout("1000-inspector-closed", { withTargets: false });
 
   report.status = "PASSED";
 } finally {

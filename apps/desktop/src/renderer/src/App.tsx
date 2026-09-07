@@ -34,6 +34,7 @@ import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
 import {
   FILES_ROUTE_ID,
+  createGatedFileBridge,
   isFilesAvailable,
   registerFilesRoute,
 } from "./files-mount";
@@ -300,16 +301,26 @@ export function App() {
   const terminal = sessions.find((item) => item.id === active);
   // Single App mount for contract panels. The registry vocabulary is the
   // static contract set (files.v1 declared here); mounting additionally
-  // requires the LIVE service to advertise it, so a withheld capability
-  // degrades to terminal UI instead of a half-mounted panel.
-  // Mount lifetime: the panel stays mounted (hidden, state intact) across
-  // route switches and transient refresh loss so unsaved editor drafts are
-  // never discarded by navigation. It unmounts only on settled
-  // unavailability, workspace loss, or explicit terminal routing — never on
-  // busy/transient status gaps, and never issues bridge calls while hidden
-  // behind a withheld capability (it is simply not rendered then).
+  // requires the LIVE service to advertise it.
+  // Mount lifetime: once user-routed while available, the panel stays
+  // mounted (hidden, state intact) across Terminals/files switches and
+  // transient refresh gaps (status null), so navigation never discards
+  // unsaved editor drafts. It unmounts on explicit capability withhold
+  // (present status without files.v1, even while busy) and on settled
+  // workspace loss — a kept-alive panel can never call behind a withheld
+  // capability because every bridge call additionally passes the
+  // fail-closed gate below. Draft survival across a true capability loss
+  // needs V3 draft-state hoisting (their item).
   const [route, setRoute] = useState<string | null>(null);
   const liveCapabilities = status?.capabilities ?? [];
+  // Gate refs update in an effect (never during render): steady-state
+  // exact, bounded one-commit staleness on transitions. The render guard
+  // (explicitWithhold below) is synchronous, so the gate is
+  // defense-in-depth for races, not the primary fence.
+  const filesGateRef = useRef(false);
+  useEffect(() => {
+    filesGateRef.current = isFilesAvailable(liveCapabilities);
+  }, [liveCapabilities]);
   const panelRegistry = useMemo(
     () =>
       registerFilesRoute(
@@ -317,7 +328,7 @@ export function App() {
           capabilities: [FILES_CAPABILITY],
           fallbackId: FILES_ROUTE_ID,
         }),
-        window.drogon,
+        createGatedFileBridge(window.drogon, () => filesGateRef.current),
       ),
     [],
   );
@@ -332,21 +343,23 @@ export function App() {
     status: Status;
   } | null>(null);
   if (current && status) lastPropsRef.current = { workspace: current, status };
-  // Keep-alive: once mounted while available, the panel survives route
-  // switches AND transient refresh gaps (drafts live in mount state).
-  // Unmount happens only on settled capability loss or workspace loss.
-  // Hidden-but-available scope reloads are normal available-capability
-  // behavior, never withheld-capability calls (unmounted then).
+  // Keep-alive: once user-routed while available, the panel survives
+  // route switches and transient refresh gaps (status null). Render
+  // stops immediately on explicit withhold (present status without
+  // files.v1, even while busy) and on settled workspace loss — never on
+  // switches, never on transients.
   const filesAliveRef = useRef(false);
   // First mount needs explicit user routing; keep-alive covers later
   // switches and transients. Never auto-mounts unopened panels.
+  // Present status without files.v1 is an explicit withhold even mid-busy;
+  // status null is the only transient that preserves the mount.
+  const explicitWithhold =
+    status !== null && !isFilesAvailable(liveCapabilities);
   if (route === FILES_ROUTE_ID && filesAvailable && current)
     filesAliveRef.current = true;
   else if (
-    status &&
-    !busy &&
-    !loadingSessions &&
-    (!current || !isFilesAvailable(liveCapabilities))
+    explicitWithhold ||
+    (status && !current && !busy && !loadingSessions)
   )
     filesAliveRef.current = false;
   const filesAlive = filesAliveRef.current;
