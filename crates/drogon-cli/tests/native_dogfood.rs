@@ -18,15 +18,14 @@
 //! same daemon-owned session-spawn engine (`session.start` -> `spawn_pty`)
 //! that both `terminal create` and every harness launch use. It costs a real
 //! (small) amount of real provider spend and reaches the network, so it only
-//! runs when explicitly opted into via `DROGON_DOGFOOD_REAL_MODEL=1`;
-//! otherwise it records why it skipped and passes, so routine runs of this
-//! suite never silently spend money or flake on network availability.
+//! runs when explicitly opted into via `DROGON_DOGFOOD_REAL_MODEL` with the
+//! exact value `1`; any other value (unset, empty, `0`, …) skips before any
+//! build, spawn or spend, and dedicated negative tests pin that skip path.
 
 #![cfg(unix)]
 
 mod common;
 
-use std::io::Read as _;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -61,6 +60,10 @@ fn workspace_root() -> PathBuf {
 /// `CARGO_BIN_EXE_*` from this package) and returns its path alongside the
 /// already-built `drogon-cli` binary in the same target directory, matching
 /// the daemon's own sibling-executable discovery (`configure_worker_cli`).
+///
+/// Both stdio pipes are drained by concurrent reader threads from the start:
+/// a chatty `cargo build` must never fill a pipe buffer and block the
+/// compiler, which would masquerade as the build timeout below.
 fn build_drogond() -> PathBuf {
     let root = workspace_root();
     let mut child = Command::new("cargo")
@@ -71,6 +74,19 @@ fn build_drogond() -> PathBuf {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn cargo build -p drogond");
+    fn drain<R: std::io::Read + Send + 'static>(
+        pipe: Option<R>,
+    ) -> std::thread::JoinHandle<String> {
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_string(&mut text);
+            }
+            text
+        })
+    }
+    let stdout_reader = drain(child.stdout.take());
+    let stderr_reader = drain(child.stderr.take());
     let start = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().expect("poll cargo build") {
@@ -83,14 +99,8 @@ fn build_drogond() -> PathBuf {
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    let mut out = String::new();
-    let mut err = String::new();
-    if let Some(mut pipe) = child.stdout.take() {
-        let _ = pipe.read_to_string(&mut out);
-    }
-    if let Some(mut pipe) = child.stderr.take() {
-        let _ = pipe.read_to_string(&mut err);
-    }
+    let out = stdout_reader.join().expect("cargo stdout reader");
+    let err = stderr_reader.join().expect("cargo stderr reader");
     assert!(
         status.success(),
         "cargo build -p drogond --locked failed: stdout={out}\nstderr={err}"
@@ -605,6 +615,70 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     drop(scratch);
 }
 
+/// The opt-in is satisfied ONLY by the exact value `1`. Unset, empty, `0` or
+/// any other value skips the leg before any build, daemon, session or spend.
+fn real_model_opted_in() -> bool {
+    matches!(std::env::var(REAL_MODEL_OPT_IN_ENV).as_deref(), Ok("1"))
+}
+
+/// Negative gate coverage: with the variable unset, empty, `0` or any
+/// non-`1` value, the real-model leg must take the fast skip path — exit 0,
+/// printed skip note, no build, no daemon, no session, no spend (a subprocess
+/// per variant keeps the parent's env free of process-global mutation).
+#[test]
+fn real_model_leg_skips_without_spending_unless_opt_in_is_exactly_one() {
+    let exe = std::env::current_exe().expect("test binary path");
+    for (label, value) in [
+        ("unset", None),
+        ("zero", Some("0")),
+        ("empty", Some("")),
+        ("non-one-word", Some("yes")),
+    ] {
+        let mut command = Command::new(&exe);
+        command
+            .args([
+                "--exact",
+                "real_model_probe_reaches_a_daemon_spawned_session",
+                "--nocapture",
+                "--test-threads",
+                "1",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        match value {
+            Some(v) => {
+                command.env(REAL_MODEL_OPT_IN_ENV, v);
+            }
+            None => {
+                command.env_remove(REAL_MODEL_OPT_IN_ENV);
+            }
+        }
+        let start = Instant::now();
+        let output = command.output().expect("spawn skip-path subprocess");
+        let elapsed = start.elapsed();
+        assert!(
+            output.status.success(),
+            "opt-in {label}: skip path must exit 0: {:?}",
+            output
+        );
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            text.contains("skipping real-model leg"),
+            "opt-in {label}: skip note must be printed, got:\n{text}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "opt-in {label}: skip must be fast (no 300s build, no daemon, no \
+             session, no spend), took {elapsed:?}"
+        );
+    }
+}
+
 /// Real-model leg: one bounded, non-agentic completion through a real,
 /// already-authenticated `claude --print` binary found on `PATH`, spawned by
 /// the real daemon's ordinary `session.start` path (`terminal create`) —
@@ -621,7 +695,7 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
 /// must never provision or persist itself.
 #[test]
 fn real_model_probe_reaches_a_daemon_spawned_session() {
-    if std::env::var_os(REAL_MODEL_OPT_IN_ENV).is_none() {
+    if !real_model_opted_in() {
         eprintln!(
             "skipping real-model leg: set {REAL_MODEL_OPT_IN_ENV}=1 to run it \
              (it reaches the network and spends real provider tokens)"
@@ -671,6 +745,18 @@ fn real_model_probe_reaches_a_daemon_spawned_session() {
     let session_id = text_field(&created, "/result/id").to_string();
     let incarnation = text_field(&created, "/result/incarnation").to_string();
 
+    // The session is tracked from creation and closed on every path: the
+    // explicit close below observes its end, and the guard closes it during
+    // any unwind (assertion failure or timeout) while the daemon is still
+    // alive — a leaked live PTY session must be impossible, including on the
+    // failure paths that skip the explicit close.
+    let mut session_guard = Some(SessionGuard {
+        data_dir: data_dir.clone(),
+        session_id: session_id.clone(),
+        incarnation: incarnation.clone(),
+        closed: false,
+    });
+
     let mut exited = false;
     let last_read = loop {
         let (code, read) = coordinator_call(
@@ -705,28 +791,65 @@ fn real_model_probe_reaches_a_daemon_spawned_session() {
         "real claude --print session did not exit within {REAL_MODEL_TIMEOUT:?}; \
          last observed read: {last_read:#}"
     );
+    let daemon_exit_code = last_read["result"]["session"]["exitCode"].clone();
+    assert_eq!(
+        daemon_exit_code,
+        Value::from(0),
+        "daemon-observed exit code must be 0: {last_read:#}"
+    );
 
+    // The child's answer must be exactly one `claude --print` JSON envelope:
+    // `is_error:false`, `result` exactly the requested marker. Only the
+    // trailing PTY cursor-show escape may follow the envelope — any other
+    // trailing bytes are a corrupted stream and must fail loudly here.
     let data_base64 = text_field(&last_read, "/result/dataBase64");
     let raw_bytes = STANDARD
         .decode(data_base64)
         .expect("session output must be valid base64");
-    let output_text = String::from_utf8_lossy(&raw_bytes).into_owned();
-    assert!(
-        output_text.contains(MARKER),
-        "real model output did not contain the requested marker.\n\
-         latency={latency:?}\nraw output bytes={raw_bytes:?}\ntext={output_text:?}"
+    const CURSOR_SHOW: &str = "\u{1b}[?25h";
+    let mut envelope_text = String::from_utf8(raw_bytes.clone())
+        .expect("real model output must be UTF-8 (no escape stripping before this check)");
+    envelope_text = envelope_text
+        .trim_end_matches(['\r', '\n', ' ', '\t'])
+        .to_string();
+    if let Some(rest) = envelope_text.strip_suffix(CURSOR_SHOW) {
+        envelope_text = rest.trim_end_matches(['\r', '\n', ' ', '\t']).to_string();
+    }
+    let envelope: Value = serde_json::from_str(&envelope_text).unwrap_or_else(|err| {
+        panic!(
+            "expected exactly one claude --print JSON envelope (only a trailing \
+             PTY cursor-show escape may follow it): {err}\nraw output bytes={raw_bytes:?}"
+        )
+    });
+    assert_eq!(
+        envelope["is_error"],
+        Value::Bool(false),
+        "the real completion must not be an error: {envelope:#}"
+    );
+    assert_eq!(
+        envelope["result"],
+        Value::String(MARKER.to_string()),
+        "the model result must be EXACTLY the requested marker, not merely \
+         contain it: {envelope:#}"
     );
 
-    let exit_code = last_read["result"]["session"]["exitCode"].clone();
+    // Explicit close before any teardown: the daemon observes the session's
+    // end instead of being killed with a live PTY child underneath it.
+    let closed = session_guard
+        .take()
+        .expect("session guard still armed")
+        .close("explicit close before daemon shutdown");
 
     let evidence = format!(
         "V1 dogfood real-model leg: PASSED\n\
          command: claude --print --output-format json <prompt>\n\
          session_id: {session_id}\n\
          incarnation: {incarnation}\n\
-         daemon-observed exit code: {exit_code:?}\n\
+         daemon-observed exit code: {daemon_exit_code:?}\n\
+         close-observed verdict: {closed:#}\n\
          wall latency (session create -> observed exited verdict): {latency:?}\n\
-         output bytes ({} bytes, base64-decoded from the real daemon session read): {output_text:?}\n",
+         envelope: {envelope:#}\n\
+         output bytes ({} bytes, base64-decoded from the real daemon session read)\n",
         raw_bytes.len(),
     );
     // Printed (not written under `scratch`, which is removed on drop below):
@@ -735,4 +858,61 @@ fn real_model_probe_reaches_a_daemon_spawned_session() {
 
     drop(daemon);
     drop(scratch);
+}
+
+/// Closes the tracked real-model session exactly once, unless the explicit
+/// close already observed its end. The best-effort drop path never panics
+/// (unwinding must not abort) and runs while the daemon is still alive.
+struct SessionGuard {
+    data_dir: PathBuf,
+    session_id: String,
+    incarnation: String,
+    closed: bool,
+}
+
+impl SessionGuard {
+    fn close(mut self, context: &str) -> Value {
+        let (code, closed) = coordinator_call(
+            &self.data_dir,
+            &[
+                "terminal",
+                "close",
+                "--session",
+                &self.session_id,
+                "--incarnation",
+                &self.incarnation,
+            ],
+        );
+        assert_ok(code, &closed, &["terminal", "close"]);
+        assert_eq!(
+            closed["result"]["verdict"],
+            Value::from("exited"),
+            "the daemon must observe the session end on {context}: {closed:#}"
+        );
+        self.closed = true;
+        closed
+    }
+}
+
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        if !self.closed {
+            let _ = run_cli(
+                &self.data_dir,
+                &[
+                    "--json",
+                    "terminal",
+                    "close",
+                    "--session",
+                    &self.session_id,
+                    "--incarnation",
+                    &self.incarnation,
+                ],
+            );
+            eprintln!(
+                "closed real-model session {} on the unwind path",
+                self.session_id
+            );
+        }
+    }
 }
