@@ -8,11 +8,13 @@ import {
   CalendarClock,
   Folder,
   GitCompareArrows,
+  Globe,
   ListTodo,
   Search,
   TerminalSquare,
 } from "lucide-react";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
+import { BROWSER_ROUTE_ID } from "../../browser-mount";
 import { CHANGES_ROUTE_ID } from "../../changes-mount";
 import { FILES_ROUTE_ID } from "../../files-mount";
 
@@ -30,6 +32,7 @@ export function SidebarNav({
   filesAvailable,
   changesAvailable,
   botsAvailable,
+  browserEnabled,
   onSelectRoute,
   onOpenPalette,
 }: {
@@ -38,6 +41,7 @@ export function SidebarNav({
   filesAvailable: boolean;
   changesAvailable: boolean;
   botsAvailable: boolean;
+  browserEnabled: boolean;
   onSelectRoute: (route: string | null) => void;
   onOpenPalette: () => void;
 }) {
@@ -126,6 +130,20 @@ export function SidebarNav({
       >
         <Bot size={16} />
         <span>Bots</span>
+      </button>
+      <button
+        type="button"
+        {...row(route === BROWSER_ROUTE_ID)}
+        aria-current={route === BROWSER_ROUTE_ID ? "page" : undefined}
+        disabled={panelsDisabled || !browserEnabled}
+        title="Browser"
+        onClick={() => {
+          setPlaceholder(null);
+          onSelectRoute(BROWSER_ROUTE_ID);
+        }}
+      >
+        <Globe size={16} />
+        <span>Browser</span>
       </button>
       <button
         type="button"

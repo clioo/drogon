@@ -22,6 +22,7 @@ export function Sidebar({
   filesAvailable,
   changesAvailable,
   botsAvailable,
+  browserEnabled,
   onSelectRoute,
   onOpenPalette,
   groups,
@@ -44,6 +45,7 @@ export function Sidebar({
   filesAvailable: boolean;
   changesAvailable: boolean;
   botsAvailable: boolean;
+  browserEnabled: boolean;
   onSelectRoute: (route: string | null) => void;
   onOpenPalette: () => void;
   groups: ProjectGroup[];
@@ -72,6 +74,7 @@ export function Sidebar({
         filesAvailable={filesAvailable}
         changesAvailable={changesAvailable}
         botsAvailable={botsAvailable}
+        browserEnabled={browserEnabled}
         onSelectRoute={onSelectRoute}
         onOpenPalette={onOpenPalette}
       />
