@@ -103,6 +103,21 @@ The DB-only receipt seam can proceed independently after its source atomicity
 baseline and candidate RED are accepted. It extends the existing ledger, not the
 public method group. The original external-effect path remains unchanged.
 
+Root accepted the database-only seam after independent focused (16/16) and
+full `drogon-core` test runs on 2026-09-07. The initial implementation was
+rejected: sharing the external path's retained in-flight slots caused an
+infinite retry loop and could report a fingerprint conflict before authorization.
+The corrected path uses only the existing SQLite transaction, with authorization
+before lookup and no in-flight map access. Real same-file/two-connection tests,
+receipt INSERT failure, deferred-COMMIT failure, and legacy-slot regressions pass.
+The original behavioral RED is retained at `0d063a0`.
+
+This seam is not wired to runtime coordination yet; dead-code warnings remain
+until integration. The full core suite retains its existing ignored child-probe
+entry; platform-gated zero-test binaries do not count as platform validation.
+The regression tests are deterministic, but their barriers have no internal
+timeout: the worker report's claim of individually bounded tests is not accepted.
+
 ### Mutation classification
 
 | Operation | Admission and waiting |
