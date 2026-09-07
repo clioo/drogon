@@ -18,20 +18,18 @@
 // never prove the real Rust binaries speak that protocol over a real win32
 // named pipe, which is what this file is for.
 //
-// Known gap, stated honestly: `crates/drogond/src/lib.rs` still guards
-// `serve()` with `#[cfg(unix)]`, and its `#[cfg(not(unix))]` fallback
-// unconditionally returns `ServeError::UnsupportedPlatform` (lib.rs:107-115);
-// `crates/drogond/src/endpoint.rs` is `#![cfg(unix)]`-only and does not bind
-// a Windows listener. So every WIN32-gated case below observes a real,
-// honest failure on a real win32 runner until that server-side admission
-// path lands — that is the correct state for this suite: real RED today,
-// real GREEN only once the implementation exists, never silently skipped or
-// force-passed in the meantime. The pipe *address* itself is not a guess
-// this file has to invent: `crates/drogon-cli/src/paths.rs`'s
-// `windows_pipe_name` is the frozen, tested contract formula (client side,
-// already implemented and covered by `pipe_name_is_contract_stable`), and
-// `resolveOwnedPipePath` in the read-only `windows-native-transport.mjs`
-// mirrors it verbatim; only the server-side bind is still missing.
+// Header scope, re-verified against this exact checkout (not a general
+// claim): `crates/drogond/src/lib.rs:107-115` still gates `serve()`'s
+// `#[cfg(not(unix))]` fallback to unconditionally return
+// `ServeError::UnsupportedPlatform`, and `crates/drogond/src/endpoint.rs:12`
+// is still `#![cfg(unix)]`-only and binds no Windows listener. So every
+// WIN32-gated case below is real RED today, real GREEN only once that
+// admission path lands — never silently skipped or force-passed. The pipe
+// *address* is not a guess: `crates/drogon-cli/src/paths.rs`'s
+// `windows_pipe_name` is the frozen client-side contract (covered by
+// `pipe_name_is_contract_stable`), and `resolveOwnedPipePath` in the
+// read-only `windows-native-transport.mjs` mirrors it verbatim; only the
+// server-side bind is still missing.
 //
 // Wrong-credential rejection is driven through the CLI's existing
 // `DROGON_DISPATCH_CAPABILITY` env override (`crates/drogon-cli/src/
@@ -144,14 +142,36 @@ async function withDaemon(context, run, { env = {} } = {}) {
     },
   });
   context.after(async () => {
+    // Prefer the admitted graceful path (`runtime.shutdown` over the named
+    // pipe) while the daemon is still responsive; Node's child_process docs
+    // state SIGTERM forcibly terminates on Windows, so `stopAcceptanceProcess`
+    // (SIGTERM-then-SIGKILL) can only be a disclosed fallback, never the
+    // primary teardown path, and which path actually ran is recorded below.
+    let shutdownPath = "force-fallback";
+    try {
+      const status = await cli(["status"], { timeout: 2000 });
+      if (status.ok === true) {
+        await rpc("runtime.shutdown", {
+          hostId: status.result.hostId,
+          serviceInstanceId: status.result.serviceInstanceId,
+        });
+        shutdownPath = "graceful";
+      }
+    } catch {
+      // Daemon unresponsive or already gone; the force fallback below still runs.
+    }
     const result = await stopAcceptanceProcess(daemon, {
       graceMs: 5000,
       forceMs: 2000,
     });
-    assert.notEqual(
+    assert.equal(
       result.verdict,
-      "unverifiable",
-      "the owned daemon must be provably stopped, never left running",
+      "exited",
+      `[${context.name}] the owned daemon must be provably stopped, never left running ` +
+        `(attempted shutdown path: ${shutdownPath})` +
+        (result.verdict === "unverifiable"
+          ? `; preserving fixture ${fixture} because the stop verdict is still "unverifiable" and a possibly-live process must never race cleanup`
+          : ""),
     );
     await rm(fixture, { recursive: true, force: true });
   });
@@ -338,7 +358,23 @@ test(
         "daemon ready before cancel-and-reap",
       );
       const folder = await mkdtemp(path.join(tmpdir(), "wnpa-ws-"));
-      t.after(() => rm(folder, { recursive: true, force: true }));
+      // Verified only once a `session.stop` verdict for THIS exact session is
+      // observed as "exited"; stays undefined otherwise, including if the
+      // case fails before session.start ever runs.
+      let sessionStopVerdict;
+      t.after(async () => {
+        if (sessionStopVerdict === "exited") {
+          await rm(folder, { recursive: true, force: true });
+        } else {
+          // The real child may still be alive: deleting the workspace folder
+          // here would race a possibly-live process and destroy evidence, so
+          // it is preserved instead and its path is logged for follow-up.
+          console.error(
+            `[${t.name}] preserving workspace folder ${folder}: session stop verdict was ` +
+              `${JSON.stringify(sessionStopVerdict)}, not the verified "exited"`,
+          );
+        }
+      });
       const added = await cli([
         "workspace",
         "add",
@@ -350,19 +386,43 @@ test(
       const started = await rpc("session.start", {
         workspaceId: added.result.id,
         command: process.execPath,
-        args: ["-e", "setInterval(() => {}, 1000)"],
+        // Bounded synthetic child: self-exits after 15s, well inside this
+        // case's 25s timeout, so a failed reap can never leave an orphan
+        // running forever; session.stop below runs immediately after start,
+        // so the child is still provably live at stop time.
+        args: ["-e", "setTimeout(() => process.exit(0), 15000)"],
         cols: 80,
         rows: 24,
       });
       assert.equal(started.verdict, "live");
-      const stopped = await rpc("session.stop", {
-        sessionId: started.id,
-        incarnation: started.incarnation,
-      });
-      assert.equal(
-        stopped.verdict,
-        "exited",
-        "cancellation must actually reap the real child process, not just mark it stopped",
-      );
+      try {
+        const stopped = await rpc("session.stop", {
+          sessionId: started.id,
+          incarnation: started.incarnation,
+        });
+        sessionStopVerdict = stopped.verdict;
+        assert.equal(
+          stopped.verdict,
+          "exited",
+          "cancellation must actually reap the real child process, not just mark it stopped",
+        );
+      } catch (error) {
+        // Guarded failure-path cleanup: session.start already produced a
+        // real child, so any assertion/RPC failure past that point must
+        // still reap the EXACT started session id + incarnation (this RPC
+        // shape carries no separate host field to include) rather than
+        // leaking it. A cleanup failure is attached as suppressed detail,
+        // never allowed to replace or mask the original failure.
+        try {
+          const cleanupStopped = await rpc("session.stop", {
+            sessionId: started.id,
+            incarnation: started.incarnation,
+          });
+          sessionStopVerdict = cleanupStopped.verdict;
+        } catch (cleanupError) {
+          error.cause = cleanupError;
+        }
+        throw error;
+      }
     }),
 );
