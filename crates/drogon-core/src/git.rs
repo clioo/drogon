@@ -173,6 +173,36 @@ impl CapabilityCache {
     }
 }
 
+/// RAII obligation for a future execution layer: hold one of these across
+/// every fallible probe call made between `begin_probe` and its natural
+/// completion (including calls that may bail out early via `?`). `Drop`
+/// calls `finish_probe` unconditionally, so an early return can never leave
+/// a `(scope, capability)` pair stuck reporting `Follower` forever because
+/// nothing called `finish_probe` on the error path. This module does not
+/// itself run any probe; it only defines the guard shape the caller who
+/// eventually does must use.
+pub struct ProbeGuard<'a> {
+    cache: &'a CapabilityCache,
+    scope: HostScope,
+    capability: Capability,
+}
+
+impl<'a> ProbeGuard<'a> {
+    pub fn new(cache: &'a CapabilityCache, scope: HostScope, capability: Capability) -> Self {
+        Self {
+            cache,
+            scope,
+            capability,
+        }
+    }
+}
+
+impl Drop for ProbeGuard<'_> {
+    fn drop(&mut self) {
+        self.cache.finish_probe(&self.scope, self.capability);
+    }
+}
+
 /// One row of the ordered probe list: the preferred command to try first,
 /// and the baseline-compatible fallback if the preferred form is rejected.
 /// Data only — this change does not spawn any process.
@@ -191,6 +221,28 @@ fn cmd(parts: &[&str]) -> Vec<String> {
 /// `docs/reference/git-compatibility.md#current-capabilities`. Order
 /// reflects the dependency for command construction (fetch/worktree probes
 /// before ref/merge probes), not measured cost.
+///
+/// # INERT DATA — must not be executed as capability discovery
+///
+/// This function returns a plain data table, not a runnable discovery
+/// procedure. Do not feed these `preferred_command`/`fallback_command`
+/// vectors straight to a process spawn as a "try the preferred command, fall
+/// back on rejection" probe: several rows are unsafe or outright invalid
+/// run that way —
+/// - `FetchNoWriteFetchHead`'s commands are a real, unbounded `git fetch
+///   origin`: a mutating network call with no timeout, no scope limit, and
+///   real side effects on failure/partial completion.
+/// - `MergeTreeWriteTree` / `MergeTreeMergeBase`'s commands omit the
+///   revision arguments `git merge-tree` requires, so as written they are
+///   not valid invocations, let alone safe ones.
+/// - `DecoratePlaceholder`'s `git log` commands carry no `-n`/revision
+///   range and would walk the entire unbounded history.
+///
+/// A future execution layer must redesign each row as a bounded, revision-
+/// scoped operation wrapper — and hold a [`ProbeGuard`] across every
+/// fallible call the wrapper makes — before any of these commands are
+/// actually spawned. Until that redesign lands, treat this table as
+/// documentation, never as an executable plan.
 pub fn baseline_probe_plan() -> Vec<ProbePlanEntry> {
     vec![
         ProbePlanEntry {
@@ -200,8 +252,12 @@ pub fn baseline_probe_plan() -> Vec<ProbePlanEntry> {
         },
         ProbePlanEntry {
             capability: Capability::WorktreeListZ,
-            preferred_command: cmd(&["worktree", "list", "-z"]),
-            fallback_command: cmd(&["worktree", "list"]),
+            // Real Git rejects a bare `-z`: "fatal: the option '-z'
+            // requires '--porcelain'" (verified live against Git 2.50.1).
+            // `--porcelain` alone is also the pre-2.36 line-block fallback
+            // the worktree parser already handles.
+            preferred_command: cmd(&["worktree", "list", "--porcelain", "-z"]),
+            fallback_command: cmd(&["worktree", "list", "--porcelain"]),
         },
         ProbePlanEntry {
             capability: Capability::RevParsePathFormat,
@@ -283,17 +339,25 @@ pub struct ParsedStatus {
 }
 
 fn parse_ab(field: &str) -> Result<(Option<i64>, Option<i64>), RpcError> {
-    // Expected shape: "+<ahead> -<behind>", e.g. "+1 -2".
+    // Expected shape: "+<ahead> -<behind>", e.g. "+1 -2". Split on chars, not
+    // bytes: `split_at(1)` on a byte index panics whenever the first
+    // character of a malformed part is multi-byte UTF-8 (it lands mid-
+    // character rather than on a char boundary), so every split here goes
+    // through `chars()` instead.
     let mut ahead = None;
     let mut behind = None;
     for part in field.split_whitespace() {
-        let (sign, digits) = part.split_at(1);
+        let mut chars = part.chars();
+        let sign = chars.next().ok_or_else(|| {
+            error::invalid_argument(format!("malformed branch.ab field: {field}"))
+        })?;
+        let digits: String = chars.collect();
         let value: i64 = digits
             .parse()
             .map_err(|_| error::invalid_argument(format!("malformed branch.ab field: {field}")))?;
         match sign {
-            "+" => ahead = Some(value),
-            "-" => behind = Some(value),
+            '+' => ahead = Some(value),
+            '-' => behind = Some(value),
             _ => {
                 return Err(error::invalid_argument(format!(
                     "malformed branch.ab field: {field}"
@@ -328,7 +392,117 @@ fn parse_header_line(line: &str, header: &mut StatusHeader) -> Result<(), RpcErr
     Ok(())
 }
 
-fn parse_ordinary_or_unmerged(line: &str) -> Result<StatusEntry, RpcError> {
+/// Unescapes one C-quoted-path byte payload (the content between the
+/// surrounding `"` `"`, already stripped by the caller): `\\`, `\"`, the
+/// standard C control-char escapes, and octal `\NNN` byte escapes (which may
+/// chain across multiple escapes to spell one multi-byte UTF-8 character).
+/// Per `core.quotePath` (see `git-config(1)`), Git emits exactly this form
+/// for any path containing a byte outside the printable-ASCII range or a
+/// quoting-metacharacter.
+fn c_unquote(quoted: &str) -> Result<String, RpcError> {
+    let bytes = quoted.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b != b'\\' {
+            out.push(b);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let esc = *bytes.get(i).ok_or_else(|| {
+            error::invalid_argument(format!("truncated C-quote escape: {quoted}"))
+        })?;
+        match esc {
+            b'\\' => {
+                out.push(b'\\');
+                i += 1;
+            }
+            b'"' => {
+                out.push(b'"');
+                i += 1;
+            }
+            b'n' => {
+                out.push(b'\n');
+                i += 1;
+            }
+            b't' => {
+                out.push(b'\t');
+                i += 1;
+            }
+            b'r' => {
+                out.push(b'\r');
+                i += 1;
+            }
+            b'a' => {
+                out.push(0x07);
+                i += 1;
+            }
+            b'b' => {
+                out.push(0x08);
+                i += 1;
+            }
+            b'f' => {
+                out.push(0x0c);
+                i += 1;
+            }
+            b'v' => {
+                out.push(0x0b);
+                i += 1;
+            }
+            b'0'..=b'7' => {
+                if i + 3 > bytes.len() {
+                    return Err(error::invalid_argument(format!(
+                        "truncated octal escape in C-quoted path: {quoted}"
+                    )));
+                }
+                let octal = std::str::from_utf8(&bytes[i..i + 3]).map_err(|_| {
+                    error::invalid_argument(format!(
+                        "invalid octal escape in C-quoted path: {quoted}"
+                    ))
+                })?;
+                let value = u8::from_str_radix(octal, 8).map_err(|_| {
+                    error::invalid_argument(format!(
+                        "invalid octal escape in C-quoted path: {quoted}"
+                    ))
+                })?;
+                out.push(value);
+                i += 3;
+            }
+            other => {
+                return Err(error::invalid_argument(format!(
+                    "unknown C-quote escape '\\{}' in path: {quoted}",
+                    other as char
+                )));
+            }
+        }
+    }
+    String::from_utf8(out)
+        .map_err(|_| error::invalid_argument(format!("C-quoted path is not valid UTF-8: {quoted}")))
+}
+
+/// Unescapes `path` if it is C-quoted (wrapped in `"` `"`), otherwise returns
+/// it unchanged. Only the line-oriented porcelain form quotes paths; `-z`
+/// output never does (see `parse_status_porcelain_v2_z`).
+fn unquote_path(path: String) -> Result<String, RpcError> {
+    if path.len() >= 2 && path.starts_with('"') && path.ends_with('"') {
+        c_unquote(&path[1..path.len() - 1])
+    } else {
+        Ok(path)
+    }
+}
+
+fn require_non_empty_path(path: String, line: &str) -> Result<String, RpcError> {
+    if path.is_empty() {
+        return Err(error::invalid_argument(format!(
+            "malformed status entry (empty path): {line}"
+        )));
+    }
+    Ok(path)
+}
+
+fn parse_ordinary_or_unmerged(line: &str, quoted: bool) -> Result<StatusEntry, RpcError> {
     let is_unmerged = line.starts_with("u ");
     let fields: Vec<&str> = line.split(' ').collect();
     let min_fields = if is_unmerged { 11 } else { 9 };
@@ -339,11 +513,12 @@ fn parse_ordinary_or_unmerged(line: &str) -> Result<StatusEntry, RpcError> {
     }
     let xy = fields[1].to_string();
     let path = fields[min_fields - 1..].join(" ");
-    if path.is_empty() {
-        return Err(error::invalid_argument(format!(
-            "malformed status entry (empty path): {line}"
-        )));
-    }
+    let path = require_non_empty_path(path, line)?;
+    let path = if quoted {
+        require_non_empty_path(unquote_path(path)?, line)?
+    } else {
+        path
+    };
     if is_unmerged {
         Ok(StatusEntry::Unmerged { xy, path })
     } else {
@@ -374,22 +549,30 @@ fn parse_rename_or_copy(line: &str) -> Result<StatusEntry, RpcError> {
             "malformed rename/copy entry (empty path): {line}"
         )));
     }
+    let path = require_non_empty_path(unquote_path(path.to_string())?, line)?;
+    let orig_path = require_non_empty_path(unquote_path(orig_path.to_string())?, line)?;
     Ok(StatusEntry::RenameOrCopy {
         xy,
         score,
-        path: path.to_string(),
-        orig_path: orig_path.to_string(),
+        path,
+        orig_path,
     })
 }
 
-fn parse_path_only(prefix_len: usize, line: &str) -> Result<String, RpcError> {
-    let path = line[prefix_len..].trim_start();
-    if path.is_empty() {
-        return Err(error::invalid_argument(format!(
-            "malformed status entry (empty path): {line}"
-        )));
+/// Strips exactly the one format-separator space after the `?`/`!` marker
+/// (`prefix_len` bytes) and, for the line-oriented (`quoted`) form,
+/// C-unquotes the remainder. Anything past that one separator is the path
+/// verbatim, including further leading spaces that are part of the real
+/// filename — `trim_start` would silently eat those too.
+fn parse_path_only(prefix_len: usize, line: &str, quoted: bool) -> Result<String, RpcError> {
+    let rest = &line[prefix_len..];
+    let path = rest.strip_prefix(' ').unwrap_or(rest);
+    let path = require_non_empty_path(path.to_string(), line)?;
+    if quoted {
+        require_non_empty_path(unquote_path(path)?, line)
+    } else {
+        Ok(path)
     }
-    Ok(path.to_string())
 }
 
 /// Parses the stable `git status --porcelain=v2` baseline subset: header
@@ -413,17 +596,104 @@ pub fn parse_status_porcelain_v2(input: &str) -> Result<ParsedStatus, RpcError> 
             .next()
             .ok_or_else(|| error::invalid_argument(format!("empty status line: {line}")))?;
         match kind {
-            "1" | "u" => entries.push(parse_ordinary_or_unmerged(line)?),
+            "1" | "u" => entries.push(parse_ordinary_or_unmerged(line, true)?),
             "2" => entries.push(parse_rename_or_copy(line)?),
             "?" => entries.push(StatusEntry::Untracked {
-                path: parse_path_only(1, line)?,
+                path: parse_path_only(1, line, true)?,
             }),
             "!" => entries.push(StatusEntry::Ignored {
-                path: parse_path_only(1, line)?,
+                path: parse_path_only(1, line, true)?,
             }),
             _ => {
                 return Err(error::invalid_argument(format!(
                     "unknown status line prefix: {line}"
+                )));
+            }
+        }
+    }
+
+    Ok(ParsedStatus { header, entries })
+}
+
+fn parse_rename_or_copy_z(entry_token: &str, orig_path_token: Option<&str>) -> Result<StatusEntry, RpcError> {
+    let fields: Vec<&str> = entry_token.split(' ').collect();
+    // "-z" shape: "2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>",
+    // with origPath as its own NUL-terminated token immediately after (no
+    // tab separator, no C-quoting — `-z` disables path quoting entirely).
+    if fields.len() < 10 {
+        return Err(error::invalid_argument(format!(
+            "malformed rename/copy entry (too few fields): {entry_token}"
+        )));
+    }
+    let xy = fields[1].to_string();
+    let score = fields[8].to_string();
+    let path = fields[9..].join(" ");
+    let orig_path = orig_path_token.ok_or_else(|| {
+        error::invalid_argument(format!(
+            "malformed rename/copy entry (missing NUL-separated origPath): {entry_token}"
+        ))
+    })?;
+    if path.is_empty() || orig_path.is_empty() {
+        return Err(error::invalid_argument(format!(
+            "malformed rename/copy entry (empty path): {entry_token}"
+        )));
+    }
+    Ok(StatusEntry::RenameOrCopy {
+        xy,
+        score,
+        path,
+        orig_path: orig_path.to_string(),
+    })
+}
+
+/// Parses the NUL-delimited (`-z`) form of `git status --porcelain=v2`:
+/// same header/entry kinds as [`parse_status_porcelain_v2`], but records are
+/// NUL-terminated instead of newline-terminated, paths are never C-quoted
+/// (verbatim bytes, since NUL — the only byte a real filename can never
+/// contain — is already an unambiguous separator), and a rename/copy
+/// entry's `origPath` is its own separate NUL-terminated token rather than
+/// tab-appended to the same record.
+pub fn parse_status_porcelain_v2_z(input: &str) -> Result<ParsedStatus, RpcError> {
+    let mut header = StatusHeader::default();
+    let mut entries = Vec::new();
+
+    let tokens: Vec<&str> = input.split('\0').filter(|t| !t.is_empty()).collect();
+    let mut i = 0;
+    while i < tokens.len() {
+        let token = tokens[i];
+        if token.starts_with("# ") {
+            parse_header_line(token, &mut header)?;
+            i += 1;
+            continue;
+        }
+        let kind = token
+            .split(' ')
+            .next()
+            .ok_or_else(|| error::invalid_argument(format!("empty status entry: {token}")))?;
+        match kind {
+            "1" | "u" => {
+                entries.push(parse_ordinary_or_unmerged(token, false)?);
+                i += 1;
+            }
+            "2" => {
+                entries.push(parse_rename_or_copy_z(token, tokens.get(i + 1).copied())?);
+                i += 2;
+            }
+            "?" => {
+                entries.push(StatusEntry::Untracked {
+                    path: parse_path_only(1, token, false)?,
+                });
+                i += 1;
+            }
+            "!" => {
+                entries.push(StatusEntry::Ignored {
+                    path: parse_path_only(1, token, false)?,
+                });
+                i += 1;
+            }
+            _ => {
+                return Err(error::invalid_argument(format!(
+                    "unknown status line prefix: {token}"
                 )));
             }
         }
