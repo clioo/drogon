@@ -66,6 +66,8 @@ jobs:
         run: |
           cargo build --workspace --locked
           cargo test -p drogond --locked
+      - name: Windows named-pipe cross-process acceptance
+        run: node --test scripts/windows-named-pipe-acceptance.test.mjs
       - name: Install pinned JavaScript dependencies
         run: |
           npm install --global pnpm@11.19.0
