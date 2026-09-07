@@ -504,6 +504,8 @@ h2 {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  /* Anchor for the transient notice overlays below. */
+  position: relative;
 }
 .workspace-explorer {
   width: 240px;
@@ -537,6 +539,107 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Editor canvas surface (ROOT-approved extras to Follow-up B): the emitted
+   textarea fills the pane column on --editor-surface in the mono scale. No
+   native resize grip may overflow the flex column, so resizing is off; the
+   focus ring mirrors the button pattern. */
+.editor-pane-surface {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 0;
+  resize: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--foreground);
+  background: var(--editor-surface);
+}
+.editor-pane-surface:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+/* Explorer tree rows (Follow-up B item 5 + approval): the emitted buttons
+   are vertical full-width flex rows mirroring .workspace-row, so selected
+   and hover reuse --sidebar-accent and the global button focus ring stays
+   intact. The chevron spacer matches the 14px lucide chevron it replaces. */
+.workspace-explorer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  margin: 2px 8px;
+  padding: 8px 12px;
+  border-radius: calc(var(--radius) * 0.8);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+}
+.workspace-explorer-row svg,
+.workspace-explorer-chevron-spacer,
+.workspace-explorer-badge {
+  flex-shrink: 0;
+}
+.workspace-explorer-chevron-spacer {
+  width: 14px;
+}
+.workspace-explorer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-explorer-badge {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.workspace-explorer-row:hover,
+.workspace-explorer-row[data-current="true"],
+.workspace-explorer-row[aria-selected="true"] {
+  background: var(--sidebar-accent);
+}
+/* Header badges stay V2-styled via existing hooks; content is V3's. */
+.editor-pane-unread {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.editor-pane-dirty {
+  font-size: 12px;
+}
+/* Truncation/symlink notices are transient siblings between the tree and
+   the editor: as flex items they would become columns squeezing the editor,
+   so they overlay the panel top instead (popover tokens, floating tier).
+   A V3 wrapper stacking them above the split remains the cleaner option. */
+.files-panel-truncated,
+.files-panel-selection {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  max-width: min(90%, 60ch);
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.8);
+  box-shadow: var(--shadow-floating);
+}
+.files-panel-symlink-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.6);
+  padding: 3px 8px;
 }
 @media (max-width: 1100px) {
   .files-panel {

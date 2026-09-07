@@ -249,15 +249,19 @@ function measureContrast() {
       a: parts.length > 3 ? parts[3] : 1,
     };
   };
-  const over = (fg, bg) =>
-    fg.a >= 1
-      ? fg
-      : {
-          r: fg.r * fg.a + bg.r * (1 - fg.a),
-          g: fg.g * fg.a + bg.g * (1 - fg.a),
-          b: fg.b * fg.a + bg.b * (1 - fg.a),
-          a: 1,
-        };
+  const over = (fg, bg) => {
+    // General (un-premultiplied) Porter-Duff "A over B": bg may itself be
+    // non-opaque (multi-layer surface() chains), so its channels must be
+    // weighted by bg.a and the result un-premultiplied by the output alpha.
+    const a = fg.a + bg.a * (1 - fg.a);
+    if (a === 0) return { r: 0, g: 0, b: 0, a: 0 };
+    return {
+      r: (fg.r * fg.a + bg.r * bg.a * (1 - fg.a)) / a,
+      g: (fg.g * fg.a + bg.g * bg.a * (1 - fg.a)) / a,
+      b: (fg.b * fg.a + bg.b * bg.a * (1 - fg.a)) / a,
+      a,
+    };
+  };
   const lum = (c) => {
     const f = (v) => {
       v /= 255;
@@ -279,12 +283,32 @@ function measureContrast() {
   );
   const header = document.querySelector(".session-header");
   if (!bodyBg || !muted || !button || !header) return null;
+  // ROOT correction: a transparent element shows its nearest opaque
+  // ancestor, not the body (e.g. transparent .sidebar-footer renders over
+  // opaque .workspace-sidebar #fafafa/#171717). Composite every layer from
+  // the body down to the element, stopping at the first opaque result.
   const surface = (el) => {
-    const own = parse(style(el, "backgroundColor"));
-    return own && own.a > 0 ? over(own, bodyBg) : bodyBg;
+    const chain = [];
+    for (
+      let node = el;
+      node && node.nodeType === 1;
+      node = node.parentElement
+    ) {
+      chain.push(node);
+      if (node === body) break;
+    }
+    // Painter's order: start at the element, composite outward until opaque.
+    let bg = null;
+    for (let i = 0; i < chain.length; i++) {
+      const layer = parse(style(chain[i], "backgroundColor"));
+      if (!layer) continue;
+      bg = bg === null ? layer : over(bg, layer);
+      if (bg.a >= 1) break;
+    }
+    return bg ?? bodyBg;
   };
   const mutedSurface = surface(muted);
-  const buttonBg = over(parse(style(button, "backgroundColor")), bodyBg);
+  const buttonBg = surface(button);
   const headerSurface = surface(header);
   // Header icons: lucide glyphs stroke with currentColor, so the button's
   // computed color is the icon foreground; ghost buttons render on
@@ -349,14 +373,14 @@ function assertContrast(theme, measured) {
     // recorded and reported, not gated - the report owns the conclusion.
     border: record("border-ui", measured.border, uiThreshold, false),
   };
-  // Header icons, settled dark only (ROOT follow-up): both glyphs duplicate
-  // meaning carried by aria-label and tooltip, so nothing gates - the 3.0
-  // non-text verdict is recorded for the report.
+  // Header icons, settled dark only: the glyphs are the visible meaning
+  // for sighted low-vision users, so aria-label/tooltip duplication does NOT
+  // waive them - meaningful header glyphs gate at non-text 3.0 (ROOT).
   if (theme === "dark" && measured.icons) {
     const icons = {};
     for (const [name, value] of Object.entries(measured.icons)) {
       if (value === null) continue;
-      icons[name] = record(`icon-${name}`, value, uiThreshold, false);
+      icons[name] = record(`icon-${name}`, value, uiThreshold, true);
     }
     report.contrast[theme].icons = icons;
   }
@@ -667,14 +691,21 @@ try {
     assertContrast(theme, measured);
   }
 
-  // 8. Files-split CSS static verification (V2-owned half of Follow-up B).
+  // 8. Files-split CSS static verification (Follow-up B V2 half + the
+  // ROOT-approved extras: editor surface, explorer rows, notice overlays).
   // HONESTY: files.v1 is withheld in every available environment, so the
   // Files panel cannot mount over CDP here and NO rendered-files visual
   // claim is possible from this probe; this section therefore verifies the
   // BUILT stylesheet statically (selector + token presence). Visual
   // acceptance of the rendered split stays with the integrated CDP lane once
   // files.v1 ships in a real environment - this section must be replaced by
-  // rendered assertions there, not treated as the visual proof.
+  // rendered assertions there, not treated as the visual proof. The 760px
+  // narrow-viewport gate (stacked fallback usable, editor usable at 760x600)
+  // is rendered-only for the same reason; its static prerequisite asserted
+  // here is presence of the @media (max-width: 1100px) stacked-fallback rule
+  // (760 falls within that breakpoint) plus overlay-free editor rules. Row
+  // math for the record: at 1440 the fixed 240px tree beside the 240px
+  // sidebar leaves 960px for the editor before any V3 drag-resize.
   const cssAssets = path.join(appDir, "out", "renderer", "assets");
   const cssFile = (await readdir(cssAssets)).find((f) => f.endsWith(".css"));
   assert.ok(cssFile, "built renderer CSS not found - run electron-vite build");
@@ -687,9 +718,19 @@ try {
     ["editor-surface-token-light", "--editor-surface: #fff;", 2],
     ["files-panel-split", ".files-panel {", 2],
     ["workspace-explorer-tree", ".workspace-explorer {", 2],
+    [
+      "files-panel-stacked-media",
+      "@media (max-width: 1100px) {",
+      1,
+    ],
     ["editor-pane-canvas", ".editor-pane {", 1],
     ["editor-pane-header", ".editor-pane-header {", 2],
     ["tree-fixed-240px", "width: 240px;", 1],
+    ["editor-surface-textarea", ".editor-pane-surface {", 1],
+    ["editor-surface-no-resize", "resize: none", 1],
+    ["explorer-row", ".workspace-explorer-row {", 1],
+    ["explorer-row-selected", ".workspace-explorer-row[data-current", 1],
+    ["notice-overlay", ".files-panel-truncated", 1],
     // color-mix borders ship as progressive enhancement: var() fallback plus
     // an @supports-wrapped color-mix override per the build pipeline.
     ["color-mix-border", "color-mix(in srgb, var(--border) 72%, transparent)", 3],
