@@ -1,0 +1,751 @@
+{
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "recordedBy": "V4-B2 worker (task_f89d0c67d308 / dispatch ctx_d369b91d50a1), 2026-09-07",
+  "method": "sha256 of `git -C /Users/carlos/Documents/Drogon-mentu-session show <pin>:<path>` output, run from the Drogon-rewrite worktree cwd; the reference checkout was never used as cwd and nothing was written to it",
+  "revisionProof": {
+    "referenceHead": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+    "pinnedObjectExists": true,
+    "headEqualsPin": true
+  },
+  "crossCheck": "every computed sha256 equals the sha256 recorded for that path in docs/migration/parity-test-work-packages.json (199/199 paths)",
+  "isolationRationale": "hash/read-only recording only; no source module was imported or executed, no runner wrote to the reference, no fixture was copied outside the declared frozen-port test files",
+  "license": {
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc.",
+    "notice": "tests/parity/ports/LICENSE.orca"
+  },
+  "portPackage": "WP-CAP-INT",
+  "scope": "Provider integrations (7 providers): azure-devops, bitbucket, gitea, github, gitlab, jira, linear plus shared/github and shared/linear contracts — full canonical 137-file test inventory from parity-test-work-packages.json",
+  "fileCount": 137,
+  "files": [
+    {
+      "path": "src/main/azure-devops/azure-devops-api-request.test.ts",
+      "sha256": "705324925f0b4679311e5bc6f9e55e058d3ab454fd60a3324798fb44b019360c",
+      "bytes": 5311
+    },
+    {
+      "path": "src/main/azure-devops/client.test.ts",
+      "sha256": "8cbb4f9cd5f35c1f81277d473df3cc30b7a4ba4107315a3d4800e35f33ed3798",
+      "bytes": 15189
+    },
+    {
+      "path": "src/main/azure-devops/pull-request-creation.test.ts",
+      "sha256": "5153f045ca2fc067fe241c426913736d35022b567644fc29b150463a57dc539a",
+      "bytes": 7730
+    },
+    {
+      "path": "src/main/azure-devops/pull-request-mappers.test.ts",
+      "sha256": "7ec23b2054369214244007212054e2067a67ba5769905bc98489b91d8e961c88",
+      "bytes": 1809
+    },
+    {
+      "path": "src/main/azure-devops/repository-ref.test.ts",
+      "sha256": "d82d62a44d3b318c6d9b7efa0077db7a97ee632f1245cb707a7bbca12b852d88",
+      "bytes": 6960
+    },
+    {
+      "path": "src/main/bitbucket/client.test.ts",
+      "sha256": "54f780759ab156b23ebd8849691dea63a251e40e833a08748e83dde78a279132",
+      "bytes": 12467
+    },
+    {
+      "path": "src/main/bitbucket/credential-connection.test.ts",
+      "sha256": "539ce4f4b3581c485bd59e1b2a59272c8080bf175fe5c1635ac28422024b1bd2",
+      "bytes": 6310
+    },
+    {
+      "path": "src/main/bitbucket/credential-store.test.ts",
+      "sha256": "546ae0be1b374a72a941cd050d20b69df01b9326d77a9bf939fd520e0c0b94a5",
+      "bytes": 12532
+    },
+    {
+      "path": "src/main/bitbucket/pull-request-creation.test.ts",
+      "sha256": "e14ff5436d44a52d9d913592975367a4ebeba7389ce521cc15e649452f359b13",
+      "bytes": 6381
+    },
+    {
+      "path": "src/main/bitbucket/pull-request-mappers.test.ts",
+      "sha256": "eb493faf0948a526fcd2f78c71698aa8d273bdb34aa7ef7ece3e4e96266c8ca3",
+      "bytes": 1734
+    },
+    {
+      "path": "src/main/bitbucket/repository-ref.test.ts",
+      "sha256": "ac73e8a8edf9ab0be617f77d70e0763b9ec460018e5b0868efb552ff502bfe4b",
+      "bytes": 5902
+    },
+    {
+      "path": "src/main/bitbucket/status-no-decrypt.test.ts",
+      "sha256": "63937e170d202c5091c8a2d8391347ce72ea313efa6635a1130f1c519d0a8755",
+      "bytes": 4683
+    },
+    {
+      "path": "src/main/gitea/client.test.ts",
+      "sha256": "06d75389231f496991bcf84bf4b666fa0ed465de95e1271d25c2d90da6ec119e",
+      "bytes": 14614
+    },
+    {
+      "path": "src/main/gitea/pull-request-creation.test.ts",
+      "sha256": "145c6a8d0a9f0e07fdf4572db02addb6fc71abf1d6f5ecb4dc39a088756f50f1",
+      "bytes": 4797
+    },
+    {
+      "path": "src/main/gitea/pull-request-mappers.test.ts",
+      "sha256": "a2693c9bae73efe1256146c5c2af9d9b6074958a42394a67f7058af8fa07f7e9",
+      "bytes": 2710
+    },
+    {
+      "path": "src/main/gitea/repository-ref.test.ts",
+      "sha256": "804a3ae7553441022d2a55744267abf562217ab57031ff1314d2ac377add2b07",
+      "bytes": 7326
+    },
+    {
+      "path": "src/main/github/auth-diagnose.test.ts",
+      "sha256": "3237511940fe1480a2577435f8b81a3210873b488be2a40d47e195dcef89ad51",
+      "bytes": 5464
+    },
+    {
+      "path": "src/main/github/client-create-pr.test.ts",
+      "sha256": "e6810a0f1f0ff7c6f4b7c61fe5694f3d06ac86710ef8fed0b006a8bbea1ce614",
+      "bytes": 15977
+    },
+    {
+      "path": "src/main/github/client-file-viewed.test.ts",
+      "sha256": "ea519e8cbbf48bcbcf5dcdaa438644af4f45da8154b0d4bef677933df08451b2",
+      "bytes": 5730
+    },
+    {
+      "path": "src/main/github/client-issue-origin-preference.test.ts",
+      "sha256": "44d1b7ea344fa1226f3f18c84fe783ce35e0046c46670aade2bd61f3e007ec79",
+      "bytes": 6950
+    },
+    {
+      "path": "src/main/github/client-issue-source.test.ts",
+      "sha256": "dcef6c6e10823dfdbc27bb2585e98553b34dcc8da21fb8936d40fbbd1b1ce8be",
+      "bytes": 34283
+    },
+    {
+      "path": "src/main/github/client-merge-queue-auto-merge.test.ts",
+      "sha256": "c1e9b770af5394dff028b65d8328299bb2e0da0934d94b0502b5e220b09ccc82",
+      "bytes": 21213
+    },
+    {
+      "path": "src/main/github/client-merged-pr-visibility.test.ts",
+      "sha256": "7c02e12bb61ace1ec7943c27519007155de284bf43adad262c75a802a160965b",
+      "bytes": 19359
+    },
+    {
+      "path": "src/main/github/client-pr-branch-discovery.test.ts",
+      "sha256": "2b956182897c7e643e89e8a365e5ec564d09662ae1ecd772f5d8cb731475a4e6",
+      "bytes": 7181
+    },
+    {
+      "path": "src/main/github/client-pr-check-details.test.ts",
+      "sha256": "3571c1dbcb1b27b8e062ac74cf46b09bf46f0ca98c7d12af36ef830a7b05ee3a",
+      "bytes": 11962
+    },
+    {
+      "path": "src/main/github/client-pr-checks.test.ts",
+      "sha256": "023ed53e596034f9cb18c5f01b7a0513a9980b18a41811c7173ca8a8d35c338d",
+      "bytes": 24081
+    },
+    {
+      "path": "src/main/github/client-pr-comment-reactions.test.ts",
+      "sha256": "de47fc9450a7d4fa15d3d38b2cc98b439b9abcbf4405dfc800f42f8ebadfb55e",
+      "bytes": 10172
+    },
+    {
+      "path": "src/main/github/client-pr-conflict-summary.test.ts",
+      "sha256": "dc6959f6a14a4925dbf9610a08666bd10f5e4325f1232b0418ed143b245f808c",
+      "bytes": 17043
+    },
+    {
+      "path": "src/main/github/client-pr-fallback-number.test.ts",
+      "sha256": "55c6d01b32c39b5d5313aa30f77d5fb302dd7aa2e93af1940e9e6c3375ff3796",
+      "bytes": 22089
+    },
+    {
+      "path": "src/main/github/client-pr-linked-lookup.test.ts",
+      "sha256": "9876f0e8e2e2addb8bf19ae9429116c3a2fb80ff577f7e46b59b2e3d247204d8",
+      "bytes": 22554
+    },
+    {
+      "path": "src/main/github/client-pr-local-runtime.test.ts",
+      "sha256": "972fd5e9eee642702be023f39f9c4e33b95ebe16afdd1e618e4d2c6cd9365ee1",
+      "bytes": 20401
+    },
+    {
+      "path": "src/main/github/client-pr-push-target.test.ts",
+      "sha256": "5350b7d48cc73773ce65e55c0c61f7726791fa02d83454b34812196eb1eadf94",
+      "bytes": 16794
+    },
+    {
+      "path": "src/main/github/client-pr-state.test.ts",
+      "sha256": "a4378f0948d945cee5de6ae8e3cc75b58e35e1c7c7b6be844bc0561a5b286c3f",
+      "bytes": 4553
+    },
+    {
+      "path": "src/main/github/client-rate-limit-block.test.ts",
+      "sha256": "c70cd68e3f37573bad908bb5b42261119ef3163a0472dbac69226102b3e5fdfa",
+      "bytes": 4205
+    },
+    {
+      "path": "src/main/github/client-ssh-provider-execution-boundary.test.ts",
+      "sha256": "3413326e9e11dfd2f4c71737871365af9fd298e5a8f29689d0de940395a5a453",
+      "bytes": 10185
+    },
+    {
+      "path": "src/main/github/client-stack-merge-guard.test.ts",
+      "sha256": "3e4359f4cdbbc7692ec102cefa94db518648dbf7ff4446cb2c392bb6a94d4f85",
+      "bytes": 22547
+    },
+    {
+      "path": "src/main/github/client-starred.test.ts",
+      "sha256": "3f939d7118e3a52680025488fcd3cfefcd3535b63689e95cc28a0074bab81254",
+      "bytes": 6694
+    },
+    {
+      "path": "src/main/github/client-tracked-upstream-fork-owner.test.ts",
+      "sha256": "4033ecb0b30689ea3f6f18a1fac46fdb32cada1a87678f83913c74b883fe47fa",
+      "bytes": 13837
+    },
+    {
+      "path": "src/main/github/client-tracked-upstream-snapshot.test.ts",
+      "sha256": "0d53452dc8cd402500255d63be11f8533d434f281619ea9f377346d60ff342d4",
+      "bytes": 28133
+    },
+    {
+      "path": "src/main/github/client-work-item-check-summary.test.ts",
+      "sha256": "8a4cf6f13fa1db9840a17629aa66b1003bbb5192fa363ebc0992d278f711be4c",
+      "bytes": 5384
+    },
+    {
+      "path": "src/main/github/client-work-items-query-paging.test.ts",
+      "sha256": "962c3f6248245909e19a99fe2fa4e059aa0a4ba694caf0359037ff2f6de59127",
+      "bytes": 11992
+    },
+    {
+      "path": "src/main/github/client-work-items.test.ts",
+      "sha256": "d6039bd2df6a2a6a49bb67f821674abf52cff34beac46bcafde4dd9d82fe8a78",
+      "bytes": 28173
+    },
+    {
+      "path": "src/main/github/comment-reactions.test.ts",
+      "sha256": "ade8bd18c6e52b624de7968e410ba637a295fa910aaf8b936751ed38dc28f690",
+      "bytes": 1144
+    },
+    {
+      "path": "src/main/github/conflict-summary.test.ts",
+      "sha256": "104bbae3e8b1a623eefdd36fc324c07d2b7e8f78e5b6a829aae66f2690eb3101",
+      "bytes": 12505
+    },
+    {
+      "path": "src/main/github/default-branch-stale-pr.test.ts",
+      "sha256": "b98a5a2abedde6099a11c1afed42befd3301ce7fa0fdfc909bbcd22ebb07925f",
+      "bytes": 14100
+    },
+    {
+      "path": "src/main/github/gh-utils-concurrency.test.ts",
+      "sha256": "2bcc0565ec1442b6ded7f98eb6c0893a033682a926d8d0e20d39c164913cd23e",
+      "bytes": 592
+    },
+    {
+      "path": "src/main/github/gh-utils.test.ts",
+      "sha256": "3e2abc4af815972c2b3094a25c93129213467123c65834f183f37b4e1a3708d6",
+      "bytes": 30388
+    },
+    {
+      "path": "src/main/github/github-api-repository.test.ts",
+      "sha256": "11be0f6a569e4c2e840f8d59ef0f780f233e2328088ee5da53c975a8fe3bcda2",
+      "bytes": 12599
+    },
+    {
+      "path": "src/main/github/github-enterprise-repository.test.ts",
+      "sha256": "16fdedf3542f5f660f927b73909002e202fa6a88a0ed88f31be86782f83ad0c0",
+      "bytes": 20831
+    },
+    {
+      "path": "src/main/github/github-pr-stack.test.ts",
+      "sha256": "492436d858ab9334a552ed96e97d34f903f0f3544d6602320f8301cf33758f02",
+      "bytes": 10141
+    },
+    {
+      "path": "src/main/github/github-remote-identity-parsing.test.ts",
+      "sha256": "4e9ee705657dbe3bcfa88f37cf4f41a2ec7e5f87726a3fa089e5c9d5ed8efa30",
+      "bytes": 7345
+    },
+    {
+      "path": "src/main/github/github-repository-identity.fork-owner-repo.test.ts",
+      "sha256": "35e6976788adf2b75b1d6e3ae29fb9d9eefa4d263ea19d483dd9382322533a01",
+      "bytes": 4889
+    },
+    {
+      "path": "src/main/github/github-repository-identity.signed-cache.test.ts",
+      "sha256": "1006240d326e6f6e9223583d5e95c55d89df71b8bd5bd012437d54d83cccc394",
+      "bytes": 3724
+    },
+    {
+      "path": "src/main/github/github-repository-identity.ssh-host-alias.test.ts",
+      "sha256": "f0ec530c9be74e5fa9a9bfd12139f2544158937d4738025d702f04880d11e772",
+      "bytes": 13990
+    },
+    {
+      "path": "src/main/github/issues.test.ts",
+      "sha256": "993070dc4ce490f9d3f70e714c26c40de4a563ac50dc6ef3da48c75421835916",
+      "bytes": 18921
+    },
+    {
+      "path": "src/main/github/pr-head-tracking-ref.test.ts",
+      "sha256": "5e966e7626a89dfa05bac15a5926456636127a12f466d227ac87d6dc59a53e5a",
+      "bytes": 5712
+    },
+    {
+      "path": "src/main/github/pr-refresh-coordinator-active-burst-pacing.test.ts",
+      "sha256": "8fc40bb0085f7fdbb6ea07605d077a40745037bf239a1125e755a3f7ca504d6f",
+      "bytes": 8605
+    },
+    {
+      "path": "src/main/github/pr-refresh-coordinator-active-visible-priority.test.ts",
+      "sha256": "02630062a159eeb9a7748da766eec14ce84ad886ac8729c6dae18bbafe90d335",
+      "bytes": 5799
+    },
+    {
+      "path": "src/main/github/pr-refresh-coordinator-alias-coalescing.test.ts",
+      "sha256": "f8b826b1bad4c784fbe970c7a9506ac09cac567e3ed6acfdeb2327dd7ba45ff6",
+      "bytes": 13795
+    },
+    {
+      "path": "src/main/github/pr-refresh-coordinator-rate-limit-budget.test.ts",
+      "sha256": "8cdb03a1a1a5fb10b8081b4efe011e42e9c8ce8df0e455a62346b9149f128383",
+      "bytes": 7671
+    },
+    {
+      "path": "src/main/github/pr-refresh-coordinator-refresh-events.test.ts",
+      "sha256": "b9de0917497f304395e7d85405ad286edd39da72830ec2d38365fd45ec17ecfa",
+      "bytes": 8682
+    },
+    {
+      "path": "src/main/github/pr-refresh-coordinator-visible-follow-up.test.ts",
+      "sha256": "fd07c0da8fe13704c5cc4f957f5a55230721579b44d7c9c9452902f74efae945",
+      "bytes": 5244
+    },
+    {
+      "path": "src/main/github/pr-refresh-error-classification.test.ts",
+      "sha256": "97c2db8fe595af50a82b7ea4b237950ec7b72a431456e2f27c152b227d05b27c",
+      "bytes": 5421
+    },
+    {
+      "path": "src/main/github/pr-refresh-queue-growth-bound.test.ts",
+      "sha256": "5a76aa859e5bdc1bc6ef0a460ad263a7dd9d9f2e45e2af314014a8a657964da4",
+      "bytes": 10478
+    },
+    {
+      "path": "src/main/github/pr-refresh-validation-backoff.test.ts",
+      "sha256": "b40fd40c19abc6a03d9c35b8295462d37f6aaf760741667bb7a513212c6c8219",
+      "bytes": 2245
+    },
+    {
+      "path": "src/main/github/pr-review-comment-lines.test.ts",
+      "sha256": "260d344cd77cd4e498f5c3f31db3c66da31e29e3135e26ce4635aee86c26e9c2",
+      "bytes": 1777
+    },
+    {
+      "path": "src/main/github/pr-start-point-compare-base.test.ts",
+      "sha256": "325b721c2560047f48087041a3cd78d92377ad60afc3cca84acb3521d8246e73",
+      "bytes": 6155
+    },
+    {
+      "path": "src/main/github/pr-start-point.test.ts",
+      "sha256": "7ef29d03a44abfbfd796124a87ed0b8d39292582beee64c1b5c64855bbdd7d65",
+      "bytes": 17646
+    },
+    {
+      "path": "src/main/github/project-view-host-auth.test.ts",
+      "sha256": "a7c1fc0817db110927763a83b672fc9243f1e1aeb126076c20c2174d1403377b",
+      "bytes": 4131
+    },
+    {
+      "path": "src/main/github/project-view.test.ts",
+      "sha256": "157f558fdfe917a3fcc3b28f80110e7c418a383527ee9926949c3e24cba9a26e",
+      "bytes": 10321
+    },
+    {
+      "path": "src/main/github/project-view/mutations.test.ts",
+      "sha256": "d5ae692f46f5803ec1154581502ebce91409634157323a4a8196d25fffb8c1f9",
+      "bytes": 8145
+    },
+    {
+      "path": "src/main/github/project-view/project-field-mutations.test.ts",
+      "sha256": "56241a9deb92262e44b333efc8c8ee89c8e8fad5463198f18de28a3f1f44bc2b",
+      "bytes": 1889
+    },
+    {
+      "path": "src/main/github/project-view/repository-field-options.test.ts",
+      "sha256": "b969041a9cd78c743d656bf17c12aa9580dc1394e7cf6f59032a55b26b530d32",
+      "bytes": 2406
+    },
+    {
+      "path": "src/main/github/rate-limit.test.ts",
+      "sha256": "f6831e07d5bc8a297d85ee92e37fe0c085de42366ce7f8f2dabe17953a1da462",
+      "bytes": 12924
+    },
+    {
+      "path": "src/main/github/review-head-remote.test.ts",
+      "sha256": "a4831de319e56faf14ac705d088549d7be8b4491dcc308fcf32a2de4c2946081",
+      "bytes": 4632
+    },
+    {
+      "path": "src/main/github/stacked-pr-creation.test.ts",
+      "sha256": "db1b25cc5d238bc8e0078c0a76207af59773b5edb9f7287dc6def17165256e80",
+      "bytes": 9069
+    },
+    {
+      "path": "src/main/github/work-item-details-api-parity.test.ts",
+      "sha256": "e69f97c85918631fae57051772ad2c975dea42ce4a279136067a8ace80bc6cda",
+      "bytes": 1472
+    },
+    {
+      "path": "src/main/github/work-item-details-concurrency.test.ts",
+      "sha256": "018ad34a416eef7da0ee9a8f0a6c89cdf2883f15ce62fa9ce3a95df4ce173304",
+      "bytes": 4722
+    },
+    {
+      "path": "src/main/github/work-item-details-enterprise-host.test.ts",
+      "sha256": "52ef2047e6e5c2532f74536b23da930660b1bd27c31279d420d51ca1b6bb232c",
+      "bytes": 10994
+    },
+    {
+      "path": "src/main/github/work-item-details-file-viewed.test.ts",
+      "sha256": "3f92309eea97e7e7bea2022a69d800b71ff83000b576e9f0c0eae899b4608fde",
+      "bytes": 9348
+    },
+    {
+      "path": "src/main/github/work-item-details-pr-files.test.ts",
+      "sha256": "a17df67f8bc218fd2275f55dd56e06bd85a0b82057acc0fe3605c7349030a228",
+      "bytes": 13157
+    },
+    {
+      "path": "src/main/github/work-item-details.test.ts",
+      "sha256": "f844c270756f4da711acdea26e472550c0750d9088b9017bd4080f6658aa7244",
+      "bytes": 29503
+    },
+    {
+      "path": "src/main/gitlab/client-mr-auth-rate-limit.test.ts",
+      "sha256": "809df2df8e5a0d0621a1216005ad15993d252d1018cbbbbf764fa4232278b343",
+      "bytes": 4842
+    },
+    {
+      "path": "src/main/gitlab/client-mr-branch-lookup.test.ts",
+      "sha256": "268ef786cd228ae488bfc4226d50b8260f879b2b8a154d3a8b2bb651555e20dd",
+      "bytes": 16374
+    },
+    {
+      "path": "src/main/gitlab/client-mr-job-ci.test.ts",
+      "sha256": "04d5e500523a77f869a20be336b7fdf35b6894bb00df40ebfbe724f4c608a272",
+      "bytes": 4529
+    },
+    {
+      "path": "src/main/gitlab/client-mr-listing.test.ts",
+      "sha256": "98a30ae856a251357f7bf16f895b475921c3dc0eeb8c1b58ff9bc6aa65e49967",
+      "bytes": 13293
+    },
+    {
+      "path": "src/main/gitlab/client-mr-review-actions.test.ts",
+      "sha256": "aba34702dc2fe67160adeecc89fdbe3a2753f9cd023af7e174900b1219dd0da7",
+      "bytes": 12668
+    },
+    {
+      "path": "src/main/gitlab/client-work-items.test.ts",
+      "sha256": "31af4bd90b4e4b41e49b4012747400872e5162dd5a97d5467b66925a58c2f359",
+      "bytes": 7529
+    },
+    {
+      "path": "src/main/gitlab/client.test.ts",
+      "sha256": "7f057493f928fa3ccf27aa1867569a0d699ad0e56ef66dbf83300d41c6acdc3d",
+      "bytes": 9531
+    },
+    {
+      "path": "src/main/gitlab/gitlab-known-host-probe-wsl-fallback.test.ts",
+      "sha256": "cf330499aa7b3ef7c35f622080196063d04be48ca07ff078c9ede7d67dc5aa39",
+      "bytes": 3076
+    },
+    {
+      "path": "src/main/gitlab/gitlab-known-host-probe.test.ts",
+      "sha256": "3f6cef2715b219d77d9abdc623bebc591ee2e408e78953d22a835e73b9dc34e8",
+      "bytes": 11132
+    },
+    {
+      "path": "src/main/gitlab/gl-utils.test.ts",
+      "sha256": "f4828c90782366413fa6c1387ed1b66cda00b88940eb01a47992b943b428b23b",
+      "bytes": 24642
+    },
+    {
+      "path": "src/main/gitlab/issues.test.ts",
+      "sha256": "e1ef3ded0773ca9b5015f199124fd1892dec932299164d11dfea150a13a9b542",
+      "bytes": 17879
+    },
+    {
+      "path": "src/main/gitlab/mappers-workitem.test.ts",
+      "sha256": "444c89b66c2e1f2d991025bb1feaff3e8fe5bfbcfdabc2f88f279851e10b426d",
+      "bytes": 3830
+    },
+    {
+      "path": "src/main/gitlab/mappers.test.ts",
+      "sha256": "f0e4b1cf4433e02f3231bca48c4d0e2c4e382011a1d9be10cb6a662428e41eca",
+      "bytes": 12246
+    },
+    {
+      "path": "src/main/gitlab/merge-request-creation.test.ts",
+      "sha256": "f2d22b5a5a6b28f422a61bed00ac0dafabb8f3200934f6ae739b2c9f31dda0cd",
+      "bytes": 7497
+    },
+    {
+      "path": "src/main/gitlab/mr-head-tracking-ref.test.ts",
+      "sha256": "908288f283ce52bf4b6a1bb5adbc8d94424b01165a8acd62b623fc0c02f38318",
+      "bytes": 4630
+    },
+    {
+      "path": "src/main/gitlab/project-ref-parser.test.ts",
+      "sha256": "28c59601d8ea0b13cfc7ddd3c13457ccc3e2597cb6dee4a670a2755f74fb44b3",
+      "bytes": 5457
+    },
+    {
+      "path": "src/main/gitlab/work-item-details.test.ts",
+      "sha256": "0272c7b956ce62e56d40fc9bc0864a42d832d86d4142074ea580262dad8665cd",
+      "bytes": 16137
+    },
+    {
+      "path": "src/main/jira/adf-markdown.test.ts",
+      "sha256": "b0abc193bf85bf6fa7255d36091598e1862b5e4577c46f196750fbd6ac46212e",
+      "bytes": 4369
+    },
+    {
+      "path": "src/main/jira/attachment-image-cache.test.ts",
+      "sha256": "3f88f5d33a323aab0f065e9ace258df9f8c1784fabc77b1cb731084b73a6967b",
+      "bytes": 3507
+    },
+    {
+      "path": "src/main/jira/attachment-images.test.ts",
+      "sha256": "250d1988b3187afbe908e8706e710f2eeafdd965b729677fba857f7601624b6a",
+      "bytes": 12822
+    },
+    {
+      "path": "src/main/jira/client.test.ts",
+      "sha256": "fefe7a486edb2e43dc45ec8df8f20521ee479c38c106beaacc4460f03126db61",
+      "bytes": 23795
+    },
+    {
+      "path": "src/main/jira/issues.test.ts",
+      "sha256": "6117f69224ada5c82f165e412f64a6210c4f65c28105c102a7b335b8a8bca39c",
+      "bytes": 28893
+    },
+    {
+      "path": "src/main/jira/jira-issue-mutations.test.ts",
+      "sha256": "818d5a1f26a14d5123303cc688ccad3762a56c0770c96de39d6dc5bd90c7ecca",
+      "bytes": 6410
+    },
+    {
+      "path": "src/main/jira/jira-issue-summary-timeout.test.ts",
+      "sha256": "b5f43bc2a8a158c1c054a663df4e1ad5be4b1e377525fd9f81d81b11ab2c4387",
+      "bytes": 2139
+    },
+    {
+      "path": "src/main/jira/jira-search-abort.test.ts",
+      "sha256": "08e432af8fdf042cfb98d093558f848f34879bb4e1e5452cedb0e9d2581193eb",
+      "bytes": 2738
+    },
+    {
+      "path": "src/main/linear/client.test.ts",
+      "sha256": "ba25b74c0b5587d6417bd19c8140feaa4876939d59bed4f535f2d216712492c3",
+      "bytes": 12536
+    },
+    {
+      "path": "src/main/linear/issue-context-client.test.ts",
+      "sha256": "248d64738e3a9a16bf5708b1cd57063efab880afabdf1817c042da0457fc8b5e",
+      "bytes": 11285
+    },
+    {
+      "path": "src/main/linear/issue-context-current.test.ts",
+      "sha256": "a65207e4bd377c0c7be1c9c0e3cabcb3325d57bf4ca32a59d8a2a12589e6595c",
+      "bytes": 2068
+    },
+    {
+      "path": "src/main/linear/issue-context-errors.test.ts",
+      "sha256": "cf5022418c72f44b3b73e3e134173e33fe0f2adc1bbd53eb1a76f443fb326833",
+      "bytes": 993
+    },
+    {
+      "path": "src/main/linear/issue-context-includes.test.ts",
+      "sha256": "9de0cc1a5431235dc82ba654682e0236aadc035136f641523faf9481eafd45b3",
+      "bytes": 12277
+    },
+    {
+      "path": "src/main/linear/issue-context-inline-media.test.ts",
+      "sha256": "2e8343751c037bf180474da5719026f1002698cfb24fd96ee3ff8e1b626e114e",
+      "bytes": 2851
+    },
+    {
+      "path": "src/main/linear/issue-context-relations.test.ts",
+      "sha256": "f9512d662ca775af6cfbfb69ebf2564b75ed2413e00cc95b01f0e0e4f9e0bfdf",
+      "bytes": 4310
+    },
+    {
+      "path": "src/main/linear/issue-context.test.ts",
+      "sha256": "48fc709aafe16722a19f6f09e7b42c117e722b04b2d2ee8399d684bdd2ba7b0a",
+      "bytes": 3227
+    },
+    {
+      "path": "src/main/linear/issue-list-filter.test.ts",
+      "sha256": "3123987401ae8fa132b8f04538efdf0af316edc7190789145c215e63dd5cdd54",
+      "bytes": 2156
+    },
+    {
+      "path": "src/main/linear/issue-relation-write.test.ts",
+      "sha256": "f170c928025472358eca2872f8353ddb3a369349db8836ae0791b77dbf406ee3",
+      "bytes": 6742
+    },
+    {
+      "path": "src/main/linear/issue-search-summary.test.ts",
+      "sha256": "cae0ab5e0369709b91812d1b3dd2af043073c36baf0d451003b883d0e3b7c137",
+      "bytes": 595
+    },
+    {
+      "path": "src/main/linear/issues.test.ts",
+      "sha256": "55a9101e64fabb032eb233391ac0f1af8a5344576e5e0444af315a23942f4d0e",
+      "bytes": 28487
+    },
+    {
+      "path": "src/main/linear/mappers.test.ts",
+      "sha256": "210da279ec233657cc8fd5a7412044bcd1c414280c7c16b9a9afc82b76e2eebc",
+      "bytes": 1613
+    },
+    {
+      "path": "src/main/linear/mcp-issue-list-pagination.test.ts",
+      "sha256": "8fa8fed432c4291789198a54b2956964ca433ee15d0d3133b876334e1c523242",
+      "bytes": 10119
+    },
+    {
+      "path": "src/main/linear/mcp-issue-list.test.ts",
+      "sha256": "cb8c3927b20fef3beb7f185c83fbb6f1805c6f8eab64d51084527a783aed7235",
+      "bytes": 10152
+    },
+    {
+      "path": "src/main/linear/projects.test.ts",
+      "sha256": "7da7690d8bbe7ad56d7aefcf02861044d4bcaa3665dded3be4a5eb9129816d6c",
+      "bytes": 16355
+    },
+    {
+      "path": "src/main/linear/teams.test.ts",
+      "sha256": "cd5528c5f72ee4d20573618d9f275c969ed2f9fa75469fbe0942b7f2f34be54f",
+      "bytes": 9928
+    },
+    {
+      "path": "src/shared/github/api-availability.test.ts",
+      "sha256": "eabb26c2ebdc1284539f8e7fd8ccca025d067624a9eedd8ce7a1578b97e23a8e",
+      "bytes": 2974
+    },
+    {
+      "path": "src/shared/github/project-identity.test.ts",
+      "sha256": "e3fd37ee49ef812296e59bd4b8e7a1a4820d7138a345977f119316ed7e82838b",
+      "bytes": 966
+    },
+    {
+      "path": "src/shared/github/project-ref-input.test.ts",
+      "sha256": "33f40aed2455df4c1bcd92dd7a541b9452b2afbd1d5d85c4fb09f8d2907b02de",
+      "bytes": 1747
+    },
+    {
+      "path": "src/shared/github/pull-request-auto-merge-availability.test.ts",
+      "sha256": "c1748277f90cc9129064df583a1f0e0e194e48e9d5f8116049da8847f5815c3c",
+      "bytes": 2709
+    },
+    {
+      "path": "src/shared/github/pull-request-for-branch-outcome.test.ts",
+      "sha256": "d01d66e666f90e5a2a4e966c4a7386899527f0e71208cc7dd225046c510effa7",
+      "bytes": 1334
+    },
+    {
+      "path": "src/shared/github/pull-request-merge-methods.test.ts",
+      "sha256": "b57999fca9614a97aee8c36c3ce8a139b8fbefde1a86f8a50b7d229fe4b1b761",
+      "bytes": 1674
+    },
+    {
+      "path": "src/shared/github/repository-identity-key.test.ts",
+      "sha256": "2a50bd0267389c62476ef85a52bd6a394dcc89ec7b2c8d2a21bbfe46dc66594b",
+      "bytes": 616
+    },
+    {
+      "path": "src/shared/github/work-items-query-bounds.test.ts",
+      "sha256": "f15b7cf6c0c9a58f0a0e6534ba4b3ea004f336afb384e81e4e8fb33706ad5fbc",
+      "bytes": 992
+    },
+    {
+      "path": "src/shared/linear/inline-media.test.ts",
+      "sha256": "a55941158b891789eeb0b2741f2ec51ae7c51affb6b8971cebb2e2f33e9599b4",
+      "bytes": 1380
+    },
+    {
+      "path": "src/shared/linear/issue-attribute-filter.test.ts",
+      "sha256": "5f377c4cc2bf37008265234dfb91e3d39a610ed7e74b6461bc58eea5f5abd222",
+      "bytes": 4476
+    },
+    {
+      "path": "src/shared/linear/issue-view-resume-state.test.ts",
+      "sha256": "bdc6a21b3774ae25d42b799ba170e2b1656a88d031bd83b57126bbc786278e5e",
+      "bytes": 12509
+    },
+    {
+      "path": "src/shared/linear/links.test.ts",
+      "sha256": "4f7de87029d6c905b53b5660e87e300f86472cf31e5b968e8a154f9b29a2e011",
+      "bytes": 5329
+    },
+    {
+      "path": "src/shared/linear/workspace-types.test.ts",
+      "sha256": "31f0ca8556561d809365469b610bd0e80eb67b1529935761b4e3c833450647f5",
+      "bytes": 3836
+    }
+  ],
+  "frozenPortCopies": [
+    {
+      "suite": "jira-mutations",
+      "portPath": "tests/parity/ports/WP-CAP-INT/jira-mutations/src/main/jira/jira-issue-mutations.test.ts",
+      "sourcePath": "src/main/jira/jira-issue-mutations.test.ts",
+      "sha256": "818d5a1f26a14d5123303cc688ccad3762a56c0770c96de39d6dc5bd90c7ecca",
+      "cases": 6
+    },
+    {
+      "suite": "linear-teams",
+      "portPath": "tests/parity/ports/WP-CAP-INT/linear-teams/src/main/linear/teams.test.ts",
+      "sourcePath": "src/main/linear/teams.test.ts",
+      "sha256": "cd5528c5f72ee4d20573618d9f275c969ed2f9fa75469fbe0942b7f2f34be54f",
+      "cases": 8
+    },
+    {
+      "suite": "github-auto-merge",
+      "portPath": "tests/parity/ports/WP-CAP-INT/github-auto-merge/src/shared/github/pull-request-auto-merge-availability.test.ts",
+      "sourcePath": "src/shared/github/pull-request-auto-merge-availability.test.ts",
+      "sha256": "c1748277f90cc9129064df583a1f0e0e194e48e9d5f8116049da8847f5815c3c",
+      "cases": 5
+    },
+    {
+      "suite": "gitlab-mr-rate-limit",
+      "portPath": "tests/parity/ports/WP-CAP-INT/gitlab-mr-rate-limit/src/main/gitlab/client-mr-auth-rate-limit.test.ts",
+      "sourcePath": "src/main/gitlab/client-mr-auth-rate-limit.test.ts",
+      "sha256": "809df2df8e5a0d0621a1216005ad15993d252d1018cbbbbf764fa4232278b343",
+      "cases": 5
+    },
+    {
+      "suite": "bitbucket-status",
+      "portPath": "tests/parity/ports/WP-CAP-INT/bitbucket-status/src/main/bitbucket/status-no-decrypt.test.ts",
+      "sourcePath": "src/main/bitbucket/status-no-decrypt.test.ts",
+      "sha256": "63937e170d202c5091c8a2d8391347ce72ea313efa6635a1130f1c519d0a8755",
+      "cases": 3
+    },
+    {
+      "suite": "github-identity-key",
+      "portPath": "tests/parity/ports/WP-CAP-INT/github-identity-key/src/shared/github/repository-identity-key.test.ts",
+      "sourcePath": "src/shared/github/repository-identity-key.test.ts",
+      "sha256": "2a50bd0267389c62476ef85a52bd6a394dcc89ec7b2c8d2a21bbfe46dc66594b",
+      "cases": 1
+    }
+  ]
+}
