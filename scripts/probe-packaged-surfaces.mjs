@@ -378,7 +378,11 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
       ["--data-dir", dataDir, "--json", "browser", "snapshot", "--tab", tabId],
       { timeout: 30000 },
     );
-    assert.equal(snapshot.ok, true);
+    assert.equal(
+      snapshot.ok,
+      true,
+      `CLI browser snapshot must succeed: ${JSON.stringify(snapshot.error ?? snapshot).slice(0, 300)}`,
+    );
     assert.equal(
       browserSnapshotShowsGuest(snapshot.result, guest),
       true,
