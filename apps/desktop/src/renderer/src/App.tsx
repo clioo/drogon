@@ -63,9 +63,11 @@ import {
   SIDEBAR_SOURCE_CONTROL_TOGGLE_CHORD,
   TAB_NEW_TERMINAL_CHORD,
 } from "./features/right-sidebar/shortcut-label";
+import { resolveAppChromeLayout } from "./features/shell/app-chrome-layout";
 import {
   canGoBackView,
   canGoForwardView,
+  currentView,
   goBackView,
   goForwardView,
   initialViewHistory,
@@ -1356,18 +1358,31 @@ export function App() {
     if (entry.route !== routeRef.current) setRoute(entry.route);
     else applyingHistory.current = false;
   };
+  const liveWorkspaceIds = useMemo(
+    () => new Set(workspaces.map((workspace) => workspace.id)),
+    [workspaces],
+  );
+  // Titlebar placement follows the source AppChromeLayout rules: the left
+  // controls live in the sidebar-column header (floating when collapsed),
+  // and the settings full page mounts no sidebar and no titlebar controls.
+  const chrome = resolveAppChromeLayout({
+    route,
+    settingsRouteId: SETTINGS_ROUTE_ID,
+    sidebarOpen,
+    sidebarWidth,
+  });
   const goBackViewHistory = () => {
-    const next = goBackView(viewHistory);
+    const next = goBackView(viewHistory, liveWorkspaceIds);
     if (next === viewHistory) return;
     setViewHistory(next);
-    applyViewEntry(next.present);
+    applyViewEntry(currentView(next));
   };
   botsCloseRef.current = goBackViewHistory;
   const goForwardViewHistory = () => {
-    const next = goForwardView(viewHistory);
+    const next = goForwardView(viewHistory, liveWorkspaceIds);
     if (next === viewHistory) return;
     setViewHistory(next);
-    applyViewEntry(next.present);
+    applyViewEntry(currentView(next));
   };
   // Add-project entry point shared by the sidebar and the landing empty
   // state. Every project — git repo or plain folder — registers through
@@ -1722,10 +1737,10 @@ export function App() {
       // tab.newBrowser (definitions-core-2.ts): the strip's New Browser Tab.
       "tab.newBrowser": guardHandler(() => void newBrowserTab(), isDisabled),
       "worktree.history.back": guardHandler(goBackViewHistory, () =>
-        !canGoBackView(viewHistory),
+        !canGoBackView(viewHistory, liveWorkspaceIds),
       ),
       "worktree.history.forward": guardHandler(goForwardViewHistory, () =>
-        !canGoForwardView(viewHistory),
+        !canGoForwardView(viewHistory, liveWorkspaceIds),
       ),
       "worktree.navigateUp": () => stepWorkspace(-1),
       "worktree.navigateDown": () => stepWorkspace(1),
@@ -1803,57 +1818,92 @@ export function App() {
     <Tooltip.Provider delayDuration={400}>
       <div className="app-shell">
         <div className="titlebar" data-testid="app-titlebar">
-          <TitlebarLeftControls
-            canGoBack={canGoBackView(viewHistory)}
-            canGoForward={canGoForwardView(viewHistory)}
-            backShortcutLabel={shortcutLabel("⌥←")}
-            forwardShortcutLabel={shortcutLabel("⌥→")}
-            toggleShortcutLabel={shortcutLabel("B")}
-            onToggleSidebar={toggleSidebar}
-            onGoBack={goBackViewHistory}
-            onGoForward={goForwardViewHistory}
-          />
+          {chrome.showChromeControls ? (
+            <div
+              className={`titlebar-left${chrome.floating ? " titlebar-left-floating" : ""}`}
+              style={
+                chrome.leftChromeWidth === null
+                  ? undefined
+                  : { width: chrome.leftChromeWidth }
+              }
+            >
+              <TitlebarLeftControls
+                canGoBack={canGoBackView(viewHistory, liveWorkspaceIds)}
+                canGoForward={canGoForwardView(viewHistory, liveWorkspaceIds)}
+                showSidebarToggle={chrome.showSidebar}
+                showHistoryControls={chrome.showHistoryControls}
+                floating={chrome.floating}
+                backShortcutLabel={shortcutLabel("⌥←")}
+                forwardShortcutLabel={shortcutLabel("⌥→")}
+                toggleShortcutLabel={shortcutLabel("B")}
+                onToggleSidebar={toggleSidebar}
+                onGoBack={goBackViewHistory}
+                onGoForward={goForwardViewHistory}
+              />
+            </div>
+          ) : null}
         </div>
         <div className="app-content">
-        <Sidebar
-          open={sidebarOpen}
-          width={sidebarWidth}
-          onWidthChange={changeSidebarWidth}
-          route={route}
-          onSelectRoute={setRoute}
-          onOpenPalette={openCommandPalette}
-          groups={projectGroups}
-          workspaces={workspaces}
-          sessions={sessions}
-          selectedWorkspaceId={selected}
-          workspaceDisabled={busy}
-          addDisabled={!status || busy}
-          onSelectWorkspace={selectWorkspaceId}
-          onAddProject={requestAddProject}
-          onCreateWorkspace={(projectId) =>
-            requestCreateWorkspace(projectId ?? null)
-          }
-          worktreesAvailable={isWorktreesAvailable(liveCapabilities)}
-          projectAction={projectAction}
-          onOpenProjectAction={setProjectAction}
-          onCloseProjectAction={() => setProjectAction(null)}
-          onBrowseProject={browseProject}
-          onSubmitAddProject={submitAddProject}
-          onSubmitRemoveWorktree={submitRemoveWorktree}
-          serviceLabel={
-            status ? `Service ${status.version}` : "Service unavailable"
-          }
-          buildRevision={
-            buildInfo
-              ? `${buildInfo.version} · ${buildInfo.revision.slice(0, 7)}`
-              : null
-          }
-          buildTitle={buildInfo ? `Built ${buildInfo.builtAt}` : undefined}
-          onOpenSettings={() => openSettings()}
-          settingsExpanded={route === SETTINGS_ROUTE_ID}
-        />
+        {chrome.showSidebar ? (
+          <Sidebar
+            open={sidebarOpen}
+            width={sidebarWidth}
+            onWidthChange={changeSidebarWidth}
+            route={route}
+            onSelectRoute={setRoute}
+            onOpenPalette={openCommandPalette}
+            groups={projectGroups}
+            workspaces={workspaces}
+            sessions={sessions}
+            selectedWorkspaceId={selected}
+            workspaceDisabled={busy}
+            addDisabled={!status || busy}
+            onSelectWorkspace={selectWorkspaceId}
+            onAddProject={requestAddProject}
+            onCreateWorkspace={(projectId) =>
+              requestCreateWorkspace(projectId ?? null)
+            }
+            worktreesAvailable={isWorktreesAvailable(liveCapabilities)}
+            projectAction={projectAction}
+            onOpenProjectAction={setProjectAction}
+            onCloseProjectAction={() => setProjectAction(null)}
+            onBrowseProject={browseProject}
+            onSubmitAddProject={submitAddProject}
+            onSubmitRemoveWorktree={submitRemoveWorktree}
+            onOpenSettings={openSettings}
+          />
+        ) : null}
         <main className="session-area" style={{ position: "relative" }}>
-          {workspaces.length === 0 ? (
+          {route === SETTINGS_ROUTE_ID ? (
+            <div className="session-layout">
+              <section
+                ref={settingsSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Settings"
+                style={{ flex: 1 }}
+              >
+                <SettingsPage
+                  theme={theme}
+                  onThemeChange={changeTheme}
+                  terminalFontSize={terminalFontSize}
+                  onTerminalFontSizeChange={changeTerminalFontSize}
+                  inspectorVisible={inspector}
+                  onInspectorChange={changeInspector}
+                  harnesses={harnesses}
+                  defaultHarnessId={defaultHarnessId}
+                  onDefaultHarnessChange={changeDefaultHarness}
+                  harnessDefaults={harnessDefaults}
+                  onHarnessDefaultChange={changeHarnessDefault}
+                  notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
+                  onNotifyChange={changeNotifyOnAgentNeedsInput}
+                  workspacePath={current?.path ?? null}
+                  initialSection={settingsInitialSection}
+                  onBack={closeSettings}
+                />
+              </section>
+            </div>
+          ) : workspaces.length === 0 ? (
             <Landing
               hasProjects={false}
               onAddProject={requestAddProject}
@@ -1915,36 +1965,6 @@ export function App() {
               </Button>
             </div>
           )}
-          {route === SETTINGS_ROUTE_ID ? (
-            <div className="session-layout">
-              <section
-                ref={settingsSectionRef}
-                tabIndex={-1}
-                className="terminal-column"
-                aria-label="Settings"
-                style={{ flex: 1 }}
-              >
-                <SettingsPage
-                  theme={theme}
-                  onThemeChange={changeTheme}
-                  terminalFontSize={terminalFontSize}
-                  onTerminalFontSizeChange={changeTerminalFontSize}
-                  inspectorVisible={inspector}
-                  onInspectorChange={changeInspector}
-                  harnesses={harnesses}
-                  defaultHarnessId={defaultHarnessId}
-                  onDefaultHarnessChange={changeDefaultHarness}
-                  harnessDefaults={harnessDefaults}
-                  onHarnessDefaultChange={changeHarnessDefault}
-                  notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
-                  onNotifyChange={changeNotifyOnAgentNeedsInput}
-                  workspacePath={current?.path ?? null}
-                  initialSection={settingsInitialSection}
-                  onBack={closeSettings}
-                />
-              </section>
-            </div>
-          ) : (
           <div className="session-layout">
             <section
               className="terminal-column"
@@ -2310,7 +2330,6 @@ export function App() {
               }}
             />
           </div>
-          )}
             </>
           )}
         </main>

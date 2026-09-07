@@ -40,11 +40,12 @@ function isMacPlatform(): boolean {
   );
 }
 
-/** Modifier chips for the worktree palette chord (⌘J on macOS). */
+/** Modifier chips for the worktree palette chord (⌘J on macOS). Always
+    visible so the hint reads in every sidebar state, not only on hover. */
 function PaletteHint(): React.JSX.Element {
   const keys = isMacPlatform() ? ["\u2318", "J"] : ["Ctrl", "Shift", "J"];
   return (
-    <span className="pointer-events-none hidden shrink-0 items-center gap-1 group-hover:flex group-focus-within:flex">
+    <span className="pointer-events-none flex shrink-0 items-center gap-1">
       {keys.map((key) => (
         <kbd
           key={key}

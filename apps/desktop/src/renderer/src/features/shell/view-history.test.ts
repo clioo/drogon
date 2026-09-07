@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   canGoBackView,
   canGoForwardView,
+  currentView,
   goBackView,
   goForwardView,
   initialViewHistory,
@@ -20,11 +21,11 @@ describe("view history", () => {
     history = pushView(history, { route: "tasks", workspaceId: "w1" });
     expect(canGoBackView(history)).toBe(true);
     history = goBackView(history);
-    expect(history.present).toEqual({ route: null, workspaceId: "w1" });
+    expect(currentView(history)).toEqual({ route: null, workspaceId: "w1" });
     expect(canGoForwardView(history)).toBe(true);
     history = pushView(history, { route: "bots", workspaceId: "w1" });
     expect(canGoForwardView(history)).toBe(false);
-    expect(history.present).toEqual({ route: "bots", workspaceId: "w1" });
+    expect(currentView(history)).toEqual({ route: "bots", workspaceId: "w1" });
   });
 
   test("consecutive duplicates are coalesced", () => {
@@ -41,11 +42,11 @@ describe("view history", () => {
     history = pushView(history, { route: "bots", workspaceId: "w2" });
     history = goBackView(history);
     history = goBackView(history);
-    expect(history.present).toEqual({ route: null, workspaceId: "w1" });
+    expect(currentView(history)).toEqual({ route: null, workspaceId: "w1" });
     history = goForwardView(history);
-    expect(history.present).toEqual({ route: "tasks", workspaceId: "w1" });
+    expect(currentView(history)).toEqual({ route: "tasks", workspaceId: "w1" });
     history = goForwardView(history);
-    expect(history.present).toEqual({ route: "bots", workspaceId: "w2" });
+    expect(currentView(history)).toEqual({ route: "bots", workspaceId: "w2" });
     expect(canGoForwardView(history)).toBe(false);
   });
 
@@ -53,5 +54,30 @@ describe("view history", () => {
     const history = initialViewHistory({ route: null, workspaceId: "w1" });
     expect(goBackView(history)).toBe(history);
     expect(goForwardView(history)).toBe(history);
+  });
+
+  test("entries for removed workspaces are skipped, not landed on", () => {
+    let history = initialViewHistory({ route: null, workspaceId: "" });
+    history = pushView(history, { route: null, workspaceId: "w1" });
+    history = pushView(history, { route: null, workspaceId: "w2" });
+    const scope = new Set(["w2"]);
+    // w1 is gone: back jumps over it to the landing entry.
+    expect(canGoBackView(history, scope)).toBe(true);
+    const back = goBackView(history, scope);
+    expect(currentView(back)).toEqual({ route: null, workspaceId: "" });
+    // Forward from landing skips the dead w1 entry and lands on w2.
+    expect(canGoForwardView(back, scope)).toBe(true);
+    expect(currentView(goForwardView(back, scope))).toEqual({
+      route: null,
+      workspaceId: "w2",
+    });
+  });
+
+  test("back is disabled when only dead entries precede", () => {
+    let history = initialViewHistory({ route: null, workspaceId: "w1" });
+    history = pushView(history, { route: null, workspaceId: "w2" });
+    // w1 removed and w2 is the present entry: nothing live behind it.
+    expect(canGoBackView(history, new Set(["w2"]))).toBe(false);
+    expect(goBackView(history, new Set(["w2"]))).toBe(history);
   });
 });

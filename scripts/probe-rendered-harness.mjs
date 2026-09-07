@@ -122,7 +122,10 @@ export async function probeRenderedHarness({
     animations: "disabled",
   });
   await page.reload();
-  await page.getByText("Service 0.1.0", { exact: true }).waitFor();
+  // R9-B: sidebar footer readiness (the "Service x.y.z" text is gone).
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor();
   await page.getByRole("tab", { name: "Pi live", exact: true }).waitFor();
   const socket = path.join(dataDir, "runtime-v1.sock");
   const interrupted = path.join(dataDir, "acceptance-unreachable.sock");

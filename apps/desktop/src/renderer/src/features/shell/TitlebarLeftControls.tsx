@@ -16,6 +16,9 @@ function isMac(): boolean {
 export function TitlebarLeftControls({
   canGoBack,
   canGoForward,
+  showSidebarToggle,
+  showHistoryControls,
+  floating,
   backShortcutLabel,
   forwardShortcutLabel,
   toggleShortcutLabel,
@@ -25,6 +28,12 @@ export function TitlebarLeftControls({
 }: {
   canGoBack: boolean;
   canGoForward: boolean;
+  /** False on full-page surfaces (settings): the toggle stays unmounted. */
+  showSidebarToggle: boolean;
+  /** False on full-page surfaces (settings): back/forward stay unmounted. */
+  showHistoryControls: boolean;
+  /** Sidebar collapsed: shrink-wrap instead of filling the column width. */
+  floating: boolean;
   backShortcutLabel: string;
   forwardShortcutLabel: string;
   toggleShortcutLabel: string;
@@ -33,7 +42,9 @@ export function TitlebarLeftControls({
   onGoForward: () => void;
 }): React.JSX.Element {
   return (
-    <div className="flex h-full w-full shrink-0 items-center">
+    <div
+      className={`flex h-full shrink-0 items-center${floating ? " w-max" : " w-full"}`}
+    >
       <div className="flex h-full items-center">
         {isMac() ? (
           <div className="titlebar-traffic-light-pad" />
@@ -43,36 +54,42 @@ export function TitlebarLeftControls({
         <div className="titlebar-app-name" aria-label="Drogon">
           <span className="titlebar-app-name-main">Drogon</span>
         </div>
-        <button
-          className="sidebar-toggle"
-          onClick={onToggleSidebar}
-          aria-label="Toggle sidebar"
-          title={`Toggle sidebar (${toggleShortcutLabel})`}
-        >
-          <PanelLeft size={16} />
-        </button>
+        {showSidebarToggle && (
+          <button
+            className="sidebar-toggle"
+            onClick={onToggleSidebar}
+            aria-label="Toggle sidebar"
+            title={`Toggle sidebar (${toggleShortcutLabel})`}
+          >
+            <PanelLeft size={16} />
+          </button>
+        )}
       </div>
-      {/* Back/forward span workspace + view history. */}
-      <div className="ml-auto mr-3 flex items-center pl-2">
-        <button
-          className="sidebar-toggle sidebar-toggle-compact"
-          onClick={onGoBack}
-          disabled={!canGoBack}
-          aria-label="Go back"
-          title={`Go back (${backShortcutLabel})`}
-        >
-          <ArrowLeft size={12} />
-        </button>
-        <button
-          className="sidebar-toggle sidebar-toggle-compact"
-          onClick={onGoForward}
-          disabled={!canGoForward}
-          aria-label="Go forward"
-          title={`Go forward (${forwardShortcutLabel})`}
-        >
-          <ArrowRight size={12} />
-        </button>
-      </div>
+      {/* Back/forward span workspace + view history. With the sidebar
+          collapsed the header shrink-wraps and ml-auto has no spare width,
+          so keep a fixed gutter before Back. */}
+      {showHistoryControls && (
+        <div className="ml-auto mr-3 flex items-center pl-2">
+          <button
+            className="sidebar-toggle sidebar-toggle-compact"
+            onClick={onGoBack}
+            disabled={!canGoBack}
+            aria-label="Go back"
+            title={`Go back (${backShortcutLabel})`}
+          >
+            <ArrowLeft size={12} />
+          </button>
+          <button
+            className="sidebar-toggle sidebar-toggle-compact"
+            onClick={onGoForward}
+            disabled={!canGoForward}
+            aria-label="Go forward"
+            title={`Go forward (${forwardShortcutLabel})`}
+          >
+            <ArrowRight size={12} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
