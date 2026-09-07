@@ -1,3 +1,6 @@
+// Contract-scaffold tests for the files mount adapter: stub components
+// only, NOT functional Files evidence. Real panel behavior lands with
+// the stabilized V3 factory + App wiring + CDP.
 import { describe, expect, it } from "vitest";
 import { FILES_CAPABILITY } from "../../shared/file-contract";
 import type { Session, Status, Workspace } from "../../shared/session-contract";
@@ -11,7 +14,9 @@ import {
 import type { PanelProps } from "./route-panel-contract";
 import {
   FILES_ROUTE_ID,
+  adaptFactoryDescriptor,
   isFilesAvailable,
+  registerFactoryRoute,
   registerFilesRoute,
 } from "./files-mount";
 
@@ -120,5 +125,45 @@ describe("panel props", () => {
       }),
     ).not.toThrow();
     expect(received).toEqual([null]);
+  });
+});
+
+describe("factory boundary (plain V3 shape in, validated contract out)", () => {
+  const bridge = {} as import("../../shared/file-contract").FileBridge;
+  it("preserves title/capability/restoreState/focus/cleanup hooks", () => {
+    const seen: string[] = [];
+    const adapted = adaptFactoryDescriptor({
+      id: "files.explorer",
+      title: "Files",
+      component: () => null,
+      capability: FILES_CAPABILITY,
+      restoreState: { path: "/" },
+      onFocus: () => void seen.push("focus"),
+      onCleanup: () => void seen.push("cleanup"),
+    });
+    expect(adapted.title).toBe("Files");
+    expect(adapted.capability).toBe(FILES_CAPABILITY);
+    expect(adapted.restoreState).toEqual({ path: "/" });
+    adapted.onFocus?.(adapted.id);
+    adapted.onCleanup?.(adapted.id);
+    expect(seen).toEqual(["focus", "cleanup"]);
+  });
+  it("rejects an empty factory id at the boundary, never at mount", () => {
+    expect(() =>
+      adaptFactoryDescriptor({ id: "  ", title: "x", component: () => null }),
+    ).toThrow();
+  });
+  it("registers a plain-shape factory end to end", () => {
+    const registry = registerFactoryRoute(
+      filesRegistry(),
+      ({ bridge: _bridge }) => ({
+        id: "files.explorer",
+        title: "Files",
+        component: () => null,
+        capability: FILES_CAPABILITY,
+      }),
+      bridge,
+    );
+    expect(resolveRoute(registry, "files.explorer").title).toBe("Files");
   });
 });
