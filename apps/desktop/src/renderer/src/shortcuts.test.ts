@@ -3,6 +3,7 @@ import {
   createShortcutRegistry,
   guardHandler,
   matchesChord,
+  PALETTE_SHORTCUTS,
   parseChord,
   resolveModifier,
   type ShortcutEventLike,
@@ -174,6 +175,107 @@ describe("createShortcutRegistry", () => {
     expect(
       registry.register({ id: "dup", chord: "CmdOrCtrl+J", handler: vi.fn() }),
     ).toBe(true);
+  });
+});
+
+describe("PALETTE_SHORTCUTS", () => {
+  function registeredIds(): string[] {
+    const registry = createShortcutRegistry();
+    for (const def of PALETTE_SHORTCUTS)
+      registry.register({ ...def, handler: () => {} });
+    return PALETTE_SHORTCUTS.map((def) => def.id);
+  }
+
+  test("declares the palette, quick open and tab chords", () => {
+    expect(registeredIds()).toEqual([
+      "palette.openCommands",
+      "palette.openQuickOpen",
+      "tabs.select1",
+      "tabs.select2",
+      "tabs.select3",
+      "tabs.select4",
+      "tabs.select5",
+      "tabs.select6",
+      "tabs.select7",
+      "tabs.select8",
+      "tabs.select9",
+      "tabs.prev",
+      "tabs.next",
+    ]);
+  });
+
+  test("CmdOrCtrl+K opens the palette on darwin and ctrl+k elsewhere", () => {
+    const parsed = parseChord("CmdOrCtrl+K");
+    expect(
+      matchesChord(parsed, event({ metaKey: true, key: "k" }), "darwin"),
+    ).toBe(true);
+    expect(
+      matchesChord(parsed, event({ ctrlKey: true, key: "k" }), "linux"),
+    ).toBe(true);
+    expect(
+      matchesChord(parsed, event({ ctrlKey: true, key: "k" }), "darwin"),
+    ).toBe(false);
+  });
+
+  test("CmdOrCtrl+P opens quick open", () => {
+    const parsed = parseChord("CmdOrCtrl+P");
+    expect(
+      matchesChord(parsed, event({ metaKey: true, key: "p" }), "darwin"),
+    ).toBe(true);
+  });
+
+  test("CmdOrCtrl+1..9 select tabs by digit", () => {
+    for (let digit = 1; digit <= 9; digit += 1) {
+      const parsed = parseChord(`CmdOrCtrl+${digit}`);
+      expect(
+        matchesChord(
+          parsed,
+          event({ metaKey: true, key: String(digit) }),
+          "darwin",
+        ),
+      ).toBe(true);
+    }
+    const first = parseChord("CmdOrCtrl+1");
+    expect(
+      matchesChord(first, event({ metaKey: true, key: "2" }), "darwin"),
+    ).toBe(false);
+  });
+
+  test("CmdOrCtrl+Shift+[ and ] move across tabs", () => {
+    const prev = parseChord("CmdOrCtrl+Shift+[");
+    expect(
+      matchesChord(
+        prev,
+        event({ metaKey: true, shiftKey: true, key: "[" }),
+        "darwin",
+      ),
+    ).toBe(true);
+    expect(
+      matchesChord(
+        prev,
+        event({ metaKey: true, key: "[" }),
+        "darwin",
+      ),
+    ).toBe(false);
+    const next = parseChord("CmdOrCtrl+Shift+]");
+    expect(
+      matchesChord(
+        next,
+        event({ ctrlKey: true, shiftKey: true, key: "]" }),
+        "win32",
+      ),
+    ).toBe(true);
+  });
+
+  test("every declared chord round-trips through the registry", () => {
+    const registry = createShortcutRegistry();
+    for (const def of PALETTE_SHORTCUTS)
+      expect(registry.register({ ...def, handler: () => {} })).toBe(true);
+    const match = registry.matchKeyEvent(
+      event({ metaKey: true, key: "k" }),
+      "darwin",
+    );
+    expect(match?.id).toBe("palette.openCommands");
   });
 });
 

@@ -120,6 +120,29 @@ export function createShortcutRegistry(): ShortcutRegistry {
   };
 }
 
+/**
+ * Palette/tab shortcut vocabulary (journey J5). Ids are stable action names;
+ * handlers attach at mount (the palette host owns them) via `register()`,
+ * keeping the existing guardHandler semantics — registration here is only
+ * the id+chord table, never the behavior.
+ */
+export interface PaletteShortcutDef {
+  id: string;
+  chord: string;
+}
+
+function tabSelectDef(index: number): PaletteShortcutDef {
+  return { id: `tabs.select${index}`, chord: `CmdOrCtrl+${index}` };
+}
+
+export const PALETTE_SHORTCUTS: readonly PaletteShortcutDef[] = [
+  { id: "palette.openCommands", chord: "CmdOrCtrl+K" },
+  { id: "palette.openQuickOpen", chord: "CmdOrCtrl+P" },
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(tabSelectDef),
+  { id: "tabs.prev", chord: "CmdOrCtrl+Shift+[" },
+  { id: "tabs.next", chord: "CmdOrCtrl+Shift+]" },
+];
+
 /** Wraps a handler so it is skipped while `isDisabled()` is true (e.g. busy/loading guards). */
 export function guardHandler(
   handler: () => void,

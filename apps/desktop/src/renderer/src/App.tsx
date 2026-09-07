@@ -37,6 +37,7 @@ import {
   markSessionDismissed,
 } from "./dismissed-sessions";
 import { HarnessLaunchMenu } from "./HarnessLaunchMenu";
+import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
 import { TerminalPane } from "./TerminalPane";
 import { updateSessionProjection } from "./session-projection";
@@ -1254,6 +1255,36 @@ export function App() {
           </div>
         </main>
       </div>
+      <CommandPaletteHost
+        fileBridge={filesGatedBridge}
+        hostId={status?.hostId ?? null}
+        workspaceId={selected}
+        workspaces={workspaces}
+        sessions={sessions}
+        activeSessionId={active}
+        filesAvailable={isFilesAvailable(liveCapabilities)}
+        botsAvailable={isBotsAvailable(liveCapabilities)}
+        harnessAvailable={harnessCapability}
+        theme={theme}
+        connected={status !== null}
+        busy={busy}
+        onNewTerminal={() => void create()}
+        onSelectWorkspace={(id) => {
+          const resolution = resolveWorkspaceSelection(selected, id);
+          if (!resolution.changed) return;
+          setSelected(resolution.selected);
+          setActive("");
+          setSessions([]);
+        }}
+        onSelectSession={setActive}
+        onOpenFiles={() => setRoute(FILES_ROUTE_ID)}
+        onOpenBots={() => setRoute(BOTS_ROUTE_ID)}
+        onToggleInspector={toggleInspector}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onSetTheme={changeTheme}
+        onAddWorkspace={() => setAdding(true)}
+        onOpenFile={() => setRoute(FILES_ROUTE_ID)}
+      />
     </Tooltip.Provider>
   );
 }
