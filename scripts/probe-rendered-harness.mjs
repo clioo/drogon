@@ -3,6 +3,13 @@ import path from "node:path";
 import { rename } from "node:fs/promises";
 import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 
+export function renderedPiIsReady(root = document) {
+  const rendered = root.querySelector(".xterm-screen")?.textContent ?? "";
+  return (
+    /\bpi v\d+\.\d+\.\d+\b/.test(rendered) && rendered.includes("clear/exit")
+  );
+}
+
 export async function probeRenderedHarness({
   page,
   workspaceId,
@@ -93,11 +100,7 @@ export async function probeRenderedHarness({
     },
     identity,
   );
-  await page.waitForFunction(() =>
-    /pi|ctrl|model/i.test(
-      document.querySelector(".xterm-screen")?.textContent ?? "",
-    ),
-  );
+  await page.waitForFunction(renderedPiIsReady);
   await page.screenshot({
     path: path.join(output, "pi-running.png"),
     animations: "disabled",
