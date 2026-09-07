@@ -1,5 +1,18 @@
 # Native worker lifecycle regressions — STABLE HANDOFF (incomplete fixture)
 
+## Post-review launch-recovery correction — 2026-09-07
+
+The independent PR #9 review found that the post-spawn persistence fault returned
+only a bare error, losing the structured dispatch identity and leaving admission
+unfinished. The fault probe first reproduced that behavior, then verified the fix:
+a confirmed spawn returns Ready (not model readiness), exact dispatch/session
+identity and the persistence warning. Its stored attempt also becomes Ready.
+Same-request replay returns the identical receipt and exactly one child remains.
+All previous process-retention and no-duplicate assertions remain. The complete
+eight-probe suite plus inert subprocess entry passes (1.31 s); no model was run.
+Persistent failure of the final ledger transaction remains explicitly uncertain
+and requires receipt/state inspection; this narrow correction does not conceal it.
+
 ## Root correction and independent validation — 2026-09-07
 
 This section supersedes the worker's historical result claims below. Root accepted

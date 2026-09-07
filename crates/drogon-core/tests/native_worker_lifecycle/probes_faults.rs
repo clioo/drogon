@@ -70,7 +70,31 @@ pub fn post_spawn_persist_fault(env: &ProbeEnv) {
     )
     .expect("create trigger");
     let faulted = env.start_worker(&engine, &run_id, &task_id, None, "postspawn-start");
-    assert!(!faulted.ok, "faulted finalize must surface an error");
+    assert!(
+        faulted.ok,
+        "a spawned worker must retain a structured recovery receipt: {:?}",
+        faulted.error
+    );
+    let result = faulted.result.unwrap();
+    assert_eq!(
+        result["assignmentState"], "ready",
+        "spawn acceptance is known despite the persistence warning"
+    );
+    assert!(
+        result["warning"]
+            .as_str()
+            .unwrap()
+            .contains("could not be persisted")
+    );
+    let dispatch_id = result["dispatchId"]
+        .as_str()
+        .expect("admitted dispatch identity");
+    assert!(result["sessionIdentity"]["sessionId"].is_string());
+    let shown = env.worker_show(&engine, &run_id, dispatch_id, "postspawn-show");
+    assert_eq!(
+        shown["assignmentState"], "ready",
+        "attempt must not remain admitting"
+    );
     wait_for_pid_count(env, 1);
     let pids = recorded_pids(&pid_dir(env));
     assert!(liveness_probe(pids[0]), "retained child must be alive");
@@ -78,9 +102,10 @@ pub fn post_spawn_persist_fault(env: &ProbeEnv) {
     // Replay of the same request must not repeat the spawn.
     let replayed = env.start_worker(&engine, &run_id, &task_id, None, "postspawn-start");
     assert!(
-        !replayed.ok,
-        "replay returns the retained uncertain receipt"
+        replayed.ok,
+        "replay must retain the structured launch receipt"
     );
+    assert_eq!(replayed.result.unwrap(), result);
     std::thread::sleep(std::time::Duration::from_millis(300));
     assert_eq!(
         recorded_pids(&pid_dir(env)).len(),

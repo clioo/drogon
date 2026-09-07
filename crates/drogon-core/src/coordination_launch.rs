@@ -284,7 +284,8 @@ impl Engine {
         ) {
             Ok((id, handle, _)) => {
                 self.sessions.lock().unwrap().insert(id, handle.clone());
-                session::persist_admission(&handle)?;
+                // Spawn is already accepted; preserve recovery identity on a bookkeeping fault.
+                let persistence_warning = session::persist_admission(&handle).err();
                 let recorded = self.coordination_read(|tx| {
                     attempts::show(tx, &params.scope, &prepared.attempt.result.dispatch_id)
                 })?;
@@ -292,6 +293,9 @@ impl Engine {
                     prepared.attempt = recorded;
                 } else {
                     prepared.attempt.result.assignment_state = AssignmentState::Ready;
+                }
+                if let Some(warning) = persistence_warning {
+                    prepared.attempt.result.warning = Some(warning.message);
                 }
             }
             Err(_) => {
