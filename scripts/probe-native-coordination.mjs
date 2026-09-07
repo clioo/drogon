@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 
 // Real typed CLI and daemon; this probe never launches an agent or model.
 export async function probeNativeCoordination({ cli }) {
-  const invoke = async (args, requestId = randomUUID()) => {
+  const invoke = async (args, requestId = randomUUID(), pending = false) => {
     let response;
     try {
       response = await cli([
@@ -13,6 +13,13 @@ export async function probeNativeCoordination({ cli }) {
         ...args,
       ]);
     } catch (error) {
+      if (pending && error.code === 1) {
+        response = JSON.parse(error.stdout);
+        assert.equal(response.ok, true);
+        assert.equal(response.result.wait.outcome, "pending");
+        assert.equal(response.requestId, requestId);
+        return response.result;
+      }
       let code = "no_valid_envelope";
       try {
         code = JSON.parse(error.stdout).error.code;
@@ -91,9 +98,33 @@ export async function probeNativeCoordination({ cli }) {
   ]);
   assert.equal(absent.state, "absent");
   assert.ok(absent.receipt == null);
+  const sendId = randomUUID();
+  const send = ["send", ...scope, "--kind", "guidance", "--subject", "Literal $PATH; guidance"];
+  const sent = await invoke(send, sendId);
+  assert.deepEqual(await invoke(send, sendId), sent);
+  const batch = await invoke(["check", ...scope]);
+  assert.equal(batch.messages.length, 1);
+  assert.equal(batch.messages[0].messageId, sent.message.messageId);
+  assert.deepEqual((await invoke(["check", ...scope])).delivery, batch.delivery);
+  const acked = await invoke(["check", ...scope, "--ack", batch.delivery.deliveryId]);
+  assert.equal(acked.acknowledged.deliveryId, batch.delivery.deliveryId);
+  assert.equal(acked.messages.length, 0);
+  const askId = randomUUID();
+  const ask = ["ask", ...scope, "--question", "Proceed literally?", "--timeout-ms", "1"];
+  const question = await invoke(ask, askId, true);
+  assert.equal((await invoke(ask, askId, true)).questionMessageId, question.questionMessageId);
+  const answer = await invoke(["reply", ...scope, "--question", question.questionMessageId, "--body", "Yes — $PATH stays literal"]);
+  assert.equal(answer.questionMessageId, question.questionMessageId);
+  const resumed = await invoke(["ask", ...scope, "--resume", question.questionMessageId, "--timeout-ms", "1"]);
+  assert.equal(resumed.wait.outcome, "answered");
+  assert.equal(resumed.answer.body, "Yes — $PATH stays literal");
+  const mail = await invoke(["check", ...scope, "--all"]);
+  assert.equal(mail.messages.length, 3);
   return [
     "native-typed-cli-run-replay-and-bootstrap-receipt",
     "native-typed-cli-task-replay-literal-text-and-actor-receipt",
     "native-typed-cli-empty-inspection-and-absent-receipt",
+    "native-typed-cli-send-replay-fifo-and-whole-batch-ack",
+    "native-typed-cli-question-timeout-replay-reply-and-resume",
   ];
 }
