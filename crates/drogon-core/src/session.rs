@@ -428,26 +428,48 @@ pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Val
 /// observed. Never assumes `kill()` returning `Ok` means the process is
 /// gone — only an actual reaped exit status does.
 pub(crate) fn stop(handle: &SessionHandle) -> Result<Value, RpcError> {
+    stop_with_action(handle).session
+}
+
+pub(crate) struct StopObservation {
+    pub(crate) process_action: drogon_protocol::orchestration_worker::ProcessAction,
+    pub(crate) session: Result<Value, RpcError>,
+}
+
+/// Preserve signal evidence even when persisting the observed exit fails.
+pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
+    use drogon_protocol::orchestration_worker::ProcessAction;
+
     if let Some(code) = try_reap(handle) {
-        persist_exit(handle, code)?;
         try_release_native(handle);
-        return Ok(to_json(handle, "exited", Some(code)));
+        return StopObservation {
+            process_action: ProcessAction::None,
+            session: persist_exit(handle, code).map(|()| to_json(handle, "exited", Some(code))),
+        };
     }
-    {
+    let process_action = {
         let mut child = handle.child.lock().unwrap();
-        let _ = child.kill();
-    }
+        match child.kill() {
+            Ok(()) => ProcessAction::Signalled,
+            Err(_) => ProcessAction::Unverifiable,
+        }
+    };
     let deadline = Instant::now() + STOP_VERIFY_TIMEOUT;
     loop {
         if let Some(code) = try_reap(handle) {
-            persist_exit(handle, code)?;
             try_release_native(handle);
-            return Ok(to_json(handle, "exited", Some(code)));
+            return StopObservation {
+                process_action,
+                session: persist_exit(handle, code).map(|()| to_json(handle, "exited", Some(code))),
+            };
         }
         if Instant::now() >= deadline {
             // The poller thread owns release for this ordering: it will
             // observe the exit and release the native halves once drained.
-            return Ok(to_json(handle, "unverifiable", None));
+            return StopObservation {
+                process_action,
+                session: Ok(to_json(handle, "unverifiable", None)),
+            };
         }
         std::thread::sleep(STOP_POLL_INTERVAL);
     }

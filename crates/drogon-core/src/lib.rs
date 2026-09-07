@@ -7,6 +7,7 @@ pub mod automations;
 pub mod bots;
 pub mod claim_identity;
 mod coordination_access;
+mod coordination_attempts;
 mod coordination_identity;
 pub mod locale_ordering;
 pub mod session_authority;
@@ -25,6 +26,9 @@ pub mod requests;
 #[cfg(test)]
 #[path = "dispatch_authenticated_tests.rs"]
 mod dispatch_authenticated_tests;
+
+#[cfg(test)]
+mod session_stop_tests;
 
 /// The on-disk SQLite filename under a data directory, exposed so
 /// integration tests (a separate crate that only sees `pub` items) can open
