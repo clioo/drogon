@@ -121,6 +121,51 @@ export async function mintOwnedPipe(root) {
 }
 
 /**
+ * Mints a platform-appropriate owned IPC endpoint for cases that exercise
+ * bounded-wait / explicit-socket-tracking logic that is not itself Windows-
+ * named-pipe-specific: a real win32 named pipe on win32 (a bare filesystem
+ * path is not a valid pipe address there, so this reuses {@link mintOwnedPipe}'s
+ * hash formula), and a plain owned socket file under `root` on POSIX. Using
+ * this instead of a hardcoded `path.join(tmpdir(), "*.sock")` is what lets a
+ * generic cleanup case run unskipped on both platforms.
+ */
+export async function mintOwnedEndpoint(root, name) {
+  if (process.platform === "win32") {
+    const { directory, pipePath } = await mintOwnedPipe(root);
+    return {
+      endpointPath: pipePath,
+      cleanup: () => rm(directory, { recursive: true, force: true }),
+    };
+  }
+  return {
+    endpointPath: path.join(root, name),
+    cleanup: async () => {},
+  };
+}
+
+/**
+ * Attempts `server.listen(endpointPath)` and resolves with a bounded
+ * verdict: `"listening"`, the `"error"` Node raised, or `"timeout"` if
+ * neither fires within `timeoutMs`. Used by the double-listen probes so a
+ * peer that neither errors nor starts listening can never hang the suite.
+ */
+export function attemptListen(server, endpointPath, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (outcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => finish({ kind: "timeout" }), timeoutMs);
+    server.once("error", (error) => finish({ kind: "error", error }));
+    server.once("listening", () => finish({ kind: "listening" }));
+    server.listen(endpointPath);
+  });
+}
+
+/**
  * Mirrors `observeLocalEndpoint`'s absent/present/ambiguous classification
  * (native-client.ts:102-141) with the win32 hardcode removed, since proving
  * that hardcode obsolete on a real pipe is this probe's entire purpose. The
@@ -470,14 +515,23 @@ const CASES = [
           first.once("error", reject);
           first.listen(pipePath, resolve);
         });
-        const error = await new Promise((resolve) => {
-          second.once("error", resolve);
-          second.listen(pipePath);
-        });
-        if (error.code !== "EADDRINUSE")
-          throw new Error(`expected EADDRINUSE, got ${error.code ?? error}`);
+        const outcome = await attemptListen(second, pipePath, 2000);
+        if (outcome.kind === "listening")
+          throw new Error(
+            "expected the second listen to fail with EADDRINUSE, but it unexpectedly succeeded",
+          );
+        if (outcome.kind === "timeout")
+          throw new Error(
+            "expected a bounded EADDRINUSE verdict, but the second listen neither errored nor succeeded within the deadline",
+          );
+        if (outcome.error.code !== "EADDRINUSE")
+          throw new Error(`expected EADDRINUSE, got ${outcome.error.code ?? outcome.error}`);
       } finally {
+        // Close both unconditionally: `second` may be listening (the
+        // unexpected-success branch above) or never bound (the ordinary
+        // EADDRINUSE branch) — `server.close()` is safe either way.
         await new Promise((resolve) => first.close(resolve));
+        await new Promise((resolve) => second.close(resolve));
         await rm(directory, { recursive: true, force: true });
       }
     },

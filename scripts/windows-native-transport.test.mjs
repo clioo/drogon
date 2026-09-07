@@ -18,31 +18,42 @@
 //     Windows `drogond` admission path.
 //   - A small set of real-but-platform-agnostic socket tests (`sendRaw`
 //     timeout, `startFixtureDaemon` idle-socket cleanup) run unconditionally
-//     using Unix-domain sockets on this host, since the bounded-wait and
-//     explicit-socket-tracking logic under test is not itself Windows-named-
-//     pipe-specific.
+//     against a platform-appropriate owned endpoint (`mintOwnedEndpoint`:
+//     a real named pipe on win32, a Unix-domain socket elsewhere), since the
+//     bounded-wait and explicit-socket-tracking logic under test is not
+//     itself Windows-named-pipe-specific.
+//   - A single win32-only CLI-entrypoint check spawns this module as its own
+//     `node` process (bounded timeout) to prove the actual CLI entry point
+//     executes and emits the JSON report shape, instead of re-running the
+//     full in-process probe a second time.
 //
-// RED/GREEN for this file: RED was this suite plus the CLI runner both
-// failing to even execute on this darwin host (module didn't exist yet).
+// Header note for this file: the initial state — this suite and the CLI
+// runner unable to even execute because the module did not exist yet — was
+// setup-blocked, not behavioral RED (tests-first policy: a module that
+// cannot load is missing scaffolding, not a failing behavioral assertion).
 // GREEN is the state below: every pure-mirror and skip-path assertion
 // passes for real on this host; every real-pipe case exists, is
 // code-reviewed, and is gated to execute for real only on a win32 CI leg —
 // this file never claims a win32 pass it did not observe.
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { test } from "node:test";
 import {
   MAX_FRAME_BYTES,
+  attemptListen,
   buildFrame,
   callFixture,
   classifyOwnedEndpoint,
   isMainModule,
+  mintOwnedEndpoint,
   mintOwnedPipe,
   precheckFrameSize,
   resolveOwnedPipePath,
@@ -51,6 +62,8 @@ import {
   startFixtureDaemon,
   validateEnvelopeMirror,
 } from "./windows-native-transport.mjs";
+
+const execFileAsync = promisify(execFile);
 
 const WIN32_ONLY = {
   skip:
@@ -261,7 +274,8 @@ test("isMainModule with its real (non-injected) defaults matches this test file'
 test("sendRaw times out instead of hanging when the peer never responds and never closes", async (context) => {
   const root = await mkdtemp(path.join(tmpdir(), "dnt-test-"));
   context.after(() => rm(root, { recursive: true, force: true }));
-  const socketPath = path.join(root, "silent.sock");
+  const { endpointPath, cleanup } = await mintOwnedEndpoint(root, "silent.sock");
+  context.after(cleanup);
   const sockets = new Set();
   const server = createServer((socket) => {
     // Deliberately never write a response and never end/destroy: this
@@ -284,10 +298,10 @@ test("sendRaw times out instead of hanging when the peer never responds and neve
   );
   await new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(socketPath, resolve);
+    server.listen(endpointPath, resolve);
   });
   const started = Date.now();
-  const outcome = await sendRaw(socketPath, "irrelevant\n", { timeoutMs: 150 });
+  const outcome = await sendRaw(endpointPath, "irrelevant\n", { timeoutMs: 150 });
   assert.equal(outcome.kind, "timeout");
   assert.ok(Date.now() - started < 5000, "sendRaw must not hang past its bound");
 });
@@ -295,9 +309,10 @@ test("sendRaw times out instead of hanging when the peer never responds and neve
 test("startFixtureDaemon.close() explicitly destroys an idle socket instead of relying on closeAllConnections", async (context) => {
   const root = await mkdtemp(path.join(tmpdir(), "dnt-test-"));
   context.after(() => rm(root, { recursive: true, force: true }));
-  const socketPath = path.join(root, "idle.sock");
-  const fixture = await startFixtureDaemon(socketPath, { token: "t" });
-  const idle = createConnection(socketPath); // connects, then never sends a full frame
+  const { endpointPath, cleanup } = await mintOwnedEndpoint(root, "idle.sock");
+  context.after(cleanup);
+  const fixture = await startFixtureDaemon(endpointPath, { token: "t" });
+  const idle = createConnection(endpointPath); // connects, then never sends a full frame
   await new Promise((resolve, reject) => {
     idle.once("connect", resolve);
     idle.once("error", reject);
@@ -319,17 +334,22 @@ test("an already-aborted signal classifies as ambiguous/cancelled before any con
   assert.deepEqual(observation, { kind: "ambiguous", reason: "cancelled" });
 });
 
-test("runAcceptanceProbe honestly self-reports unverified off-Windows, never a fabricated pass", async () => {
-  const report = await runAcceptanceProbe();
-  if (process.platform === "win32") {
-    assert.ok(["pass", "fail"].includes(report.verdict));
-    return;
-  }
-  assert.equal(report.platform, process.platform);
-  assert.equal(report.verdict, "unverified");
-  assert.equal(report.cases.length, 0);
-  assert.match(report.reason, /requires a real win32 named-pipe host/);
-});
+test(
+  "runAcceptanceProbe honestly self-reports unverified off-Windows, never a fabricated pass",
+  {
+    skip:
+      process.platform === "win32"
+        ? "covered on win32 by the dedicated pass-run test and the CLI-entrypoint spawn test below, not by re-running the full probe here"
+        : false,
+  },
+  async () => {
+    const report = await runAcceptanceProbe();
+    assert.equal(report.platform, process.platform);
+    assert.equal(report.verdict, "unverified");
+    assert.equal(report.cases.length, 0);
+    assert.match(report.reason, /requires a real win32 named-pipe host/);
+  },
+);
 
 test(
   "present: a real owned server is classified present, and absent once torn down",
@@ -397,17 +417,24 @@ test(
     const { directory, pipePath } = await mintOwnedPipe(root);
     context.after(() => rm(directory, { recursive: true, force: true }));
     const first = createServer(() => {});
+    const second = createServer(() => {});
+    // Registered before either listen attempt so a throw from the
+    // assertions below (including the unexpected-success branch) still
+    // closes both servers — `server.close()` is safe whether or not a
+    // given server ever bound.
     context.after(() => new Promise((resolve) => first.close(resolve)));
+    context.after(() => new Promise((resolve) => second.close(resolve)));
     await new Promise((resolve, reject) => {
       first.once("error", reject);
       first.listen(pipePath, resolve);
     });
-    const second = createServer(() => {});
-    const error = await new Promise((resolve) => {
-      second.once("error", resolve);
-      second.listen(pipePath);
-    });
-    assert.equal(error.code, "EADDRINUSE");
+    const outcome = await attemptListen(second, pipePath, 2000);
+    if (outcome.kind === "listening")
+      throw new Error(
+        "expected the second listen to fail with EADDRINUSE, but it unexpectedly succeeded",
+      );
+    assert.equal(outcome.kind, "error");
+    assert.equal(outcome.error.code, "EADDRINUSE");
   },
 );
 
@@ -451,5 +478,26 @@ test(
       [],
     );
     assert.equal(report.verdict, "pass");
+  },
+);
+
+test(
+  "CLI entrypoint: spawning the script as its own node process executes the real probe and emits the JSON report shape",
+  WIN32_ONLY,
+  async () => {
+    const scriptPath = fileURLToPath(new URL("./windows-native-transport.mjs", import.meta.url));
+    let stdout;
+    try {
+      ({ stdout } = await execFileAsync(process.execPath, [scriptPath], { timeout: 15000 }));
+    } catch (error) {
+      // A "fail" verdict makes the script exit 1; the JSON report on
+      // stdout — not the exit code — is what this case is proving.
+      if (typeof error.stdout !== "string") throw error;
+      stdout = error.stdout;
+    }
+    const report = JSON.parse(stdout);
+    assert.equal(report.platform, "win32");
+    assert.ok(["pass", "fail"].includes(report.verdict));
+    assert.ok(Array.isArray(report.cases));
   },
 );
