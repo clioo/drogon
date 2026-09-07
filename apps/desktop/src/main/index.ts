@@ -9,6 +9,7 @@ import { readBuildInfo } from "./build-info";
 import { registerAutomationIpc } from "./automation-bridge";
 import { dispatchFileRequest } from "./file-bridge";
 import { registerGitBridge } from "./git-bridge";
+import { registerSettingsProbes } from "./settings-probes";
 import { registerBrowserIpc } from "./browser/browser-ipc";
 import { dispatchBotSnapshot } from "./bot-bridge";
 import {
@@ -56,6 +57,7 @@ let window: BrowserWindow | null = null;
 
 function registerBridge() {
   registerGitBridge(() => window);
+  registerSettingsProbes(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
     ipcMain.handle(`drogon:${method}`, async (event, input: unknown) => {
       if (

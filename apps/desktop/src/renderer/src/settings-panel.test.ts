@@ -2,12 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   attachSettingsDialogLifecycle,
-  buildThemeOptionsState,
-  handleInspectorCheckboxChange,
-  handleThemeRadioChange,
   isSettingsBackdropClick,
-  SETTINGS_PANEL_STYLES,
-  THEME_OPTIONS,
 } from "./settings-panel";
 import { SettingsStore } from "./settings-store";
 import type { StorageLike, Theme } from "./settings-store";
@@ -44,65 +39,6 @@ class MemoryStorage implements StorageLike {
     this.map.set(key, value);
   }
 }
-
-describe("buildThemeOptionsState (aria/props mapping)", () => {
-  it("marks exactly the current theme as checked, in system/light/dark order", () => {
-    expect(buildThemeOptionsState("dark")).toEqual([
-      { value: "system", label: "System", checked: false },
-      { value: "light", label: "Light", checked: false },
-      { value: "dark", label: "Dark", checked: true },
-    ]);
-  });
-  it("reflects system and light as the checked option", () => {
-    expect(buildThemeOptionsState("system").map((o) => o.checked)).toEqual([
-      true,
-      false,
-      false,
-    ]);
-    expect(buildThemeOptionsState("light").map((o) => o.checked)).toEqual([
-      false,
-      true,
-      false,
-    ]);
-  });
-  it("exposes exactly the three catalog-anchored theme values", () => {
-    expect(THEME_OPTIONS.map((o) => o.value)).toEqual([
-      "system",
-      "light",
-      "dark",
-    ]);
-  });
-});
-
-describe("handleThemeRadioChange", () => {
-  it("selecting dark calls onThemeChange('dark')", () => {
-    const onThemeChange = vi.fn();
-    handleThemeRadioChange("dark", onThemeChange);
-    expect(onThemeChange).toHaveBeenCalledExactlyOnceWith("dark");
-  });
-  it("selecting light or system calls onThemeChange with that value", () => {
-    const onThemeChange = vi.fn();
-    handleThemeRadioChange("light", onThemeChange);
-    handleThemeRadioChange("system", onThemeChange);
-    expect(onThemeChange).toHaveBeenNthCalledWith(1, "light");
-    expect(onThemeChange).toHaveBeenNthCalledWith(2, "system");
-  });
-  it("ignores a value outside the Theme union without calling onThemeChange", () => {
-    const onThemeChange = vi.fn();
-    handleThemeRadioChange("blurple", onThemeChange);
-    expect(onThemeChange).not.toHaveBeenCalled();
-  });
-});
-
-describe("handleInspectorCheckboxChange", () => {
-  it("passes the checkbox's checked state straight through", () => {
-    const onInspectorChange = vi.fn();
-    handleInspectorCheckboxChange(true, onInspectorChange);
-    handleInspectorCheckboxChange(false, onInspectorChange);
-    expect(onInspectorChange).toHaveBeenNthCalledWith(1, true);
-    expect(onInspectorChange).toHaveBeenNthCalledWith(2, false);
-  });
-});
 
 describe("attachSettingsDialogLifecycle (native modal open/close/focus-restore)", () => {
   it("opens the dialog as a real modal on attach, so the browser moves focus in and traps Tab/Shift+Tab", () => {
@@ -201,38 +137,32 @@ describe("isSettingsBackdropClick (outside-interaction dismissal)", () => {
   });
 });
 
-describe("SETTINGS_PANEL_STYLES (canonical type scale, layer tier, narrow viewport)", () => {
-  it("uses only the documented 12/13/14px type scale, not invented rem sizes", () => {
-    expect(SETTINGS_PANEL_STYLES).not.toMatch(/0?\.\d+rem/);
-    expect(SETTINGS_PANEL_STYLES).toMatch(/font-size:\s*14px/);
-    expect(SETTINGS_PANEL_STYLES).toMatch(/font-size:\s*13px/);
-    expect(SETTINGS_PANEL_STYLES).toMatch(/font-size:\s*12px/);
-  });
-  it("uses the source floating/popover layer tier (z-index: 10), not an invented 20", () => {
-    expect(SETTINGS_PANEL_STYLES).toMatch(/z-index:\s*10\b/);
-    expect(SETTINGS_PANEL_STYLES).not.toMatch(/z-index:\s*20\b/);
-  });
-  it("clamps width to the viewport so a narrow window doesn't overflow off-screen", () => {
-    expect(SETTINGS_PANEL_STYLES).toMatch(
-      /width:\s*min\(260px,\s*calc\(100vw - 32px\)\)/,
-    );
-  });
-});
-
-describe("store round-trip: theme + inspector persist through the same wiring App.tsx uses", () => {
-  it("persists a dark theme + hidden inspector across a fresh store instance", () => {
+describe("store round-trip: the full J10 surface persists through the same wiring App.tsx uses", () => {
+  it("persists theme, font size, harness defaults and the notification switch across a fresh store instance", () => {
     const storage = new MemoryStorage();
     const store = new SettingsStore(storage, { namespace: "ui" });
     const onThemeChange = (theme: Theme) => store.set("theme", theme);
-    const onInspectorChange = (visible: boolean) =>
-      store.set("inspectorVisible", visible);
+    const onTerminalFontSizeChange = (size: number) =>
+      store.set("terminalFontSize", size);
+    const onNotifyChange = (next: boolean) =>
+      store.set("notifyOnAgentNeedsInput", next);
 
-    handleThemeRadioChange("dark", onThemeChange);
-    handleInspectorCheckboxChange(false, onInspectorChange);
+    onThemeChange("dark");
+    onTerminalFontSizeChange(15);
+    store.set("defaultHarnessId", "pi");
+    store.set("harnessDefaults", {
+      pi: { model: "opus", effort: "high", permissionMode: "unattended" },
+    });
+    onNotifyChange(false);
     store.flush();
 
     const reloaded = new SettingsStore(storage, { namespace: "ui" });
     expect(reloaded.get("theme")).toBe("dark");
-    expect(reloaded.get("inspectorVisible")).toBe(false);
+    expect(reloaded.get("terminalFontSize")).toBe(15);
+    expect(reloaded.get("defaultHarnessId")).toBe("pi");
+    expect(reloaded.get("harnessDefaults")).toEqual({
+      pi: { model: "opus", effort: "high", permissionMode: "unattended" },
+    });
+    expect(reloaded.get("notifyOnAgentNeedsInput")).toBe(false);
   });
 });

@@ -5,7 +5,9 @@
 // debounce with a 5s maximum pending delay; storage reads/writes are guarded
 // (no durability or encryption promise).
 //
-// Scope: the initial UI-chrome subset only. Anchored to the frozen catalog
+// Scope: the UI-chrome subset plus the J10 settings additions (terminal font
+// size, default harness, per-harness launch defaults, agent-input
+// notification switch). Anchored to the frozen catalog
 // docs/migration/parity-settings-properties.json (schema
 // drogon.parity-settings-properties/2): `theme` is declared
 // 'system' | 'dark' | 'light' with builder default 'system'. `inspectorVisible`
@@ -21,10 +23,39 @@
 // storage key need no changes.
 
 export type Theme = "system" | "dark" | "light";
+
+/** Permission mode vocabulary shared with the harness launch form (inherit = prompts, unattended = skip). */
+export type HarnessPermissionMode = "inherit" | "unattended";
+
+/**
+ * Per-harness launch defaults (journey J10). Empty model/effort means "no
+ * preference" (the launch menu sends the key as absent, i.e. harness
+ * default); permissionMode always has an explicit value.
+ */
+export type HarnessAgentDefault = {
+  model: string;
+  effort: string;
+  permissionMode: HarnessPermissionMode;
+};
+
+export const EMPTY_HARNESS_AGENT_DEFAULT: HarnessAgentDefault = {
+  model: "",
+  effort: "",
+  permissionMode: "inherit",
+};
+
 export type SettingsSubset = {
   theme: Theme;
   inspectorVisible: boolean;
   locale: string;
+  /** Terminal font size in px; consumed by the terminal surface CSS hook. */
+  terminalFontSize: number;
+  /** Default harness for the "+" launch menu; "" means no default. */
+  defaultHarnessId: string;
+  /** Per-harness launch defaults keyed by harness id; absent key = all defaults. */
+  harnessDefaults: Record<string, HarnessAgentDefault>;
+  /** Master switch for agent-needs-input native notifications (wired by another task). */
+  notifyOnAgentNeedsInput: boolean;
 };
 
 /** localStorage shape the store needs; injectable for tests and alternative stores. */
@@ -37,6 +68,10 @@ export const SETTINGS_DEFAULTS: SettingsSubset = {
   theme: "system",
   inspectorVisible: true,
   locale: "en",
+  terminalFontSize: 13,
+  defaultHarnessId: "",
+  harnessDefaults: {},
+  notifyOnAgentNeedsInput: true,
 };
 
 const DEBOUNCE_MS = 1000;
@@ -76,6 +111,71 @@ function isTheme(value: unknown): value is Theme {
   return value === "system" || value === "dark" || value === "light";
 }
 
+// Same control-character rule as the harness bridge's opaque fields
+// (bridge-validation.ts): free text, never NUL/newline/control.
+const NO_CONTROL_CHARS = /^[^\x00-\x1f\x7f]*$/;
+
+function isTerminalFontSize(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 9 &&
+    value <= 32
+  );
+}
+
+function isDefaultHarnessId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 128 &&
+    NO_CONTROL_CHARS.test(value)
+  );
+}
+
+function isPermissionMode(value: unknown): value is HarnessPermissionMode {
+  return value === "inherit" || value === "unattended";
+}
+
+function parseHarnessAgentDefault(value: unknown): HarnessAgentDefault | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.model !== "string" ||
+    candidate.model.length > 4096 ||
+    !NO_CONTROL_CHARS.test(candidate.model)
+  )
+    return null;
+  if (
+    typeof candidate.effort !== "string" ||
+    candidate.effort.length > 256 ||
+    !NO_CONTROL_CHARS.test(candidate.effort)
+  )
+    return null;
+  if (!isPermissionMode(candidate.permissionMode)) return null;
+  return {
+    model: candidate.model,
+    effort: candidate.effort,
+    permissionMode: candidate.permissionMode,
+  };
+}
+
+function parseHarnessDefaults(value: unknown): Record<string, HarnessAgentDefault> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate);
+  if (keys.length > 16) return null;
+  const out: Record<string, HarnessAgentDefault> = {};
+  for (const key of keys) {
+    if (key.length === 0 || key.length > 128 || !NO_CONTROL_CHARS.test(key))
+      continue;
+    const parsed = parseHarnessAgentDefault(candidate[key]);
+    if (parsed) out[key] = parsed;
+  }
+  return out;
+}
+
 /**
  * Parses the persisted envelope { settings: {...} }. Anything malformed or
  * foreign (other schemas' envelopes, arrays, primitives) yields no overrides
@@ -104,6 +204,16 @@ export function parsePersistedSettings(
       out.inspectorVisible = candidate.inspectorVisible;
     if (typeof candidate.locale === "string" && candidate.locale.length > 0)
       out.locale = candidate.locale;
+    if (isTerminalFontSize(candidate.terminalFontSize))
+      out.terminalFontSize = candidate.terminalFontSize;
+    if (isDefaultHarnessId(candidate.defaultHarnessId))
+      out.defaultHarnessId = candidate.defaultHarnessId;
+    {
+      const parsed = parseHarnessDefaults(candidate.harnessDefaults);
+      if (parsed) out.harnessDefaults = parsed;
+    }
+    if (typeof candidate.notifyOnAgentNeedsInput === "boolean")
+      out.notifyOnAgentNeedsInput = candidate.notifyOnAgentNeedsInput;
     return out;
   } catch {
     return {};

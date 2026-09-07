@@ -5,6 +5,7 @@ import { installBrowserWindowCloseGuard } from "./browser-window-close-installat
 import { usageBridge } from "./usage";
 import { git } from "./git";
 import { browser } from "./browser";
+import { settings } from "./settings";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -28,6 +29,7 @@ const bridge: DesktopBridge = {
   startHarness: (value) => ipcRenderer.invoke("drogon:startHarness", value),
   buildInfo: () => ipcRenderer.invoke("drogon:buildInfo"),
   usage: usageBridge,
+  settings,
 };
 // Reconciles the granted `window.drogon.git.*` namespace with the
 // coordinator-owned DesktopBridge type without editing it: a runtime-only

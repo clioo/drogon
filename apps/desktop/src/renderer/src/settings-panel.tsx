@@ -1,41 +1,16 @@
-// Appearance controls share App settings; native modal behavior owns focus containment.
+// Thin wrapper around the J10 settings surface (features/settings): the
+// native modal shell lives here so existing callers keep working, every
+// section lives in the surface.
 import { useEffect, useRef } from "react";
 import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
+import type { Harness } from "../../shared/session-contract";
 import { Button } from "./components/ui/button";
-import type { Theme } from "./settings-store";
-
-export const THEME_OPTIONS: { value: Theme; label: string }[] = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-];
-
-export function buildThemeOptionsState(
-  theme: Theme,
-): { value: Theme; label: string; checked: boolean }[] {
-  return THEME_OPTIONS.map((option) => ({
-    ...option,
-    checked: option.value === theme,
-  }));
-}
-
-function isTheme(value: string): value is Theme {
-  return value === "system" || value === "light" || value === "dark";
-}
-
-export function handleThemeRadioChange(
-  value: string,
-  onThemeChange: (theme: Theme) => void,
-): void {
-  if (isTheme(value)) onThemeChange(value);
-}
-
-export function handleInspectorCheckboxChange(
-  checked: boolean,
-  onInspectorChange: (visible: boolean) => void,
-): void {
-  onInspectorChange(checked);
-}
+import {
+  SettingsSurface,
+  type SettingsSurfaceProps,
+} from "./features/settings/SettingsSurface";
+import type { SettingsSectionId } from "./features/settings/settings-sections";
+import type { HarnessAgentDefault, Theme } from "./settings-store";
 
 export type DialogLike = {
   open: boolean;
@@ -81,57 +56,7 @@ export function isSettingsBackdropClick(
   );
 }
 
-export const SETTINGS_PANEL_STYLES = `
-  .settings-panel {
-    position: fixed;
-    top: 48px;
-    right: 16px;
-    left: auto;
-    margin: 0;
-    z-index: 10;
-    width: min(260px, calc(100vw - 32px));
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border);
-    background: var(--popover);
-    color: var(--popover-foreground);
-    box-shadow: var(--shadow-floating);
-  }
-  .settings-panel::backdrop {
-    background: transparent;
-  }
-  .settings-panel h2 {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .settings-panel fieldset {
-    margin: 0;
-    padding: 0;
-    border: none;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .settings-panel legend {
-    padding: 0 0 4px;
-    font-size: 12px;
-    color: var(--muted-foreground);
-  }
-  .settings-panel label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-  }
-  .settings-panel .settings-panel-actions {
-    display: flex;
-    justify-content: flex-end;
-  }
-`;
+const noop = (): void => {};
 
 export type SettingsPanelProps = {
   theme: Theme;
@@ -139,9 +64,23 @@ export type SettingsPanelProps = {
   inspectorVisible: boolean;
   onInspectorChange: (visible: boolean) => void;
   onClose: () => void;
-
   openerRef: RefObject<HTMLElement | null>;
-};
+} & Partial<
+  Pick<
+    SettingsSurfaceProps,
+    | "terminalFontSize"
+    | "onTerminalFontSizeChange"
+    | "harnesses"
+    | "defaultHarnessId"
+    | "onDefaultHarnessChange"
+    | "harnessDefaults"
+    | "onHarnessDefaultChange"
+    | "notifyOnAgentNeedsInput"
+    | "onNotifyChange"
+    | "workspacePath"
+    | "initialSection"
+  >
+>;
 
 export function SettingsPanel({
   theme,
@@ -150,7 +89,18 @@ export function SettingsPanel({
   onInspectorChange,
   onClose,
   openerRef,
-}: SettingsPanelProps) {
+  terminalFontSize = 13,
+  onTerminalFontSizeChange = noop,
+  harnesses = [],
+  defaultHarnessId = "",
+  onDefaultHarnessChange = noop,
+  harnessDefaults = {},
+  onHarnessDefaultChange = noop,
+  notifyOnAgentNeedsInput = true,
+  onNotifyChange = noop,
+  workspacePath = null,
+  initialSection,
+}: SettingsPanelProps & { initialSection?: SettingsSectionId }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -166,44 +116,13 @@ export function SettingsPanel({
     <dialog
       ref={dialogRef}
       aria-label="Settings"
-      className="settings-panel"
+      className="settings-surface-dialog"
       onClick={(event: ReactMouseEvent<HTMLDialogElement>) => {
         if (isSettingsBackdropClick(event, dialogRef.current)) onClose();
       }}
     >
-      <style>{SETTINGS_PANEL_STYLES}</style>
-      <h2>Settings</h2>
-      <fieldset>
-        <legend>Theme</legend>
-        {buildThemeOptionsState(theme).map((option) => (
-          <label key={option.value}>
-            <input
-              type="radio"
-              name="settings-theme"
-              value={option.value}
-              checked={option.checked}
-              onChange={(event) =>
-                handleThemeRadioChange(event.target.value, onThemeChange)
-              }
-            />
-            {option.label}
-          </label>
-        ))}
-      </fieldset>
-      <label>
-        <input
-          type="checkbox"
-          checked={inspectorVisible}
-          onChange={(event) =>
-            handleInspectorCheckboxChange(
-              event.target.checked,
-              onInspectorChange,
-            )
-          }
-        />
-        Show session details
-      </label>
-      <div className="settings-panel-actions">
+      <div className="settings-surface-head">
+        <h2>Settings</h2>
         <Button
           size="sm"
           variant="outline"
@@ -212,6 +131,23 @@ export function SettingsPanel({
           Close
         </Button>
       </div>
+      <SettingsSurface
+        theme={theme}
+        onThemeChange={onThemeChange}
+        terminalFontSize={terminalFontSize}
+        onTerminalFontSizeChange={onTerminalFontSizeChange}
+        inspectorVisible={inspectorVisible}
+        onInspectorChange={onInspectorChange}
+        harnesses={harnesses}
+        defaultHarnessId={defaultHarnessId}
+        onDefaultHarnessChange={onDefaultHarnessChange}
+        harnessDefaults={harnessDefaults}
+        onHarnessDefaultChange={onHarnessDefaultChange}
+        notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
+        onNotifyChange={onNotifyChange}
+        workspacePath={workspacePath}
+        initialSection={initialSection}
+      />
     </dialog>
   );
 }

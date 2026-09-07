@@ -13,6 +13,11 @@ import {
   type HarnessLaunchFormValues,
 } from "./harness-launch-form";
 import {
+  isPristineLaunchForm,
+  resolveLaunchDefaults,
+} from "./features/settings/agent-defaults";
+import type { HarnessAgentDefault } from "./settings-store";
+import {
   clearPendingHarnessLaunch,
   loadPendingHarnessLaunch,
   savePendingHarnessLaunch,
@@ -34,6 +39,8 @@ export function HarnessLaunchMenu({
   disabled,
   onCreateTerminal,
   onLaunch,
+  defaultHarnessId,
+  launchDefaults,
 }: {
   workspaceId: string;
   /** The execution host this recovery record is scoped to; `null` while disconnected — recovery is a no-op without it. */
@@ -42,6 +49,9 @@ export function HarnessLaunchMenu({
   disabled: boolean;
   onCreateTerminal(): void;
   onLaunch(input: HarnessLaunchInput): Promise<boolean>;
+  /** J10: stored default harness (badged in the menu) and per-harness field defaults used to pre-fill a pristine form. Read-only here; edited in Settings. */
+  defaultHarnessId?: string;
+  launchDefaults?: Record<string, HarnessAgentDefault>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [selected, setSelected] = useState<Harness | null>(null);
@@ -195,13 +205,41 @@ export function HarnessLaunchMenu({
                   key={harness.harnessId}
                   className="harness-menu-item"
                   disabled={harness.availability !== "available"}
-                  onSelect={() => setSelected(harness)}
+                  onSelect={() => {
+                    setSelected(harness);
+                    // A pristine form inherits the stored per-harness
+                    // defaults; any user-typed value is never clobbered.
+                    setValues((prev) => {
+                      if (
+                        !isPristineLaunchForm({
+                          model: prev.model,
+                          effort: prev.effort,
+                          unattended: prev.unattended,
+                        })
+                      )
+                        return prev;
+                      const resolved = resolveLaunchDefaults(
+                        harness.harnessId,
+                        launchDefaults ?? {},
+                      );
+                      return {
+                        ...prev,
+                        model: resolved.model,
+                        effort: resolved.effort,
+                        unattended: resolved.unattended,
+                      };
+                    });
+                  }}
                 >
                   <span>{harness.displayName}</span>
-                  {harness.availability !== "available" && (
+                  {harness.availability !== "available" ? (
                     <span className="harness-menu-hint">
                       {unavailableHint[harness.availability]}
                     </span>
+                  ) : (
+                    defaultHarnessId === harness.harnessId && (
+                      <span className="harness-menu-hint">Default</span>
+                    )
                   )}
                 </DropdownMenu.Item>
               ))}
