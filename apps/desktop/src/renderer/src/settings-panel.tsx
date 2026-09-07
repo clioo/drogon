@@ -1,16 +1,4 @@
-// Scoped appearance checkpoint (ROOT-approved): theme + inspector visibility
-// only. Presentational only — `uiSettings()` in App.tsx stays the single
-// source of truth; this component drives it through props, never holds its
-// own copy of the setting values. Keybinding editing is deferred to a later
-// checkpoint.
-//
-// ROOT HELD the prior build (msg_82afd72eee69): aria-modal="true" on a plain
-// absolutely-positioned div has no real focus trap or inert background, so
-// keyboard focus could leave the dialog while it claimed to be modal. This
-// version uses a native <dialog> opened with showModal(): the browser itself
-// supplies focus-into-dialog on open, Tab/Shift+Tab trapping, an inert
-// background and native Escape-to-close, so no custom JS trap is needed or
-// implemented here.
+// Appearance controls share App settings; native modal behavior owns focus containment.
 import { useEffect, useRef } from "react";
 import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import { Button } from "./components/ui/button";
@@ -22,7 +10,6 @@ export const THEME_OPTIONS: { value: Theme; label: string }[] = [
   { value: "dark", label: "Dark" },
 ];
 
-/** Pure aria/props mapping: which theme radio is checked, in catalog order. */
 export function buildThemeOptionsState(
   theme: Theme,
 ): { value: Theme; label: string; checked: boolean }[] {
@@ -36,7 +23,6 @@ function isTheme(value: string): value is Theme {
   return value === "system" || value === "light" || value === "dark";
 }
 
-/** What a theme radio's onChange wires to; ignores any foreign value. */
 export function handleThemeRadioChange(
   value: string,
   onThemeChange: (theme: Theme) => void,
@@ -44,7 +30,6 @@ export function handleThemeRadioChange(
   if (isTheme(value)) onThemeChange(value);
 }
 
-/** What the inspector checkbox's onChange wires to. */
 export function handleInspectorCheckboxChange(
   checked: boolean,
   onInspectorChange: (visible: boolean) => void,
@@ -62,16 +47,6 @@ export type DialogLike = {
 
 export type FocusableLike = { focus: () => void };
 
-/**
- * Wires the native modal lifecycle for the settings dialog: opens it as a
- * real modal (the browser supplies focus-into-dialog, Tab/Shift+Tab trapping
- * and inert background) and calls `onClose` whenever the dialog's native
- * "close" event fires — which is the browser's single funnel for Escape,
- * outside-backdrop dismissal and the panel's own Close button (all of which
- * call the dialog's `.close()` method rather than reimplementing dismissal).
- * The returned cleanup closes a still-open dialog and restores focus to the
- * opener, matching the pre-existing openerRef contract.
- */
 export function attachSettingsDialogLifecycle(
   dialog: DialogLike,
   opener: FocusableLike | null,
@@ -87,14 +62,6 @@ export function attachSettingsDialogLifecycle(
   };
 }
 
-/**
- * A native <dialog>'s ::backdrop is not part of the DOM, so an outside click
- * lands on the dialog element itself — but so does a click on the dialog's
- * own padding. The target check alone cannot tell backdrop from padding, so
- * this also requires the pointer to fall outside the dialog's content rect.
- * This is what the dialog's onClick wires to for truthful
- * outside-interaction dismissal (no synthetic overlay div).
- */
 export function isSettingsBackdropClick(
   event: { target: unknown; clientX: number; clientY: number },
   dialog: {
@@ -114,18 +81,13 @@ export function isSettingsBackdropClick(
   );
 }
 
-/**
- * Canonical 12/13/14px type scale and the source floating/popover layer tier
- * (z-index: 10, matching --shadow-floating usage elsewhere in main.css).
- * TODO(pending leader CSS handoff integration): move into main.css as a
- * regular class once the appearance-panel style-block relocation lands;
- * kept inline here for now since main.css is out of this dispatch's scope.
- */
 export const SETTINGS_PANEL_STYLES = `
   .settings-panel {
-    position: absolute;
+    position: fixed;
     top: 48px;
     right: 16px;
+    left: auto;
+    margin: 0;
     z-index: 10;
     width: min(260px, calc(100vw - 32px));
     padding: 16px;
@@ -177,16 +139,10 @@ export type SettingsPanelProps = {
   inspectorVisible: boolean;
   onInspectorChange: (visible: boolean) => void;
   onClose: () => void;
-  /** The control that opened the panel; focus returns there on close. */
+
   openerRef: RefObject<HTMLElement | null>;
 };
 
-/**
- * Dismissible native modal dialog, not a route: mounted/unmounted directly by
- * App.tsx. showModal() moves focus in and traps Tab/Shift+Tab (browser-native,
- * see attachSettingsDialogLifecycle); closing (Escape, outside click, the
- * Close button, or unmount) returns focus to the opener via `openerRef`.
- */
 export function SettingsPanel({
   theme,
   onThemeChange,

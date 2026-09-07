@@ -1,17 +1,4 @@
-// Pure-logic tests for the SettingsPanel wiring. This vitest project has no
-// jsdom/happy-dom and no @testing-library (verified absent repo-wide), so DOM
-// rendering/real focus/Tab dispatch cannot be exercised here. The panel is a
-// native <dialog>.showModal(): the browser itself supplies focus-into-dialog,
-// Tab/Shift+Tab trapping and inert background, so attachSettingsDialogLifecycle
-// below is the entire seam our own code owns for that behavior, and it is
-// exercised against a fake dialog that mimics the real showModal/close/event
-// contract. Real-browser confirmation of the native trap/outside-dismiss/
-// Escape/focus-restore behavior is left to the CDP harness (out of this
-// dispatch's file scope). The exported handlers below are exactly what the
-// component's radio/checkbox/dialog wiring uses, so testing them directly
-// covers the real interaction logic. Real-browser persistence (select dark,
-// reload, .dark applied, localStorage updated) is verified separately by a
-// throwaway CDP script (see worker_done report).
+// Pure lifecycle/handler contracts; native focus behavior requires the separate CDP probe.
 import { describe, expect, it, vi } from "vitest";
 import {
   attachSettingsDialogLifecycle,
