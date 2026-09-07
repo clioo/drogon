@@ -3,7 +3,9 @@
 //! `browser.*` calls enqueue one command and block (bounded) until the
 //! connected desktop long-polls it via `desktop.commands.poll`, executes it
 //! against the embedded browser host, and reports back via
-//! `desktop.commands.complete`.
+//! `desktop.commands.complete`. Inside a Drogon terminal the `drogon-cli`
+//! shim (and the `drogon` alias) is already on `PATH`, so agents drive the
+//! relay with no `--data-dir` flag.
 //!
 //! Persist nothing: the queue lives in [`RelayState`] on the `Engine` and is
 //! cleared on daemon restart. These RPCs bypass the request ledger and the

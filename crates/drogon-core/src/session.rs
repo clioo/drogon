@@ -149,6 +149,7 @@ struct NativePty {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn(
     db: Arc<Mutex<Connection>>,
+    data_dir: &std::path::Path,
     host_id: String,
     workspace_id: String,
     cwd: &str,
@@ -183,7 +184,7 @@ pub(crate) fn spawn(
         tx.commit().map_err(error::from_sqlite)?;
         plan
     };
-    session_admission::launch_reserved(db, plan, None)
+    session_admission::launch_reserved(db, data_dir, plan, None)
 }
 
 type SpawnedPty = (
@@ -193,7 +194,11 @@ type SpawnedPty = (
     Box<dyn Child + Send + Sync>,
 );
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_pty(
+    data_dir: &std::path::Path,
+    workspace_id: &str,
+    session_id: &str,
     cwd: &str,
     command: &str,
     args: &[String],
@@ -226,18 +231,13 @@ fn spawn_pty(
         .map_err(|e| error::io_error(format!("take pty writer failed: {e}")))?;
 
     let mut cmd = CommandBuilder::new(command);
-    // Remove control-plane context from the child environment: a foreign
-    // runtime's identifiers (ORCA_*) and this runtime's own authority binding
-    // (DROGON_*), so a harness or agent inside a session cannot accidentally
-    // act on this service (or another one) through inherited variables. A
-    // reserved worker launch then applies exactly its service-authored
-    // context; ordinary sessions keep none.
-    for (key, _) in std::env::vars_os() {
-        let upper = key.to_string_lossy().to_ascii_uppercase();
-        if upper.starts_with("ORCA_") || upper.starts_with("DROGON_") {
-            cmd.env_remove(key);
-        }
-    }
+    // Session environment first: strip inherited control-plane context (a
+    // harness or agent inside a session must not act on this service through
+    // inherited variables), prepend the `<data-dir>/bin` shims to PATH, and
+    // export the session identity. A reserved worker launch then applies
+    // exactly its service-authored context on top; ordinary sessions keep
+    // only the session environment.
+    crate::session_env::apply_to_command(&mut cmd, data_dir, workspace_id, session_id);
     if let Some(env) = worker_env {
         env.apply_to_command(&mut cmd);
     }

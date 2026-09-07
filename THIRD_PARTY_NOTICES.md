@@ -78,6 +78,19 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+The session environment and `drogon-cli` shims in
+`crates/drogon-core/src/session_env.rs` port the shape of Orca's
+`src/main/daemon/pty-subprocess/spawn-environment.ts`,
+`src/main/cli/{linux-terminal-orca-cli-shim,bundled-cli-launcher-path,linux-bare-orca-dispatcher}.ts`
+and `config/scripts/dev-cli-terminal-wrapper.mjs`, with DROGON_* names and
+TERM_PROGRAM=Drogon. The Mentu runtime, recipe and run-record handling in
+`crates/drogon-core/src/mentu/` and the panel in
+`apps/desktop/src/renderer/src/features/mentu/` adapt the Drogon fork's
+`src/main/mentu/{mentu-cli-process,mentu-session-launch,mentu-run-parsing,mentu-runtime-identity,mentu-recipe-files}.ts`
+and `src/renderer/src/components/mentu/{MentuPanel,RecipePaneHeader}.tsx`
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
+file keeps the MIT notice in its header comment.
+
 ## Packaged dependencies
 
 Dependency versions are fixed in Cargo.lock and pnpm-lock.yaml. Their licenses must accompany redistributed artifacts. Geist is consumed from `@fontsource-variable/geist` with its bundled SIL Open Font License. No Game of Thrones artwork is redistributed in this foundation.

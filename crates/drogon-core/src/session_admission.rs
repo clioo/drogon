@@ -2,7 +2,8 @@
 //! caller's transaction without touching a process; [`launch_reserved`]
 //! verifies the committed reservation, then performs the PTY effect with the
 //! same primitives as the ordinary path. Ordinary sessions launch with no
-//! worker context and inherit no control-plane environment.
+//! worker context and the session environment only (no control-plane
+//! inheritance); worker launches layer their service-authored context on top.
 //!
 //! Cancel/revocation races and ledger ownership are engine integration
 //! obligations; this seam does not claim them. A lost handle is never
@@ -255,6 +256,7 @@ pub(crate) fn reserve(
 /// fallible post-spawn persistence, which stays the engine's job.
 pub(crate) fn launch_reserved(
     db: Arc<Mutex<Connection>>,
+    data_dir: &std::path::Path,
     plan: PreparedSession,
     env: Option<WorkerEnvironment>,
 ) -> Result<LaunchedSession, RpcError> {
@@ -274,6 +276,9 @@ pub(crate) fn launch_reserved(
         verify_committed(&conn, &plan)?;
     }
     match super::spawn_pty(
+        data_dir,
+        &plan.workspace_id,
+        &plan.session_id,
         &plan.cwd,
         &plan.command,
         &plan.args,

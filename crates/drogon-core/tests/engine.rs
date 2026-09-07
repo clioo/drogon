@@ -906,16 +906,18 @@ fn unknown_session_ids_are_not_found_while_recovered_ones_are_unverifiable() {
 #[test]
 fn child_environment_is_stripped_of_runtime_control_context() {
     // Regression for: inherited ORCA_* was stripped, but this runtime's own
-    // DROGON_* authority (notably DROGON_DATA_DIR) leaked into every child,
-    // letting a harness agent accidentally target the spawning service.
+    // DROGON_* authority (notably a forged DROGON_DATA_DIR) leaked into
+    // every child, letting a harness agent accidentally target the spawning
+    // service. The session environment now sets a fresh DROGON_DATA_DIR (and
+    // workspace/session/terminal identity) per launch instead of inheriting.
     //
     // The probe runs in an owned subprocess — this same test binary,
     // re-invoked into the isolated `#[ignore]` entry below — whose
     // environment is configured here, entirely before spawn: two
-    // control-context canaries the PTY child must NOT see (`ORCA_*`,
-    // `DROGON_*`) and one benign inherited canary it must still see. The
-    // test process's own environment is never mutated, so no concurrently
-    // running test can ever observe a forged one.
+    // control-context canaries the PTY child must NOT inherit (`ORCA_*`, a
+    // forged `DROGON_DATA_DIR`) and one benign inherited canary it must
+    // still see. The test process's own environment is never mutated, so no
+    // concurrently running test can ever observe a forged one.
     let exe = std::env::current_exe().expect("current test binary path");
     let mut command = std::process::Command::new(exe);
     command.args([
@@ -974,8 +976,16 @@ fn child_environment_is_stripped_of_runtime_control_context() {
         "a benign inherited value must survive into the PTY child: {stdout:?}"
     );
     assert!(
-        stdout.contains("orca=unset") && stdout.contains("drogon=unset"),
-        "runtime control context leaked into the PTY child: {stdout:?}"
+        stdout.contains("orca=unset"),
+        "foreign control context leaked into the PTY child: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("drogon=/tmp/drogon-should-not-inherit"),
+        "a forged DROGON_DATA_DIR must never be inherited: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("PROBE-OK"),
+        "the probe's fresh-identity checks must pass: {stdout:?}"
     );
 }
 
@@ -992,7 +1002,7 @@ fn child_environment_probe_entry() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine, dir.path(), "ws-1");
-    let probe = "printf 'PROBE keep=%s orca=%s drogon=%s' \"${PROBE_KEEP_ME:-unset}\" \"${ORCA_TEST_CONTROL:-unset}\" \"${DROGON_DATA_DIR:-unset}\"";
+    let probe = "printf 'PROBE keep=%s orca=%s drogon=%s ws=%s sess=%s term=%s termprogram=%s' \"${PROBE_KEEP_ME:-unset}\" \"${ORCA_TEST_CONTROL:-unset}\" \"${DROGON_DATA_DIR:-unset}\" \"${DROGON_WORKSPACE_ID:-unset}\" \"${DROGON_SESSION_ID:-unset}\" \"${DROGON_TERMINAL:-unset}\" \"${TERM_PROGRAM:-unset}\"";
     let session = ok(
         &engine,
         "session.start",
@@ -1027,6 +1037,34 @@ fn child_environment_probe_entry() {
         output.contains("PROBE keep="),
         "probe shell never produced its verdict: {output:?}"
     );
+    // Fresh session identity is set per launch, never inherited: the forged
+    // DROGON_DATA_DIR from the probe's environment must be gone, replaced by
+    // this engine's own data dir plus the workspace/session/terminal markers.
+    let expected_data = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        output.contains(&format!("drogon={expected_data}")),
+        "DROGON_DATA_DIR must be this session's data dir: {output:?}"
+    );
+    assert!(
+        output.contains(&format!("ws={workspace_id}")),
+        "DROGON_WORKSPACE_ID must be this session's workspace: {output:?}"
+    );
+    assert!(
+        output.contains(&format!("sess={session_id}")),
+        "DROGON_SESSION_ID must be this session's id: {output:?}"
+    );
+    assert!(
+        output.contains("term=1"),
+        "DROGON_TERMINAL must mark the session: {output:?}"
+    );
+    assert!(
+        output.contains("termprogram=Drogon"),
+        "TERM_PROGRAM must identify Drogon: {output:?}"
+    );
+    println!("PROBE-OK");
 }
 
 fn read_output(engine: &Engine, session_id: &str, incarnation: &str) -> String {

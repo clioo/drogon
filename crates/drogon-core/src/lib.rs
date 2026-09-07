@@ -42,6 +42,7 @@ mod hooks;
 mod project;
 mod ring;
 mod session;
+mod session_env;
 mod workspace;
 mod workspace_file_rpc;
 mod workspace_files;
@@ -229,6 +230,11 @@ impl Engine {
         })?;
         let host_id =
             gate.map_err(|e| error::internal_error(format!("startup schema/recovery gate: {e}")))?;
+
+        // Every Drogon terminal resolves `drogon-cli`/`drogon` through these
+        // shims; installing them here keeps hook commands and session `PATH`
+        // lookups pointed at this daemon's CLI.
+        session_env::install_shims(data_dir)?;
 
         Ok(Engine {
             data_dir: data_dir.to_path_buf(),
@@ -580,6 +586,7 @@ impl Engine {
         // comment for why that ordering matters.
         let (session_id, handle, session_json) = session::spawn(
             self.db.clone(),
+            &self.data_dir,
             self.host_id.clone(),
             workspace_id,
             &cwd,
