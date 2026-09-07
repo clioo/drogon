@@ -1,0 +1,175 @@
+{
+  "status": "current-evidence-index-not-final-audit",
+  "createdAt": "2026-09-07T08:51:37.803092+00:00",
+  "latestRenderedReport": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/report.json",
+  "renderedChecks": [
+    "packaged-app-starts-bundled-runtime-with-minimal-path-and-displays-revision",
+    "pending-and-recovery-with-real-authenticated-transport-latency",
+    "missing-folder-real-service-failure-visible",
+    "isolated-renderer-and-real-folder-registration",
+    "real-harness-picker-form-trust-default-theme-narrow-escape-without-launch",
+    "rendered-terminal-command-output",
+    "transport-timeout-is-unverifiable-then-recovers-exact-shell-service-and-output",
+    "renderer-reload-retains-exact-session-and-output",
+    "packaged-quit-and-reopen-preserves-incumbent-runtime-session-and-output",
+    "keyboard-tab-navigation-and-sibling-close",
+    "light-dark-captures-and-narrow-no-overflow",
+    "exact-session-close-through-ui",
+    "explicitly-closed-tabs-stay-dismissed-after-reload",
+    "sealed-final-artifact-identity-unchanged-after-acceptance"
+  ],
+  "cleanup": [
+    "first desktop instance: exited",
+    "owned workspace sessions: exited",
+    "desktop: exited",
+    "exact packaged fixture daemon and sessions: exited"
+  ],
+  "scope": "14 bounded named checks: ten existing shell/package checks plus four supplemental audit checks. This is not 14 whole features or an audit percentage. Prior 10/12/13-check runs are historical subsets, not additive unique coverage.",
+  "files": [
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/baseline.json",
+      "bytes": 1852,
+      "sha256": "58b55ee45465eed2609619241eda5b6b672d24cb748a337dfc53eefbe4d26677"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/reference-evidence.json",
+      "bytes": 1348,
+      "sha256": "1cc213a82d0df4211fcc3cea4a8c6bf1adfd3a8a193b88c1c4f5b7c8ad12f5c1"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/mentu-evidence-characterization.json",
+      "bytes": 6895,
+      "sha256": "e977a1deeda1e30126493930b4f92471f481e2235ab277b071fa016bc1063905"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/characterize-mentu-evidence.mjs",
+      "bytes": 3827,
+      "sha256": "b9ccaaa288f1d63107d625941150592ce256e5c96bbc6e23170bbb12f159526c"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/cli-results.json",
+      "bytes": 12843,
+      "sha256": "b75c07d432295e7a1e83ffd7df27ab7b5b3b0492f8dceff4b204438e90fba135"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/audit-cli.py",
+      "bytes": 2512,
+      "sha256": "04c235c3500889b3fd6587635f14dfad06ef8eb2a8b29ba363610bd3763a442d"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/verify-baseline.mjs",
+      "bytes": 2640,
+      "sha256": "34c39c32f6509c86ec42ffda65ae7e48d5680b538f13e2ee9160b7a8edc7c4b6"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/verify-reference-evidence.mjs",
+      "bytes": 2263,
+      "sha256": "28422f4941529374146f0d90cb348d0c951a4b9f8daeb3107a25f3d2f5de36dc"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/scripts/audit-desktop-states.mjs",
+      "bytes": 21076,
+      "sha256": "2188dcb516a4834a491985c6cfe29d9c637e2f8ce32571c927ec9c998d46c620"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/scripts/audit-transport-delay.mjs",
+      "bytes": 1737,
+      "sha256": "1d9102ab2ae3286aa09d4d03e72085fae7cd42fe703aa16b7defa9026ceabb6c"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/report.json",
+      "bytes": 12521,
+      "sha256": "28dc4a99da2ed5f32a3516ebb2efee61ae4775b4866b02fa9dd9ff0651664f6e"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/dark.png",
+      "bytes": 53185,
+      "sha256": "c6d09bd4358724b0b1eb46ef7e5f488bfbf468f27ae0967bddfd2f67c1921386"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/harness-form-advanced-dark.png",
+      "bytes": 59802,
+      "sha256": "085cdb0a796c6da66991558e8654e7b4c17bb926ed345e1e24eb3a47239102b5"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/harness-form-advanced-light.png",
+      "bytes": 61811,
+      "sha256": "92c1fcd9cfa8790350decae693fe227659a8af333f3b09640b48c6ddbc5b7aa7"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/harness-form-advanced-narrow.png",
+      "bytes": 36282,
+      "sha256": "0b89bc0b1a834631daf128835e5368355eee5787525dd82bf562daef29ad8be7"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/harness-form-initial.png",
+      "bytes": 53963,
+      "sha256": "93b55ef7dd8eac13e2ea26f88288aa82655698d516d29ff9574d2fe6cda4df09"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/harness-menu-availability.png",
+      "bytes": 54037,
+      "sha256": "8169affb7bbcf853b09afa6379ecaf0856436b8870ab4c61e3b64fa3c7bb06b6"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/initial-empty.png",
+      "bytes": 40710,
+      "sha256": "3b8770a12ff8d53024618cb6206464dbd803cba215a7ef880e1b5b7267fac147"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/light.png",
+      "bytes": 52859,
+      "sha256": "bbebce84e5c72f07e29119761f1d8c11e5a1f57248848ad570e18076afc587b5"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/narrow.png",
+      "bytes": 25518,
+      "sha256": "3c3682456c4d7247029d739419a458e8aadf0a462be67d655b461383581b33df"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/pending-real-transport.png",
+      "bytes": 42223,
+      "sha256": "21ae8978163909b611db971cd0c69844f52dcec5e40f55409281b517dd4952bf"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/recovered-after-latency.png",
+      "bytes": 40707,
+      "sha256": "63f91d824798bfc5fb048a292d34c81ad68c6b771cb0370f6a9f3a40471ec0d5"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/terminal-normal.png",
+      "bytes": 31053,
+      "sha256": "4e5acf85508ac04728b042a780fa169323296ea182c6a44efeb760bd42a9296c"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/terminal-reload-recovered.png",
+      "bytes": 52859,
+      "sha256": "bbebce84e5c72f07e29119761f1d8c11e5a1f57248848ad570e18076afc587b5"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/terminal-transport-recovered.png",
+      "bytes": 31231,
+      "sha256": "ba25be1059a733bb0d47122d4c53f198433525888e90f76f803833d59d54f389"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/terminal-unverifiable.png",
+      "bytes": 34572,
+      "sha256": "0432419e5b01bfab8c03de510361802fea6432964fd45a8f762de13ed402b651"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/workspace-added-empty-session.png",
+      "bytes": 42250,
+      "sha256": "74a1dea5a46a9800803e501d003a804e074d37cecffea69190f16caedc39ef87"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/workspace-form-empty.png",
+      "bytes": 42024,
+      "sha256": "094710b4d63e05cb1bfb7d1e3ba5710340730810daad47c31cf09b4e84a4ac76"
+    },
+    {
+      "path": "/tmp/drogon-ux-parity-audit-252de85c2fd2/harness/.preflight/acceptance/desktop-1788764911291-d87cd648-dc87-4fab-b2fe-d5503f7946cf/workspace-path-failure.png",
+      "bytes": 49554,
+      "sha256": "8b9ed9f92389e88ac8f7ab0979539cdcffab7056a8411a52b8b642baaed2dcf4"
+    }
+  ]
+}

@@ -117,14 +117,17 @@ haya entorno/autorización. Referencias: [E5 final](e5-final-root-review.md),
 
 ### Audit UX adicional del preview: no confundirlo con el audit de origen
 
-Un coordinador separado está auditando el candidato `252de85c`. Su
-[reporte local provisional](/tmp/drogon-ux-parity-audit-252de85c2fd2/report.md),
-[matriz de hallazgos](/tmp/drogon-ux-parity-audit-252de85c2fd2/matrix.md),
-[matriz JSON](/tmp/drogon-ux-parity-audit-252de85c2fd2/matrix.json) y
-[crosswalk de 50 IDs](/tmp/drogon-ux-parity-audit-252de85c2fd2/coverage.json)
-deben incorporarse al paquete durable de handoff tras su cierre y revisión de
-privacidad. Son paths locales temporales: **no asumir que existen en otra máquina**.
-El reporte se declara ensamblado y pendiente de validación final/lifecycle.
+Un coordinador separado terminó el audit del candidato `252de85c`. Su
+[reporte validado](ux-parity-audit-252de85/report.md),
+[matriz de hallazgos](ux-parity-audit-252de85/matrix.md),
+[matriz JSON](ux-parity-audit-252de85/matrix.json) y
+[crosswalk de 50 IDs](ux-parity-audit-252de85/coverage.json)
+están archivados con hashes originales verificados y
+[límites de privacidad/portabilidad](ux-parity-audit-252de85/README.md).
+Esto cierra el handoff del reporte, no la aceptación del producto. Los binarios,
+capturas, scripts y archivos externos referenciados no fueron copiados:
+**no asumir que existen en otra máquina**. El lifecycle de sus hojas está cerrado;
+los terminales externos retenidos no se declaran `exited`.
 Sus 86 filas (43 P1, 28 P2, 15 NIT) mezclan faltantes, contratos y problemas;
 no son 86 bugs ejecutados. Doce detalles interiores siguen explícitamente sin
 leer/ejecutar. Un `defer` del auditor no autoriza retirar una feature.
@@ -138,7 +141,9 @@ Dos fallos de navegación sí están reproducidos mediante CDP real:
 2. `UX-NAV-RESTORE-WORKSPACE`: seleccionar la segunda carpeta y recargar vuelve
    a la primera; la selección no se persiste. Las sesiones sí sobreviven.
 
-Dueño V2. [Revisión independiente y reproducción](/tmp/drogon-ux-parity-audit-252de85c2fd2/workers/navigation-review.md).
+Dueño V2. La matriz durable conserva los contratos y la reproducción;
+la [revisión detallada original, local-only y no archivada](/tmp/drogon-ux-parity-audit-252de85c2fd2/workers/navigation-review.md)
+es evidencia complementaria, no un archivo portable del paquete.
 El run `desktop-1788767241615-bd578f1a-4f4a-4650-b1a2-3d58a534db32` conservó
 14 checks positivos, falló estas dos expectativas y cerró sus procesos propios.
 Las capturas/driver están bajo `harness/.preflight/acceptance/` y `harness/scripts/`

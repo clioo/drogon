@@ -1,0 +1,498 @@
+{
+  "sourceIndexCount": 50,
+  "note": "50/50 mapped is anti-omission bookkeeping, NOT 100% UX fidelity or state coverage.",
+  "rows": [
+    {
+      "sourceId": "PUI-SIDEBAR-001",
+      "title": "Left sidebar workspace/worktree list + nav buttons",
+      "matrixRows": [
+        "UX-SHELL-NAV-01",
+        "UX-SHELL-WS-03"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SETTINGS-000",
+      "title": "Settings nav taxonomy (35 panes)",
+      "matrixRows": [
+        "UX-SHELL-NAV-02"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SETTINGS-002",
+      "title": "Settings search (per-control keyword index)",
+      "matrixRows": [
+        "UX-SURFACE-17"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SHELL-002",
+      "title": "Session persistence & shutdown checkpoint",
+      "matrixRows": [
+        "UX-RT-D-01",
+        "UX-RT-F-06",
+        "UX-NAV-RESTORE-WORKSPACE",
+        "UX-NAV-ACTIVE-WORKSPACE"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SIDEBAR-002",
+      "title": "Workspace-space (disk usage) manager",
+      "matrixRows": [
+        "UX-SURFACE-21"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-TABS-001",
+      "title": "Tab strip create/close/drag/reorder/split entry menu",
+      "matrixRows": [
+        "UX-RT-D-04",
+        "UX-RT-D-05"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-TERM-001",
+      "title": "Terminal surface / xterm host + liveness contract",
+      "matrixRows": [
+        "UX-RT-D-02",
+        "UX-RT-D-03"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-TERM-002",
+      "title": "Terminal search overlay",
+      "matrixRows": [
+        "UX-SURFACE-22"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-TERM-004",
+      "title": "Floating terminal (detach/resize/orchestration dialog)",
+      "matrixRows": [
+        "UX-SURFACE-23"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-TABS-002",
+      "title": "Split/group layout (drag-to-split, pane focus)",
+      "matrixRows": [
+        "UX-RT-D-05"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-EDITOR-001",
+      "title": "Editor surfaces (source/diff/notebook/image/markdown)",
+      "matrixRows": [
+        "UX-SHELL-J-02"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SC-001",
+      "title": "Source control panel (stage/commit/AI-message/sync)",
+      "matrixRows": [
+        "UX-SHELL-J-03"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SC-002",
+      "title": "Checks panel (CI status + review comments)",
+      "matrixRows": [
+        "UX-SHELL-J-04"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-PR-001",
+      "title": "Pull request page (conversation/checks/files/reviewers)",
+      "matrixRows": [
+        "UX-SURFACE-16"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-BROWSER-001",
+      "title": "Browser pane tab (URL classify/guest-view/trust boundary)",
+      "matrixRows": [
+        "UX-SURFACE-01"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-NATIVECHAT-001",
+      "title": "Native chat portal (per-tab rendering mode)",
+      "matrixRows": [
+        "UX-SURFACE-02"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-DASHBOARD-001",
+      "title": "Agent dashboard popout (live buckets, snapshot cache)",
+      "matrixRows": [
+        "UX-SURFACE-03"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-AIVAULT-001",
+      "title": "AI Vault session panel (right-sidebar tab)",
+      "matrixRows": [
+        "UX-SURFACE-04"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-ACCOUNTS-001",
+      "title": "Branded per-provider account switchers (Claude/Codex/Grok)",
+      "matrixRows": [
+        "UX-SURFACE-05"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SKILLS-001",
+      "title": "Skills page (cloud install/share/agent setup)",
+      "matrixRows": [
+        "UX-SURFACE-SKILLS"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-ARTIFACTS-001",
+      "title": "Artifacts (create-intent + share-record, resumable publish)",
+      "matrixRows": [
+        "UX-SURFACE-ARTIFACTS"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-TASKS-001",
+      "title": "Task page (Jira/Linear/GitHub/GitLab providers)",
+      "matrixRows": [
+        "UX-SURFACE-TASKS"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-AUTOMATIONS-001",
+      "title": "Automations (schedule/trigger, host-fenced dispatch)",
+      "matrixRows": [
+        "UX-AUTO-01",
+        "UX-AUTO-02",
+        "UX-AUTO-03",
+        "UX-NAV-01"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-BOTS-001",
+      "title": "Bots page (creation/preset/responsibility scheduling)",
+      "matrixRows": [
+        "UX-BOTS-01",
+        "UX-BOTS-02",
+        "UX-BOTS-03",
+        "UX-BOTS-04",
+        "UX-BOTS-05",
+        "UX-BOTS-06",
+        "UX-NAV-01"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-MENTU-001",
+      "title": "Mentu panel & recipe workbench",
+      "matrixRows": [
+        "UX-MENTU-01",
+        "UX-MENTU-02",
+        "UX-MENTU-03",
+        "UX-NAV-01"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-MEETINGS-001",
+      "title": "Meetings page",
+      "matrixRows": [
+        "UX-MEET-01",
+        "UX-MEET-02",
+        "UX-MEET-03",
+        "UX-MEET-04",
+        "UX-MEET-05",
+        "UX-NAV-01"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-CONN-003",
+      "title": "Mobile pairing & emulator",
+      "matrixRows": [
+        "UX-SURFACE-15"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-DIAG-001",
+      "title": "Diagnostics bundle (Settings->Privacy)",
+      "matrixRows": [
+        "UX-SHELL-K-03"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-ONBOARD-001",
+      "title": "First-run onboarding flow",
+      "matrixRows": [
+        "UX-SURFACE-06"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-FEATURETIPS-001",
+      "title": "Contextual feature-tip system",
+      "matrixRows": [
+        "UX-SURFACE-07"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-PLUGINCATALOG-001",
+      "title": "Plugin marketplace catalog, install consent, rollback",
+      "matrixRows": [
+        "UX-SURFACE-08"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-NOTIF-001",
+      "title": "Native notification delivery, permission probing, mobile fanout",
+      "matrixRows": [
+        "UX-SURFACE-09"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-WEBMODE-001",
+      "title": "Web-mode preload shim (browser deployment target)",
+      "matrixRows": [
+        "UX-SURFACE-20"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-PETS-001",
+      "title": "Status-bar pet segment, bundle import, agent-state animation",
+      "matrixRows": [
+        "UX-SURFACE-11"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-STATS-001",
+      "title": "Stats settings pane and collector",
+      "matrixRows": [
+        "UX-SURFACE-10"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SPARSE-001",
+      "title": "Sparse-checkout presets",
+      "matrixRows": [
+        "UX-SURFACE-13"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-QUICKCMD-001",
+      "title": "Quick commands (Settings + tab-bar trigger)",
+      "matrixRows": [
+        "UX-SURFACE-12"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-CONN-001",
+      "title": "SSH target management",
+      "matrixRows": [
+        "UX-SHELL-J-05"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-CONN-002",
+      "title": "Remote Orca servers / runtime environments",
+      "matrixRows": [
+        "UX-SHELL-J-06",
+        "UX-SURFACE-14"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-KEYS-001",
+      "title": "Static keybinding catalog",
+      "matrixRows": [
+        "UX-SHELL-K-02",
+        "UX-SURFACE-19"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-FILEEXP-001",
+      "title": "File explorer (right-sidebar tree)",
+      "matrixRows": [
+        "UX-SHELL-J-01"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-PORTS-001",
+      "title": "Local & SSH port forwarding panel + scanner",
+      "matrixRows": [
+        "UX-SURFACE-PORTS"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SHELL-001",
+      "title": "Platform shell chrome",
+      "matrixRows": [
+        "UX-SHELL-VIS-01",
+        "UX-SHELL-VIS-02",
+        "UX-SURFACE-24"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SHELL-003",
+      "title": "Global shortcut dispatcher",
+      "matrixRows": [
+        "UX-SHELL-K-02",
+        "UX-SURFACE-19"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-TERM-003",
+      "title": "Terminal quick-command creation/editor/launch",
+      "matrixRows": [
+        "UX-SURFACE-12"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SETTINGS-001",
+      "title": "Legacy settings pane-range aggregate",
+      "matrixRows": [
+        "UX-SHELL-NAV-02"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-SETTINGS-003",
+      "title": "Settings deep links",
+      "matrixRows": [
+        "UX-SURFACE-18"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-KEYS-002",
+      "title": "Shortcut editor",
+      "matrixRows": [
+        "UX-SURFACE-19"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-DROGON-001",
+      "title": "Drogon placeholder identity vs implemented pages",
+      "matrixRows": [
+        "UX-NAV-01",
+        "UX-SURFACE-25"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Mapping coverage only, not screen/state test acceptance."
+    },
+    {
+      "sourceId": "PUI-CONN-004",
+      "title": "Windows/WSL settings and CLI registration",
+      "matrixRows": [
+        "UX-PLATFORM-WINDOWS"
+      ],
+      "status": "mapped-with-qualified-evidence",
+      "note": "Windows runtime explicitly missing; WSL source/real-host execution remains an explicit platform gate."
+    }
+  ],
+  "dimensions": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "status": "VERIFIED_BYTE_IDENTICAL_RETENTION",
+  "at": "2026-09-07T07:47:05.604Z",
+  "originalLocation": "/Users/carlos/orca/workspaces/Drogon-rewrite/codex-packaged-artifact-identity/dist/dc12c7ab4c8a-1788753097411/Drogon-darwin-arm64/Drogon.app",
+  "originalLocationNow": "unavailable before attempted next audit launch; no process started",
+  "verifiedArchive": "/Users/carlos/Applications/.drogon-builds/dc12c7ab4c8a-v3-320ab38c3e0fc4371532e0e59c82b3fa22dcc618c07332c942819eccdd59a7f9/Drogon.app",
+  "retainedBundle": "/tmp/drogon-ux-parity-audit-252de85c2fd2/retained-bundle/Drogon.app",
+  "artifactRevision": "dc12c7ab4c8a5b82802da5f54dcc17824f9eb90f",
+  "before": {
+    "sealedVersion": 3,
+    "sealedDigest": "320ab38c3e0fc4371532e0e59c82b3fa22dcc618c07332c942819eccdd59a7f9",
+    "fileCount": 293,
+    "totalBytes": 307543311
+  },
+  "retained": {
+    "sealedVersion": 3,
+    "sealedDigest": "320ab38c3e0fc4371532e0e59c82b3fa22dcc618c07332c942819eccdd59a7f9",
+    "fileCount": 293,
+    "totalBytes": 307543311
+  },
+  "scope": "Read and copied existing archived package only, not an installation or preview replacement. Same source revision and exact sealed identity; no user profile or running user session touched."
+}
