@@ -64,6 +64,47 @@ fn worker_dispatch_answers_status_without_entering_the_admin_dispatcher() {
 }
 
 #[test]
+fn active_worker_cannot_create_bots_or_replay_an_admin_creation() {
+    let (dir, engine, host_id) = open_engine_with_worker(WORKER_SECRET);
+    let folder = dir.path().join("folder");
+    std::fs::create_dir(&folder).unwrap();
+    let mut register = req("workspace.register", Some(SERVICE_CREDENTIAL));
+    register.params = json!({"path": folder});
+    let workspace = engine.dispatch_authenticated(register, SERVICE_CREDENTIAL);
+    assert!(workspace.ok, "{workspace:?}");
+    let mut create = req("bot.create", Some(SERVICE_CREDENTIAL));
+    create.request_id = "admin-created-bot".into();
+    create.params = json!({
+        "workspaceId": workspace.result.unwrap()["id"], "hostId": host_id,
+        "body": {
+            "characterPreset":"none",
+            "displayIdentity":{"displayName":"Watcher","handle":null,"title":null},
+            "harnessPolicy":{"defaultHarness":"codex","explicitModel":null},
+            "instructions":"Review", "memories":[]
+        }
+    });
+    let first = engine.dispatch_authenticated(create.clone(), SERVICE_CREDENTIAL);
+    assert!(first.ok, "{first:?}");
+    assert!(
+        engine
+            .dispatch_authenticated(req("status", Some(WORKER_SECRET)), SERVICE_CREDENTIAL)
+            .ok
+    );
+    create.auth = Some(WORKER_SECRET.into());
+    for id in ["admin-created-bot", "worker-fresh-create"] {
+        create.request_id = id.into();
+        let denied = engine.dispatch_authenticated(create.clone(), SERVICE_CREDENTIAL);
+        assert!(!denied.ok, "{denied:?}");
+        assert_eq!(denied.error.unwrap().code, "unauthorized");
+    }
+    let counts: (i64, i64) = engine.db.lock().unwrap().query_row(
+        "SELECT (SELECT COUNT(*) FROM bots), (SELECT COUNT(*) FROM requests WHERE method='bot.create')",
+        [], |row| Ok((row.get(0)?,row.get(1)?))
+    ).unwrap();
+    assert_eq!(counts, (1, 1));
+}
+
+#[test]
 fn replaced_binding_after_authorization_cannot_inherit_a_stale_credential() {
     for changed_field in [
         "host_id",

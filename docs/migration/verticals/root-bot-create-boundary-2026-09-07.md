@@ -36,3 +36,26 @@ scoped persistence, exact replay after restart, changed-parameter conflict,
 authentication and workspace authorization before replay, atomic receipt
 failure rollback, and concurrent same-request admission. No process or model
 is launched by this suite. It is not a claim that those behaviors pass.
+
+## Public Engine integration — 15:18 UTC
+
+ROOT adapted the stable V4 B6 domain implementation from `0c12abe` into
+`bot_mutation_rpc.rs`, registered `bot.create`, and reused canonical
+`RequestLedger::run_atomic` and `workspace::owned_path`. The lifecycle gate
+fences shutdown; scope authorization runs before receipt lookup on every call.
+Worker credentials remain denied by the existing authenticated dispatcher.
+No `bots.v1` capability or desktop control is activated here.
+
+The suite was extended to 11 executable RED cases before registration; all
+11 now pass against the public Engine and real SQLite. The added checks cover
+invalid explicit IDs, strict/born-empty input, missing/foreign workspaces,
+shutdown admission and milliseconds matching the source `createBot` clock
+(`src/main/persistence/loading-store/bot-persistence.ts:56`, pinned source).
+An additional real registered-worker test proves both fresh creation and
+replay of an administrator's creation are denied without a second record.
+
+ROOT final checks: full `cargo test --workspace --locked --offline --quiet`
+exits zero (one pre-existing ignored test is not acceptance); `cargo clippy
+--workspace --all-targets --locked --offline -- -D warnings` and `cargo fmt
+--all -- --check` exit zero. No model invocation. These are native integration
+results, not rendered, packaged, Windows or whole-product parity evidence.

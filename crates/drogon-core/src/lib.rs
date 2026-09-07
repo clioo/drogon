@@ -4,6 +4,7 @@
 //! auth and the transport; this crate never sees a raw socket.
 
 pub mod automations;
+mod bot_mutation_rpc;
 mod bot_snapshot_rpc;
 pub mod bots;
 pub mod claim_identity;
@@ -79,6 +80,15 @@ pub(crate) fn now_rfc3339() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     humantime_rfc3339(dur.as_secs(), dur.subsec_nanos())
+}
+
+pub(crate) fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 /// Minimal UTC RFC3339 formatter so this crate does not need a chrono/time
@@ -311,6 +321,7 @@ impl Engine {
             "runtime.shutdown" => self.do_runtime_shutdown(request),
             "harness.list" => Ok(self.harness_list()),
             "bot.snapshot" => self.bot_snapshot(&request.params),
+            "bot.create" => self.bot_create(request),
             "files.list" => self.do_files_list(&request.params),
             "files.read" => self.do_files_read(&request.params),
             "files.write" => self.mutating(request, Self::do_files_write),
