@@ -277,6 +277,7 @@ dependencies = [
  "hmac",
  "icu_collator",
  "icu_locale",
+ "libc",
  "portable-pty",
  "rusqlite",
  "serde",
