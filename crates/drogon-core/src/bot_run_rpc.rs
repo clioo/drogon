@@ -69,24 +69,71 @@
 //! flagged for ROOT approval). A human-readable `error` string is kept
 //! alongside, never instead.
 //!
-//! ## Registration status and the ROOT adapter (report-only, not applied)
+//! ## Registration status and the ROOT adapter (applied)
 //!
-//! This module is not yet registered in `lib.rs` (ROOT owns registration).
-//! The intended wiring composes the stages above through
-//! `RequestLedger::run_staged`'s `authorize`/`prepare`/`effect`/`finalize`
-//! callbacks; see the A6d delivery report for the exact adapter hunk this
-//! module is not authorized to apply itself.
+//! This module is registered in `lib.rs` (`pub mod bot_run_rpc;`) and
+//! `dispatch_inner` routes `"bot.run"` to [`crate::Engine::bot_run`] below,
+//! immediately after the `bot.create` arm. `dispatch_worker` is untouched:
+//! `bot.run` is desktop-only, so a worker credential is denied by
+//! `coordination_access::authorize_worker`'s allowlist before a worker
+//! request ever reaches a dispatcher match arm at all (see
+//! [`authorize_caller`]'s doc for the defensive-only in-crate check that
+//! backs this up).
+//!
+//! `Engine::bot_run` composes the stages above onto `RequestLedger::run_staged`:
+//! `authorize` re-checks quiescence (fail-closed on `runtime_busy`) then
+//! [`revalidate_run_scope`] on every admission attempt, replay included;
+//! `prepare` samples one fresh `attempt_at` and calls [`authorized_prepare`]
+//! (fresh-only); `effect` calls [`execute`] for a `Ready` plan (or renders a
+//! `Refused`/`Unsupported` receipt directly, with no dispatch at all); and
+//! `finalize` calls [`record`] inside `run_staged`'s own finalize
+//! transaction, so the run rows and the receipt row commit atomically.
+//!
+//! ### Lifecycle admission: no outer `lifecycle_gate` guard on `bot.run`
+//!
+//! Unlike `bot_create`/`Engine::mutating`, `Engine::bot_run` takes **no**
+//! `self.lifecycle_gate.read()` guard of its own. Its `effect` phase
+//! re-enters `Engine::dispatch` via [`runner::EngineDispatchSeam`]
+//! (`harness.start` -> `Engine::mutating`, which itself takes the gate's
+//! *read* side; `session.read` takes no gate at all). `RwLock::read` is not
+//! reentrant in the general case: a thread that already holds the read side
+//! and tries to take it again can deadlock against a writer that arrived in
+//! between (many `RwLock` implementations, including the one backing this
+//! crate's, do not guarantee recursive-read correctness once a writer is
+//! queued). Holding an outer read guard across that nested `dispatch` call
+//! would be exactly that hazard, so this module never does.
+//!
+//! Fencing instead happens the same way `run_staged`'s other admission
+//! sites do it: `authorize` checks `self.quiescent` (fail-closed,
+//! `runtime_busy`) and then [`revalidate_run_scope`], matching the
+//! authorize-before-lookup ordering `run_staged` already enforces before any
+//! stored-row inspection. The nested `harness.start`/`session.read` calls
+//! carry their own independent `mutating()`/read-path gating, so admission
+//! is still fenced end-to-end -- just never via a single guard held across
+//! the re-entrant call.
+//!
+//! A freeze racing the effect phase resolves fail-closed: if
+//! `runtime.shutdown` durably freezes between this call's own admission
+//! commit and its `effect` running, the nested `harness.start` dispatch hits
+//! `Engine::mutating`'s own quiescence check and is refused `runtime_busy`
+//! -- so [`execute`] observes a real [`RunnerOutcome::DispatchFailed`], never
+//! a live session invented from nothing. `finalize` still runs and commits
+//! `requests` from `pending` to `done` atomically with the recorded
+//! `DispatchFailed` run rows, for the exact in-flight key, exactly once.
+
+use std::cell::Cell;
+use std::sync::atomic::Ordering;
 
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use drogon_core::automations::execution::{DispatchRefusal, InvocationReason};
-use drogon_core::automations::runner::{
-    self, DispatchSeam, HarnessLaunchParams, PrepareOutcome, RunPlan, RunRefusal, RunUnsupported,
-    RunnerOutcome,
+use crate::automations::execution::{DispatchRefusal, InvocationReason};
+use crate::automations::runner::{
+    self, DispatchSeam, EngineDispatchSeam, HarnessLaunchParams, PrepareOutcome, RunPlan,
+    RunRefusal, RunUnsupported, RunnerOutcome,
 };
-use drogon_core::bots::policy::ResponsibilityRefusal;
+use crate::bots::policy::ResponsibilityRefusal;
 use drogon_protocol::RpcError;
 
 /// Who is calling. ROOT's wiring maps the private auth layer's
@@ -662,4 +709,144 @@ pub fn record(
 ) -> Result<(), RpcError> {
     runner::record_run_outcome_in_tx(conn, plan, outcome, observed_at)
         .map_err(|e| internal_error(format!("failed to record bot run: {e}")))
+}
+
+/// The applied ROOT adapter: composes the staged primitives above onto
+/// `RequestLedger::run_staged`. See this module's doc for why no outer
+/// `lifecycle_gate` guard is taken here, unlike `bot_create`.
+impl crate::Engine {
+    pub(crate) fn bot_run(&self, request: &drogon_protocol::Request) -> Result<Value, RpcError> {
+        let parsed = parse_bot_run_request(&request.params)?;
+        let derived_host_id = self.host_id.clone();
+        let request_id = request.request_id.clone();
+        let method = request.method.clone();
+        let params = request.params.clone();
+        let seam = EngineDispatchSeam::new(self);
+        let outcome_slot: Cell<Option<(RunPlan, RunnerOutcome, f64)>> = Cell::new(None);
+        self.ledger.run_staged(
+            &self.db,
+            &request_id,
+            &method,
+            &params,
+            |tx| {
+                if self.quiescent.load(Ordering::Acquire) {
+                    return Err(crate::error::runtime_busy(
+                        "service admission is frozen for shutdown",
+                    ));
+                }
+                revalidate_run_scope(tx, &derived_host_id, &parsed)
+            },
+            |tx| {
+                // Single clock sample at fresh admission; travels as part of
+                // the prepared tuple so `effect` never needs its own admission
+                // clock.
+                let attempt_at = crate::now_unix_ms() as f64;
+                Ok((attempt_at, authorized_prepare(tx, &derived_host_id, &parsed, attempt_at)?))
+            },
+            |(attempt_at, prepared)| match prepared {
+                BotRunPrepare::Refused {
+                    workspace_id,
+                    refusal,
+                    error,
+                } => Ok(build_receipt(
+                    &request_id,
+                    &derived_host_id,
+                    &workspace_id,
+                    "refused",
+                    refusal,
+                    Value::Null,
+                    None,
+                    None,
+                    None,
+                    Value::String(error),
+                    None,
+                    attempt_at,
+                )),
+                BotRunPrepare::Unsupported {
+                    workspace_id,
+                    reason,
+                    error,
+                } => Ok(build_receipt(
+                    &request_id,
+                    &derived_host_id,
+                    &workspace_id,
+                    "unsupported",
+                    Value::Null,
+                    reason,
+                    None,
+                    None,
+                    None,
+                    Value::String(error),
+                    None,
+                    attempt_at,
+                )),
+                BotRunPrepare::Ready { plan, workspace_id } => {
+                    let outcome = execute(&plan, &seam);
+                    // Strictly after `execute` returns: the actual
+                    // `session.read` wall time, never the admission sample.
+                    let observed_at = crate::now_unix_ms() as f64;
+                    let receipt = match &outcome {
+                        RunnerOutcome::Observed {
+                            session_id,
+                            incarnation,
+                            ..
+                        } => build_receipt(
+                            &request_id,
+                            &derived_host_id,
+                            &workspace_id,
+                            "dispatched",
+                            Value::Null,
+                            Value::Null,
+                            Some(json!({"sessionId": session_id, "incarnation": incarnation})),
+                            Some(format!("ar:{}", plan.request_id)),
+                            Some(plan.request_id.clone()),
+                            Value::Null,
+                            Some(observed_at),
+                            attempt_at,
+                        ),
+                        RunnerOutcome::ObservationFailed {
+                            session_id,
+                            incarnation,
+                            error,
+                        } => build_receipt(
+                            &request_id,
+                            &derived_host_id,
+                            &workspace_id,
+                            "dispatched",
+                            Value::Null,
+                            Value::Null,
+                            Some(json!({"sessionId": session_id, "incarnation": incarnation})),
+                            Some(format!("ar:{}", plan.request_id)),
+                            Some(plan.request_id.clone()),
+                            Value::String(error.to_string()),
+                            Some(observed_at),
+                            attempt_at,
+                        ),
+                        RunnerOutcome::DispatchFailed(error) => build_receipt(
+                            &request_id,
+                            &derived_host_id,
+                            &workspace_id,
+                            "refused",
+                            Value::Null,
+                            Value::Null,
+                            None,
+                            Some(format!("ar:{}", plan.request_id)),
+                            Some(plan.request_id.clone()),
+                            Value::String(error.to_string()),
+                            None,
+                            attempt_at,
+                        ),
+                    };
+                    outcome_slot.set(Some((plan, outcome, observed_at)));
+                    Ok(receipt)
+                }
+            },
+            |tx, _result| {
+                if let Some((plan, outcome, observed_at)) = outcome_slot.take() {
+                    record(tx, &plan, &outcome, observed_at)?;
+                }
+                Ok(())
+            },
+        )
+    }
 }

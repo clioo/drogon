@@ -5,6 +5,7 @@
 
 pub mod automations;
 mod bot_mutation_rpc;
+pub mod bot_run_rpc;
 mod bot_snapshot_rpc;
 pub mod bots;
 pub mod claim_identity;
@@ -322,6 +323,7 @@ impl Engine {
             "harness.list" => Ok(self.harness_list()),
             "bot.snapshot" => self.bot_snapshot(&request.params),
             "bot.create" => self.bot_create(request),
+            "bot.run" => self.bot_run(request),
             "files.list" => self.do_files_list(&request.params),
             "files.read" => self.do_files_read(&request.params),
             "files.write" => self.mutating(request, Self::do_files_write),
