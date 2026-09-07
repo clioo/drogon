@@ -66,7 +66,7 @@ se despachan después. Nada de líderes intermedios ni hojas de hojas.
 
 ## 4. Reglas de orquestación
 
-1. Profundidad 1: un coordinador y como máximo seis workers activos (Carlos, 2026-09-08), con rutas disjuntas.
+1. Profundidad 1: un coordinador y hasta diez workers activos con rutas disjuntas (Carlos, 2026-09-08): Sonnet 5 para lo difícil, Pi + Muse Spark 1.3 Contributor para volumen, y dos slots cada uno para Pi + GLM 5.3 Flash (`--provider zai`) y OpenCode + Muse (`-m opencode/muse-spark-1.3-contributor-free`).
 2. Una tarea es un journey con rutas propias, oráculo y evidencia exigida.
 3. Aceptación por evidencia: tests que fallan antes y pasan después, más
    captura CDP del paquete o del dev real. Un módulo exportado sin consumidor
@@ -133,3 +133,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J3 R7-C: shim `drogon-cli` en cada terminal, DROGON_* en el entorno de sesión | R7 | Muse | lanzada | |
 | J8 R7-E: responsabilidades de Bots (tarjetas, alta con cron, historial, Back) | R7 | Muse | lanzada | |
 | J5/J10 R7-I: tabla de atajos del fuente, dispatcher por scope, sección de shortcuts en Settings | R7 | Muse | lanzada | |
+| J6 R8-G1: Tasks con frame, source bar, filas GitHub, filtros y paginación del fuente; paging en tasks.list | R8 | GLM 5.3 Flash | lanzada | |
+| Fidelidad R8-G2: tokens `:root`/`.dark`, capa base y fuentes Geist + Nerd Symbols del fuente | R8 | GLM 5.3 Flash | lanzada | |
+| J7 R8-O1: Automations con lista, editor, detalle e historial del fuente; horarios en hora local | R8 | OpenCode + Muse | lanzada | |
+| J1 R8-O2: terminal con terminal.css, tema xterm por esquema, zoom, búsqueda, links, menú contextual y overlay de salida | R8 | OpenCode + Muse | lanzada | |
