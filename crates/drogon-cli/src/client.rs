@@ -172,7 +172,8 @@ pub struct CallOk {
 }
 
 impl Client {
-    /// Resolves the endpoint and reads the auth token. A missing runtime is
+    /// Resolves the endpoint and the wire credential: the dispatch
+    /// capability when present, else the service token. A missing runtime is
     /// `unverifiable` (exit 1); this never starts a service. The request id
     /// minted by the caller (explicit `--request-id` or a fresh UUID) is
     /// attached to any failure so ambiguous mutations stay replayable.
@@ -186,10 +187,7 @@ impl Client {
                 request_id: request_id.to_string(),
             });
         }
-        let auth_token = paths::read_auth_token(data_dir).map_err(|error| CliError::Local {
-            error,
-            request_id: request_id.to_string(),
-        })?;
+        let auth_token = crate::credential::resolve(data_dir, request_id)?;
         Ok(Client {
             endpoint: paths::endpoint_for(data_dir),
             auth_token,

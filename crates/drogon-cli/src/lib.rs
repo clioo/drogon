@@ -11,6 +11,7 @@
 pub mod cli;
 pub mod client;
 pub mod commands;
+pub mod credential;
 pub mod error;
 pub mod output;
 pub mod paths;
