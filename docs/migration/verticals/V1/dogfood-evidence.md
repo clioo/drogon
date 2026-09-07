@@ -344,3 +344,81 @@ free — but this is expected and bounded, not a privacy or credential leak.
 No rollback needed; nothing committed, pushed, or installed.
 
 Ready for independent review: yes.
+
+---
+
+## Checkpoint 3 (task_ad7c01bbd957): dogfood review corrections — hardening the real-model leg
+
+Scope: `crates/drogon-cli/tests/native_dogfood.rs` only (+ this section).
+One change per ROOT review; the frozen fixture leg is untouched.
+
+### Correction verdicts
+
+1. **Exact-value opt-in gate + negative tests — DONE.**
+   `real_model_opted_in()` now requires `DROGON_DOGFOOD_REAL_MODEL` to be
+   the exact string `1` (`matches!(std::env::var(...).as_deref(), Ok("1"))`).
+   New test `real_model_leg_skips_without_spending_unless_opt_in_is_exactly_one`
+   re-executes the real test binary as a subprocess four times — unset, `0`,
+   empty, and a non-`1` word — asserting each: exit 0, printed skip note,
+   and a fast return (<30s bound proves no 300s build, no daemon, no session,
+   no spend). Subprocesses keep the parent's env free of process-global
+   mutation; the default suite run therefore spends nothing.
+2. **Strict envelope parsing instead of `contains(MARKER)` — DONE.**
+   The decoded PTY bytes must be exactly one `claude --print --output-format
+   json` envelope, tolerating only trailing whitespace plus the single PTY
+   cursor-show escape (`ESC[?25h`); anything else fails loudly with the raw
+   bytes. Asserted: `is_error == false`, `result` EXACTLY
+   `"DROGON-REAL-MODEL-OK"` (no contains), and daemon-observed `exitCode`
+   `0` before parsing.
+3. **Session tracked, closed, and end-observed before shutdown — DONE.**
+   The session/incarnation are tracked from creation in a `SessionGuard`
+   whose `Drop` performs a best-effort non-panicking `terminal close` during
+   any unwind (assertion failure or timeout), while the daemon is still
+   alive; the happy path calls an explicit close and asserts the daemon
+   observes `verdict: "exited"` BEFORE `Daemon` shutdown — a leaked live PTY
+   session is impossible on every path.
+4. **`build_drogond` drains cargo stdio concurrently — DONE.** Both pipes
+   are drained by reader threads from spawn; the timeout loop polls only the
+   child status. Compiler output can no longer fill a pipe buffer and fake
+   the 300s build timeout.
+
+### Commands run and outcomes
+
+- `cargo test -p drogon-cli --test native_dogfood --locked` (default):
+  **3 passed / 0 failed** — fixture leg green, real-model leg skipped with
+  note, negative gate test green. No spend.
+- `cargo fmt -p drogon-cli -- --check`: clean.
+- `cargo clippy -p drogon-cli --test native_dogfood --locked -- -D warnings`:
+  clean.
+- `DROGON_DOGFOOD_REAL_MODEL=1 cargo test -p drogon-cli --test
+  native_dogfood --locked real_model_probe_reaches_a_daemon_spawned_session
+  -- --nocapture`: **GREEN, run twice** (see spend disclosure): second run
+  `test result: ok. 1 passed`, whole test 6.22s.
+
+### Evidence (second, fully captured run)
+
+- daemon session_id: `d32ae189-15f3-4d74-a370-87a8a70a6f23`
+- incarnation: `766df9eb-e048-41ed-ac02-069ee1ea61e4`
+- daemon-observed exit code: `0`; close-observed verdict: `exited`
+- wall latency (session create -> observed exited verdict): 5.289s
+- claude envelope: `type: result`, `subtype: success`, `is_error: false`,
+  `result: "DROGON-REAL-MODEL-OK"` (exact), `duration_ms: 1964`,
+  `total_cost_usd: 0.0203`, claude-side `session_id`
+  `97321838-976a-4dc3-aa2e-e0fc3c9c3044`
+- full log retained at
+  `/var/folders/8g/w9x4n8ws4mx6vxjhmnrnwy640000gn/T/opencode/dogfood-evidence-run.log`
+
+### Spend disclosure (honest deviation noted)
+
+Two opted-in invocations occurred, not one. The first run was GREEN
+(6.52s) and the strict parsing passed on the first try, but the coordinator
+evidence block was truncated by the operator's own `tail` capture and the
+ephemeral data dir was already removed, so its session id/latency were
+unrecoverable. A second, fully captured run was performed rather than
+reporting incomplete evidence. Total real spend: two trivial completions
+(~2s API each; second one metered at $0.0203, first similar — dominated by
+cache reads). All default/negative runs spent nothing.
+
+What remains: nothing for this checkpoint; both corrections' gates are
+green (`cargo test -p drogon-cli --locked` full-suite result recorded
+below in the final gate run).
