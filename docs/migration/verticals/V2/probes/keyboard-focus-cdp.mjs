@@ -57,38 +57,118 @@ async function stopOwned(child, label) {
   if (result.forced || result.verdict !== "exited") report.status = "FAILED";
   return result;
 }
-// Stops every session the probe created via the exact host+id+incarnation
-// identity and requires observed exited + empty list before the daemon
-// goes down. Any deviation fails the report: leaked shells must never
-// hide behind a PASSED functional section.
-async function cleanupSessions(page, workspaceId) {
-  if (!page || !workspaceId) return;
-  const listed = await page.evaluate(async (id) => {
-    const response = await window.drogon.sessions(id);
+// Redundant control channels: the renderer bridge first, the existing CLI
+// against the same data dir when the page is dead. Final invariant demands
+// every retained session verdict===exited (unverifiable is not death).
+import { execFile } from "node:child_process";
+
+const cliBin = path.join(
+  ROOT,
+  "target",
+  "debug",
+  process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
+);
+
+function cliJson(args) {
+  return new Promise((resolve, reject) => {
+    execFile(cliBin, ["--data-dir", dataDir, "--json", ...args], (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(`cli ${args.slice(0, 2).join(" ")} failed: ${stderr || error.message}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (cause) {
+        reject(new Error(`cli ${args.slice(0, 2).join(" ")} bad JSON: ${cause.message}`));
+      }
+    });
+  });
+}
+
+function checked(envelope, what) {
+  if (!envelope || envelope.ok !== true)
+    throw new Error(`${what} not ok: ${JSON.stringify(envelope?.error ?? envelope)}`);
+  return envelope.result;
+}
+
+async function pageUsable() {
+  if (!page) return false;
+  try {
+    await page.evaluate(() => true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function listSessions(workspaceId) {
+  if (await pageUsable()) {
+    const response = await page.evaluate(async (id) => window.drogon.sessions(id), workspaceId);
     if (!response.ok) throw new Error(response.error.message);
-    return response.result.sessions;
-  }, workspaceId);
-  for (const session of listed) {
-    const stopped = await page.evaluate(
+    return { channel: "page", sessions: response.result.sessions };
+  }
+  const result = checked(await cliJson(["terminal", "list", "--workspace", workspaceId]), "cli terminal list");
+  return { channel: "cli", sessions: result.sessions };
+}
+
+async function stopSession(session) {
+  if (await pageUsable()) {
+    const response = await page.evaluate(
       async (target) => window.drogon.stop({ sessionId: target.id, incarnation: target.incarnation }),
       { id: session.id, incarnation: session.incarnation },
     );
-    if (!stopped.ok) throw new Error(stopped.error.message);
-    assert.equal(stopped.result.verdict, "exited", `session ${session.id} must exit on exact stop`);
-    assert.equal(stopped.result.id, session.id);
-    assert.equal(stopped.result.incarnation, session.incarnation);
+    if (!response.ok) throw new Error(response.error.message);
+    return response.result;
+  }
+  return checked(
+    await cliJson(["terminal", "close", "--session", session.id, "--incarnation", session.incarnation]),
+    `cli terminal close ${session.id}`,
+  );
+}
+
+async function cleanupSessions(workspaceId) {
+  if (!workspaceId) return;
+  const first = await listSessions(workspaceId);
+  report.checks.push(`session-cleanup-list-via-${first.channel}(${first.sessions.length})`);
+  for (const session of first.sessions) {
+    if (session.verdict === "exited") continue;
+    const stopped = await stopSession(session);
+    assert.equal(stopped.verdict, "exited", `session ${session.id} must exit on exact stop`);
+    assert.equal(stopped.id, session.id);
+    assert.equal(stopped.incarnation, session.incarnation);
     report.checks.push(`session-cleanup-exited:${session.id}`);
   }
-  const remaining = await page.evaluate(async (id) => {
-    const response = await window.drogon.sessions(id);
+  const last = await listSessions(workspaceId);
+  const counts = {};
+  for (const session of last.sessions) counts[session.verdict] = (counts[session.verdict] ?? 0) + 1;
+  const nonExited = last.sessions.filter((session) => session.verdict !== "exited");
+  assert.equal(nonExited.length, 0, `all retained sessions must be exited, got ${JSON.stringify(counts)}`);
+  report.checks.push(`session-cleanup-all-exited(${JSON.stringify(counts)})`);
+}
+
+async function runtimeFence() {
+  let status;
+  if (await pageUsable()) {
+    const response = await page.evaluate(async () => window.drogon.status());
     if (!response.ok) throw new Error(response.error.message);
-    return response.result.sessions;
-  }, workspaceId);
-  // The Engine retains exited sessions as history: the leak invariant is
-  // that no LIVE session survives cleanup, not that the list is empty.
-  const live = remaining.filter((item) => item.verdict === "live");
-  assert.equal(live.length, 0, "no live probe session may survive cleanup");
-  report.checks.push(`session-cleanup-no-live(${remaining.length}-exited-retained)`);
+    status = response.result;
+  } else {
+    status = checked(await cliJson(["status"]), "cli status");
+  }
+  const hostId = status.hostId ?? status.host_id;
+  const serviceInstanceId = status.serviceInstanceId ?? status.service_instance_id;
+  const capabilities = status.capabilities ?? [];
+  assert.ok(hostId && serviceInstanceId, "status must carry host/service identity");
+  if (!capabilities.includes("runtime.quiescent-shutdown.v1")) {
+    report.checks.push("runtime-fence: capability not advertised, process stop only");
+    return;
+  }
+  const admitted = checked(
+    await cliJson(["rpc", "runtime.shutdown", "--params", JSON.stringify({ hostId, serviceInstanceId })]),
+    "runtime.shutdown",
+  );
+  assert.equal(admitted.accepted, true, "shutdown must be admitted");
+  report.checks.push("runtime-fence: shutdown admitted, observing kernel exit");
 }
 try {
   daemon = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], { stdio: "ignore" });
@@ -216,9 +296,10 @@ try {
   report.status = "PASSED";
 } finally {
   try {
-    await cleanupSessions(page, probeWorkspaceId);
+    await cleanupSessions(probeWorkspaceId);
+    await runtimeFence();
   } catch (error) {
-    report.checks.push(`session-cleanup: FAILED (${error.message})`);
+    report.checks.push(`cleanup: FAILED (${error.message})`);
     report.status = "FAILED";
   }
   if (browser) await browser.close().catch(() => {});
