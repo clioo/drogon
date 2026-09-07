@@ -8,6 +8,9 @@ His subsequent reasoning requirement is **max**, explicitly launched with
 Installed `pi --help` confirms `max` is a supported CLI value; the actual
 provider's effective level still requires verification during smoke/startup.
 Do not silently clamp or downgrade it.
+The installed `pi-muse-bridge` 0.3.0 explicitly maps Pi `max` to Muse
+`--reasoning-effort ultra`; this is the adapter's maximum-level mapping, not a
+provider/model substitution. Check both sides in the launch evidence.
 The repeated five-leader instruction governs the one later reference to three.
 Coding leaves may use Sonnet 5, GLM-5.3-Flash and Muse Spark 1.3, with load
 distributed by each leader. This supersedes all Sonnet-as-leader language below,

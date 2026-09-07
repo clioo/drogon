@@ -34,8 +34,17 @@ impl Drop for TestServer {
 }
 
 fn start_server() -> TestServer {
+    start_server_with_sibling_cli(false)
+}
+
+fn start_server_with_sibling_cli(with_cli: bool) -> TestServer {
     let dir = tempfile::tempdir().unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_drogond"))
+    let binary = dir.path().join("drogond");
+    std::fs::copy(env!("CARGO_BIN_EXE_drogond"), &binary).unwrap();
+    if with_cli {
+        std::fs::copy("/bin/echo", dir.path().join("drogon-cli")).unwrap();
+    }
+    let child = Command::new(binary)
         .env_clear()
         .arg("--data-dir")
         .arg(dir.path())
@@ -64,6 +73,52 @@ fn start_server() -> TestServer {
         }
         assert!(Instant::now() < deadline, "daemon startup deadline");
         std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn compiled_daemon_configures_its_sibling_worker_cli_without_path_lookup() {
+    for with_cli in [false, true] {
+        let server = start_server_with_sibling_cli(with_cli);
+        let host = host_id_via_admin(&server);
+        let run = call(
+            &server,
+            req(
+                "orchestration.runCreate",
+                "create",
+                Some(&server.token),
+                json!({"contractVersion":1,"hostId":host,"coordinatorId":"owner","objective":"host CLI configuration"}),
+            ),
+        );
+        assert!(run.ok, "{:?}", run.error);
+        let run = run.result.unwrap()["run"]["runId"].clone();
+        let response = call(
+            &server,
+            req(
+                "orchestration.workerStart",
+                "start",
+                Some(&server.token),
+                json!({"contractVersion":1,"hostId":host,"runId":run,"coordinatorId":"owner",
+            "consumerGeneration":1,"taskId":"missing-task","workspaceId":"missing-folder",
+            "mode":"fresh","launch":{"harnessId":"pi"}}),
+            ),
+        );
+        assert!(!response.ok);
+        assert_eq!(
+            response.error.unwrap().code,
+            if with_cli {
+                "task_not_found"
+            } else {
+                "unsupported_feature"
+            },
+            "host CLI configuration must precede the missing task check"
+        );
+        assert_eq!(
+            fixture_db(server.dir.path())
+                .query_row("SELECT count(*) FROM sessions", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 }
 
