@@ -15,6 +15,7 @@ import type { PanelProps } from "./route-panel-contract";
 import {
   FILES_ROUTE_ID,
   adaptFactoryDescriptor,
+  createGatedFileBridge,
   isFilesAvailable,
   registerFactoryRoute,
   registerFilesRoute,
@@ -169,5 +170,56 @@ describe("factory boundary (plain V3 shape in, validated contract out)", () => {
       bridge,
     );
     expect(resolveRoute(registry, "files.explorer").title).toBe("Files");
+  });
+});
+
+describe("gated bridge (explicit withhold fails closed, drafts stay mounted)", () => {
+  const scope = { hostId: "local", workspaceId: "w1", path: "/" };
+  const calls: string[] = [];
+  const source = {
+    fileList: async () => {
+      calls.push("list");
+      return { ok: true as const, result: { ...scope, entries: [], truncated: false } };
+    },
+    fileRead: async () => {
+      calls.push("read");
+      return { ok: true as const, result: { ...scope, content: "", size: 0, mtime: "" } };
+    },
+    fileWrite: async () => {
+      calls.push("write");
+      return { ok: true as const, result: { ...scope, size: 0, mtime: "" } };
+    },
+  };
+  it("passes calls through while allowed", async () => {
+    const gated = createGatedFileBridge(source, () => true);
+    const listed = await gated.fileList(scope);
+    expect(listed.ok).toBe(true);
+    expect(calls).toEqual(["list"]);
+  });
+  it("refuses all three calls locally once withheld, never touching source", async () => {
+    calls.length = 0;
+    const gated = createGatedFileBridge(source, () => false);
+    for (const response of [
+      await gated.fileList(scope),
+      await gated.fileRead(scope),
+      await gated.fileWrite({ ...scope, content: "x", requestId: "r1" }),
+    ]) {
+      expect(response.ok).toBe(false);
+      if (!response.ok) {
+        expect(response.error.code).toBe("unsupported_capability");
+        expect(response.error.retryable).toBe(true);
+      }
+    }
+    expect(calls).toEqual([]);
+  });
+  it("mid-life availability loss fails closed on the next call", async () => {
+    calls.length = 0;
+    let allowed = true;
+    const gated = createGatedFileBridge(source, () => allowed);
+    expect((await gated.fileList(scope)).ok).toBe(true);
+    allowed = false;
+    const refused = await gated.fileRead(scope);
+    expect(refused.ok).toBe(false);
+    expect(calls).toEqual(["list"]);
   });
 });
