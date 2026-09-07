@@ -10,6 +10,7 @@ import {
   Bot,
   Folder,
   FolderPlus,
+  GitCompareArrows,
   Monitor,
   Moon,
   PanelRight,
@@ -48,6 +49,14 @@ import {
   isFilesAvailable,
   registerFilesRoute,
 } from "./files-mount";
+import {
+  CHANGES_ROUTE_ID,
+  GIT_CAPABILITY,
+  createGatedGitBridge,
+  isChangesAvailable,
+  registerChangesRoute,
+  windowGitBridge,
+} from "./changes-mount";
 import {
   BOTS_CAPABILITY,
   BOTS_ROUTE_ID,
@@ -350,12 +359,20 @@ export function App() {
   useEffect(() => {
     filesGateRef.current = isFilesAvailable(liveCapabilities);
   }, [liveCapabilities]);
+  const gitGateRef = useRef(false);
+  useEffect(() => {
+    gitGateRef.current = isChangesAvailable(liveCapabilities);
+  }, [liveCapabilities]);
   const botsGateRef = useRef(false);
   useEffect(() => {
     botsGateRef.current = isBotsAvailable(liveCapabilities);
   }, [liveCapabilities]);
   const filesGatedBridge = useMemo(
     () => createGatedFileBridge(window.drogon, () => filesGateRef.current),
+    [],
+  );
+  const gitGatedBridge = useMemo(
+    () => createGatedGitBridge(windowGitBridge(), () => gitGateRef.current),
     [],
   );
   const botsGatedBridge = useMemo(
@@ -421,14 +438,17 @@ export function App() {
   // rebuilds on snapshot change; the files base below never does.
   const filesBaseRegistry = useMemo(
     () =>
-      registerFilesRoute(
-        createRouteRegistry({
-          capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY],
-          fallbackId: BOTS_ROUTE_ID,
-        }),
-        filesGatedBridge,
+      registerChangesRoute(
+        registerFilesRoute(
+          createRouteRegistry({
+            capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY, GIT_CAPABILITY],
+            fallbackId: BOTS_ROUTE_ID,
+          }),
+          filesGatedBridge,
+        ),
+        gitGatedBridge,
       ),
-    [filesGatedBridge],
+    [filesGatedBridge, gitGatedBridge],
   );
   const panelRegistry = useMemo(() => {
     if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
@@ -477,9 +497,29 @@ export function App() {
   )
     filesAliveRef.current = false;
   const filesAlive = filesAliveRef.current;
+  // Changes keep-alive mirrors files: survives switches and transients,
+  // unmounts on explicit git.v1 withhold or settled workspace loss.
+  const changesAvailable =
+    isChangesAvailable(liveCapabilities) &&
+    checkAvailability(
+      resolveRoute(filesBaseRegistry, CHANGES_ROUTE_ID),
+      liveCapabilities,
+    ) === "available";
+  const changesAliveRef = useRef(false);
+  const changesExplicitWithhold =
+    status !== null && !isChangesAvailable(liveCapabilities);
+  if (route === CHANGES_ROUTE_ID && changesAvailable && current)
+    changesAliveRef.current = true;
+  else if (
+    changesExplicitWithhold ||
+    (status && !current && !busy && !loadingSessions)
+  )
+    changesAliveRef.current = false;
+  const changesAlive = changesAliveRef.current;
   const filesProps =
     current && status ? { workspace: current, status } : lastPropsRef.current;
   const filesSectionRef = useRef<HTMLElement>(null);
+  const changesSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
   useEffect(() => {
@@ -488,9 +528,11 @@ export function App() {
     const target =
       route === FILES_ROUTE_ID
         ? filesSectionRef.current
-        : route === BOTS_ROUTE_ID
-          ? botsSectionRef.current
-          : null;
+        : route === CHANGES_ROUTE_ID
+          ? changesSectionRef.current
+          : route === BOTS_ROUTE_ID
+            ? botsSectionRef.current
+            : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -824,6 +866,23 @@ export function App() {
               <span>Files</span>
             </button>
             <button
+              key="panel-changes"
+              className="workspace-row"
+              disabled={
+                busy || !current || !isChangesAvailable(liveCapabilities)
+              }
+              data-current={route === CHANGES_ROUTE_ID}
+              title={
+                isChangesAvailable(liveCapabilities)
+                  ? "Changes"
+                  : "Changes unavailable: service does not advertise git.v1"
+              }
+              onClick={() => setRoute(CHANGES_ROUTE_ID)}
+            >
+              <GitCompareArrows size={16} />
+              <span>Changes</span>
+            </button>
+            <button
               key="panel-bots"
               className="workspace-row"
               disabled={busy || !current || !isBotsAvailable(liveCapabilities)}
@@ -972,6 +1031,9 @@ export function App() {
               style={{
                 display:
                   (route === FILES_ROUTE_ID && filesAlive) ||
+                  (route === CHANGES_ROUTE_ID &&
+                    changesAlive &&
+                    filesProps !== null) ||
                   (route === BOTS_ROUTE_ID && botsAlive && filesProps !== null)
                     ? "none"
                     : undefined,
@@ -1165,6 +1227,26 @@ export function App() {
                 />
               </section>
             ) : null}
+            {changesAlive && filesProps ? (
+              <section
+                ref={changesSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Changes"
+                style={{
+                  display: route === CHANGES_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                <MountedPanel
+                  descriptor={resolveRoute(
+                    filesBaseRegistry,
+                    CHANGES_ROUTE_ID,
+                  )}
+                  workspace={filesProps.workspace}
+                  status={filesProps.status}
+                />
+              </section>
+            ) : null}
             {botsAlive && filesProps ? (
               <section
                 ref={botsSectionRef}
@@ -1247,8 +1329,8 @@ export function App() {
                 <div className="migration-note">
                   <h2>Coming in the migration</h2>
                   <p>
-                    Mentu, Bots and source control are not connected in this
-                    build.
+                    Mentu and Bots are not connected in this build. Source
+                    control is available from the Changes panel.
                   </p>
                 </div>
               </aside>

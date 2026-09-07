@@ -7,6 +7,7 @@ import { bridgeSchemas } from "../shared/bridge-validation";
 import type { Result, Status } from "../shared/session-contract";
 import { readBuildInfo } from "./build-info";
 import { dispatchFileRequest } from "./file-bridge";
+import { registerGitBridge } from "./git-bridge";
 import { dispatchBotSnapshot } from "./bot-bridge";
 import {
   readCursorMismatches,
@@ -52,6 +53,7 @@ function contractViolation(message: string) {
 let window: BrowserWindow | null = null;
 
 function registerBridge() {
+  registerGitBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
     ipcMain.handle(`drogon:${method}`, async (event, input: unknown) => {
       if (

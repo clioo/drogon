@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 
+pub mod git;
 pub mod orchestration_common;
 pub mod orchestration_mail;
 pub mod orchestration_question;

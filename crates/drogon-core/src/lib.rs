@@ -29,6 +29,7 @@ mod db;
 mod error;
 pub mod git;
 pub mod git_process;
+mod git_rpc;
 pub mod git_worktree;
 mod harness;
 mod ring;
@@ -76,6 +77,7 @@ const CAPABILITIES: &[&str] = &[
     "request.idempotency.v1",
     "harness.catalog.v1",
     "harness.launch.v1",
+    "git.v1",
     "runtime.quiescent-shutdown.v1",
 ];
 
@@ -330,6 +332,13 @@ impl Engine {
             "files.list" => self.do_files_list(&request.params),
             "files.read" => self.do_files_read(&request.params),
             "files.write" => self.mutating(request, Self::do_files_write),
+            "git.status" => self.do_git_status(&request.params),
+            "git.diff" => self.do_git_diff(&request.params),
+            "git.stage" => self.mutating(request, Self::do_git_stage),
+            "git.unstage" => self.mutating(request, Self::do_git_unstage),
+            "git.commit" => self.mutating(request, Self::do_git_commit),
+            "git.push" => self.mutating(request, Self::do_git_push),
+            "git.pr_create" => self.mutating(request, Self::do_git_pr_create),
             "harness.start" => self.mutating(request, Self::do_harness_start),
             "workspace.register" => self.mutating(request, Self::do_workspace_register),
             "workspace.list" => {
