@@ -93,9 +93,7 @@ mod unix {
 #[cfg(unix)]
 pub use unix::{DataDirLock, acquire_exclusive};
 
-// Windows uses the OS file lock (`LockFileEx` via `windows-sys`);
-// data-file ACLs are inherited from the parent (no explicit DACL
-// hardening on this path, unlike the Unix side's `0600`).
+// Windows uses the OS file lock; data-file ACLs are inherited from the parent.
 #[cfg(windows)]
 mod windows {
     use std::fs::OpenOptions;

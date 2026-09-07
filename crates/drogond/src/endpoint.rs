@@ -349,21 +349,6 @@ mod unix {
 pub use unix::{SOCKET_FILE_NAME, establish};
 
 // Explicit-user pipe ACLs and overlapped lifetime ownership are tested on Windows.
-//
-// Windows named-pipe transport, real listener/connection API, built on
-// `windows-sys` bindings (verified against the installed
-// `windows-sys-0.61.2` source tree — see the evidence doc's Completion
-// section for the exact feature list) instead of hand-rolled
-// `extern "system"` declarations, everywhere `windows-sys` has a matching
-// declaration. Still hand-written, not moved to `windows-sys` (nothing
-// there could replace them; this crate's own logic on top of the raw
-// bindings, not FFI declarations): the explicit-DACL SID/SDDL-selection
-// logic (`dacl_sddl_for_user_sid`, `token_user_sid_string`), the
-// `SecurityDescriptorGuard`/`HandleGuard` RAII wrappers around
-// `LocalFree`/`CloseHandle`, and the `to_wide` UTF-16 helper. No other
-// hand-written FFI was added. The `cfg(windows)` path has not been
-// compiled by any Rust toolchain on this vertical's Unix host; it is
-// exercised by the isolated Windows runner.
 #[cfg(windows)]
 mod windows_pipe {
     use std::cell::Cell;

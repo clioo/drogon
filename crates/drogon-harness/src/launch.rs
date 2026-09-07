@@ -122,17 +122,9 @@ pub fn plan_launch(
         // scope. Refuse early here, scoped to the prompt specifically, with
         // that rationale, rather than let it fall through to the generic
         // per-argv-token refusal below.
-        if is_batch_launcher && has_unsafe_windows_batch_syntax(prompt) {
-            return Err(invalid(
-                "This prompt is not supported for a .cmd/.bat launcher yet: it contains a \
-                 newline or a cmd.exe metacharacter (& | < > ^ \" % !), and today's argv-only \
-                 delivery has no way to escape those safely. Real support needs the prompt \
-                 written to the session's stdin after spawn (`session.write`, once \
-                 `session.start` has started the process) instead of folded into the \
-                 cmd.exe command line — unimplemented pending a Windows end-to-end run. Use a \
-                 single-line prompt without those characters, or a harness installed as a \
-                 native executable, until then.",
-            ));
+        if let Some(err) = scoped_batch_prompt_error(request.harness_id, prompt, is_batch_launcher)
+        {
+            return Err(err);
         }
         match request.harness_id {
             HarnessId::Opencode => args.push(format!("--prompt={prompt}")),
@@ -169,6 +161,45 @@ const WINDOWS_BATCH_UNSAFE_CHARACTERS: [char; 8] = ['&', '|', '<', '>', '^', '"'
 
 fn has_unsafe_windows_batch_syntax(value: &str) -> bool {
     value.contains(['\r', '\n']) || value.contains(WINDOWS_BATCH_UNSAFE_CHARACTERS)
+}
+
+/// Checked against the argv value each harness actually delivers, not the
+/// raw prompt: Pi's delivered argv is always `"Drogon task:\n{prompt}"`
+/// (the match arm below), so it always carries a newline independent of the
+/// raw prompt's content — checking `prompt` itself would miss that and let a
+/// "safe" single-line Pi prompt fall through to the generic per-token
+/// refusal instead of this scoped one. `is_batch_launcher` is taken as a
+/// plain bool rather than recomputed from a path here, so this stays
+/// unit-testable on any host, including Linux where `is_script_launcher` is
+/// always false.
+fn scoped_batch_prompt_error(
+    harness_id: HarnessId,
+    prompt: &str,
+    is_batch_launcher: bool,
+) -> Option<RpcError> {
+    if !is_batch_launcher {
+        return None;
+    }
+    let pi_prompt_argv;
+    let delivered = match harness_id {
+        HarnessId::Pi => {
+            pi_prompt_argv = format!("Drogon task:\n{prompt}");
+            pi_prompt_argv.as_str()
+        }
+        _ => prompt,
+    };
+    has_unsafe_windows_batch_syntax(delivered).then(|| {
+        invalid(
+            "This prompt is not supported for a .cmd/.bat launcher yet: it contains a \
+             newline or a cmd.exe metacharacter (& | < > ^ \" % !), and today's argv-only \
+             delivery has no way to escape those safely. Real support needs the prompt \
+             written to the session's stdin after spawn (`session.write`, once \
+             `session.start` has started the process) instead of folded into the \
+             cmd.exe command line — unimplemented pending a Windows end-to-end run. Use a \
+             single-line prompt without those characters, or a harness installed as a \
+             native executable, until then.",
+        )
+    })
 }
 
 /// `ComSpec`, then `%SystemRoot%\System32\cmd.exe`, then the documented
@@ -257,6 +288,33 @@ mod tests {
         assert!(!has_unsafe_windows_batch_syntax(
             r"C:\Program Files (x86)\tools\pi.cmd"
         ));
+    }
+
+    /// Portable regression test for the Pi-prefix bug: runs on any host,
+    /// including Linux where `is_script_launcher` is always `false`, by
+    /// passing `is_batch_launcher` in directly rather than deriving it from
+    /// a path. A safe single-line prompt must still be refused for Pi with
+    /// the scoped, `session.write`-naming message, because the delivered
+    /// argv gets the `"Drogon task:\n"` prefix regardless of the raw
+    /// prompt's content.
+    #[test]
+    fn pi_safe_single_line_prompt_is_scoped_refused_for_batch_launcher() {
+        let safe_prompt = "do the thing, no metacharacters here";
+        assert!(!has_unsafe_windows_batch_syntax(safe_prompt));
+
+        let err = scoped_batch_prompt_error(HarnessId::Pi, safe_prompt, true)
+            .expect("Pi + batch launcher must refuse even a safe prompt");
+        assert_eq!(err.code, "invalid_argument");
+        assert!(
+            err.message.contains("session.write"),
+            "must name the real fix (post-spawn stdin delivery): got {:?}",
+            err.message
+        );
+
+        // Same prompt, not a batch launcher: no refusal at all.
+        assert!(scoped_batch_prompt_error(HarnessId::Pi, safe_prompt, false).is_none());
+        // Same batch launcher, a harness without the prefix: raw prompt decides.
+        assert!(scoped_batch_prompt_error(HarnessId::Claude, safe_prompt, true).is_none());
     }
 
     #[test]
