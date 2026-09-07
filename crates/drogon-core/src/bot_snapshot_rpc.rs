@@ -46,11 +46,19 @@ impl Engine {
             for entry in storage::history_for_bot(&tx, &self.host_id, &folder, &bot.id)
                 .map_err(snapshot_error)?
             {
+                // `ResponsibilityTrigger::Scheduled`'s variant-level
+                // `rename_all` only renames the tag, not its fields, so the
+                // trigger's own (re-)serialization stays snake_case;
+                // project a camelCase alias here and keep the snake_case
+                // key too, for clients still reading the old name.
+                let automation_id = entry.responsibility_run.automation_id.clone();
                 history.push(json!({
                     "run":entry.responsibility_run,
                     "responsibilityName":entry.responsibility.map(|r|r.name),
                     "automationName":entry.automation.map(|a|a.name),
                     "automationRunNumber":entry.automation_run.and_then(|r|r.run_number),
+                    "automation_id":automation_id,
+                    "automationId":automation_id,
                 }));
             }
         }
@@ -60,7 +68,10 @@ impl Engine {
                 .unwrap_or(0.0)
                 .total_cmp(&a["run"]["startedAt"].as_f64().unwrap_or(0.0))
         });
-        let result = json!({"hostId":self.host_id,"workspaceId":scope.workspace_id,"bots":bots,"history":history});
+        let mut bots_json = serde_json::to_value(&bots)
+            .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?;
+        project_bots_trigger_automation_id(&mut bots_json);
+        let result = json!({"hostId":self.host_id,"workspaceId":scope.workspace_id,"bots":bots_json,"history":history});
         if serde_json::to_vec(&result)
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?
             .len()
@@ -69,6 +80,38 @@ impl Engine {
             return Err(snapshot_too_large());
         }
         Ok(result)
+    }
+}
+
+/// Same field-level `rename_all` gap as the history projection above, but
+/// for each responsibility's own `trigger` object as it appears inside the
+/// raw serialized `Bot` structs in the `bots` array: `ResponsibilityTrigger`'s
+/// `rename_all` only renames the `kind` tag, so a scheduled trigger's
+/// `automation_id` field stays snake_case on the wire. Project an additive
+/// camelCase `automationId` alongside it, in place, leaving every other
+/// field (including the retained snake_case one) untouched.
+fn project_bots_trigger_automation_id(bots_json: &mut Value) {
+    let Some(bots) = bots_json.as_array_mut() else {
+        return;
+    };
+    for bot in bots {
+        let Some(responsibilities) = bot
+            .get_mut("responsibilities")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for responsibility in responsibilities {
+            let Some(trigger) = responsibility
+                .get_mut("trigger")
+                .and_then(Value::as_object_mut)
+            else {
+                continue;
+            };
+            if let Some(automation_id) = trigger.get("automation_id").cloned() {
+                trigger.insert("automationId".to_string(), automation_id);
+            }
+        }
     }
 }
 
