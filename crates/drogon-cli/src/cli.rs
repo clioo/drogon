@@ -12,7 +12,7 @@ use crate::orchestration_cli::OrchestrationCommand;
 #[command(
     name = "drogon-cli",
     version,
-    about = "Command-line client for the Drogon runtime (protocol v1)",
+    about = "Start with `drogon-cli skills get drogon-cli` for the version-matched agent guide.\nCommand-line client for the Drogon runtime (protocol v1)",
     args_override_self = true,
     override_usage = "drogon-cli [OPTIONS] <COMMAND>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
 )]
@@ -120,6 +120,11 @@ pub enum Command {
         /// JSON object of params (default {})
         #[arg(long, value_name = "JSON")]
         params: Option<String>,
+    },
+    /// Version-matched agent guides bundled with this CLI (local, no runtime needed)
+    Skills {
+        #[command(subcommand)]
+        action: SkillsAction,
     },
 }
 
@@ -399,6 +404,63 @@ pub enum TerminalAction {
         #[arg(long, value_name = "TOKEN")]
         incarnation: String,
     },
+    /// Poll a session until a condition holds (client-side over session.read)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal wait --session <ID> --incarnation <TOKEN> --for <exited|idle|output> --timeout-ms <MS>\nValid flags: --data-dir, --for, --help, --incarnation, --json, --request-id, --retry-request, --session, --timeout-ms"
+    )]
+    Wait {
+        #[arg(long, value_name = "ID")]
+        session: String,
+        #[arg(long, value_name = "TOKEN")]
+        incarnation: String,
+        /// Wait for the session to exit, to report agentState idle (an
+        /// exited session also satisfies idle: it will never work again),
+        /// or for any terminal output to exist or arrive
+        #[arg(long, value_enum, value_name = "COND")]
+        r#for: WaitFor,
+        /// Bounded wait budget in ms (1..=900000)
+        #[arg(long, value_name = "MS")]
+        timeout_ms: u64,
+    },
+}
+
+/// What `terminal wait --for` polls for. Clap renders these kebab-case, so
+/// the wire values are exactly `exited|idle|output`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum WaitFor {
+    Exited,
+    Idle,
+    Output,
+}
+
+impl WaitFor {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            WaitFor::Exited => "exited",
+            WaitFor::Idle => "idle",
+            WaitFor::Output => "output",
+        }
+    }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SkillsAction {
+    /// List version-matched skill guides bundled with this CLI
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli skills list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    List,
+    /// Print a version-matched skill guide as Markdown
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli skills get <NAME>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Get {
+        /// Guide name, e.g. drogon-cli
+        name: String,
+    },
 }
 
 impl Cli {
@@ -553,6 +615,18 @@ impl Cli {
                     require_nonempty("session", session)?;
                     require_nonempty("incarnation", incarnation)?;
                 }
+                TerminalAction::Wait {
+                    session,
+                    incarnation,
+                    timeout_ms,
+                    ..
+                } => {
+                    require_nonempty("session", session)?;
+                    require_nonempty("incarnation", incarnation)?;
+                    if *timeout_ms == 0 || *timeout_ms > 900_000 {
+                        return Err(CliError::Usage("--timeout-ms must be in 1..=900000".into()));
+                    }
+                }
             },
             Command::Automation { action } => match action {
                 AutomationAction::Create {
@@ -648,6 +722,12 @@ impl Cli {
                     }
                 }
             }
+            Command::Skills { action } => match action {
+                SkillsAction::List => {}
+                SkillsAction::Get { name } => {
+                    require_nonempty("name", name)?;
+                }
+            },
             Command::Orchestration { command } => {
                 // Purely local actor/flag contradictions (worker credential
                 // vs coordinator bindings, reuse-vs-fresh preferences,
@@ -934,6 +1014,92 @@ mod tests {
         ])
         .unwrap();
         assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn terminal_wait_parses_conditions_and_bounds_the_budget() {
+        for condition in ["exited", "idle", "output"] {
+            let cli = parse(&[
+                "terminal",
+                "wait",
+                "--session",
+                "s",
+                "--incarnation",
+                "i",
+                "--for",
+                condition,
+                "--timeout-ms",
+                "5000",
+            ])
+            .unwrap();
+            let Command::Terminal {
+                action: TerminalAction::Wait { timeout_ms, .. },
+            } = &cli.command
+            else {
+                panic!("wrong subcommand");
+            };
+            assert_eq!(*timeout_ms, 5000);
+            assert!(cli.validate().is_ok());
+        }
+
+        // Unknown conditions never reach the daemon.
+        assert!(
+            parse(&[
+                "terminal",
+                "wait",
+                "--session",
+                "s",
+                "--incarnation",
+                "i",
+                "--for",
+                "tui-idle",
+                "--timeout-ms",
+                "5000",
+            ])
+            .is_err()
+        );
+
+        for budget in ["0", "900001"] {
+            let cli = parse(&[
+                "terminal",
+                "wait",
+                "--session",
+                "s",
+                "--incarnation",
+                "i",
+                "--for",
+                "exited",
+                "--timeout-ms",
+                budget,
+            ])
+            .unwrap();
+            assert!(matches!(cli.validate(), Err(CliError::Usage(_))));
+        }
+    }
+
+    #[test]
+    fn skills_list_and_get_parse() {
+        let cli = parse(&["skills", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Skills {
+                action: SkillsAction::List
+            }
+        ));
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["skills", "get", "drogon-cli"]).unwrap();
+        let Command::Skills {
+            action: SkillsAction::Get { name },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(name, "drogon-cli");
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["skills", "get", ""]).unwrap();
+        assert!(matches!(cli.validate(), Err(CliError::Usage(_))));
     }
 
     #[test]

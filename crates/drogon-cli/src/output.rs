@@ -209,6 +209,22 @@ pub fn session_resized(session: &Session) -> String {
     )
 }
 
+/// Human `terminal wait` success: the satisfied condition plus where the
+/// session stands, so callers can tell an idle satisfaction from an exit.
+pub fn session_waited(result: &ReadResult, wait_for: &str, polls: u32, elapsed_ms: u64) -> String {
+    format!(
+        "Wait satisfied for {} [{}] agent={} for={} after {}ms ({} polls) cursor {}..{}.",
+        result.session.id,
+        result.session.verdict_str(),
+        result.session.agent_state.as_wire(),
+        wait_for,
+        elapsed_ms,
+        polls,
+        result.start_cursor,
+        result.next_cursor
+    )
+}
+
 pub fn session_closed(session: &Session) -> String {
     let exit = session
         .exit_code
@@ -449,6 +465,25 @@ mod tests {
         let mut session = sample_session("exited");
         session.exit_code = Some(3);
         assert!(session_closed(&session).contains("exit=3"));
+    }
+
+    #[test]
+    fn wait_success_line_names_condition_and_state() {
+        let read: ReadResult = serde_json::from_value(json!({
+            "session": {
+                "id": "s1", "workspaceId": "w1", "hostId": "h1", "incarnation": "tok",
+                "command": "sh", "args": [], "cols": 80, "rows": 24,
+                "verdict": "exited", "exitCode": 0, "createdAt": "2026-09-05T12:00:00Z",
+                "agentState": "exited", "agentStateAt": null
+            },
+            "dataBase64": STANDARD.encode("hi\n"),
+            "startCursor": 0, "nextCursor": 3, "truncated": false
+        }))
+        .unwrap();
+        let text = session_waited(&read, "exited", 2, 120);
+        assert!(text.contains("Wait satisfied for s1 [exited]"));
+        assert!(text.contains("for=exited"));
+        assert!(text.contains("cursor 0..3"));
     }
 
     #[test]

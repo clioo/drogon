@@ -18,5 +18,6 @@ pub mod orchestration_commands;
 mod orchestration_output;
 pub mod output;
 pub mod paths;
+pub mod skills;
 pub mod transport;
 pub mod wire;
