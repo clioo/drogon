@@ -46,19 +46,11 @@ impl Engine {
             for entry in storage::history_for_bot(&tx, &self.host_id, &folder, &bot.id)
                 .map_err(snapshot_error)?
             {
-                // `ResponsibilityTrigger::Scheduled`'s variant-level
-                // `rename_all` only renames the tag, not its fields, so the
-                // trigger's own (re-)serialization stays snake_case;
-                // project a camelCase alias here and keep the snake_case
-                // key too, for clients still reading the old name.
-                let automation_id = entry.responsibility_run.automation_id.clone();
                 history.push(json!({
                     "run":entry.responsibility_run,
                     "responsibilityName":entry.responsibility.map(|r|r.name),
                     "automationName":entry.automation.map(|a|a.name),
                     "automationRunNumber":entry.automation_run.and_then(|r|r.run_number),
-                    "automation_id":automation_id,
-                    "automationId":automation_id,
                 }));
             }
         }
@@ -127,15 +119,21 @@ fn snapshot_too_large() -> RpcError {
 /// materialized-size check below produces, but computed with a handful of
 /// cheap `COUNT`/`SUM(LENGTH(...))` probes run directly against the store's
 /// own tables -- never by calling `storage::list_bots`/`history_for_bot`
-/// (which parse every row into a domain struct) first. The byte-budget
-/// probe sums the `bots` and `bot_responsibility_runs` rows in scope plus
-/// the `automations`/`automation_runs` rows those runs actually link to (via
-/// `json_extract` on the stored run payload's `automationId`/
-/// `automationRunId`, joined only on the ids present in this scope's runs --
-/// never a full scan of either linked table), because a run's rendered
-/// history entry embeds its linked automation/automation-run name/number:
-/// an oversized linked record inflates the real response even though it
-/// never appears directly in `bots`/`bot_responsibility_runs`.
+/// (which parse every row into a domain struct) first.
+///
+/// `history_for_bot` materializes a full `Automation`/`AutomationRun` (via
+/// `get_automation`/`get_automation_run`) for *every* history row that
+/// references one, and re-derives that row's `Responsibility` from its
+/// owning Bot's payload for every row too -- so a linked record's (or a
+/// Bot's own) cost to materialization scales with how many history rows
+/// reference it, not with how many distinct linked rows exist. The budget
+/// below therefore sums each linked payload once per *referencing* history
+/// row (a plain `JOIN`, never `DISTINCT`), plus a repeated-responsibility
+/// budget that likewise charges a Bot's own payload once per history row
+/// that belongs to it. All sums use `LENGTH(CAST(payload_json AS BLOB))`,
+/// not bare `LENGTH(...)`, because SQLite's `LENGTH()` on TEXT counts
+/// characters, not UTF-8 bytes -- undercounting any multi-byte payload
+/// against the final check below, which budgets real serialized bytes.
 fn preflight_snapshot_budget(
     tx: &rusqlite::Transaction,
     host_id: &str,
@@ -155,7 +153,7 @@ fn preflight_snapshot_budget(
 
     let bots_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(LENGTH(payload_json)), 0) FROM bots
+            "SELECT COALESCE(SUM(LENGTH(CAST(payload_json AS BLOB))), 0) FROM bots
              WHERE host_id = ?1 AND folder = ?2",
             params![host_id, folder],
             |r| r.get(0),
@@ -163,38 +161,39 @@ fn preflight_snapshot_budget(
         .map_err(error::from_sqlite)?;
     let runs_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(LENGTH(payload_json)), 0) FROM bot_responsibility_runs
+            "SELECT COALESCE(SUM(LENGTH(CAST(payload_json AS BLOB))), 0)
+             FROM bot_responsibility_runs
              WHERE bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)",
+            params![host_id, folder],
+            |r| r.get(0),
+        )
+        .map_err(error::from_sqlite)?;
+    let repeated_responsibility_bytes: i64 = tx
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(CAST(b.payload_json AS BLOB))), 0)
+             FROM bot_responsibility_runs brr
+             JOIN bots b ON b.id = brr.bot_id
+             WHERE b.host_id = ?1 AND b.folder = ?2",
             params![host_id, folder],
             |r| r.get(0),
         )
         .map_err(error::from_sqlite)?;
     let linked_automation_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(a.payload_len), 0) FROM (
-                 SELECT LENGTH(a.payload_json) AS payload_len FROM automations a
-                 WHERE a.id IN (
-                     SELECT DISTINCT json_extract(brr.payload_json, '$.automationId')
-                     FROM bot_responsibility_runs brr
-                     WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)
-                       AND json_extract(brr.payload_json, '$.automationId') IS NOT NULL
-                 )
-             ) a",
+            "SELECT COALESCE(SUM(LENGTH(CAST(a.payload_json AS BLOB))), 0)
+             FROM bot_responsibility_runs brr
+             JOIN automations a ON a.id = json_extract(brr.payload_json, '$.automationId')
+             WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)",
             params![host_id, folder],
             |r| r.get(0),
         )
         .map_err(error::from_sqlite)?;
     let linked_automation_run_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(ar.payload_len), 0) FROM (
-                 SELECT LENGTH(ar.payload_json) AS payload_len FROM automation_runs ar
-                 WHERE ar.id IN (
-                     SELECT DISTINCT json_extract(brr.payload_json, '$.automationRunId')
-                     FROM bot_responsibility_runs brr
-                     WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)
-                       AND json_extract(brr.payload_json, '$.automationRunId') IS NOT NULL
-                 )
-             ) ar",
+            "SELECT COALESCE(SUM(LENGTH(CAST(ar.payload_json AS BLOB))), 0)
+             FROM bot_responsibility_runs brr
+             JOIN automation_runs ar ON ar.id = json_extract(brr.payload_json, '$.automationRunId')
+             WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)",
             params![host_id, folder],
             |r| r.get(0),
         )
@@ -202,6 +201,7 @@ fn preflight_snapshot_budget(
 
     let total = bots_bytes
         .saturating_add(runs_bytes)
+        .saturating_add(repeated_responsibility_bytes)
         .saturating_add(linked_automation_bytes)
         .saturating_add(linked_automation_run_bytes);
     if total > SNAPSHOT_BUDGET_BYTES {
