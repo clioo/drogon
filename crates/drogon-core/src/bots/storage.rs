@@ -59,8 +59,33 @@
 //! two writes can never share a "new == old" blind spot. See
 //! `cas_write_detects_a_same_timestamp_two_connection_clobber_race` in the
 //! tests for the exact scenario this replaces.
+//!
+//! ## Run history scope fence (P2-1)
+//!
+//! [`history_for_bot`] fences returned rows to the resolved `(host_id,
+//! folder)` scope of its `bot_id` lookup, on top of the plain `WHERE bot_id
+//! = ?` query: `bots.id` is a global PRIMARY KEY, and [`delete_bot`]
+//! deliberately preserves a deleted Bot's prior runs as orphaned evidence
+//! rather than deleting them, so a freed id later reused by [`create_bot`]
+//! in a *different* folder must not silently reattach the earlier folder's
+//! runs to the new Bot (see P2-1,
+//! `docs/migration/verticals/V5/bot-snapshot-review.md`). The fence is an
+//! additive JSON stamp inside the existing `payload_json` blob (the
+//! storage-internal `StoredRun` envelope below, never a schema/migration
+//! change): every row [`record_responsibility_run`] writes after this
+//! fence carries its writing `(host_id, folder)`; a row whose stamp does
+//! not match the caller's resolved scope is excluded from the returned
+//! history but left untouched on disk -- still visible to a caller who
+//! queries with its actual original scope, still present for direct
+//! row-count evidence. A row written before this fence existed carries no
+//! stamp (`scope_host`/`scope_folder` both `None` via `#[serde(default)]`)
+//! and stays visible under any bot_id match, exactly like the pre-fence
+//! behavior -- its true original scope was never recorded and cannot be
+//! reconstructed, so this fence only closes the exposure for rows written
+//! after it exists.
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
 
 use super::records::{Bot, HistoryEntry, ResponsibilityRun, ResponsibilityTrigger};
 use crate::automations::records::Automation;
@@ -722,6 +747,9 @@ pub fn record_responsibility_run(
         .find(|r| r.id == run.responsibility_id)
         .ok_or(StorageError::NotFound("responsibility"))?;
     match &responsibility.trigger {
+        // Storage-internal shape: `automation_id` stays snake_case on disk;
+        // V5's own snapshot boundary is the only place that maps it to wire
+        // camelCase `automationId`.
         ResponsibilityTrigger::Scheduled { automation_id } => {
             if run.automation_id.as_deref() != Some(automation_id.as_str()) {
                 return Err(StorageError::OwnershipViolation(
@@ -760,14 +788,14 @@ pub fn record_responsibility_run(
                 host_observation: run.host_observation.or(existing.host_observation),
                 ..existing
             };
-            upsert_run_row(conn, &merged)?;
+            upsert_run_row(conn, host_id, folder, &merged)?;
             merged
         } else {
-            upsert_run_row(conn, &run)?;
+            upsert_run_row(conn, host_id, folder, &run)?;
             run
         }
     } else {
-        upsert_run_row(conn, &run)?;
+        upsert_run_row(conn, host_id, folder, &run)?;
         run
     };
     tx.commit()?;
@@ -789,8 +817,40 @@ fn find_run_by_automation_run_id(
     .transpose()
 }
 
-fn upsert_run_row(conn: &Connection, run: &ResponsibilityRun) -> Result<()> {
-    let payload = serde_json::to_string(run)?;
+/// Storage-internal envelope written into
+/// `bot_responsibility_runs.payload_json`: wraps the source-visible
+/// [`ResponsibilityRun`] (`#[serde(flatten)]`, so its own fields are
+/// unchanged on disk) with an additive `(host_id, folder)` scope stamp used
+/// only by [`history_for_bot`]'s scope fence (see the module doc's "Run
+/// history scope fence"). `#[serde(default)]` on both stamp fields is what
+/// keeps this backwards compatible: rows written before this envelope
+/// existed deserialize with `scope_host`/`scope_folder` both `None` rather
+/// than failing, and other readers of this JSON that still deserialize
+/// straight into a plain [`ResponsibilityRun`] (e.g.
+/// [`find_run_by_automation_run_id`]) keep working unchanged since
+/// `ResponsibilityRun` has no `deny_unknown_fields`.
+#[derive(Serialize, Deserialize)]
+struct StoredRun {
+    #[serde(flatten)]
+    run: ResponsibilityRun,
+    #[serde(default)]
+    scope_host: Option<String>,
+    #[serde(default)]
+    scope_folder: Option<String>,
+}
+
+fn upsert_run_row(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    run: &ResponsibilityRun,
+) -> Result<()> {
+    let stored = StoredRun {
+        run: run.clone(),
+        scope_host: Some(host_id.to_string()),
+        scope_folder: Some(folder.to_string()),
+    };
+    let payload = serde_json::to_string(&stored)?;
     conn.execute(
         "INSERT INTO bot_responsibility_runs (id, bot_id, automation_run_id, started_at, payload_json)
          VALUES (?1, ?2, ?3, ?4, ?5)
@@ -802,8 +862,15 @@ fn upsert_run_row(conn: &Connection, run: &ResponsibilityRun) -> Result<()> {
     Ok(())
 }
 
-/// Newest-first history for `bot_id`. Orphaned responsibility/automation/
-/// automation-run links resolve to `None`, never synthesized.
+/// Newest-first history for `bot_id`, fenced to the resolved `(host_id,
+/// folder)` scope (see the module doc's "Run history scope fence" --
+/// P2-1): a row whose `StoredRun` scope stamp does not match this call's
+/// `(host_id, folder)` is excluded here, but never deleted -- it stays on
+/// disk, still reachable by a caller who queries with its actual original
+/// scope. A row with no stamp at all (written before this fence existed)
+/// is included under any bot_id match, exactly like the pre-fence
+/// behavior. Orphaned responsibility/automation/automation-run links
+/// resolve to `None`, never synthesized.
 pub fn history_for_bot(
     conn: &Connection,
     host_id: &str,
@@ -818,8 +885,18 @@ pub fn history_for_bot(
         .query_map(params![bot_id], |r| r.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     rows.into_iter()
-        .map(|json| -> Result<HistoryEntry> {
-            let run: ResponsibilityRun = serde_json::from_str(&json)?;
+        .map(|json| -> Result<Option<HistoryEntry>> {
+            let stored: StoredRun = serde_json::from_str(&json)?;
+            let in_scope = match (&stored.scope_host, &stored.scope_folder) {
+                (Some(h), Some(f)) => h == host_id && f == folder,
+                // Legacy unstamped row: original scope was never recorded,
+                // so it stays visible under any bot_id match.
+                _ => true,
+            };
+            if !in_scope {
+                return Ok(None);
+            }
+            let run = stored.run;
             let responsibility = bot.as_ref().and_then(|b| {
                 b.responsibilities
                     .iter()
@@ -834,13 +911,14 @@ pub fn history_for_bot(
                 Some(id) => automations_storage::get_automation_run(conn, id)?,
                 None => None,
             };
-            Ok(HistoryEntry {
+            Ok(Some(HistoryEntry {
                 responsibility_run: run,
                 responsibility,
                 automation,
                 automation_run,
-            })
+            }))
         })
+        .filter_map(|r| r.transpose())
         .collect()
 }
 
