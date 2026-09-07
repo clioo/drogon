@@ -21,11 +21,13 @@ import {
 import { probeNativeProtocol } from "./probe-native-protocol.mjs";
 import { probeSessionBoundaries } from "./probe-session-boundaries.mjs";
 import { probeHarnessLaunch } from "./probe-harness-launch.mjs";
+import { probeNativeCoordination } from "./probe-native-coordination.mjs";
 
 const withHarness = process.argv.slice(2).join(" ") === "--harness pi";
+const withCoordination = process.argv.slice(2).join(" ") === "--coordination";
 assert.ok(
-  process.argv.length === 2 || withHarness,
-  "Use --harness pi or no arguments",
+  process.argv.length === 2 || withHarness || withCoordination,
+  "Use --harness pi, --coordination or no arguments",
 );
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -181,6 +183,9 @@ try {
   const listed = await cli(["workspace", "list"]);
   assert.ok(listed.result.workspaces.some((item) => item.id === workspace.id));
   report.checks.push("non-git-folder-registration-and-list");
+  if (withCoordination) {
+    report.checks.push(...(await probeNativeCoordination({ cli })));
+  }
 
   const command = process.execPath;
   const program =
