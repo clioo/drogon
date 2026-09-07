@@ -131,7 +131,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J4 CLI browser por relay daemon → desktop | R4 | Muse B | fusionada: open, navigate, snapshot, click, fill, tabs | #41 |
 | J1 R7-A: composer de nuevo workspace y Add Project desde carpeta del fuente; quita el formulario legado | R7 | Muse | fusionada: aceptación 15/15, oráculo empty/project-terminal Δ0 en sidebar y barra; etiquetas de paleta llegan con R7-I | #57 |
 | J3 R7-C: shim `drogon-cli` en cada terminal, DROGON_* en el entorno de sesión | R7 | Muse | fusionada: shims en `<data-dir>/bin`, entorno de sesión con DROGON_* y TERM_PROGRAM=Drogon, hooks usan el shim | #56 |
-| J8 R7-E: responsabilidades de Bots (tarjetas, alta con cron, historial, Back) | R7 | Muse | lanzada | |
+| J8 R7-E: responsabilidades de Bots (tarjetas, alta con cron, historial, Back) | R7 | Muse | fusionada: bot.responsibility_create/delete sobre automations del bot, tarjetas e historial por bot, Back de cabecera cableado; 876 tests | #60 |
 | J5/J10 R7-I: tabla de atajos del fuente, dispatcher por scope, sección de shortcuts en Settings | R7 | Muse | lanzada | |
 | J6 R8-G1: Tasks con frame, source bar, filas GitHub, filtros y paginación del fuente; paging en tasks.list | R8 | GLM 5.3 Flash | lanzada | |
 | Fidelidad R8-G2: tokens `:root`/`.dark`, capa base y fuentes Geist + Nerd Symbols del fuente | R8 | GLM 5.3 Flash | lanzada | |
@@ -139,3 +139,4 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J1 R8-O2: terminal con terminal.css, tema xterm por esquema, zoom, búsqueda, links, menú contextual y overlay de salida | R8 | OpenCode + Muse | lanzada | |
 | J1 R9-A: acciones de tarjeta de worktree del fuente (menú contextual, renombrar, borrar con conteos, badges) | R9 | Muse | lanzada | |
 | Fidelidad R9-B: remanente del chrome (Back/Forward en el titlebar, cabecera de Projects, pie del sidebar, Star on GitHub, ⌘J) | R9 | Muse | lanzada | |
+| J8 R9-C: bot.delete, ejecuciones programadas en el historial, acciones de cabecera de la tarjeta | R9 | Muse | lanzada | |
