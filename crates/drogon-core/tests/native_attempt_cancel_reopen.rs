@@ -202,6 +202,9 @@ fn cleanup_preserves_fixtures_while_a_child_is_live_and_cleans_after_proven_exit
         "unexpected refusal reason: {preserved}"
     );
     assert!(fixture.dir.is_dir(), "fixtures must be preserved");
+    // The parent cleanup stop-marker is written even on refusal paths, so a
+    // later observer can tell "cleanup ran here" from "never cleaned".
+    assert!(fixture.dir.join("stop-marker").is_file());
 
     // Prove the exit (exact owned handle: cooperative release, then reap).
     std::fs::write(&release, b"1").expect("release owned fixture child");
@@ -212,6 +215,58 @@ fn cleanup_preserves_fixtures_while_a_child_is_live_and_cleans_after_proven_exit
         .try_cleanup_within(Duration::from_secs(10))
         .expect("cleanup must succeed once every child proved its exit");
     assert!(!fixture.dir.exists(), "fixtures removed after proven exit");
+}
+
+/// Unreadable or malformed pid logs can never prove any child outcome, so
+/// cleanup must PRESERVE the fixture tree (with the parent stop-marker
+/// written), while a genuinely never-started fixture — no pid-log at all —
+/// still cleans up. This is the deterministic regression test for the old
+/// `read_to_string().unwrap_or_default()` behavior that silently read an
+/// unreadable log as "zero children" and deleted the fixtures.
+#[test]
+fn cleanup_preserves_fixtures_on_unreadable_pid_log_and_cleans_never_started() {
+    // (a) Malformed record: parse failure is retention, not "zero children".
+    let fixture = Fixture::new("ul-a");
+    std::fs::write(fixture.dir.join("pid-log"), b"not-a-pid\n").expect("write malformed pid log");
+    let reason = fixture
+        .try_cleanup_within(Duration::from_secs(2))
+        .expect_err("a malformed pid log must block fixture removal");
+    assert!(reason.contains("pid log unreadable"), "{reason}");
+    assert!(fixture.dir.is_dir(), "fixtures must be preserved");
+    assert!(
+        fixture.dir.join("stop-marker").is_file(),
+        "the cleanup stop-marker must be written even on retention paths"
+    );
+
+    // (b) Unreadable file: read failure is retention, not "zero children".
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new("ul-b");
+    let log = fixture.dir.join("pid-log");
+    std::fs::write(&log, b"12345\n").expect("write pid log");
+    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o000))
+        .expect("make pid log unreadable");
+    let reason = fixture
+        .try_cleanup_within(Duration::from_secs(2))
+        .expect_err("an unreadable pid log must block fixture removal");
+    assert!(reason.contains("pid log unreadable"), "{reason}");
+    assert!(fixture.dir.is_dir(), "fixtures must be preserved");
+    assert!(fixture.dir.join("stop-marker").is_file());
+    // Restore access so this test's own teardown can remove the tree.
+    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644))
+        .expect("restore pid log permissions");
+    std::fs::remove_dir_all(&fixture.dir).expect("remove owned fixture");
+
+    // (c) Proven never-started: no pid-log at all still cleans up, proving
+    // the never-started vs unreadable distinction.
+    let fixture = Fixture::new("ul-c");
+    assert!(!fixture.dir.join("pid-log").exists());
+    fixture
+        .try_cleanup_within(Duration::from_secs(10))
+        .expect("a never-started fixture must clean up");
+    assert!(
+        !fixture.dir.exists(),
+        "fixtures removed after clean cleanup"
+    );
 }
 
 /// Writes the release file even on an assertion failure inside the test, so

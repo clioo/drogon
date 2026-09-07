@@ -132,3 +132,59 @@ no other test files touched.
   process, so the test does not depend on the runner's uid.
 - What remains: nothing for this checkpoint; both corrections are landed
   and every consuming suite is green.
+
+---
+
+## Follow-up (task_91d6c617d8e9): ROOT e728 review — stop-marker + unreadable-log retention
+
+Scope: `tests/native_worker_lifecycle/harness.rs`,
+`tests/native_attempt_cancel_reopen.rs`, this section only. No production
+files, no other test files touched.
+
+1. **Parent cleanup stop-marker restored on every cleanup attempt — DONE.**
+   `try_cleanup_within` writes the parent stop-marker as its first action,
+   unconditionally: success, provably-live refusal, unreadable pid log, and
+   the normal child-crash path all leave the marker behind, so a later
+   observer can always distinguish "cleanup ran here" from "never cleaned".
+   A marker-write failure itself is a typed Err that preserves the fixture
+   tree (the cleanup is then honestly unverifiable). The `cleanup` doc
+   comment now matches the actual behavior, and the live-child refusal test
+   asserts the marker's presence on the retention path.
+2. **`recorded_pids` no longer swallows read/parse failures — DONE.** The
+   fixture log is read through `recorded_pids_result -> PidLog`, with three
+   distinguished cases: `NeverStarted` (no pid-log file: proven "no child
+   was ever recorded"), `Recorded(Vec<i32>)` (parsed), and
+   `Unreadable(reason)` (unreadable or malformed — no child outcome is
+   knowable). `try_cleanup_within` uses the Result form: `Unreadable`
+   returns a typed Err that PRESERVES the fixture tree (never deletes over
+   an unknowable outcome), `NeverStarted` proceeds to removal, and recorded
+   children go through the three-valued liveness observer as before. The
+   old bool-cast convenience `recorded_pids` remains ONLY for the read-only
+   probe count assertions (its files are outside this task's edit scope):
+   never-started stays an empty list, and an unreadable log now panics
+   loudly as a fixture bug instead of silently pretending zero children.
+   **Deterministic regression test added**:
+   `cleanup_preserves_fixtures_on_unreadable_pid_log_and_cleans_never_started`
+   covers (a) a malformed pid record (retention + stop-marker written),
+   (b) an unreadable 0o000 pid-log (retention + stop-marker written), and
+   (c) a never-started fixture with no pid-log (cleans up), proving the
+   never-started vs unreadable distinction. No broad PID signaling anywhere
+   — the only process operations remain signal-0 observation and exact
+   owned-handle reaping.
+
+### Gates
+
+- `cargo test -p drogon-core --test native_attempt_cancel_reopen --locked`:
+  **8 passed / 0 failed** (4 behavioral probes + probe entry + 3 fixture
+  error-path tests).
+- Consuming suites: native_worker_lifecycle **9 passed / 0 failed**,
+  native_receipt_recovery **6 passed / 0 failed**,
+  orchestration_worker_boundary **2 passed / 0 failed**, engine
+  **18 passed / 0 failed (1 ignored, pre-existing)**.
+- `cargo fmt --all -- --check`: **exit 0** (one intermediate failure was in
+  this checkpoint's own edit to `native_attempt_cancel_reopen.rs`, fixed by
+  reformatting that file; no other file in the workspace needed changes).
+- `cargo clippy -p drogon-core --all-targets --locked -- -D warnings`:
+  clean (exit 0).
+
+What remains: nothing for this checkpoint.

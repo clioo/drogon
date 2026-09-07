@@ -37,11 +37,13 @@ impl Fixture {
         Fixture { dir, cli }
     }
 
-    /// Cooperative cleanup: raise the stop marker and wait, bounded, for the
-    /// recorded fixture children to PROVE their exit (or self-expire). Never
-    /// signals a discovered PID. Only a provably-exited outcome removes the
-    /// fixture tree; an unverifiable outcome preserves it on disk so a live
-    /// or unprovable child is never buried under a deleted directory.
+    /// Cooperative cleanup: write the parent stop marker on EVERY attempt
+    /// (so a later observer can distinguish cleaned-up from never-cleaned,
+    /// including on the normal child-crash path), then wait, bounded, for
+    /// the recorded fixture children to PROVE their exit (or self-expire).
+    /// Never signals a discovered PID. Only a provably-exited outcome removes
+    /// the fixture tree; an unverifiable outcome preserves it on disk so a
+    /// live or unprovable child is never buried under a deleted directory.
     pub fn cleanup(&self) {
         if let Err(reason) = self.try_cleanup() {
             panic!(
@@ -61,31 +63,48 @@ impl Fixture {
     }
 
     pub fn try_cleanup_within(&self, deadline: Duration) -> Result<(), String> {
+        // The parent cleanup stop-marker is written on EVERY cleanup attempt
+        // — success, provably-live refusal, unreadable pid log, or the normal
+        // child-crash path — so a later observer can always distinguish
+        // "cleanup ran here" from "never cleaned". A marker write failure
+        // preserves the fixtures too (the cleanup itself is then unverifiable).
+        std::fs::write(self.dir.join("stop-marker"), b"stop\n")
+            .map_err(|error| format!("write cleanup stop marker: {error}"))?;
         let deadline = Instant::now() + deadline;
         let mut last_reason = String::from("cleanup window exhausted before any observation");
         while Instant::now() < deadline {
-            let pids = recorded_pids(&self.dir);
-            let mut blocked = None;
-            for pid in &pids {
-                match observe_liveness(*pid) {
-                    Liveness::Exited => {}
-                    Liveness::Live => {
-                        blocked = Some(format!("pid {pid} is provably live"));
-                        break;
+            match recorded_pids_result(&self.dir) {
+                PidLog::Unreadable(reason) => {
+                    return Err(format!(
+                        "pid log unreadable; no child outcome is knowable, \
+                         fixture preserved: {reason}"
+                    ));
+                }
+                PidLog::NeverStarted => {}
+                PidLog::Recorded(pids) => {
+                    let mut blocked = None;
+                    for pid in &pids {
+                        match observe_liveness(*pid) {
+                            Liveness::Exited => {}
+                            Liveness::Live => {
+                                blocked = Some(format!("pid {pid} is provably live"));
+                                break;
+                            }
+                            Liveness::Unverifiable => {
+                                blocked = Some(format!("pid {pid} liveness unverifiable"));
+                                break;
+                            }
+                        }
                     }
-                    Liveness::Unverifiable => {
-                        blocked = Some(format!("pid {pid} liveness unverifiable"));
-                        break;
+                    if let Some(reason) = blocked {
+                        last_reason = reason;
+                        std::thread::sleep(Duration::from_millis(100));
+                        continue;
                     }
                 }
             }
-            if let Some(reason) = blocked {
-                last_reason = reason;
-                std::thread::sleep(Duration::from_millis(100));
-                continue;
-            }
-            // Every recorded child proved its exit (or none was recorded):
-            // only now may the fixture tree be removed.
+            // No child was ever recorded, or every recorded child proved its
+            // exit: only now may the fixture tree be removed.
             match std::fs::remove_file(self.dir.join("env-dump.cap")) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -476,23 +495,58 @@ pub fn wait_for_exit(engine: &Engine, scope: &Value, dispatch_id: &str) {
     }
 }
 
-/// Parses exact fixture PID records; read-only, never signals.
+/// The recorded fixture children, distinguishing the three cases cleanup
+/// must tell apart:
+/// - [`PidLog::NeverStarted`]: no pid-log file exists — proven "no fixture
+///   child was ever recorded" (this is what lets a childless fixture clean
+///   up).
+/// - [`PidLog::Recorded`]: the log parsed into pid records.
+/// - [`PidLog::Unreadable`]: the log exists but could not be read or parsed
+///   — NO child outcome is knowable, so cleanup must preserve the fixture
+///   tree instead of guessing.
+pub enum PidLog {
+    NeverStarted,
+    Recorded(Vec<i32>),
+    Unreadable(String),
+}
+
+/// Result-based read of the fixture pid log. Read/parse failures are values,
+/// never defaults: an unreadable log can neither prove liveness nor exit.
+pub fn recorded_pids_result(fixture_dir: &Path) -> PidLog {
+    let content = match std::fs::read_to_string(fixture_dir.join("pid-log")) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return PidLog::NeverStarted;
+        }
+        Err(error) => return PidLog::Unreadable(format!("read pid-log: {error}")),
+    };
+    let mut pids = Vec::new();
+    for line in content.lines() {
+        match line.trim().parse::<i32>() {
+            Ok(pid) if pid > 1 => pids.push(pid),
+            Ok(pid) => {
+                return PidLog::Unreadable(format!("invalid fixture child PID {pid}"));
+            }
+            Err(_) => {
+                return PidLog::Unreadable(format!("malformed pid record {line:?}"));
+            }
+        }
+    }
+    PidLog::Recorded(pids)
+}
+
+/// Probe-count convenience over [`recorded_pids_result`]: never-started is
+/// an empty list; an unreadable/malformed log is a fixture bug and panics
+/// loudly instead of pretending zero children. Cleanup paths must use
+/// [`recorded_pids_result`] so unreadable logs PRESERVE fixtures.
 pub fn recorded_pids(fixture_dir: &Path) -> Vec<i32> {
-    std::fs::read_to_string(fixture_dir.join("pid-log"))
-        .map(|content| {
-            content
-                .lines()
-                .map(|line| {
-                    let pid = line
-                        .trim()
-                        .parse::<i32>()
-                        .expect("invalid fixture PID record");
-                    assert!(pid > 1, "invalid fixture child PID");
-                    pid
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    match recorded_pids_result(fixture_dir) {
+        PidLog::Recorded(pids) => pids,
+        PidLog::NeverStarted => Vec::new(),
+        PidLog::Unreadable(reason) => {
+            panic!("fixture pid log unreadable (fixture bug): {reason}")
+        }
+    }
 }
 
 pub fn pid_dir(env: &ProbeEnv) -> PathBuf {
