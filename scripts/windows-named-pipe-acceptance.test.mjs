@@ -152,6 +152,11 @@ async function withDaemon(context, run, { env = {} } = {}) {
     // primary teardown path. `admitted` records whether the shutdown RPC was
     // actually ADMITTED, not merely attempted.
     let admitted = false;
+    // Bound to the error that prevented admission, distinct from
+    // "unresponsive/gone": an explicit rejection of runtime.shutdown must
+    // stay visible in the eventual failure message, never collapse into an
+    // indistinguishable `admitted: false`.
+    let shutdownAttemptError;
     try {
       const status = await cli(["status"], { timeout: 2000 });
       if (status.ok === true) {
@@ -161,9 +166,10 @@ async function withDaemon(context, run, { env = {} } = {}) {
         });
         admitted = true;
       }
-    } catch {
-      // Daemon unresponsive or already gone; the bounded observation below
-      // still runs before any force.
+    } catch (error) {
+      // Daemon unresponsive, already gone, or shutdown was rejected; the
+      // bounded observation below still runs before any force.
+      shutdownAttemptError = error;
     }
     // Graceful-first: give the admitted (or never-responsive) daemon a
     // bounded window to actually exit before any signal is sent.
@@ -187,17 +193,25 @@ async function withDaemon(context, run, { env = {} } = {}) {
     if (result.verdict === "exited") {
       await rm(fixture, { recursive: true, force: true });
     } else {
+      // Surface whichever diagnostic the failure actually produced: a
+      // rejected/errored shutdown attempt, and/or stopAcceptanceProcess's own
+      // `error` (set when its kill() itself threw) — neither may be dropped
+      // from the loud failure below.
+      const shutdownDetail = shutdownAttemptError
+        ? `; shutdown attempt error: ${shutdownAttemptError.message}`
+        : "";
+      const stopDetail = result.error ? `; stop error: ${result.error}` : "";
       console.error(
         `[${context.name}] preserving fixture ${fixture} (contains the dataDir ` +
           `workspace): daemon stop verdict was ${JSON.stringify(result.verdict)}, ` +
           `not the provable "exited"; actual teardown path ${actualPath} ` +
-          `(shutdown admitted: ${admitted}, forced: ${result.forced}).`,
+          `(shutdown admitted: ${admitted}, forced: ${result.forced})${shutdownDetail}${stopDetail}.`,
       );
       assert.fail(
         `[${context.name}] the owned daemon must be provably stopped, never left ` +
           `running (actual teardown path: ${actualPath}; shutdown admitted: ${admitted}; ` +
           `forced: ${result.forced}); stop verdict was ${JSON.stringify(result.verdict)}, ` +
-          `so the fixture is preserved at ${fixture}`,
+          `so the fixture is preserved at ${fixture}${shutdownDetail}${stopDetail}`,
       );
     }
   });
