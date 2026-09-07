@@ -170,13 +170,22 @@ already holding a database lock needed by the other path.
 ### Reports, duplicate outcomes and prompt observation
 
 Source `db/dispatch-context/worker-report-settlement.ts` explicitly corrects a
-false failure caused by `AGENT_PROMPT_STALLED_ERROR`: the preamble can have reached
-the worker before observation expired. Preserve the *behavior*, not the false
-failure state. In Drogon, a prompt observation timeout leaves readiness unverified
-and the attempt active/inspectable. It neither revokes the capability nor unlocks
-replacement. An authenticated final report can still settle that exact attempt.
-Genuine launch failure, explicit cancellation and confirmed process exit remain
-different evidence. The selected source regression must map to this invariant.
+failure caused by `AGENT_PROMPT_STALLED_ERROR`: the preamble can have reached the
+worker before observation expired. Root's earlier active-only proposal did not
+preserve the source's observable failed state or explicit retry behavior. The
+2026-09-07 source review supersedes that proposal: retain the compatibility
+task/assignment `failed` state with this exact observation-failure reason, while
+keeping reported outcome unset, readiness unverified and process verdict separate.
+The capability remains valid for that attempt's first real report unless an
+explicit cancellation, abandonment or replacement has fenced it. This is not
+evidence that the process exited or that the worker reported failure.
+
+Preserve explicit `retryOf` for the latest failed/stopped/abandoned attempt when
+its task is failed/blocked, as `worker-dispatch-start.ts` requires. A timeout alone
+never starts a replacement. The replacement transaction fences old authority;
+late original reports cannot settle the replacement. Existing uncertain/live
+resources remain recorded and inspectable, never implicitly killed or forgotten.
+These are compatibility state transitions, not new process-death evidence.
 
 | Report condition | Required result |
 | --- | --- |
@@ -185,7 +194,7 @@ different evidence. The selected source regression must map to this invariant.
 | Same attempt already reported the same outcome, no active replacement | Duplicate receipt identifying the original report; preserve original body/result, do not create another final message |
 | Same attempt already reported a different outcome | Refuse; no overwrite |
 | Cancelled, abandoned or superseded attempt | Refuse a fresh settlement, never complete its replacement |
-| Prompt not observed, exact active worker later reports | Accept once; lack of TUI observation is not a cancellation fence |
+| Prompt not observed, exact non-replaced worker later reports | Accept its first real report once, including a failed report replacing the observation-failure placeholder |
 
 Credential revocation prevents new worker effects but must retain enough scoped
 identity to recover an exact committed report receipt. This is not general
@@ -309,6 +318,8 @@ Windows build and Unix runtime coverage stated separately.
 Read at the pinned Orca revision: `src/shared/orchestration-rpc-contract.ts`,
 `src/main/runtime/orchestration/db/runs/run-delivery.ts`,
 `src/main/runtime/orchestration/db/dispatch-capability-hash.ts`,
+`src/main/runtime/orchestration/db/worker-dispatch/worker-dispatch-start.ts`,
+`src/main/runtime/orchestration/db/dispatch-context/worker-report-settlement.ts`,
 `docs/reference/remote-wire-compatibility.md`, and
 `docs/reference/ssh-execution-boundary.md`. Preserve attribution for adapted code.
 Current Drogon integration seams: `crates/drogon-core/src/requests.rs`, `db.rs`,
