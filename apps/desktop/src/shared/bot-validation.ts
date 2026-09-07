@@ -1,0 +1,79 @@
+import { z } from "zod";
+
+const id = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[^\x00-\x1f\x7f]+$/u);
+const scope = z.object({ hostId: id, workspaceId: id });
+const timestamp = z.number().finite();
+const recipe = z.object({
+  recipeRef: z.string(),
+  runId: z.string().nullable(),
+  evidencePath: z.string().nullable(),
+});
+const observation = z.enum(["live", "unverifiable", "exited"]);
+const responsibility = z.object({
+  id: z.string(),
+  name: z.string(),
+  instructions: z.string(),
+  kind: z.enum(["reactive", "scheduled"]),
+  trigger: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("reactive"), event: z.string().nullable() }),
+    z.object({ kind: z.literal("scheduled"), automationId: z.string() }),
+  ]),
+  enabled: z.boolean(),
+  recipe: recipe.nullable(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+const bot = z.object({
+  id: z.string(),
+  characterPreset: z.string(),
+  displayIdentity: z.object({
+    displayName: z.string(),
+    handle: z.string().nullable(),
+    title: z.string().nullable(),
+  }),
+  harnessPolicy: z.object({
+    defaultHarness: z.string(),
+    explicitModel: z.string().nullable(),
+  }),
+  instructions: z.string(),
+  memories: z.array(z.string()),
+  responsibilities: z.array(responsibility),
+  currentSession: z
+    .object({
+      sessionId: z.string(),
+      harness: z.string(),
+      model: z.string().nullable(),
+      startedAt: timestamp,
+      rotatedAt: timestamp.nullable(),
+    })
+    .nullable(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+const history = z.object({
+  run: z.object({
+    id: z.string(),
+    botId: z.string(),
+    responsibilityId: z.string(),
+    automationId: z.string().nullable(),
+    automationRunId: z.string().nullable(),
+    startedAt: timestamp,
+    endedAt: timestamp.nullable(),
+    recipe: recipe.nullable(),
+    hostObservation: observation.nullable(),
+  }),
+  responsibilityName: z.string().nullable(),
+  automationName: z.string().nullable(),
+  automationRunNumber: z.number().finite().nullable(),
+});
+export const botSnapshotInputSchema = scope
+  .extend({ locale: z.string().min(1).max(128) })
+  .strict();
+export const botSnapshotResultSchema = scope.extend({
+  bots: z.array(bot),
+  history: z.array(history),
+});

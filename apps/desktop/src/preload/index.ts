@@ -5,6 +5,7 @@ import { installBrowserWindowCloseGuard } from "./browser-window-close-installat
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
 const bridge: DesktopBridge = {
+  botSnapshot: (value) => ipcRenderer.invoke("drogon:botSnapshot", value),
   fileList: (value) => ipcRenderer.invoke("drogon:fileList", value),
   fileRead: (value) => ipcRenderer.invoke("drogon:fileRead", value),
   fileWrite: (value) => ipcRenderer.invoke("drogon:fileWrite", value),

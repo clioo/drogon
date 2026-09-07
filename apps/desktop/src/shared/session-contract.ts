@@ -1,4 +1,5 @@
 import type { FileBridge } from "./file-contract";
+import type { BotBridge } from "./bot-contract";
 
 export type Verdict = "live" | "unverifiable" | "exited";
 export type Workspace = {
@@ -59,7 +60,7 @@ export type ReadResult = {
 export type Result<T> =
   | { ok: true; result: T }
   | { ok: false; error: { code: string; message: string; retryable: boolean } };
-export interface DesktopBridge extends FileBridge {
+export interface DesktopBridge extends FileBridge, BotBridge {
   status(): Promise<Result<Status>>;
   workspaces(): Promise<Result<{ workspaces: Workspace[] }>>;
   addWorkspace(path: string): Promise<Result<Workspace>>;
