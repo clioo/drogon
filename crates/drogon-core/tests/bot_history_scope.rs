@@ -188,14 +188,17 @@ fn raw_run_row_count(conn: &Connection, bot_id: &str) -> i64 {
 /// whether a scope stamp was attached) rather than only on what a read API
 /// chooses to expose.
 fn raw_payload_json(conn: &Connection, run_id: &str) -> serde_json::Value {
-    let json: String = conn
-        .query_row(
-            "SELECT payload_json FROM bot_responsibility_runs WHERE id = ?1",
-            [run_id],
-            |r| r.get(0),
-        )
-        .unwrap();
-    serde_json::from_str(&json).unwrap()
+    serde_json::from_str(&raw_payload_json_string(conn, run_id)).unwrap()
+}
+
+/// Byte-exact variant of [`raw_payload_json`] for before/after comparisons.
+fn raw_payload_json_string(conn: &Connection, run_id: &str) -> String {
+    conn.query_row(
+        "SELECT payload_json FROM bot_responsibility_runs WHERE id = ?1",
+        [run_id],
+        |r| r.get(0),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -461,19 +464,14 @@ fn record_responsibility_run_refuses_a_cross_scope_dedup_replay_against_a_fully_
     .unwrap();
     assert_eq!(first.id, "run-record-1");
 
-    // Delete the folder-A bot (its run stays as orphaned evidence, stamped
-    // to folder A -- see delete_bot's doc), freeing the globally-unique
-    // `bots.id` primary key so a second row for the same id can exist at
-    // all. Then raw-insert a bot row for the SAME id "d1" directly into
-    // folder B (bypassing create_bot's own gate, which would otherwise now
-    // refuse this -- this reproduces exactly the pre-W1 legacy shape being
-    // guarded against: a bot id that already lived, with runs, in a
-    // different scope).
+    // Delete the folder-A bot (the run survives as folder-A-stamped
+    // orphaned evidence), then raw-insert a same-id bot directly into
+    // folder B: the pre-W1 legacy shape this dedup fence guards against.
     assert!(bstorage::delete_bot(&c, HOST, FOLDER_A, "d1").unwrap());
     // delete_bot clears ownership of every automation owned by this bot_id
     // (bot_id is a global key on Automation, not scoped) -- re-claim "a1"
-    // for the recreated "d1" so the test actually reaches the dedup/merge
-    // path below instead of failing earlier on a plain ownership check.
+    // for the recreated "d1" so the test reaches the dedup/merge path
+    // instead of failing on a plain ownership check.
     let mut reclaimed = automation.clone();
     reclaimed.bot_id = Some("d1".to_string());
     automations::storage::upsert_automation(&c, &reclaimed).unwrap();
@@ -484,6 +482,9 @@ fn record_responsibility_run_refuses_a_cross_scope_dedup_replay_against_a_fully_
         rusqlite::params![bot_b.id, HOST, FOLDER_B, bot_b.updated_at, payload_b],
     )
     .unwrap();
+
+    // Capture the survivor's exact bytes before the refused replay.
+    let payload_before = raw_payload_json_string(&c, "run-record-1");
 
     // Replaying the SAME automation_run_id from folder B's scope must be
     // refused: the existing row is fully stamped to folder A, and folder
@@ -507,11 +508,17 @@ fn record_responsibility_run_refuses_a_cross_scope_dedup_replay_against_a_fully_
     .unwrap_err();
     assert!(matches!(err, bstorage::StorageError::OwnershipViolation(_)));
 
-    // The existing row must be completely untouched: still exactly one
-    // row for this automation_run_id, still the original id, still no
-    // ended_at.
+    // The refusal leaves the row untouched: exactly one row for this
+    // automation_run_id, byte-identical payload, and endedAt genuinely
+    // present as null. (The old `["ended_at"]` form indexed a missing
+    // snake_case key in the serde camelCase envelope -- vacuously Null.)
     assert_eq!(raw_run_row_count(&c, "d1"), 1);
-    let survivor = raw_payload_json(&c, "run-record-1");
+    let payload_after = raw_payload_json_string(&c, "run-record-1");
+    assert_eq!(
+        payload_after, payload_before,
+        "a refused replay must be byte-identical"
+    );
+    let survivor: serde_json::Value = serde_json::from_str(&payload_after).unwrap();
     assert_eq!(survivor.get("endedAt"), Some(&serde_json::Value::Null));
 }
 
