@@ -2,10 +2,28 @@
 //! ROOT-approved contract, composed on top of `bots::policy` +
 //! `automations::runner`'s 3-phase flow (never duplicating either).
 //!
+//! ## Chat turns (`prompt`, R2-S)
+//!
+//! `bot.run` also accepts a `prompt` in place of `responsibilityId`/
+//! `reason`/`eventIdentity` -- a raw chat turn with no `Responsibility`/
+//! `Automation` behind it. [`RunTurn::Chat`] carries this; it bypasses
+//! `bots::policy`/`automations::runner::prepare_run_plan_in_tx` entirely
+//! (both require an owned `Automation`, which a chat turn never has) and
+//! instead composes the harness prompt via `bots::prompt::build_operating_prompt`
+//! and dispatches directly through the same [`DispatchSeam`] (never through
+//! [`RunPlan`], which is shaped around a real `Automation`/`Responsibility`
+//! pair). The turn is persisted as a [`BotMessage`] row (`bot_messages`
+//! table, `bots::storage::record_bot_message_in_tx`) instead of a
+//! `ResponsibilityRun` -- a distinct effect, not a parallel copy of the
+//! existing one. `bot.history` (below) reads these rows back.
+//!
 //! ## Request contract (strict; unknown fields denied)
 //!
 //! `{workspaceId*, hostId*, botId*, responsibilityId*, reason*:
-//! scheduledDue|manual|reactiveEvent, eventIdentity*, harness?, locale?}`.
+//! scheduledDue|manual|reactiveEvent, eventIdentity*, harness?, locale?}`,
+//! OR `{workspaceId*, hostId*, botId*, prompt*, harness?, locale?}` for a
+//! chat turn -- `responsibilityId`/`reason`/`eventIdentity` and `prompt` are
+//! mutually exclusive.
 //! `requestId` is NOT an admitted param: the native envelope carries it, and
 //! ROOT's wiring takes it explicitly, never from `params`. `hostId` is a
 //! client ASSERTION tripwire only -- the server always derives the current
@@ -134,7 +152,10 @@ use crate::automations::runner::{
     RunRefusal, RunUnsupported, RunnerOutcome,
 };
 use crate::bots::policy::ResponsibilityRefusal;
+use crate::bots::records::{BotMessage, HostObservation};
+use crate::bots::storage as bots_storage;
 use drogon_protocol::RpcError;
+use drogon_protocol::bot::{BotHistoryResult, BotHostObservation, BotMessageWire};
 
 /// Who is calling. ROOT's wiring maps the private auth layer's
 /// `WorkerBinding` onto [`BotRunCaller::Worker`]; `bot.run` is desktop-only
@@ -198,6 +219,21 @@ pub struct HarnessOverrides {
     permission_mode: Option<String>,
 }
 
+/// A `bot.run` call is either a scheduled/reactive/manual responsibility
+/// invocation, or a raw chat turn carrying its own `prompt`. Mutually
+/// exclusive on the wire (see [`parse_bot_run_request`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum RunTurn {
+    Responsibility {
+        responsibility_id: String,
+        reason: Reason,
+        event_identity: String,
+    },
+    Chat {
+        prompt: String,
+    },
+}
+
 /// The strict, normalized request. The envelope `request_id` is deliberately
 /// not a field: it keys the delegated ledger and never enters the
 /// fingerprint. Serialization of this struct is the fingerprint input.
@@ -208,14 +244,30 @@ pub struct BotRunRequest {
     /// trusted for authority.
     asserted_host_id: String,
     bot_id: String,
-    responsibility_id: String,
-    reason: Reason,
-    event_identity: String,
+    turn: RunTurn,
     #[serde(skip_serializing_if = "Option::is_none")]
     harness: Option<HarnessOverrides>,
     #[serde(skip_serializing_if = "Option::is_none")]
     locale: Option<String>,
 }
+
+/// A chat turn's own owned plan -- the [`RunPlan`] equivalent for
+/// [`RunTurn::Chat`]. Holds no `Connection`/seam reference, same as
+/// `RunPlan`, but carries no `automation_id`/`responsibility_id` since
+/// neither exists for a chat turn.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatPlan {
+    pub bot_id: String,
+    pub request_id: String,
+    pub params: Value,
+    pub prompt: String,
+    pub attempt_at: f64,
+}
+
+/// Bound on the raw chat message: generous enough for a real conversational
+/// turn, small enough that a single message cannot alone approach
+/// `drogon_protocol::MAX_FRAME_BYTES`.
+const MAX_CHAT_PROMPT_CHARS: usize = 20_000;
 
 fn invalid_argument(message: impl Into<String>) -> RpcError {
     RpcError::new("invalid_argument", message.into())
@@ -293,7 +345,10 @@ fn parse_harness(value: &Value) -> Result<HarnessOverrides, RpcError> {
 
 /// Strict parse: unknown top-level fields are denied (including a params
 /// `requestId` -- the envelope carries it), every starred field is required,
-/// and ids must be non-empty after trim.
+/// and ids must be non-empty after trim. A `prompt` key (chat turn) and
+/// `responsibilityId`/`reason`/`eventIdentity` (responsibility turn) are
+/// mutually exclusive; supplying both is rejected rather than silently
+/// preferring one.
 pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> {
     let object = params
         .as_object()
@@ -305,6 +360,7 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         "responsibilityId",
         "reason",
         "eventIdentity",
+        "prompt",
         "harness",
         "locale",
     ];
@@ -317,13 +373,33 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         None | Some(Value::Null) => None,
         Some(value) => Some(parse_harness(value)?),
     };
+    let has_prompt = matches!(object.get("prompt"), Some(value) if !value.is_null());
+    let turn = if has_prompt {
+        for key in ["responsibilityId", "reason", "eventIdentity"] {
+            if object.contains_key(key) {
+                return Err(invalid_argument(format!(
+                    "field {key} must not be set alongside prompt (a chat turn carries no \
+                     responsibility)"
+                )));
+            }
+        }
+        let prompt = required_string(params, "prompt")?;
+        if prompt.chars().count() > MAX_CHAT_PROMPT_CHARS {
+            return Err(invalid_argument("field prompt exceeds the maximum length"));
+        }
+        RunTurn::Chat { prompt }
+    } else {
+        RunTurn::Responsibility {
+            responsibility_id: required_string(params, "responsibilityId")?,
+            reason: Reason::parse(object.get("reason").unwrap_or(&Value::Null))?,
+            event_identity: required_string(params, "eventIdentity")?,
+        }
+    };
     Ok(BotRunRequest {
         workspace_id: required_string(params, "workspaceId")?,
         asserted_host_id: required_string(params, "hostId")?,
         bot_id: required_string(params, "botId")?,
-        responsibility_id: required_string(params, "responsibilityId")?,
-        reason: Reason::parse(object.get("reason").unwrap_or(&Value::Null))?,
-        event_identity: required_string(params, "eventIdentity")?,
+        turn,
         harness,
         locale: optional_string(params, "locale")?,
     })
@@ -440,6 +516,7 @@ pub fn build_receipt(
     session: Option<Value>,
     automation_run_id: Option<String>,
     responsibility_run_id: Option<String>,
+    message_id: Option<String>,
     error: Value,
     observed_at: Option<f64>,
     recorded_at: f64,
@@ -450,6 +527,7 @@ pub fn build_receipt(
         "workspaceId": workspace_id,
         "automationRunId": automation_run_id,
         "responsibilityRunId": responsibility_run_id,
+        "messageId": message_id,
         "session": session,
         "outcome": outcome,
         "refusal": refusal,
@@ -557,8 +635,12 @@ pub enum BotRunPrepare {
         reason: Value,
         error: String,
     },
-    Ready {
+    ReadyResponsibility {
         plan: RunPlan,
+        workspace_id: String,
+    },
+    ReadyChat {
+        plan: ChatPlan,
         workspace_id: String,
     },
 }
@@ -582,6 +664,7 @@ pub enum BotRunPrepare {
 pub fn authorized_prepare(
     conn: &Connection,
     derived_host_id: &str,
+    envelope_request_id: &str,
     request: &BotRunRequest,
     attempt_at: f64,
 ) -> Result<BotRunPrepare, RpcError> {
@@ -656,38 +739,187 @@ pub fn authorized_prepare(
         permission_mode: harness.permission_mode.clone(),
     };
 
-    let prepared = runner::prepare_run_plan_in_tx(
-        conn,
-        derived_host_id,
-        &folder,
-        &request.bot_id,
-        &request.responsibility_id,
-        derived_host_id,
-        &request.reason.to_invocation_reason(&request.event_identity),
-        &request.event_identity,
-        &harness_params,
-        attempt_at,
-    );
-    match prepared {
-        Ok(PrepareOutcome::Ready(plan)) => Ok(BotRunPrepare::Ready { plan, workspace_id }),
-        Ok(PrepareOutcome::Refused(refusal)) => {
-            let (object, message) = render_refusal(&refusal);
-            Ok(BotRunPrepare::Refused {
+    match &request.turn {
+        RunTurn::Responsibility {
+            responsibility_id,
+            reason,
+            event_identity,
+        } => {
+            let prepared = runner::prepare_run_plan_in_tx(
+                conn,
+                derived_host_id,
+                &folder,
+                &request.bot_id,
+                responsibility_id,
+                derived_host_id,
+                &reason.to_invocation_reason(event_identity),
+                event_identity,
+                &harness_params,
+                attempt_at,
+            );
+            match prepared {
+                Ok(PrepareOutcome::Ready(plan)) => {
+                    Ok(BotRunPrepare::ReadyResponsibility { plan, workspace_id })
+                }
+                Ok(PrepareOutcome::Refused(refusal)) => {
+                    let (object, message) = render_refusal(&refusal);
+                    Ok(BotRunPrepare::Refused {
+                        workspace_id,
+                        refusal: object,
+                        error: message,
+                    })
+                }
+                Ok(PrepareOutcome::Unsupported(unsupported)) => {
+                    let (reason, message) = render_unsupported(&unsupported);
+                    Ok(BotRunPrepare::Unsupported {
+                        workspace_id,
+                        reason,
+                        error: message,
+                    })
+                }
+                Err(e) => Err(internal_error(format!("failed to load bot run state: {e}"))),
+            }
+        }
+        RunTurn::Chat { prompt } => {
+            let Some(bot) = bots_storage::get_bot(conn, derived_host_id, &folder, &request.bot_id)
+                .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
+            else {
+                return Ok(BotRunPrepare::Refused {
+                    workspace_id,
+                    refusal: json!({"type": "bot", "kind": "unknownBot", "botId": request.bot_id}),
+                    error: format!("bot {} not found", request.bot_id),
+                });
+            };
+            let operating_prompt = crate::bots::prompt::build_operating_prompt(&bot, prompt);
+            let chat_request_id = format!("bot-chat:{envelope_request_id}");
+            let params =
+                build_chat_harness_start_params(&workspace_id, &operating_prompt, &harness_params);
+            Ok(BotRunPrepare::ReadyChat {
+                plan: ChatPlan {
+                    bot_id: request.bot_id.clone(),
+                    request_id: chat_request_id,
+                    params,
+                    prompt: prompt.clone(),
+                    attempt_at,
+                },
                 workspace_id,
-                refusal: object,
-                error: message,
             })
         }
-        Ok(PrepareOutcome::Unsupported(unsupported)) => {
-            let (reason, message) = render_unsupported(&unsupported);
-            Ok(BotRunPrepare::Unsupported {
-                workspace_id,
-                reason,
-                error: message,
-            })
-        }
-        Err(e) => Err(internal_error(format!("failed to load bot run state: {e}"))),
     }
+}
+
+/// Chat-turn equivalent of `automations::runner`'s private
+/// `build_harness_start_params`: same shape, since `harness.start` itself
+/// has no concept of responsibilities/automations.
+fn build_chat_harness_start_params(
+    workspace_id: &str,
+    prompt: &str,
+    harness_params: &HarnessLaunchParams,
+) -> Value {
+    let mut params = json!({
+        "workspaceId": workspace_id,
+        "harnessId": harness_params.harness_id,
+        "prompt": prompt,
+    });
+    if let Some(model) = &harness_params.model {
+        params["model"] = json!(model);
+    }
+    if let Some(effort) = &harness_params.effort {
+        params["effort"] = json!(effort);
+    }
+    if let Some(provider) = &harness_params.provider {
+        params["provider"] = json!(provider);
+    }
+    if let Some(permission_mode) = &harness_params.permission_mode {
+        params["permissionMode"] = json!(permission_mode);
+    }
+    params
+}
+
+/// Chat-turn equivalent of `automations::runner::dispatch_run_plan`: the
+/// same one-`harness_start`-plus-one-`session_read` composition, over
+/// [`ChatPlan`] instead of [`RunPlan`] (which requires an owned
+/// `Automation`/`Responsibility` a chat turn never has).
+pub fn execute_chat<S: DispatchSeam>(plan: &ChatPlan, seam: &S) -> RunnerOutcome {
+    let started = match seam.harness_start(&plan.request_id, plan.params.clone()) {
+        Ok(started) => started,
+        Err(err) => return RunnerOutcome::DispatchFailed(err),
+    };
+    match seam.session_read(&started.session_id, &started.incarnation) {
+        Ok(observation) => RunnerOutcome::Observed {
+            session_id: started.session_id,
+            incarnation: started.incarnation,
+            verdict: observation.verdict,
+            exit_code: observation.exit_code,
+        },
+        Err(err) => RunnerOutcome::ObservationFailed {
+            session_id: started.session_id,
+            incarnation: started.incarnation,
+            error: err,
+        },
+    }
+}
+
+fn host_observation_of(verdict: &str) -> HostObservation {
+    if verdict == "exited" {
+        HostObservation::Exited
+    } else {
+        HostObservation::Live
+    }
+}
+
+/// Durable record for a chat turn: connection-bound (opens no transaction
+/// of its own), meant to run inside the delegated ledger's own `finalize`
+/// transaction, same as [`record`]. `message_id` is minted once in `effect`
+/// (so the receipt's `messageId` and the persisted row share the same id)
+/// and threaded in rather than minted here.
+pub fn record_chat(
+    conn: &Connection,
+    plan: &ChatPlan,
+    outcome: &RunnerOutcome,
+    observed_at: f64,
+    message_id: String,
+) -> Result<(), RpcError> {
+    let (session_id, incarnation, host_observation, ended_at, error) = match outcome {
+        RunnerOutcome::Observed {
+            session_id,
+            incarnation,
+            verdict,
+            ..
+        } => (
+            Some(session_id.clone()),
+            Some(incarnation.clone()),
+            Some(host_observation_of(verdict)),
+            Some(observed_at),
+            None,
+        ),
+        RunnerOutcome::ObservationFailed {
+            session_id,
+            incarnation,
+            error,
+        } => (
+            Some(session_id.clone()),
+            Some(incarnation.clone()),
+            Some(HostObservation::Unverifiable),
+            Some(observed_at),
+            Some(error.to_string()),
+        ),
+        RunnerOutcome::DispatchFailed(error) => (None, None, None, None, Some(error.to_string())),
+    };
+    let message = BotMessage {
+        id: message_id,
+        bot_id: plan.bot_id.clone(),
+        request_id: plan.request_id.clone(),
+        prompt: plan.prompt.clone(),
+        session_id,
+        incarnation,
+        host_observation,
+        error,
+        started_at: plan.attempt_at,
+        ended_at,
+    };
+    bots_storage::record_bot_message_in_tx(conn, &message)
+        .map_err(|e| internal_error(format!("failed to record bot message: {e}")))
 }
 
 /// Phase 2: no `Connection` -- the caller MUST have released its DB guard
@@ -711,6 +943,14 @@ pub fn record(
         .map_err(|e| internal_error(format!("failed to record bot run: {e}")))
 }
 
+/// What [`Engine::bot_run`]'s `effect` phase hands to its `finalize` phase:
+/// the owned plan plus its outcome, tagged by which turn kind actually ran
+/// (a single call is always exactly one of the two).
+enum PreparedOutcome {
+    Responsibility(RunPlan, RunnerOutcome, f64),
+    Chat(ChatPlan, RunnerOutcome, f64, String),
+}
+
 /// The applied ROOT adapter: composes the staged primitives above onto
 /// `RequestLedger::run_staged`. See this module's doc for why no outer
 /// `lifecycle_gate` guard is taken here, unlike `bot_create`.
@@ -722,7 +962,7 @@ impl crate::Engine {
         let method = request.method.clone();
         let params = request.params.clone();
         let seam = EngineDispatchSeam::new(self);
-        let outcome_slot: Cell<Option<(RunPlan, RunnerOutcome, f64)>> = Cell::new(None);
+        let outcome_slot: Cell<Option<PreparedOutcome>> = Cell::new(None);
         self.ledger.run_staged(
             &self.db,
             &request_id,
@@ -743,7 +983,7 @@ impl crate::Engine {
                 let attempt_at = crate::now_unix_ms() as f64;
                 Ok((
                     attempt_at,
-                    authorized_prepare(tx, &derived_host_id, &parsed, attempt_at)?,
+                    authorized_prepare(tx, &derived_host_id, &request_id, &parsed, attempt_at)?,
                 ))
             },
             |(attempt_at, prepared)| match prepared {
@@ -758,6 +998,7 @@ impl crate::Engine {
                     "refused",
                     refusal,
                     Value::Null,
+                    None,
                     None,
                     None,
                     None,
@@ -779,11 +1020,12 @@ impl crate::Engine {
                     None,
                     None,
                     None,
+                    None,
                     Value::String(error),
                     None,
                     attempt_at,
                 )),
-                BotRunPrepare::Ready { plan, workspace_id } => {
+                BotRunPrepare::ReadyResponsibility { plan, workspace_id } => {
                     let outcome = execute(&plan, &seam);
                     // Strictly after `execute` returns: the actual
                     // `session.read` wall time, never the admission sample.
@@ -803,6 +1045,7 @@ impl crate::Engine {
                             Some(json!({"sessionId": session_id, "incarnation": incarnation})),
                             Some(format!("ar:{}", plan.request_id)),
                             Some(plan.request_id.clone()),
+                            None,
                             Value::Null,
                             Some(observed_at),
                             attempt_at,
@@ -821,6 +1064,7 @@ impl crate::Engine {
                             Some(json!({"sessionId": session_id, "incarnation": incarnation})),
                             Some(format!("ar:{}", plan.request_id)),
                             Some(plan.request_id.clone()),
+                            None,
                             Value::String(error.to_string()),
                             Some(observed_at),
                             attempt_at,
@@ -835,21 +1079,173 @@ impl crate::Engine {
                             None,
                             Some(format!("ar:{}", plan.request_id)),
                             Some(plan.request_id.clone()),
+                            None,
                             Value::String(error.to_string()),
                             None,
                             attempt_at,
                         ),
                     };
-                    outcome_slot.set(Some((plan, outcome, observed_at)));
+                    outcome_slot.set(Some(PreparedOutcome::Responsibility(
+                        plan,
+                        outcome,
+                        observed_at,
+                    )));
+                    Ok(receipt)
+                }
+                BotRunPrepare::ReadyChat { plan, workspace_id } => {
+                    let outcome = execute_chat(&plan, &seam);
+                    // Strictly after `execute_chat` returns, same rule as
+                    // the responsibility path.
+                    let observed_at = crate::now_unix_ms() as f64;
+                    let message_id = uuid::Uuid::new_v4().to_string();
+                    let receipt = match &outcome {
+                        RunnerOutcome::Observed {
+                            session_id,
+                            incarnation,
+                            ..
+                        } => build_receipt(
+                            &request_id,
+                            &derived_host_id,
+                            &workspace_id,
+                            "dispatched",
+                            Value::Null,
+                            Value::Null,
+                            Some(json!({"sessionId": session_id, "incarnation": incarnation})),
+                            None,
+                            None,
+                            Some(message_id.clone()),
+                            Value::Null,
+                            Some(observed_at),
+                            attempt_at,
+                        ),
+                        RunnerOutcome::ObservationFailed {
+                            session_id,
+                            incarnation,
+                            error,
+                        } => build_receipt(
+                            &request_id,
+                            &derived_host_id,
+                            &workspace_id,
+                            "dispatched",
+                            Value::Null,
+                            Value::Null,
+                            Some(json!({"sessionId": session_id, "incarnation": incarnation})),
+                            None,
+                            None,
+                            Some(message_id.clone()),
+                            Value::String(error.to_string()),
+                            Some(observed_at),
+                            attempt_at,
+                        ),
+                        RunnerOutcome::DispatchFailed(error) => build_receipt(
+                            &request_id,
+                            &derived_host_id,
+                            &workspace_id,
+                            "refused",
+                            Value::Null,
+                            Value::Null,
+                            None,
+                            None,
+                            None,
+                            Some(message_id.clone()),
+                            Value::String(error.to_string()),
+                            None,
+                            attempt_at,
+                        ),
+                    };
+                    outcome_slot.set(Some(PreparedOutcome::Chat(
+                        plan,
+                        outcome,
+                        observed_at,
+                        message_id,
+                    )));
                     Ok(receipt)
                 }
             },
             |tx, _result| {
-                if let Some((plan, outcome, observed_at)) = outcome_slot.take() {
-                    record(tx, &plan, &outcome, observed_at)?;
+                match outcome_slot.take() {
+                    Some(PreparedOutcome::Responsibility(plan, outcome, observed_at)) => {
+                        record(tx, &plan, &outcome, observed_at)?;
+                    }
+                    Some(PreparedOutcome::Chat(plan, outcome, observed_at, message_id)) => {
+                        record_chat(tx, &plan, &outcome, observed_at, message_id)?;
+                    }
+                    None => {}
                 }
                 Ok(())
             },
         )
+    }
+
+    /// `bot.history {workspaceId, hostId, botId, limit?}`: newest-first
+    /// chat-turn history for one bot, bounded by `limit` (default
+    /// [`DEFAULT_HISTORY_LIMIT`], clamped to [`MAX_HISTORY_LIMIT`]). A plain
+    /// scoped read -- no ledger, no mutation -- following the same
+    /// `workspace::owned_path` scope check `bot.snapshot` uses.
+    pub(crate) fn bot_history(&self, params: &Value) -> Result<Value, RpcError> {
+        let scope: HistoryScope = serde_json::from_value(params.clone())
+            .map_err(|_| invalid_argument("Invalid Bot history scope"))?;
+        if scope.workspace_id.is_empty() || scope.bot_id.is_empty() {
+            return Err(invalid_argument("Invalid Bot history scope"));
+        }
+        let limit = scope
+            .limit
+            .map(i64::from)
+            .unwrap_or(DEFAULT_HISTORY_LIMIT)
+            .clamp(1, MAX_HISTORY_LIMIT);
+        let conn = self.db.lock().unwrap();
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| internal_error(format!("bot history lookup failed: {e}")))?;
+        let folder =
+            crate::workspace::owned_path(&tx, &self.host_id, &scope.workspace_id, &scope.host_id)?;
+        let messages = bots_storage::history_for_bot_messages(
+            &tx,
+            &self.host_id,
+            &folder,
+            &scope.bot_id,
+            limit,
+        )
+        .map_err(|e| internal_error(format!("failed to read bot history: {e}")))?;
+        let result = BotHistoryResult {
+            host_id: self.host_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            bot_id: scope.bot_id.clone(),
+            messages: messages.into_iter().map(bot_message_wire).collect(),
+        };
+        serde_json::to_value(&result)
+            .map_err(|_| internal_error("Bot history serialization failed".to_string()))
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HistoryScope {
+    workspace_id: String,
+    host_id: String,
+    bot_id: String,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+const DEFAULT_HISTORY_LIMIT: i64 = 50;
+const MAX_HISTORY_LIMIT: i64 = 200;
+
+fn bot_message_wire(message: BotMessage) -> BotMessageWire {
+    BotMessageWire {
+        id: message.id,
+        bot_id: message.bot_id,
+        request_id: message.request_id,
+        prompt: message.prompt,
+        session_id: message.session_id,
+        incarnation: message.incarnation,
+        host_observation: message.host_observation.map(|value| match value {
+            HostObservation::Live => BotHostObservation::Live,
+            HostObservation::Exited => BotHostObservation::Exited,
+            HostObservation::Unverifiable => BotHostObservation::Unverifiable,
+        }),
+        error: message.error,
+        started_at: message.started_at,
+        ended_at: message.ended_at,
     }
 }

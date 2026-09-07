@@ -242,7 +242,7 @@ fn migrate_is_idempotent_and_survives_reopen() {
 }
 
 #[test]
-fn migrate_from_a_genuine_v1_bots_schema_applies_the_v2_step_and_preserves_data() {
+fn migrate_from_a_genuine_v1_bots_schema_applies_the_v2_and_v3_steps_and_preserves_data() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("test.sqlite3");
     {
@@ -280,7 +280,7 @@ fn migrate_from_a_genuine_v1_bots_schema_applies_the_v2_step_and_preserves_data(
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(recorded, 2);
+        assert_eq!(recorded, 3);
         // Pre-existing data survived, and rev is now usable (defaulted to 0).
         let bot = bstorage::get_bot(&c, HOST, FOLDER, "b1").unwrap().unwrap();
         assert_eq!(bot.id, "b1");
@@ -297,6 +297,19 @@ fn migrate_from_a_genuine_v1_bots_schema_applies_the_v2_step_and_preserves_data(
             )
             .unwrap();
         assert_eq!(index_exists, 1);
+        // The v3 step's bot_messages table now exists and is usable.
+        let messages_table_exists: i64 = c
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'bot_messages'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(messages_table_exists, 1);
+        assert_eq!(
+            bstorage::history_for_bot_messages(&c, HOST, FOLDER, "b1", 50).unwrap(),
+            Vec::new()
+        );
     }
 }
 

@@ -167,6 +167,31 @@ pub struct HistoryEntry {
     pub automation_run: Option<AutomationRun>,
 }
 
+/// A single chat turn: one `bot.run` call carrying a `prompt` instead of a
+/// `responsibilityId`. Not a responsibility run (no `Automation` is ever
+/// involved) -- stored separately in `bot_messages` (see
+/// `bots::storage::record_bot_message_in_tx`). `session_id`/`incarnation`
+/// let a conversation view read the actual reply bytes via the existing
+/// `session.read` path; this record never carries the reply text itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotMessage {
+    pub id: String,
+    pub bot_id: String,
+    /// The `bot.run` envelope request id that produced this turn -- the
+    /// link back to "the run" the contract asks for.
+    pub request_id: String,
+    pub prompt: String,
+    pub session_id: Option<String>,
+    pub incarnation: Option<String>,
+    /// `None` only when `harness.start` itself failed (no session was ever
+    /// admitted); see `host_observation`'s doc above for the 3-state rule.
+    pub host_observation: Option<HostObservation>,
+    pub error: Option<String>,
+    pub started_at: f64,
+    pub ended_at: Option<f64>,
+}
+
 /// Source `normalizeDrogonBotRecipeLink`: requires a non-empty (after
 /// ECMAScript trim) `recipeRef`; `runId`/`evidencePath` default to `None`
 /// unless they are non-empty strings. Returns `None` for a non-object

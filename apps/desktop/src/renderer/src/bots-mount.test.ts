@@ -15,6 +15,7 @@ import {
   BOTS_CAPABILITY,
   BOTS_ROUTE_ID,
   buildBotsPanelProps,
+  buildWiredBotsPanelProps,
   createGatedBotBridge,
   isBotsAvailable,
   registerBotsRoute,
@@ -37,9 +38,7 @@ function botsRegistry() {
 describe("isBotsAvailable", () => {
   it("is true when the service advertises bot.snapshot.v1", () => {
     expect(isBotsAvailable([BOTS_CAPABILITY])).toBe(true);
-    expect(isBotsAvailable(["harness.catalog.v1", BOTS_CAPABILITY])).toBe(
-      true,
-    );
+    expect(isBotsAvailable(["harness.catalog.v1", BOTS_CAPABILITY])).toBe(true);
   });
   it("is false without the capability or on an empty list", () => {
     expect(isBotsAvailable(["harness.catalog.v1"])).toBe(false);
@@ -160,6 +159,272 @@ describe("gated bot bridge (fail-closed, gates the one botSnapshot method)", () 
   });
 });
 
+describe("gated bot bridge (R2-S: botCreate/botRun/botHistory/read)", () => {
+  const scope: BotScope & { locale: string } = {
+    hostId: "host-a",
+    workspaceId: "w-a",
+    locale: "en-US",
+  };
+  const runInput = {
+    ...scope,
+    botId: "bot-1",
+    responsibilityId: "resp-1",
+    reason: "manual" as const,
+    eventIdentity: "evt-1",
+    requestId: "req-1",
+  };
+
+  function fullSource(calls: string[]) {
+    return {
+      botSnapshot: async () => {
+        calls.push("botSnapshot");
+        return { ok: true as const, result: { ...scope, ...emptySnapshot } };
+      },
+      botCreate: async () => {
+        calls.push("botCreate");
+        return { ok: true as const, result: {} as never };
+      },
+      botRun: async () => {
+        calls.push("botRun");
+        return {
+          ok: true as const,
+          result: {
+            requestId: "req-1",
+            hostId: scope.hostId,
+            workspaceId: scope.workspaceId,
+            automationRunId: null,
+            responsibilityRunId: null,
+            messageId: null,
+            session: null,
+            outcome: "dispatched" as const,
+            refusal: null,
+            reason: null,
+            error: null,
+            observedAt: null,
+            recordedAt: 0,
+          },
+        };
+      },
+      botHistory: async () => {
+        calls.push("botHistory");
+        return {
+          ok: true as const,
+          result: { ...scope, botId: "bot-1", messages: [] },
+        };
+      },
+      read: async () => {
+        calls.push("read");
+        return {
+          ok: true as const,
+          result: {
+            session: { verdict: "live" as const },
+            dataBase64: "",
+            startCursor: 0,
+            nextCursor: 0,
+            truncated: false,
+          },
+        } as never;
+      },
+    };
+  }
+
+  it("gates botCreate/botRun/botHistory the same as botSnapshot", async () => {
+    const calls: string[] = [];
+    const gated = createGatedBotBridge(fullSource(calls), () => false);
+    const create = await gated.botCreate?.({} as never);
+    const run = await gated.botRun?.(runInput);
+    const history = await gated.botHistory?.({ ...scope, botId: "bot-1" });
+    expect(create?.ok).toBe(false);
+    expect(run?.ok).toBe(false);
+    expect(history?.ok).toBe(false);
+    if (!create?.ok) expect(create?.error.code).toBe("unsupported_capability");
+    expect(calls).toEqual([]);
+  });
+
+  it("passes botCreate/botRun/botHistory through while allowed", async () => {
+    const calls: string[] = [];
+    const gated = createGatedBotBridge(fullSource(calls), () => true);
+    await gated.botCreate?.({} as never);
+    await gated.botRun?.(runInput);
+    await gated.botHistory?.({ ...scope, botId: "bot-1" });
+    expect(calls).toEqual(["botCreate", "botRun", "botHistory"]);
+  });
+
+  it("passes read through ungated even while the capability is withheld", async () => {
+    const calls: string[] = [];
+    const gated = createGatedBotBridge(fullSource(calls), () => false);
+    const response = await gated.read?.({
+      sessionId: "s1",
+      incarnation: "i1",
+      cursor: 0,
+    });
+    expect(response?.ok).toBe(true);
+    expect(calls).toEqual(["read"]);
+  });
+
+  it("omits read entirely when the source does not provide it", () => {
+    const gated = createGatedBotBridge(
+      {
+        botSnapshot: async () => ({
+          ok: true as const,
+          result: { ...scope, ...emptySnapshot },
+        }),
+      },
+      () => true,
+    );
+    expect(gated.read).toBeUndefined();
+  });
+});
+
+describe("buildWiredBotsPanelProps", () => {
+  const scope: BotScope & { locale: string } = {
+    hostId: "host-a",
+    workspaceId: "w-a",
+    locale: "en-US",
+  };
+
+  it("always threads the bridge onto the panel", () => {
+    const bridge: BotBridge = {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: { ...scope, ...emptySnapshot },
+      }),
+    };
+    const wired = buildWiredBotsPanelProps(
+      bridge,
+      buildBotsPanelProps(emptySnapshot),
+    );
+    expect(wired.bridge).toBe(bridge);
+  });
+
+  it("threads sessionReader only when the bridge provides read", () => {
+    const bridge: BotBridge = {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: { ...scope, ...emptySnapshot },
+      }),
+    };
+    const withoutRead = buildWiredBotsPanelProps(
+      bridge,
+      buildBotsPanelProps(emptySnapshot),
+    );
+    expect(withoutRead.sessionReader).toBeUndefined();
+
+    const read = async () => ({
+      ok: true as const,
+      result: {
+        session: { verdict: "live" as const },
+        dataBase64: "",
+        startCursor: 0,
+        nextCursor: 0,
+        truncated: false,
+      },
+    });
+    const withRead = buildWiredBotsPanelProps(
+      { ...bridge, read: read as never },
+      buildBotsPanelProps(emptySnapshot),
+    );
+    expect(withRead.sessionReader).toBe(read);
+  });
+
+  const snapshotWithBot: BotsPanelSnapshot = {
+    bots: [
+      {
+        id: "bot-1",
+        characterPreset: "none",
+        displayIdentity: { displayName: "Watcher", handle: null, title: null },
+        harnessPolicy: { defaultHarness: "claude", explicitModel: null },
+        instructions: "",
+        memories: [],
+        responsibilities: [],
+        currentSession: null,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+    history: [],
+  };
+
+  it("wires onRunResponsibility to bridge.botRun with a manual reason and the bot's own harness, only when scope is present", () => {
+    const calls: unknown[] = [];
+    const bridge: BotBridge = {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: { ...scope, ...emptySnapshot },
+      }),
+      botRun: async (input) => {
+        calls.push(input);
+        return {
+          ok: true as const,
+          result: {
+            requestId: "r",
+            hostId: scope.hostId,
+            workspaceId: scope.workspaceId,
+            automationRunId: null,
+            responsibilityRunId: null,
+            messageId: null,
+            session: null,
+            outcome: "dispatched" as const,
+            refusal: null,
+            reason: null,
+            error: null,
+            observedAt: null,
+            recordedAt: 0,
+          },
+        };
+      },
+    };
+
+    const withoutScope = buildWiredBotsPanelProps(
+      bridge,
+      buildBotsPanelProps(snapshotWithBot),
+    );
+    expect(withoutScope.onRunResponsibility).toBeUndefined();
+
+    const withScope = buildWiredBotsPanelProps(
+      bridge,
+      buildBotsPanelProps(snapshotWithBot, undefined, scope),
+    );
+    withScope.onRunResponsibility?.({
+      botId: "bot-1",
+      responsibilityId: "resp-1",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      hostId: scope.hostId,
+      workspaceId: scope.workspaceId,
+      locale: scope.locale,
+      botId: "bot-1",
+      responsibilityId: "resp-1",
+      reason: "manual",
+      harness: { harnessId: "claude" },
+    });
+  });
+
+  it("never calls bridge.botRun for a bot absent from the snapshot (no harness to resolve)", () => {
+    const calls: unknown[] = [];
+    const bridge: BotBridge = {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: { ...scope, ...emptySnapshot },
+      }),
+      botRun: async (input) => {
+        calls.push(input);
+        throw new Error("must not be called");
+      },
+    };
+    const withScope = buildWiredBotsPanelProps(
+      bridge,
+      buildBotsPanelProps(emptySnapshot, undefined, scope),
+    );
+    withScope.onRunResponsibility?.({
+      botId: "unknown-bot",
+      responsibilityId: "resp-1",
+    });
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe("registerBotsRoute (real factory)", () => {
   const bridge: BotBridge = {
     botSnapshot: async (input) => ({
@@ -206,9 +471,7 @@ describe("capability gating on the registered descriptor", () => {
       buildBotsPanelProps(emptySnapshot),
     );
     const descriptor = resolveRoute(registry, BOTS_ROUTE_ID);
-    expect(checkAvailability(descriptor, [BOTS_CAPABILITY])).toBe(
-      "available",
-    );
+    expect(checkAvailability(descriptor, [BOTS_CAPABILITY])).toBe("available");
     expect(checkAvailability(descriptor, [])).toBe("unsupported");
     expect(checkAvailability(descriptor, ["harness.catalog.v1"])).toBe(
       "unsupported",

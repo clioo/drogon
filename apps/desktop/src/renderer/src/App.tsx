@@ -584,7 +584,7 @@ export function App() {
       return registerBotsRoute(
         filesBaseRegistry,
         botsGatedBridge,
-        buildBotsPanelProps(botsLoad.snapshot),
+        buildBotsPanelProps(botsLoad.snapshot, undefined, botsScope),
       );
     return filesBaseRegistry;
   }, [

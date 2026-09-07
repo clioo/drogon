@@ -43,8 +43,8 @@ use drogon_core::automations::runner::{
 use drogon_core::automations::storage as astorage;
 use drogon_core::bot_run_rpc::{self, BotRunCaller, BotRunPrepare};
 use drogon_core::bots::records::{
-    Bot, DEFAULT_DROGON_BOT_HARNESS, DisplayIdentity, HarnessModelPolicy, Responsibility,
-    ResponsibilityKind, ResponsibilityTrigger,
+    Bot, DEFAULT_DROGON_BOT_HARNESS, DisplayIdentity, HarnessModelPolicy, HostObservation,
+    Responsibility, ResponsibilityKind, ResponsibilityTrigger,
 };
 use drogon_core::bots::storage as bstorage;
 use drogon_core::{DB_FILE_NAME, Engine};
@@ -249,6 +249,26 @@ fn params(host: &str, overrides: Value) -> Value {
     value
 }
 
+/// Chat-turn equivalent of [`params`]: `prompt` in place of
+/// `responsibilityId`/`reason`/`eventIdentity`.
+fn chat_params(host: &str, overrides: Value) -> Value {
+    let mut value = json!({
+        "workspaceId": "ws-1",
+        "hostId": host,
+        "botId": "bot-1",
+        "prompt": "What is the status?",
+        "harness": { "harnessId": "codex" },
+    });
+    for (key, val) in overrides.as_object().unwrap() {
+        if val.is_null() {
+            value.as_object_mut().unwrap().remove(key);
+        } else {
+            value[key] = val.clone();
+        }
+    }
+    value
+}
+
 #[test]
 fn strict_schema_rejects_unknown_fields_missing_fields_and_non_admitted_harness() {
     let (_dir, _engine, _conn, host) = fixture();
@@ -324,7 +344,7 @@ fn asserted_host_mismatch_is_refused_as_structured_foreign_workspace_host() {
     let request =
         bot_run_rpc::parse_bot_run_request(&params(&host, json!({"hostId": "host-evil"}))).unwrap();
     let prepared =
-        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
     let BotRunPrepare::Refused {
         workspace_id,
         refusal,
@@ -365,7 +385,7 @@ fn workspace_owned_by_another_host_is_refused_even_when_the_assertion_matches() 
 
     let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
     let prepared =
-        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
     let BotRunPrepare::Refused { refusal, error, .. } = prepared else {
         panic!("expected Refused, got {prepared:?}");
     };
@@ -388,7 +408,7 @@ fn unknown_workspace_is_refused_as_a_structured_receipt() {
     // No workspace row seeded at all.
     let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
     let prepared =
-        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
     let BotRunPrepare::Refused {
         workspace_id,
         refusal,
@@ -419,8 +439,9 @@ fn owned_plan_outlives_the_connection_scope_that_prepared_it() {
         seed_scheduled_bot(&conn, &host, true);
         let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
         let prepared =
-            bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
-        let BotRunPrepare::Ready { plan, .. } = prepared else {
+            bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0)
+                .unwrap();
+        let BotRunPrepare::ReadyResponsibility { plan, .. } = prepared else {
             panic!("expected Ready, got {prepared:?}");
         };
         drop(conn);
@@ -454,8 +475,8 @@ fn no_lock_is_held_on_the_database_during_execute() {
     seed_scheduled_bot(&conn, &host, true);
     let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
     let prepared =
-        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
-    let BotRunPrepare::Ready { plan, .. } = prepared else {
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::ReadyResponsibility { plan, .. } = prepared else {
         panic!("expected Ready, got {prepared:?}");
     };
 
@@ -494,8 +515,8 @@ fn callers_own_transaction_rollback_leaves_both_history_rows_absent() {
     };
     let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
     let prepared =
-        bot_run_rpc::authorized_prepare(&conn, &host, &request, 1_797_724_800.0).unwrap();
-    let BotRunPrepare::Ready { plan, .. } = prepared else {
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::ReadyResponsibility { plan, .. } = prepared else {
         panic!("expected Ready, got {prepared:?}");
     };
     let outcome = bot_run_rpc::execute(&plan, &seam);
@@ -541,6 +562,121 @@ fn authorize_caller_denies_worker_callers_before_any_ledger_interaction() {
         error.message,
         "bot.run is desktop-only: worker dispatch credentials are denied on this auth path"
     );
+}
+
+// ---------------------------------------------------------------------
+// PURE chat-turn tests (R2-S): same staged primitives, a `prompt` in place
+// of `responsibilityId`/`reason`/`eventIdentity`.
+// ---------------------------------------------------------------------
+
+#[test]
+fn prompt_and_responsibility_fields_are_mutually_exclusive() {
+    let error = bot_run_rpc::parse_bot_run_request(&chat_params(
+        "host-1",
+        json!({"responsibilityId": "resp-1"}),
+    ))
+    .unwrap_err();
+    assert_eq!(error.code, "invalid_argument");
+    assert!(error.message.contains("responsibilityId"));
+
+    let error =
+        bot_run_rpc::parse_bot_run_request(&chat_params("host-1", json!({"reason": "manual"})))
+            .unwrap_err();
+    assert_eq!(error.code, "invalid_argument");
+
+    let error = bot_run_rpc::parse_bot_run_request(&chat_params(
+        "host-1",
+        json!({"eventIdentity": "evt-1"}),
+    ))
+    .unwrap_err();
+    assert_eq!(error.code, "invalid_argument");
+}
+
+#[test]
+fn chat_prompt_over_the_length_bound_is_rejected() {
+    let long_prompt = "x".repeat(20_001);
+    let error =
+        bot_run_rpc::parse_bot_run_request(&chat_params("host-1", json!({"prompt": long_prompt})))
+            .unwrap_err();
+    assert_eq!(error.code, "invalid_argument");
+    assert!(error.message.contains("prompt"));
+}
+
+#[test]
+fn authorized_prepare_composes_the_operating_prompt_for_a_chat_turn() {
+    let (_dir, _engine, conn, host) = fixture();
+    seed_workspace(&conn, &host);
+    seed_scheduled_bot(&conn, &host, true);
+
+    let request = bot_run_rpc::parse_bot_run_request(&chat_params(&host, json!({}))).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::ReadyChat { plan, workspace_id } = prepared else {
+        panic!("expected ReadyChat, got {prepared:?}");
+    };
+    assert_eq!(workspace_id, "ws-1");
+    assert_eq!(plan.bot_id, "bot-1");
+    assert_eq!(plan.prompt, "What is the status?");
+    assert_eq!(plan.request_id, "bot-chat:req-1");
+    let harness_prompt = plan.params["prompt"].as_str().unwrap();
+    assert!(harness_prompt.contains("Name: Watcher"));
+    assert!(harness_prompt.contains("Chat message\nWhat is the status?"));
+    assert_eq!(plan.params["workspaceId"], "ws-1");
+    assert_eq!(plan.params["harnessId"], "codex");
+}
+
+#[test]
+fn chat_turn_against_an_unknown_bot_is_refused_not_a_hard_error() {
+    let (_dir, _engine, conn, host) = fixture();
+    seed_workspace(&conn, &host);
+    // No bot seeded at all.
+    let request = bot_run_rpc::parse_bot_run_request(&chat_params(&host, json!({}))).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::Refused { refusal, error, .. } = prepared else {
+        panic!("expected Refused, got {prepared:?}");
+    };
+    assert_eq!(
+        refusal,
+        json!({"type": "bot", "kind": "unknownBot", "botId": "bot-1"})
+    );
+    assert!(error.contains("bot-1"));
+}
+
+#[test]
+fn chat_turn_executes_and_persists_a_bot_message_readable_from_history() {
+    let (_dir, _engine, conn, host) = fixture();
+    seed_workspace(&conn, &host);
+    seed_scheduled_bot(&conn, &host, true);
+    let seam = CountingSeam {
+        starts: Cell::new(0),
+    };
+
+    let request = bot_run_rpc::parse_bot_run_request(&chat_params(&host, json!({}))).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::ReadyChat { plan, .. } = prepared else {
+        panic!("expected ReadyChat, got {prepared:?}");
+    };
+    let outcome = bot_run_rpc::execute_chat(&plan, &seam);
+    assert!(matches!(outcome, RunnerOutcome::Observed { .. }));
+    assert_eq!(seam.starts.get(), 1);
+
+    bot_run_rpc::record_chat(&conn, &plan, &outcome, 1_797_724_801.0, "msg-1".to_string()).unwrap();
+
+    let history = bstorage::history_for_bot_messages(&conn, &host, "/repo", "bot-1", 50).unwrap();
+    assert_eq!(history.len(), 1);
+    let message = &history[0];
+    assert_eq!(message.id, "msg-1");
+    assert_eq!(message.bot_id, "bot-1");
+    assert_eq!(message.request_id, "bot-chat:req-1");
+    assert_eq!(message.prompt, "What is the status?");
+    assert_eq!(message.session_id.as_deref(), Some("session-1"));
+    assert_eq!(message.incarnation.as_deref(), Some("incarnation-1"));
+    assert_eq!(message.host_observation, Some(HostObservation::Live));
+    assert_eq!(message.error, None);
+    assert_eq!(message.started_at, 1_797_724_800.0);
+    assert_eq!(message.ended_at, Some(1_797_724_801.0));
 }
 
 // ---------------------------------------------------------------------
@@ -668,6 +804,24 @@ impl EngineFixture {
             "responsibilityId": "resp-1",
             "reason": "manual",
             "eventIdentity": "evt-1",
+            "harness": { "harnessId": UNKNOWN_HARNESS },
+        });
+        for (key, val) in overrides.as_object().unwrap() {
+            if val.is_null() {
+                value.as_object_mut().unwrap().remove(key);
+            } else {
+                value[key] = val.clone();
+            }
+        }
+        value
+    }
+
+    fn chat_params(&self, overrides: Value) -> Value {
+        let mut value = json!({
+            "workspaceId": self.workspace_id,
+            "hostId": self.host,
+            "botId": "bot-1",
+            "prompt": "What is the status?",
             "harness": { "harnessId": UNKNOWN_HARNESS },
         });
         for (key, val) in overrides.as_object().unwrap() {
@@ -1041,4 +1195,99 @@ fn worker_route_fail_closed() {
         fx.count("SELECT COUNT(*) FROM requests WHERE method='harness.start'"),
         0
     );
+}
+
+/// REQUIRED PROOF: a chat turn is recorded even when the nested dispatch
+/// fails -- a `bot_messages` row exists with the composed `messageId`,
+/// carries the failure `error`, and no session/observation (never
+/// synthesized) -- the receipt's `messageId` matches the persisted row
+/// exactly, and a replay of the same key+params returns the identical
+/// stored receipt without re-dispatching or re-recording.
+#[test]
+fn chat_turn_is_recorded_even_when_dispatch_fails() {
+    let fx = EngineFixture::new();
+    let params = fx.chat_params(json!({}));
+    let receipt = ok(fx.run("chat-req-1", params.clone()));
+
+    assert_eq!(receipt["outcome"], "refused");
+    assert!(receipt["automationRunId"].is_null());
+    assert!(receipt["responsibilityRunId"].is_null());
+    let message_id = receipt["messageId"].as_str().unwrap().to_string();
+
+    let conn = fx.conn();
+    let messages =
+        bstorage::history_for_bot_messages(&conn, &fx.host, &fx.folder, "bot-1", 50).unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].id, message_id);
+    assert_eq!(messages[0].bot_id, "bot-1");
+    assert_eq!(messages[0].request_id, "bot-chat:chat-req-1");
+    assert_eq!(messages[0].prompt, "What is the status?");
+    assert_eq!(messages[0].session_id, None);
+    assert_eq!(messages[0].incarnation, None);
+    assert_eq!(messages[0].host_observation, None);
+    assert!(messages[0].error.is_some());
+
+    let replay = ok(fx.run("chat-req-1", params));
+    assert_eq!(
+        replay, receipt,
+        "a replay of the same key+params must return the byte-identical stored receipt"
+    );
+    assert_eq!(
+        bstorage::history_for_bot_messages(&conn, &fx.host, &fx.folder, "bot-1", 50)
+            .unwrap()
+            .len(),
+        1,
+        "a replay must never record a second message row"
+    );
+}
+
+/// REQUIRED PROOF: `bot.history` returns only the requesting workspace's
+/// own scope, newest-first, bounded by `limit`.
+#[test]
+fn bot_history_reads_back_recorded_chat_turns_newest_first_and_bounded_by_limit() {
+    let fx = EngineFixture::new();
+    ok(fx.run(
+        "chat-req-1",
+        fx.chat_params(json!({"prompt": "first message"})),
+    ));
+    ok(fx.run(
+        "chat-req-2",
+        fx.chat_params(json!({"prompt": "second message"})),
+    ));
+
+    let result = ok(fx.engine.dispatch(request(
+        "history-req-1",
+        "bot.history",
+        json!({"workspaceId": fx.workspace_id, "hostId": fx.host, "botId": "bot-1"}),
+    )));
+    let messages = result["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["prompt"], "second message");
+    assert_eq!(messages[1]["prompt"], "first message");
+
+    let limited = ok(fx.engine.dispatch(request(
+        "history-req-2",
+        "bot.history",
+        json!({"workspaceId": fx.workspace_id, "hostId": fx.host, "botId": "bot-1", "limit": 1}),
+    )));
+    let limited_messages = limited["messages"].as_array().unwrap();
+    assert_eq!(limited_messages.len(), 1);
+    assert_eq!(limited_messages[0]["prompt"], "second message");
+}
+
+/// REQUIRED PROOF: `bot.history` never leaks another host's bots into scope
+/// -- a foreign `hostId` assertion or an unrelated bot id resolves to a
+/// storage error / empty result, never another scope's messages.
+#[test]
+fn bot_history_is_scoped_to_the_owning_workspace() {
+    let fx = EngineFixture::new();
+    ok(fx.run("chat-req-1", fx.chat_params(json!({}))));
+
+    let response = fx.engine.dispatch(request(
+        "history-req-evil",
+        "bot.history",
+        json!({"workspaceId": fx.workspace_id, "hostId": "host-evil", "botId": "bot-1"}),
+    ));
+    let error = err(response);
+    assert_eq!(error.code, "unsupported_host");
 }
