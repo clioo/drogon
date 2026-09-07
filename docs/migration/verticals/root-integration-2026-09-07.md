@@ -400,3 +400,16 @@ are delivered but await ROOT review; the pinned notice corpus bytes match
 their recorded hashes, which does not confer redistribution clearance.
 Audit remains 11/12 groups (91.7%, medium confidence; delta zero), with all
 46 product obligations still in scope and the 16:41:33 UTC deadline high risk.
+
+### Installed preview
+
+The clean `be192c5c07bc85d36f28302e515843f882482926` build passed all 15
+packaged acceptance checks, including real Files behavior, quit/reopen
+session continuity and unchanged sealed artifact identity. ROOT inspected
+packaged wide-dark and narrow-light captures. Report:
+`.preflight/acceptance/desktop-1788792935480-78d85ce9-dbbc-4bdc-8d3b-7938040e9549/report.json`.
+Seal v3 `43396fc17300489fd69646ca5752841b1e6c0c6074b507883316b6452f1b1d47`
+covers 293 files / 311408948 bytes. The existing installer admitted that
+same seal and installed the per-user `Drogon.app` link, retaining the prior
+`83e9eca` preview and all user data without stopping any process. This is
+local ad-hoc-signed preview acceptance, not notarization or E5 clearance.

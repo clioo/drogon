@@ -24,3 +24,15 @@ Node 24 verification on 2026-09-07:
 These are boundary unit tests, not source-parity, Engine, rendered or installed
 acceptance. Native create/run integration and their real authorization, transaction,
 replay and execution tests remain prerequisites for any activation.
+
+## Public Engine RED — 15:01 UTC
+
+ROOT added `crates/drogon-core/tests/native_bot_create_engine.rs`, separate
+from the V4-owned domain tests. All seven tests compile against the public
+Engine and real SQLite. They currently fail because `bot.create` returns
+`method_not_found`; this is executable behavioral RED, not a missing import.
+The downstream assertions remain unexercised until registration: born-empty
+scoped persistence, exact replay after restart, changed-parameter conflict,
+authentication and workspace authorization before replay, atomic receipt
+failure rollback, and concurrent same-request admission. No process or model
+is launched by this suite. It is not a claim that those behaviors pass.
