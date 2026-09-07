@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use drogon_protocol::{PROTOCOL_VERSION, Request, Response};
@@ -19,6 +20,7 @@ const DISPATCH: &str = "dispatch-1";
 const SESSION: &str = "session-1";
 const INCARNATION: &str = "incarnation-1";
 const WORKER_SECRET: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+static FIXTURE_LAUNCH: Mutex<()> = Mutex::new(());
 
 struct TestServer {
     dir: tempfile::TempDir,
@@ -39,6 +41,8 @@ fn start_server() -> TestServer {
 
 fn start_server_with_sibling_cli(with_cli: bool) -> TestServer {
     let dir = tempfile::tempdir().unwrap();
+    // Concurrent forks can inherit another fixture's writable copy FD until exec.
+    let launch_guard = FIXTURE_LAUNCH.lock().unwrap();
     let binary = dir.path().join("drogond");
     std::fs::copy(env!("CARGO_BIN_EXE_drogond"), &binary).unwrap();
     if with_cli {
@@ -53,6 +57,7 @@ fn start_server_with_sibling_cli(with_cli: bool) -> TestServer {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+    drop(launch_guard);
     let mut server = TestServer {
         dir,
         token: String::new(),

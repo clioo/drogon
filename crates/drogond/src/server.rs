@@ -14,9 +14,8 @@ use drogon_core::Engine;
 use drogon_protocol::{Request, Response, RpcError};
 
 use crate::framing::{read_frame, write_response};
-#[cfg(unix)]
 use crate::service_quiescence::{
-    ConnectionRegistry, DEFAULT_DRAIN_TIMEOUT, DEFAULT_QUIESCENCE_POLL, QuiesceGate,
+    ConnectionRegistry, DEFAULT_DRAIN_TIMEOUT, DEFAULT_QUIESCENCE_POLL, QuiesceGate, Transport,
 };
 
 /// Local IPC on a single-user data directory has no legitimate reason to
@@ -98,6 +97,56 @@ pub fn accept_loop_with_limits(
     )
 }
 
+/// Windows counterpart of `accept_loop`, added under the root grant. Same
+/// shape as the Unix entry: `endpoint::establish`'s listener, this crate's
+/// `Engine` and auth token in, a blocking call that serves forever out.
+#[cfg(windows)]
+pub fn accept_loop(
+    listener: crate::endpoint::NamedPipeListener,
+    engine: Arc<Engine>,
+    token: Arc<str>,
+) -> std::io::Result<()> {
+    accept_loop_with_limits(
+        listener,
+        engine,
+        token,
+        DEFAULT_MAX_CONCURRENT_CONNECTIONS,
+        DEFAULT_IDLE_TIMEOUT,
+    )
+}
+
+/// Windows counterpart of `accept_loop_with_limits`. `NamedPipeListener`
+/// has no separate "set nonblocking" step (see `endpoint.rs`):
+/// `accept(poll_timeout)` already blocks for at most `poll_timeout` and
+/// reports a client-free poll as `io::ErrorKind::WouldBlock`, matching the
+/// nonblocking Unix listener's contract from the accept loop's point of
+/// view — so `poll_on_would_block: true` below is correct for exactly the
+/// same reason it is on the Unix side, not a new assumption.
+#[cfg(windows)]
+pub fn accept_loop_with_limits(
+    mut listener: crate::endpoint::NamedPipeListener,
+    engine: Arc<Engine>,
+    token: Arc<str>,
+    max_connections: usize,
+    idle_timeout: Duration,
+) -> std::io::Result<()> {
+    run_accept_loop_inner(
+        move || listener.accept(DEFAULT_QUIESCENCE_POLL),
+        engine,
+        token,
+        QuiesceGate::default(),
+        AcceptLoopConfig {
+            max_connections,
+            idle_timeout,
+            accept_error_backoff: DEFAULT_ACCEPT_ERROR_BACKOFF,
+            max_consecutive_accept_errors: DEFAULT_MAX_CONSECUTIVE_ACCEPT_ERRORS,
+            poll_on_would_block: true,
+            quiescence_poll: DEFAULT_QUIESCENCE_POLL,
+            drain_timeout: DEFAULT_DRAIN_TIMEOUT,
+        },
+    )
+}
+
 /// The accept loop proper, parameterized by the accept source so tests can
 /// inject deterministic transient errors ahead of real connections.
 ///
@@ -142,7 +191,6 @@ pub fn run_accept_loop(
 
 /// Tuning bundle for the accept loop; see the constants each field falls
 /// back to in `accept_loop_with_limits` and `run_accept_loop`.
-#[cfg(unix)]
 #[derive(Clone, Copy)]
 struct AcceptLoopConfig {
     max_connections: usize,
@@ -179,9 +227,15 @@ struct AcceptLoopConfig {
 ///   through the normal drop path. Fatal and budget-exhausted accept errors
 ///   still return their original error unchanged; a fatal error mid-service
 ///   keeps its existing meaning and does not drain.
-#[cfg(unix)]
-fn run_accept_loop_inner(
-    mut accept: impl FnMut() -> std::io::Result<UnixStream>,
+///
+/// Generic over [`Transport`] (not just `UnixStream`) so this one
+/// implementation serves both platforms' public wrapper functions below
+/// (`accept_loop`/`run_accept_loop`/etc. for Unix, their `cfg(windows)`
+/// counterparts for the named-pipe transport) — see
+/// `service_quiescence::Transport`'s doc for why a shared trait was needed
+/// instead of a shared concrete type.
+fn run_accept_loop_inner<S: Transport>(
+    mut accept: impl FnMut() -> std::io::Result<S>,
     engine: Arc<Engine>,
     token: Arc<str>,
     gate: QuiesceGate,
@@ -300,9 +354,38 @@ fn is_fatal_accept_error(error: &std::io::Error) -> bool {
         || code == libc::EOPNOTSUPP
 }
 
+/// Windows counterpart of the Unix classifier above. Unlike the Unix
+/// listener, `NamedPipeListener::accept` (see `endpoint.rs`) already
+/// resolves its own transient "no client yet" case internally and reports
+/// it as `io::ErrorKind::WouldBlock` (handled separately, above, not here),
+/// so the only errors this ever sees are failures creating the *next* pipe
+/// instance. Conservative and unverified — no Windows host to observe real
+/// failure codes from — so only clearly listener-fatal, non-recoverable
+/// codes are fatal; everything else is treated as transient and retried,
+/// mirroring the Unix side's "ambiguous is never treated as more severe
+/// than it has to be" stance.
+#[cfg(windows)]
+fn is_fatal_accept_error(error: &std::io::Error) -> bool {
+    use windows_sys::Win32::Foundation::{ERROR_INVALID_HANDLE, ERROR_NOT_ENOUGH_MEMORY};
+    let Some(code) = error.raw_os_error() else {
+        return false;
+    };
+    code == ERROR_INVALID_HANDLE as i32 || code == ERROR_NOT_ENOUGH_MEMORY as i32
+}
+
 #[cfg(unix)]
 pub fn handle_connection(
     stream: UnixStream,
+    engine: &Engine,
+    token: &str,
+    idle_timeout: Duration,
+) -> std::io::Result<()> {
+    connection_loop(stream, engine, token, idle_timeout, None)
+}
+
+#[cfg(windows)]
+pub fn handle_connection(
+    stream: crate::endpoint::NamedPipeConnection,
     engine: &Engine,
     token: &str,
     idle_timeout: Duration,
@@ -317,9 +400,11 @@ pub fn handle_connection(
 /// ends this connection: the service is draining, so nothing further may be
 /// served here. Refused shutdowns (busy, stale, unauthorized) are ordinary
 /// responses and the connection stays open.
-#[cfg(unix)]
-fn connection_loop(
-    stream: UnixStream,
+///
+/// Generic over [`Transport`] for the same reason as
+/// `run_accept_loop_inner` above.
+fn connection_loop<S: Transport>(
+    stream: S,
     engine: &Engine,
     token: &str,
     idle_timeout: Duration,
