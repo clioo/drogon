@@ -3,13 +3,10 @@
 //! ownership. No Electron dependency anywhere in this crate.
 
 pub mod auth;
-#[cfg(unix)]
 pub mod endpoint;
 pub mod framing;
-#[cfg(unix)]
 pub mod lock;
 pub mod server;
-#[cfg(unix)]
 pub mod service_quiescence;
 
 use std::path::Path;
@@ -73,14 +70,41 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     Ok(())
 }
 
-#[cfg(unix)]
+/// Windows counterpart of the `serve` above, added under the root grant.
+/// Same shape and ordering (lock, then endpoint, then token, then engine,
+/// then the accept loop) for the same reason: the exclusive lock must be
+/// acquired before anything else touches the directory. No explicit
+/// same-user permission hardening is applied to the data directory or lock
+/// file here (unlike the Unix side's `0700`/`0600`): doing so would need
+/// new Windows ACL-setting FFI beyond what `endpoint.rs`'s pipe DACL already
+/// justifies, which is out of scope for this pass — see the evidence doc.
+/// This relies on the data directory's inherited NTFS ACLs (from the user
+/// profile it lives under) for now.
+#[cfg(windows)]
+pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
+    std::fs::create_dir_all(data_dir).map_err(ServeError::Io)?;
+    reject_unsafe_data_dir(data_dir).map_err(ServeError::Io)?;
+    let _lock = lock::acquire_exclusive(data_dir).map_err(ServeError::Io)?;
+    let listener = endpoint::establish(data_dir).map_err(ServeError::Io)?;
+    let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
+    let engine = Engine::open(data_dir).map_err(ServeError::Engine)?;
+    let engine = Arc::new(configure_worker_cli(engine)?);
+    server::accept_loop(listener, engine, Arc::from(token.as_str())).map_err(ServeError::Io)?;
+    Ok(())
+}
+
+/// Cross-platform: the daemon's installed sibling worker CLI is named
+/// `drogon-cli` on Unix and `drogon-cli.exe` on Windows;
+/// `std::env::consts::EXE_SUFFIX` is `""`/`".exe"` respectively, so one
+/// implementation covers both rather than a per-platform cfg branch that
+/// could drift.
 fn configure_worker_cli(engine: Engine) -> Result<Engine, ServeError> {
     // Only the daemon's installed sibling is trusted, never cwd or inherited PATH.
     let executable = std::env::current_exe().map_err(ServeError::Io)?;
     let parent = executable
         .parent()
         .ok_or_else(|| ServeError::Io(std::io::Error::other("Daemon executable has no parent.")))?;
-    let cli = parent.join("drogon-cli");
+    let cli = parent.join(format!("drogon-cli{}", std::env::consts::EXE_SUFFIX));
     match std::fs::metadata(&cli) {
         Ok(_) => engine.with_worker_cli(&cli).map_err(ServeError::Engine),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(engine),
@@ -91,8 +115,9 @@ fn configure_worker_cli(engine: Engine) -> Result<Engine, ServeError> {
 /// Refuses a data directory that is itself a symlink — following it would
 /// mean this process's notion of "the data directory" and the path a
 /// symlink attack redirected it to could silently diverge from what a
-/// caller passed on the command line.
-#[cfg(unix)]
+/// caller passed on the command line. Cross-platform: `symlink_metadata`
+/// and `is_symlink` both recognize a Windows reparse-point symlink the same
+/// way they recognize a Unix one; no platform-specific API was needed here.
 fn reject_unsafe_data_dir(data_dir: &Path) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(data_dir)?;
     if meta.file_type().is_symlink() {
@@ -104,12 +129,11 @@ fn reject_unsafe_data_dir(data_dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Windows has no implementation in this slice: named pipes are a distinct
-/// mechanism from the endpoint-ownership protocol above and have not been
-/// written or tested. Returning a typed error here — rather than a stub
-/// that silently binds nothing — is required by this task's instruction to
-/// never claim unsupported Windows parity.
-#[cfg(not(unix))]
+/// Neither Unix nor Windows: no native IPC transport is implemented for
+/// this target. Returning a typed error here — rather than a stub that
+/// silently binds nothing — is required by this task's instruction to
+/// never claim unsupported platform parity.
+#[cfg(not(any(unix, windows)))]
 pub fn serve(_data_dir: &Path) -> Result<(), ServeError> {
     Err(ServeError::UnsupportedPlatform)
 }

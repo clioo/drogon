@@ -3,6 +3,9 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import {
   FILES_ROUTE_ID,
+  FilesRequestIdCapError,
+  activeOpenPath,
+  activeSelection,
   createFilesPanelDescriptor,
   createFilesSource,
   createRequestIdSource,
@@ -11,12 +14,15 @@ import {
   isFilesAvailable,
   joinEntryPath,
   makeFileSaver,
+  observeSaveResult,
   readContentFor,
   readErrorFor,
   runFilesRead,
   truncationNoticeText,
+  type FilesOpenEntry,
   type FilesReadState,
 } from "./files-panel";
+import { createFilesDraftStore } from "./files-draft-store";
 import {
   applyEditorAction,
   initialEditorState,
@@ -340,22 +346,200 @@ describe("read gating and identity", () => {
   });
 });
 
-describe("request ids: fresh per logical save, stable per retry, per-mount distinct", () => {
-  test("retrying the exact same payload reuses the id; a new payload gets a fresh uuid", () => {
+describe("request ids: per-attempt identity with settle-on-success", () => {
+  test("an unresolved payload keeps its id; settle retires it so the next save is a new attempt", () => {
     const source = createRequestIdSource();
-    const first = source.next(KEY_A, "same body");
-    const retry = source.next(KEY_A, "same body");
-    expect(retry).toBe(first);
+    const first = source.next(KEY_A, "body");
     expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    // Edited draft = new logical save:
-    const edited = source.next(KEY_A, "changed body");
-    expect(edited).not.toBe(first);
-    expect(edited).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    // Same draft for another file = new logical save:
-    const otherFile = source.next(KEY_B, "same body");
-    expect(otherFile).not.toBe(first);
-    // Retry of the edited payload is stable too:
-    expect(source.next(KEY_A, "changed body")).toBe(edited);
+    // Retry while unresolved reuses the id…
+    expect(source.next(KEY_A, "body")).toBe(first);
+    // …and a confirmed success retires it:
+    source.settle(KEY_A, "body");
+    const again = source.next(KEY_A, "body");
+    expect(again).not.toBe(first);
+    // A failed save (never settled) keeps its retry identity:
+    const failed = source.next(KEY_B, "body");
+    expect(source.next(KEY_B, "body")).toBe(failed);
+  });
+
+  test("saver A->B->A sequence: A's retired receipt is never replayed after B landed", async () => {
+    const wire: Array<{ path: string; requestId: string }> = [];
+    const gates = new Map<string, ReturnType<typeof deferred<void>>>();
+    const bridge: FileBridge = {
+      fileList: () => Promise.reject(new Error("unused")),
+      fileRead: () => Promise.reject(new Error("unused")),
+      fileWrite: (input) => {
+        wire.push({ path: input.path, requestId: input.requestId });
+        const gate = deferred<void>();
+        gates.set(input.path, gate);
+        return gate.promise.then(
+          () =>
+            ({
+              ok: true,
+              result: {
+                hostId: "h1",
+                workspaceId: "w1",
+                path: input.path,
+                size: 4,
+                mtime: "t",
+              },
+            }) as never,
+        );
+      },
+    };
+    const ids = createRequestIdSource();
+    const saver = (path: string, key: string) =>
+      makeFileSaver(bridge, { hostId: "h1", workspaceId: "w1", path }, ids, key);
+
+    const saveA1 = saver("src/a.ts", KEY_A)("same body");
+    gates.get("src/a.ts")!.resolve();
+    await saveA1;
+    const saveB = saver("src/b.ts", KEY_B)("same body");
+    gates.get("src/b.ts")!.resolve();
+    await saveB;
+    const saveA2 = saver("src/a.ts", KEY_A)("same body");
+    gates.get("src/a.ts")!.resolve();
+    await saveA2;
+
+    const aWrites = wire.filter((w) => w.path === "src/a.ts");
+    expect(wire).toHaveLength(3);
+    // The second save of A got a FRESH id — the first receipt was retired
+    // on success, so the service can never mistake it for a duplicate
+    // while disk holds B's write.
+    expect(aWrites[1].requestId).not.toBe(aWrites[0].requestId);
+    expect(aWrites[0]).toEqual(wire.find((w) => w.path === "src/a.ts")!.valueOf());
+  });
+
+  test("a failing save keeps its id across retries until a success settles it", async () => {
+    const wire: string[] = [];
+    let fail = true;
+    const bridge: FileBridge = {
+      fileList: () => Promise.reject(new Error("unused")),
+      fileRead: () => Promise.reject(new Error("unused")),
+      fileWrite: (input) => {
+        wire.push(input.requestId);
+        const result = fail
+          ? ({
+              ok: false,
+              error: { code: "io", message: "read-only volume", retryable: true },
+            } as const)
+          : ({
+              ok: true,
+              result: { hostId: "h1", workspaceId: "w1", path: input.path, size: 1, mtime: "t" },
+            });
+        return Promise.resolve(result as never);
+      },
+    };
+    const ids = createRequestIdSource();
+    const save = makeFileSaver(
+      bridge,
+      { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+      ids,
+      KEY_A,
+    );
+    const first = await save("body");
+    expect(first.ok).toBe(false);
+    // Retry after failure reuses the id (still unresolved):
+    const retry = await save("body");
+    expect(retry.ok).toBe(false);
+    expect(wire).toHaveLength(2);
+    expect(wire[1]).toBe(wire[0]);
+    // The attempt that finally succeeds is still the same logical save…
+    fail = false;
+    await save("body");
+    expect(wire).toHaveLength(3);
+    expect(wire[2]).toBe(wire[0]);
+    // …and its success settles the id: the next save of the same payload
+    // is a new attempt with a fresh id.
+    await save("body");
+    expect(wire).toHaveLength(4);
+    expect(wire[3]).not.toBe(wire[0]);
+  });
+
+  test("per-file generation retire: A unresolved -> B (same file) confirmed -> A mints a FRESH id", () => {
+    const source = createRequestIdSource();
+    const idA = source.next(KEY_A, "draft A");
+    // B — a later payload for the SAME file — is confirmed successful:
+    const idB = source.next(KEY_A, "draft B");
+    source.settle(KEY_A, "draft B");
+    // A's unresolved attempt was minted before B's success — superseded:
+    // writing A now is a NEW logical write with a fresh id.
+    const idA2 = source.next(KEY_A, "draft A");
+    expect(idA2).not.toBe(idA);
+    expect(idA2).not.toBe(idB);
+    // B's own id was settled; retrying B is also a new attempt:
+    expect(source.next(KEY_A, "draft B")).not.toBe(idB);
+  });
+
+  test("settle safely prunes superseded attempts: the cap is usable again after a success", () => {
+    const source = createRequestIdSource({ maxRetained: 2 });
+    source.next(KEY_A, "A body"); // unresolved attempt for the file
+    source.next(KEY_A, "B body"); // later payload, file cap now full
+    // B confirms success: A's attempt (minted before B's success) is
+    // superseded-now-safe and must be PRUNED — never retained to jam the cap.
+    source.settle(KEY_A, "B body");
+    // The pruned space means a brand-new payload still fits without throw:
+    expect(() => source.next(KEY_A, "C body")).not.toThrow();
+  });
+
+  test("exact-A retry is preserved only while no intervening success exists", () => {
+    const source = createRequestIdSource();
+    const idA = source.next(KEY_A, "draft A");
+    // No success for the file since A was minted — retry identity holds.
+    expect(source.next(KEY_A, "draft A")).toBe(idA);
+  });
+
+  test("attempts minted AFTER a success stay retryable until the next success", () => {
+    const source = createRequestIdSource();
+    source.next(KEY_A, "v1");
+    source.settle(KEY_A, "v1");
+    const post = source.next(KEY_A, "v2");
+    expect(source.next(KEY_A, "v2")).toBe(post);
+    // Another payload succeeds — v2's attempt is now superseded:
+    source.next(KEY_A, "v3");
+    source.settle(KEY_A, "v3");
+    expect(source.next(KEY_A, "v2")).not.toBe(post);
+  });
+
+  test("distinct files keep independent retries across each other's successes", () => {
+    const source = createRequestIdSource();
+    const idA = source.next(KEY_A, "A body");
+    const idB = source.next(KEY_B, "B body");
+    // FILE_B's save succeeds: only FILE_B's attempts are superseded.
+    source.settle(KEY_B, "B body");
+    expect(source.next(KEY_A, "A body")).toBe(idA);
+    expect(source.next(KEY_B, "B body")).not.toBe(idB);
+  });
+
+  test("cap fails closed: a valid unresolved retry still returns; a new attempt throws a named error", () => {
+    const source = createRequestIdSource({ maxRetained: 1 });
+    const first = source.next(KEY_A, "payload one");
+    // At cap, but this IS the unresolved retry — reuse, never a silent mint:
+    expect(source.next(KEY_A, "payload one")).toBe(first);
+    // A different (new) payload at cap refuses with the named error:
+    expect(() => source.next(KEY_A, "payload two")).toThrowError(
+      FilesRequestIdCapError,
+    );
+    try {
+      source.next(KEY_A, "payload two");
+    } catch (error) {
+      expect((error as Error).name).toBe("FilesRequestIdCapError");
+    }
+    // After settle, the slot frees and a fresh id is minted:
+    source.settle(KEY_A, "payload one");
+    expect(source.next(KEY_A, "payload two")).not.toBe(first);
+  });
+
+  test("a superseded attempt is replaced in place, not double-counted against the cap", () => {
+    const source = createRequestIdSource({ maxRetained: 1 });
+    const superseded = source.next(KEY_A, "old");
+    source.settle(KEY_A, "old"); // success supersedes the old attempt
+    const fresh = source.next(KEY_A, "old"); // 1:1 replacement of the stale entry
+    expect(fresh).not.toBe(superseded);
+    // Still at exactly one retained entry for the file: a new payload throws.
+    expect(() => source.next(KEY_A, "other")).toThrowError(
+      FilesRequestIdCapError,
+    );
   });
 
   test("distinct mounts never share request ids, even for identical payloads", () => {
@@ -364,42 +548,63 @@ describe("request ids: fresh per logical save, stable per retry, per-mount disti
     const idOne = mountOne.next(KEY_A, "body");
     const idTwo = mountTwo.next(KEY_A, "body");
     expect(idOne).not.toBe(idTwo);
-    // And each mount keeps its own retry identity:
     expect(mountOne.next(KEY_A, "body")).toBe(idOne);
     expect(mountTwo.next(KEY_A, "body")).toBe(idTwo);
   });
 
-  test("the saver forwards the draft to the id source and onto the wire", async () => {
-    const gate = deferred<{
-      ok: true;
-      result: { hostId: string; workspaceId: string; path: string; size: number; mtime: string };
-    }>();
-    const wireIds: string[] = [];
+  test("request-id identity survives unmount/remount at descriptor lifetime", () => {
+    // The source is owned by the DESCRIPTOR (injected here exactly as the
+    // factory owns it), so a V2 unmount/remount must not orphan an
+    // unresolved retry the way the old per-mount useMemo did.
+    const descriptorSource = createRequestIdSource();
+    const descriptor = createFilesPanelDescriptor({
+      bridge: fakeBridge().bridge,
+      requestIds: descriptorSource,
+    });
+    expect(descriptor.id).toBe(FILES_ROUTE_ID);
+    // "Mount 1": a save attempt goes unresolved (deferred write never
+    // settles in this scenario).
+    const attemptId = descriptorSource.next(KEY_A, "remount body");
+    // V2 unmounts and remounts the panel — same descriptor, same source.
+    // A retry of the exact payload reuses the attempt id:
+    expect(descriptorSource.next(KEY_A, "remount body")).toBe(attemptId);
+    // And a wire write through the factory wiring carries that same id:
+    const wire: string[] = [];
     const bridge: FileBridge = {
       fileList: () => Promise.reject(new Error("unused")),
       fileRead: () => Promise.reject(new Error("unused")),
       fileWrite: (input) => {
-        wireIds.push(input.requestId);
-        return gate.promise;
+        wire.push(input.requestId);
+        return Promise.resolve({
+          ok: true,
+          result: { hostId: "h1", workspaceId: "w1", path: input.path, size: 1, mtime: "t" },
+        });
       },
     };
-    const ids = createRequestIdSource();
-    const save = makeFileSaver(
+    const retrySaver = makeFileSaver(
       bridge,
       { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
-      (draft) => ids.next(KEY_A, draft),
+      descriptorSource,
+      KEY_A,
     );
-    const first = save("body");
-    gate.resolve({
-      ok: true,
-      result: { hostId: "h1", workspaceId: "w1", path: "src/a.ts", size: 4, mtime: "t" },
+    return retrySaver("remount body").then(() => {
+      expect(wire).toEqual([attemptId]);
     });
-    await first;
-    const second = save("body"); // retry of the same payload
-    void second;
-    expect(wireIds).toHaveLength(2);
-    expect(wireIds[1]).toBe(wireIds[0]);
-    expect(wireIds[0]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("safe prune never removes a valid retry (minted after the last success)", () => {
+    const source = createRequestIdSource({ maxRetained: 2 });
+    const v1 = source.next(KEY_A, "v1");
+    source.settle(KEY_A, "v1"); // success prunes v1 (superseded-now-safe)
+    // Minted AFTER the success: this is a valid unresolved retry…
+    const v2 = source.next(KEY_A, "v2");
+    expect(v2).not.toBe(v1);
+    source.next(KEY_A, "v3"); // second unresolved payload, cap now full
+    // …and it survives: nothing has superseded it, so even at cap it is
+    // returned rather than silently replaced…
+    expect(source.next(KEY_A, "v2")).toBe(v2);
+    // …while a genuinely new payload still fails closed at the cap.
+    expect(() => source.next(KEY_A, "v4")).toThrowError(FilesRequestIdCapError);
   });
 
   test("a service refusal passes through verbatim (no rewriting into success)", async () => {
@@ -416,9 +621,26 @@ describe("request ids: fresh per logical save, stable per retry, per-mount disti
       await makeFileSaver(
         failingBridge,
         { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
-        () => crypto.randomUUID(),
+        createRequestIdSource(),
+        KEY_A,
       )("body"),
     ).toBe(failure);
+  });
+});
+
+describe("scope-gated selection and open path (frame safety)", () => {
+  test("a selection from another scope is inert; the current scope's renders", () => {
+    const selection = { node: { name: "l", path: "l", kind: "file" as const, symlink: true as const }, scopeKey: "h1/w1" };
+    expect(activeSelection(selection, "h2/w2")).toBeNull();
+    expect(activeSelection(selection, "h1/w1")?.node.symlink).toBe(true);
+    expect(activeSelection(null, "h1/w1")).toBeNull();
+  });
+
+  test("an open path from another scope is inert in this scope", () => {
+    const open: FilesOpenEntry = { scopeKey: "h1/w1", path: "src/a.ts" };
+    expect(activeOpenPath(open, "h2/w2")).toBeNull();
+    expect(activeOpenPath(open, "h1/w1")).toBe("src/a.ts");
+    expect(activeOpenPath(null, "h1/w1")).toBeNull();
   });
 });
 
@@ -445,10 +667,13 @@ describe("edit+save through the factory wiring (scoped fenced runSave)", () => {
       },
     };
     // The component rebuilds the saver per render with the current openPath;
-    // the test mirrors that exactly.
+    // the test mirrors that exactly (per-mount id source + scoped file key).
     const save = (path: string) =>
-      makeFileSaver(bridge, { hostId: "h1", workspaceId: "w1", path }, () =>
-        crypto.randomUUID(),
+      makeFileSaver(
+        bridge,
+        { hostId: "h1", workspaceId: "w1", path },
+        createRequestIdSource(),
+        scopedFileKey(SCOPE_A, path),
       );
 
     let state = applyEditorAction(initialEditorState(), {
@@ -519,6 +744,174 @@ describe("edit+save through the factory wiring (scoped fenced runSave)", () => {
     expect(state.lastSaved).toBe("B draft");
     expect(isDirty(state)).toBe(false);
     expect(state.files[KEY_A]).toEqual({ draft: "A draft", lastSaved: "A saved" });
+  });
+});
+
+describe("onSave observer rejection handling", () => {
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  function watchUnhandled(): { unhandled: unknown[]; done(): void } {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", listener);
+    return {
+      unhandled,
+      done() {
+        process.off("unhandledRejection", listener);
+      },
+    };
+  }
+
+  test("a transport throw is absorbed by the observer; runSave still reports the failure", async () => {
+    const watch = watchUnhandled();
+    try {
+      const store = createFilesDraftStore();
+      store.confirmRead(SCOPE_A, "src/a.ts", "saved");
+      const bridge: FileBridge = {
+        fileList: () => Promise.reject(new Error("unused")),
+        fileRead: () => Promise.reject(new Error("unused")),
+        fileWrite: () => {
+          throw new Error("transport down");
+        },
+      };
+      // The exact panel wiring: makeFileSaver promise + derived observer,
+      // with the panel's recordDraft before the write attempt.
+      const result = makeFileSaver(
+        bridge,
+        { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+        createRequestIdSource(),
+        KEY_A,
+      )("body");
+      store.recordDraft(SCOPE_A, "src/a.ts", "body");
+      observeSaveResult(result, store, SCOPE_A, "src/a.ts", "body");
+      // The editor's runSave receives the SAME original rejection:
+      let state = applyEditorAction(initialEditorState(), {
+        type: "file-opened",
+        scope: SCOPE_A,
+        path: "src/a.ts",
+        content: "saved",
+      });
+      state = applyEditorAction(state, { type: "edited", value: "body" });
+      const dispatched: EditorAction[] = [];
+      await runSave({
+        draft: "body",
+        scope: SCOPE_A,
+        path: "src/a.ts",
+        generation: nextSaveGeneration(state),
+        allowEmpty: false,
+        onSave: () => result,
+        dispatch: (action) => {
+          dispatched.push(action);
+          state = applyEditorAction(state, action);
+        },
+      });
+      await flush();
+      await flush();
+      // No unhandled rejection escaped the derived observer:
+      expect(watch.unhandled).toEqual([]);
+      // runSave's failure path is intact (a thrown transport maps to the
+      // pane's fallback save message):
+      expect(state.saveError).toEqual({
+        key: KEY_A,
+        path: "src/a.ts",
+        message: "The file could not be saved.",
+      });
+      // No markSaved on rejection — the draft stays dirty in the store.
+      expect(store.isDirty(SCOPE_A, "src/a.ts")).toBe(true);
+      expect(store.savedContentOf(SCOPE_A, "src/a.ts")).toBe("saved");
+    } finally {
+      watch.done();
+    }
+  });
+
+  test("a FilesRequestIdCapError rejection is absorbed; no markSaved, failure still reported", async () => {
+    const watch = watchUnhandled();
+    try {
+      const store = createFilesDraftStore();
+      store.confirmRead(SCOPE_A, "src/a.ts", "saved");
+      // The panel records the draft before the write attempt:
+      store.recordDraft(SCOPE_A, "src/a.ts", "payload two");
+      // Fill the per-file cap, so the next (different) payload fails closed:
+      const ids = createRequestIdSource({ maxRetained: 1 });
+      ids.next(KEY_A, "payload one");
+      const bridge: FileBridge = {
+        fileList: () => Promise.reject(new Error("unused")),
+        fileRead: () => Promise.reject(new Error("unused")),
+        fileWrite: () => Promise.reject(new Error("must not be reached")),
+      };
+      const result = makeFileSaver(
+        bridge,
+        { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+        ids,
+        KEY_A,
+      )("payload two");
+      observeSaveResult(result, store, SCOPE_A, "src/a.ts", "payload two");
+      let state = applyEditorAction(initialEditorState(), {
+        type: "file-opened",
+        scope: SCOPE_A,
+        path: "src/a.ts",
+        content: "saved",
+      });
+      state = applyEditorAction(state, { type: "edited", value: "payload two" });
+      const dispatched: EditorAction[] = [];
+      await runSave({
+        draft: "payload two",
+        scope: SCOPE_A,
+        path: "src/a.ts",
+        generation: nextSaveGeneration(state),
+        allowEmpty: false,
+        onSave: () => result,
+        dispatch: (action) => {
+          dispatched.push(action);
+          state = applyEditorAction(state, action);
+        },
+      });
+      await flush();
+      await flush();
+      expect(watch.unhandled).toEqual([]);
+      expect(state.saveError).toEqual({
+        key: KEY_A,
+        path: "src/a.ts",
+        message: "The file could not be saved.",
+      });
+      expect(store.isDirty(SCOPE_A, "src/a.ts")).toBe(true);
+      void dispatched;
+    } finally {
+      watch.done();
+    }
+  });
+
+  test("success still marks the payload saved through the observer", async () => {
+    const watch = watchUnhandled();
+    try {
+      const store = createFilesDraftStore();
+      store.confirmRead(SCOPE_A, "src/a.ts", "saved");
+      store.recordDraft(SCOPE_A, "src/a.ts", "edited body");
+      const bridge: FileBridge = {
+        fileList: () => Promise.reject(new Error("unused")),
+        fileRead: () => Promise.reject(new Error("unused")),
+        fileWrite: () =>
+          Promise.resolve({
+            ok: true,
+            result: { hostId: "h1", workspaceId: "w1", path: "src/a.ts", size: 1, mtime: "t" },
+          }),
+      };
+      const result = makeFileSaver(
+        bridge,
+        { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+        createRequestIdSource(),
+        KEY_A,
+      )("edited body");
+      observeSaveResult(result, store, SCOPE_A, "src/a.ts", "edited body");
+      await flush();
+      await flush();
+      expect(watch.unhandled).toEqual([]);
+      // Confirmed write retired the dirty flag via the observer's markSaved:
+      expect(store.isDirty(SCOPE_A, "src/a.ts")).toBe(false);
+      expect(store.savedContentOf(SCOPE_A, "src/a.ts")).toBe("edited body");
+    } finally {
+      watch.done();
+    }
   });
 });
 

@@ -23,14 +23,23 @@ const daemonBin = path.join(
   "debug",
   process.platform === "win32" ? "drogond.exe" : "drogond",
 );
-const { chromium } = createRequireRoot(path.join(ROOT, "package.json"))("playwright");
-const { startAcceptanceProcess, stopAcceptanceProcess, waitAcceptanceExit } = await import(
-  path.join(ROOT, "scripts", "acceptance-process.mjs")
+const { chromium } = createRequireRoot(path.join(ROOT, "package.json"))(
+  "playwright",
 );
+const { startAcceptanceProcess, stopAcceptanceProcess, waitAcceptanceExit } =
+  await import(path.join(ROOT, "scripts", "acceptance-process.mjs"));
 
 if (process.platform === "win32") {
   console.log(
-    JSON.stringify({ status: "UNVERIFIED", reason: "probe not yet verified on Windows", checks: [] }, null, 1),
+    JSON.stringify(
+      {
+        status: "UNVERIFIED",
+        reason: "probe not yet verified on Windows",
+        checks: [],
+      },
+      null,
+      1,
+    ),
   );
   process.exitCode = 2;
   process.exit(process.exitCode);
@@ -54,7 +63,9 @@ let probeWorkspaceId = null;
 async function stopOwned(child, label) {
   if (!child) return null;
   const result = await stopAcceptanceProcess(child);
-  report.checks.push(`${label}: ${result.verdict}${result.forced ? " (FORCED)" : ""}`);
+  report.checks.push(
+    `${label}: ${result.verdict}${result.forced ? " (FORCED)" : ""}`,
+  );
   if (result.forced || result.verdict !== "exited") report.status = "FAILED";
   return result;
 }
@@ -85,10 +96,22 @@ async function setSettledTheme(theme) {
 }
 
 async function openSettingsDialog() {
-  const settingsButton = page.getByRole("button", { name: "Settings", exact: true });
+  const settingsButton = page.getByRole("button", {
+    name: "Settings",
+    exact: true,
+  });
   await settingsButton.waitFor();
   await settingsButton.click();
   await page.locator('dialog[aria-label="Settings"]').waitFor();
+  const bounds = await page
+    .locator('dialog[aria-label="Settings"]')
+    .boundingBox();
+  const viewport = page.viewportSize();
+  assert.ok(bounds && viewport, "dialog and viewport must be observable");
+  assert.ok(
+    Math.abs(viewport.width - bounds.x - bounds.width - 16) <= 1,
+    "settings dialog must align with the right-hand toolbar",
+  );
 }
 
 async function closeSettingsDialog() {
@@ -104,7 +127,7 @@ async function checkTabTrap(label) {
     const dialog = document.querySelector('dialog[aria-label="Settings"]');
     if (!dialog) return 0;
     const focusable = dialog.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
     );
     return focusable.length;
   });
@@ -113,6 +136,13 @@ async function checkTabTrap(label) {
   for (let i = 0; i < focusableCount + 3; i++) {
     await page.keyboard.press("Tab");
     await delay(50);
+    assert.ok(
+      await page.evaluate(() => {
+        const dialog = document.querySelector('dialog[aria-label="Settings"]');
+        return dialog?.contains(document.activeElement);
+      }),
+      `${label}: focus escaped on Tab step ${i + 1}`,
+    );
   }
 
   // Verify focus is still inside the dialog
@@ -123,7 +153,10 @@ async function checkTabTrap(label) {
     return dialog.contains(activeElement) || dialog === activeElement;
   });
 
-  assert.ok(focusInsideDialog, `${label}: focus escaped dialog after repeated Tab`);
+  assert.ok(
+    focusInsideDialog,
+    `${label}: focus escaped dialog after repeated Tab`,
+  );
   report.checks.push(`tab-forward-trap-${label}`);
 
   // Verify dialog is still open
@@ -135,7 +168,10 @@ async function checkTabTrap(label) {
 
   // Close for next test
   await closeSettingsDialog();
-  await page.waitForFunction(() => !document.querySelector('dialog[aria-label="Settings"]'), { timeout: 5000 });
+  await page.waitForFunction(
+    () => !document.querySelector('dialog[aria-label="Settings"]'),
+    { timeout: 5000 },
+  );
 }
 
 async function checkShiftTabTrap(label) {
@@ -146,7 +182,7 @@ async function checkShiftTabTrap(label) {
     const dialog = document.querySelector('dialog[aria-label="Settings"]');
     if (!dialog) return 0;
     const focusable = dialog.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
     );
     return focusable.length;
   });
@@ -155,6 +191,13 @@ async function checkShiftTabTrap(label) {
   for (let i = 0; i < focusableCount + 3; i++) {
     await page.keyboard.press("Shift+Tab");
     await delay(50);
+    assert.ok(
+      await page.evaluate(() => {
+        const dialog = document.querySelector('dialog[aria-label="Settings"]');
+        return dialog?.contains(document.activeElement);
+      }),
+      `${label}: focus escaped on Shift+Tab step ${i + 1}`,
+    );
   }
 
   // Verify focus is still inside the dialog
@@ -165,7 +208,10 @@ async function checkShiftTabTrap(label) {
     return dialog.contains(activeElement) || dialog === activeElement;
   });
 
-  assert.ok(focusInsideDialog, `${label}: focus escaped dialog after repeated Shift+Tab`);
+  assert.ok(
+    focusInsideDialog,
+    `${label}: focus escaped dialog after repeated Shift+Tab`,
+  );
   report.checks.push(`shift-tab-reverse-trap-${label}`);
 
   // Verify dialog is still open
@@ -173,35 +219,52 @@ async function checkShiftTabTrap(label) {
     const dialog = document.querySelector('dialog[aria-label="Settings"]');
     return dialog?.open ?? false;
   });
-  assert.ok(dialogOpen, `${label}: dialog closed unexpectedly during Shift+Tab trap`);
+  assert.ok(
+    dialogOpen,
+    `${label}: dialog closed unexpectedly during Shift+Tab trap`,
+  );
 
   // Close for next test
   await closeSettingsDialog();
-  await page.waitForFunction(() => !document.querySelector('dialog[aria-label="Settings"]'), { timeout: 5000 });
+  await page.waitForFunction(
+    () => !document.querySelector('dialog[aria-label="Settings"]'),
+    { timeout: 5000 },
+  );
 }
 
 async function checkBackgroundInert(label) {
   await openSettingsDialog();
 
   // Try to focus a header button (outside the dialog)
-  const headerButton = page.getByRole("button", { name: "Refresh connection", exact: true });
+  const headerButton = page.getByRole("button", {
+    name: "Refresh connection",
+    exact: true,
+  });
 
   // Attempt to focus it
   const wasFocused = await page.evaluate(() => {
-    const btn = document.querySelector('button[aria-label="Refresh connection"]');
-    if (!btn) return false;
+    const btn = document.querySelector(
+      'button[aria-label="Refresh connection"]',
+    );
+    if (!btn) throw new Error("background control is missing");
     btn.focus();
     return document.activeElement === btn;
   });
 
   // Verify it was NOT focused (focus should remain in dialog)
-  assert.ok(!wasFocused, `${label}: background button received focus while dialog was open`);
+  assert.ok(
+    !wasFocused,
+    `${label}: background button received focus while dialog was open`,
+  );
 
   // Verify dialog is still open and focus is still inside
   const focusInsideDialog = await page.evaluate(() => {
     const dialog = document.querySelector('dialog[aria-label="Settings"]');
     const activeElement = document.activeElement;
-    return dialog?.open && (dialog.contains(activeElement) || dialog === activeElement);
+    return (
+      dialog?.open &&
+      (dialog.contains(activeElement) || dialog === activeElement)
+    );
   });
   assert.ok(focusInsideDialog, `${label}: dialog lost focus or was closed`);
 
@@ -209,7 +272,10 @@ async function checkBackgroundInert(label) {
 
   // Close for next test
   await closeSettingsDialog();
-  await page.waitForFunction(() => !document.querySelector('dialog[aria-label="Settings"]'), { timeout: 5000 });
+  await page.waitForFunction(
+    () => !document.querySelector('dialog[aria-label="Settings"]'),
+    { timeout: 5000 },
+  );
 }
 
 async function checkEscapeCloses(label) {
@@ -292,12 +358,18 @@ async function checkBackdropClick(label) {
 
   // Close for next test
   await closeSettingsDialog();
-  await page.waitForFunction(() => !document.querySelector('dialog[aria-label="Settings"]'), { timeout: 5000 });
+  await page.waitForFunction(
+    () => !document.querySelector('dialog[aria-label="Settings"]'),
+    { timeout: 5000 },
+  );
 }
 
 async function checkFocusRestoration(label) {
   // Store initial focus (should be somewhere neutral)
-  const settingsButton = page.getByRole("button", { name: "Settings", exact: true });
+  const settingsButton = page.getByRole("button", {
+    name: "Settings",
+    exact: true,
+  });
   const buttonElement = await settingsButton.elementHandle();
 
   // Open dialog
@@ -312,7 +384,10 @@ async function checkFocusRestoration(label) {
     const btn = document.querySelector('button[aria-label="Settings"]');
     return document.activeElement === btn;
   });
-  assert.ok(focusedAfterEscape, `${label}: focus not restored to Settings button after Escape`);
+  assert.ok(
+    focusedAfterEscape,
+    `${label}: focus not restored to Settings button after Escape`,
+  );
 
   report.checks.push(`focus-restoration-escape-${label}`);
 
@@ -341,31 +416,47 @@ async function checkFocusRestoration(label) {
     const btn = document.querySelector('button[aria-label="Settings"]');
     return document.activeElement === btn;
   });
-  assert.ok(focusedAfterClickOutside, `${label}: focus not restored to Settings button after outside click`);
+  assert.ok(
+    focusedAfterClickOutside,
+    `${label}: focus not restored to Settings button after outside click`,
+  );
 
   report.checks.push(`focus-restoration-outside-click-${label}`);
 }
 
 try {
-  daemon = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], { stdio: "ignore" });
-  desktop = startAcceptanceProcess(electron, [appDir, "--remote-debugging-port=0"], {
-    stdio: ["ignore", "ignore", "pipe"],
-    env: {
-      ...process.env,
-      DROGON_DATA_DIR: dataDir,
-      DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
-      ...(process.platform === "win32" ? {} : { SHELL: "/bin/sh" }),
-    },
+  daemon = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], {
+    stdio: "ignore",
   });
+  desktop = startAcceptanceProcess(
+    electron,
+    [appDir, "--remote-debugging-port=0"],
+    {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: {
+        ...process.env,
+        DROGON_DATA_DIR: dataDir,
+        DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
+        ...(process.platform === "win32" ? {} : { SHELL: "/bin/sh" }),
+      },
+    },
+  );
 
   const endpoint = await new Promise((resolve, reject) => {
     let tail = "";
-    const timeout = setTimeout(() => reject(new Error(`no DevTools endpoint: ${tail}`)), 30000);
+    const timeout = setTimeout(
+      () => reject(new Error(`no DevTools endpoint: ${tail}`)),
+      30000,
+    );
     desktop.once("error", reject);
-    desktop.once("exit", () => reject(new Error(`electron exited early: ${tail}`)));
+    desktop.once("exit", () =>
+      reject(new Error(`electron exited early: ${tail}`)),
+    );
     desktop.stderr.on("data", (bytes) => {
       tail = (tail + bytes.toString()).slice(-8192);
-      const m = tail.match(/DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/\S+)/);
+      const m = tail.match(
+        /DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/\S+)/,
+      );
       if (m) {
         clearTimeout(timeout);
         resolve(m[1]);
@@ -385,7 +476,10 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByText("Service 0.1.0", { exact: true }).waitFor();
 
-  await page.getByRole("button", { name: "Add workspace", exact: true }).first().click();
+  await page
+    .getByRole("button", { name: "Add workspace", exact: true })
+    .first()
+    .click();
   await page.getByLabel("Folder path").fill(folder);
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
@@ -406,7 +500,11 @@ try {
   await checkEscapeCloses("1440-light");
   await checkBackdropClick("1440-light");
   await checkFocusRestoration("1440-light");
-  await page.screenshot({ path: path.join(shots, "1440-light-all-checks-done.png") });
+  await openSettingsDialog();
+  await page.screenshot({
+    path: path.join(shots, "1440-light-all-checks-done.png"),
+  });
+  await closeSettingsDialog();
 
   // Trap-forward + Escape + restore repeat at 760x600 dark
   await setSettledTheme("dark");
@@ -416,7 +514,11 @@ try {
   await checkTabTrap("760-dark");
   await checkEscapeCloses("760-dark");
   await checkFocusRestoration("760-dark");
-  await page.screenshot({ path: path.join(shots, "760-dark-trap-escape-restore-done.png") });
+  await openSettingsDialog();
+  await page.screenshot({
+    path: path.join(shots, "760-dark-trap-escape-restore-done.png"),
+  });
+  await closeSettingsDialog();
 
   report.status = "PASSED";
 } catch (error) {

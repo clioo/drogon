@@ -376,7 +376,10 @@ export function App() {
   const botsScopeWorkspace = botsScope?.workspaceId ?? null;
   const botsScopeLocale = botsScope?.locale ?? null;
   function botsScopeEquals(
-    scope: { hostId: string; workspaceId: string; locale: string } | null | undefined,
+    scope:
+      | { hostId: string; workspaceId: string; locale: string }
+      | null
+      | undefined,
   ): scope is { hostId: string; workspaceId: string; locale: string } {
     return (
       scope != null &&
@@ -403,7 +406,14 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [route, botsAvailable, botsScopeHost, botsScopeWorkspace, botsScopeLocale, botsReload]);
+  }, [
+    route,
+    botsAvailable,
+    botsScopeHost,
+    botsScopeWorkspace,
+    botsScopeLocale,
+    botsReload,
+  ]);
   // Stable files base: Bots snapshot refreshes must never reset the Files
   // descriptor identity (mounted editor drafts/attempts). The bots layer
   // rebuilds on snapshot change; the files base below never does.
@@ -426,7 +436,14 @@ export function App() {
         buildBotsPanelProps(botsLoad.snapshot),
       );
     return filesBaseRegistry;
-  }, [filesBaseRegistry, botsGatedBridge, botsLoad, botsScopeHost, botsScopeWorkspace, botsScopeLocale]);
+  }, [
+    filesBaseRegistry,
+    botsGatedBridge,
+    botsLoad,
+    botsScopeHost,
+    botsScopeWorkspace,
+    botsScopeLocale,
+  ]);
   const filesAvailable =
     isFilesAvailable(liveCapabilities) &&
     checkAvailability(
@@ -458,7 +475,8 @@ export function App() {
   )
     filesAliveRef.current = false;
   const filesAlive = filesAliveRef.current;
-  const filesProps = current && status ? { workspace: current, status } : lastPropsRef.current;
+  const filesProps =
+    current && status ? { workspace: current, status } : lastPropsRef.current;
   const filesSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
@@ -534,10 +552,7 @@ export function App() {
         setSelected((value) =>
           result.workspaces.some((item) => item.id === value)
             ? value
-            : resolveRestoredSelection(
-                result.workspaces,
-                loadSavedSelection(),
-              ),
+            : resolveRestoredSelection(result.workspaces, loadSavedSelection()),
         );
         setRevision((value) => value + 1);
         const supportsHarnesses = supportsHarnessLaunch(connected.capabilities);
@@ -565,7 +580,10 @@ export function App() {
     // workspace, so the next reload's restore has an up-to-date target.
     const workspace = workspaces.find((item) => item.id === selected);
     if (workspace)
-      saveSavedSelection({ workspaceId: workspace.id, hostId: workspace.hostId });
+      saveSavedSelection({
+        workspaceId: workspace.id,
+        hostId: workspace.hostId,
+      });
   }, [selected, workspaces]);
   useEffect(() => {
     const wide = matchMedia("(min-width: 1101px)");
@@ -791,11 +809,7 @@ export function App() {
             <button
               key="panel-files"
               className="workspace-row"
-              disabled={
-                busy ||
-                !current ||
-                !isFilesAvailable(liveCapabilities)
-              }
+              disabled={busy || !current || !isFilesAvailable(liveCapabilities)}
               data-current={route === FILES_ROUTE_ID}
               title={
                 isFilesAvailable(liveCapabilities)
@@ -810,11 +824,7 @@ export function App() {
             <button
               key="panel-bots"
               className="workspace-row"
-              disabled={
-                busy ||
-                !current ||
-                !isBotsAvailable(liveCapabilities)
-              }
+              disabled={busy || !current || !isBotsAvailable(liveCapabilities)}
               data-current={route === BOTS_ROUTE_ID}
               title={
                 isBotsAvailable(liveCapabilities)
@@ -898,10 +908,7 @@ export function App() {
               {current && <span className="path">{current.path}</span>}
             </div>
             <div className="header-actions">
-              <IconButton
-                label={`Theme: ${theme}`}
-                onClick={cycleTheme}
-              >
+              <IconButton label={`Theme: ${theme}`} onClick={cycleTheme}>
                 {theme === "system" ? (
                   <Monitor size={16} />
                 ) : theme === "dark" ? (
@@ -1184,8 +1191,8 @@ export function App() {
                         return (
                           <>
                             <p>
-                              Bots snapshot too large: {fresh.message}{" "}
-                              Narrow the workspace scope and retry.
+                              Bots snapshot too large: {fresh.message} Narrow
+                              the workspace scope and retry.
                             </p>
                             <Button
                               disabled={busy}

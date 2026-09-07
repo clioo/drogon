@@ -458,10 +458,21 @@ describe("real local endpoint probe against an owned fixture socket", () => {
 
   test("a missing/unreadable auth token against a real live local socket is observed as present, and bootstrap does not spawn", async () => {
     scratchDir = await mkdtemp(path.join(tmpdir(), "drogon-bootstrap-probe-"));
-    const socketPath = resolveEndpointPath(scratchDir, "darwin");
+    // The real transport endpoint is host-specific (a unix socket path vs. a
+    // named pipe), unlike `baseDeps`'s fixed "darwin" `platform`, which only
+    // simulates a POSIX-spawn-capable decision core — see its declaration.
+    const hostPlatform = process.platform;
+    const socketPath = resolveEndpointPath(scratchDir, hostPlatform);
     const server = createServer((socket) => socket.destroy());
-    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    let listening = false;
     try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(socketPath, () => {
+          listening = true;
+          resolve();
+        });
+      });
       const spawnDaemon = vi.fn(async () => undefined);
       const outcome = await bootstrapNativeRuntime(
         baseDeps({
@@ -470,20 +481,46 @@ describe("real local endpoint probe against an owned fixture socket", () => {
           // this task requires `observeLocalEndpoint` to resolve.
           checkStatus: async () => unverifiable,
           observeLocalEndpoint: (signal) =>
-            observeLocalEndpoint(scratchDir, "darwin", 2_000, signal),
+            observeLocalEndpoint(scratchDir, hostPlatform, 2_000, signal),
           spawnDaemon,
         }),
       );
-      expect(outcome).toEqual({ kind: "endpoint-present-not-spawning" });
+      // `observeLocalEndpoint` never probes on win32 — no named-pipe
+      // implementation exists to own the endpoint — so a live fixture pipe
+      // there is still reported as the platform-ambiguous never-spawn
+      // outcome, not "present", and must not be forced onto a fake POSIX
+      // result just to match the non-Windows expectation below.
+      expect(outcome).toEqual(
+        hostPlatform === "win32"
+          ? {
+              kind: "endpoint-ambiguous-not-spawning",
+              reason: "unsupported-platform",
+            }
+          : { kind: "endpoint-present-not-spawning" },
+      );
       expect(spawnDaemon).not.toHaveBeenCalled();
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (listening) {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      } else {
+        server.removeAllListeners("error");
+        server.close();
+      }
     }
   });
 
   test("no socket file at all (fresh install) is observed as absent through the real probe", async () => {
     scratchDir = await mkdtemp(path.join(tmpdir(), "drogon-bootstrap-probe-"));
-    const observation = await observeLocalEndpoint(scratchDir, "darwin", 2_000);
-    expect(observation).toEqual({ kind: "absent" });
+    const hostPlatform = process.platform;
+    const observation = await observeLocalEndpoint(
+      scratchDir,
+      hostPlatform,
+      2_000,
+    );
+    expect(observation).toEqual(
+      hostPlatform === "win32"
+        ? { kind: "ambiguous", reason: "unsupported-platform" }
+        : { kind: "absent" },
+    );
   });
 });

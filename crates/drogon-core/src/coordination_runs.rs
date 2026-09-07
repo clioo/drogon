@@ -9,11 +9,10 @@ use rusqlite::{OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::sync::atomic::Ordering;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::coordination_attempts;
 use crate::coordination_identity::Actor;
-use crate::{Engine, error, requests};
+use crate::{Engine, error, now_unix_ms as now_ms, requests};
 
 impl Engine {
     pub(crate) fn dispatch_run_task(&self, request: &Request) -> Result<Value, RpcError> {
@@ -213,13 +212,4 @@ pub(crate) fn encode(value: impl Serialize) -> Result<Value, RpcError> {
 
 fn new_id(prefix: &str) -> String {
     format!("{prefix}_{}", uuid::Uuid::new_v4())
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
 }

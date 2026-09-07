@@ -588,22 +588,25 @@ try {
   }
   await page.screenshot({ path: path.join(shots, "theme-matrix-done.png") });
 
-  // 5. Hidden files mount: files.v1 is not advertised by this daemon, so
-  // the Files entry must stay disabled with an honest reason, the panel
-  // must not mount, and the terminal flow must be intact.
-  const filesButton = page.getByRole("button", { name: "Files", exact: true });
-  await filesButton.waitFor();
-  assert.equal(await filesButton.isDisabled(), true);
-  assert.match((await filesButton.getAttribute("title")) ?? "", /files\.v1/);
-  assert.equal(await page.locator('section[aria-label="Files"]').count(), 0);
-  const botsButton = page.getByRole("button", { name: "Bots", exact: true });
-  await botsButton.waitFor();
-  assert.equal(await botsButton.isDisabled(), true);
-  assert.match((await botsButton.getAttribute("title")) ?? "", /bot\.snapshot\.v1/);
-  assert.equal(await page.locator('section[aria-label="Bots"]').count(), 0);
+  // Availability follows the real service; inactive panels remain unmounted.
+  const service = await page.evaluate(() => window.drogon.status());
+  assert.equal(service.ok, true);
+  assert.ok(Array.isArray(service.result.capabilities));
+  for (const [name, capability] of [
+    ["Files", "files.v1"],
+    ["Bots", "bot.snapshot.v1"],
+  ]) {
+    const button = page.getByRole("button", { name, exact: true });
+    await button.waitFor();
+    const available = service.result.capabilities.includes(capability);
+    assert.equal(await button.isDisabled(), !available);
+    if (!available) {
+      assert.ok(((await button.getAttribute("title")) ?? "").includes(capability));
+    }
+    assert.equal(await page.locator(`section[aria-label="${name}"]`).count(), 0);
+    report.checks.push(`${name.toLowerCase()}-availability-matches-service-and-inactive-panel-unmounted`);
+  }
   assert.equal(await page.getByRole("tab").count(), 2);
-  report.checks.push("hidden-files-mount-stays-disabled-with-reason");
-  report.checks.push("hidden-bots-mount-stays-disabled-with-reason");
   await page.screenshot({ path: path.join(shots, "panels-hidden-mount.png") });
 
   // 6. Layout matrix: responsive shell invariants at 1440x1000 and 760x600
@@ -691,21 +694,7 @@ try {
     assertContrast(theme, measured);
   }
 
-  // 8. Files-split CSS static verification (Follow-up B V2 half + the
-  // ROOT-approved extras: editor surface, explorer rows, notice overlays).
-  // HONESTY: files.v1 is withheld in every available environment, so the
-  // Files panel cannot mount over CDP here and NO rendered-files visual
-  // claim is possible from this probe; this section therefore verifies the
-  // BUILT stylesheet statically (selector + token presence). Visual
-  // acceptance of the rendered split stays with the integrated CDP lane once
-  // files.v1 ships in a real environment - this section must be replaced by
-  // rendered assertions there, not treated as the visual proof. The 760px
-  // narrow-viewport gate (stacked fallback usable, editor usable at 760x600)
-  // is rendered-only for the same reason; its static prerequisite asserted
-  // here is presence of the @media (max-width: 1100px) stacked-fallback rule
-  // (760 falls within that breakpoint) plus overlay-free editor rules. Row
-  // math for the record: at 1440 the fixed 240px tree beside the 240px
-  // sidebar leaves 960px for the editor before any V3 drag-resize.
+  // Static prerequisites only; accept-desktop --files owns rendered Files acceptance.
   const cssAssets = path.join(appDir, "out", "renderer", "assets");
   const cssFile = (await readdir(cssAssets)).find((f) => f.endsWith(".css"));
   assert.ok(cssFile, "built renderer CSS not found - run electron-vite build");
