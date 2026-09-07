@@ -1,6 +1,179 @@
 {
   "schema": 1,
   "observedAt": "2026-09-07T15:53:00Z",
+  "leadersObservedAt": "2026-09-07T15:58:00Z",
+  "leaders": [
+    {
+      "vertical": "V5",
+      "finalSha": "3a17a171f918ce90f4ecb456a86daf75bc8ab268",
+      "taskId": "task_1546a2a90f4c",
+      "taskStatus": "completed",
+      "dispatchId": "ctx_3dc8d5809559",
+      "dispatchStatus": "completed",
+      "workerState": "succeeded",
+      "terminalHandle": "term_8ac44f44-a83e-4095-a4d0-5b4bb9b844fe",
+      "terminalState": "retained",
+      "closureKind": "accepted worker_done",
+      "releaseReceipt": {
+        "state": "retained",
+        "reason": "external_terminal",
+        "processAction": "none"
+      },
+      "resourceSnapshot": {
+        "id": "wtr_a60f9e46aed8",
+        "ownershipState": "external",
+        "releaseState": "not_requested",
+        "retainedReason": "external_terminal",
+        "terminalHandle": "term_8ac44f44-a83e-4095-a4d0-5b4bb9b844fe",
+        "worktreeId": "a8600e26-85de-4a2e-9837-82fd47a9fc57::/Users/carlos/orca/workspaces/Drogon-rewrite/codex-vertical-05-platform-release",
+        "originDispatchId": "ctx_3dc8d5809559",
+        "ownerDispatchId": "ctx_3dc8d5809559",
+        "releaseRequestedAt": null,
+        "releaseCompletedAt": null,
+        "releaseError": null,
+        "archive": {
+          "source": null,
+          "status": null
+        }
+      }
+    },
+    {
+      "vertical": "V2",
+      "finalSha": "8406e02a74316e66a5204d72e5c594dd4e9e08b5",
+      "taskId": "task_9e42feed8627",
+      "taskStatus": "completed",
+      "dispatchId": "ctx_b8999954bf9c",
+      "dispatchStatus": "completed",
+      "workerState": "succeeded",
+      "terminalHandle": "term_f7337878-60b0-491b-93b6-d12e9f76bd00",
+      "terminalState": "retained",
+      "closureKind": "accepted worker_done",
+      "releaseReceipt": {
+        "state": "retained",
+        "reason": "external_terminal",
+        "processAction": "none"
+      },
+      "resourceSnapshot": {
+        "id": "wtr_0418d09a7bd2",
+        "ownershipState": "external",
+        "releaseState": "not_requested",
+        "retainedReason": "external_terminal",
+        "terminalHandle": "term_f7337878-60b0-491b-93b6-d12e9f76bd00",
+        "worktreeId": "a8600e26-85de-4a2e-9837-82fd47a9fc57::/Users/carlos/orca/workspaces/Drogon-rewrite/codex-vertical-02-desktop-settings",
+        "originDispatchId": "ctx_b8999954bf9c",
+        "ownerDispatchId": "ctx_b8999954bf9c",
+        "releaseRequestedAt": null,
+        "releaseCompletedAt": null,
+        "releaseError": null,
+        "archive": {
+          "source": null,
+          "status": null
+        }
+      }
+    },
+    {
+      "vertical": "V4",
+      "finalSha": "3114bd7119f28d3fdda97e1d4581c204abcc50c5",
+      "taskId": "task_565c41f74577",
+      "taskStatus": "completed",
+      "dispatchId": "ctx_6f0e78e8230d",
+      "dispatchStatus": "failed",
+      "workerState": "abandoned",
+      "terminalHandle": "term_8ee3db65-18a3-472e-a42b-000ac2e9cf40",
+      "terminalState": "retained",
+      "closureKind": "coordinator recovery; no accepted worker_done",
+      "releaseReceipt": {
+        "state": "retained",
+        "reason": "identity_unproven",
+        "processAction": "none"
+      },
+      "resourceSnapshot": {
+        "id": "wtr_d3ce467a1d3d",
+        "ownershipState": "external",
+        "releaseState": "not_requested",
+        "retainedReason": "external_terminal",
+        "terminalHandle": "term_8ee3db65-18a3-472e-a42b-000ac2e9cf40",
+        "worktreeId": "a8600e26-85de-4a2e-9837-82fd47a9fc57::/Users/carlos/orca/workspaces/Drogon-rewrite/codex-vertical-04-capabilities",
+        "originDispatchId": "ctx_6f0e78e8230d",
+        "ownerDispatchId": "ctx_6f0e78e8230d",
+        "releaseRequestedAt": null,
+        "releaseCompletedAt": null,
+        "releaseError": null,
+        "archive": {
+          "source": null,
+          "status": null
+        }
+      }
+    },
+    {
+      "vertical": "V1",
+      "finalSha": "1080749a91f7fa36aed739e7e833d55de6ae724f",
+      "taskId": "task_bbb62f343b3c",
+      "taskStatus": "completed",
+      "dispatchId": "ctx_c62f0e47ad7a",
+      "dispatchStatus": "failed",
+      "workerState": "abandoned",
+      "terminalHandle": "term_3f2f6153-5cae-4f42-91c7-f6a631c38607",
+      "terminalState": "retained",
+      "closureKind": "coordinator recovery; no accepted worker_done",
+      "releaseReceipt": {
+        "state": "retained",
+        "reason": "identity_unproven",
+        "processAction": "none"
+      },
+      "resourceSnapshot": {
+        "id": "wtr_38372a1e7099",
+        "ownershipState": "external",
+        "releaseState": "not_requested",
+        "retainedReason": "external_terminal",
+        "terminalHandle": "term_3f2f6153-5cae-4f42-91c7-f6a631c38607",
+        "worktreeId": "a8600e26-85de-4a2e-9837-82fd47a9fc57::/Users/carlos/orca/workspaces/Drogon-rewrite/codex-vertical-01-runtime-cli",
+        "originDispatchId": "ctx_c62f0e47ad7a",
+        "ownerDispatchId": "ctx_c62f0e47ad7a",
+        "releaseRequestedAt": null,
+        "releaseCompletedAt": null,
+        "releaseError": null,
+        "archive": {
+          "source": null,
+          "status": null
+        }
+      }
+    },
+    {
+      "vertical": "V3",
+      "finalSha": "1e59034829a93ebf474df5c9f06cd6e031b3418f",
+      "taskId": "task_a12105de2816",
+      "taskStatus": "completed",
+      "dispatchId": "ctx_62b07c551e42",
+      "dispatchStatus": "failed",
+      "workerState": "abandoned",
+      "terminalHandle": "term_0559bd56-74e0-4b03-bf10-134bad39e82e",
+      "terminalState": "retained",
+      "closureKind": "coordinator recovery; no accepted worker_done",
+      "releaseReceipt": {
+        "state": "retained",
+        "reason": "identity_unproven",
+        "processAction": "none"
+      },
+      "resourceSnapshot": {
+        "id": "wtr_c05b53346f93",
+        "ownershipState": "external",
+        "releaseState": "not_requested",
+        "retainedReason": "external_terminal",
+        "terminalHandle": "term_0559bd56-74e0-4b03-bf10-134bad39e82e",
+        "worktreeId": "a8600e26-85de-4a2e-9837-82fd47a9fc57::/Users/carlos/orca/workspaces/Drogon-rewrite/codex-vertical-03-workspaces-remote",
+        "originDispatchId": "ctx_62b07c551e42",
+        "ownerDispatchId": "ctx_62b07c551e42",
+        "releaseRequestedAt": null,
+        "releaseCompletedAt": null,
+        "releaseError": null,
+        "archive": {
+          "source": null,
+          "status": null
+        }
+      }
+    }
+  ],
   "rootRun": "run_ddca7735397e",
   "runtimeId": "e9c8216c-44ad-42d5-9d9a-065bd6ada0b9",
   "scope": "Historical sanitized child-run inventory. Not credentials, product acceptance, or proof that retained processes exited. Tasks may have multiple or no dispatch rows.",

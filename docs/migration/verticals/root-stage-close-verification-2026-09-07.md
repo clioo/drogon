@@ -58,4 +58,17 @@ with OS error 26, `ExecutableFileBusy` / `Text file busy`. ROOT serialized
 only executable copy + spawn with a test-local mutex (`7122c66`), preventing
 another fixture fork from inheriting the copy's writable FD until exec.
 Daemon interactions remain concurrent; all six assertions remain unchanged.
-The six tests pass locally, strict clippy/fmt pass; Linux rerun is required.
+The six tests pass locally, strict clippy/fmt pass. CI run `34140539442`
+on `7122c66` passes Linux, macOS and Windows without test skips added by this fix.
+
+## Packaged preview
+
+Clean `1629b5ca698028c1eeee6d823d67fa9389ac6feb` package passed 15 real
+acceptance checks, including Files and quit/reopen session continuity.
+Receipt: `../stage-close-packaged-acceptance-2026-09-07.json`.
+Seal v3 `da1ddde81c38e5e1dcd086a6a0bd0307a8b172ceb6d708e01edb1150ad380fe4`
+covers 293 files / 311448093 bytes. ROOT inspected wide-dark/narrow-light
+captures; all owned fixture sessions, desktop and daemon observed exited.
+Installer independently verified the same seal and installed the per-user
+preview, retaining `be192c5` and user data; no user process was stopped.
+Local ad-hoc signing is not notarization or E5 rights acceptance.

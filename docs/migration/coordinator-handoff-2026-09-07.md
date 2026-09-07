@@ -1,8 +1,8 @@
 # Traspaso de coordinación — Drogon, 7 de septiembre de 2026
 
-Estado: cierre de etapa en curso; este documento no certifica paridad ni release.
-La sección de cierre se completará después de recibir las entregas finales,
-revisar su integración y contabilizar los recursos de los cinco líderes.
+Estado: etapa cerrada con integración parcial y preview verificado; no certifica
+paridad completa ni release público. Los cinco líderes entregaron su checkpoint;
+V1/V3/V4 necesitaron recuperación explícita de settlement, detallada abajo.
 
 ## 1. Leer primero: decisión vigente de Carlos
 
@@ -193,10 +193,37 @@ Nunca reemplazar un daemon activo o cerrar sesiones del usuario para instalar.
 
 ## 9. Cierre final y siguiente paso
 
-Pendiente de completar: SHAs finales aceptados/retenidos, CI del HEAD final,
-PR de cierre, preview instalado, informes por vertical, cobertura/paridad
-calificada y recibos de settlement/release. No interpretar este borrador
-como confirmación de que los líderes ya terminaron.
+Integración entregada mediante [PR10](https://github.com/clioo/drogon/pull/10).
+Último cambio de código/test: `7122c66519651837095b7d9007bcb7c6c20eb44d`;
+[CI 34140539442](https://github.com/clioo/drogon/actions/runs/34140539442)
+pasó en Ubuntu 22.04, macOS 14 y Windows. Los commits de relevo posteriores
+solo documentan el cierre. Consultar el PR para su estado GitHub vigente.
+
+Preview instalado: `1629b5ca698028c1eeee6d823d67fa9389ac6feb`, Node24,
+Electron 44.2.0, macOS arm64, firma local ad-hoc sin notarización.
+Los 15 checks del paquete real pasaron, incluido Files, quit/reopen,
+continuidad de la sesión y misma identidad sellada antes/después. Todos los
+procesos/sesiones del fixture se observaron `exited`. ROOT inspeccionó capturas
+wide-dark y narrow-light. [Receipt portable](stage-close-packaged-acceptance-2026-09-07.json).
+
+Seal v3: `da1ddde81c38e5e1dcd086a6a0bd0307a8b172ceb6d708e01edb1150ad380fe4`
+(293 archivos, 311448093 bytes). App: `/Users/carlos/Applications/Drogon.app`.
+Archivo inmutable instalado bajo `~/Applications/.drogon-builds/`
+`1629b5ca6980-v3-<seal>/Drogon.app`; el installer retuvo el preview `be192c5`,
+los anteriores y todos los datos. No detuvo procesos del usuario. El JSON
+portable conserva los paths locales exactos; las capturas permanecen en
+`.preflight/acceptance/desktop-1788796635900-51891bb4-1c25-49ac-910f-5f55c3011e1b/`.
+Los cambios documentales posteriores no forman parte del bundle instalado.
+
+Estado final de coordinación: cinco tareas de líderes completed, cero
+Dispatches activos en ROOT y cero en los cinco child Runs observados.
+No significa que toda tarea hija haya sido exitosa ni que los terminales
+retenidos hayan salido. V2/V5 cerraron normalmente; V1/V3/V4 fueron cercados
+sin acción de proceso tras su informe final y cerrados por recuperación.
+
+Siguiente dueño: comenzar por secciones 10–12, revisar los holds y definir
+el siguiente bloque. No continuar automáticamente la ola antigua, relanzar
+workers por sus viejos prompts o ejecutar la receta raíz/benchmark.
 
 ## 10. Qué código se aceptó y qué NO debe integrarse a ciegas
 
@@ -209,7 +236,8 @@ como confirmación de que los líderes ya terminaron.
 | V5 | Bootstrap y CI, verifier fail-closed, corpus de notices en `7cebf42` | `3a17a17` fixture Windows: si sale el daemon pero falla/cancela el hijo, todavía borra evidencia. No integrar esa limpieza; falta propagar resultado del hijo antes de remover fixture. E5 sigue abierto. |
 
 Checkpoint V1 publicado en PR14: `1080749`; V2 PR11: `8406e02`;
-V5 PR15: `3a17a17`. Las ramas de líderes son propuestas preservadas,
+V3 PR12: `1e59034`; V4 PR13: `3114bd7`; V5 PR15: `3a17a17`.
+Todos esos commits quedaron publicados en sus ramas. Las ramas de líderes son propuestas preservadas,
 no reemplazos de `codex/vertical-integration`. Usar `git show <SHA>:<path>`
 desde el checkout de integración para leerlas sin escribir en otro checkout.
 
@@ -265,7 +293,23 @@ terminal retenido; NO worker_done válido y NO proceso declarado exited.
 
 V2 cerró con `msg_11d1abcff867`; V5 con `msg_d4817db587c9`.
 Ambos worker-release devolvieron retained/external_terminal, processAction none.
-El cierre de V3/V4 se registra en la sección final cuando esté confirmado.
+V3/V4 entregaron su informe final por el terminal exacto (cursores 3558 y 4344),
+confirmando capability irrecuperable y checkpoint estable. ROOT repitió la
+recuperación sin acción de proceso: intentos abandoned/failed, tareas completed
+con causa, release retained/identity_unproven. El JSON incluye las tres
+dimensiones y el resultado real de release; no reconstruye un worker_done.
+
+V3 `1e59034` corrige el antiguo poll-error-as-done, pero el nuevo test de timeout
+todavía muta `PATH` global con `unsafe set_var` mientras otros tests leen el
+entorno. Encadenar luego el Git real evita resultados vacíos, no aísla el
+entorno concurrente; además la fixture usa shell/PATH POSIX. ROOT mantiene
+el wrapper sin integrar ni registrar: sustituir por entorno por-proceso o
+fixture aislada y revalidar límites/reap/fallbacks antes de activar Git.
+
+V4 conserva dos directorios locales no trackeados, declarados como held:
+`tests/parity/ports/WP-CAP-DEVICE/` y `tests/parity/ports/WP-CAP-INT/` en su
+worktree. No se publicaron ni se borraron; revisar procedencia/contenido antes
+de cualquier cleanup. Su existencia no prueba tests portados/ejecutados.
 
 ## 12. Porcentajes, riesgos y recomendaciones de relevo
 
