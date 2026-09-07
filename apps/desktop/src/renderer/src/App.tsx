@@ -68,6 +68,11 @@ import {
   isBotsAvailable,
   registerBotsRoute,
 } from "./bots-mount";
+import {
+  BROWSER_ROUTE_ID,
+  browserBridge,
+  registerBrowserRoute,
+} from "./browser-mount";
 import { loadBotSnapshot } from "./bots-loader";
 import type { BotsLoadResult } from "./bots-loader";
 import { FILES_CAPABILITY } from "../../shared/file-contract";
@@ -443,19 +448,25 @@ export function App() {
   // Stable files base: Bots snapshot refreshes must never reset the Files
   // descriptor identity (mounted editor drafts/attempts). The bots layer
   // rebuilds on snapshot change; the files base below never does.
+  // Browser is a local Electron feature (no service capability): the
+  // bridge is static, so it joins the base registry unconditionally.
+  const browserStaticBridge = useMemo(() => browserBridge(), []);
   const filesBaseRegistry = useMemo(
     () =>
-      registerChangesRoute(
-        registerFilesRoute(
-          createRouteRegistry({
-            capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY, GIT_CAPABILITY],
-            fallbackId: BOTS_ROUTE_ID,
-          }),
-          filesGatedBridge,
+      registerBrowserRoute(
+        registerChangesRoute(
+          registerFilesRoute(
+            createRouteRegistry({
+              capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY, GIT_CAPABILITY],
+              fallbackId: BOTS_ROUTE_ID,
+            }),
+            filesGatedBridge,
+          ),
+          gitGatedBridge,
         ),
-        gitGatedBridge,
+        browserStaticBridge,
       ),
-    [filesGatedBridge, gitGatedBridge],
+    [filesGatedBridge, gitGatedBridge, browserStaticBridge],
   );
   const panelRegistry = useMemo(() => {
     if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
@@ -528,6 +539,7 @@ export function App() {
   const filesSectionRef = useRef<HTMLElement>(null);
   const changesSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
+  const browserSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
   useEffect(() => {
     // Real focus, only on explicit user navigation to a panel: background
@@ -539,7 +551,9 @@ export function App() {
           ? changesSectionRef.current
           : route === BOTS_ROUTE_ID
             ? botsSectionRef.current
-            : null;
+            : route === BROWSER_ROUTE_ID
+              ? browserSectionRef.current
+              : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -567,6 +581,15 @@ export function App() {
   )
     botsAliveRef.current = false;
   const botsAlive = botsAliveRef.current;
+  // Browser keep-alive mirrors files minus the capability withhold (local
+  // feature, always available): survives switches and transients, unmounts
+  // on settled workspace loss. The page itself lives in main, so a remount
+  // only rebuilds chrome and re-reports bounds.
+  const browserAliveRef = useRef(false);
+  if (route === BROWSER_ROUTE_ID && current) browserAliveRef.current = true;
+  else if (status && !current && !busy && !loadingSessions)
+    browserAliveRef.current = false;
+  const browserAlive = browserAliveRef.current;
   const botsScopeMatch =
     botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope);
   const botsDescriptor: PanelDescriptor | null =
@@ -836,6 +859,7 @@ export function App() {
           filesAvailable={isFilesAvailable(liveCapabilities)}
           changesAvailable={isChangesAvailable(liveCapabilities)}
           botsAvailable={isBotsAvailable(liveCapabilities)}
+          browserEnabled={true}
           onSelectRoute={setRoute}
           onOpenPalette={openCommandPalette}
           groups={projectGroups}
@@ -984,7 +1008,12 @@ export function App() {
                   (route === CHANGES_ROUTE_ID &&
                     changesAlive &&
                     filesProps !== null) ||
-                  (route === BOTS_ROUTE_ID && botsAlive && filesProps !== null)
+                  (route === BOTS_ROUTE_ID &&
+                    botsAlive &&
+                    filesProps !== null) ||
+                  (route === BROWSER_ROUTE_ID &&
+                    browserAlive &&
+                    filesProps !== null)
                     ? "none"
                     : undefined,
               }}
@@ -1129,6 +1158,23 @@ export function App() {
                     filesBaseRegistry,
                     CHANGES_ROUTE_ID,
                   )}
+                  workspace={filesProps.workspace}
+                  status={filesProps.status}
+                />
+              </section>
+            ) : null}
+            {browserAlive && filesProps ? (
+              <section
+                ref={browserSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Browser"
+                style={{
+                  display: route === BROWSER_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                <MountedPanel
+                  descriptor={resolveRoute(filesBaseRegistry, BROWSER_ROUTE_ID)}
                   workspace={filesProps.workspace}
                   status={filesProps.status}
                 />

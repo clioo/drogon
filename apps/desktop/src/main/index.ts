@@ -8,6 +8,7 @@ import type { Result, Status } from "../shared/session-contract";
 import { readBuildInfo } from "./build-info";
 import { dispatchFileRequest } from "./file-bridge";
 import { registerGitBridge } from "./git-bridge";
+import { registerBrowserIpc } from "./browser/browser-ipc";
 import { dispatchBotSnapshot } from "./bot-bridge";
 import {
   readCursorMismatches,
@@ -292,6 +293,7 @@ if (!holdsSingleInstanceLock) {
     );
     registerBridge();
     registerUsageIpc();
+    registerBrowserIpc(() => window);
     await bootstrapDaemon();
     createWindow();
     app.on("activate", () => {

@@ -3,6 +3,7 @@ import type { DesktopBridge } from "../shared/session-contract";
 import { installBrowserWindowCloseGuard } from "./browser-window-close-installation";
 import { usageBridge } from "./usage";
 import { git } from "./git";
+import { browser } from "./browser";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -29,5 +30,5 @@ const bridge: DesktopBridge = {
 // Reconciles the granted `window.drogon.git.*` namespace with the
 // coordinator-owned DesktopBridge type without editing it: a runtime-only
 // merge before the freeze, so no existing key changes shape.
-Object.assign(bridge, { git });
+Object.assign(bridge, { git, browser });
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

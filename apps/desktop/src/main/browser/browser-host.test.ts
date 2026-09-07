@@ -1,0 +1,209 @@
+import { describe, expect, test, vi } from "vitest";
+import {
+  BrowserHost,
+  GUEST_WEB_PREFERENCES,
+  lockDownGuestSession,
+  type BrowserParentWindowLike,
+  type GuestContentsLike,
+  type GuestSessionLike,
+  type GuestViewLike,
+} from "./browser-host";
+
+function fakeSession(): GuestSessionLike & {
+  permissionCallback: ((allow: boolean) => void) | null;
+  checkHandler: (() => boolean) | null;
+  downloadPrevented: boolean;
+} {
+  const state = {
+    permissionCallback: null as ((allow: boolean) => void) | null,
+    checkHandler: null as (() => boolean) | null,
+    downloadPrevented: false,
+  };
+  const session: GuestSessionLike & typeof state = Object.assign(state, {
+    setPermissionRequestHandler(
+      handler: (
+        webContents: unknown,
+        permission: string,
+        callback: (allow: boolean) => void,
+      ) => void,
+    ): void {
+      // Record the real decision by invoking with a probe callback.
+      handler({}, "media", (allow) => {
+        (session as { lastDecision?: boolean }).lastDecision = allow;
+      });
+    },
+    setPermissionCheckHandler(handler: () => boolean): void {
+      state.checkHandler = handler;
+    },
+    on(event: "will-download", listener: (event: { preventDefault(): void }) => void): void {
+      if (event === "will-download")
+        listener({ preventDefault: () => { state.downloadPrevented = true; } });
+    },
+  });
+  return session;
+}
+
+function fakeContents(session?: GuestSessionLike): GuestContentsLike & {
+  listeners: Map<string, (...args: never[]) => void>;
+  loaded: string[];
+  windowOpenHandler: ((details: { url: string }) => { action: "deny" }) | null;
+} {
+  const contents = {
+    listeners: new Map<string, (...args: never[]) => void>(),
+    loaded: [] as string[],
+    windowOpenHandler: null as
+      | ((details: { url: string }) => { action: "deny" })
+      | null,
+    session: session ?? fakeSession(),
+    loadURL(url: string) { this.loaded.push(url); },
+    stop() {},
+    goBack() {},
+    goForward() {},
+    reload() {},
+    getURL: () => "https://example.test/",
+    getTitle: () => "Example",
+    executeJavaScript: async () => ({ title: "Example", text: "hello" }),
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    setWindowOpenHandler(
+      handler: (details: { url: string }) => { action: "deny" },
+    ) { this.windowOpenHandler = handler; },
+    on(event: string, listener: (...args: never[]) => void) {
+      this.listeners.set(event, listener);
+    },
+  };
+  return contents;
+}
+
+function harness() {
+  const sent: { channel: string; payload: unknown }[] = [];
+  const views: GuestViewLike[] = [];
+  const window: BrowserParentWindowLike = {
+    contentView: {
+      addChildView: (view) => { views.push(view as GuestViewLike); },
+      removeChildView: (view) => {
+        const index = views.indexOf(view as GuestViewLike);
+        if (index >= 0) views.splice(index, 1);
+      },
+    },
+    webContents: { send: (channel, payload) => { sent.push({ channel, payload }); } },
+    getContentBounds: () => ({ width: 1440, height: 900 }),
+    on: () => {},
+  };
+  const createdPrefs: unknown[] = [];
+  const host = new BrowserHost(
+    () => window,
+    (options) => {
+      createdPrefs.push(options.webPreferences);
+      const view: GuestViewLike = {
+        webContents: fakeContents(),
+        setBounds: vi.fn(),
+        setVisible: vi.fn(),
+      };
+      return view;
+    },
+  );
+  return { host, sent, views, createdPrefs, window };
+}
+
+describe("guest trust boundary", () => {
+  test("locked preferences: no preload, no node, sandbox on", () => {
+    expect(GUEST_WEB_PREFERENCES).toEqual({
+      nodeIntegration: false,
+      sandbox: true,
+      contextIsolation: true,
+      webSecurity: true,
+    });
+    expect("preload" in GUEST_WEB_PREFERENCES).toBe(false);
+  });
+  test("every created view uses the locked preferences", () => {
+    const { host, createdPrefs } = harness();
+    host.createTab("w1", "example.test");
+    host.createTab("w1", "example.test");
+    expect(createdPrefs).toHaveLength(2);
+    for (const prefs of createdPrefs) expect(prefs).toEqual(GUEST_WEB_PREFERENCES);
+  });
+  test("permission requests denied and downloads blocked", () => {
+    const session = fakeSession();
+    lockDownGuestSession(session);
+    expect(
+      (session as unknown as { lastDecision?: boolean }).lastDecision,
+    ).toBe(false);
+    expect(session.checkHandler?.()).toBe(false);
+    expect(session.downloadPrevented).toBe(true);
+  });
+  test("guest popups are denied and routed into a pane tab", () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    const first = host.list().tabs[0];
+    const contents = (host as unknown as {
+      views: Map<string, GuestViewLike>;
+    }).views.get(first.tabId)?.webContents as ReturnType<typeof fakeContents>;
+    const verdict = contents.windowOpenHandler?.({ url: "https://popup.test/" });
+    expect(verdict).toEqual({ action: "deny" });
+    expect(host.list().tabs).toHaveLength(2);
+  });
+});
+
+describe("browser host behavior", () => {
+  test("blocked scheme never loads and reports honestly", () => {
+    const { host } = harness();
+    const result = host.createTab("w1", "file:///etc/passwd");
+    expect(result).toEqual({
+      blocked: expect.stringMatching(/Blocked/),
+    });
+    expect(host.list().tabs).toHaveLength(0);
+  });
+  test("setBounds with a zero rect hides the active view", () => {
+    const { host, views } = harness();
+    host.createTab("w1", "example.test");
+    host.setBounds(undefined, { x: 0, y: 0, width: 0, height: 0 });
+    expect(views[0].setVisible).toHaveBeenCalledWith(false);
+  });
+  test("failed main-frame load surfaces an honest error", () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    const tabId = host.list().tabs[0].tabId;
+    const contents = (host as unknown as {
+      views: Map<string, GuestViewLike>;
+    }).views.get(tabId)?.webContents as ReturnType<typeof fakeContents>;
+    (contents.listeners.get("did-fail-load") as unknown as (
+      ...args: unknown[]
+    ) => void)?.(
+      {},
+      -105,
+      "ERR_NAME_NOT_RESOLVED",
+      "https://missing.test/",
+      true,
+    );
+    const [tab] = host.list().tabs;
+    expect(tab.loading).toBe(false);
+    expect(tab.error).toContain("https://missing.test/");
+  });
+  test("navigate records the requested URL before commit", () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    const tabId = host.list().tabs[0].tabId;
+    const result = host.navigate(tabId, "example.test/next");
+    expect(result).toMatchObject({
+      tabId,
+      url: "https://example.test/next",
+      loading: true,
+    });
+  });
+  test("blocked navigate keeps an honest pane error", () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    const tabId = host.list().tabs[0].tabId;
+    host.navigate(tabId, "file:///etc/passwd");
+    const [tab] = host.list().tabs;
+    expect(tab.loading).toBe(false);
+    expect(tab.error).toMatch(/Blocked/);
+  });
+  test("snapshot is bounded", async () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    const tabId = host.list().tabs[0].tabId;
+    const snapshot = await host.snapshot(tabId);
+    expect(snapshot).toMatchObject({ tabId, url: expect.any(String) });
+  });
+});
