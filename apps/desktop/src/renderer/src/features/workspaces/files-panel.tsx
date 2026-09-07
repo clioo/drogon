@@ -357,14 +357,8 @@ export function makeFileSaver(
   };
 }
 
-/**
- * Fire-and-forget observer for a save the editor is ALREADY tracking via
- * its fenced runSave. The derived promise created here must never become
- * an unhandled rejection: transport throws and fail-closed
- * FilesRequestIdCapError rejections are absorbed explicitly (no markSaved
- * — the store keeps the draft dirty), while the ORIGINAL promise still
- * delivers the failure to runSave for its own saveError path.
- */
+// Absorbs the derived promise's rejection so it never becomes unhandled;
+// the ORIGINAL promise still delivers the failure to runSave.
 export function observeSaveResult(
   result: Promise<Result<null>>,
   drafts: FilesDraftStore,
@@ -537,9 +531,7 @@ function FilesPanel({
   // Update-on-edit (at save-attempt granularity): the attempted draft is
   // recorded in the store before the write, and a service-confirmed write
   // marks the payload saved — the store caches drafts, the service stays
-  // saved-truth. The observer rejection is handled explicitly (see
-  // observeSaveResult): a transport throw or a fail-closed cap error must
-  // not escape as an unhandled rejection.
+  // saved-truth.
   const onSave = (content: string): Promise<Result<null>> => {
     const result = saveDraft(content);
     if (effectiveOpenPath !== null) {

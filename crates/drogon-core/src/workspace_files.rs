@@ -50,13 +50,6 @@
 //! fails loudly instead of silently truncating whatever was there. Its
 //! post-rename read-back is capped to `expected_len + 1` bytes rather than
 //! reading a possibly-since-grown file in full.
-//!
-//! `revalidate_containment` is a `std`-path-based, best-effort diagnostic
-//! kept only for its own tests (`#[cfg(test)]`): re-checking a path with
-//! `canonicalize` after a `Dir`-relative write would itself be a
-//! check-then-act step of the kind this module otherwise avoids, and the
-//! `Dir`-relative rename already fails closed on its own if its target
-//! can't be walked inside the root.
 
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -155,8 +148,7 @@ const ESCAPE_MSG: &str = "workspace path must not follow a symlink outside the w
 /// — mapped to `io_error` instead of being misreported as a workspace
 /// escape.
 fn is_escape_attempt(e: &std::io::Error) -> bool {
-    e.kind() == std::io::ErrorKind::PermissionDenied
-        && e.to_string().contains("led outside")
+    e.kind() == std::io::ErrorKind::PermissionDenied && e.to_string().contains("led outside")
 }
 
 /// Maps a `Dir`-relative lookup failure to our wire error codes: missing
@@ -179,24 +171,6 @@ fn map_dir_error(e: std::io::Error) -> RpcError {
         return error::invalid_argument(ESCAPE_MSG);
     }
     error::io_error(e.to_string())
-}
-
-/// Re-canonicalizes `parent` and confirms it still lies under `root`. Kept
-/// only for its own tests below (see the module docs): it is itself a
-/// check-then-act step, not a lock, and is superseded for correctness by
-/// the `Dir`-relative rename in `write_file`, which fails closed on its own.
-#[cfg(test)]
-pub(crate) fn revalidate_containment(root: &Path, parent: &Path) -> Result<(), RpcError> {
-    let root_canonical = std::fs::canonicalize(root)
-        .map_err(|_| error::invalid_argument("workspace root does not exist"))?;
-    let parent_canonical = std::fs::canonicalize(parent)
-        .map_err(|_| error::invalid_argument("workspace path no longer resolves"))?;
-    if !parent_canonical.starts_with(&root_canonical) {
-        return Err(error::invalid_argument(
-            "workspace path escaped the workspace root after resolution",
-        ));
-    }
-    Ok(())
 }
 
 fn entry_kind(meta: &cap_std::fs::Metadata) -> EntryKind {
@@ -256,7 +230,9 @@ pub(crate) fn list_dir(
             .map_err(|_| error::invalid_argument("directory entry name is not valid UTF-8"))?;
         // `lstat`, not `stat`: reports the entry itself, never a symlink's
         // target, so listing never silently follows one.
-        let meta = entry.metadata().map_err(|e| error::io_error(e.to_string()))?;
+        let meta = entry
+            .metadata()
+            .map_err(|e| error::io_error(e.to_string()))?;
         entries.push(DirEntryInfo {
             name,
             kind: entry_kind(&meta),
@@ -331,8 +307,8 @@ pub(crate) fn read_file(root: &Path, rel: &str, max_bytes: u64) -> Result<FileCo
     if bytes.len() as u64 > max_bytes {
         return Err(error::invalid_argument("file exceeds max_bytes limit"));
     }
-    let content = String::from_utf8(bytes)
-        .map_err(|_| error::invalid_argument("file is not valid UTF-8"))?;
+    let content =
+        String::from_utf8(bytes).map_err(|_| error::invalid_argument("file is not valid UTF-8"))?;
     let size = content.len() as u64;
     let mtime = handle_meta
         .modified()
@@ -371,9 +347,7 @@ pub(crate) fn write_file(root: &Path, rel: &str, bytes: &[u8]) -> Result<WriteRe
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                root_dir
-                    .create_dir_all(parent_rel)
-                    .map_err(map_dir_error)?;
+                root_dir.create_dir_all(parent_rel).map_err(map_dir_error)?;
             }
             Err(e) => return Err(map_dir_error(e)),
         }

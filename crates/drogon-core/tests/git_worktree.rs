@@ -25,15 +25,15 @@ mod git;
 
 use git::Capability;
 use git_worktree::{
-    WorktreeEntry, parse_worktree_list_porcelain, validate_worktree_add,
-    worktree_list_probe_plan,
+    WorktreeEntry, parse_worktree_list_porcelain, validate_worktree_add, worktree_list_probe_plan,
 };
 
 // --- NUL-delimited (-z) parsing ---------------------------------------------
 
 #[test]
 fn parses_nul_delimited_entry_with_branch() {
-    let input = "worktree /repo\0HEAD abcdef1234567890abcdef1234567890abcdef12\0branch refs/heads/main\0\0";
+    let input =
+        "worktree /repo\0HEAD abcdef1234567890abcdef1234567890abcdef12\0branch refs/heads/main\0\0";
     let entries = parse_worktree_list_porcelain(input).unwrap();
     assert_eq!(
         entries,
@@ -51,7 +51,8 @@ fn parses_nul_delimited_entry_with_branch() {
 
 #[test]
 fn parses_nul_delimited_detached_entry() {
-    let input = "worktree /repo/detached\0HEAD 1111111111111111111111111111111111111111\0detached\0\0";
+    let input =
+        "worktree /repo/detached\0HEAD 1111111111111111111111111111111111111111\0detached\0\0";
     let entries = parse_worktree_list_porcelain(input).unwrap();
     assert_eq!(entries.len(), 1);
     assert!(entries[0].detached);
@@ -124,7 +125,8 @@ fn nul_delimited_path_starting_and_ending_with_literal_quote_is_kept_verbatim() 
 
 #[test]
 fn parses_line_block_entry_with_branch() {
-    let input = "worktree /repo\nHEAD abcdef1234567890abcdef1234567890abcdef12\nbranch refs/heads/main\n\n";
+    let input =
+        "worktree /repo\nHEAD abcdef1234567890abcdef1234567890abcdef12\nbranch refs/heads/main\n\n";
     let entries = parse_worktree_list_porcelain(input).unwrap();
     assert_eq!(
         entries,
@@ -181,13 +183,15 @@ fn line_block_path_starting_and_ending_with_literal_quote_is_kept_verbatim() {
 
 #[test]
 fn rejects_nul_delimited_record_missing_worktree_line() {
-    let err = parse_worktree_list_porcelain("HEAD abcdef1234567890abcdef1234567890abcdef12\0\0").unwrap_err();
+    let err = parse_worktree_list_porcelain("HEAD abcdef1234567890abcdef1234567890abcdef12\0\0")
+        .unwrap_err();
     assert_eq!(err.code, "invalid_argument");
 }
 
 #[test]
 fn rejects_line_block_record_missing_worktree_line() {
-    let err = parse_worktree_list_porcelain("HEAD abcdef1234567890abcdef1234567890abcdef12\n\n").unwrap_err();
+    let err = parse_worktree_list_porcelain("HEAD abcdef1234567890abcdef1234567890abcdef12\n\n")
+        .unwrap_err();
     assert_eq!(err.code, "invalid_argument");
 }
 
@@ -224,7 +228,9 @@ fn accepts_relative_path_with_spaces() {
 
 #[test]
 fn accepts_valid_branch_name() {
-    assert!(validate_worktree_add("/repo", "wt", Some("codex/vertical-03-workspaces-remote")).is_ok());
+    assert!(
+        validate_worktree_add("/repo", "wt", Some("codex/vertical-03-workspaces-remote")).is_ok()
+    );
 }
 
 #[test]
@@ -315,7 +321,10 @@ fn rejects_branch_with_forbidden_glyphs() {
     for glyph in ["~", "^", ":", "?", "*", "["] {
         let branch = format!("feature{glyph}x");
         let err = validate_worktree_add("/repo", "wt", Some(&branch)).unwrap_err();
-        assert_eq!(err.code, "invalid_argument", "glyph {glyph} should be rejected");
+        assert_eq!(
+            err.code, "invalid_argument",
+            "glyph {glyph} should be rejected"
+        );
     }
 }
 
@@ -433,5 +442,8 @@ fn probe_plan_preferred_command_includes_porcelain_before_z() {
         plan.preferred_command,
         vec!["worktree", "list", "--porcelain", "-z"]
     );
-    assert_eq!(plan.fallback_command, vec!["worktree", "list", "--porcelain"]);
+    assert_eq!(
+        plan.fallback_command,
+        vec!["worktree", "list", "--porcelain"]
+    );
 }

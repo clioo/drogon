@@ -103,8 +103,15 @@ const WORKTREE_LIST_Z_RETRY_INTERVAL: Duration = Duration::from_secs(300);
 /// decision directly against a `CapabilityCache` pre-seeded with
 /// `record_rejection`, without needing a real pre-2.36 Git binary (none
 /// installed on this development host) to actually trigger it end-to-end.
-pub(crate) fn should_try_preferred_worktree_list(scope: &HostScope, cache: &CapabilityCache) -> bool {
-    cache.should_retry(scope, Capability::WorktreeListZ, WORKTREE_LIST_Z_RETRY_INTERVAL)
+pub(crate) fn should_try_preferred_worktree_list(
+    scope: &HostScope,
+    cache: &CapabilityCache,
+) -> bool {
+    cache.should_retry(
+        scope,
+        Capability::WorktreeListZ,
+        WORKTREE_LIST_Z_RETRY_INTERVAL,
+    )
 }
 
 /// Runs one bounded, read-only Git operation and parses its output.
@@ -160,9 +167,45 @@ fn run_status(workspace_root: &Path, budget: &GitProbeBudget) -> Result<ParsedGi
     Ok(ParsedGitOutput::Status(parsed))
 }
 
-/// `WorktreeList`'s single-flight + fallback sequence. Only the `Leader` of
-/// `begin_probe` constructs a `ProbeGuard` — see "Follower policy" below for
-/// why a `Follower` must NOT also construct one.
+/// Bounded wait for a Follower: how long to poll `CapabilityCache::is_in_flight`
+/// before giving up and spawning its own fallback anyway. A judgment call —
+/// long enough that the Leader's one bounded spawn usually finishes first,
+/// short enough this never becomes an unbounded wait if the Leader is itself
+/// stuck (its own `budget.timeout` bounds that, but a Follower must not
+/// additionally wait past a fixed cap of its own on top of that).
+const FOLLOWER_LEADER_WAIT_BOUND: Duration = Duration::from_millis(500);
+
+fn wait_for_leader_bounded(scope: &HostScope, cache: &CapabilityCache, capability: Capability) {
+    let deadline = Instant::now() + FOLLOWER_LEADER_WAIT_BOUND;
+    while cache.is_in_flight(scope, capability) && Instant::now() < deadline {
+        thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// The argv a Follower must use: always the fallback, never the preferred
+/// form. `pub(crate)` so `tests/git_process_bounds.rs` can assert this
+/// directly — a Follower calling this can NEVER return
+/// `worktree_list_preferred_argv()`, regardless of cache state, which is
+/// exactly what makes many concurrent first-ever callers safe: at most one
+/// of them (the Leader) ever spawns the preferred form per rejection
+/// episode.
+pub(crate) fn follower_worktree_list_argv() -> Vec<String> {
+    worktree_list_fallback_argv()
+}
+
+/// `WorktreeList`'s single-flight + fallback sequence.
+///
+/// Follower policy: `CapabilityCache::finish_probe` is an unconditional
+/// `HashMap::remove` keyed only by `(scope, capability)`, not a reference
+/// count (see `crate::git::CapabilityCache`) — a `Follower` must NOT
+/// construct its own `ProbeGuard` (its `Drop` would prematurely clear the
+/// real `Leader`'s in-flight entry) and must NOT spawn the preferred probe
+/// (only the Leader spends that one attempt per rejection episode, so N
+/// concurrent first-ever callers never become N concurrent preferred
+/// spawns). A `Follower` bounded-waits for the Leader to finish, then always
+/// runs the fallback argv itself — correct whether the Leader's preferred
+/// attempt succeeded or was rejected, so a Follower never needs to inspect
+/// the Leader's outcome to pick a safe command.
 fn run_worktree_list(
     workspace_root: &Path,
     scope: &HostScope,
@@ -170,27 +213,24 @@ fn run_worktree_list(
     budget: &GitProbeBudget,
 ) -> Result<ParsedGitOutput, RpcError> {
     let capability = Capability::WorktreeListZ;
-
-    // Follower policy: `CapabilityCache::finish_probe` is an unconditional
-    // `HashMap::remove` keyed only by `(scope, capability)`, not a reference
-    // count (see `crate::git::CapabilityCache`). If a `Follower` also built
-    // its own `ProbeGuard` here, that guard's `Drop` would call
-    // `finish_probe` and prematurely clear the actual `Leader`'s in-flight
-    // entry, breaking single-flight coalescing for every other concurrent
-    // caller. So only the `Leader` gets a guard; a `Follower` still runs its
-    // own real resolve→spawn→record sequence unguarded (this leaf has no
-    // channel to await the leader's result and must still return a real,
-    // synchronous answer to its own caller) — `record_rejection` /
-    // `record_success` are plain idempotent map writes on a SEPARATE mutex
-    // from `in_flight`, so a `Follower` racing a `Leader` there is safe, just
-    // occasionally redundant (at most one extra spawn under a race, never
-    // incorrect output).
     let is_leader = cache.begin_probe(scope, capability) == ProbeOutcome::Leader;
-    let _guard = if is_leader {
-        Some(ProbeGuard::new(cache, scope.clone(), capability))
-    } else {
-        None
-    };
+
+    if !is_leader {
+        wait_for_leader_bounded(scope, cache, capability);
+        let fallback_argv = follower_worktree_list_argv();
+        let outcome = spawn_git_and_capture(workspace_root, &fallback_argv, budget)?;
+        let stdout = require_success(&outcome, &fallback_argv)?;
+        let entries = parse_worktree_list_porcelain(stdout)?;
+        return Ok(ParsedGitOutput::WorktreeList(entries));
+    }
+
+    // Leader: holds the guard across the entire resolve→spawn→record
+    // sequence below, including every early-return `?`, so a caller-side
+    // failure (timeout, spawn error, parse error) can never leave this
+    // `(scope, capability)` pair stuck reporting `Follower` forever — see
+    // `ProbeGuard`'s own doc comment for why `Drop` makes this true
+    // regardless of which `?` returns early.
+    let _guard = ProbeGuard::new(cache, scope.clone(), capability);
 
     let try_preferred = should_try_preferred_worktree_list(scope, cache);
     let preferred_argv = worktree_list_preferred_argv();
@@ -258,8 +298,10 @@ fn run_worktree_list(
 /// matrix, `docs/migration/verticals/V3/docs-reference-git-compatibility.md`
 /// "CI Contract") before being trusted in production.
 pub(crate) fn is_worktree_list_z_unsupported(stderr: &str) -> bool {
-    let mentions_unknown_switch = stderr.contains("unknown switch") || stderr.contains("unknown option");
-    let quotes_bare_z = stderr.contains("`z'") || stderr.contains("'z'") || stderr.contains("\u{2018}z\u{2019}");
+    let mentions_unknown_switch =
+        stderr.contains("unknown switch") || stderr.contains("unknown option");
+    let quotes_bare_z =
+        stderr.contains("`z'") || stderr.contains("'z'") || stderr.contains("\u{2018}z\u{2019}");
     mentions_unknown_switch && quotes_bare_z
 }
 
@@ -316,7 +358,11 @@ pub(crate) const GLOBAL_ARGS: &[&str] = &[
 /// test binary, not a live process inspection.
 pub(crate) fn status_argv() -> Vec<String> {
     let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
-    argv.extend(["status", "--porcelain=v2", "-z"].iter().map(|s| s.to_string()));
+    argv.extend(
+        ["status", "--porcelain=v2", "-z"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
     argv
 }
 
@@ -332,7 +378,11 @@ pub(crate) fn worktree_list_preferred_argv() -> Vec<String> {
 
 pub(crate) fn worktree_list_fallback_argv() -> Vec<String> {
     let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
-    argv.extend(["worktree", "list", "--porcelain"].iter().map(|s| s.to_string()));
+    argv.extend(
+        ["worktree", "list", "--porcelain"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
     argv
 }
 
@@ -357,6 +407,21 @@ pub(crate) fn worktree_list_fallback_argv() -> Vec<String> {
 ///   worse, matching by accident).
 pub(crate) const BOUNDED_ENV: &[(&str, &str)] = &[("GIT_OPTIONAL_LOCKS", "0"), ("LC_ALL", "C")];
 
+/// Fixed denylist of Git worktree/index-selection variables this wrapper
+/// must never inherit from its own process, mirroring `src/session.rs`'s
+/// inherited-env scrub for the same class of ambient state: an inherited
+/// `GIT_DIR`/`GIT_WORK_TREE`/etc. from whatever spawned THIS process could
+/// silently redirect either read-only operation at a different
+/// repository/worktree/index than `cwd` implies. `pub(crate)` alongside
+/// `BOUNDED_ENV` so tests can assert removal via `Command::get_envs`.
+pub(crate) const ENV_REMOVE_DENYLIST: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+];
+
 pub(crate) fn build_git_command(cwd: &Path, argv: &[String]) -> Command {
     let mut cmd = Command::new("git");
     cmd.args(argv)
@@ -364,6 +429,9 @@ pub(crate) fn build_git_command(cwd: &Path, argv: &[String]) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    for key in ENV_REMOVE_DENYLIST {
+        cmd.env_remove(key);
+    }
     for (key, value) in BOUNDED_ENV {
         cmd.env(key, value);
     }
@@ -409,10 +477,11 @@ fn apply_platform_spawn_flags(_cmd: &mut Command) {}
 //    also checking the shared cap-exceeded flag each iteration. This is the
 //    "never a blocking read between polls" requirement: the control loop's
 //    only blocking operation is a short, fixed `thread::sleep`.
-// 4. On timeout OR cap-exceeded, the control loop calls `Child::kill()` then
-//    `Child::wait()` to reap the immediate child (bounded: `wait()` blocks
-//    on the child's own pid via `waitpid`/`WaitForSingleObject`, which is
-//    unaffected by whether any pipe reader thread is stuck).
+// 4. On timeout OR cap-exceeded, the control loop calls `kill_and_reap`,
+//    which bounds its own `try_wait` polling by `REAP_GRACE` rather than
+//    calling `Child::wait()` unboundedly. An unconfirmed reap maps to
+//    `SpawnOutcome::UnreapedAfterKill` (unverifiable), never to a trusted
+//    `TimedOut`/`CapExceeded`.
 // 5. Cleanup NEVER joins a reader thread unboundedly. A grandchild process
 //    that inherited a pipe's write end (not expected for `status`/`worktree
 //    list`, which don't fork helpers, but not something this module can
@@ -421,13 +490,15 @@ fn apply_platform_spawn_flags(_cmd: &mut Command) {}
 //    `read()` on that pipe would then never return. So the control loop
 //    waits for each reader thread's "finished" flag for at most
 //    `READER_DRAIN_GRACE`, using a cheap poll (not a join), and then takes
-//    whatever bytes are in the shared buffer regardless of whether the
+//    whatever bytes/state are in the shared buffer regardless of whether the
 //    thread ever finished — if it didn't, the thread is simply left
 //    detached (dropped `Arc`/`JoinHandle`), never joined, and may keep
 //    running in the background for the lifetime of whatever process still
 //    holds the pipe open. This is a deliberate, documented resource
 //    trade-off (an orphaned thread costs a small stack, nothing else) over
-//    the alternative of this function itself hanging.
+//    the alternative of this function itself hanging. An unfinished drain
+//    on the `Exited` path maps to `SpawnOutcome::CaptureUnfinished`, never
+//    silently treated as a complete capture.
 
 const READ_CHUNK_BYTES: usize = 64 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -435,32 +506,64 @@ const READER_DRAIN_GRACE: Duration = Duration::from_millis(200);
 
 #[derive(Debug)]
 pub(crate) enum SpawnOutcome {
-    /// The child exited (with or without a zero code) within budget, and
-    /// both streams' reader threads finished (or were given up on after
-    /// `READER_DRAIN_GRACE`) before this variant was returned.
+    /// The child exited with a status, AND both reader threads reached a
+    /// clean EOF, AND both captured byte buffers are valid UTF-8. Never
+    /// returned for an unfinished, errored, or non-UTF-8 capture — see the
+    /// other variants below, which exist precisely so this one stays a
+    /// fully EOF/error-proven success.
     Exited {
         status: ExitStatus,
         stdout: String,
         stderr: String,
     },
-    /// The child was killed after exceeding `budget.timeout`. Distinct from
-    /// `Exited` so callers can map it to `unverifiable` without inspecting
-    /// an exit code that was never really observed.
+    /// The child was killed after exceeding `budget.timeout`, and was
+    /// confirmed reaped. Distinct from `Exited` so callers can map it to
+    /// `unverifiable` without inspecting an exit code that was never really
+    /// observed.
     TimedOut,
     /// The child was killed after the combined stdout+stderr byte count
-    /// exceeded `budget.max_combined_output_bytes`. Distinct from `Exited`
-    /// for the same reason.
+    /// exceeded `budget.max_combined_output_bytes`, and was confirmed
+    /// reaped. Distinct from `Exited` for the same reason as `TimedOut`.
     CapExceeded,
+    /// The child was killed (timeout or byte-cap) but `kill_and_reap` could
+    /// not confirm it was reaped within `REAP_GRACE`. The process's true
+    /// fate is unknown, so this maps to `unverifiable` regardless of which
+    /// kill trigger produced it.
+    UnreapedAfterKill,
+    /// The child exited, but at least one reader thread had not reached EOF
+    /// (or an error, or the cap) within `READER_DRAIN_GRACE` — for example a
+    /// grandchild inherited the pipe's write end and kept it open. The bytes
+    /// captured so far are an unproven partial snapshot, never trusted as a
+    /// complete `Exited` capture.
+    CaptureUnfinished,
+    /// A reader thread's blocking `Read::read` returned an OS-level error
+    /// before EOF. Carries that error's message. Distinct from
+    /// `CaptureUnfinished`: this is a confirmed I/O failure, not merely "no
+    /// EOF observed yet".
+    CaptureReadError(String),
+    /// The child exited and both reader threads reached a clean EOF, but the
+    /// captured bytes on the named stream (`"stdout"`/`"stderr"`) are not
+    /// valid UTF-8. Decoding via `String::from_utf8_lossy` would silently
+    /// substitute replacement characters and change path/content identity,
+    /// so this wrapper never does that — invalid UTF-8 is a hard failure.
+    CaptureInvalidUtf8(&'static str),
 }
 
-/// `pub(crate)` with `pub(crate)` fields solely so `tests/git_process.rs`
-/// can drive `spawn_stream_reader` directly with a synthetic in-process
-/// `Read` (no real child process) to exercise the combined-byte-cap
-/// enforcement deterministically, isolated from both Git and OS process
-/// specifics.
+/// `pub(crate)` with `pub(crate)` fields solely so `tests/git_process.rs`/
+/// `tests/git_process_bounds.rs` can drive `spawn_stream_reader` directly
+/// with a synthetic in-process `Read` (no real child process) to exercise
+/// the combined-byte-cap and read-error paths deterministically, isolated
+/// from both Git and OS process specifics.
 pub(crate) struct SharedStream {
     pub(crate) buf: Arc<Mutex<Vec<u8>>>,
     pub(crate) finished: Arc<AtomicBool>,
+    /// First OS-level `Read::read` error this stream's reader thread hit, if
+    /// any — never silently swallowed like the old `Err(_) => break`. Kept
+    /// separate from `finished` because both a clean EOF and a read error
+    /// end the loop with `finished = true`; only this field distinguishes
+    /// them, which is exactly what the `Exited` outcome below must never
+    /// blur (see "EOF/error-proven capture" at the call site).
+    pub(crate) read_error: Arc<Mutex<Option<String>>>,
 }
 
 pub(crate) fn spawn_stream_reader(
@@ -471,15 +574,20 @@ pub(crate) fn spawn_stream_reader(
 ) -> SharedStream {
     let buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let finished = Arc::new(AtomicBool::new(false));
+    let read_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let buf_thread = Arc::clone(&buf);
     let finished_thread = Arc::clone(&finished);
+    let read_error_thread = Arc::clone(&read_error);
     thread::spawn(move || {
         let mut chunk = [0u8; READ_CHUNK_BYTES];
         loop {
             let n = match stream.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(n) => n,
-                Err(_) => break,
+                Err(e) => {
+                    *read_error_thread.lock().unwrap() = Some(e.to_string());
+                    break;
+                }
             };
             {
                 let mut guard = buf_thread.lock().unwrap();
@@ -493,18 +601,52 @@ pub(crate) fn spawn_stream_reader(
         }
         finished_thread.store(true, Ordering::SeqCst);
     });
-    SharedStream { buf, finished }
+    SharedStream {
+        buf,
+        finished,
+        read_error,
+    }
+}
+
+/// A bounded snapshot of one `SharedStream`, taken by `drain_or_snapshot`.
+struct DrainedStream {
+    bytes: Vec<u8>,
+    /// False when the reader thread had not reached EOF/error/cap by
+    /// `deadline` — e.g. a grandchild still holds the pipe's write end
+    /// open. The caller must never treat `bytes` as a complete capture when
+    /// this is false.
+    finished: bool,
+    read_error: Option<String>,
 }
 
 /// Waits for `stream`'s reader thread to finish, up to `deadline`, then
-/// takes a snapshot of whatever bytes it has captured so far regardless.
-/// Never joins the thread — see the module-level "Bounded cleanup strategy"
-/// doc comment above.
-fn drain_or_snapshot(stream: &SharedStream, deadline: Instant) -> Vec<u8> {
+/// takes a snapshot of whatever bytes/state it has so far regardless. Never
+/// joins the thread — see the module-level "Bounded cleanup strategy" doc
+/// comment above.
+fn drain_or_snapshot(stream: &SharedStream, deadline: Instant) -> DrainedStream {
     while !stream.finished.load(Ordering::SeqCst) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(2));
     }
-    stream.buf.lock().unwrap().clone()
+    DrainedStream {
+        bytes: stream.buf.lock().unwrap().clone(),
+        finished: stream.finished.load(Ordering::SeqCst),
+        read_error: stream.read_error.lock().unwrap().clone(),
+    }
+}
+
+/// Explicit grace bound for confirming a killed child was actually reaped.
+/// Bounded `try_wait` polling only — never an unbounded `wait()`, which is a
+/// `waitpid`/`WaitForSingleObject` call this module cannot prove terminates
+/// if the OS/process is sufficiently wedged.
+const REAP_GRACE: Duration = Duration::from_millis(500);
+
+/// Whether `kill_and_reap` confirmed the child was actually reaped within
+/// `REAP_GRACE`. `reaped: false` means the true fate of the process is
+/// unknown, not that cleanup failed outright — callers must map that to an
+/// uncertain outcome, never to a confirmed success or a confirmed failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReapOutcome {
+    pub(crate) reaped: bool,
 }
 
 /// `pub(crate)` so `tests/git_process.rs` can verify the reap half of the
@@ -512,9 +654,21 @@ fn drain_or_snapshot(stream: &SharedStream, deadline: Instant) -> Vec<u8> {
 /// call this, then assert `Child::try_wait()` returns `Ok(Some(_))`
 /// (reaped, not a zombie) without needing to route through the full
 /// timeout-polling loop to exercise just this primitive.
-pub(crate) fn kill_and_reap(child: &mut Child) {
+pub(crate) fn kill_and_reap(child: &mut Child) -> ReapOutcome {
     let _ = child.kill();
-    let _ = child.wait();
+    let deadline = Instant::now() + REAP_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return ReapOutcome { reaped: true },
+            Err(_) => return ReapOutcome { reaped: false },
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    return ReapOutcome { reaped: false };
+                }
+                thread::sleep(POLL_INTERVAL);
+            }
+        }
+    }
 }
 
 /// The generic bounded spawn+capture primitive: takes an already-built
@@ -531,7 +685,9 @@ pub(crate) fn spawn_and_capture_bounded(
     budget: &GitProbeBudget,
 ) -> Result<SpawnOutcome, RpcError> {
     let mut child = cmd.spawn().map_err(|e| {
-        error::io_error(format!("failed to spawn process for bounded git probe: {e}"))
+        error::io_error(format!(
+            "failed to spawn process for bounded git probe: {e}"
+        ))
     })?;
     let stdout = child
         .stdout
@@ -546,7 +702,8 @@ pub(crate) fn spawn_and_capture_bounded(
     let cap_hit = Arc::new(AtomicBool::new(false));
     let cap = budget.max_combined_output_bytes;
 
-    let stdout_stream = spawn_stream_reader(stdout, Arc::clone(&combined_len), cap, Arc::clone(&cap_hit));
+    let stdout_stream =
+        spawn_stream_reader(stdout, Arc::clone(&combined_len), cap, Arc::clone(&cap_hit));
     let stderr_stream = spawn_stream_reader(stderr, combined_len, cap, Arc::clone(&cap_hit));
 
     let start = Instant::now();
@@ -579,8 +736,8 @@ pub(crate) fn spawn_and_capture_bounded(
     match poll_result {
         PollResult::Exited(status) => {
             let deadline = Instant::now() + READER_DRAIN_GRACE;
-            let stdout_bytes = drain_or_snapshot(&stdout_stream, deadline);
-            let stderr_bytes = drain_or_snapshot(&stderr_stream, deadline);
+            let mut stdout_drained = drain_or_snapshot(&stdout_stream, deadline);
+            let stderr_drained = drain_or_snapshot(&stderr_stream, deadline);
             // Final belt-and-suspenders check: the reader threads keep
             // running concurrently with the poll loop above, so a cap trip
             // that raced past the `try_wait()` check that produced this
@@ -590,25 +747,55 @@ pub(crate) fn spawn_and_capture_bounded(
             if cap_hit.load(Ordering::SeqCst) {
                 return Ok(SpawnOutcome::CapExceeded);
             }
-            Ok(SpawnOutcome::Exited {
-                status,
-                stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
-                stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
-            })
+            // EOF/error-proven capture: a read error on either stream is a
+            // confirmed I/O failure, checked before "finished" so it is
+            // never masked by the loop having merely exited.
+            if let Some(err) = stdout_drained
+                .read_error
+                .take()
+                .or(stderr_drained.read_error)
+            {
+                return Ok(SpawnOutcome::CaptureReadError(err));
+            }
+            // Never report success on a mere 200ms (`READER_DRAIN_GRACE`)
+            // snapshot of a stream that hasn't actually reached EOF yet.
+            if !stdout_drained.finished || !stderr_drained.finished {
+                return Ok(SpawnOutcome::CaptureUnfinished);
+            }
+            match (
+                String::from_utf8(stdout_drained.bytes),
+                String::from_utf8(stderr_drained.bytes),
+            ) {
+                (Ok(stdout), Ok(stderr)) => Ok(SpawnOutcome::Exited {
+                    status,
+                    stdout,
+                    stderr,
+                }),
+                (Err(_), _) => Ok(SpawnOutcome::CaptureInvalidUtf8("stdout")),
+                (_, Err(_)) => Ok(SpawnOutcome::CaptureInvalidUtf8("stderr")),
+            }
         }
         PollResult::TimedOut => {
-            kill_and_reap(&mut child);
+            let reap = kill_and_reap(&mut child);
             let deadline = Instant::now() + READER_DRAIN_GRACE;
             drain_or_snapshot(&stdout_stream, deadline);
             drain_or_snapshot(&stderr_stream, deadline);
-            Ok(SpawnOutcome::TimedOut)
+            if reap.reaped {
+                Ok(SpawnOutcome::TimedOut)
+            } else {
+                Ok(SpawnOutcome::UnreapedAfterKill)
+            }
         }
         PollResult::CapExceeded => {
-            kill_and_reap(&mut child);
+            let reap = kill_and_reap(&mut child);
             let deadline = Instant::now() + READER_DRAIN_GRACE;
             drain_or_snapshot(&stdout_stream, deadline);
             drain_or_snapshot(&stderr_stream, deadline);
-            Ok(SpawnOutcome::CapExceeded)
+            if reap.reaped {
+                Ok(SpawnOutcome::CapExceeded)
+            } else {
+                Ok(SpawnOutcome::UnreapedAfterKill)
+            }
         }
     }
 }
@@ -632,11 +819,11 @@ fn spawn_git_and_capture(
 
 /// Maps a `SpawnOutcome` to its stdout on success, or a frozen `RpcError`
 /// otherwise:
-/// - `TimedOut` → `unverifiable` (a killed-on-timeout probe's true outcome
-///   is unknown, not a confirmed failure, per this repo's
+/// - `TimedOut` / `UnreapedAfterKill` / `CaptureUnfinished` → `unverifiable`
+///   (the true outcome is unknown, not a confirmed failure, per this repo's
 ///   `live`/`unverifiable`/`exited` convention).
-/// - `CapExceeded` → `io_error` (an I/O read had to be aborted before
-///   completion).
+/// - `CapExceeded` / `CaptureReadError` / `CaptureInvalidUtf8` → `io_error`
+///   (a confirmed I/O or decoding failure).
 /// - `Exited` with a non-zero code → `io_error`, naming the observed exit
 ///   code so this case is distinguishable in logs/tests from the timeout
 ///   case above, which never observed a code at all.
@@ -655,6 +842,22 @@ fn require_success<'a>(outcome: &'a SpawnOutcome, argv: &[String]) -> Result<&'a
         ))),
         SpawnOutcome::CapExceeded => Err(error::io_error(format!(
             "git {} exceeded the configured combined output byte cap and was killed",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::UnreapedAfterKill => Err(error::unverifiable(format!(
+            "git {} was killed but could not be confirmed reaped",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureUnfinished => Err(error::unverifiable(format!(
+            "git {} exited but its output capture had not finished draining",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureReadError(e) => Err(error::io_error(format!(
+            "git {} output capture failed: {e}",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureInvalidUtf8(which) => Err(error::io_error(format!(
+            "git {} produced {which} that is not valid UTF-8",
             argv.join(" ")
         ))),
     }

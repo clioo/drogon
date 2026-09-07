@@ -27,16 +27,16 @@ mod error;
 #[allow(dead_code)]
 #[path = "../src/git.rs"]
 mod git;
+#[path = "../src/git_process.rs"]
+mod git_process;
 #[allow(dead_code)]
 #[path = "../src/git_worktree.rs"]
 mod git_worktree;
-#[path = "../src/git_process.rs"]
-mod git_process;
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use git::{Capability, CapabilityCache, HostScope, ProbeOutcome};
@@ -216,8 +216,16 @@ fn worktree_list_happy_path_on_real_repo_with_linked_worktree() {
 
     match result {
         ParsedGitOutput::WorktreeList(entries) => {
-            assert_eq!(entries.len(), 2, "expected main + linked worktree: {entries:?}");
-            assert!(entries.iter().any(|e| e.branch.as_deref() == Some("refs/heads/linked-branch")));
+            assert_eq!(
+                entries.len(),
+                2,
+                "expected main + linked worktree: {entries:?}"
+            );
+            assert!(
+                entries
+                    .iter()
+                    .any(|e| e.branch.as_deref() == Some("refs/heads/linked-branch"))
+            );
         }
         other => panic!("expected WorktreeList output, got {other:?}"),
     }
@@ -342,7 +350,9 @@ fn unsupported_z_predicate_does_not_match_unrelated_errors_that_merely_mention_z
 fn should_try_preferred_worktree_list_is_true_for_a_fresh_cache() {
     let cache = CapabilityCache::new();
     let scope = HostScope::native();
-    assert!(git_process::should_try_preferred_worktree_list(&scope, &cache));
+    assert!(git_process::should_try_preferred_worktree_list(
+        &scope, &cache
+    ));
 }
 
 #[test]
@@ -350,7 +360,9 @@ fn should_try_preferred_worktree_list_is_false_immediately_after_a_recorded_reje
     let cache = CapabilityCache::new();
     let scope = HostScope::native();
     cache.record_rejection(&scope, Capability::WorktreeListZ);
-    assert!(!git_process::should_try_preferred_worktree_list(&scope, &cache));
+    assert!(!git_process::should_try_preferred_worktree_list(
+        &scope, &cache
+    ));
 }
 
 #[test]
@@ -364,7 +376,10 @@ fn should_try_preferred_worktree_list_rejection_is_scoped_per_host() {
         &rejected_scope,
         &cache
     ));
-    assert!(git_process::should_try_preferred_worktree_list(&other_scope, &cache));
+    assert!(git_process::should_try_preferred_worktree_list(
+        &other_scope,
+        &cache
+    ));
 }
 
 // --- env/argv determinism ----------------------------------------------------
@@ -384,11 +399,17 @@ fn global_args_disable_the_pager_and_pin_quote_path_and_color() {
 
     let preferred = git_process::worktree_list_preferred_argv();
     assert!(preferred.contains(&"--no-pager".to_string()));
-    assert!(contains_window(&preferred, &["worktree", "list", "--porcelain", "-z"]));
+    assert!(contains_window(
+        &preferred,
+        &["worktree", "list", "--porcelain", "-z"]
+    ));
 
     let fallback = git_process::worktree_list_fallback_argv();
     assert!(fallback.contains(&"--no-pager".to_string()));
-    assert!(contains_window(&fallback, &["worktree", "list", "--porcelain"]));
+    assert!(contains_window(
+        &fallback,
+        &["worktree", "list", "--porcelain"]
+    ));
     assert!(!fallback.contains(&"-z".to_string()));
 }
 
@@ -401,12 +422,20 @@ fn build_git_command_carries_the_bounded_env_via_commands_own_introspection() {
     let argv = git_process::status_argv();
     let cmd = git_process::build_git_command(std::path::Path::new("."), &argv);
 
-    let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     assert_eq!(args, argv);
 
     let envs: std::collections::HashMap<String, Option<String>> = cmd
         .get_envs()
-        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+        .map(|(k, v)| {
+            (
+                k.to_string_lossy().into_owned(),
+                v.map(|v| v.to_string_lossy().into_owned()),
+            )
+        })
         .collect();
     for (key, value) in git_process::BOUNDED_ENV {
         assert_eq!(
@@ -493,8 +522,14 @@ fn run_read_only_git_maps_a_real_timeout_to_unverifiable() {
         max_combined_output_bytes: GENEROUS_CAP,
     };
 
-    let err = run_read_only_git(ReadOnlyGitOperation::Status, &repo.dir, &scope, &cache, budget)
-        .expect_err("a 1-microsecond budget must time out");
+    let err = run_read_only_git(
+        ReadOnlyGitOperation::Status,
+        &repo.dir,
+        &scope,
+        &cache,
+        budget,
+    )
+    .expect_err("a 1-microsecond budget must time out");
     assert_eq!(err.code, "unverifiable");
 }
 
@@ -532,16 +567,25 @@ fn spawn_stream_reader_stops_within_one_chunk_past_the_combined_cap() {
     while !cap_hit.load(Ordering::SeqCst) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(2));
     }
-    assert!(cap_hit.load(Ordering::SeqCst), "cap should have tripped within 5s");
+    assert!(
+        cap_hit.load(Ordering::SeqCst),
+        "cap should have tripped within 5s"
+    );
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while !stream.finished.load(Ordering::SeqCst) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(2));
     }
-    assert!(stream.finished.load(Ordering::SeqCst), "reader thread should stop after tripping the cap");
+    assert!(
+        stream.finished.load(Ordering::SeqCst),
+        "reader thread should stop after tripping the cap"
+    );
 
     let len = stream.buf.lock().unwrap().len();
-    assert!(len > cap, "buffer should have grown past the cap before stopping: {len}");
+    assert!(
+        len > cap,
+        "buffer should have grown past the cap before stopping: {len}"
+    );
     // Bounded overshoot: the reader can overshoot by at most one chunk, so
     // it must never grow anywhere near unboundedly past the configured cap.
     assert!(
@@ -556,7 +600,9 @@ fn run_read_only_git_maps_a_real_byte_cap_trip_to_io_error() {
     // writing many distinctly-named untracked files.
     let repo = TempRepo::init("status-bytecap");
     for i in 0..500 {
-        repo.write_file(&format!("untracked-file-number-{i}-with-a-long-name-to-inflate-output.txt"));
+        repo.write_file(&format!(
+            "untracked-file-number-{i}-with-a-long-name-to-inflate-output.txt"
+        ));
     }
     let cache = CapabilityCache::new();
     let scope = HostScope::native();
@@ -565,7 +611,13 @@ fn run_read_only_git_maps_a_real_byte_cap_trip_to_io_error() {
         max_combined_output_bytes: 64,
     };
 
-    let err = run_read_only_git(ReadOnlyGitOperation::Status, &repo.dir, &scope, &cache, budget)
-        .expect_err("a 64-byte cap must be exceeded by 500 untracked files");
+    let err = run_read_only_git(
+        ReadOnlyGitOperation::Status,
+        &repo.dir,
+        &scope,
+        &cache,
+        budget,
+    )
+    .expect_err("a 64-byte cap must be exceeded by 500 untracked files");
     assert_eq!(err.code, "io_error");
 }

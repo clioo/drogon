@@ -141,8 +141,18 @@ impl CapabilityCache {
 
     /// True when the capability was never rejected, or the rejection is
     /// older than `interval` and eligible for a self-heal retry.
-    pub fn should_retry(&self, scope: &HostScope, capability: Capability, interval: Duration) -> bool {
-        match self.rejections.lock().unwrap().get(&(scope.clone(), capability)) {
+    pub fn should_retry(
+        &self,
+        scope: &HostScope,
+        capability: Capability,
+        interval: Duration,
+    ) -> bool {
+        match self
+            .rejections
+            .lock()
+            .unwrap()
+            .get(&(scope.clone(), capability))
+        {
             None => true,
             Some(record) => record.rejected_at.elapsed() >= interval,
         }
@@ -170,6 +180,24 @@ impl CapabilityCache {
             .lock()
             .unwrap()
             .remove(&(scope.clone(), capability));
+    }
+
+    /// Read-only peek: true while a Leader's probe for `(scope, capability)`
+    /// is still in flight. Unlike `begin_probe`, never inserts — a Follower
+    /// can poll this repeatedly without risking becoming a new Leader itself
+    /// the moment the real Leader finishes.
+    ///
+    /// `#[allow(dead_code)]`: exercised by `crate::git_process`'s Follower
+    /// path and by `tests/git_process_bounds.rs`, not by `tests/git_baseline.rs`
+    /// (this method's own `#[path]` inclusion there predates it) — the
+    /// attribute lives here, on the item itself, so it applies wherever this
+    /// source file is compiled without needing to edit that other test file.
+    #[allow(dead_code)]
+    pub fn is_in_flight(&self, scope: &HostScope, capability: Capability) -> bool {
+        self.in_flight
+            .lock()
+            .unwrap()
+            .contains_key(&(scope.clone(), capability))
     }
 }
 
@@ -537,13 +565,11 @@ fn parse_rename_or_copy(line: &str) -> Result<StatusEntry, RpcError> {
     let xy = fields[1].to_string();
     let score = fields[8].to_string();
     let tail = fields[9..].join(" ");
-    let (path, orig_path) = tail
-        .split_once('\t')
-        .ok_or_else(|| {
-            error::invalid_argument(format!(
-                "malformed rename/copy entry (missing tab-separated origPath): {line}"
-            ))
-        })?;
+    let (path, orig_path) = tail.split_once('\t').ok_or_else(|| {
+        error::invalid_argument(format!(
+            "malformed rename/copy entry (missing tab-separated origPath): {line}"
+        ))
+    })?;
     if path.is_empty() || orig_path.is_empty() {
         return Err(error::invalid_argument(format!(
             "malformed rename/copy entry (empty path): {line}"
@@ -615,7 +641,10 @@ pub fn parse_status_porcelain_v2(input: &str) -> Result<ParsedStatus, RpcError> 
     Ok(ParsedStatus { header, entries })
 }
 
-fn parse_rename_or_copy_z(entry_token: &str, orig_path_token: Option<&str>) -> Result<StatusEntry, RpcError> {
+fn parse_rename_or_copy_z(
+    entry_token: &str,
+    orig_path_token: Option<&str>,
+) -> Result<StatusEntry, RpcError> {
     let fields: Vec<&str> = entry_token.split(' ').collect();
     // "-z" shape: "2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>",
     // with origPath as its own NUL-terminated token immediately after (no

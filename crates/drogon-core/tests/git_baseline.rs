@@ -56,13 +56,28 @@ fn rejection_on_native_scope_does_not_affect_wsl_scope() {
 
 #[test]
 fn capability_key_matches_the_source_table_identifiers() {
-    assert_eq!(Capability::FetchNoWriteFetchHead.key(), "fetch-no-write-fetch-head");
+    assert_eq!(
+        Capability::FetchNoWriteFetchHead.key(),
+        "fetch-no-write-fetch-head"
+    );
     assert_eq!(Capability::WorktreeListZ.key(), "worktree-list-z");
-    assert_eq!(Capability::RevParsePathFormat.key(), "rev-parse-path-format");
+    assert_eq!(
+        Capability::RevParsePathFormat.key(),
+        "rev-parse-path-format"
+    );
     assert_eq!(Capability::ForEachRefExclude.key(), "for-each-ref-exclude");
-    assert_eq!(Capability::MergeTreeWriteTree.key(), "merge-tree-write-tree");
-    assert_eq!(Capability::MergeTreeMergeBase.key(), "merge-tree-merge-base");
-    assert_eq!(Capability::DecoratePlaceholder.key(), "decorate-placeholder");
+    assert_eq!(
+        Capability::MergeTreeWriteTree.key(),
+        "merge-tree-write-tree"
+    );
+    assert_eq!(
+        Capability::MergeTreeMergeBase.key(),
+        "merge-tree-merge-base"
+    );
+    assert_eq!(
+        Capability::DecoratePlaceholder.key(),
+        "decorate-placeholder"
+    );
 }
 
 #[test]
@@ -108,7 +123,11 @@ fn should_retry_is_false_immediately_after_rejection() {
     let native = HostScope::native();
     cache.record_rejection(&native, Capability::MergeTreeMergeBase);
 
-    assert!(!cache.should_retry(&native, Capability::MergeTreeMergeBase, Duration::from_secs(60)));
+    assert!(!cache.should_retry(
+        &native,
+        Capability::MergeTreeMergeBase,
+        Duration::from_secs(60)
+    ));
 }
 
 #[test]
@@ -119,7 +138,11 @@ fn should_retry_is_true_once_interval_elapses() {
 
     // A zero interval always permits an immediate retry, exercising the
     // "upgrade self-heals" path without a real sleep in the test.
-    assert!(cache.should_retry(&native, Capability::MergeTreeMergeBase, Duration::from_secs(0)));
+    assert!(cache.should_retry(
+        &native,
+        Capability::MergeTreeMergeBase,
+        Duration::from_secs(0)
+    ));
 }
 
 #[test]
@@ -127,7 +150,11 @@ fn should_retry_is_true_when_capability_was_never_rejected() {
     let cache = CapabilityCache::new();
     let native = HostScope::native();
 
-    assert!(cache.should_retry(&native, Capability::DecoratePlaceholder, Duration::from_secs(3600)));
+    assert!(cache.should_retry(
+        &native,
+        Capability::DecoratePlaceholder,
+        Duration::from_secs(3600)
+    ));
 }
 
 #[test]
@@ -136,7 +163,11 @@ fn retry_after_elapsed_interval_clears_the_rejection_on_success() {
     let native = HostScope::native();
     cache.record_rejection(&native, Capability::RevParsePathFormat);
 
-    assert!(cache.should_retry(&native, Capability::RevParsePathFormat, Duration::from_secs(0)));
+    assert!(cache.should_retry(
+        &native,
+        Capability::RevParsePathFormat,
+        Duration::from_secs(0)
+    ));
     cache.record_success(&native, Capability::RevParsePathFormat);
 
     assert!(!cache.is_rejected(&native, Capability::RevParsePathFormat));
@@ -241,7 +272,10 @@ fn worktree_list_z_preferred_and_fallback_commands_carry_porcelain() {
         entry.preferred_command,
         vec!["worktree", "list", "--porcelain", "-z"]
     );
-    assert_eq!(entry.fallback_command, vec!["worktree", "list", "--porcelain"]);
+    assert_eq!(
+        entry.fallback_command,
+        vec!["worktree", "list", "--porcelain"]
+    );
     assert!(entry.preferred_command.contains(&"--porcelain".to_string()));
     assert!(entry.fallback_command.contains(&"--porcelain".to_string()));
 }
@@ -252,7 +286,8 @@ fn worktree_list_z_fallback_command_shape_is_parseable_line_block_output() {
     // Git's pre-2.36 line-block porcelain form. Feed a representative
     // sample of that exact shape through the worktree parser to prove the
     // fallback command and the parser agree on what "parseable" means.
-    let sample = "worktree /repo\nHEAD abcdef1234567890abcdef1234567890abcdef12\nbranch refs/heads/main\n\n";
+    let sample =
+        "worktree /repo\nHEAD abcdef1234567890abcdef1234567890abcdef12\nbranch refs/heads/main\n\n";
     let entries = parse_worktree_list_porcelain(sample).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].path, "/repo");
@@ -345,7 +380,9 @@ fn parses_untracked_and_ignored_lines() {
     let input = "? untracked.txt\n! ignored.log\n";
     let parsed = parse_status_porcelain_v2(input).unwrap();
     assert_eq!(parsed.entries.len(), 2);
-    assert!(matches!(&parsed.entries[0], StatusEntry::Untracked { path } if path == "untracked.txt"));
+    assert!(
+        matches!(&parsed.entries[0], StatusEntry::Untracked { path } if path == "untracked.txt")
+    );
     assert!(matches!(&parsed.entries[1], StatusEntry::Ignored { path } if path == "ignored.log"));
 }
 
@@ -630,7 +667,9 @@ fn z_form_paths_are_never_c_unquoted() {
 fn z_form_untracked_path_with_legitimate_leading_space_keeps_it() {
     let input = "?  leading.txt\0";
     let parsed = parse_status_porcelain_v2_z(input).unwrap();
-    assert!(matches!(&parsed.entries[0], StatusEntry::Untracked { path } if path == " leading.txt"));
+    assert!(
+        matches!(&parsed.entries[0], StatusEntry::Untracked { path } if path == " leading.txt")
+    );
 }
 
 #[test]

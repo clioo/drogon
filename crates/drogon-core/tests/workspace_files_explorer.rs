@@ -189,8 +189,8 @@ fn read_file_refuses_a_nested_pre_swapped_escaping_symlink_one_level_deeper() {
 fn read_file_never_returns_content_from_outside_root_while_a_component_is_concurrently_swapped() {
     use std::io::Write as _;
     use std::os::unix::fs::symlink;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let outside = tempdir().unwrap();
     // Named identically to the contained case's file below, so a real leak
@@ -342,7 +342,10 @@ fn list_dir_truncates_and_reports_the_flag_when_max_entries_exceeded() {
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
     let mut sorted_names = names.clone();
     sorted_names.sort_unstable();
-    assert_eq!(names, sorted_names, "the returned page must be sorted among itself");
+    assert_eq!(
+        names, sorted_names,
+        "the returned page must be sorted among itself"
+    );
     for name in &names {
         assert!(
             (0..5).any(|i| *name == format!("f{i}.txt")),
@@ -523,8 +526,8 @@ fn read_file_does_not_block_opening_a_fifo_with_no_writer_attached() {
 #[cfg(unix)]
 fn read_file_validates_the_type_of_the_handle_it_actually_opened_not_an_earlier_stat() {
     use std::io::Write as _;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let root = make_root();
     let path = root.path().join("swapme");
@@ -670,7 +673,11 @@ fn write_file_temp_creation_is_exclusive_and_never_truncates_a_collision() {
     let root = make_root();
     let dir = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
 
-    fs::write(root.path().join("collide.tmp"), b"pre-existing, must survive").unwrap();
+    fs::write(
+        root.path().join("collide.tmp"),
+        b"pre-existing, must survive",
+    )
+    .unwrap();
 
     let mut opts = OpenOptions::new();
     opts.write(true).create_new(true);
@@ -688,8 +695,8 @@ fn write_file_temp_creation_is_exclusive_and_never_truncates_a_collision() {
 #[cfg(unix)]
 fn write_file_bounds_its_post_write_readback_even_if_the_file_balloons_concurrently() {
     use std::io::Write as _;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let root = make_root();
     let path = root.path().join("ballooning.txt");
@@ -750,8 +757,8 @@ fn write_file_post_rename_readback_never_hangs_when_the_target_is_swapped_for_a_
     // right after the rename (and before the read-back's own open) could
     // hang this call forever. `open_regular_file` opens non-blocking and
     // validates the handle it actually got, exactly like `read_file`.
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let root = make_root();
     let path = root.path().join("swap-target.txt");
@@ -823,7 +830,10 @@ fn write_file_preserves_existing_executable_permission_bit() {
     write_file(root.path(), "script.sh", b"#!/bin/sh\necho updated\n").unwrap();
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode, 0o755, "executable bit must survive the temp+rename swap");
+    assert_eq!(
+        mode, 0o755,
+        "executable bit must survive the temp+rename swap"
+    );
     let content = fs::read_to_string(&path).unwrap();
     assert_eq!(content, "#!/bin/sh\necho updated\n");
 }
@@ -841,13 +851,20 @@ fn write_file_of_a_brand_new_file_uses_default_creation_mode() {
         .permissions()
         .mode()
         & 0o777;
-    assert_ne!(mode, 0o755, "a brand-new file must not inherit an unrelated mode");
+    assert_ne!(
+        mode, 0o755,
+        "a brand-new file must not inherit an unrelated mode"
+    );
 }
 
 // --- write_file TOCTOU re-validation ----------------------------------------
 
 #[test]
 #[cfg(unix)]
+// Also the symlink-escape coverage `revalidate_containment`'s own tests
+// used to carry (removed with that helper): a parent swapped for a symlink
+// resolving outside root is refused here via the real Dir-relative path,
+// not a std-canonicalize side check.
 fn write_file_refuses_a_parent_directory_pre_swapped_to_an_escaping_symlink() {
     use std::os::unix::fs::symlink;
 
@@ -858,27 +875,4 @@ fn write_file_refuses_a_parent_directory_pre_swapped_to_an_escaping_symlink() {
     let err = write_file(root.path(), "escape/newfile.txt", b"payload").unwrap_err();
     assert_eq!(err.code, "invalid_argument");
     assert!(!outside.path().join("newfile.txt").exists());
-}
-
-#[test]
-fn revalidate_containment_allows_a_parent_still_inside_root() {
-    let root = make_root();
-    let parent = root.path().join("nested");
-    fs::create_dir_all(&parent).unwrap();
-
-    workspace_files::revalidate_containment(root.path(), &parent).unwrap();
-}
-
-#[test]
-#[cfg(unix)]
-fn revalidate_containment_refuses_a_parent_swapped_to_an_escaping_symlink() {
-    use std::os::unix::fs::symlink;
-
-    let outside = tempdir().unwrap();
-    let root = make_root();
-    let parent = root.path().join("nested");
-    symlink(outside.path(), &parent).unwrap();
-
-    let err = workspace_files::revalidate_containment(root.path(), &parent).unwrap_err();
-    assert_eq!(err.code, "invalid_argument");
 }
