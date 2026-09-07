@@ -108,6 +108,8 @@ pub fn accept_loop_with_limits(
 /// descriptor, invalid argument, non-socket endpoint, …) returns
 /// immediately. Either way the error reaches the caller as a real error —
 /// an honestly failing service beats a silently dead one.
+/// An admitted shutdown instead drains connections and returns `Ok(())`
+/// after its reply write is attempted; callers must allow this normal exit.
 #[cfg(unix)]
 pub fn run_accept_loop(
     accept: impl FnMut() -> std::io::Result<UnixStream>,
