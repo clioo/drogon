@@ -65,6 +65,34 @@ export function registerFactoryRoute(
 }
 
 /**
+ * Fail-closed capability gate around a FileBridge. Every call evaluates
+ * isAllowed at call time: when the live service is known to withhold
+ * files.v1 the call is refused locally (never reaching the service) with
+ * an explicit retryable error, so a kept-alive panel cannot issue calls
+ * behind a withheld capability while its drafts stay mounted. Transient
+ * unknown states keep the last App-level decision via the callback.
+ */
+export function createGatedFileBridge(
+  source: FileBridge,
+  isAllowed: () => boolean,
+): FileBridge {
+  const refused = () =>
+    Promise.resolve({
+      ok: false as const,
+      error: {
+        code: "unsupported_capability",
+        message: "files.v1 capability is not advertised by the service",
+        retryable: true,
+      },
+    });
+  return {
+    fileList: (input) => (isAllowed() ? source.fileList(input) : refused()),
+    fileRead: (input) => (isAllowed() ? source.fileRead(input) : refused()),
+    fileWrite: (input) => (isAllowed() ? source.fileWrite(input) : refused()),
+  };
+}
+
+/**
  * Registers the REAL V3 files route (capability-gated on files.v1) through
  * the V2 contract and returns the new registry. Single construction path
  * with registerFactoryRoute above; no duplicated factory definitions.
