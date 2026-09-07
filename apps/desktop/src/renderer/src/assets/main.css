@@ -251,6 +251,13 @@ h2 {
   flex-direction: column;
   gap: 2px;
 }
+/* Long unbreakable repo names must ellipsize like the path below them, never
+   paint under the header action buttons at narrow widths. */
+.workspace-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .workspace-heading .path {
   overflow: hidden;
   text-overflow: ellipsis;
