@@ -78,6 +78,86 @@ export interface BrowserBridge {
   onState(listener: (event: BrowserStateEvent) => void): () => void;
 }
 
+/**
+ * Daemon-mediated desktop command relay (`browser.relay.v1`, journeys
+ * J3/J4). Additive: nothing above changes. The daemon enqueues one command
+ * per `browser.*` CLI call; the desktop long-polls `desktop.commands.poll`,
+ * executes against the browser host, and reports `desktop.commands.complete`.
+ */
+export const BROWSER_RELAY_CAPABILITY = "browser.relay.v1";
+export const MAX_BROWSER_SELECTOR_CHARS = 1_024;
+export const MAX_BROWSER_FILL_TEXT_CHARS = 8_192;
+
+const selectorInput = z.string().min(1).max(MAX_BROWSER_SELECTOR_CHARS);
+
+export const browserRelayOpenParamsSchema = z.object({
+  workspaceId,
+  url: urlInput.optional(),
+});
+export type BrowserRelayOpenParams = z.infer<typeof browserRelayOpenParamsSchema>;
+
+export const browserRelayTabParamsSchema = browserTabRefSchema;
+
+export const browserRelayClickParamsSchema = z.object({
+  tabId,
+  selector: selectorInput,
+});
+export type BrowserRelayClickParams = z.infer<typeof browserRelayClickParamsSchema>;
+
+export const browserRelayFillParamsSchema = z.object({
+  tabId,
+  selector: selectorInput,
+  text: z.string().max(MAX_BROWSER_FILL_TEXT_CHARS),
+});
+export type BrowserRelayFillParams = z.infer<typeof browserRelayFillParamsSchema>;
+
+export const browserRelayTabsParamsSchema = z.object({ workspaceId });
+export type BrowserRelayTabsParams = z.infer<typeof browserRelayTabsParamsSchema>;
+
+export const relayCommandKinds = [
+  "browser.open",
+  "browser.navigate",
+  "browser.snapshot",
+  "browser.click",
+  "browser.fill",
+  "browser.tabs",
+] as const;
+export type RelayCommandKind = (typeof relayCommandKinds)[number];
+
+export const relayCommandSchema = z.object({
+  commandId: z.string().min(1).max(128),
+  kind: z.enum(relayCommandKinds),
+  params: z.record(z.string(), z.unknown()),
+});
+export type RelayCommand = z.infer<typeof relayCommandSchema>;
+
+export const relayPollResultSchema = z.object({
+  commands: z.array(relayCommandSchema),
+});
+export type RelayPollResult = z.infer<typeof relayPollResultSchema>;
+
+export const relayCompleteErrorSchema = z.object({
+  code: z.string().min(1).max(128),
+  message: z.string().min(1).max(2_048),
+});
+export type RelayCompleteError = z.infer<typeof relayCompleteErrorSchema>;
+
+export const relayTabsResultSchema = z.object({
+  tabs: z.array(
+    z.object({
+      tabId: z.string(),
+      workspaceId: z.string(),
+      url: z.string(),
+      title: z.string(),
+      loading: z.boolean(),
+      canGoBack: z.boolean(),
+      canGoForward: z.boolean(),
+      error: z.string().nullable(),
+    }),
+  ),
+});
+export type RelayTabsResult = z.infer<typeof relayTabsResultSchema>;
+
 export const browserIpcChannels = {
   createTab: "drogon:browserCreateTab",
   closeTab: "drogon:browserCloseTab",

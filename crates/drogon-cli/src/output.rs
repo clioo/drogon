@@ -5,9 +5,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::client::{
-    AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, HarnessCatalog,
-    MethodResult, Project, ProjectList, ReadResult, Removed, Session, SessionList, StatusResult,
-    Workspace, WorkspaceList, Worktree, WorktreeList, WriteResult,
+    AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, BrowserSnapshot,
+    BrowserTab, BrowserTabsList, HarnessCatalog, MethodResult, Project, ProjectList, ReadResult,
+    Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList, Worktree, WorktreeList,
+    WriteResult,
 };
 
 pub fn status_line(result: &StatusResult) -> String {
@@ -354,6 +355,66 @@ pub fn automation_history(history: &AutomationHistory, automation_id: &str) -> S
                 },
             )
         })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn browser_tab_line(tab: &BrowserTab) -> String {
+    let state = if tab.loading { "loading" } else { "ready" };
+    let error = tab
+        .error
+        .as_deref()
+        .map(|message| format!(" error={message:?}"))
+        .unwrap_or_default();
+    format!(
+        "{} ws={} {} {:?} [{}]{}",
+        tab.tab_id, tab.workspace_id, tab.url, tab.title, state, error
+    )
+}
+
+/// Human `browser open` / `browser navigate`: the verb names the relayed
+/// action so `open` and `navigate` stay distinguishable in transcripts.
+pub fn browser_tab(method: &str, tab: &BrowserTab) -> String {
+    let verb = if method == "browser.open" {
+        "Opened"
+    } else {
+        "Navigated"
+    };
+    format!("{} {}.", verb, browser_tab_line(tab))
+}
+
+/// Human `browser click` / `browser fill`: the tab state after the guest
+/// interaction, so the caller sees where the pane stands.
+pub fn browser_acted(method: &str, tab: &BrowserTab) -> String {
+    let verb = if method == "browser.click" {
+        "Clicked"
+    } else {
+        "Filled"
+    };
+    format!("{} {}.", verb, browser_tab_line(tab))
+}
+
+/// Human `browser snapshot`: identity header plus the bounded DOM text.
+/// `--json` preserves the wire fields untouched.
+pub fn browser_snapshot(snapshot: &BrowserSnapshot) -> String {
+    let header = format!(
+        "tab {} {} {:?} truncated={}",
+        snapshot.tab_id, snapshot.url, snapshot.title, snapshot.truncated
+    );
+    if snapshot.text.is_empty() {
+        header
+    } else {
+        format!("{header}\n{}", snapshot.text)
+    }
+}
+
+pub fn browser_tabs(list: &BrowserTabsList) -> String {
+    if list.tabs.is_empty() {
+        return "No browser tabs open.".into();
+    }
+    list.tabs
+        .iter()
+        .map(browser_tab_line)
         .collect::<Vec<_>>()
         .join("\n")
 }

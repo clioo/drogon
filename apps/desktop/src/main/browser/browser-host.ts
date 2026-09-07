@@ -8,6 +8,8 @@
 
 import type { WebContentsView } from "electron";
 import {
+  MAX_BROWSER_FILL_TEXT_CHARS,
+  MAX_BROWSER_SELECTOR_CHARS,
   MAX_BROWSER_SNAPSHOT_CHARS,
   MAX_BROWSER_TABS,
   browserIpcChannels,
@@ -100,6 +102,42 @@ export function lockDownGuestSession(session: GuestSessionLike): void {
   session.setPermissionCheckHandler(() => false);
   session.on("will-download", (event) => event.preventDefault());
 }
+
+/**
+ * Guest script for `click`: resolves one CSS selector and clicks it. The
+ * selector is embedded with `JSON.stringify`, so it is always a string
+ * literal — never code. Results never echo guest data back: only fixed
+ * `ok`/`error` literals cross the boundary.
+ */
+export function buildClickScript(selector: string): string {
+  return `(function(){var el;try{el=document.querySelector(${JSON.stringify(selector)});}catch(err){return{ok:false,error:"invalid selector"};}if(!el){return{ok:false,error:"no element matches selector"};}try{el.click();}catch(err){return{ok:false,error:"click failed"};}return{ok:true};})()`;
+}
+
+/**
+ * Guest script for `fill`: resolves one CSS selector and sets its value,
+ * firing the `input`/`change` events a real keystroke would. Same
+ * selector-only embedding and no-echo rule as {@link buildClickScript}.
+ */
+export function buildFillScript(selector: string, text: string): string {
+  return `(function(){var el;try{el=document.querySelector(${JSON.stringify(selector)});}catch(err){return{ok:false,error:"invalid selector"};}if(!el){return{ok:false,error:"no element matches selector"};}var value=${JSON.stringify(text)};try{if(el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement){el.focus();el.value=value;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));}else if(el.isContentEditable){el.focus();el.textContent=value;el.dispatchEvent(new Event("input",{bubbles:true}));}else{return{ok:false,error:"element is not fillable"};}}catch(err){return{ok:false,error:"fill failed"};}return{ok:true};})()`;
+}
+
+type GuestVerdict = { ok?: unknown; error?: unknown };
+
+function verdictError(verdict: unknown): string | null {
+  if (
+    verdict &&
+    typeof verdict === "object" &&
+    (verdict as GuestVerdict).ok === true
+  )
+    return null;
+  const detail = (verdict as GuestVerdict | null)?.error;
+  return typeof detail === "string" && detail
+    ? detail.slice(0, 256)
+    : "The page did not confirm the interaction.";
+}
+
+export type HostBlocked = { blocked: string; code?: string };
 
 export class BrowserHost {
   private state: BrowserHostSnapshot = initialHostSnapshot();
@@ -357,6 +395,54 @@ export class BrowserHost {
   private describe(tabId: string): BrowserTabState | { blocked: string } {
     const tab = publicTabStates(this.state).find((item) => item.tabId === tabId);
     return tab ?? { blocked: "Tab is not open." };
+  }
+
+  tabsForWorkspace(workspaceId: string): BrowserTabState[] {
+    return publicTabStates(this.state).filter(
+      (tab) => tab.workspaceId === workspaceId,
+    );
+  }
+
+  async click(tabId: string, selector: string): Promise<BrowserTabState | HostBlocked> {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open.", code: "browser_no_tab" };
+    if (
+      !selector ||
+      selector.length > MAX_BROWSER_SELECTOR_CHARS ||
+      selector.includes("\0")
+    )
+      return { blocked: "Invalid CSS selector.", code: "invalid_argument" };
+    let verdict: unknown;
+    try {
+      verdict = await contents.executeJavaScript(buildClickScript(selector));
+    } catch {
+      return { blocked: "The page refused script evaluation.", code: "browser_blocked" };
+    }
+    const failure = verdictError(verdict);
+    if (failure) return { blocked: failure, code: "browser_blocked" };
+    return this.describe(tabId);
+  }
+
+  async fill(
+    tabId: string,
+    selector: string,
+    text: string,
+  ): Promise<BrowserTabState | HostBlocked> {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return { blocked: "Tab is not open.", code: "browser_no_tab" };
+    if (!selector || selector.length > MAX_BROWSER_SELECTOR_CHARS || selector.includes("\0"))
+      return { blocked: "Invalid CSS selector.", code: "invalid_argument" };
+    if (text.length > MAX_BROWSER_FILL_TEXT_CHARS)
+      return { blocked: "Fill text exceeds the budget.", code: "invalid_argument" };
+    let verdict: unknown;
+    try {
+      verdict = await contents.executeJavaScript(buildFillScript(selector, text));
+    } catch {
+      return { blocked: "The page refused script evaluation.", code: "browser_blocked" };
+    }
+    const failure = verdictError(verdict);
+    if (failure) return { blocked: failure, code: "browser_blocked" };
+    return this.describe(tabId);
   }
 
   async snapshot(tabId: string): Promise<BrowserSnapshot | { blocked: string }> {

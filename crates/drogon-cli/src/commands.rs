@@ -10,17 +10,18 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, Cli, Command, HarnessAction, InternalAction, ProjectAction, TerminalAction,
-    WaitFor, WorkspaceAction, WorktreeAction,
+    AutomationAction, BrowserAction, Cli, Command, HarnessAction, InternalAction, ProjectAction,
+    TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
-    AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, CallOk,
-    Client, HarnessCatalog, Project, ProjectList, ReadResult, Removed, Session, SessionList,
-    StatusResult, Verdict, Workspace, WorkspaceList, Worktree, WorktreeList, WriteResult,
-    check_automation, check_automation_history, check_automation_list, check_automation_run_now,
-    check_harness_catalog, check_project, check_project_list, check_read, check_removed,
-    check_session, check_session_list, check_status, check_workspace, check_workspace_list,
-    check_worktree, check_worktree_list, check_write,
+    AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
+    BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, Project,
+    ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Verdict, Workspace,
+    WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation, check_automation_history,
+    check_automation_list, check_automation_run_now, check_browser_snapshot, check_browser_tab,
+    check_browser_tabs, check_harness_catalog, check_project, check_project_list, check_read,
+    check_removed, check_session, check_session_list, check_status, check_workspace,
+    check_workspace_list, check_worktree, check_worktree_list, check_write,
 };
 use crate::error::{CliError, method_not_found, timeout};
 use crate::output;
@@ -91,6 +92,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Project { action } => project(&client, &request_id, json, action).await,
         Command::Worktree { action } => worktree(&client, &request_id, json, action).await,
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
+        Command::Browser { action } => browser(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
         Command::Orchestration { command } => {
@@ -505,7 +507,7 @@ async fn harness(
         HarnessAction::List => "harness.catalog.v1",
         HarnessAction::Start { .. } => "harness.launch.v1",
     };
-    let status = capability_preflight(client, request_id, required_capability).await?;
+    let status = capability_preflight(client, request_id, required_capability, "harness").await?;
     match action {
         HarnessAction::List => {
             let call = client
@@ -578,7 +580,7 @@ async fn automation(
     json: bool,
     action: &AutomationAction,
 ) -> Result<RunOutcome, CliError> {
-    capability_preflight(client, request_id, "automation.v1").await?;
+    capability_preflight(client, request_id, "automation.v1", "automation").await?;
     match action {
         AutomationAction::Create {
             name,
@@ -705,6 +707,7 @@ async fn capability_preflight(
     client: &Client,
     operation_request_id: &str,
     required_capability: &str,
+    feature: &str,
 ) -> Result<StatusResult, CliError> {
     let preflight_request_id = uuid::Uuid::new_v4().to_string();
     let call = client
@@ -721,12 +724,97 @@ async fn capability_preflight(
         return Err(CliError::local(
             method_not_found(format!(
                 "this Drogon service does not advertise {required_capability}; \
-                 update the Drogon service on the execution host to a version with harness support"
+                 update the Drogon service on the execution host to a version with {feature} support"
             )),
             operation_request_id,
         ));
     }
     Ok(status)
+}
+
+/// Browser pane control through the daemon's desktop command relay. One
+/// invocation enqueues exactly one relay command; the daemon holds the call
+/// (bounded by `--timeout-ms`) until the connected desktop executes it. With
+/// no desktop connected the service answers `desktop_not_connected` and the
+/// CLI surfaces it unchanged (exit 1).
+async fn browser(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &BrowserAction,
+) -> Result<RunOutcome, CliError> {
+    capability_preflight(client, request_id, "browser.relay.v1", "browser").await?;
+    let (method, params) = match action {
+        BrowserAction::Open {
+            workspace,
+            url,
+            timeout_ms,
+        } => (
+            "browser.open",
+            json!({"workspaceId": workspace, "url": url, "timeoutMs": timeout_ms}),
+        ),
+        BrowserAction::Navigate {
+            tab,
+            url,
+            timeout_ms,
+        } => (
+            "browser.navigate",
+            json!({"tabId": tab, "url": url, "timeoutMs": timeout_ms}),
+        ),
+        BrowserAction::Snapshot { tab, timeout_ms } => (
+            "browser.snapshot",
+            json!({"tabId": tab, "timeoutMs": timeout_ms}),
+        ),
+        BrowserAction::Click {
+            tab,
+            selector,
+            timeout_ms,
+        } => (
+            "browser.click",
+            json!({"tabId": tab, "selector": selector, "timeoutMs": timeout_ms}),
+        ),
+        BrowserAction::Fill {
+            tab,
+            selector,
+            text,
+            timeout_ms,
+        } => (
+            "browser.fill",
+            json!({"tabId": tab, "selector": selector, "text": text, "timeoutMs": timeout_ms}),
+        ),
+        BrowserAction::Tabs {
+            workspace,
+            timeout_ms,
+        } => (
+            "browser.tabs",
+            json!({"workspaceId": workspace, "timeoutMs": timeout_ms}),
+        ),
+    };
+    // The relay hold is server-side and bounded by timeoutMs; the transport
+    // budget stays the fixed default, which always covers the CLI's own
+    // 1..=25000ms validation range.
+    let call = client
+        .call(method, params, request_id, DEFAULT_TIMEOUT)
+        .await?;
+    match action {
+        BrowserAction::Open { .. } | BrowserAction::Navigate { .. } => {
+            let tab: BrowserTab = Client::decode_checked(&call, method, check_browser_tab)?;
+            emit(call, json, || output::browser_tab(method, &tab), 0, None)
+        }
+        BrowserAction::Click { .. } | BrowserAction::Fill { .. } => {
+            let tab: BrowserTab = Client::decode_checked(&call, method, check_browser_tab)?;
+            emit(call, json, || output::browser_acted(method, &tab), 0, None)
+        }
+        BrowserAction::Snapshot { .. } => {
+            let snapshot: BrowserSnapshot =
+                Client::decode_checked(&call, method, check_browser_snapshot)?;
+            emit(call, json, || output::browser_snapshot(&snapshot), 0, None)
+        }
+        BrowserAction::Tabs { .. } => {
+            let list: BrowserTabsList = Client::decode_checked(&call, method, check_browser_tabs)?;
+            emit(call, json, || output::browser_tabs(&list), 0, None)
+        }
+    }
 }
 
 /// Success: human text or the raw validated envelope, exactly one stdout

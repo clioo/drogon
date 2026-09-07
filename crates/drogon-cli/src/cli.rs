@@ -91,6 +91,14 @@ pub enum Command {
         #[command(subcommand)]
         action: TerminalAction,
     },
+    /// Embedded browser pane, driven through the daemon's desktop command
+    /// relay (requires the service capability browser.relay.v1 and a
+    /// connected Drogon desktop; without one the call fails
+    /// desktop_not_connected inside its timeout)
+    Browser {
+        #[command(subcommand)]
+        action: BrowserAction,
+    },
     /// Harness discovery and launch (requires service capabilities
     /// harness.catalog.v1 / harness.launch.v1)
     Harness {
@@ -448,6 +456,100 @@ pub enum TerminalAction {
     },
 }
 
+/// Browser pane control through the daemon relay: the daemon enqueues one
+/// command per invocation and waits (bounded) for the connected desktop to
+/// execute it against the embedded browser host.
+#[derive(Subcommand, Debug)]
+pub enum BrowserAction {
+    /// Open a URL in a new pane tab for a workspace
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli browser open --workspace <ID> <URL> [--timeout-ms <MS>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --timeout-ms, --workspace"
+    )]
+    Open {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        /// URL to open (positional, verbatim)
+        #[arg(value_name = "URL")]
+        url: String,
+        /// Bounded wait for the desktop to execute, in ms (1..=25000)
+        #[arg(long, value_name = "MS", default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+    /// Navigate an open tab to a URL
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli browser navigate --tab <ID> <URL> [--timeout-ms <MS>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --tab, --timeout-ms"
+    )]
+    Navigate {
+        #[arg(long, value_name = "ID")]
+        tab: String,
+        /// URL to navigate to (positional, verbatim)
+        #[arg(value_name = "URL")]
+        url: String,
+        /// Bounded wait for the desktop to execute, in ms (1..=25000)
+        #[arg(long, value_name = "MS", default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+    /// Snapshot a tab's URL, title and bounded DOM text
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli browser snapshot --tab <ID> [--timeout-ms <MS>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --tab, --timeout-ms"
+    )]
+    Snapshot {
+        #[arg(long, value_name = "ID")]
+        tab: String,
+        /// Bounded wait for the desktop to execute, in ms (1..=25000)
+        #[arg(long, value_name = "MS", default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+    /// Click the element matching a CSS selector in a tab
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli browser click --tab <ID> --selector <CSS> [--timeout-ms <MS>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --selector, --tab, --timeout-ms"
+    )]
+    Click {
+        #[arg(long, value_name = "ID")]
+        tab: String,
+        /// CSS selector resolved with document.querySelector in the guest
+        #[arg(long, value_name = "CSS")]
+        selector: String,
+        /// Bounded wait for the desktop to execute, in ms (1..=25000)
+        #[arg(long, value_name = "MS", default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+    /// Fill the element matching a CSS selector with text
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli browser fill --tab <ID> --selector <CSS> --text <TEXT> [--timeout-ms <MS>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --selector, --tab, --text, --timeout-ms"
+    )]
+    Fill {
+        #[arg(long, value_name = "ID")]
+        tab: String,
+        /// CSS selector resolved with document.querySelector in the guest
+        #[arg(long, value_name = "CSS")]
+        selector: String,
+        /// Literal text to fill in (never shell interpolated)
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        text: String,
+        /// Bounded wait for the desktop to execute, in ms (1..=25000)
+        #[arg(long, value_name = "MS", default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+    /// List a workspace's open pane tabs
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli browser tabs --workspace <ID> [--timeout-ms <MS>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --timeout-ms, --workspace"
+    )]
+    Tabs {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        /// Bounded wait for the desktop to execute, in ms (1..=25000)
+        #[arg(long, value_name = "MS", default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+}
+
 /// What `terminal wait --for` polls for. Clap renders these kebab-case, so
 /// the wire values are exactly `exited|idle|output`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -651,6 +753,57 @@ impl Cli {
                     }
                 }
             },
+            Command::Browser { action } => match action {
+                BrowserAction::Open {
+                    workspace,
+                    url,
+                    timeout_ms,
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    validate_browser_url(url)?;
+                    validate_relay_timeout(*timeout_ms)?;
+                }
+                BrowserAction::Navigate {
+                    tab,
+                    url,
+                    timeout_ms,
+                } => {
+                    require_nonempty("tab", tab)?;
+                    validate_browser_url(url)?;
+                    validate_relay_timeout(*timeout_ms)?;
+                }
+                BrowserAction::Snapshot { tab, timeout_ms } => {
+                    require_nonempty("tab", tab)?;
+                    validate_relay_timeout(*timeout_ms)?;
+                }
+                BrowserAction::Click {
+                    tab,
+                    selector,
+                    timeout_ms,
+                } => {
+                    require_nonempty("tab", tab)?;
+                    validate_selector(selector)?;
+                    validate_relay_timeout(*timeout_ms)?;
+                }
+                BrowserAction::Fill {
+                    tab,
+                    selector,
+                    text,
+                    timeout_ms,
+                } => {
+                    require_nonempty("tab", tab)?;
+                    validate_selector(selector)?;
+                    validate_fill_text(text)?;
+                    validate_relay_timeout(*timeout_ms)?;
+                }
+                BrowserAction::Tabs {
+                    workspace,
+                    timeout_ms,
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    validate_relay_timeout(*timeout_ms)?;
+                }
+            },
             Command::Automation { action } => match action {
                 AutomationAction::Create {
                     name,
@@ -831,6 +984,43 @@ fn validate_preference(flag: &str, value: &str) -> Result<(), CliError> {
         return Err(CliError::Usage(format!(
             "--{flag} takes the exact value verbatim; values starting with '-' are refused"
         )));
+    }
+    Ok(())
+}
+
+/// Relay waits are client-bounded well under the 30s transport budget so a
+/// `desktop_not_connected` timeout always arrives as a typed service error,
+/// never a transport loss.
+fn validate_relay_timeout(timeout_ms: u64) -> Result<(), CliError> {
+    if timeout_ms == 0 || timeout_ms > 25_000 {
+        return Err(CliError::Usage("--timeout-ms must be in 1..=25000".into()));
+    }
+    Ok(())
+}
+
+fn validate_browser_url(url: &str) -> Result<(), CliError> {
+    if url.is_empty() || url.len() > 2048 || url.contains('\0') {
+        return Err(CliError::Usage(
+            "URL must be 1..=2048 characters without NUL".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_selector(selector: &str) -> Result<(), CliError> {
+    if selector.is_empty() || selector.len() > 1024 || selector.contains('\0') {
+        return Err(CliError::Usage(
+            "--selector must be 1..=1024 characters without NUL".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_fill_text(text: &str) -> Result<(), CliError> {
+    if text.len() > 8192 || text.contains('\0') {
+        return Err(CliError::Usage(
+            "--text must be at most 8192 UTF-8 bytes without NUL".into(),
+        ));
     }
     Ok(())
 }
@@ -1386,5 +1576,161 @@ mod harness_tests {
         ])
         .unwrap();
         assert!(too_long.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod browser_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("drogon-cli").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn browser_verbs_parse_with_positional_urls() {
+        let cli = parse(&[
+            "browser",
+            "open",
+            "--workspace",
+            "w1",
+            "https://example.test/",
+        ])
+        .unwrap();
+        let Command::Browser {
+            action:
+                BrowserAction::Open {
+                    workspace,
+                    url,
+                    timeout_ms,
+                },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(workspace, "w1");
+        assert_eq!(url, "https://example.test/");
+        assert_eq!(*timeout_ms, 15_000);
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&[
+            "browser",
+            "navigate",
+            "--tab",
+            "browser-tab-1",
+            "https://example.test/next",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["browser", "snapshot", "--tab", "browser-tab-1"]).unwrap();
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&[
+            "browser",
+            "fill",
+            "--tab",
+            "browser-tab-1",
+            "--selector",
+            "#name",
+            "--text",
+            "Ada",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["browser", "tabs", "--workspace", "w1"]).unwrap();
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn browser_open_requires_workspace_and_url() {
+        assert!(parse(&["browser", "open", "https://example.test/"]).is_err());
+        assert!(parse(&["browser", "open", "--workspace", "w1"]).is_err());
+    }
+
+    #[test]
+    fn browser_timeouts_are_bounded_client_side() {
+        let cli = parse(&[
+            "browser",
+            "snapshot",
+            "--tab",
+            "browser-tab-1",
+            "--timeout-ms",
+            "0",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
+        let cli = parse(&[
+            "browser",
+            "snapshot",
+            "--tab",
+            "browser-tab-1",
+            "--timeout-ms",
+            "25001",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
+        let cli = parse(&[
+            "browser",
+            "snapshot",
+            "--tab",
+            "browser-tab-1",
+            "--timeout-ms",
+            "5000",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn browser_selector_and_text_shapes_are_checked() {
+        let cli = parse(&[
+            "browser",
+            "click",
+            "--tab",
+            "browser-tab-1",
+            "--selector",
+            "",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
+        let big_selector = "#".to_string() + &"x".repeat(1024);
+        let cli = parse(&[
+            "browser",
+            "click",
+            "--tab",
+            "browser-tab-1",
+            "--selector",
+            &big_selector,
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
+        let big_text = "x".repeat(8193);
+        let cli = parse(&[
+            "browser",
+            "fill",
+            "--tab",
+            "browser-tab-1",
+            "--selector",
+            "#a",
+            "--text",
+            &big_text,
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
+        // Flag-like fill text is literal data, not a flag.
+        let cli = parse(&[
+            "browser",
+            "fill",
+            "--tab",
+            "browser-tab-1",
+            "--selector",
+            "#a",
+            "--text",
+            "--looks-like-a-flag but is not",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_ok());
     }
 }

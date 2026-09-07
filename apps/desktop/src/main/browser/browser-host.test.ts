@@ -2,6 +2,8 @@ import { describe, expect, test, vi } from "vitest";
 import {
   BrowserHost,
   GUEST_WEB_PREFERENCES,
+  buildClickScript,
+  buildFillScript,
   lockDownGuestSession,
   type BrowserParentWindowLike,
   type GuestContentsLike,
@@ -205,5 +207,67 @@ describe("browser host behavior", () => {
     const tabId = host.list().tabs[0].tabId;
     const snapshot = await host.snapshot(tabId);
     expect(snapshot).toMatchObject({ tabId, url: expect.any(String) });
+  });
+  test("tabsForWorkspace scopes to one workspace", () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    host.createTab("w2", "example.test");
+    expect(host.tabsForWorkspace("w1")).toHaveLength(1);
+    expect(host.tabsForWorkspace("w1")[0].workspaceId).toBe("w1");
+    expect(host.tabsForWorkspace("missing")).toHaveLength(0);
+  });
+  test("click on a missing tab reports browser_no_tab", async () => {
+    const { host } = harness();
+    expect(await host.click("browser-tab-9", "#go")).toEqual({
+      blocked: "Tab is not open.",
+      code: "browser_no_tab",
+    });
+    expect(await host.fill("browser-tab-9", "#a", "x")).toEqual({
+      blocked: "Tab is not open.",
+      code: "browser_no_tab",
+    });
+  });
+  test("click runs the selector script and returns the tab", async () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    const tabId = host.list().tabs[0].tabId;
+    const contents = (host as unknown as {
+      views: Map<string, GuestViewLike>;
+    }).views.get(tabId)?.webContents as ReturnType<typeof fakeContents> & {
+      executeJavaScript: ReturnType<typeof vi.fn>;
+    };
+    const seen: string[] = [];
+    contents.executeJavaScript = vi.fn(async (code: string) => {
+      seen.push(code);
+      return { ok: true };
+    });
+    const result = await host.click(tabId, "#go");
+    expect(result).toMatchObject({ tabId });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain(JSON.stringify("#go"));
+  });
+  test("fill verdict miss maps to browser_blocked without echo", async () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    const tabId = host.list().tabs[0].tabId;
+    const contents = (host as unknown as {
+      views: Map<string, GuestViewLike>;
+    }).views.get(tabId)?.webContents as ReturnType<typeof fakeContents> & {
+      executeJavaScript: ReturnType<typeof vi.fn>;
+    };
+    contents.executeJavaScript = vi.fn(async () => ({
+      ok: false,
+      error: "no element matches selector",
+    }));
+    expect(await host.fill(tabId, "#missing", "secret-text")).toEqual({
+      blocked: "no element matches selector",
+      code: "browser_blocked",
+    });
+  });
+  test("guest scripts embed the selector as a JSON literal", () => {
+    expect(buildClickScript("#go")).toContain(`querySelector(${JSON.stringify("#go")})`);
+    const script = buildFillScript("#a", "x");
+    expect(script).toContain(`querySelector(${JSON.stringify("#a")})`);
+    expect(script).toContain(JSON.stringify("x"));
   });
 });
