@@ -29,6 +29,12 @@ import { supportsHarnessLaunch } from "./harness-capability";
 import { TerminalPane } from "./TerminalPane";
 import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
+import {
+  loadSavedSelection,
+  resolveRestoredSelection,
+  resolveWorkspaceSelection,
+  saveSavedSelection,
+} from "./workspace-selection";
 
 /**
  * Replaces an already-listed entry only on an exact host+id+incarnation
@@ -209,7 +215,10 @@ export function App() {
         setSelected((value) =>
           result.workspaces.some((item) => item.id === value)
             ? value
-            : (result.workspaces[0]?.id ?? ""),
+            : resolveRestoredSelection(
+                result.workspaces,
+                loadSavedSelection(),
+              ),
         );
         setRevision((value) => value + 1);
         const supportsHarnesses = supportsHarnessLaunch(connected.capabilities);
@@ -232,6 +241,13 @@ export function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    // Persists every confirmed selection once it settles against a known
+    // workspace, so the next reload's restore has an up-to-date target.
+    const workspace = workspaces.find((item) => item.id === selected);
+    if (workspace)
+      saveSavedSelection({ workspaceId: workspace.id, hostId: workspace.hostId });
+  }, [selected, workspaces]);
   useEffect(() => {
     const wide = matchMedia("(min-width: 1101px)");
     const adapt = () => {
@@ -407,7 +423,14 @@ export function App() {
                 data-current={workspace.id === selected}
                 aria-current={workspace.id === selected ? "page" : undefined}
                 onClick={() => {
-                  setSelected(workspace.id);
+                  // Re-clicking the already-active workspace must not clear
+                  // its visible live-session projection.
+                  const resolution = resolveWorkspaceSelection(
+                    selected,
+                    workspace.id,
+                  );
+                  if (!resolution.changed) return;
+                  setSelected(resolution.selected);
                   setActive("");
                   setSessions([]);
                 }}
