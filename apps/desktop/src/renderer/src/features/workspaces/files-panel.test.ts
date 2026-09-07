@@ -3,6 +3,9 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import {
   FILES_ROUTE_ID,
+  MAX_RETAINED_REQUEST_IDS,
+  activeOpenPath,
+  activeSelection,
   createFilesPanelDescriptor,
   createFilesSource,
   createRequestIdSource,
@@ -15,6 +18,7 @@ import {
   readErrorFor,
   runFilesRead,
   truncationNoticeText,
+  type FilesOpenEntry,
   type FilesReadState,
 } from "./files-panel";
 import {
@@ -340,22 +344,127 @@ describe("read gating and identity", () => {
   });
 });
 
-describe("request ids: fresh per logical save, stable per retry, per-mount distinct", () => {
-  test("retrying the exact same payload reuses the id; a new payload gets a fresh uuid", () => {
+describe("request ids: per-attempt identity with settle-on-success", () => {
+  test("an unresolved payload keeps its id; settle retires it so the next save is a new attempt", () => {
     const source = createRequestIdSource();
-    const first = source.next(KEY_A, "same body");
-    const retry = source.next(KEY_A, "same body");
-    expect(retry).toBe(first);
+    const first = source.next(KEY_A, "body");
     expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    // Edited draft = new logical save:
-    const edited = source.next(KEY_A, "changed body");
-    expect(edited).not.toBe(first);
-    expect(edited).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    // Same draft for another file = new logical save:
-    const otherFile = source.next(KEY_B, "same body");
-    expect(otherFile).not.toBe(first);
-    // Retry of the edited payload is stable too:
-    expect(source.next(KEY_A, "changed body")).toBe(edited);
+    // Retry while unresolved reuses the id…
+    expect(source.next(KEY_A, "body")).toBe(first);
+    // …and a confirmed success retires it:
+    source.settle(KEY_A, "body");
+    const again = source.next(KEY_A, "body");
+    expect(again).not.toBe(first);
+    // A failed save (never settled) keeps its retry identity:
+    const failed = source.next(KEY_B, "body");
+    expect(source.next(KEY_B, "body")).toBe(failed);
+  });
+
+  test("saver A->B->A sequence: A's retired receipt is never replayed after B landed", async () => {
+    const wire: Array<{ path: string; requestId: string }> = [];
+    const gates = new Map<string, ReturnType<typeof deferred<void>>>();
+    const bridge: FileBridge = {
+      fileList: () => Promise.reject(new Error("unused")),
+      fileRead: () => Promise.reject(new Error("unused")),
+      fileWrite: (input) => {
+        wire.push({ path: input.path, requestId: input.requestId });
+        const gate = deferred<void>();
+        gates.set(input.path, gate);
+        return gate.promise.then(
+          () =>
+            ({
+              ok: true,
+              result: {
+                hostId: "h1",
+                workspaceId: "w1",
+                path: input.path,
+                size: 4,
+                mtime: "t",
+              },
+            }) as never,
+        );
+      },
+    };
+    const ids = createRequestIdSource();
+    const saver = (path: string, key: string) =>
+      makeFileSaver(bridge, { hostId: "h1", workspaceId: "w1", path }, ids, key);
+
+    const saveA1 = saver("src/a.ts", KEY_A)("same body");
+    gates.get("src/a.ts")!.resolve();
+    await saveA1;
+    const saveB = saver("src/b.ts", KEY_B)("same body");
+    gates.get("src/b.ts")!.resolve();
+    await saveB;
+    const saveA2 = saver("src/a.ts", KEY_A)("same body");
+    gates.get("src/a.ts")!.resolve();
+    await saveA2;
+
+    const aWrites = wire.filter((w) => w.path === "src/a.ts");
+    expect(wire).toHaveLength(3);
+    // The second save of A got a FRESH id — the first receipt was retired
+    // on success, so the service can never mistake it for a duplicate
+    // while disk holds B's write.
+    expect(aWrites[1].requestId).not.toBe(aWrites[0].requestId);
+    expect(aWrites[0]).toEqual(wire.find((w) => w.path === "src/a.ts")!.valueOf());
+  });
+
+  test("a failing save keeps its id across retries until a success settles it", async () => {
+    const wire: string[] = [];
+    let fail = true;
+    const bridge: FileBridge = {
+      fileList: () => Promise.reject(new Error("unused")),
+      fileRead: () => Promise.reject(new Error("unused")),
+      fileWrite: (input) => {
+        wire.push(input.requestId);
+        const result = fail
+          ? ({
+              ok: false,
+              error: { code: "io", message: "read-only volume", retryable: true },
+            } as const)
+          : ({
+              ok: true,
+              result: { hostId: "h1", workspaceId: "w1", path: input.path, size: 1, mtime: "t" },
+            });
+        return Promise.resolve(result as never);
+      },
+    };
+    const ids = createRequestIdSource();
+    const save = makeFileSaver(
+      bridge,
+      { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
+      ids,
+      KEY_A,
+    );
+    const first = await save("body");
+    expect(first.ok).toBe(false);
+    // Retry after failure reuses the id (still unresolved):
+    const retry = await save("body");
+    expect(retry.ok).toBe(false);
+    expect(wire).toHaveLength(2);
+    expect(wire[1]).toBe(wire[0]);
+    // The attempt that finally succeeds is still the same logical save…
+    fail = false;
+    await save("body");
+    expect(wire).toHaveLength(3);
+    expect(wire[2]).toBe(wire[0]);
+    // …and its success settles the id: the next save of the same payload
+    // is a new attempt with a fresh id.
+    await save("body");
+    expect(wire).toHaveLength(4);
+    expect(wire[3]).not.toBe(wire[0]);
+  });
+
+  test("retained retry ids are bounded; eviction past the cap mints fresh ids", () => {
+    const source = createRequestIdSource();
+    const first = source.next("k0", "d0");
+    for (let i = 1; i <= MAX_RETAINED_REQUEST_IDS; i += 1) {
+      source.next(`k${i}`, "d");
+    }
+    // k0 was evicted (oldest) past the bound: a fresh id is minted.
+    expect(source.next("k0", "d0")).not.toBe(first);
+    // Recent entries are still retained:
+    const recent = source.next(`k${MAX_RETAINED_REQUEST_IDS}`, "d");
+    expect(source.next(`k${MAX_RETAINED_REQUEST_IDS}`, "d")).toBe(recent);
   });
 
   test("distinct mounts never share request ids, even for identical payloads", () => {
@@ -364,42 +473,8 @@ describe("request ids: fresh per logical save, stable per retry, per-mount disti
     const idOne = mountOne.next(KEY_A, "body");
     const idTwo = mountTwo.next(KEY_A, "body");
     expect(idOne).not.toBe(idTwo);
-    // And each mount keeps its own retry identity:
     expect(mountOne.next(KEY_A, "body")).toBe(idOne);
     expect(mountTwo.next(KEY_A, "body")).toBe(idTwo);
-  });
-
-  test("the saver forwards the draft to the id source and onto the wire", async () => {
-    const gate = deferred<{
-      ok: true;
-      result: { hostId: string; workspaceId: string; path: string; size: number; mtime: string };
-    }>();
-    const wireIds: string[] = [];
-    const bridge: FileBridge = {
-      fileList: () => Promise.reject(new Error("unused")),
-      fileRead: () => Promise.reject(new Error("unused")),
-      fileWrite: (input) => {
-        wireIds.push(input.requestId);
-        return gate.promise;
-      },
-    };
-    const ids = createRequestIdSource();
-    const save = makeFileSaver(
-      bridge,
-      { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
-      (draft) => ids.next(KEY_A, draft),
-    );
-    const first = save("body");
-    gate.resolve({
-      ok: true,
-      result: { hostId: "h1", workspaceId: "w1", path: "src/a.ts", size: 4, mtime: "t" },
-    });
-    await first;
-    const second = save("body"); // retry of the same payload
-    void second;
-    expect(wireIds).toHaveLength(2);
-    expect(wireIds[1]).toBe(wireIds[0]);
-    expect(wireIds[0]).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   test("a service refusal passes through verbatim (no rewriting into success)", async () => {
@@ -416,9 +491,26 @@ describe("request ids: fresh per logical save, stable per retry, per-mount disti
       await makeFileSaver(
         failingBridge,
         { hostId: "h1", workspaceId: "w1", path: "src/a.ts" },
-        () => crypto.randomUUID(),
+        createRequestIdSource(),
+        KEY_A,
       )("body"),
     ).toBe(failure);
+  });
+});
+
+describe("scope-gated selection and open path (frame safety)", () => {
+  test("a selection from another scope is inert; the current scope's renders", () => {
+    const selection = { node: { name: "l", path: "l", kind: "file" as const, symlink: true as const }, scopeKey: "h1/w1" };
+    expect(activeSelection(selection, "h2/w2")).toBeNull();
+    expect(activeSelection(selection, "h1/w1")?.node.symlink).toBe(true);
+    expect(activeSelection(null, "h1/w1")).toBeNull();
+  });
+
+  test("an open path from another scope is inert in this scope", () => {
+    const open: FilesOpenEntry = { scopeKey: "h1/w1", path: "src/a.ts" };
+    expect(activeOpenPath(open, "h2/w2")).toBeNull();
+    expect(activeOpenPath(open, "h1/w1")).toBe("src/a.ts");
+    expect(activeOpenPath(null, "h1/w1")).toBeNull();
   });
 });
 
@@ -445,10 +537,13 @@ describe("edit+save through the factory wiring (scoped fenced runSave)", () => {
       },
     };
     // The component rebuilds the saver per render with the current openPath;
-    // the test mirrors that exactly.
+    // the test mirrors that exactly (per-mount id source + scoped file key).
     const save = (path: string) =>
-      makeFileSaver(bridge, { hostId: "h1", workspaceId: "w1", path }, () =>
-        crypto.randomUUID(),
+      makeFileSaver(
+        bridge,
+        { hostId: "h1", workspaceId: "w1", path },
+        createRequestIdSource(),
+        scopedFileKey(SCOPE_A, path),
       );
 
     let state = applyEditorAction(initialEditorState(), {
