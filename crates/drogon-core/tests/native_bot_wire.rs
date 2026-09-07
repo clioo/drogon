@@ -94,3 +94,69 @@ fn scheduled_trigger_preserves_existing_snake_case_storage_reads() {
         },
     );
 }
+
+#[test]
+fn snapshot_budget_counts_linked_payload_for_each_materialized_history_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let engine = Engine::open(&data).unwrap();
+    let call = |method: &str, params| {
+        engine.dispatch(Request {
+            protocol: PROTOCOL_VERSION,
+            request_id: uuid::Uuid::new_v4().to_string(),
+            auth: None,
+            method: method.into(),
+            params,
+        })
+    };
+    let workspace = call("workspace.register", json!({"path":dir.path()}))
+        .result
+        .unwrap();
+    let conn = rusqlite::Connection::open(data.join(DB_FILE_NAME)).unwrap();
+    let bot = bots::records::normalize_bot(
+        &json!({"id":"bot", "displayIdentity":{"displayName":"Bot"}}),
+        |_| true,
+        1.0,
+    )
+    .unwrap();
+    bots::storage::create_bot(
+        &conn,
+        workspace["hostId"].as_str().unwrap(),
+        workspace["path"].as_str().unwrap(),
+        &bot,
+    )
+    .unwrap();
+    // Invalid domain payload distinguishes early budgeting from materialization.
+    let linked_payload = json!("x".repeat(200_000)).to_string();
+    conn.execute(
+        "INSERT INTO automations (id, bot_id, payload_json) VALUES ('linked', NULL, ?1)",
+        [&linked_payload],
+    )
+    .unwrap();
+    for index in 0..4 {
+        let id = format!("run-{index}");
+        let run = json!({
+            "id":id, "botId":"bot", "responsibilityId":"duty",
+            "automationId":"linked", "automationRunId":null,
+            "startedAt":1.0, "endedAt":null, "recipe":null, "hostObservation":null,
+        });
+        conn.execute(
+            "INSERT INTO bot_responsibility_runs
+             (id, bot_id, automation_run_id, started_at, payload_json)
+             VALUES (?1, 'bot', NULL, 1.0, ?2)",
+            rusqlite::params![id, run.to_string()],
+        )
+        .unwrap();
+    }
+    assert!(linked_payload.len() < drogon_protocol::MAX_FRAME_BYTES / 2);
+    assert!(linked_payload.len() * 4 > drogon_protocol::MAX_FRAME_BYTES / 2);
+    let response = call(
+        "bot.snapshot",
+        json!({"hostId":workspace["hostId"], "workspaceId":workspace["id"], "locale":"en-US"}),
+    );
+    assert_eq!(
+        response.error.as_ref().map(|error| error.code.as_str()),
+        Some("snapshot_too_large"),
+        "Budget each reference before loading malformed linked records: {response:?}",
+    );
+}
