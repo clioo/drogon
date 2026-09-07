@@ -11,6 +11,7 @@ use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension};
 
 use crate::automations::storage as automations_storage;
 use crate::bots::storage as bots_storage;
+use crate::coordination_access;
 
 pub const DB_FILE_NAME: &str = "drogon.sqlite3";
 
@@ -172,6 +173,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     create_tables(&tx)?;
     automations_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Automations)?;
     bots_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Bots)?;
+    coordination_access::apply_pending_steps_in_tx(&tx)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;

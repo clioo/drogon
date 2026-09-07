@@ -289,7 +289,9 @@ dependencies = [
  "drogon-core",
  "drogon-protocol",
  "libc",
+ "rusqlite",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

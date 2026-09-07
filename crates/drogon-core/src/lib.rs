@@ -6,6 +6,7 @@
 pub mod automations;
 pub mod bots;
 pub mod claim_identity;
+mod coordination_access;
 mod coordination_identity;
 pub mod locale_ordering;
 pub mod session_authority;
@@ -20,6 +21,10 @@ mod workspace;
 mod service_quiescence;
 
 pub mod requests;
+
+#[cfg(test)]
+#[path = "dispatch_authenticated_tests.rs"]
+mod dispatch_authenticated_tests;
 
 /// The on-disk SQLite filename under a data directory, exposed so
 /// integration tests (a separate crate that only sees `pub` items) can open
@@ -188,6 +193,64 @@ impl Engine {
         match result {
             Ok(value) => Response::success(request.request_id, value),
             Err(err) => Response::failure(request.request_id, err),
+        }
+    }
+
+    /// Resolve worker authority without entering the trusted admin dispatcher.
+    pub fn dispatch_authenticated(&self, request: Request, service_credential: &str) -> Response {
+        if let Err(err) = request.validate() {
+            return Response::failure(request.request_id, err);
+        }
+        if request.auth.as_deref() == Some(service_credential) {
+            return self.finish_dispatch(request);
+        }
+        let authorized = {
+            let conn = self.db.lock().unwrap();
+            coordination_access::authorize_worker(
+                &conn,
+                &self.host_id,
+                request.auth.as_deref().unwrap_or(""),
+                &request.method,
+                &request.params,
+            )
+        };
+        match authorized {
+            Ok(binding) => self.dispatch_worker(binding, request),
+            Err(err) => Response::failure(request.request_id, err),
+        }
+    }
+
+    fn finish_dispatch(&self, request: Request) -> Response {
+        match self.dispatch_inner(&request) {
+            Ok(value) => Response::success(request.request_id, value),
+            Err(err) => Response::failure(request.request_id, err),
+        }
+    }
+
+    // Recheck exact identity because revocation can race entry authorization.
+    fn dispatch_worker(
+        &self,
+        binding: coordination_access::WorkerBinding,
+        request: Request,
+    ) -> Response {
+        let rechecked = {
+            let conn = self.db.lock().unwrap();
+            let tx = match conn.unchecked_transaction() {
+                Ok(tx) => tx,
+                Err(err) => return Response::failure(request.request_id, error::from_sqlite(err)),
+            };
+            let result = coordination_access::recheck_in_tx(&tx, &binding);
+            let _ = tx.rollback();
+            result
+        };
+        match rechecked {
+            Err(err) => Response::failure(request.request_id, err),
+            Ok(_) if request.method == "status" => {
+                Response::success(request.request_id, self.status())
+            }
+            Ok(_) => {
+                Response::failure(request.request_id, error::method_not_found(&request.method))
+            }
         }
     }
 

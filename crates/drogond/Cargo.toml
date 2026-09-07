@@ -22,3 +22,5 @@ libc = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+rusqlite = { workspace = true }
+sha2 = { workspace = true }
