@@ -144,14 +144,10 @@ fn client_folder_override_is_rejected() {
     );
 }
 
-/// P2-2 regression (a): a bot with an excessive number of history rows must
-/// be rejected as `snapshot_too_large` from a cheap row-count probe, before
-/// any row is fetched and parsed into a `HistoryEntry`. Every seeded row's
-/// `payload_json` is deliberately not valid `ResponsibilityRun` JSON: if the
-/// implementation ever fell through to real materialization (`history_for_bot`
-/// parsing each row), it would instead surface `storage_error` on the first
-/// malformed row, not `snapshot_too_large` -- so this distinguishes "rejected
-/// by the preflight" from "rejected after fully reading every row".
+/// P2-2 regression (a): excessive history row count must fail `snapshot_too_large` from the
+/// cheap COUNT preflight, before any row is parsed. Seeded payloads are deliberately invalid
+/// `ResponsibilityRun` JSON: a fall-through to real materialization would surface
+/// `storage_error` on the first malformed row instead, so the error code proves the fence held.
 #[test]
 fn excess_history_rows_trigger_snapshot_too_large_without_full_materialization() {
     let fx = Fixture::new();
@@ -179,11 +175,8 @@ fn excess_history_rows_trigger_snapshot_too_large_without_full_materialization()
     );
 }
 
-/// P2-2 regression (b), automation side: a bot with very few, tiny history
-/// rows must still be rejected as `snapshot_too_large` when a row's linked
-/// `automations` record is itself oversized -- the byte budget must account
-/// for linked automation payloads, not just the `bots`/`bot_responsibility_runs`
-/// rows directly in scope.
+/// P2-2 regression (b), automation side: few, tiny history rows must still fail the byte
+/// budget when a linked `automations` payload is oversized -- linked records count too.
 #[test]
 fn oversized_linked_automation_record_hits_the_byte_budget() {
     let fx = Fixture::new();
@@ -219,8 +212,7 @@ fn oversized_linked_automation_record_hits_the_byte_budget() {
     );
 }
 
-/// P2-2 regression (b), automation-run side: same as above but the
-/// oversized linked record is an `automation_runs` row reached via
+/// Same as above, but the oversized linked record is an `automation_runs` row reached via
 /// `automationRunId` rather than `automations` via `automationId`.
 #[test]
 fn oversized_linked_automation_run_record_hits_the_byte_budget() {
@@ -257,12 +249,9 @@ fn oversized_linked_automation_run_record_hits_the_byte_budget() {
     );
 }
 
-/// P2-2 regression (c): a request authenticated as a worker (not the
-/// coordinator's service credential) must be denied for `bot.snapshot` --
-/// this method is not on the worker allowlist, so it must fail with
-/// `unauthorized` through `dispatch_authenticated`, never return real Bot
-/// data and never leak a generic `method_not_found` that would suggest the
-/// allowlist was bypassed.
+/// P2-2 regression (c): a worker credential (not the service credential) must be denied for
+/// `bot.snapshot` with `unauthorized` through `dispatch_authenticated` -- never data, and
+/// never a generic `method_not_found` that would suggest the allowlist was bypassed.
 #[test]
 fn authenticated_worker_credential_is_denied_for_bot_snapshot_not_given_data() {
     let fx = Fixture::new();
@@ -284,10 +273,9 @@ fn authenticated_worker_credential_is_denied_for_bot_snapshot_not_given_data() {
     assert_eq!(result.error.unwrap().code, "unauthorized");
 }
 
-/// P2-2 regression (d): an unsupported/invalid locale tag must map to
-/// `invalid_argument` (the existing `snapshot_error` LocaleOrdering branch),
-/// preserving the current malformed-store-vs-locale error distinction rather
-/// than collapsing both into the generic `storage_error`.
+/// P2-2 regression (d): an unsupported locale tag maps to `invalid_argument` (the
+/// `snapshot_error` LocaleOrdering branch), keeping the locale-vs-malformed-store
+/// distinction instead of collapsing both into `storage_error`.
 #[test]
 fn unsupported_locale_maps_to_invalid_argument_not_storage_error() {
     let fx = Fixture::new();
@@ -355,11 +343,9 @@ fn sample_scheduled_responsibility(id: &str, automation_id: &str) -> bots::recor
     }
 }
 
-/// Regression: the same missing-`rename_all`-on-fields gap as above also
-/// affects the raw `Bot` struct serialized into the `bots` array -- each
-/// scheduled responsibility's own `trigger` object (not just the derived
-/// `history` entry) must also carry a projected camelCase `automationId`
-/// alongside the retained snake_case `automation_id`.
+/// Regression: each scheduled responsibility's `trigger` object serialized into the `bots`
+/// array must carry a projected camelCase `automationId` alongside the retained snake_case
+/// `automation_id` (the trigger's `rename_all` covers only the `kind` tag).
 #[test]
 fn scheduled_responsibility_trigger_in_bots_array_has_camel_case_automation_id() {
     let fx = Fixture::new();
@@ -388,15 +374,12 @@ fn scheduled_responsibility_trigger_in_bots_array_has_camel_case_automation_id()
     assert_eq!(trigger["automation_id"], json!("auto-1"), "{trigger:?}");
 }
 
-/// P2-2 correction: same per-reference budget as
-/// `snapshot_budget_counts_linked_payload_for_each_materialized_history_entry`
-/// in `native_bot_wire.rs`, mirrored here against the `automation_runs`
-/// table (reached via `automationRunId`) instead of `automations`. A single
-/// 200KB linked run record, referenced by 4 history rows, is comfortably
-/// under budget once (200KB) but not four times over (800KB); the stored
-/// linked payload is deliberately not valid `AutomationRun` JSON, so a
-/// `storage_error` response would mean the preflight under-counted this
-/// scope and let materialization run first.
+/// P2-2 correction: mirrors the per-reference budget test
+/// `snapshot_budget_counts_linked_payload_for_each_materialized_history_entry` in
+/// ROOT-owned `native_bot_wire.rs`, against `automation_runs` (via `automationRunId`).
+/// One 200KB linked record referenced by 4 rows is under budget once but 4x over; the
+/// stored payload is deliberately invalid `AutomationRun` JSON, so `storage_error` would
+/// expose a preflight under-count that let materialization run first.
 #[test]
 fn snapshot_budget_counts_linked_automation_run_payload_for_each_referencing_row() {
     let fx = Fixture::new();
