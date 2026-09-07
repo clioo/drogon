@@ -140,9 +140,11 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J1 R9-A: acciones de tarjeta de worktree del fuente (menú contextual, renombrar, borrar con conteos, badges) | R9 | Muse | lanzada | |
 | Fidelidad R9-B: remanente del chrome (Back/Forward en el titlebar, cabecera de Projects, pie del sidebar, Star on GitHub, ⌘J) | R9 | Muse | fusionada: titlebar en la columna del sidebar, Settings sin controles, cabecera/pie/vacío exactos, historial del fuente | #73 |
 | J8 R9-C: bot.delete, ejecuciones programadas en el historial, acciones de cabecera de la tarjeta | R9 | Muse | fusionada; desvío conocido: diálogo de confirmación y etiquetas Scheduled/Manual que el fork no tiene | #67 |
-| Fidelidad R10-A: primitivas UI (shadcn/Radix) del fuente en components/ui | R10 | GLM 5.3 Flash | lanzada | |
+| Fidelidad R10-A: primitivas UI (shadcn/Radix) del fuente en components/ui | R10 | GLM 5.3 Flash | fusionada: 26 primitivas con recetas idénticas, 43 tests, tw-animate-css importado como el fuente | #77 |
 | J2 R10-B: contenido del panel Source Control del fuente (secciones, filas, commit, sync, Create PR) | R10 | OpenCode + Muse | lanzada | |
 | J1/J9 R10-C: eventos del terminal cableados en App, `shell.openExternal`, Mentu como ítem de la barra derecha | R10 | Muse | fusionada: abrir archivo/reiniciar/cerrar desde el terminal, openExternal http(s), Mentu en la barra derecha en el orden del fork | #75 |
 | J2 R10-D: panel Explorer del fuente (árbol, filtro, toolbar, menú contextual, crear/renombrar/borrar) | R10 | Muse | lanzada | |
 | Fidelidad R11-A: remates (glifos de teclas, títulos de paleta, hint de Search, puertos/memoria de la barra, ajuste GPU del terminal) | R11 | GLM 5.3 Flash | lanzada | |
 | J4 R11-B: chrome de la pestaña de browser del fuente (barra de direcciones, navegación, banners, menú, buscar, menú contextual) | R11 | Muse | lanzada | |
+| J11 R11-C: cobertura del paquete sellado para las superficies nuevas (barra derecha, menú +, composer, Automations, Bots, Tasks, Settings, barra) | R11 | OpenCode + Muse | lanzada | |
+| J9 R11-D: panel y pestaña de Mentu portados literalmente del fork (Draft, Graph, Metrics, controles de ejecución) sobre las primitivas | R11 | Muse | lanzada | |
