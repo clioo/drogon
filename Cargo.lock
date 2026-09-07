@@ -264,6 +264,8 @@ dependencies = [
 name = "drogon-orchestration"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "drogon-core",
  "drogon-protocol",
  "rusqlite",
  "serde",
