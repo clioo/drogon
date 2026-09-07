@@ -47,6 +47,15 @@ recipes. The Settings surface in `apps/desktop/src/renderer/src/features/setting
 ports `components/settings/{SettingsSidebar,SettingsSection,SettingsFormControls,ShortcutRowsList}.tsx`.
 All at the pinned source revision above; each ported file keeps the MIT notice.
 
+The Bots page in `apps/desktop/src/renderer/src/features/bots/` and the operating
+prompt composer in `crates/drogon-core/src/bots/prompt.rs` port the Drogon fork's
+`src/renderer/src/components/bots/{BotCharacterPicker,BotCreationForm,BotsPage}.tsx`
+and `src/shared/{drogon-bot-characters,drogon-bot-prompt}.ts` (fork revision
+`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Character artwork was not
+copied; avatars are initials on a disc. The Tasks page in
+`apps/desktop/src/renderer/src/features/tasks/` follows the structure of Orca's
+`src/renderer/src/components/task-page/**`. Each ported file keeps the MIT notice.
+
 MIT License
 
 Copyright (c) 2026 Lovecast Inc.

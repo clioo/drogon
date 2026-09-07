@@ -113,16 +113,16 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J12 barra inferior | R1 | Muse A | fusionada | #19 |
 | J5 paleta | R1 | Muse B | fusionada; falta revelar archivo desde quick open | #17 |
 | J2 Git review | R1 | Muse C | fusionada | #21 |
-| J8 Bots | R2 | Sonnet | en curso | |
+| J8 Bots | R2 | Sonnet | fusionada: crear, chat sobre bot.run, historial; capability bot.snapshot.v1 activa | #42 |
 | J1 sidebar y pestañas | R2 | Muse A | fusionada; estado de agente real llega con R1-S | #22 |
 | J7 Automations | R2 | Muse B | fusionada; horarios solo UTC | #29 |
 | J4 Browser | R2 | Muse C | fusionada (pane); CLI browser pendiente | #27 |
-| J9 Mentu | R3 | Sonnet | pendiente | |
+| J9 Mentu | R3 | Sonnet | lanzada | |
 | J6 Tasks | R3 | Muse A | fusionada: GitHub Issues, start crea worktree con badge #n | #38 |
 | J3 CLI | R3 | Muse B | fusionada: terminal wait y guías skills get; browser CLI pendiente | #30 |
 | J1 notificaciones | R3 | Muse C | fusionada: needs_input por hooks y notificación nativa | #35 |
 | J10 Settings | R4 | Muse A | fusionada; falta tamaño de fuente en xterm | #33 |
 | J11 Paquete | R4 | Muse B | pendiente | |
 | Fidelidad exacta: oráculo fuente + render y auditoría | R5 | Muse | en curso | |
-| J1 UI: añadir proyecto, crear y quitar worktree, pulido | R4 | Muse C | en curso | |
-| J4 CLI browser por relay daemon → desktop | R4 | Muse B | en curso | |
+| J1 UI: añadir proyecto, crear y quitar worktree, pulido | R4 | Muse C | fusionada | #40 |
+| J4 CLI browser por relay daemon → desktop | R4 | Muse B | fusionada: open, navigate, snapshot, click, fill, tabs | #41 |
