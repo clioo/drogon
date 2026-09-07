@@ -34,6 +34,24 @@ pub(crate) fn method_not_found(method: &str) -> RpcError {
     RpcError::new("method_not_found", format!("Unknown method: {method}"))
 }
 
+/// Additive per `service-quiescence-contract.md`: a `runtime.shutdown`
+/// target whose `hostId` does not match this service's own host identity.
+pub(crate) fn unsupported_host() -> RpcError {
+    RpcError::new(
+        "unsupported_host",
+        "Shutdown target host does not match this service's host identity.",
+    )
+}
+
+/// Additive per `service-quiescence-contract.md`: "Pending, live and
+/// unverifiable rows refuse with a retryable `runtime_busy` error." Also
+/// used once admission is durably frozen, to refuse further mutations.
+pub(crate) fn runtime_busy(msg: impl Into<String>) -> RpcError {
+    let mut err = RpcError::new("runtime_busy", msg.into());
+    err.retryable = true;
+    err
+}
+
 pub(crate) fn io_error(msg: impl Into<String>) -> RpcError {
     RpcError::new("io_error", msg.into())
 }

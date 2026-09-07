@@ -9,6 +9,8 @@ pub mod framing;
 #[cfg(unix)]
 pub mod lock;
 pub mod server;
+#[cfg(unix)]
+pub mod service_quiescence;
 
 use std::path::Path;
 use std::sync::Arc;
