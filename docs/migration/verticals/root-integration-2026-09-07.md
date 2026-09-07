@@ -368,3 +368,35 @@ the wrapper is not registered. V4 staged run/create leaves and V1 Windows
 TokenUser ACL / bounded dogfood preparation remain active. No new paid
 inference or package installation occurred. Audit and all 46 obligations
 remain unchanged; deadline risk remains high.
+
+## 14:54 UTC checkpoint
+
+V2 CSS/probe checkpoint `5d4d203` is integrated as `f6e5611`. ROOT restored
+the now-corrected contrast measurement after its earlier hold and preserved
+the existing cleanup. The probe's old hardcoded unavailable-panel premise
+failed against the integrated Files capability; ROOT replaced it with exact
+service-capability/UI agreement while retaining inactive-panel non-mounting.
+The rerun passed all 60 checks, including light muted-text contrast 4.54:1,
+dark muted text 6.94:1 and dark meaningful header icons 18.97:1. Decorative
+hairline contrast remains reported below 3:1, not counted as a text pass.
+Screenshots: `.preflight/v2-kbd-1788792815125/`.
+
+ROOT `accept-desktop --files` passed all 12 checks with the native daemon:
+read, draft retention across file and panel switches, exact saved disk bytes,
+unchanged sibling, reload and useful editor/tree geometry at 1440/760 widths
+in both themes. ROOT inspected wide-light and narrow-dark captures. Report:
+`.preflight/acceptance/desktop-1788792720291-66bff2c9-d7e8-4d4a-8395-ebd427f739cc/report.json`.
+Both runs observed all owned sessions, desktop and daemon exited. Build,
+TypeScript and 475 desktop tests passed. This closes the reproduced Files
+layout gate and admits `files.v1`; it does not claim complete editor parity,
+Windows execution, SSH acceptance or an installed artifact.
+
+V1 Windows `bbecf18` remains held: ROOT found a byte-buffer alignment gap in
+the TokenUser FFI query and requested aligned backing storage. Its prepared
+real-model dogfood is also held because cleanup treats any non-live verdict
+as proof of exit; explicit `exited` and negative cases are required. No new
+paid model invocation occurred. V5's verifier and Windows-fixture corrections
+are delivered but await ROOT review; the pinned notice corpus bytes match
+their recorded hashes, which does not confer redistribution clearance.
+Audit remains 11/12 groups (91.7%, medium confidence; delta zero), with all
+46 product obligations still in scope and the 16:41:33 UTC deadline high risk.

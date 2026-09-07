@@ -64,6 +64,7 @@ use session::SessionHandle;
 const CAPABILITIES: &[&str] = &[
     "orchestration.native.v1",
     "workspace.v1",
+    "files.v1",
     "session.pty.v1",
     "session.cursor-read.v1",
     "session.incarnation.v1",
