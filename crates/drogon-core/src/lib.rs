@@ -9,6 +9,7 @@ pub mod claim_identity;
 mod coordination_access;
 mod coordination_attempts;
 mod coordination_identity;
+mod coordination_runs;
 pub mod locale_ordering;
 pub mod session_authority;
 
@@ -275,6 +276,13 @@ impl Engine {
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
+            "orchestration.runCreate"
+            | "orchestration.runUse"
+            | "orchestration.runList"
+            | "orchestration.runShow"
+            | "orchestration.taskCreate"
+            | "orchestration.taskList"
+            | "orchestration.taskShow" => self.dispatch_run_task(request),
             other => Err(error::method_not_found(other)),
         }
     }

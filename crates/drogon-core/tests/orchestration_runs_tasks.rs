@@ -1,20 +1,4 @@
-//! Pre-implementation RED tests for `orchestration.run*`/`task*` against a
-//! real `Engine::open`/`dispatch` and an isolated per-test temp data dir —
-//! no mock domain, no fake store. Run/task contract decisions:
-//! `docs/migration/native-coordination-contract.md`; per-test rationale and
-//! the compiled `cargo test` transcript: `docs/migration/native-coordination-engine-red.md`.
-//!
-//! None of `orchestration.run{Create,List,Show,Use}` or
-//! `orchestration.task{Create,List,Show}` is wired into
-//! `Engine::dispatch_inner` yet (see `crates/drogon-core/src/lib.rs`'s
-//! method match); every behavioral test below therefore fails today, for
-//! the single shared reason that the method does not exist yet — not as
-//! nine independently-proven bugs. Each test's first `ok(...)` call panics
-//! on the resulting `method_not_found` response, so whatever it asserts
-//! about replay, dependency gating, or takeover past that point is written
-//! for when the method exists, not exercised today. That is deliberate:
-//! these are real, unignored RED tests, not a passing characterization of
-//! absence.
+//! Real Engine run/task regressions; initial RED evidence is retained in Git.
 #![cfg(unix)]
 
 use drogon_core::Engine;

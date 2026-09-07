@@ -31,3 +31,10 @@ terminal through Orca; its receipt confirmed `ptyKilled: true`. Source and tests
 were retained. This is domain validation, not native orchestration acceptance:
 engine admission/receipt integration, task status transitions, attempt history,
 mail and lifecycle remain separate gates.
+
+The next root integration wires seven run/task RPC methods through engine-owned
+host validation, coordinator fencing, lifecycle admission and atomic receipts.
+The domain migration joins the startup transaction. All 15 real Engine run/task
+tests pass, including concurrent same-request creation, reopen replay, explicit
+takeover replay fencing and injected receipt-write rollback. No native worker
+capability is advertised by this partial integration.
