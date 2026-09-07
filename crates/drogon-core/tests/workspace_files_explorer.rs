@@ -17,6 +17,8 @@ use std::fs;
 use tempfile::tempdir;
 use workspace_files::{EntryKind, list_dir, read_file, write_file};
 
+const MANY: usize = 1000;
+
 fn make_root() -> tempfile::TempDir {
     tempdir().unwrap()
 }
@@ -26,7 +28,7 @@ fn make_root() -> tempfile::TempDir {
 #[test]
 fn list_dir_rejects_parent_dir_traversal() {
     let root = make_root();
-    let err = list_dir(root.path(), "../escape").unwrap_err();
+    let err = list_dir(root.path(), "../escape", MANY).unwrap_err();
     assert_eq!(err.code, "invalid_argument");
 }
 
@@ -64,8 +66,10 @@ fn list_dir_reports_symlink_entries_distinctly_without_following() {
     fs::create_dir(root.path().join("realdir")).unwrap();
     symlink(root.path().join("realdir"), root.path().join("linked-dir")).unwrap();
 
-    let entries = list_dir(root.path(), "").unwrap();
-    let names_kinds: Vec<(String, EntryKind)> = entries
+    let listing = list_dir(root.path(), "", MANY).unwrap();
+    assert!(!listing.truncated);
+    let names_kinds: Vec<(String, EntryKind)> = listing
+        .entries
         .iter()
         .map(|e| (e.name.clone(), e.kind))
         .collect();
@@ -94,7 +98,7 @@ fn resolving_into_a_symlink_that_escapes_root_is_rejected() {
     let err = read_file(root.path(), "escape/secret.txt", 1024).unwrap_err();
     assert_eq!(err.code, "invalid_argument");
 
-    let err = list_dir(root.path(), "escape").unwrap_err();
+    let err = list_dir(root.path(), "escape", MANY).unwrap_err();
     assert_eq!(err.code, "invalid_argument");
 }
 
@@ -120,7 +124,9 @@ fn list_dir_sorts_entries_and_reports_kind_and_size() {
     fs::write(root.path().join("b.txt"), b"12345").unwrap();
     fs::create_dir(root.path().join("a-dir")).unwrap();
 
-    let entries = list_dir(root.path(), "").unwrap();
+    let listing = list_dir(root.path(), "", MANY).unwrap();
+    assert!(!listing.truncated);
+    let entries = listing.entries;
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].name, "a-dir");
     assert_eq!(entries[0].kind, EntryKind::Dir);
@@ -133,8 +139,51 @@ fn list_dir_sorts_entries_and_reports_kind_and_size() {
 #[test]
 fn list_dir_not_found_maps_to_not_found_error() {
     let root = make_root();
-    let err = list_dir(root.path(), "missing").unwrap_err();
+    let err = list_dir(root.path(), "missing", MANY).unwrap_err();
     assert_eq!(err.code, "not_found");
+}
+
+// --- list_dir bounded/truncation -------------------------------------------
+
+#[test]
+fn list_dir_truncates_and_reports_the_flag_when_max_entries_exceeded() {
+    let root = make_root();
+    for i in 0..5 {
+        fs::write(root.path().join(format!("f{i}.txt")), b"x").unwrap();
+    }
+
+    let listing = list_dir(root.path(), "", 3).unwrap();
+    assert!(listing.truncated);
+    assert_eq!(listing.entries.len(), 3);
+    let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, vec!["f0.txt", "f1.txt", "f2.txt"]);
+}
+
+#[test]
+fn list_dir_reports_untruncated_when_entries_fit_within_max_entries() {
+    let root = make_root();
+    fs::write(root.path().join("a.txt"), b"x").unwrap();
+    fs::write(root.path().join("b.txt"), b"x").unwrap();
+
+    let listing = list_dir(root.path(), "", 2).unwrap();
+    assert!(!listing.truncated);
+    assert_eq!(listing.entries.len(), 2);
+}
+
+#[test]
+fn list_dir_exact_limit_boundary_is_not_truncated() {
+    let root = make_root();
+    fs::write(root.path().join("a.txt"), b"x").unwrap();
+    fs::write(root.path().join("b.txt"), b"x").unwrap();
+    fs::write(root.path().join("c.txt"), b"x").unwrap();
+
+    let listing = list_dir(root.path(), "", 3).unwrap();
+    assert!(!listing.truncated);
+    assert_eq!(listing.entries.len(), 3);
+
+    let listing = list_dir(root.path(), "", 2).unwrap();
+    assert!(listing.truncated);
+    assert_eq!(listing.entries.len(), 2);
 }
 
 // --- read_file error mapping ----------------------------------------------
@@ -178,6 +227,77 @@ fn read_file_returns_content_on_success() {
     assert_eq!(content, "hello world");
 }
 
+// --- read_file bound enforcement -------------------------------------------
+
+#[test]
+fn read_file_allows_content_exactly_at_the_max_bytes_boundary() {
+    let root = make_root();
+    fs::write(root.path().join("exact.txt"), b"0123456789").unwrap();
+    let content = read_file(root.path(), "exact.txt", 10).unwrap();
+    assert_eq!(content, "0123456789");
+}
+
+#[test]
+fn read_file_rejects_content_one_byte_over_the_max_bytes_boundary() {
+    let root = make_root();
+    fs::write(root.path().join("over.txt"), b"01234567890").unwrap();
+    let err = read_file(root.path(), "over.txt", 10).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+#[cfg(unix)]
+fn read_file_rejects_a_fifo_special_file_instead_of_blocking() {
+    let root = make_root();
+    let fifo_path = root.path().join("pipe");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&fifo_path)
+        .status()
+        .expect("failed to invoke mkfifo");
+    assert!(status.success(), "mkfifo command failed");
+
+    let err = read_file(root.path(), "pipe", 1024).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+#[cfg(unix)]
+fn read_file_never_returns_content_beyond_max_bytes_while_the_file_grows_concurrently() {
+    use std::io::Write as _;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let root = make_root();
+    let path = root.path().join("growing.log");
+    fs::write(&path, b"start").unwrap();
+    let max_bytes = 20u64;
+
+    let writer_path = path.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_writer = stop.clone();
+    let writer = std::thread::spawn(move || {
+        while !stop_writer.load(Ordering::Relaxed) {
+            if let Ok(mut f) = fs::OpenOptions::new().append(true).open(&writer_path) {
+                let _ = f.write_all(b"x");
+            }
+        }
+    });
+
+    // A growing file must never make it back out with more than max_bytes
+    // of content, and must never silently truncate: every outcome across
+    // many overlapping attempts is either a bound-respecting Ok or a clean
+    // invalid_argument rejection.
+    for _ in 0..500 {
+        match read_file(root.path(), "growing.log", max_bytes) {
+            Ok(content) => assert!(content.len() as u64 <= max_bytes),
+            Err(err) => assert_eq!(err.code, "invalid_argument"),
+        }
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    writer.join().unwrap();
+}
+
 // --- write_file atomicity / verification ----------------------------------
 
 #[test]
@@ -214,4 +334,79 @@ fn write_file_rejects_path_escaping_root() {
     let err = write_file(root.path(), "../escape.txt", b"x").unwrap_err();
     assert_eq!(err.code, "invalid_argument");
     assert!(!root.path().parent().unwrap().join("escape.txt").exists());
+}
+
+// --- write_file permission-bit preservation --------------------------------
+
+#[test]
+#[cfg(unix)]
+fn write_file_preserves_existing_executable_permission_bit() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = make_root();
+    let path = root.path().join("script.sh");
+    fs::write(&path, b"#!/bin/sh\necho hi\n").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    write_file(root.path(), "script.sh", b"#!/bin/sh\necho updated\n").unwrap();
+
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o755, "executable bit must survive the temp+rename swap");
+    let content = fs::read_to_string(&path).unwrap();
+    assert_eq!(content, "#!/bin/sh\necho updated\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn write_file_of_a_brand_new_file_uses_default_creation_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = make_root();
+    write_file(root.path(), "new.txt", b"payload").unwrap();
+
+    let mode = fs::metadata(root.path().join("new.txt"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_ne!(mode, 0o755, "a brand-new file must not inherit an unrelated mode");
+}
+
+// --- write_file TOCTOU re-validation ----------------------------------------
+
+#[test]
+#[cfg(unix)]
+fn write_file_refuses_a_parent_directory_pre_swapped_to_an_escaping_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let outside = tempdir().unwrap();
+    let root = make_root();
+    symlink(outside.path(), root.path().join("escape")).unwrap();
+
+    let err = write_file(root.path(), "escape/newfile.txt", b"payload").unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+    assert!(!outside.path().join("newfile.txt").exists());
+}
+
+#[test]
+fn revalidate_containment_allows_a_parent_still_inside_root() {
+    let root = make_root();
+    let parent = root.path().join("nested");
+    fs::create_dir_all(&parent).unwrap();
+
+    workspace_files::revalidate_containment(root.path(), &parent).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn revalidate_containment_refuses_a_parent_swapped_to_an_escaping_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let outside = tempdir().unwrap();
+    let root = make_root();
+    let parent = root.path().join("nested");
+    symlink(outside.path(), &parent).unwrap();
+
+    let err = workspace_files::revalidate_containment(root.path(), &parent).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
 }

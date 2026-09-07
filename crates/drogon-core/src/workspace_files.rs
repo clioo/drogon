@@ -5,7 +5,20 @@
 //! NUL) and, component by component, for a symlink that would resolve
 //! outside that root. A symlink that stays inside the root may be followed;
 //! one that escapes is refused rather than silently traversed.
+//!
+//! This is a resolve-then-act (check-then-act) policy, not an atomic
+//! containment guarantee. A concurrent actor with filesystem access can
+//! still swap a path component (e.g. replace a plain directory with a
+//! symlink) between the resolution check and the filesystem operation that
+//! follows it, and race past the check; nothing below closes that window
+//! completely. `write_file` narrows it by re-validating, right before it
+//! reports success, that its target directory still canonicalizes inside
+//! `root`, refusing and cleaning up its temp file on a mismatch — but that
+//! re-check is itself a check-then-act step, not a lock. Callers that need
+//! a hard security boundary against a hostile co-resident process should
+//! not rely on this module alone.
 
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -34,10 +47,19 @@ pub(crate) struct WriteResult {
     pub(crate) mtime: String,
 }
 
-/// Validates `rel` against `root` and resolves it to an absolute path that
-/// is guaranteed not to escape `root` through `..`, an absolute component,
-/// or a symlink whose real target lies outside `root`. The final path
-/// element need not exist (callers writing a new file rely on that).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirListing {
+    pub(crate) entries: Vec<DirEntryInfo>,
+    pub(crate) truncated: bool,
+}
+
+/// Validates `rel` against `root` and resolves it to an absolute path,
+/// rejecting `..`, an absolute component, or a symlink whose real target
+/// lies outside `root` at the moment each component is walked. This proves
+/// containment at the time of the check; it is not an atomic guarantee
+/// against a concurrent swap after resolution returns (see the module
+/// docs). The final path element need not exist (callers writing a new
+/// file rely on that).
 fn resolve_in_root(root: &Path, rel: &str) -> Result<PathBuf, RpcError> {
     if rel.as_bytes().contains(&0) {
         return Err(error::invalid_argument("relative path contains a NUL byte"));
@@ -89,6 +111,25 @@ fn resolve_in_root(root: &Path, rel: &str) -> Result<PathBuf, RpcError> {
     Ok(resolved)
 }
 
+/// Re-canonicalizes `parent` and confirms it still lies under `root`. Used
+/// as a post-step re-check after a mutation (`create_dir_all`, a write) to
+/// narrow, not close, the check-then-act window `resolve_in_root` opens
+/// (see the module docs): if `parent` was swapped for an escaping symlink
+/// after the initial resolution, this catches it before success is
+/// reported. This is itself a check-then-act step, not a lock.
+pub(crate) fn revalidate_containment(root: &Path, parent: &Path) -> Result<(), RpcError> {
+    let root_canonical = std::fs::canonicalize(root)
+        .map_err(|_| error::invalid_argument("workspace root does not exist"))?;
+    let parent_canonical = std::fs::canonicalize(parent)
+        .map_err(|_| error::invalid_argument("workspace path no longer resolves"))?;
+    if !parent_canonical.starts_with(&root_canonical) {
+        return Err(error::invalid_argument(
+            "workspace path escaped the workspace root after resolution",
+        ));
+    }
+    Ok(())
+}
+
 fn entry_kind(meta: &std::fs::Metadata) -> EntryKind {
     if meta.file_type().is_symlink() {
         EntryKind::Symlink
@@ -99,7 +140,11 @@ fn entry_kind(meta: &std::fs::Metadata) -> EntryKind {
     }
 }
 
-pub(crate) fn list_dir(root: &Path, rel_path: &str) -> Result<Vec<DirEntryInfo>, RpcError> {
+pub(crate) fn list_dir(
+    root: &Path,
+    rel_path: &str,
+    max_entries: usize,
+) -> Result<DirListing, RpcError> {
     let dir_path = resolve_in_root(root, rel_path)?;
     let dir_meta =
         std::fs::metadata(&dir_path).map_err(|_| error::not_found("directory not found"))?;
@@ -122,19 +167,35 @@ pub(crate) fn list_dir(root: &Path, rel_path: &str) -> Result<Vec<DirEntryInfo>,
         });
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(entries)
+    let truncated = entries.len() > max_entries;
+    entries.truncate(max_entries);
+    Ok(DirListing { entries, truncated })
 }
 
 pub(crate) fn read_file(root: &Path, rel: &str, max_bytes: u64) -> Result<String, RpcError> {
     let file_path = resolve_in_root(root, rel)?;
-    let meta = std::fs::metadata(&file_path).map_err(|_| error::not_found("file not found"))?;
-    if meta.is_dir() {
-        return Err(error::invalid_argument("path is a directory"));
+    // `symlink_metadata` (lstat), not `metadata`: `resolve_in_root` already
+    // followed any in-path symlink to its verified-contained target, so
+    // what's left here must itself be a plain regular file — never a
+    // directory, FIFO, socket, device or dangling/other special node, all
+    // of which `fs::read` would otherwise happily block on or misreport.
+    let meta =
+        std::fs::symlink_metadata(&file_path).map_err(|_| error::not_found("file not found"))?;
+    if !meta.file_type().is_file() {
+        return Err(error::invalid_argument("path is not a regular file"));
     }
-    if meta.len() > max_bytes {
+
+    // The byte cap is enforced by the bounded reader below, not by trusting
+    // this stat's reported length: a file can grow between this check and
+    // the read that follows, and `fs::read` has no way to stop at a limit.
+    let file = std::fs::File::open(&file_path).map_err(|e| error::io_error(e.to_string()))?;
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|e| error::io_error(e.to_string()))?;
+    if bytes.len() as u64 > max_bytes {
         return Err(error::invalid_argument("file exceeds max_bytes limit"));
     }
-    let bytes = std::fs::read(&file_path).map_err(|e| error::io_error(e.to_string()))?;
     String::from_utf8(bytes).map_err(|_| error::invalid_argument("file is not valid UTF-8"))
 }
 
@@ -144,6 +205,17 @@ pub(crate) fn write_file(root: &Path, rel: &str, bytes: &[u8]) -> Result<WriteRe
         .parent()
         .ok_or_else(|| error::invalid_argument("path has no parent directory"))?;
     std::fs::create_dir_all(parent).map_err(|e| error::io_error(e.to_string()))?;
+
+    // On unix, carry the destination's existing permission bits (e.g. an
+    // executable script) across the atomic temp+rename swap below; a
+    // brand-new file keeps the platform's default creation mode. Non-unix
+    // targets have no equivalent POSIX mode bits to preserve, so this is a
+    // no-op there and the current (default creation mode) behavior stands.
+    #[cfg(unix)]
+    let existing_mode = std::fs::symlink_metadata(&file_path)
+        .ok()
+        .filter(|m| m.file_type().is_file())
+        .map(|m| unix_mode(&m));
 
     let file_name = file_path
         .file_name()
@@ -159,6 +231,22 @@ pub(crate) fn write_file(root: &Path, rel: &str, bytes: &[u8]) -> Result<WriteRe
         let _ = std::fs::remove_file(&tmp_path);
         return Err(error::io_error(e.to_string()));
     }
+
+    #[cfg(unix)]
+    if let Some(Err(e)) = existing_mode.map(|mode| set_unix_mode(&tmp_path, mode)) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(error::io_error(e.to_string()));
+    }
+
+    // TOCTOU honesty (see module docs): re-check, while the temp file can
+    // still be cleaned up, that the target directory resolves inside
+    // `root`. This narrows but does not close the window in which `parent`
+    // could have been swapped for an escaping symlink since resolution.
+    if let Err(err) = revalidate_containment(root, parent) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+
     if let Err(e) = std::fs::rename(&tmp_path, &file_path) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(error::io_error(e.to_string()));
@@ -179,6 +267,23 @@ pub(crate) fn write_file(root: &Path, rel: &str, bytes: &[u8]) -> Result<WriteRe
     })
 }
 
+#[cfg(unix)]
+fn unix_mode(meta: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode()
+}
+
+#[cfg(unix)]
+fn set_unix_mode(path: &Path, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+// TODO(WIRING): keep-until-shared-helper — format_rfc3339/civil_from_days
+// format a filesystem-metadata timestamp, not wall-clock now, so they must
+// NOT be replaced with crate::now_rfc3339. ROOT factors a proper shared
+// metadata-time formatter at wiring time; do not restructure anything else
+// about this module for that.
 fn format_rfc3339(time: SystemTime) -> String {
     let dur = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = dur.as_secs();

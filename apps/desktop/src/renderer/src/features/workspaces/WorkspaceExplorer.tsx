@@ -57,6 +57,7 @@ export interface ExplorerState {
 }
 
 export type ExplorerAction =
+  | { type: "workspace-changed" }
   | { type: "load-started" }
   | { type: "load-succeeded"; path: string; nodes: WorkspaceFileNode[] }
   | { type: "load-failed"; message: string }
@@ -90,15 +91,18 @@ export function toggleExpanded(
 }
 
 /**
- * Directory listings are keyed by path, so a late reply only ever fills
- * the exact directory it was requested for; callers drop replies from
- * cancelled generations before dispatching.
+ * Cached state (children, expansion, selection) is per-workspace-scope:
+ * a workspace/source switch resets ALL of it, because an identical
+ * subdirectory path in a different workspace must never expose the
+ * previous workspace's cached listing.
  */
 export function applyExplorerAction(
   state: ExplorerState,
   action: ExplorerAction,
 ): ExplorerState {
   switch (action.type) {
+    case "workspace-changed":
+      return { ...initialExplorerState(), status: "loading" };
     case "load-started":
       return { ...state, status: "loading", errorMessage: "" };
     case "load-succeeded": {
@@ -142,6 +146,45 @@ export function visibleRows(
     }
   }
   return rows;
+}
+
+export type ExplorerDispatch = (action: ExplorerAction) => void;
+
+/**
+ * One directory-listing pipeline shared by root and lazy loads, exported
+ * so tests can drive it with deferred fakes. `isCurrent` is the generation
+ * guard: a reply from a superseded load (workspace switch, retry race,
+ * unmount) is dropped BEFORE it reaches the reducer, so a late reply can
+ * never write another workspace's children into the cache. A rejected
+ * listing promise is surfaced as `load-failed` — never an unhandled
+ * rejection. The returned promise always resolves.
+ */
+export function runLoad(
+  path: string,
+  source: WorkspaceExplorerDataSource,
+  isCurrent: () => boolean,
+  dispatch: ExplorerDispatch,
+): Promise<void> {
+  return source.listDir(path).then(
+    (result) => {
+      if (!isCurrent()) return;
+      if (result.ok) {
+        dispatch({ type: "load-succeeded", path, nodes: result.result });
+      } else {
+        dispatch({ type: "load-failed", message: result.error.message });
+      }
+    },
+    (failure: unknown) => {
+      if (!isCurrent()) return;
+      dispatch({
+        type: "load-failed",
+        message:
+          failure instanceof Error
+            ? failure.message
+            : "The directory listing could not be read.",
+      });
+    },
+  );
 }
 
 const GIT_BADGE_LABELS: Record<string, string> = {
@@ -241,33 +284,36 @@ export function WorkspaceExplorer({
     initialExplorerState,
   );
   const generation = useRef(0);
-  // Every root load increments the generation; replies from superseded
-  // loads (workspace switch, retry race) are dropped, matching the
-  // late-response guard convention used across the app shell.
+  // Every scope entry (workspaceId/source change, retry, unmount) bumps the
+  // generation; replies from superseded loads are dropped before dispatch,
+  // matching the late-response guard convention used across the app shell.
   const load = (path: string, trackGeneration: boolean) => {
     if (!source) return;
     const current = trackGeneration ? ++generation.current : generation.current;
-    void source.listDir(path).then((result) => {
-      if (generation.current !== current) return;
-      if (result.ok) {
-        dispatch({ type: "load-succeeded", path, nodes: result.result });
-      } else {
-        dispatch({ type: "load-failed", message: result.error.message });
-      }
-    });
+    void runLoad(path, source, () => generation.current === current, dispatch);
   };
   useEffect(() => {
-    dispatch({ type: "load-started" });
+    generation.current++;
+    // Reset cached children/expansion/selection: they belonged to the
+    // previous workspace scope and must never leak into this one.
+    dispatch({ type: "workspace-changed" });
     if (!workspaceId || !source) {
       dispatch({ type: "load-succeeded", path: "", nodes: [] });
-      return;
+      return () => {
+        generation.current++;
+      };
     }
     load("", true);
+    return () => {
+      generation.current++;
+    };
   }, [workspaceId, source]);
 
   const loadDir = (dir: WorkspaceFileNode & { kind: "directory" }) => {
     const expanding = !state.expanded.has(dir.path);
     dispatch({ type: "toggled", path: dir.path, isDirectory: true });
+    // The children cache is per-scope (reset on every workspace/source
+    // change), so a cache hit here is always this workspace's listing.
     if (!expanding || state.children[dir.path]) return;
     dispatch({ type: "dir-load-started", path: dir.path });
     load(dir.path, false);
