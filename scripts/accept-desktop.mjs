@@ -15,6 +15,10 @@ import {
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import {
+  probeGhUnavailable,
+  probePackagedSurfaces,
+} from "./probe-packaged-surfaces.mjs";
+import {
   bundlePaths,
   sealedBundleDigest,
   verifiedBuildInfo,
@@ -377,6 +381,38 @@ try {
         workspaceId: registered.id,
         output,
         dataDir,
+      })),
+    );
+  }
+  // Extended packaged surfaces (palette, Settings, Changes, Automations,
+  // Bots, status bar, Tasks). Runs against the sealed bundle; setting
+  // DROGON_PROBE_SURFACES=1 also enables it on a development build for
+  // iteration without a full package cycle.
+  if (bundle || process.env.DROGON_PROBE_SURFACES === "1") {
+    const surfacesCli = packaged
+      ? packaged.cli
+      : path.join(
+          root,
+          "target",
+          "debug",
+          process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
+        );
+    report.checks.push(
+      ...(await probePackagedSurfaces({
+        page,
+        workspace,
+        output,
+        root,
+        cli: surfacesCli,
+        dataDir,
+      })),
+    );
+  }
+  if (bundle) {
+    report.checks.push(
+      ...(await probeGhUnavailable({
+        daemon: packaged.daemon,
+        cli: packaged.cli,
       })),
     );
   }

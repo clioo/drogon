@@ -23,6 +23,10 @@ Run the service in a dedicated test data directory with `target/debug/drogond --
 
 `pnpm typecheck`, `pnpm test`, `pnpm accept:desktop` and `pnpm accept:core-cli` cover complementary boundaries. Acceptance scripts create isolated profiles and retain local evidence under `.preflight/acceptance`; inspect their exit status and reports. A rendered terminal test passing does not imply the complete security, platform or feature gates passed.
 
+## Install (macOS preview)
+
+From a clean checkout on `main`, `pnpm package:desktop` builds the release binaries, bundles the desktop and ad-hoc-signs `Drogon.app`. `node scripts/accept-desktop.mjs --bundle <Drogon.app> --files` runs the sealed packaged acceptance (palette, Settings, Changes, Automations, Bots, status bar, Tasks) against a disposable profile and data directory. `node scripts/install-preview.mjs --bundle <Drogon.app> --report <packaged acceptance report>` installs `~/Applications/Drogon.app` as a link to an immutable copy under `~/Applications/.drogon-builds/`, keeping earlier builds and never stopping a running daemon. The preview carries no telemetry or updater; the installed app uses your existing `~/Library/Application Support/Drogon` data directory.
+
 ## Preflight
 
 `node scripts/verify-preflight.mjs <agy|sonnet|glm>` verifies a worker artifact against its input challenge. It requires the local, ignored `.preflight/<lane>/challenge.json` and `result.json` from the run; a fresh clone does not contain those artifacts. This is infrastructure validation, not a product test. Local raw transcripts stay ignored.

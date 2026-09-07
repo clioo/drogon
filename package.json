@@ -13,7 +13,7 @@
     "test": "cargo test --workspace --locked && pnpm --filter @drogon/desktop test",
     "accept:core-cli": "node scripts/accept-core-cli.mjs",
     "accept:desktop": "node scripts/accept-desktop.mjs",
-    "test:packaging": "node --test scripts/acceptance-bridge-observation.test.mjs scripts/acceptance-process.test.mjs scripts/desktop-artifacts.test.mjs scripts/packaged-runtime-admission.test.mjs scripts/packaged-fixture-daemon.test.mjs scripts/preview-install-lock.test.mjs scripts/probe-rendered-harness.test.mjs tests/parity/ports/WP-ENG-RUNTIME/package-admission/sealed-bundle-identity.test.mjs",
+    "test:packaging": "node --test scripts/acceptance-bridge-observation.test.mjs scripts/acceptance-process.test.mjs scripts/desktop-artifacts.test.mjs scripts/packaged-runtime-admission.test.mjs scripts/packaged-fixture-daemon.test.mjs scripts/preview-install-lock.test.mjs scripts/probe-rendered-harness.test.mjs scripts/probe-packaged-surfaces.test.mjs tests/parity/ports/WP-ENG-RUNTIME/package-admission/sealed-bundle-identity.test.mjs",
     "package:desktop": "node scripts/package-desktop.mjs",
     "accept:packaged": "node scripts/accept-desktop.mjs",
     "install:preview": "node scripts/install-preview.mjs",
