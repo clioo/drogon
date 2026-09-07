@@ -1,0 +1,212 @@
+{
+  "status": "CHARACTERIZED_SOURCE_NOT_PARITY",
+  "sourceRevision": "c97906287bb7a390b25e2025b600d9fb3c25d9c3",
+  "esbuildVersion": "0.25.12",
+  "workspace": "/tmp/dg-mentu-evidence-scPt4r",
+  "manifest": [
+    {
+      "path": "src/shared/mentu-pane-types.ts",
+      "sha256": "a24a74da344b24689574a0a193e81b809eb8bf897ab7af7f695f321b347cd0ab"
+    },
+    {
+      "path": "src/shared/mentu-recipe-contract.test.ts",
+      "sha256": "d5dc7fd5999e487c0f54e5d27a79f1fbd4e2fffe2a3c2a6ee09ae4edcb5a0418"
+    },
+    {
+      "path": "src/shared/mentu-recipe-contract.ts",
+      "sha256": "5089b336a0e2590b10b64bea57d0528b7487b7a30af3667f1d0101a9f356c55f"
+    },
+    {
+      "path": "src/shared/mentu-recipe-dependencies.ts",
+      "sha256": "99aa74848d7660c740c80a88bfb3f90220fc0e9c3dffb6e6759c153f37d1c7a7"
+    },
+    {
+      "path": "src/shared/mentu-recipe-entry-validation.ts",
+      "sha256": "15e01d76b6b63a1eb05e5e56dfc9e7118e88791658034bc1e8d2bc32c47212fe"
+    },
+    {
+      "path": "src/shared/mentu-recipe-fields.ts",
+      "sha256": "f9ba7e8aa2abdbb035f1eb5f10005c5f73394f77e679ee9574c6b5facfc829e1"
+    },
+    {
+      "path": "src/shared/mentu-recipe-file-contract.ts",
+      "sha256": "b0b3be91ac9a53385534c68ae154d70c8a1316c7b2019ab3644c36e216cd3ad3"
+    },
+    {
+      "path": "src/shared/mentu-recipe-root-validation.ts",
+      "sha256": "a709a0dad65f4b1e0c24d456cf6d3356bfeaea2d6c3a2b48e6edc9be0f3fe1ed"
+    },
+    {
+      "path": "src/shared/mentu-recipe-serialization.ts",
+      "sha256": "36c65589aac00c8c7e5f8b9ebcc510b13efe77f7879b3708f84c732af7047d7b"
+    },
+    {
+      "path": "src/shared/mentu-recipe-validation.ts",
+      "sha256": "6d6cec8ff4117db567f52a6d097ea000fb862c701c951e2da0ad32a7f187f369"
+    },
+    {
+      "path": "src/shared/mentu-recipe-value-validation.ts",
+      "sha256": "98caec68013da3bb993115d843b4b4efb5f584ec58d66167af10848ed7d204ee"
+    },
+    {
+      "path": "src/shared/mentu-recipe-verify-validation.ts",
+      "sha256": "0507abaec4f8f7e525e43dacadeba8d2b20d8388352863dc24f8ee5b6cf2c51d"
+    },
+    {
+      "path": "src/shared/mentu-run-contract.ts",
+      "sha256": "29a1ee32ef1352166322a1390c12191a38b37d3d6506afe0ea4c7d5e18ef4988"
+    },
+    {
+      "path": "src/shared/mentu-run-status.ts",
+      "sha256": "03f3d88292f5134fd9de81f9108eb3648bd1b9f799b9f1f50bb8cb94c20d820a"
+    },
+    {
+      "path": "src/shared/mentu-session-approval.test.ts",
+      "sha256": "ac603a306e17f19bedda7ef9cf021f1a84df9cf0e55ca6b3e488e4a498a690f8"
+    },
+    {
+      "path": "src/shared/mentu-session-approval.ts",
+      "sha256": "0380eb2e189bee419f5ca3c25c4982b8a651b940cc6e61409ba308c38b0a10ec"
+    },
+    {
+      "path": "src/shared/mentu-session-identity.ts",
+      "sha256": "37f7f1dc8a82e23963e8cdcd15fc679c87e0467bccb52c085ccd27551a0fdcfb"
+    },
+    {
+      "path": "src/shared/mentu-session-state-types.ts",
+      "sha256": "4d16f4f48e0a07c1cd67ff9e1801e52e733971bdafdb7e957c2a4403a51fce1d"
+    },
+    {
+      "path": "src/shared/mentu-session-state.test-fixture.ts",
+      "sha256": "1e203a0cfef77f2c949df239a2d06e9269708a9519566a327247d0d4f40c43c7"
+    },
+    {
+      "path": "src/main/mentu/mentu-run-evidence.ts",
+      "sha256": "897f700d260c18fd275dd459d89558956d287493f6a962fe9e4fc05bdbde9542"
+    },
+    {
+      "path": "src/main/mentu/mentu-run-evidence-files.ts",
+      "sha256": "2c059b59f5b75b6f83bbf331531de6ba8378128497f03e3ebf010c46caa5812b"
+    },
+    {
+      "path": "src/main/mentu/mentu-run-parsing.ts",
+      "sha256": "7091e2e7933335f844613a7f111f4f804c01c39edffef259a3f7bf6d9e6bcc44"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3"
+    }
+  ],
+  "checks": {
+    "quarantineReadback": true,
+    "noFormalCommitmentProtocol": true,
+    "storedRunningProjectsLive": true,
+    "storedOkProjectsExited": true,
+    "stagedSourceUnchanged": true
+  },
+  "running": {
+    "evidence": {
+      "kind": "local-run-evidence",
+      "label": "Local run evidence",
+      "formalCommitmentProtocol": false
+    },
+    "commitmentProtocol": {
+      "kind": "not-present",
+      "label": "No formal Commitment Protocol record"
+    },
+    "status": "running",
+    "owner": {
+      "transport": "local",
+      "executionHostId": "local",
+      "workspacePath": "/tmp/dg-mentu-evidence-scPt4r"
+    },
+    "hostObservation": "live",
+    "run": {
+      "value": {
+        "run_id": "run_auditfixture",
+        "recipe_name": "audit-record-only",
+        "started_at": "2000-01-01T00:00:00Z",
+        "outcome": "running",
+        "cloud_mode": "off",
+        "steps": [],
+        "hooks": []
+      },
+      "raw": {
+        "run_id": "run_auditfixture",
+        "recipe_name": "audit-record-only",
+        "started_at": "2000-01-01T00:00:00Z",
+        "outcome": "running",
+        "cloud_mode": "off",
+        "steps": [],
+        "hooks": []
+      }
+    },
+    "events": [],
+    "invalidEventLines": [],
+    "state": null,
+    "baseline": null,
+    "outputs": {},
+    "hookOutputs": [],
+    "quarantine": [
+      {
+        "relativePath": "quarantine/fixture.txt",
+        "size": 36,
+        "content": "audit synthetic quarantine artifact\n"
+      }
+    ],
+    "quarantineMetadata": []
+  },
+  "settled": {
+    "evidence": {
+      "kind": "local-run-evidence",
+      "label": "Local run evidence",
+      "formalCommitmentProtocol": false
+    },
+    "commitmentProtocol": {
+      "kind": "not-present",
+      "label": "No formal Commitment Protocol record"
+    },
+    "status": "successful",
+    "owner": {
+      "transport": "local",
+      "executionHostId": "local",
+      "workspacePath": "/tmp/dg-mentu-evidence-scPt4r"
+    },
+    "hostObservation": "exited",
+    "run": {
+      "value": {
+        "run_id": "run_auditfixture",
+        "recipe_name": "audit-record-only",
+        "started_at": "2000-01-01T00:00:00Z",
+        "outcome": "ok",
+        "cloud_mode": "off",
+        "steps": [],
+        "hooks": []
+      },
+      "raw": {
+        "run_id": "run_auditfixture",
+        "recipe_name": "audit-record-only",
+        "started_at": "2000-01-01T00:00:00Z",
+        "outcome": "ok",
+        "cloud_mode": "off",
+        "steps": [],
+        "hooks": []
+      }
+    },
+    "events": [],
+    "invalidEventLines": [],
+    "state": null,
+    "baseline": null,
+    "outputs": {},
+    "hookOutputs": [],
+    "quarantine": [
+      {
+        "relativePath": "quarantine/fixture.txt",
+        "size": 36,
+        "content": "audit synthetic quarantine artifact\n"
+      }
+    ],
+    "quarantineMetadata": []
+  },
+  "limitations": "Synthetic run records only; no recipe authored/executed, no model/harness/session/service started. Actual pinned reader bundled without source edits. Output characterizes record-derived observations, NOT operating-system liveness. Source EvidenceView displays transport plus this observation; whole-app UI not launched in this characterization."
+}

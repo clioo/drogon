@@ -234,6 +234,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "drogon-harness",
+ "drogon-orchestration",
  "drogon-protocol",
  "getrandom",
  "hmac",
@@ -260,6 +261,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "drogon-orchestration"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "drogon-protocol",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "drogon-protocol"
 version = "0.1.0"
 dependencies = [
@@ -276,7 +290,9 @@ dependencies = [
  "drogon-core",
  "drogon-protocol",
  "libc",
+ "rusqlite",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use crate::error::CliError;
+use crate::orchestration_cli::OrchestrationCommand;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -25,6 +26,11 @@ pub struct Cli {
     /// Caller-chosen request id so a mutation can be replayed byte-equivalently
     #[arg(long, global = true, value_name = "ID")]
     pub request_id: Option<String>,
+
+    /// Alias for --request-id for retry workflows; giving both requires
+    /// equal values (a contradiction is a usage error)
+    #[arg(long, global = true, value_name = "ID")]
+    pub retry_request: Option<String>,
 
     #[command(subcommand)]
     pub command: Command,
@@ -47,6 +53,12 @@ pub enum Command {
     Harness {
         #[command(subcommand)]
         action: HarnessAction,
+    },
+    /// Native coordination (requires the service capability
+    /// orchestration.native.v1; the preflight decides before any method)
+    Orchestration {
+        #[command(subcommand)]
+        command: Box<OrchestrationCommand>,
     },
     /// Diagnostic passthrough for a raw protocol method
     Rpc {
@@ -92,7 +104,7 @@ pub enum HarnessAction {
 
 /// Permission mode mirroring the wire enum; the service maps it to
 /// adapter-specific flags.
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum PermissionModeArg {
     #[default]
     Inherit,
@@ -185,6 +197,18 @@ impl Cli {
     pub fn validate(&self) -> Result<(), CliError> {
         if let Some(request_id) = &self.request_id {
             validate_request_id(request_id)?;
+        }
+        if let Some(retry_request) = &self.retry_request {
+            validate_request_id(retry_request)?;
+            // Why: one operation identity per invocation; two different ids
+            // would make replay ambiguous.
+            if let Some(request_id) = &self.request_id
+                && request_id != retry_request
+            {
+                return Err(CliError::Usage(
+                    "--request-id and --retry-request name different operations".into(),
+                ));
+            }
         }
         match &self.command {
             Command::Workspace { action } => match action {
@@ -309,6 +333,13 @@ impl Cli {
                         return Err(CliError::Usage("--params must be a JSON object".into()));
                     }
                 }
+            }
+            Command::Orchestration { command } => {
+                // Purely local actor/flag contradictions (worker credential
+                // vs coordinator bindings, reuse-vs-fresh preferences,
+                // request-show scope) fail closed here, before any
+                // connection is attempted.
+                crate::orchestration_commands::validate_actor_flags(command)?;
             }
             Command::Status => {}
         }

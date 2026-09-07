@@ -6,6 +6,19 @@
 pub mod automations;
 pub mod bots;
 pub mod claim_identity;
+mod coordination_access;
+mod coordination_attempts;
+mod coordination_identity;
+mod coordination_launch;
+mod coordination_mail;
+mod coordination_mail_groups;
+mod coordination_mail_rpc;
+mod coordination_output;
+mod coordination_question_rpc;
+mod coordination_receipts;
+mod coordination_runs;
+mod coordination_worker_control;
+mod coordination_workers;
 pub mod locale_ordering;
 pub mod session_authority;
 
@@ -19,6 +32,13 @@ mod workspace;
 mod service_quiescence;
 
 pub mod requests;
+
+#[cfg(test)]
+#[path = "dispatch_authenticated_tests.rs"]
+mod dispatch_authenticated_tests;
+
+#[cfg(test)]
+mod session_stop_tests;
 
 /// The on-disk SQLite filename under a data directory, exposed so
 /// integration tests (a separate crate that only sees `pub` items) can open
@@ -39,6 +59,7 @@ use serde_json::{Value, json};
 use session::SessionHandle;
 
 const CAPABILITIES: &[&str] = &[
+    "orchestration.native.v1",
     "workspace.v1",
     "session.pty.v1",
     "session.cursor-read.v1",
@@ -89,6 +110,8 @@ pub struct Engine {
     service_instance_id: String,
     sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
     ledger: RequestLedger,
+    worker_cli: Option<PathBuf>,
+    worker_operations: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     /// Lifecycle admission gate for quiescent shutdown. Every mutating
     /// method (`Engine::mutating`) holds the *read* side across its whole
     /// ledger interaction — admission, the work itself (including PTY
@@ -165,6 +188,8 @@ impl Engine {
             service_instance_id: uuid::Uuid::new_v4().to_string(),
             sessions: Mutex::new(HashMap::new()),
             ledger: RequestLedger::default(),
+            worker_cli: None,
+            worker_operations: Mutex::new(HashMap::new()),
             lifecycle_gate: RwLock::new(()),
             quiescent: AtomicBool::new(false),
             #[cfg(test)]
@@ -190,6 +215,92 @@ impl Engine {
         }
     }
 
+    /// Resolve worker authority without entering the trusted admin dispatcher.
+    pub fn dispatch_authenticated(&self, request: Request, service_credential: &str) -> Response {
+        if let Err(err) = request.validate() {
+            return Response::failure(request.request_id, err);
+        }
+        if request.auth.as_deref() == Some(service_credential) {
+            return self.finish_dispatch(request);
+        }
+        let authorized = {
+            let conn = self.db.lock().unwrap();
+            coordination_access::authorize_worker(
+                &conn,
+                &self.host_id,
+                request.auth.as_deref().unwrap_or(""),
+                &request.method,
+                &request.params,
+            )
+        };
+        match authorized {
+            Ok(binding) => self.dispatch_worker(binding, request),
+            Err(err) => Response::failure(request.request_id, err),
+        }
+    }
+
+    fn finish_dispatch(&self, request: Request) -> Response {
+        match self.dispatch_inner(&request) {
+            Ok(value) => Response::success(request.request_id, value),
+            Err(err) => Response::failure(request.request_id, err),
+        }
+    }
+
+    // Recheck exact identity because revocation can race entry authorization.
+    fn dispatch_worker(
+        &self,
+        binding: coordination_access::WorkerBinding,
+        request: Request,
+    ) -> Response {
+        let rechecked = {
+            let conn = self.db.lock().unwrap();
+            let tx = match conn.unchecked_transaction() {
+                Ok(tx) => tx,
+                Err(err) => return Response::failure(request.request_id, error::from_sqlite(err)),
+            };
+            let result = coordination_access::recheck_in_tx(&tx, &binding, &request.method);
+            let _ = tx.rollback();
+            result
+        };
+        match rechecked {
+            Err(err) => Response::failure(request.request_id, err),
+            Ok(_) if request.method == "status" => {
+                Response::success(request.request_id, self.status())
+            }
+            Ok(_) if request.method == "orchestration.requestShow" => {
+                match self.show_coordination_receipt(&request, Some(&binding)) {
+                    Ok(value) => Response::success(request.request_id, value),
+                    Err(err) => Response::failure(request.request_id, err),
+                }
+            }
+            Ok(_)
+                if matches!(
+                    request.method.as_str(),
+                    "orchestration.send" | "orchestration.check"
+                ) =>
+            {
+                match self.dispatch_worker_mail(&binding, &request) {
+                    Ok(value) => Response::success(request.request_id, value),
+                    Err(err) => Response::failure(request.request_id, err),
+                }
+            }
+            Ok(_)
+                if matches!(
+                    request.method.as_str(),
+                    "orchestration.ask" | "orchestration.reply"
+                ) =>
+            {
+                match self.dispatch_coordination_question(&request, Some(&binding)) {
+                    Ok(value) => Response::success(request.request_id, value),
+                    Err(err) => Response::failure(request.request_id, err),
+                }
+            }
+            Ok(_) => {
+                Response::failure(request.request_id, error::method_not_found(&request.method))
+            }
+        }
+    }
+
     fn dispatch_inner(&self, request: &Request) -> Result<Value, RpcError> {
         match request.method.as_str() {
             "status" => Ok(self.status()),
@@ -207,6 +318,24 @@ impl Engine {
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
+            "orchestration.runCreate"
+            | "orchestration.runUse"
+            | "orchestration.runList"
+            | "orchestration.runShow"
+            | "orchestration.taskCreate"
+            | "orchestration.taskList"
+            | "orchestration.taskShow" => self.dispatch_run_task(request),
+            "orchestration.workerStart"
+            | "orchestration.workerShow"
+            | "orchestration.workerRead"
+            | "orchestration.workerStop"
+            | "orchestration.workerAbandon"
+            | "orchestration.workerRelease" => self.dispatch_coordination_worker(request),
+            "orchestration.requestShow" => self.show_coordination_receipt(request, None),
+            "orchestration.send" | "orchestration.check" => self.dispatch_admin_mail(request),
+            "orchestration.ask" | "orchestration.reply" => {
+                self.dispatch_coordination_question(request, None)
+            }
             other => Err(error::method_not_found(other)),
         }
     }

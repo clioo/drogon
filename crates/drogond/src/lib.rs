@@ -61,7 +61,8 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let _lock = lock::acquire_exclusive(data_dir).map_err(ServeError::Io)?;
     let listener = endpoint::establish(data_dir).map_err(ServeError::Io)?;
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
-    let engine = Arc::new(Engine::open(data_dir).map_err(ServeError::Engine)?);
+    let engine = Engine::open(data_dir).map_err(ServeError::Engine)?;
+    let engine = Arc::new(configure_worker_cli(engine)?);
     // Transient accept errors are retried with backoff inside the loop, up
     // to a bounded consecutive-error budget; a fatal listener failure or an
     // exhausted budget surfaces here, and either must end the process with
@@ -70,6 +71,21 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     // `_lock` is held for this entire call, released only on process exit
     // or an early `?` return above.
     Ok(())
+}
+
+#[cfg(unix)]
+fn configure_worker_cli(engine: Engine) -> Result<Engine, ServeError> {
+    // Only the daemon's installed sibling is trusted, never cwd or inherited PATH.
+    let executable = std::env::current_exe().map_err(ServeError::Io)?;
+    let parent = executable
+        .parent()
+        .ok_or_else(|| ServeError::Io(std::io::Error::other("Daemon executable has no parent.")))?;
+    let cli = parent.join("drogon-cli");
+    match std::fs::metadata(&cli) {
+        Ok(_) => engine.with_worker_cli(&cli).map_err(ServeError::Engine),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(engine),
+        Err(error) => Err(ServeError::Io(error)),
+    }
 }
 
 /// Refuses a data directory that is itself a symlink — following it would

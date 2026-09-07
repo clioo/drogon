@@ -1,0 +1,28 @@
+{
+  "recordedAt": "2026-09-07T09:22:04.336091+00:00",
+  "receipts": [
+    {
+      "dispatchId": "ctx_648fb08a2748",
+      "state": "retained",
+      "reason": "external_terminal",
+      "processAction": "none",
+      "archive": null,
+      "mutation": {
+        "requestId": "05b67d76-f823-447a-bf67-dc35774e2960",
+        "replayed": false
+      }
+    },
+    {
+      "dispatchId": "ctx_bef96e8cb0ce",
+      "state": "retained",
+      "reason": "external_terminal",
+      "processAction": "none",
+      "archive": null,
+      "mutation": {
+        "requestId": "e120009d-d919-4107-88e0-76fd3a980c21",
+        "replayed": false
+      }
+    }
+  ],
+  "note": "Official idempotent release calls returned retained/external_terminal with no process action. worker-show may still show resource.releaseState=not_requested; that is not replaced with an invented exited/released claim."
+}

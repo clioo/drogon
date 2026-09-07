@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 
+pub mod orchestration_common;
+pub mod orchestration_mail;
+pub mod orchestration_question;
+pub mod orchestration_run;
+pub mod orchestration_scope;
+pub mod orchestration_task;
+pub mod orchestration_worker;
+
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 

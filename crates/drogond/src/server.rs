@@ -429,12 +429,8 @@ fn parse_request(frame: &[u8]) -> Result<Request, Response> {
     })
 }
 
+// Non-matching `auth` is resolved as a worker dispatch credential before any
+// ledger/effect touch; see `Engine::dispatch_authenticated`.
 fn dispatch_request(request: Request, engine: &Engine, token: &str) -> Response {
-    if request.auth.as_deref() != Some(token) {
-        return Response::failure(
-            request.request_id,
-            RpcError::new("unauthorized", "missing or invalid auth token"),
-        );
-    }
-    engine.dispatch(request)
+    engine.dispatch_authenticated(request, token)
 }

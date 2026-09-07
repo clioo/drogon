@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 drogon-harness.workspace = true
+drogon-orchestration.workspace = true
 drogon-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

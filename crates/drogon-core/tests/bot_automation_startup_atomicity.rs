@@ -395,7 +395,13 @@ fn two_concurrent_engine_open_calls_against_the_same_data_dir_both_succeed_consi
     let final_snapshot = snapshot(&conn);
     assert_eq!(
         final_snapshot.schema_versions,
-        vec![("automations".to_string(), 2), ("bots".to_string(), 2),]
+        vec![
+            ("automations".to_string(), 2),
+            ("bots".to_string(), 2),
+            ("coordination_access".to_string(), 1),
+            ("orchestration_attempts".to_string(), 1),
+            ("orchestration_mail".to_string(), 1),
+        ]
     );
     assert!(final_snapshot.host_id.is_some());
     // Both engines must agree on the same host id -- the loser of the
