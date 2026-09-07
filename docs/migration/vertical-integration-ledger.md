@@ -87,3 +87,35 @@ delta 0); product fidelity has no defensible completion percentage. E5 rights,
 recordings, exact notices and service decisions remain open. The delayed old-wave
 closure consumed more than two hours of the eight-hour window; full parity by
 the deadline is high risk and is not promised by staffing or these passing checks.
+
+## 11:18 UTC: first integration and mailbox correction
+
+V2 checkpoint `518e4cb676c9e1772b6eb2c372467f91fb8ac6de` is staged as
+`02d3735` in the integration branch. Root independently ran desktop 141/141
+tests, typecheck, build and both real-Electron navigation regressions through
+Playwright CDP. Active workspace re-click preserves the visible tab and exact
+session ID/host/incarnation; reload restores the second folder without a session.
+The owned desktop, fixture daemon and sessions all exited without forced cleanup.
+Local evidence: `.preflight/verify-v2-navigation.mjs`; result under
+`/var/folders/8g/w9x4n8ws4mx6vxjhmnrnwy640000gn/T/dgnav-qzP0Uc/report.json`.
+The first probe attempt had a wrong CLI executable name and was a setup failure,
+not product RED; its daemon exited without force. This is development-build
+acceptance, not a newly sealed/installed build. Panel mounting remains unaccepted:
+root requested nullable session props and safe unavailable-capability fallback.
+
+V3 `ff327a56`/`2cd9153` is under review, not integrated: file-read bounds,
+special-file admission, write permissions/path races and UI stale-state/save
+identity require correction before exposing filesystem RPC. V5 docs-only
+`2d9990e`/`893113e` is not product progress; stale package/security claims were
+returned for correction and actual Windows fixture runner work was assigned.
+
+Root reproduced a live coordinator-mail routing limitation: after a leader binds
+its child Run, ordinary checks read that Run; selecting the parent Run returns
+`consumer_fenced`, and root-Run dispatch-addressed guidance is not returned.
+Sending as root with matching `--run <child-run>` and `--to run:<child-run>`
+delivers guidance to the leader's existing coordinator inbox. V5 acknowledged
+this route, then began the requested implementation. No rebind, impersonation,
+restart, depth change or child-mail acknowledgment by root was performed.
+The same guidance was relayed to all five existing child Runs. Their Tasks and
+Dispatches retain original ownership and depth; this is an operational routing
+correction, not a claim that the Orca product limitation was fixed.
