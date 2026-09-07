@@ -30,6 +30,8 @@ export type MentuStep = {
   description: string | null;
   dependsOn: string[];
   timeoutSeconds: number | null;
+  /** The step's declared `verify.commands`, when the recipe defines any. */
+  verifyCommands: string[];
 };
 
 export type MentuRecipeDetail = {
@@ -61,6 +63,11 @@ export type MentuApproval = {
   approvedAt: string;
 };
 
+export type MentuStepVerification = {
+  errors: string[];
+  warnings: string[];
+};
+
 export type MentuStepRun = {
   label: string;
   backend: string;
@@ -71,6 +78,8 @@ export type MentuStepRun = {
   outputPath: string | null;
   errorPath: string | null;
   error: string | null;
+  /** Recorded verification results; null when the run record carries none. */
+  verification: MentuStepVerification | null;
 };
 
 export type MentuRun = {
@@ -162,6 +171,7 @@ const step = z.object({
   description: z.string().nullable().optional().default(null),
   dependsOn: z.array(z.string()).optional().default([]),
   timeoutSeconds: z.number().nullable().optional().default(null),
+  verifyCommands: z.array(z.string()).optional().default([]),
 });
 const recipeDetail = z.object({
   id: z.string().min(1),
@@ -189,6 +199,10 @@ const approval = z.object({
   contentHash: z.string().min(1),
   approvedAt: z.string().min(1),
 });
+const stepVerification = z.object({
+  errors: z.array(z.string()).optional().default([]),
+  warnings: z.array(z.string()).optional().default([]),
+});
 const stepRun = z.object({
   label: z.string().min(1),
   backend: z.string().min(1),
@@ -199,6 +213,7 @@ const stepRun = z.object({
   outputPath: z.string().nullable().optional().default(null),
   errorPath: z.string().nullable().optional().default(null),
   error: z.string().nullable().optional().default(null),
+  verification: stepVerification.nullable().optional().default(null),
 });
 const run = z.object({
   id: z.string().min(1),

@@ -180,6 +180,12 @@ ports Orca's `src/renderer/src/components/browser-pane/assemble-chrome/{browser-
 and `browser-pane/navigate/**` helpers, all at the pinned source revision above.
 Each ported file keeps the MIT notice.
 
+The Mentu panel and wide tab in `apps/desktop/src/renderer/src/features/mentu/`
+port the Drogon fork's `src/renderer/src/components/mentu/{MentuPanel,MentuRuntimeMessage,RecipePane,RecipePaneHeader,RecipePaneContent,RecipeVerification,recipe-pane-views,recipe-pane-inspector,recipe-pane-run-controls,recipe-graph,recipe-pane-controller,use-recipe-pane-controller}.ts(x)`
+and `src/shared/{mentu-pane-types,mentu-recipe-dependencies,mentu-run-status}.ts`
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
+file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

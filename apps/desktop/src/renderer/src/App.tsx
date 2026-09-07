@@ -158,7 +158,7 @@ import {
   registerMentuRoute,
   windowMentuBridge,
 } from "./mentu-mount";
-import { MentuPanel } from "./features/mentu/MentuPanel";
+import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./features/mentu/MentuPanel";
 import { refreshWorktreeIssueLinks } from "./features/tasks/issue-links";
 import { TasksPage } from "./features/tasks/TasksPage";
 import { loadBotSnapshot } from "./bots-loader";
@@ -1854,6 +1854,14 @@ export function App() {
     };
     // Registered once by design; every branch is ref/stable-setter only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    // Mentu panel "Open full tab" (R11-D): the panel dispatches a window
+    // event because App owns routing; setRoute is a stable state setter.
+    const onOpenMentuTab = () => setRoute(MENTU_ROUTE_ID);
+    window.addEventListener(MENTU_OPEN_TAB_EVENT, onOpenMentuTab);
+    return () =>
+      window.removeEventListener(MENTU_OPEN_TAB_EVENT, onOpenMentuTab);
   }, []);
   useEffect(() => {
     // Source-parity window chords (keybindings/definitions.ts): one shared

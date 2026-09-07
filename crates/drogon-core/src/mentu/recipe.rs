@@ -182,12 +182,25 @@ fn parse_steps(recipe: &Value) -> Result<Vec<MentuStep>, String> {
                 })
                 .unwrap_or_default();
             let timeout_seconds = step.get("timeout").and_then(Value::as_u64);
+            let verify_commands = step
+                .get("verify")
+                .and_then(|verify| verify.get("commands"))
+                .and_then(Value::as_array)
+                .map(|commands| {
+                    commands
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
             Ok(MentuStep {
                 label: label.to_string(),
                 backend,
                 description: step_description(step),
                 depends_on,
                 timeout_seconds,
+                verify_commands,
             })
         })
         .collect()
@@ -358,6 +371,28 @@ mod tests {
             current_content_hash(dir.path(), "hello").unwrap()
         );
         assert_eq!(detail.content_hash.len(), 64);
+    }
+
+    #[test]
+    fn load_recipe_extracts_verify_commands_and_defaults_to_empty() {
+        let dir = workspace();
+        write_recipe(
+            dir.path(),
+            "verified",
+            r#"{
+            "name": "verified",
+            "steps": [
+                {"label": "checked", "backend": "shell", "verify": {"commands": ["test -f out.txt"]}},
+                {"label": "plain", "backend": "shell"}
+            ]
+        }"#,
+        );
+        let detail = load_recipe(dir.path(), "verified").unwrap();
+        assert_eq!(
+            detail.steps[0].verify_commands,
+            vec!["test -f out.txt".to_string()]
+        );
+        assert!(detail.steps[1].verify_commands.is_empty());
     }
 
     #[test]

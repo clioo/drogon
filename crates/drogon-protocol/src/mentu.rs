@@ -50,6 +50,25 @@ pub struct MentuStep {
     pub depends_on: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
+    /// The step's `verify.commands` strings, when the recipe defines any:
+    /// the declared verification contract. The matching results live on
+    /// each step run's `verification`, when the run record carries them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verify_commands: Vec<String>,
+}
+
+/// The verification results `mentu-recipes` recorded for one step run:
+/// the `verify` contract evaluated after the step, as error/warning
+/// message lists. `None` when the run record carries no `verification`
+/// object (older records, fixture runs) — rendered as "not recorded",
+/// never as a clean bill.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuStepVerification {
+    #[serde(default)]
+    pub errors: Vec<String>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 /// A parsed recipe plus its raw source text (the client-local "draft" seed)
@@ -125,6 +144,8 @@ pub struct MentuStepRun {
     pub error_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<MentuStepVerification>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -316,6 +337,7 @@ mod tests {
                 output_path: Some("say-hello.stdout".into()),
                 error_path: Some("say-hello.stderr".into()),
                 error: None,
+                verification: None,
             }],
             error: None,
             retry_of: None,
@@ -410,5 +432,33 @@ mod tests {
         let value = serde_json::to_value(summary).unwrap();
         assert!(value.get("issue").is_none());
         assert_eq!(value["name"], "hello");
+    }
+
+    #[test]
+    fn step_verify_commands_default_and_round_trip() {
+        // Older daemons omit the field: it must default, never fail.
+        let legacy = serde_json::from_value::<MentuStep>(json!({
+            "label": "say-hello",
+            "backend": "shell",
+        }))
+        .unwrap();
+        assert!(legacy.verify_commands.is_empty());
+        let step = MentuStep {
+            verify_commands: vec!["test -f out.txt".into()],
+            ..legacy.clone()
+        };
+        let value = serde_json::to_value(&step).unwrap();
+        assert_eq!(value["verifyCommands"], json!(["test -f out.txt"]));
+        // Empty commands stay off the wire like the other optional fields.
+        let bare = MentuStep {
+            verify_commands: Vec::new(),
+            ..legacy.clone()
+        };
+        assert!(
+            serde_json::to_value(bare)
+                .unwrap()
+                .get("verifyCommands")
+                .is_none()
+        );
     }
 }
