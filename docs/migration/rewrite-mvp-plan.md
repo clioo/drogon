@@ -66,7 +66,7 @@ se despachan después. Nada de líderes intermedios ni hojas de hojas.
 
 ## 4. Reglas de orquestación
 
-1. Profundidad 1: un coordinador y como máximo cuatro workers activos.
+1. Profundidad 1: un coordinador y como máximo seis workers activos (Carlos, 2026-09-08), con rutas disjuntas.
 2. Una tarea es un journey con rutas propias, oráculo y evidencia exigida.
 3. Aceptación por evidencia: tests que fallan antes y pasan después, más
    captura CDP del paquete o del dev real. Un módulo exportado sin consumidor
@@ -122,7 +122,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J3 CLI | R3 | Muse B | fusionada: terminal wait y guías skills get; browser CLI pendiente | #30 |
 | J1 notificaciones | R3 | Muse C | fusionada: needs_input por hooks y notificación nativa | #35 |
 | J10 Settings | R4 | Muse A | fusionada; falta tamaño de fuente en xterm | #33 |
-| J11 Paquete | R4 | Muse B | en curso (R6-D) | |
+| J11 Paquete | R4 | Muse B | fusionada: paquete sellado, aceptación 25/25, instalado en ~/Applications con builds previos preservados | #51 |
 | Fidelidad exacta: oráculo fuente + render y auditoría | R5 | Muse | fusionada: `scripts/fidelity/compare-surfaces.mjs`, 30 diferencias rankeadas | #44 |
 | Fidelidad R6-A: chrome de ventana, sidebar 280, nav rows y chords del fuente, landing | R6 | Muse | fusionada; oráculo: sidebar y barra inferior Δ0 | #48 |
 | Fidelidad R6-C: settings como página completa, copy y ARIA de Automations, Bots, Tasks | R6 | Muse | fusionada | #46 |
