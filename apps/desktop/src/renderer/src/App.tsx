@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Folder,
   FolderPlus,
@@ -32,6 +32,20 @@ import { supportsHarnessLaunch } from "./harness-capability";
 import { TerminalPane } from "./TerminalPane";
 import { updateSessionProjection } from "./session-projection";
 import { sessionLabel } from "./session-label";
+import {
+  FILES_ROUTE_ID,
+  isFilesAvailable,
+  registerFilesRoute,
+} from "./files-mount";
+import { FILES_CAPABILITY } from "../../shared/file-contract";
+import {
+  applyPanelFocus,
+  checkAvailability,
+  createRouteRegistry,
+  releasePanel,
+  resolveRoute,
+} from "./route-panel-contract";
+import type { PanelDescriptor } from "./route-panel-contract";
 import { createShortcutRegistry, guardHandler } from "./shortcuts";
 import {
   parsePersistedSettings,
@@ -183,6 +197,36 @@ export function IconButton({
   );
 }
 
+/**
+ * Single App mount for contract-registered panels: resolves the visible
+ * descriptor, applies the focus contract on mount and releases panel
+ * resources on unmount. Files panels mount session-less by design.
+ */
+export function MountedPanel({
+  descriptor,
+  workspace,
+  status,
+}: {
+  descriptor: PanelDescriptor;
+  workspace: Workspace;
+  status: Status;
+}) {
+  useEffect(() => {
+    applyPanelFocus(descriptor, null);
+    return () => releasePanel(descriptor);
+  }, [descriptor]);
+  const Component = descriptor.component;
+  return (
+    <Component
+      routeId={descriptor.id}
+      session={null}
+      workspace={workspace}
+      status={status}
+      focusTarget={null}
+    />
+  );
+}
+
 export function App() {
   const settings = uiSettings();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -254,6 +298,30 @@ export function App() {
   }, [theme]);
   const current = workspaces.find((item) => item.id === selected);
   const terminal = sessions.find((item) => item.id === active);
+  // Single App mount for contract panels. The registry vocabulary is the
+  // static contract set (files.v1 declared here); mounting additionally
+  // requires the LIVE service to advertise it, so a withheld capability
+  // degrades to terminal UI instead of a half-mounted panel.
+  const [route, setRoute] = useState<string | null>(null);
+  const liveCapabilities = status?.capabilities ?? [];
+  const panelRegistry = useMemo(
+    () =>
+      registerFilesRoute(
+        createRouteRegistry({
+          capabilities: [FILES_CAPABILITY],
+          fallbackId: FILES_ROUTE_ID,
+        }),
+        window.drogon,
+      ),
+    [],
+  );
+  const filesDescriptor: PanelDescriptor | null =
+    route === FILES_ROUTE_ID && current && status &&
+    isFilesAvailable(liveCapabilities) &&
+    checkAvailability(resolveRoute(panelRegistry, route), liveCapabilities) ===
+      "available"
+      ? resolveRoute(panelRegistry, route)
+      : null;
   const checked = <T,>(value: Result<T>): T => {
     if (!value.ok) throw new Error(value.error.message);
     return value.result;
@@ -520,6 +588,40 @@ export function App() {
               </button>
             ))}
           </nav>
+          <div className="sidebar-label">
+            <span>Panels</span>
+          </div>
+          <nav aria-label="Panels">
+            <button
+              key="panel-terminals"
+              className="workspace-row"
+              disabled={busy || !current}
+              data-current={route === null}
+              onClick={() => setRoute(null)}
+            >
+              <TerminalSquare size={16} />
+              <span>Terminals</span>
+            </button>
+            <button
+              key="panel-files"
+              className="workspace-row"
+              disabled={
+                busy ||
+                !current ||
+                !isFilesAvailable(liveCapabilities)
+              }
+              data-current={route === FILES_ROUTE_ID}
+              title={
+                isFilesAvailable(liveCapabilities)
+                  ? "Files"
+                  : "Files unavailable: service does not advertise files.v1"
+              }
+              onClick={() => setRoute(FILES_ROUTE_ID)}
+            >
+              <Folder size={16} />
+              <span>Files</span>
+            </button>
+          </nav>
           {adding && (
             <form
               className="folder-form"
@@ -632,6 +734,15 @@ export function App() {
             </div>
           )}
           <div className="session-layout">
+            {filesDescriptor && current && status ? (
+              <section className="terminal-column" aria-label="Files">
+                <MountedPanel
+                  descriptor={filesDescriptor}
+                  workspace={current}
+                  status={status}
+                />
+              </section>
+            ) : (
             <section className="terminal-column" aria-label="Terminals">
               <div
                 className="terminal-tabs"
@@ -804,6 +915,7 @@ export function App() {
                 )}
               </div>
             </section>
+            )}
             {inspector && (
               <aside className="session-details" aria-label="Session details">
                 <h2>Session</h2>

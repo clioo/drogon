@@ -73,16 +73,17 @@ describe("isFilesAvailable", () => {
   });
 });
 
-describe("registerFilesRoute", () => {
+describe("registerFilesRoute (real V3 factory)", () => {
+  const bridge = {} as import("../../shared/file-contract").FileBridge;
   it("registers the Files descriptor and resolveRoute finds it", () => {
-    const registry = registerFilesRoute(filesRegistry(), () => null);
+    const registry = registerFilesRoute(filesRegistry(), bridge);
     expect(resolveRoute(registry, FILES_ROUTE_ID).title).toBe("Files");
     expect(resolveRoute(registry, FILES_ROUTE_ID).capability).toBe(
       FILES_CAPABILITY,
     );
   });
   it("unknown ids fall back to the registry fallback and never throw", () => {
-    const registry = registerFilesRoute(filesRegistry(), () => null);
+    const registry = registerFilesRoute(filesRegistry(), bridge);
     let descriptor: { id: string } | undefined;
     expect(() => {
       descriptor = resolveRoute(registry, "no-such-panel");
@@ -90,14 +91,15 @@ describe("registerFilesRoute", () => {
     expect(descriptor?.id).toBe("terminal");
   });
   it("rejects duplicate registration of the files route", () => {
-    const once = registerFilesRoute(filesRegistry(), () => null);
-    expect(() => registerFilesRoute(once, () => null)).toThrow(/duplicate/);
+    const once = registerFilesRoute(filesRegistry(), bridge);
+    expect(() => registerFilesRoute(once, bridge)).toThrow(/duplicate/);
   });
 });
 
 describe("capability gating", () => {
+  const bridge = {} as import("../../shared/file-contract").FileBridge;
   it("gates the descriptor on the live service capabilities", () => {
-    const registry = registerFilesRoute(filesRegistry(), () => null);
+    const registry = registerFilesRoute(filesRegistry(), bridge);
     const descriptor = resolveRoute(registry, FILES_ROUTE_ID);
     expect(checkAvailability(descriptor, [FILES_CAPABILITY])).toBe("available");
     expect(checkAvailability(descriptor, [])).toBe("unsupported");
@@ -107,24 +109,26 @@ describe("capability gating", () => {
   });
 });
 
-describe("panel props", () => {
-  it("accepts a null session (session-less mount) without throwing", () => {
-    const received: Array<Session | null> = [];
-    const registry = registerFilesRoute(filesRegistry(), (props: PanelProps) => {
-      received.push(props.session);
-      return null;
-    });
+describe("real panel mount", () => {
+  const bridge = {} as import("../../shared/file-contract").FileBridge;
+  it("server-renders the real FilesPanel with a null session", async () => {
+    const registry = registerFilesRoute(filesRegistry(), bridge);
     const descriptor = resolveRoute(registry, FILES_ROUTE_ID);
-    expect(() =>
-      descriptor.component({
-        routeId: FILES_ROUTE_ID,
-        session: null,
-        workspace,
-        status,
-        focusTarget: null,
-      }),
-    ).not.toThrow();
-    expect(received).toEqual([null]);
+    const { createElement } = await import("react");
+    const { renderToString } = await import("react-dom/server");
+    let html = "";
+    expect(() => {
+      html = renderToString(
+        createElement(descriptor.component, {
+          routeId: FILES_ROUTE_ID,
+          session: null,
+          workspace,
+          status,
+          focusTarget: null,
+        }),
+      );
+    }).not.toThrow();
+    expect(html.length).toBeGreaterThan(0);
   });
 });
 

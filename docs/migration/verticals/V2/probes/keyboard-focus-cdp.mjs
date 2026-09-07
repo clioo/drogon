@@ -293,6 +293,18 @@ try {
   }
   await page.screenshot({ path: path.join(shots, "theme-matrix-done.png") });
 
+  // 5. Hidden files mount: files.v1 is not advertised by this daemon, so
+  // the Files entry must stay disabled with an honest reason, the panel
+  // must not mount, and the terminal flow must be intact.
+  const filesButton = page.getByRole("button", { name: "Files", exact: true });
+  await filesButton.waitFor();
+  assert.equal(await filesButton.isDisabled(), true);
+  assert.match((await filesButton.getAttribute("title")) ?? "", /files\.v1/);
+  assert.equal(await page.locator('section[aria-label="Files"]').count(), 0);
+  assert.equal(await page.getByRole("tab").count(), 2);
+  report.checks.push("hidden-files-mount-stays-disabled-with-reason");
+  await page.screenshot({ path: path.join(shots, "panels-hidden-mount.png") });
+
   report.status = "PASSED";
 } finally {
   try {
