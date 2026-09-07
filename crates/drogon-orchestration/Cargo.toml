@@ -15,5 +15,4 @@ serde_json.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-drogon-core.workspace = true
 tempfile.workspace = true
