@@ -164,6 +164,17 @@ ports Orca's `src/renderer/src/components/right-sidebar/{FileExplorer,FileExplor
 `path-tree.ts` and the file-type icon tables, all at the pinned source revision
 above. Each ported file keeps the MIT notice.
 
+The Source Control panel content in `apps/desktop/src/renderer/src/features/source-control/`
+ports Orca's `src/renderer/src/components/right-sidebar/source-control/{panel,listing,commit,sync}/**`
+(panel-content, header-toolbar, header-overflow-menu, branch-context-row,
+branch-line-total-chip, commit-surface, uncommitted-sections, section-header,
+section-file-list, uncommitted-entry-row, row-layout, diff-line-counts,
+content-status, entry-actions, entry-context-menu, empty-state,
+too-many-changes-banner, commit-area, commit-message-composer,
+commit-action-menu, bulk-action-bar, commit-notices, discard-dialog,
+compare-summary and their helpers), all at the pinned source revision above.
+Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
