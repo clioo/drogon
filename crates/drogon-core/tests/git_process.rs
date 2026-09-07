@@ -27,6 +27,7 @@ mod error;
 #[allow(dead_code)]
 #[path = "../src/git.rs"]
 mod git;
+#[allow(dead_code)]
 #[path = "../src/git_process.rs"]
 mod git_process;
 #[allow(dead_code)]
@@ -513,23 +514,82 @@ fn run_read_only_git_maps_a_real_timeout_to_unverifiable() {
     let repo = TempRepo::init("status-timeout");
     let cache = CapabilityCache::new();
     let scope = HostScope::native();
-    // A real `git` process spawn (fork+exec) takes far longer than one
-    // microsecond, so this budget is essentially guaranteed to trip the
-    // timeout path on the very first poll iteration — no external
-    // long-running helper process needed for this assertion.
+    // Create a wrapper script that takes far longer than the timeout budget.
+    // This is deterministic (no race between spawn and first poll): the
+    // wrapper will definitely still be running when polling begins, and
+    // will outlast the 100ms budget. Exercises the real timeout path,
+    // avoiding the 1-microsecond spawn race.
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    // Resolve the REAL git binary BEFORE poisoning PATH below: `set_var` is
+    // process-wide, so concurrently-running tests keep spawning `git`
+    // through the poisoned PATH for the whole window. If the wrapper merely
+    // `exit 0`ed, those victims would observe a fake empty success (e.g. a
+    // swallowed `git add` followed by a real `git commit` on an empty
+    // index). Chaining `exec <real-git>` after the sleep keeps the wrapper
+    // slow but semantically transparent, so the only cross-test effect is
+    // delay (victim budgets are 30s; the timeout under test here is 100ms).
+    let real_git = std::env::split_paths(&original_path)
+        .map(|dir| dir.join("git"))
+        .find(|candidate| {
+            if !candidate.is_file() {
+                return false;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                candidate
+                    .metadata()
+                    .map(|m| m.permissions().mode() & 0o111 != 0)
+                    .unwrap_or(false)
+            }
+            #[cfg(not(unix))]
+            {
+                true
+            }
+        })
+        .expect("resolve the real git binary from the unpoisoned PATH");
+    let wrapper_dir = TempRepo::plain_dir("git-sleep-wrapper");
+    let wrapper_path = wrapper_dir.join("git");
+    std::fs::write(
+        &wrapper_path,
+        format!(
+            "#!/bin/sh\nsleep 5\nexec \"{}\" \"$@\"\n",
+            real_git.display()
+        ),
+    )
+    .expect("write git wrapper script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper_path, std::fs::Permissions::from_mode(0o755))
+            .expect("make git wrapper executable");
+    }
+
+    unsafe {
+        std::env::set_var(
+            "PATH",
+            format!("{}:{}", wrapper_dir.display(), original_path),
+        );
+    }
+
     let budget = GitProbeBudget {
-        timeout: Duration::from_micros(1),
+        timeout: Duration::from_millis(100),
         max_combined_output_bytes: GENEROUS_CAP,
     };
 
-    let err = run_read_only_git(
+    let result = run_read_only_git(
         ReadOnlyGitOperation::Status,
         &repo.dir,
         &scope,
         &cache,
         budget,
-    )
-    .expect_err("a 1-microsecond budget must time out");
+    );
+
+    unsafe {
+        std::env::set_var("PATH", original_path);
+    }
+
+    let err = result.expect_err("a 100ms budget must time out when git sleeps 5s");
     assert_eq!(err.code, "unverifiable");
 }
 

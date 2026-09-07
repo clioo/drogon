@@ -789,14 +789,72 @@ pub(crate) fn try_acquire_admission() -> Option<AdmissionPermit> {
     }
 }
 
-/// True once a probe's outstanding resources are genuinely done: both
-/// reader threads finished (EOF, read error, or byte cap — see
-/// `SharedStream::finished`), AND, if a child is still being retained
-/// because a prior kill's reap was unconfirmed, `try_wait` now confirms it
-/// exited. A poll error on the retained child also counts as done — it
-/// means this process can learn nothing further from `try_wait`, so
-/// continuing to poll would only add another orphaned thread on top of an
-/// already-unverifiable child, never actually resolving it. `pub(crate)` so
+/// How one `Child::try_wait` poll on a retained child resolves. Only
+/// `Exited` proves the child is done. `Running` means it is still alive;
+/// `Unverifiable` (an `Err` from `try_wait`) means this process can no
+/// longer learn anything about it — but that uncertainty must NEVER count
+/// as done: treating it as done would free the admission permit and let
+/// repeated uncertain children defeat the cross-call cap. `pub(crate)` as
+/// the deterministic Err/None/Some test seam, so
+/// `tests/git_process_bounds.rs` can pin this decision table directly with
+/// synthetic poll values — a real `try_wait` `Err` is not reliably
+/// producible on demand, so no end-to-end fixture can prove it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChildPollReadiness {
+    Exited,
+    Running,
+    Unverifiable,
+}
+
+/// Classifies one already-observed `try_wait` poll: only `Ok(Some(_))`
+/// proves the child exited; `Err` is quarantined uncertainty, never proof
+/// of completion.
+pub(crate) fn classify_child_poll(
+    poll: &Result<Option<ExitStatus>, std::io::Error>,
+) -> ChildPollReadiness {
+    match poll {
+        Ok(Some(_)) => ChildPollReadiness::Exited,
+        Ok(None) => ChildPollReadiness::Running,
+        Err(_) => ChildPollReadiness::Unverifiable,
+    }
+}
+
+/// A probe's full readiness: both reader threads finished (EOF, read error,
+/// or byte cap — see `SharedStream::finished`), AND, if a child is still
+/// being retained because a prior kill's reap was unconfirmed, `try_wait`
+/// now confirms it exited. A poll error on the retained child is
+/// `Unverifiable`, never finished: polling further could never resolve an
+/// already-unverifiable child, but `release_when_finished` quarantines it
+/// (permit and child retained without reopening capacity) instead of
+/// releasing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProbeReadiness {
+    Finished,
+    Unfinished,
+    Unverifiable,
+}
+
+pub(crate) fn probe_readiness(
+    stdout: &SharedStream,
+    stderr: &SharedStream,
+    retained_child: &mut Option<Child>,
+) -> ProbeReadiness {
+    if !(stdout.finished.load(Ordering::SeqCst) && stderr.finished.load(Ordering::SeqCst)) {
+        return ProbeReadiness::Unfinished;
+    }
+    match retained_child {
+        None => ProbeReadiness::Finished,
+        Some(child) => match classify_child_poll(&child.try_wait()) {
+            ChildPollReadiness::Exited => ProbeReadiness::Finished,
+            ChildPollReadiness::Running => ProbeReadiness::Unfinished,
+            ChildPollReadiness::Unverifiable => ProbeReadiness::Unverifiable,
+        },
+    }
+}
+
+/// True once a probe's outstanding resources are genuinely done — see
+/// `probe_readiness`. A poll error on the retained child is NOT done (it is
+/// `Unverifiable`, quarantined by `release_when_finished`). `pub(crate)` so
 /// `tests/git_process_bounds.rs` can exercise this exact predicate
 /// deterministically with synthetic streams, without needing a real
 /// unreaped-after-kill child (not reliably producible on demand) to prove
@@ -806,25 +864,38 @@ pub(crate) fn resources_are_finished(
     stderr: &SharedStream,
     retained_child: &mut Option<Child>,
 ) -> bool {
-    let streams_done =
-        stdout.finished.load(Ordering::SeqCst) && stderr.finished.load(Ordering::SeqCst);
-    let child_done = match retained_child {
-        None => true,
-        Some(child) => !matches!(child.try_wait(), Ok(None)),
-    };
-    streams_done && child_done
+    matches!(
+        probe_readiness(stdout, stderr, retained_child),
+        ProbeReadiness::Finished
+    )
+}
+
+/// Quarantines an unverifiable probe: polling further could never resolve
+/// a child whose `try_wait` already errors, so stop — but NEVER reopen
+/// admission capacity on that uncertainty. Leaking both the permit (its
+/// `Drop` would free a slot) and the retained child keeps the cross-call
+/// cap fail-closed: at most `MAX_CONCURRENT_PROBES` such quarantines can
+/// ever be outstanding, after which admission fails closed outright. No
+/// retry, no kill-by-PID: the child's true fate is unknown and this
+/// wrapper must not act on a process it cannot observe.
+fn quarantine_unverifiable(permit: AdmissionPermit, retained_child: Option<Child>) {
+    std::mem::forget(retained_child);
+    std::mem::forget(permit);
 }
 
 /// Releases `permit` (and waits out `retained_child`, if any) only once
-/// `resources_are_finished` is true — never merely once this is called. If
-/// everything is already finished, this releases immediately with no extra
-/// thread; otherwise it spawns exactly one background watcher that owns
-/// `permit`/`retained_child`/the stream handles until they are genuinely
-/// done, then drops them. An unreaped `retained_child` is therefore never
-/// simply discarded: dropping a `Child` neither kills nor waits it, which
-/// would leave its true fate (and, on Unix, a potential zombie) unknown
-/// forever — this keeps it as an active, polled cleanup owner until
-/// `try_wait` actually confirms it exited.
+/// `probe_readiness` reports `Finished` — never merely once this is called.
+/// If everything is already finished, this releases immediately with no
+/// extra thread; if the probe is unverifiable, this quarantines immediately
+/// (see `quarantine_unverifiable`); otherwise it spawns exactly one
+/// background watcher that owns `permit`/`retained_child`/the stream
+/// handles until they are genuinely done, then drops them — or quarantines
+/// them if the retained child ever becomes unverifiable while waiting. An
+/// unreaped `retained_child` is therefore never simply discarded: dropping
+/// a `Child` neither kills nor waits it, which would leave its true fate
+/// (and, on Unix, a potential zombie) unknown forever — this keeps it as
+/// an active, polled cleanup owner until `try_wait` actually confirms it
+/// exited, or quarantines it if `try_wait` stops answering.
 fn release_when_finished(
     permit: AdmissionPermit,
     stdout: SharedStream,
@@ -832,18 +903,33 @@ fn release_when_finished(
     retained_child: Option<Child>,
 ) {
     let mut retained_child = retained_child;
-    if resources_are_finished(&stdout, &stderr, &mut retained_child) {
-        drop(retained_child);
-        drop(permit);
-        return;
-    }
-    thread::spawn(move || {
-        while !resources_are_finished(&stdout, &stderr, &mut retained_child) {
-            thread::sleep(POLL_INTERVAL);
+    match probe_readiness(&stdout, &stderr, &mut retained_child) {
+        ProbeReadiness::Finished => {
+            drop(retained_child);
+            drop(permit);
         }
-        drop(retained_child);
-        drop(permit);
-    });
+        ProbeReadiness::Unverifiable => {
+            quarantine_unverifiable(permit, retained_child);
+        }
+        ProbeReadiness::Unfinished => {
+            thread::spawn(move || {
+                loop {
+                    match probe_readiness(&stdout, &stderr, &mut retained_child) {
+                        ProbeReadiness::Finished => {
+                            drop(retained_child);
+                            drop(permit);
+                            return;
+                        }
+                        ProbeReadiness::Unverifiable => {
+                            quarantine_unverifiable(permit, retained_child);
+                            return;
+                        }
+                        ProbeReadiness::Unfinished => thread::sleep(POLL_INTERVAL),
+                    }
+                }
+            });
+        }
+    }
 }
 
 /// The generic bounded spawn+capture primitive: takes an already-built

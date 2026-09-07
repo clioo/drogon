@@ -890,6 +890,55 @@ fn resources_are_finished_also_waits_for_a_retained_child_to_be_confirmed_exited
 }
 
 #[test]
+fn child_poll_classification_counts_only_a_confirmed_exit_as_done() {
+    // Deterministic Err/None/Some seam for the admission-retention rule: a
+    // real `try_wait` `Err` is not reliably producible on demand, so the
+    // decision table is pinned here against synthetic poll values. Only
+    // `Ok(Some(_))` — a proven exit — may ever release admission capacity;
+    // a poll error is quarantined uncertainty, never proof of completion.
+    // The `Ok(Some(_))` value below carries a REAL `ExitStatus` (a
+    // self-spawn child that exits immediately), so the seam is exercised
+    // against a genuine OS exit status, not a fabricated one.
+    let exited_status = std::process::Command::new(
+        std::env::current_exe().expect("current_exe for a real ExitStatus"),
+    )
+    .args([
+        "helper_sleep_ms",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1",
+    ])
+    .env("DROGON_TEST_SLEEP_MS", "0")
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .status()
+    .expect("spawn a real immediately-exiting self-spawn child");
+    assert!(
+        exited_status.success(),
+        "self-spawn fixture child must exit successfully"
+    );
+
+    assert_eq!(
+        git_process::classify_child_poll(&Ok(Some(exited_status))),
+        git_process::ChildPollReadiness::Exited,
+        "a confirmed exit is the only poll outcome that proves the child is done"
+    );
+    assert_eq!(
+        git_process::classify_child_poll(&Ok(None)),
+        git_process::ChildPollReadiness::Running,
+        "a still-running child must keep its admission permit held"
+    );
+    let poll_err: Result<Option<std::process::ExitStatus>, std::io::Error> =
+        Err(std::io::Error::other("synthetic try_wait failure"));
+    assert_eq!(
+        git_process::classify_child_poll(&poll_err),
+        git_process::ChildPollReadiness::Unverifiable,
+        "a poll error must quarantine the permit, never free it as if done"
+    );
+}
+
+#[test]
 fn spawn_and_capture_bounded_repeated_calls_never_leak_admission_permits() {
     // Regression for "no cross-call bound": if admission were leaked (never
     // released) across calls, this loop would eventually start failing with
