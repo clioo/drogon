@@ -519,3 +519,51 @@ on fresh runs, the evidence appendix is consistent with the recorded runs,
 and nothing was changed by this closure review beyond this appendix. The
 final paid-model pass under the pinned `claude-sonnet-5` lane remains
 ROOT's own deferred step, as recorded in Checkpoint 4.
+
+---
+
+## Unwind note (task_22d0ad414c4e): ROOT 4837f84 review — Drop unwind-panic fix
+
+Scope: `crates/drogon-cli/tests/native_dogfood.rs` only (+ this note).
+No opted-in run; `DROGON_DOGFOOD_REAL_MODEL` never set.
+
+**Finding (accepted):** the Checkpoint 4 `SessionGuard::Drop` delegated to
+`common::run_cli`, whose spawn path is `command.output().expect("spawn
+drogon-cli")` (`tests/common/mod.rs:217`) — a CLI spawn failure during
+unwind would have panicked inside `Drop` and aborted the process, making
+the "never panics" claim false.
+
+**Fix shape:** `Drop` now calls a minimal OWNED local adapter,
+`best_effort_close(cli, data_dir, session_id, incarnation)`, used ONLY by
+the Drop path. It replicates `run_cli`'s spawn setup (the built binary +
+`DROGON_DATA_DIR`) but is fallible end-to-end with no `expect`/`unwrap`
+and no broad panic catching: spawn io::Error, non-zero CLI exit, unparsable
+output, refused (`ok:false`) envelope, and missing verdict all map to
+reported `Err` reasons; `Ok(verdict)` is returned only for a fully proven
+observation, and `Drop` reports proven vs unverifiable/cleanup-failed
+exactly as before. `tests/common` was deliberately NOT edited — that scope
+belongs to another owner; the "never panics" claim is now literally true of
+the code.
+
+**Corrected claims:** Checkpoint 4's item 3 ("the unwind path uses the
+file's existing `run_cli`/`stdout`/`stderr` helpers") described the
+pre-fix state and is superseded by this note: the unwind path now uses the
+owned fallible adapter precisely BECAUSE the shared helpers can panic on
+spawn failure; `coordinator_call`/`assert_ok` remain on the happy path.
+
+**Deterministic test:** `unwind_close_adapter_maps_spawn_failure_to_
+unverifiable_without_panicking` passes a bogus argv0 (inside a nonexistent
+directory) and asserts the adapter returns `Err` naming the spawn step —
+no panic, uid-independent.
+
+### Gates (targeted, per this checkpoint)
+
+- `cargo test -p drogon-cli --test native_dogfood --locked`:
+  **4 passed / 0 failed** (fixture leg; real-model leg skipped with note;
+  negative gate test; new adapter regression test). Zero spend.
+- `cargo fmt --all -- --check`: **exit 0**.
+- `cargo clippy -p drogon-cli --test native_dogfood --locked -- -D
+  warnings`: exit 0 (hygiene, beyond the required gate).
+
+What remains: nothing for this checkpoint; the final paid-model pass under
+the pinned `claude-sonnet-5` lane remains ROOT's own deferred step.

@@ -904,44 +904,89 @@ impl Drop for SessionGuard {
         if self.closed {
             return;
         }
-        // Inspect, don't assert: closure is PROVEN only when the CLI exited
-        // successfully AND the daemon observed `exited`. Anything else is
-        // reported as unverifiable/cleanup-failed so a failed unwind close
-        // is never silently claimed as a clean release.
-        let out = run_cli(
+        // Inspect, don't assert: closure is PROVEN only when the CLI spawned,
+        // exited successfully, and the daemon observed `exited`. Every other
+        // outcome — including a CLI spawn failure — is reported as
+        // unverifiable/cleanup-failed instead of panicking, because a panic
+        // inside Drop during unwind aborts the whole process.
+        match best_effort_close(
+            Path::new(env!("CARGO_BIN_EXE_drogon-cli")),
             &self.data_dir,
-            &[
-                "--json",
-                "terminal",
-                "close",
-                "--session",
-                &self.session_id,
-                "--incarnation",
-                &self.incarnation,
-            ],
-        );
-        let text = stdout(&out);
-        let verdict = serde_json::from_str::<Value>(&text).ok().and_then(|value| {
-            value["result"]["verdict"]
-                .as_str()
-                .map(std::string::ToString::to_string)
-        });
-        if out.status.success() && verdict.as_deref() == Some("exited") {
-            eprintln!(
-                "closed real-model session {} on the unwind path \
-                 (daemon observed exited)",
-                self.session_id
-            );
-        } else {
-            eprintln!(
-                "WARNING: real-model session {} unwind closure is \
-                 unverifiable/cleanup-failed (cli exit ok: {}, observed \
-                 verdict: {:?}, stdout: {text:?}, stderr: {:?})",
-                self.session_id,
-                out.status.success(),
-                verdict,
-                stderr(&out)
-            );
+            &self.session_id,
+            &self.incarnation,
+        ) {
+            Ok(verdict) if verdict == "exited" => {
+                eprintln!(
+                    "closed real-model session {} on the unwind path \
+                     (daemon observed exited)",
+                    self.session_id
+                );
+            }
+            outcome => {
+                eprintln!(
+                    "WARNING: real-model session {} unwind closure is \
+                     unverifiable/cleanup-failed (outcome: {outcome:?})",
+                    self.session_id
+                );
+            }
         }
     }
+}
+
+/// The Drop path's own fallible best-effort close, used ONLY there: unlike
+/// `run_cli`/`coordinator_call` (whose `.expect` on spawn is correct on the
+/// normal path but would double-panic during unwind), this adapter maps
+/// every failure mode — spawn io::Error, non-zero CLI exit, unparsable or
+/// refused output, missing verdict — into a reported `Err`, and returns
+/// `Ok(verdict)` only for a fully proven observation. It never panics and
+/// never catches broader panics.
+fn best_effort_close(
+    cli: &Path,
+    data_dir: &Path,
+    session_id: &str,
+    incarnation: &str,
+) -> Result<String, String> {
+    let output = Command::new(cli)
+        .args([
+            "--json",
+            "terminal",
+            "close",
+            "--session",
+            session_id,
+            "--incarnation",
+            incarnation,
+        ])
+        .env("DROGON_DATA_DIR", data_dir)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("spawn drogon-cli: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("cli exit {:?}", output.status.code()));
+    }
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|error| format!("unparsable close output: {error}; stdout={text:?}"))?;
+    if value["ok"] != Value::Bool(true) {
+        return Err(format!("close refused: {text:?}"));
+    }
+    value["result"]["verdict"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| format!("close result carries no verdict: {text:?}"))
+}
+
+/// The adapter's failure mapping is deterministic: a bogus argv0 (inside a
+/// directory that does not exist) fails the spawn with an io::Error, which
+/// surfaces as `Err` carrying the spawn reason — never as a panic.
+#[test]
+fn unwind_close_adapter_maps_spawn_failure_to_unverifiable_without_panicking() {
+    let absent_dir = std::env::temp_dir().join("drogon-dogfood-no-such-cli-dir");
+    let bogus_cli = absent_dir.join("no-such-cli");
+    let data_dir = std::env::temp_dir().join("drogon-dogfood-no-such-data-dir");
+    let outcome = best_effort_close(&bogus_cli, &data_dir, "session-x", "incarnation-x");
+    let reason = outcome.expect_err("a spawn failure must map to Err, never panic, on any uid");
+    assert!(
+        reason.contains("spawn drogon-cli"),
+        "the failure must name the spawn step: {reason}"
+    );
 }
