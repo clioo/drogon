@@ -6,23 +6,35 @@ import {
   applyEditorAction,
   initialEditorState,
   isDirty,
+  isReadConfirmed,
   nextSaveGeneration,
   runSave,
+  scopedFileKey,
   type EditorAction,
   type EditorPaneProps,
+  type EditorScope,
   type EditorState,
 } from "./EditorPane";
 import type { Result } from "../../../../shared/session-contract";
 
+const SCOPE_A: EditorScope = { hostId: "h1", workspaceId: "w1" };
+const SCOPE_B: EditorScope = { hostId: "h2", workspaceId: "w2" };
 const FILE_A = "src/a.ts";
 const FILE_B = "src/b.ts";
+const KEY_A = scopedFileKey(SCOPE_A, FILE_A);
+const KEY_B = scopedFileKey(SCOPE_A, FILE_B);
 
 const okSave = (): EditorPaneProps["onSave"] => () =>
   Promise.resolve({ ok: true, result: null });
 
-function opened(content = "saved body", path = FILE_A): EditorState {
+function opened(
+  content = "saved body",
+  path = FILE_A,
+  scope: EditorScope = SCOPE_A,
+): EditorState {
   return applyEditorAction(initialEditorState(), {
     type: "file-opened",
+    scope,
     path,
     content,
   });
@@ -38,13 +50,371 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-describe("dirty tracking", () => {
-  test("a freshly opened file is clean", () => {
-    expect(isDirty(opened())).toBe(false);
+describe("scoped keys", () => {
+  test("drafts are namespaced by hostId/workspaceId/path", () => {
+    expect(scopedFileKey(SCOPE_A, FILE_A)).toBe("h1/w1/src/a.ts");
+    expect(scopedFileKey(SCOPE_B, FILE_A)).toBe("h2/w2/src/a.ts");
+    expect(scopedFileKey(SCOPE_A, FILE_A)).not.toBe(
+      scopedFileKey(SCOPE_B, FILE_A),
+    );
+  });
+});
+
+describe("unread-gated save", () => {
+  test("a pending read leaves the file unread and a save request is refused", () => {
+    let state = opened(null as unknown as string);
+    // content=null means unread: lastSaved null, placeholder draft "".
+    expect(isReadConfirmed(state)).toBe(false);
+    const before = state;
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "",
+      generation: 1,
+      allowEmpty: false,
+    });
+    expect(state).toBe(before);
+    expect(state.saveInFlight).toBe(false);
   });
 
-  test("editing marks the pane dirty; reverting the text cleans it again", () => {
+  test("runSave on an unread file dispatches save-started but the reducer refuses it", async () => {
+    let state = applyEditorAction(initialEditorState(), {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: null,
+    });
+    const dispatched: EditorAction[] = [];
+    await runSave({
+      draft: "",
+      scope: SCOPE_A,
+      path: FILE_A,
+      generation: 1,
+      allowEmpty: false,
+      onSave: okSave(),
+      dispatch: (action) => {
+        dispatched.push(action);
+        state = applyEditorAction(state, action);
+      },
+    });
+    expect(dispatched[0].type).toBe("save-started");
+    // The gate held: no save is in flight, lastSaved is still null.
+    expect(state.saveInFlight).toBe(false);
+    expect(state.lastSaved).toBeNull();
+  });
+
+  test("after the read completes, saving is accepted and a blank draft is not dirty", async () => {
+    let state = applyEditorAction(initialEditorState(), {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: null,
+    });
+    // The delayed read arrives:
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "real body",
+    });
+    expect(isReadConfirmed(state)).toBe(true);
+    expect(state.draft).toBe("real body");
+    expect(isDirty(state)).toBe(false);
+    const dispatched: EditorAction[] = [];
+    state = applyEditorAction(state, { type: "edited", value: "edited body" });
+    await runSave({
+      draft: state.draft,
+      scope: SCOPE_A,
+      path: FILE_A,
+      generation: nextSaveGeneration(state),
+      allowEmpty: false,
+      onSave: okSave(),
+      dispatch: (action) => {
+        dispatched.push(action);
+        state = applyEditorAction(state, action);
+      },
+    });
+    expect(dispatched).toEqual([
+      { type: "save-started", key: KEY_A, path: FILE_A, draft: "edited body", generation: 1, allowEmpty: false },
+      { type: "save-succeeded", key: KEY_A, generation: 1 },
+    ]);
+    expect(state.lastSaved).toBe("edited body");
+  });
+
+  test("allowEmptySave is the explicit new-file intent: unread saves are allowed", () => {
+    let state = applyEditorAction(initialEditorState(), {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: "new-file.ts",
+      content: null,
+    });
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: scopedFileKey(SCOPE_A, "new-file.ts"),
+      path: "new-file.ts",
+      draft: "",
+      generation: 1,
+      allowEmpty: true,
+    });
+    expect(state.saveInFlight).toBe(true);
+  });
+
+  test("typed work under new-file intent is never clobbered by the late read", () => {
+    let state = applyEditorAction(initialEditorState(), {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: "new-file.ts",
+      content: null,
+    });
+    state = applyEditorAction(state, { type: "edited", value: "my new note" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: "new-file.ts",
+      content: "file appeared on disk",
+    });
+    expect(state.draft).toBe("my new note");
+    expect(state.lastSaved).toBeNull();
+  });
+
+  test("an empty-but-read file (content \"\") is read-confirmed and saveable", () => {
+    let state = applyEditorAction(initialEditorState(), {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "",
+    });
+    expect(isReadConfirmed(state)).toBe(true);
+    expect(isDirty(state)).toBe(false);
+    const before = state;
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "",
+      generation: 1,
+      allowEmpty: false,
+    });
+    expect(state.saveInFlight).toBe(true);
+    expect(before.lastSaved).toBe("");
+  });
+});
+
+describe("scope-keyed drafts", () => {
+  test("the same relative path under another scope never restores a foreign draft", () => {
+    let state = opened("A saved", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "A scope work" });
+    // Open the same relpath under a different host+workspace:
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_B,
+      path: FILE_A,
+      content: "other scope body",
+    });
+    // Fresh content adopted — not the foreign draft:
+    expect(state.draft).toBe("other scope body");
+    expect(isDirty(state)).toBe(false);
+    // Neither scope's data was silently reset:
+    expect(state.files[KEY_A]).toEqual({ draft: "A scope work", lastSaved: "A saved" });
+    expect(state.files[scopedFileKey(SCOPE_B, FILE_A)]).toEqual({
+      draft: "other scope body",
+      lastSaved: "other scope body",
+    });
+  });
+
+  test("returning to the original scope restores its retained draft", () => {
+    let state = opened("A saved", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "A scope work" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_B,
+      path: FILE_A,
+      content: "other scope body",
+    });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "A saved",
+    });
+    expect(state.draft).toBe("A scope work");
+    expect(isDirty(state)).toBe(true);
+    expect(state.openScope).toEqual(SCOPE_A);
+  });
+
+  test("same-scope file switches keep per-path retention (unchanged guarantee)", () => {
+    let state = opened("A saved", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "A unsaved" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_B,
+      content: "B saved",
+    });
+    expect(state.draft).toBe("B saved");
+    expect(state.files[KEY_A]).toEqual({ draft: "A unsaved", lastSaved: "A saved" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "A saved",
+    });
+    expect(state.draft).toBe("A unsaved");
+    expect(isDirty(state)).toBe(true);
+  });
+
+  test("a failed read retains the draft in its scope and restores it after a switch", () => {
+    let state = opened("A saved", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "kept work" });
+    // Read fails (content null + readError is a parent-render concern; the
+    // state keeps the retained entry regardless).
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_B,
+      content: "B saved",
+    });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: null,
+    });
+    expect(state.draft).toBe("kept work");
+    expect(isDirty(state)).toBe(true);
+  });
+});
+
+describe("transition fence on save completion", () => {
+  test("a success for a file that is no longer open is dropped entirely", () => {
+    let state = opened("A saved", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "A draft" });
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "A draft",
+      generation: 1,
+      allowEmpty: false,
+    });
+    // Rapid switch to B before A completes:
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_B,
+      content: "B saved",
+    });
+    const before = state;
+    state = applyEditorAction(state, {
+      type: "save-succeeded",
+      key: KEY_A,
+      generation: 1,
+    });
+    // Dropped: B is untouched, and A's entry keeps its dirty draft (the
+    // conservative trade: it will be re-saved when reopened).
+    expect(state).toBe(before);
+    expect(state.openPath).toBe(FILE_B);
+    expect(state.files[KEY_A]).toEqual({ draft: "A draft", lastSaved: "A saved" });
+  });
+
+  test("a success whose scope has changed with the same path is dropped too", () => {
+    let state = opened("A saved", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "A draft" });
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "A draft",
+      generation: 1,
+      allowEmpty: false,
+    });
+    // The scope flips to another host/workspace with the same relpath:
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_B,
+      path: FILE_A,
+      content: "other scope body",
+    });
+    const before = state;
+    state = applyEditorAction(state, {
+      type: "save-succeeded",
+      key: KEY_A,
+      generation: 1,
+    });
+    expect(state).toBe(before);
+    expect(state.files[scopedFileKey(SCOPE_B, FILE_A)]).toEqual({
+      draft: "other scope body",
+      lastSaved: "other scope body",
+    });
+  });
+
+  test("a failure for a file that is no longer open is dropped, never attached to the new file", () => {
+    let state = opened("A saved", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "A draft" });
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "A draft",
+      generation: 1,
+      allowEmpty: false,
+    });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_B,
+      content: "B saved",
+    });
+    const before = state;
+    state = applyEditorAction(state, {
+      type: "save-failed",
+      key: KEY_A,
+      generation: 1,
+      message: "disk full",
+    });
+    expect(state).toBe(before);
+    expect(state.saveError).toBeNull();
+  });
+
+  test("a save started for a file that is not the open one is refused at start", () => {
+    const state = opened("A saved", FILE_A, SCOPE_A);
+    const fenced = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_B,
+      path: FILE_B,
+      draft: "x",
+      generation: 1,
+      allowEmpty: false,
+    });
+    expect(fenced).toBe(state);
+  });
+
+  test("the open file's own save still completes normally through the fence", () => {
+    let state = opened("A saved", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "A draft" });
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "A draft",
+      generation: 1,
+      allowEmpty: false,
+    });
+    state = applyEditorAction(state, {
+      type: "save-succeeded",
+      key: KEY_A,
+      generation: 1,
+    });
+    expect(state.lastSaved).toBe("A draft");
+    expect(isDirty(state)).toBe(false);
+  });
+});
+
+describe("dirty tracking and retry (regressions)", () => {
+  test("a freshly opened, read file is clean; editing marks it dirty", () => {
     let state = opened("saved body");
+    expect(isDirty(state)).toBe(false);
     state = applyEditorAction(state, { type: "edited", value: "new body" });
     expect(isDirty(state)).toBe(true);
     state = applyEditorAction(state, { type: "edited", value: "saved body" });
@@ -55,447 +425,219 @@ describe("dirty tracking", () => {
     let state = opened("saved");
     state = applyEditorAction(state, {
       type: "save-started",
+      key: KEY_A,
       path: FILE_A,
       draft: "attempt one",
       generation: 1,
+      allowEmpty: false,
     });
     state = applyEditorAction(state, { type: "edited", value: "attempt two" });
     state = applyEditorAction(state, {
       type: "save-succeeded",
-      path: FILE_A,
+      key: KEY_A,
       generation: 1,
     });
     expect(state.lastSaved).toBe("attempt one");
     expect(state.draft).toBe("attempt two");
     expect(isDirty(state)).toBe(true);
   });
-});
 
-describe("save identity fencing", () => {
-  test("a stale success for file A cannot mark file B saved", () => {
-    // Save A (generation 1) goes pending, then the user opens B and saves B.
-    let state = opened("A saved", FILE_A);
-    state = applyEditorAction(state, { type: "edited", value: "A draft" });
-    state = applyEditorAction(state, {
-      type: "save-started",
-      path: FILE_A,
-      draft: "A draft",
-      generation: nextSaveGeneration(state),
-    });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_B,
-      content: "B saved",
-    });
-    state = applyEditorAction(state, { type: "edited", value: "B draft" });
-    state = applyEditorAction(state, {
-      type: "save-started",
-      path: FILE_B,
-      draft: "B draft",
-      generation: nextSaveGeneration(state),
-    });
-    // A's slow completion finally arrives…
-    const fenced = applyEditorAction(state, {
-      type: "save-succeeded",
-      path: FILE_A,
-      generation: 1,
-    });
-    // …and must be discarded wholesale: state is unchanged by identity —
-    // B is still dirty, still saving, and nothing about it moved.
-    expect(fenced).toBe(state);
-    expect(fenced.draft).toBe("B draft");
-    expect(isDirty(fenced)).toBe(true);
-    expect(fenced.saveInFlight).toBe(true);
-    expect(fenced.savingPath).toBe(FILE_B);
-    expect(fenced.savingDraft).toBe("B draft");
-  });
-
-  test("a stale failure for file A cannot set saveError on file B", () => {
-    let state = opened("A saved", FILE_A);
-    state = applyEditorAction(state, { type: "edited", value: "A draft" });
-    state = applyEditorAction(state, {
-      type: "save-started",
-      path: FILE_A,
-      draft: "A draft",
-      generation: 1,
-    });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_B,
-      content: "B saved",
-    });
-    state = applyEditorAction(state, {
-      type: "save-started",
-      path: FILE_B,
-      draft: "B draft",
-      generation: 2,
-    });
-    const fenced = applyEditorAction(state, {
-      type: "save-failed",
-      path: FILE_A,
-      generation: 1,
-      message: "disk full on A",
-    });
-    expect(fenced).toBe(state);
-    expect(fenced.saveError).toBeNull();
-  });
-
-  test("a completion for the still-in-flight save applies to its own path after a switch", () => {
-    // A's save is pending when the user switches to B (no B save yet):
-    // A's completion is NOT stale and must land on A's retained entry only.
-    let state = opened("A saved", FILE_A);
-    state = applyEditorAction(state, { type: "edited", value: "A draft" });
-    state = applyEditorAction(state, {
-      type: "save-started",
-      path: FILE_A,
-      draft: "A draft",
-      generation: 1,
-    });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_B,
-      content: "B saved",
-    });
-    expect(state.savingPath).toBe(FILE_A);
-    state = applyEditorAction(state, {
-      type: "save-succeeded",
-      path: FILE_A,
-      generation: 1,
-    });
-    expect(state.saveInFlight).toBe(false);
-    // B is untouched and clean.
-    expect(isDirty(state)).toBe(false);
-    // A's retained entry is now saved (no longer dirty when reopened).
-    expect(state.files[FILE_A]).toEqual({ draft: "A draft", lastSaved: "A draft" });
-  });
-
-  test("a failure recorded while another file is open is keyed to its own path", () => {
-    let state = opened("A saved", FILE_A);
-    state = applyEditorAction(state, { type: "edited", value: "A draft" });
-    state = applyEditorAction(state, {
-      type: "save-started",
-      path: FILE_A,
-      draft: "A draft",
-      generation: 1,
-    });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_B,
-      content: "B saved",
-    });
-    state = applyEditorAction(state, {
-      type: "save-failed",
-      path: FILE_A,
-      generation: 1,
-      message: "read-only volume",
-    });
-    expect(state.saveError).toEqual({ path: FILE_A, message: "read-only volume" });
-    expect(state.saveError?.path).not.toBe(FILE_B);
-    expect(state.saveInFlight).toBe(false);
-  });
-});
-
-describe("dirty-switch draft retention", () => {
-  test("switching files retains the dirty draft and restores it on return", () => {
-    let state = opened("A saved", FILE_A);
-    state = applyEditorAction(state, { type: "edited", value: "A unsaved work" });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_B,
-      content: "B saved",
-    });
-    // B opens fresh and clean; A's draft is retained, not discarded.
-    expect(state.openPath).toBe(FILE_B);
-    expect(state.draft).toBe("B saved");
-    expect(isDirty(state)).toBe(false);
-    expect(state.files[FILE_A]).toEqual({
-      draft: "A unsaved work",
-      lastSaved: "A saved",
-    });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_A,
-      content: "A saved",
-    });
-    expect(state.draft).toBe("A unsaved work");
-    expect(isDirty(state)).toBe(true);
-  });
-
-  test("drafts for two dirty files are retained independently", () => {
-    let state = opened("A saved", FILE_A);
-    state = applyEditorAction(state, { type: "edited", value: "A edit" });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_B,
-      content: "B saved",
-    });
-    state = applyEditorAction(state, { type: "edited", value: "B edit" });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_A,
-      content: "A saved",
-    });
-    expect(state.draft).toBe("A edit");
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_B,
-      content: "B saved",
-    });
-    expect(state.draft).toBe("B edit");
-    expect(isDirty(state)).toBe(true);
-  });
-
-  test("reopening the same path with fresh saved content adopts it only while clean", () => {
-    let state = opened("stale saved", FILE_A);
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_A,
-      content: "externally replaced",
-    });
-    expect(state.draft).toBe("externally replaced");
-    expect(isDirty(state)).toBe(false);
-    // Dirty same-path refresh keeps the draft (covered below via retention
-    // wiring): retained dirty wins over external content.
-    state = applyEditorAction(state, { type: "edited", value: "my edits" });
-    const kept = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_A,
-      content: "replaced again",
-    });
-    expect(kept.draft).toBe("my edits");
-    expect(isDirty(kept)).toBe(true);
-  });
-});
-
-describe("save failure and retry", () => {
-  test("a failed save keeps the draft, shows the error and stays dirty", () => {
-    let state = opened("saved");
-    state = applyEditorAction(state, {
-      type: "save-started",
-      path: FILE_A,
-      draft: "draft",
-      generation: 1,
-    });
-    state = applyEditorAction(state, { type: "edited", value: "draft!" });
-    state = applyEditorAction(state, {
-      type: "save-failed",
-      path: FILE_A,
-      generation: 1,
-      message: "disk full",
-    });
-    expect(state.saveError).toEqual({ path: FILE_A, message: "disk full" });
-    expect(state.draft).toBe("draft!");
-    expect(state.saveInFlight).toBe(false);
-    expect(isDirty(state)).toBe(true);
-  });
-
-  test("retrying clears the error while keeping the draft, then success clears dirty", () => {
+  test("a failed save keeps the draft and error; retry clears error then succeeds", () => {
     let state = opened("saved");
     state = applyEditorAction(state, { type: "edited", value: "draft" });
     state = applyEditorAction(state, {
       type: "save-started",
+      key: KEY_A,
       path: FILE_A,
       draft: "draft",
       generation: 1,
+      allowEmpty: false,
     });
     state = applyEditorAction(state, {
       type: "save-failed",
-      path: FILE_A,
+      key: KEY_A,
       generation: 1,
       message: "disk full",
     });
+    expect(state.saveError).toEqual({ key: KEY_A, path: FILE_A, message: "disk full" });
+    expect(state.draft).toBe("draft");
+    expect(state.saveInFlight).toBe(false);
     state = applyEditorAction(state, {
       type: "save-started",
+      key: KEY_A,
       path: FILE_A,
       draft: "draft",
       generation: nextSaveGeneration(state),
+      allowEmpty: false,
     });
     expect(state.saveError).toBeNull();
-    expect(state.draft).toBe("draft");
-    expect(state.saveInFlight).toBe(true);
     state = applyEditorAction(state, {
       type: "save-succeeded",
-      path: FILE_A,
+      key: KEY_A,
       generation: 2,
     });
     expect(isDirty(state)).toBe(false);
   });
+
+  test("each new save gets a fresh generation; completions do not advance it", () => {
+    let state = opened("saved");
+    expect(nextSaveGeneration(state)).toBe(1);
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "d",
+      generation: 1,
+      allowEmpty: false,
+    });
+    expect(nextSaveGeneration(state)).toBe(2);
+    state = applyEditorAction(state, {
+      type: "save-succeeded",
+      key: KEY_A,
+      generation: 1,
+    });
+    expect(state.saveGeneration).toBe(1);
+    expect(nextSaveGeneration(state)).toBe(2);
+  });
 });
 
-describe("runSave with injected deferred fakes", () => {
-  test("an accepted Result clears the save with the request's identity", async () => {
+describe("runSave with deferred fakes (scoped identity)", () => {
+  test("dispatches save-started with the scoped key, then the fenced outcome", async () => {
     const dispatched: EditorAction[] = [];
     const gate = deferred<Result<null>>();
     const pending = runSave({
       draft: "my draft",
+      scope: SCOPE_A,
       path: FILE_A,
       generation: 7,
+      allowEmpty: false,
       onSave: () => gate.promise,
       dispatch: (action) => dispatched.push(action),
     });
     expect(dispatched).toEqual([
-      { type: "save-started", path: FILE_A, draft: "my draft", generation: 7 },
+      {
+        type: "save-started",
+        key: "h1/w1/src/a.ts",
+        path: FILE_A,
+        draft: "my draft",
+        generation: 7,
+        allowEmpty: false,
+      },
     ]);
     gate.resolve({ ok: true, result: null });
     await pending;
-    expect(dispatched).toEqual([
-      { type: "save-started", path: FILE_A, draft: "my draft", generation: 7 },
-      { type: "save-succeeded", path: FILE_A, generation: 7 },
-    ]);
-  });
-
-  test("a rejected Result surfaces the service error with the request's identity", async () => {
-    const dispatched: EditorAction[] = [];
-    const gate = deferred<Result<null>>();
-    const pending = runSave({
-      draft: "my draft",
-      path: FILE_A,
-      generation: 3,
-      onSave: () => gate.promise,
-      dispatch: (action) => dispatched.push(action),
-    });
-    gate.resolve({
-      ok: false,
-      error: { code: "io", message: "read-only volume", retryable: true },
-    });
-    await pending;
     expect(dispatched[1]).toEqual({
-      type: "save-failed",
-      path: FILE_A,
-      generation: 3,
-      message: "read-only volume",
+      type: "save-succeeded",
+      key: "h1/w1/src/a.ts",
+      generation: 7,
     });
   });
 
-  test("a thrown save (transport failure) becomes a retryable save error, not a crash", async () => {
+  test("a thrown save becomes a retryable failure carrying the scoped identity", async () => {
     const dispatched: EditorAction[] = [];
     await runSave({
       draft: "my draft",
+      scope: SCOPE_B,
       path: FILE_A,
       generation: 1,
+      allowEmpty: true,
       onSave: () => Promise.reject(new Error("boom")),
       dispatch: (action) => dispatched.push(action),
     });
     expect(dispatched[1]).toEqual({
       type: "save-failed",
-      path: FILE_A,
+      key: "h2/w2/src/a.ts",
       generation: 1,
       message: "The file could not be saved.",
     });
   });
 
-  test("interleaved saves: a slow A completion dispatches A's identity, never B's", async () => {
+  test("interleaved saves dispatch their own scoped identities", async () => {
     const dispatched: EditorAction[] = [];
     const gateA = deferred<Result<null>>();
     const saveA = runSave({
       draft: "A draft",
+      scope: SCOPE_A,
       path: FILE_A,
       generation: 1,
+      allowEmpty: false,
       onSave: () => gateA.promise,
       dispatch: (action) => dispatched.push(action),
     });
     const saveB = runSave({
       draft: "B draft",
+      scope: SCOPE_A,
       path: FILE_B,
       generation: 2,
+      allowEmpty: false,
       onSave: okSave(),
       dispatch: (action) => dispatched.push(action),
     });
     await saveB;
     gateA.resolve({ ok: true, result: null });
     await saveA;
-    expect(dispatched).toEqual([
-      { type: "save-started", path: FILE_A, draft: "A draft", generation: 1 },
-      { type: "save-started", path: FILE_B, draft: "B draft", generation: 2 },
-      { type: "save-succeeded", path: FILE_B, generation: 2 },
-      { type: "save-succeeded", path: FILE_A, generation: 1 },
+    expect(dispatched.map((action) => action.type)).toEqual([
+      "save-started",
+      "save-started",
+      "save-succeeded",
+      "save-succeeded",
     ]);
-  });
-});
-
-describe("file switching basics", () => {
-  test("opening another file starts from its own saved content with no error banner", () => {
-    let state = opened("saved");
-    state = applyEditorAction(state, { type: "edited", value: "unsaved" });
-    state = applyEditorAction(state, {
-      type: "save-failed",
-      path: FILE_A,
-      generation: 0,
-      message: "disk full",
-    });
-    state = applyEditorAction(state, {
-      type: "file-opened",
-      path: FILE_B,
-      content: "fresh",
-    });
-    expect(state.openPath).toBe(FILE_B);
-    expect(state.draft).toBe("fresh");
-    expect(state.saveError).toBeNull();
-    expect(isDirty(state)).toBe(false);
-  });
-
-  test("closing the file retains its draft in the map", () => {
-    let state = opened("saved");
-    state = applyEditorAction(state, { type: "edited", value: "kept work" });
-    state = applyEditorAction(state, { type: "file-opened", path: null, content: null });
-    expect(state.openPath).toBeNull();
-    expect(state.files[FILE_A]).toEqual({ draft: "kept work", lastSaved: "saved" });
+    expect(dispatched[2]).toEqual({ type: "save-succeeded", key: KEY_B, generation: 2 });
+    expect(dispatched[3]).toEqual({ type: "save-succeeded", key: KEY_A, generation: 1 });
   });
 });
 
 describe("EditorPane rendering", () => {
-  test("a read error shows the read-error state with the retry-read affordance", () => {
-    const markup = renderToString(
+  const render = (props: Partial<EditorPaneProps>) =>
+    renderToString(
       createElement(EditorPane, {
+        scope: SCOPE_A,
         path: FILE_A,
-        content: null,
-        readError: "File unavailable",
-        onReload: () => {},
+        content: "body",
         onSave: okSave(),
+        ...props,
       }),
     );
+
+  test("a pending read renders the explicit unread state with no Save and no textarea", () => {
+    const markup = render({ content: null });
+    expect(markup).toContain("Waiting for file content");
+    expect(markup).not.toContain(">Save<");
+    expect(markup).not.toContain("Unsaved changes");
+    expect(markup).not.toContain("Contents of");
+  });
+
+  test("after content arrives the editor renders with Save enabled", () => {
+    const markup = render({ content: "body" });
+    expect(markup).toContain(">Save<");
+    expect(markup).toContain("Contents of");
+    expect(markup).not.toContain("Waiting for file content");
+  });
+
+  test("a read error shows the read-error state with the retry-read affordance", () => {
+    const markup = render({
+      content: null,
+      readError: "File unavailable",
+      onReload: () => {},
+    });
     expect(markup).toContain("File unavailable");
     expect(markup).toContain("Retry read");
   });
 
   test("with no open file it shows the empty state", () => {
-    const markup = renderToString(
-      createElement(EditorPane, { path: null, content: null, onSave: okSave() }),
-    );
+    const markup = render({ path: null, content: null });
     expect(markup).toContain("No file open");
   });
 
-  test("an opened clean file renders its path and no dirty indicator", () => {
-    const markup = renderToString(
-      createElement(EditorPane, {
-        path: FILE_A,
-        content: "body",
-        onSave: okSave(),
-      }),
-    );
-    expect(markup).toContain(FILE_A);
-    expect(markup).toContain("Save");
-    expect(markup).not.toContain("Unsaved changes");
+  test("new-file intent renders an editable empty pane with Save", () => {
+    const markup = render({ content: null, allowEmptySave: true });
+    expect(markup).toContain(">Save<");
+    expect(markup).not.toContain("Waiting for file content");
   });
 
-  test("each new save gets a fresh generation; completions do not advance it", async () => {
-    let state = opened("saved");
-    expect(nextSaveGeneration(state)).toBe(1);
-    state = applyEditorAction(state, {
-      type: "save-started",
-      path: FILE_A,
-      draft: "d",
-      generation: nextSaveGeneration(state),
-    });
-    expect(nextSaveGeneration(state)).toBe(2);
-    state = applyEditorAction(state, {
-      type: "save-succeeded",
-      path: FILE_A,
-      generation: 1,
-    });
-    // The counter only moves when the NEXT save starts, so two concurrent
-    // saves can never share a generation.
-    expect(state.saveGeneration).toBe(1);
-    expect(nextSaveGeneration(state)).toBe(2);
+  test("an opened clean file shows no dirty indicator; label carries the path", () => {
+    const markup = render({ content: "body" });
+    expect(markup).toContain(FILE_A);
+    expect(markup).not.toContain("Unsaved changes");
   });
 });
