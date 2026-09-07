@@ -13,6 +13,7 @@ repository = "https://github.com/clioo/drogon"
 drogon-protocol = { path = "crates/drogon-protocol" }
 drogon-core = { path = "crates/drogon-core" }
 drogon-harness = { path = "crates/drogon-harness" }
+drogon-orchestration = { path = "crates/drogon-orchestration" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }

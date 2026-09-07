@@ -260,6 +260,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "drogon-orchestration"
+version = "0.1.0"
+dependencies = [
+ "drogon-protocol",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "drogon-protocol"
 version = "0.1.0"
 dependencies = [
