@@ -1521,3 +1521,219 @@ fn live_then_exited_then_stale_unverifiable_never_regresses_either_row() {
         "ended_at must stay consistent with host_observation=Exited"
     );
 }
+
+// --- V4-A5c: atomic both-row record transaction --------------------------
+//
+// Reproduces a second, distinct hole left by the V4-A5b fix above: for a
+// NON-terminal existing row (`Dispatched`, never `Completed`), a later
+// out-of-order (stale `observed_at`) replay was correctly rejected by the
+// `AutomationRun` upsert (the row itself was left untouched), but
+// `record_run_outcome` still built a FRESH `ResponsibilityRun` projection
+// straight from the raw incoming `outcome` regardless -- regressing the
+// responsibility row even though the durable `AutomationRun` it is
+// supposed to mirror never changed. It also proves `record_run_outcome`
+// now opens exactly one `BEGIN IMMEDIATE` transaction shared by both
+// writes (a genuine mid-transaction failure on the second write rolls
+// back the first), and that a session/incarnation mismatch for the same
+// `request_id` is refused outright rather than silently overwriting the
+// existing linkage.
+
+fn history_row(c: &Connection, bot_id: &str, request_id: &str) -> ResponsibilityRun {
+    bstorage::history_for_bot(c, HOST, FOLDER, bot_id)
+        .unwrap()
+        .into_iter()
+        .find(|h| h.responsibility_run.id == request_id)
+        .expect("responsibility run row must exist")
+        .responsibility_run
+}
+
+#[test]
+fn stale_nonterminal_observation_never_regresses_the_responsibility_row() {
+    let c = conn();
+    seed_scheduled_bot(&c);
+    let plan = prepare(&c, "due-100", 100.0);
+    let automation_run_id = automation_run_id_for(&plan.request_id);
+
+    // 1) live, observed at t=100 -- non-terminal (`Dispatched`).
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            verdict: "live".to_string(),
+            exit_code: None,
+        },
+        100.0,
+    )
+    .unwrap();
+
+    let before_run = automations::storage::get_automation_run(&c, &automation_run_id)
+        .unwrap()
+        .expect("row must exist");
+    assert_eq!(before_run.status, AutomationRunStatus::Dispatched);
+    let before_responsibility = history_row(&c, "b1", &plan.request_id);
+    assert_eq!(
+        before_responsibility.host_observation,
+        Some(HostObservation::Live)
+    );
+    assert_eq!(before_responsibility.ended_at, None);
+
+    // 2) a later-arriving but OUT-OF-ORDER (earlier `observed_at`) failed
+    // poll for the SAME incarnation -- rejected as stale, must not touch
+    // either durable row.
+    let poll_error = DispatchSeamError {
+        code: "unverifiable".to_string(),
+        message: "lost contact".to_string(),
+    };
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::ObservationFailed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            error: poll_error,
+        },
+        50.0,
+    )
+    .unwrap();
+
+    let after_run = automations::storage::get_automation_run(&c, &automation_run_id)
+        .unwrap()
+        .expect("row must exist");
+    assert_eq!(
+        after_run, before_run,
+        "a stale non-terminal replay must leave the AutomationRun row byte-identical"
+    );
+
+    let after_responsibility = history_row(&c, "b1", &plan.request_id);
+    assert_eq!(
+        after_responsibility, before_responsibility,
+        "a stale non-terminal replay must leave the ResponsibilityRun row byte-identical -- \
+         never re-derived from the rejected replay's own outcome"
+    );
+}
+
+#[test]
+fn session_incarnation_mismatch_for_the_same_request_id_is_an_ownership_violation() {
+    let c = conn();
+    seed_scheduled_bot(&c);
+    let plan = prepare(&c, "due-100", 100.0);
+    let automation_run_id = automation_run_id_for(&plan.request_id);
+
+    record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            verdict: "live".to_string(),
+            exit_code: None,
+        },
+        100.0,
+    )
+    .unwrap();
+
+    let before_run = automations::storage::get_automation_run(&c, &automation_run_id)
+        .unwrap()
+        .expect("row must exist");
+    let before_responsibility = history_row(&c, "b1", &plan.request_id);
+
+    // Same `request_id` (so the same `ar:{request_id}` linkage), but a
+    // DIFFERENT session/incarnation -- never a legitimate replay under this
+    // build's deterministic request_id, so it must be refused rather than
+    // silently overwriting the existing linkage.
+    let result = record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s2".to_string(),
+            incarnation: "inc-2".to_string(),
+            verdict: "live".to_string(),
+            exit_code: None,
+        },
+        200.0,
+    );
+    assert!(
+        matches!(result, Err(bstorage::StorageError::OwnershipViolation(_))),
+        "a session/incarnation mismatch for the same request_id must be an OwnershipViolation, \
+         got {result:?}"
+    );
+
+    let after_run = automations::storage::get_automation_run(&c, &automation_run_id)
+        .unwrap()
+        .expect("row must exist");
+    assert_eq!(
+        after_run, before_run,
+        "a refused linkage mismatch must leave the AutomationRun row untouched"
+    );
+    let after_responsibility = history_row(&c, "b1", &plan.request_id);
+    assert_eq!(
+        after_responsibility, before_responsibility,
+        "a refused linkage mismatch must leave the ResponsibilityRun row untouched"
+    );
+
+    let run_count: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM bot_responsibility_runs WHERE automation_run_id = ?1",
+            [&automation_run_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        run_count, 1,
+        "the refused call must never insert a second row"
+    );
+}
+
+#[test]
+fn a_mid_transaction_failure_on_the_responsibility_write_rolls_back_the_automation_run_write_too() {
+    let c = conn();
+    seed_scheduled_bot(&c);
+    let plan = prepare(&c, "due-100", 100.0);
+    let automation_run_id = automation_run_id_for(&plan.request_id);
+
+    // A concurrent delete of the Bot between plan preparation and
+    // recording: the linked `AutomationRun` upsert (the FIRST write in the
+    // shared transaction) would still succeed in isolation, but the
+    // `ResponsibilityRun` write (the SECOND) now genuinely fails --
+    // `record_responsibility_run_in_tx` requires the Bot to exist. Both
+    // writes share one `BEGIN IMMEDIATE` transaction, so this real failure
+    // must roll back the already-applied first write too.
+    assert!(bstorage::delete_bot(&c, HOST, FOLDER, "b1").unwrap());
+
+    let result = record_run_outcome(
+        &c,
+        &plan,
+        &RunnerOutcome::Observed {
+            session_id: "s1".to_string(),
+            incarnation: "inc-1".to_string(),
+            verdict: "live".to_string(),
+            exit_code: None,
+        },
+        100.0,
+    );
+    assert!(
+        result.is_err(),
+        "the responsibility write must fail: its owning Bot no longer exists"
+    );
+
+    let stored = automations::storage::get_automation_run(&c, &automation_run_id).unwrap();
+    assert!(
+        stored.is_none(),
+        "the AutomationRun upsert must roll back together with the failed responsibility write, \
+         never left as an orphaned committed row"
+    );
+
+    let run_count: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM bot_responsibility_runs WHERE automation_run_id = ?1",
+            [&automation_run_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        run_count, 0,
+        "no responsibility run row may be committed when its own write failed"
+    );
+}

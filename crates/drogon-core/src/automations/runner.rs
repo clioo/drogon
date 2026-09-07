@@ -588,18 +588,53 @@ impl ObservationUpdate {
     }
 }
 
-/// Read-modify-write upsert of the linked `AutomationRun` (id `ar:{request_id}`)
-/// against a real `BEGIN IMMEDIATE` transaction, so a concurrent replay of
-/// the same event is serialized rather than racing a read against a write.
+/// Explicit result of [`upsert_linked_automation_run_in_tx`]'s
+/// read-modify-write decision, carried alongside the accepted row so
+/// [`record_run_outcome`] can decide what to project into the
+/// `ResponsibilityRun` write WITHOUT re-deriving it from the raw incoming
+/// `outcome` -- see [`RejectedStale`](Self::RejectedStale) for the
+/// regression this replaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcceptedOutcome {
+    /// No existing row (a first insert), or an existing non-terminal row
+    /// legitimately merged with this observation.
+    AcceptedNew,
+    /// The existing row already proved `Completed` (a real exit was
+    /// observed); it is terminal and returned completely unchanged.
+    KeptExisting,
+    /// The incoming observation's `observed_at` is older than the existing
+    /// (non-terminal) row's -- an out-of-order replay. The existing row is
+    /// returned completely unchanged, and the caller must project the
+    /// responsibility row from that SAME existing state, never from this
+    /// call's own rejected `outcome`.
+    RejectedStale,
+}
+
+/// Read-modify-write upsert of the linked `AutomationRun` (id
+/// `ar:{request_id}`), taking an already-open transaction/connection and
+/// never beginning or committing one of its own -- see [`record_run_outcome`]
+/// for why this and the responsibility-run write now share exactly one
+/// `BEGIN IMMEDIATE` (V4-A5c).
 ///
 /// Two cases are a deliberate no-op (the row is read back and returned
-/// unchanged, nothing is written):
-/// - the existing row already proved `Completed` (a real exit was
-///   observed) -- that is terminal and is never regressed by a later
-///   stale/unverifiable observation for the same incarnation, since this
-///   build's deterministic `request_id` always re-admits the same session;
-/// - the incoming observation's `observed_at` is older than the existing
-///   row's -- an out-of-order replay, rejected without error.
+/// unchanged, nothing is written) -- both reported via [`AcceptedOutcome`]
+/// rather than left for the caller to re-infer from `automation_run.status`:
+/// - [`AcceptedOutcome::KeptExisting`]: the existing row already proved
+///   `Completed` (a real exit was observed) -- that is terminal and is
+///   never regressed by a later stale/unverifiable observation for the
+///   same incarnation, since this build's deterministic `request_id`
+///   always re-admits the same session;
+/// - [`AcceptedOutcome::RejectedStale`]: the incoming observation's
+///   `observed_at` is older than the existing (non-terminal) row's -- an
+///   out-of-order replay, rejected without error.
+///
+/// Session fence: if the existing row already carries a
+/// `(terminal_session_id, session_incarnation)` linkage and this
+/// observation's own linkage is both present and DIFFERENT, the whole call
+/// fails with [`bots_storage::StorageError::OwnershipViolation`] rather
+/// than silently overwriting it -- the same `request_id` (and so the same
+/// `ar:{request_id}` row) must never be re-linked to a different session
+/// incarnation.
 ///
 /// Every other field this build does not interpret here (`title`,
 /// `trigger`, `scheduled_for`, `occurrence_count`, `last_occurrence_at`,
@@ -607,15 +642,14 @@ impl ObservationUpdate {
 /// syntax; only a first insert ever assigns them, and even then
 /// `occurrence_count`/`last_occurrence_at` are left `None` -- this module
 /// has no proven source for what they should mean, so it never guesses.
-fn upsert_linked_automation_run(
+fn upsert_linked_automation_run_in_tx(
     conn: &Connection,
     automation_run_id: &str,
     plan: &RunPlan,
     outcome: &RunnerOutcome,
     observed_at: f64,
-) -> Result<AutomationRun, automations_storage::StorageError> {
-    let tx = automations_storage::begin_immediate(conn)?;
-    let existing = automations_storage::get_automation_run(&tx, automation_run_id)?;
+) -> Result<(AutomationRun, AcceptedOutcome), bots_storage::StorageError> {
+    let existing = automations_storage::get_automation_run(conn, automation_run_id)?;
     let observation = ObservationUpdate::from_outcome(outcome, plan.attempt_at, observed_at);
 
     let result = match existing {
@@ -659,48 +693,63 @@ fn upsert_linked_automation_run(
                 exit_code: observation.exit_code,
                 observed_at: observation.observed_at,
             };
-            automations_storage::upsert_automation_run(&tx, &fresh)?;
-            fresh
+            automations_storage::upsert_automation_run(conn, &fresh)?;
+            (fresh, AcceptedOutcome::AcceptedNew)
         }
-        Some(existing) if existing.status == AutomationRunStatus::Completed => existing,
         Some(existing) => {
-            let is_stale = match (observation.observed_at, existing.observed_at) {
-                (Some(incoming), Some(recorded)) => incoming < recorded,
-                _ => false,
-            };
-            if is_stale {
-                existing
+            if let (Some(existing_sid), Some(existing_inc)) =
+                (&existing.terminal_session_id, &existing.session_incarnation)
+                && let (Some(incoming_sid), Some(incoming_inc)) = (
+                    &observation.terminal_session_id,
+                    &observation.session_incarnation,
+                )
+                && (existing_sid != incoming_sid || existing_inc != incoming_inc)
+            {
+                return Err(bots_storage::StorageError::OwnershipViolation(
+                    "automation run's existing session linkage does not match this \
+                     observation's session/incarnation for the same request id",
+                ));
+            }
+            if existing.status == AutomationRunStatus::Completed {
+                (existing, AcceptedOutcome::KeptExisting)
             } else {
-                let merged = AutomationRun {
-                    status: observation.status,
-                    error: observation.error.clone(),
-                    terminal_session_id: observation
-                        .terminal_session_id
-                        .clone()
-                        .or(existing.terminal_session_id.clone()),
-                    session_incarnation: observation
-                        .session_incarnation
-                        .clone()
-                        .or(existing.session_incarnation.clone()),
-                    exit_code: observation.exit_code.or(existing.exit_code),
-                    observed_at: observation.observed_at.or(existing.observed_at),
-                    // The FIRST dispatch time is frozen forever: existing
-                    // wins whenever it is already `Some`, never rewritten by
-                    // a later replay's own attempt time.
-                    dispatched_at: existing.dispatched_at.or(observation.dispatched_at),
-                    ..existing
+                let is_stale = match (observation.observed_at, existing.observed_at) {
+                    (Some(incoming), Some(recorded)) => incoming < recorded,
+                    _ => false,
                 };
-                automations_storage::upsert_automation_run(&tx, &merged)?;
-                merged
+                if is_stale {
+                    (existing, AcceptedOutcome::RejectedStale)
+                } else {
+                    let merged = AutomationRun {
+                        status: observation.status,
+                        error: observation.error.clone(),
+                        terminal_session_id: observation
+                            .terminal_session_id
+                            .clone()
+                            .or(existing.terminal_session_id.clone()),
+                        session_incarnation: observation
+                            .session_incarnation
+                            .clone()
+                            .or(existing.session_incarnation.clone()),
+                        exit_code: observation.exit_code.or(existing.exit_code),
+                        observed_at: observation.observed_at.or(existing.observed_at),
+                        // The FIRST dispatch time is frozen forever: existing
+                        // wins whenever it is already `Some`, never rewritten by
+                        // a later replay's own attempt time.
+                        dispatched_at: existing.dispatched_at.or(observation.dispatched_at),
+                        ..existing
+                    };
+                    automations_storage::upsert_automation_run(conn, &merged)?;
+                    (merged, AcceptedOutcome::AcceptedNew)
+                }
             }
         }
     };
-    tx.commit()?;
     Ok(result)
 }
 
 /// Projects the durable `ResponsibilityRun.host_observation`/`ended_at`
-/// pair from the ACCEPTED `AutomationRun` row [`upsert_linked_automation_run`]
+/// pair from the ACCEPTED `AutomationRun` row [`upsert_linked_automation_run_in_tx`]
 /// just returned -- never straight from the raw incoming `outcome`. That
 /// row's own terminal guard already refuses to regress a proven
 /// `Completed` (real exit observed) with a later stale/unverifiable
@@ -714,6 +763,14 @@ fn upsert_linked_automation_run(
 /// `plan.attempt_at`. Only when the accepted row is still non-terminal
 /// (`Dispatched`) does the current `outcome`'s own verdict decide
 /// `Live`/`Exited`/`Unverifiable`.
+///
+/// [`record_run_outcome`] never calls this at all when
+/// [`upsert_linked_automation_run_in_tx`] reports
+/// [`AcceptedOutcome::RejectedStale`]: that case has no ACCEPTED row to
+/// project from (the existing row was correctly left untouched), so the
+/// only correct projection is "none" -- the existing `ResponsibilityRun`
+/// stays byte-identical, never re-derived from this call's own rejected
+/// `outcome` (the regression V4-A5c fixes for non-terminal rows).
 fn responsibility_projection(
     automation_run: &AutomationRun,
     outcome: &RunnerOutcome,
@@ -737,7 +794,7 @@ fn responsibility_projection(
 
 /// Phase 3: durable record via existing responsibility-run history storage,
 /// linked to a durably upserted `AutomationRun` at the stable id
-/// `ar:{request_id}` (see [`upsert_linked_automation_run`]).
+/// `ar:{request_id}` (see [`upsert_linked_automation_run_in_tx`]).
 /// `host_observation`/`ended_at` are derived from that ACCEPTED row by
 /// [`responsibility_projection`], never fabricated from the raw `outcome`
 /// directly -- see its doc for the terminal-guard rationale. `observed_at`
@@ -745,6 +802,18 @@ fn responsibility_projection(
 /// call, supplied by the caller and distinct from `plan.attempt_at` (the
 /// dispatch attempt time); it is only ever used when this call's
 /// observation is the one accepted.
+///
+/// V4-A5c: both durable writes -- the linked `AutomationRun` upsert and the
+/// `ResponsibilityRun` record -- now share exactly ONE `BEGIN IMMEDIATE`
+/// transaction, committed once at the end; any failure on either write (a
+/// storage error, or the session fence in
+/// [`upsert_linked_automation_run_in_tx`]) drops the transaction
+/// uncommitted, rolling both back together rather than leaving the first
+/// write durably committed while the second silently never happens. When
+/// the upsert reports [`AcceptedOutcome::RejectedStale`], the
+/// `ResponsibilityRun` write is skipped entirely -- the existing row is
+/// left exactly as it was, never regressed by a projection built from this
+/// call's own rejected `outcome`.
 pub fn record_run_outcome(
     conn: &Connection,
     plan: &RunPlan,
@@ -752,22 +821,27 @@ pub fn record_run_outcome(
     observed_at: f64,
 ) -> Result<(), bots_storage::StorageError> {
     let automation_run_id = format!("ar:{}", plan.request_id);
-    let automation_run =
-        upsert_linked_automation_run(conn, &automation_run_id, plan, outcome, observed_at)?;
+    let tx = automations_storage::begin_immediate(conn)?;
 
-    let (host_observation, ended_at) = responsibility_projection(&automation_run, outcome);
+    let (automation_run, accepted) =
+        upsert_linked_automation_run_in_tx(&tx, &automation_run_id, plan, outcome, observed_at)?;
 
-    let run = ResponsibilityRun {
-        id: plan.request_id.clone(),
-        bot_id: plan.bot_id.clone(),
-        responsibility_id: plan.responsibility_id.clone(),
-        automation_id: Some(plan.automation_id.clone()),
-        automation_run_id: Some(automation_run.id.clone()),
-        started_at: plan.attempt_at,
-        ended_at,
-        recipe: None,
-        host_observation,
-    };
-    bots_storage::record_responsibility_run(conn, &plan.host_id, &plan.folder, run)?;
+    if accepted != AcceptedOutcome::RejectedStale {
+        let (host_observation, ended_at) = responsibility_projection(&automation_run, outcome);
+        let run = ResponsibilityRun {
+            id: plan.request_id.clone(),
+            bot_id: plan.bot_id.clone(),
+            responsibility_id: plan.responsibility_id.clone(),
+            automation_id: Some(plan.automation_id.clone()),
+            automation_run_id: Some(automation_run.id.clone()),
+            started_at: plan.attempt_at,
+            ended_at,
+            recipe: None,
+            host_observation,
+        };
+        bots_storage::record_responsibility_run_in_tx(&tx, &plan.host_id, &plan.folder, run)?;
+    }
+
+    tx.commit()?;
     Ok(())
 }
