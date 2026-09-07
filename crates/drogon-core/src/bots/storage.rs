@@ -823,6 +823,12 @@ pub fn require_owned_automation(
 /// added in schema v2 is the hard backstop even if that serialization were
 /// ever bypassed. Reopening the database afterwards still shows exactly
 /// one row for that pair, at the original (first-inserted) id.
+///
+/// This wrapper only owns the transaction boundary: the actual sequence is
+/// [`record_responsibility_run_in_tx`], also called directly by
+/// `automations::runner::record_run_outcome` so that write can share a
+/// single `BEGIN IMMEDIATE` with its own linked `AutomationRun` upsert
+/// (see V4-A5c) instead of nesting a second transaction.
 pub fn record_responsibility_run(
     conn: &Connection,
     host_id: &str,
@@ -830,8 +836,23 @@ pub fn record_responsibility_run(
     run: ResponsibilityRun,
 ) -> Result<ResponsibilityRun> {
     let tx = automations_storage::begin_immediate(conn)?;
-    let conn = &tx;
+    let result = record_responsibility_run_in_tx(&tx, host_id, folder, run)?;
+    tx.commit()?;
+    Ok(result)
+}
 
+/// The check-then-merge-or-insert body of [`record_responsibility_run`],
+/// taking an already-open transaction/connection and never beginning or
+/// committing one of its own -- see that function's doc for the full
+/// behavior contract, which this preserves byte-for-byte. `pub(crate)` so
+/// `automations::runner::record_run_outcome` can run it inside its own
+/// shared `BEGIN IMMEDIATE` alongside the linked `AutomationRun` upsert.
+pub(crate) fn record_responsibility_run_in_tx(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    run: ResponsibilityRun,
+) -> Result<ResponsibilityRun> {
     let bot = get_bot(conn, host_id, folder, &run.bot_id)?.ok_or(StorageError::NotFound("bot"))?;
     let responsibility = bot
         .responsibilities
@@ -909,7 +930,6 @@ pub fn record_responsibility_run(
         upsert_run_row(conn, host_id, folder, &run)?;
         run
     };
-    tx.commit()?;
     Ok(result)
 }
 
