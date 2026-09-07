@@ -148,3 +148,11 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J4 R11-B: chrome de la pestaña de browser del fuente (barra de direcciones, navegación, banners, menú, buscar, menú contextual) | R11 | Muse | fusionada: 1278 tests, oráculo browser PASSED; chords con el guest enfocado pendientes | #83 |
 | J11 R11-C: cobertura del paquete sellado para las superficies nuevas (barra derecha, menú +, composer, Automations, Bots, Tasks, Settings, barra) | R11 | OpenCode + Muse | fusionada: bundle sellado 40/40 PASSED sobre main | #82 |
 | J9 R11-D: panel y pestaña de Mentu portados literalmente del fork (Draft, Graph, Metrics, controles de ejecución) sobre las primitivas | R11 | Muse | fusionada: Graph/Run/Evidence/Metrics del fork, verify.commands y step_status corregidos; Open full tab cableado | #84 |
+| J2 R12-A: editor Monaco y visor de diff del fuente (cabecera, autosave, tema, DiffViewer) | R12 | Sonnet | lanzada | |
+| J5 R12-B: jump palette ⌘J y quick open ⌘P del fuente con files.search en el daemon y reveal en Explorer | R12 | Muse | lanzada | |
+| J1 R12-D: interacciones del tab strip (reordenar con dnd-kit, menú contextual, pin, cerrar variantes) | R12 | Muse | lanzada | |
+| J1/J4 R12-E: remates de terminal y browser (política de pegado, popover de enlaces, reinicio con el mismo harness, chords con el guest enfocado) | R12 | GLM 5.3 Flash | lanzada | |
+| J7 R12-F: dashboard de Runs y página de detalle de ejecución de Automations | R12 | GLM 5.3 Flash | lanzada | |
+| J6 R12-G: Tasks en modo pull requests con celdas de revisión/checks/merge y start desde PR | R12 | OpenCode + Muse | lanzada | |
+| J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode + Muse | lanzada | |
+| J10 R12-I: paneles de Settings del fuente (Appearance, General, Agents, Notifications, Git y GitHub) | R12 | Muse | lanzada | |
