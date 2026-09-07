@@ -105,11 +105,11 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J2 Git review | R1 | Muse C | fusionada | #21 |
 | J8 Bots | R2 | Sonnet | en curso | |
 | J1 sidebar y pestañas | R2 | Muse A | fusionada; estado de agente real llega con R1-S | #22 |
-| J7 Automations | R2 | Muse B | en curso | |
+| J7 Automations | R2 | Muse B | fusionada; horarios solo UTC | #29 |
 | J4 Browser | R2 | Muse C | fusionada (pane); CLI browser pendiente | #27 |
 | J9 Mentu | R3 | Sonnet | pendiente | |
 | J6 Tasks | R3 | Muse A | en curso | |
-| J3 CLI | R3 | Muse B | en curso | |
-| J1 notificaciones | R3 | Muse C | pendiente | |
+| J3 CLI | R3 | Muse B | fusionada: terminal wait y guías skills get; browser CLI pendiente | #30 |
+| J1 notificaciones | R3 | Muse C | en curso: needs_input por hooks de Claude y notificación nativa | |
 | J10 Settings | R4 | Muse A | pendiente | |
 | J11 Paquete | R4 | Muse B | pendiente | |
