@@ -657,7 +657,22 @@ pub fn parse_status_porcelain_v2_z(input: &str) -> Result<ParsedStatus, RpcError
     let mut header = StatusHeader::default();
     let mut entries = Vec::new();
 
-    let tokens: Vec<&str> = input.split('\0').filter(|t| !t.is_empty()).collect();
+    // Split on NUL but do NOT filter out empty tokens: `input` is a sequence
+    // of NUL-*terminated* records, so a well-formed input's only empty token
+    // is the single trailing artifact after the final terminator (or none,
+    // for empty input). Blanket-filtering every empty token (the previous
+    // behavior) silently deletes a malformed empty `origPath` token too —
+    // shifting every later `tokens.get(i + 1)` lookup onto what should have
+    // been the START of the NEXT record, so a crafted empty-origPath rename
+    // record would corrupt/consume that following record as if it were this
+    // one's origPath instead of being rejected. Preserving positions and
+    // dropping only the one legitimate trailing empty artifact makes that
+    // shape a normal "unknown status line prefix" or "empty origPath"
+    // rejection instead.
+    let mut tokens: Vec<&str> = input.split('\0').collect();
+    if tokens.last() == Some(&"") {
+        tokens.pop();
+    }
     let mut i = 0;
     while i < tokens.len() {
         let token = tokens[i];

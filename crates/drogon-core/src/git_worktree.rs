@@ -27,6 +27,20 @@ pub struct WorktreeEntry {
     pub prunable: bool,
 }
 
+/// Verified live against Git 2.50.1: unlike `git status --porcelain=v2`,
+/// `git worktree list --porcelain` (line-block form, no `-z`) NEVER C-quotes
+/// its `worktree <path>` field, even for a path containing a literal `"`, a
+/// raw control byte, a tab, or non-ASCII bytes, and even with
+/// `core.quotePath=true` forced — the line form has no escaping mechanism at
+/// all (that gap is exactly why `-z` exists for this command). So a `"`-
+/// wrapped-looking path here is never C-quoted; it is either a raw path that
+/// happens to start and end with a literal `"` character, or (in the never-
+/// observed case a future/older Git actually emits real C-quoting here) an
+/// escape sequence we cannot safely tell apart from that literal case. Do
+/// NOT reuse `crate::git`'s status-parser C-unquote heuristic here: applying
+/// it would corrupt or reject a real path that legitimately starts and ends
+/// with `"`, since (unlike status output) a `"`-wrapped path is not proof of
+/// quoting in this command's output.
 fn build_entry(lines: &[&str]) -> Result<WorktreeEntry, RpcError> {
     let mut entry = WorktreeEntry::default();
     let mut saw_worktree = false;
@@ -186,6 +200,26 @@ fn is_absolute_path(path: &str) -> bool {
     Path::new(path).is_absolute()
 }
 
+/// True for a Windows "drive-relative" path: `C:foo` or a bare `C:` (a drive
+/// letter followed by `:` with no `/` or `\` immediately after). This form
+/// is syntactically indistinguishable from an ordinary relative path by eye,
+/// but on Windows it resolves against the *current directory of that drive
+/// letter* — a per-process, per-drive slot this module has no visibility
+/// into and that has nothing to do with `root`. It must be rejected under
+/// the same "not actually relative to root" policy as a drive-absolute path
+/// (`is_absolute_path`); a drive-absolute path is already unconditionally
+/// rejected below because this module enforces "relative to root" via
+/// `path` alone (no filesystem containment check against `root` — see
+/// `validate_worktree_add`'s doc comment), so any path that is not
+/// unambiguously relative already necessarily escapes that policy.
+fn is_drive_relative_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && !(bytes.len() >= 3 && (bytes[2] == b'/' || bytes[2] == b'\\'))
+}
+
 fn split_segments(path: &str) -> impl Iterator<Item = &str> {
     path.split(['/', '\\'])
 }
@@ -210,6 +244,11 @@ fn validate_worktree_path(path: &str) -> Result<(), RpcError> {
             "worktree path must be relative to root: {path}"
         )));
     }
+    if is_drive_relative_path(path) {
+        return Err(error::invalid_argument(format!(
+            "worktree path must not be a Windows drive-relative path: {path}"
+        )));
+    }
     if split_segments(path).any(|segment| segment == "..") {
         return Err(error::invalid_argument(format!(
             "worktree path must not escape root via '..': {path}"
@@ -218,11 +257,41 @@ fn validate_worktree_path(path: &str) -> Result<(), RpcError> {
     Ok(())
 }
 
-/// Refuses a branch name that `git check-ref-format` (or a shell splitting
-/// its argument list) would treat unsafely: whitespace, control characters,
-/// the `~^:?*[` glyphs Git ref syntax gives special meaning to, a leading
-/// `-` (an option-injection shape) or `/`, a `..` component separator, and a
-/// `.lock` suffix (Git's own lockfile convention).
+/// Refuses a branch name that `git check-ref-format --allow-onelevel` (or a
+/// shell splitting its argument list) would treat unsafely.
+///
+/// # NOT a complete lexical implementation of `check-ref-format`
+///
+/// This is a defensive pre-check against the shapes this codebase's callers
+/// are most likely to hit (whitespace/control-character/option-injection
+/// argv hazards, plus the ref-syntax rules verified live against this host's
+/// installed `git check-ref-format --allow-onelevel` on Git 2.50.1, see the
+/// matrix below). It never claims to be a complete reimplementation of
+/// `check-ref-format`'s grammar, and future Git versions may add rules this
+/// function does not know about. `git check-ref-format` (invoked directly,
+/// or transitively by whatever `git` subcommand consumes the branch name)
+/// remains the sole authoritative validator at execution time; this
+/// function's job is only to reject obviously-unsafe input before it ever
+/// reaches an argv, not to replace that final check.
+///
+/// Verified-live rules covered here (all against
+/// `git check-ref-format --allow-onelevel <name>`):
+/// - whitespace or ASCII control characters anywhere (rule 3)
+/// - the glyphs `~^:?*[` anywhere (rules 3-4)
+/// - a backslash `\` anywhere (rule 9)
+/// - the literal sequence `@{` anywhere (rule 7)
+/// - the single character `@` (rule 8)
+/// - a leading `-` (not a `check-ref-format` rule; an option-injection shape
+///   for callers that pass this name on a `git` argv)
+/// - an empty `/`-separated component, which also catches a leading `/`, a
+///   trailing `/`, and `//` (rule 5)
+/// - two consecutive dots `..` anywhere (rule 2)
+/// - a trailing dot `.` on the whole name (rule 6; verified live that this
+///   is NOT a per-component rule: `foo./bar` is accepted by real Git, only
+///   a dot at the very end of the whole name is rejected)
+/// - a `/`-separated component starting with `.`, or ending with `.lock`
+///   (rule 1; verified live that both ARE per-component: `foo/.bar` and
+///   `sub.lock/bar` are both rejected even though neither is the whole name)
 fn validate_branch_name(name: &str) -> Result<(), RpcError> {
     if contains_nul(name) {
         return Err(error::invalid_argument(
@@ -232,6 +301,11 @@ fn validate_branch_name(name: &str) -> Result<(), RpcError> {
     if name.is_empty() {
         return Err(error::invalid_argument(
             "branch name must not be empty".to_string(),
+        ));
+    }
+    if name == "@" {
+        return Err(error::invalid_argument(
+            "branch name must not be the single character '@'".to_string(),
         ));
     }
     if name.chars().any(|c| c == ' ' || c.is_control()) {
@@ -245,14 +319,24 @@ fn validate_branch_name(name: &str) -> Result<(), RpcError> {
             "branch name must not contain '~', '^', ':', '?', '*', or '[': {name}"
         )));
     }
+    if name.contains('\\') {
+        return Err(error::invalid_argument(format!(
+            "branch name must not contain '\\': {name}"
+        )));
+    }
+    if name.contains("@{") {
+        return Err(error::invalid_argument(format!(
+            "branch name must not contain '@{{': {name}"
+        )));
+    }
     if name.starts_with('-') {
         return Err(error::invalid_argument(format!(
             "branch name must not start with '-': {name}"
         )));
     }
-    if name.starts_with('/') {
+    if name.split('/').any(|component| component.is_empty()) {
         return Err(error::invalid_argument(format!(
-            "branch name must not start with '/': {name}"
+            "branch name must not start or end with '/', or contain '//': {name}"
         )));
     }
     if name.contains("..") {
@@ -260,10 +344,22 @@ fn validate_branch_name(name: &str) -> Result<(), RpcError> {
             "branch name must not contain '..': {name}"
         )));
     }
-    if name.ends_with(".lock") {
+    if name.ends_with('.') {
         return Err(error::invalid_argument(format!(
-            "branch name must not end with '.lock': {name}"
+            "branch name must not end with '.': {name}"
         )));
+    }
+    for component in name.split('/') {
+        if component.starts_with('.') {
+            return Err(error::invalid_argument(format!(
+                "branch name component must not start with '.': {name}"
+            )));
+        }
+        if component.ends_with(".lock") {
+            return Err(error::invalid_argument(format!(
+                "branch name component must not end with '.lock': {name}"
+            )));
+        }
     }
     Ok(())
 }

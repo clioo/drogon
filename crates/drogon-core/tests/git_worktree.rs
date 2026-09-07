@@ -106,6 +106,20 @@ fn parses_multiple_nul_delimited_entries_in_order() {
     assert!(entries[1].detached);
 }
 
+#[test]
+fn nul_delimited_path_starting_and_ending_with_literal_quote_is_kept_verbatim() {
+    // Characterization test, not a "quoted path" test: verified live against
+    // Git 2.50.1 that `worktree list --porcelain` (both -z and line-block
+    // forms) never C-quotes the path field, even for paths containing a
+    // literal `"`, control bytes, tabs, or non-ASCII bytes, and even with
+    // `core.quotePath=true` forced. A path that happens to start and end
+    // with a literal `"` character must therefore pass through raw, not be
+    // mistaken for (and mangled by) C-quote unescaping.
+    let input = "worktree /repo/\"quoted\"\0HEAD abcdef1234567890abcdef1234567890abcdef12\0branch refs/heads/main\0\0";
+    let entries = parse_worktree_list_porcelain(input).unwrap();
+    assert_eq!(entries[0].path, "/repo/\"quoted\"");
+}
+
 // --- legacy line-block parsing (pre-2.36 fallback) --------------------------
 
 #[test]
@@ -154,6 +168,13 @@ fn parses_line_block_path_with_spaces() {
 #[test]
 fn empty_input_parses_to_empty_list_in_either_form() {
     assert!(parse_worktree_list_porcelain("").unwrap().is_empty());
+}
+
+#[test]
+fn line_block_path_starting_and_ending_with_literal_quote_is_kept_verbatim() {
+    let input = "worktree /repo/\"quoted\"\nHEAD abcdef1234567890abcdef1234567890abcdef12\nbranch refs/heads/main\n\n";
+    let entries = parse_worktree_list_porcelain(input).unwrap();
+    assert_eq!(entries[0].path, "/repo/\"quoted\"");
 }
 
 // --- malformed input rejection ----------------------------------------------
@@ -222,6 +243,22 @@ fn rejects_absolute_unix_path() {
 #[test]
 fn rejects_windows_drive_absolute_path() {
     let err = validate_worktree_add("/repo", "C:\\wt", None).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn rejects_windows_drive_relative_path() {
+    // "C:foo" (no separator after the colon) is syntactically a relative
+    // path but resolves on Windows against the current directory of drive
+    // C:, not against `root` — must be rejected the same as a drive-
+    // absolute path.
+    let err = validate_worktree_add("/repo", "C:foo", None).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn rejects_bare_windows_drive_relative_path() {
+    let err = validate_worktree_add("/repo", "C:", None).unwrap_err();
     assert_eq!(err.code, "invalid_argument");
 }
 
@@ -315,6 +352,67 @@ fn rejects_empty_branch_name() {
 #[test]
 fn rejects_branch_with_nul_byte() {
     let err = validate_worktree_add("/repo", "wt", Some("main\0x")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+// --- validate_worktree_add: newly-covered check-ref-format shapes ----------
+// Each rejection here was verified live against this host's installed
+// `git check-ref-format --allow-onelevel` (Git 2.50.1) before being added.
+
+#[test]
+fn rejects_branch_with_backslash() {
+    let err = validate_worktree_add("/repo", "wt", Some("feature\\x")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn rejects_branch_containing_at_brace() {
+    let err = validate_worktree_add("/repo", "wt", Some("feature@{x")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn rejects_branch_that_is_only_at_sign() {
+    let err = validate_worktree_add("/repo", "wt", Some("@")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn rejects_branch_ending_with_a_dot() {
+    let err = validate_worktree_add("/repo", "wt", Some("feature.")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn accepts_branch_with_an_interior_dot_before_a_slash() {
+    // Verified live: `foo./bar` is ACCEPTED by real Git — rule 6 (trailing
+    // dot) applies to the whole refname, not to every '/'-separated
+    // component (contrast with rule 1's `.`-prefix / `.lock`-suffix checks,
+    // which ARE per-component; see the two rejection tests below).
+    assert!(validate_worktree_add("/repo", "wt", Some("foo./bar")).is_ok());
+}
+
+#[test]
+fn rejects_branch_with_a_component_starting_with_a_dot() {
+    let err = validate_worktree_add("/repo", "wt", Some("feature/.hidden")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn rejects_branch_with_a_non_final_component_ending_in_lock() {
+    let err = validate_worktree_add("/repo", "wt", Some("sub.lock/feature")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn rejects_branch_with_trailing_slash() {
+    let err = validate_worktree_add("/repo", "wt", Some("feature/")).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
+fn rejects_branch_with_double_slash() {
+    let err = validate_worktree_add("/repo", "wt", Some("feature//x")).unwrap_err();
     assert_eq!(err.code, "invalid_argument");
 }
 

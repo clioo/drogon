@@ -641,6 +641,21 @@ fn z_form_rejects_rename_missing_nul_separated_orig_path() {
 }
 
 #[test]
+fn z_form_rejects_rename_with_malformed_empty_orig_path_token_instead_of_consuming_next_record() {
+    // Crafted: the rename record's origPath token is itself an empty NUL-
+    // terminated token (a stray extra NUL), immediately followed by a real
+    // next record. The old parser blanket-filtered every empty token, which
+    // deleted this malformed empty origPath entirely and shifted the
+    // following untracked record's bytes into its place as if THEY were the
+    // origPath — silently corrupting one entry and dropping another instead
+    // of rejecting the malformed input. Preserving token positions turns
+    // this into an explicit empty-origPath rejection.
+    let input = "2 R. N... 100644 100644 100644 1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 R100 new_name.txt\0\0? untracked.txt\0";
+    let err = parse_status_porcelain_v2_z(input).unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+}
+
+#[test]
 fn z_form_rejects_unknown_line_prefix() {
     let err = parse_status_porcelain_v2_z("x not a real entry\0").unwrap_err();
     assert_eq!(err.code, "invalid_argument");
