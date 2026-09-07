@@ -14,6 +14,7 @@ use drogon_core::Engine;
 use drogon_protocol::{Request, Response, RpcError};
 
 use crate::framing::{read_frame, write_response};
+#[cfg(unix)]
 use crate::service_quiescence::{
     ConnectionRegistry, DEFAULT_DRAIN_TIMEOUT, DEFAULT_QUIESCENCE_POLL, QuiesceGate,
 };
