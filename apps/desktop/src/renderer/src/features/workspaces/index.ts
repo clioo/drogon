@@ -20,3 +20,8 @@ export {
   type FilesPanelDescriptor,
   type FilesPanelProps,
 } from "./files-panel";
+export {
+  createFilesDraftStore,
+  editorContentFor,
+  type FilesDraftStore,
+} from "./files-draft-store";

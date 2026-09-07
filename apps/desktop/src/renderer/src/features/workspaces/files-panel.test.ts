@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import {
   FILES_ROUTE_ID,
-  MAX_RETAINED_REQUEST_IDS,
+  FilesRequestIdCapError,
   activeOpenPath,
   activeSelection,
   createFilesPanelDescriptor,
@@ -454,17 +454,77 @@ describe("request ids: per-attempt identity with settle-on-success", () => {
     expect(wire[3]).not.toBe(wire[0]);
   });
 
-  test("retained retry ids are bounded; eviction past the cap mints fresh ids", () => {
+  test("per-file generation retire: A unresolved -> B confirmed -> A mints a FRESH id", () => {
     const source = createRequestIdSource();
-    const first = source.next("k0", "d0");
-    for (let i = 1; i <= MAX_RETAINED_REQUEST_IDS; i += 1) {
-      source.next(`k${i}`, "d");
+    const idA = source.next(KEY_A, "draft A");
+    // B (same file, later payload) is confirmed successful:
+    const idB = source.next(KEY_A, "draft B");
+    source.settle(KEY_A, "draft B");
+    // A's unresolved attempt was minted before B's success — it is
+    // superseded: writing A now is a NEW logical write with a fresh id.
+    const idA2 = source.next(KEY_A, "draft A");
+    expect(idA2).not.toBe(idA);
+    expect(idA2).not.toBe(idB);
+  });
+
+  test("exact-A retry is preserved only while no intervening success exists", () => {
+    const source = createRequestIdSource();
+    const idA = source.next(KEY_A, "draft A");
+    // No success for the file since A was minted — retry identity holds.
+    expect(source.next(KEY_A, "draft A")).toBe(idA);
+  });
+
+  test("attempts minted AFTER a success stay retryable until the next success", () => {
+    const source = createRequestIdSource();
+    source.next(KEY_A, "v1");
+    source.settle(KEY_A, "v1");
+    const post = source.next(KEY_A, "v2");
+    expect(source.next(KEY_A, "v2")).toBe(post);
+    // Another payload succeeds — v2's attempt is now superseded:
+    source.next(KEY_A, "v3");
+    source.settle(KEY_A, "v3");
+    expect(source.next(KEY_A, "v2")).not.toBe(post);
+  });
+
+  test("distinct files keep independent retries across each other's successes", () => {
+    const source = createRequestIdSource();
+    const idA = source.next(KEY_A, "A body");
+    const idB = source.next(KEY_B, "B body");
+    // FILE_B's save succeeds: only FILE_B's attempts are superseded.
+    source.settle(KEY_B, "B body");
+    expect(source.next(KEY_A, "A body")).toBe(idA);
+    expect(source.next(KEY_B, "B body")).not.toBe(idB);
+  });
+
+  test("cap fails closed: a valid unresolved retry still returns; a new attempt throws a named error", () => {
+    const source = createRequestIdSource({ maxRetained: 1 });
+    const first = source.next(KEY_A, "payload one");
+    // At cap, but this IS the unresolved retry — reuse, never a silent mint:
+    expect(source.next(KEY_A, "payload one")).toBe(first);
+    // A different (new) payload at cap refuses with the named error:
+    expect(() => source.next(KEY_A, "payload two")).toThrowError(
+      FilesRequestIdCapError,
+    );
+    try {
+      source.next(KEY_A, "payload two");
+    } catch (error) {
+      expect((error as Error).name).toBe("FilesRequestIdCapError");
     }
-    // k0 was evicted (oldest) past the bound: a fresh id is minted.
-    expect(source.next("k0", "d0")).not.toBe(first);
-    // Recent entries are still retained:
-    const recent = source.next(`k${MAX_RETAINED_REQUEST_IDS}`, "d");
-    expect(source.next(`k${MAX_RETAINED_REQUEST_IDS}`, "d")).toBe(recent);
+    // After settle, the slot frees and a fresh id is minted:
+    source.settle(KEY_A, "payload one");
+    expect(source.next(KEY_A, "payload two")).not.toBe(first);
+  });
+
+  test("a superseded attempt is replaced in place, not double-counted against the cap", () => {
+    const source = createRequestIdSource({ maxRetained: 1 });
+    const superseded = source.next(KEY_A, "old");
+    source.settle(KEY_A, "old"); // success supersedes the old attempt
+    const fresh = source.next(KEY_A, "old"); // 1:1 replacement of the stale entry
+    expect(fresh).not.toBe(superseded);
+    // Still at exactly one retained entry for the file: a new payload throws.
+    expect(() => source.next(KEY_A, "other")).toThrowError(
+      FilesRequestIdCapError,
+    );
   });
 
   test("distinct mounts never share request ids, even for identical payloads", () => {
