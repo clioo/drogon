@@ -1,0 +1,148 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Ported shell from the Orca reference (read-only):
+//   src/renderer/src/components/settings/settings-page-renderer.tsx
+//     (settings-view-shell: left SettingsSidebar + scrollable content with
+//      max-w-4xl panes, "No settings found" empty state on empty search)
+// Adapted: the MVP section list is this repo's five implemented sections
+// (no accounts/agents-catalog/repo sections); search filters both the nav
+// and the pane, and ⌘F focuses the search field.
+import { useEffect, useRef, useState } from "react";
+import type { Harness } from "../../../../shared/session-contract";
+import type { HarnessAgentDefault, Theme } from "../../settings-store";
+import { AgentsSection } from "./agents-section";
+import { AppearanceSection } from "./appearance-section";
+import { GitSection } from "./git-section";
+import { NotificationsSection } from "./notifications-section";
+import { ShortcutsSection } from "./shortcuts-section";
+import { SettingsSidebar } from "./SettingsSidebar";
+import {
+  DEFAULT_SETTINGS_SECTION,
+  isSettingsSectionId,
+  type SettingsSectionId,
+} from "./settings-sections";
+import { filterSettingsSections } from "./settings-search";
+
+export type SettingsPageProps = {
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
+  terminalFontSize: number;
+  onTerminalFontSizeChange: (size: number) => void;
+  inspectorVisible: boolean;
+  onInspectorChange: (visible: boolean) => void;
+  harnesses: Harness[];
+  defaultHarnessId: string;
+  onDefaultHarnessChange: (harnessId: string) => void;
+  harnessDefaults: Record<string, HarnessAgentDefault>;
+  onHarnessDefaultChange: (
+    harnessId: string,
+    next: HarnessAgentDefault,
+  ) => void;
+  notifyOnAgentNeedsInput: boolean;
+  onNotifyChange: (next: boolean) => void;
+  /** Selected workspace path for the git probe; null renders the honest empty state. */
+  workspacePath: string | null;
+  initialSection?: SettingsSectionId;
+  onBack: () => void;
+};
+
+export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
+  const [section, setSection] = useState<SettingsSectionId>(
+    props.initialSection && isSettingsSectionId(props.initialSection)
+      ? props.initialSection
+      : DEFAULT_SETTINGS_SECTION,
+  );
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // ⌘F / Ctrl+F focuses settings search while the page is mounted — the
+  // same shortcut the reference binds as settings.search. Escape leaves
+  // the page like the old dialog's dismissal (Back to app owns the same
+  // action for pointer users).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "f"
+      ) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        props.onBack();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [props.onBack]);
+
+  const matches = filterSettingsSections(searchQuery);
+  const searching = searchQuery.trim() !== "";
+  // While searching the pane stacks every match (the reference keeps the
+  // pane on the selected match; stacking is this page's honest variant and
+  // keeps every control reachable without extra navigation).
+  const visible: SettingsSectionId[] = searching
+    ? matches
+    : matches.includes(section)
+      ? [section]
+      : matches;
+
+  return (
+    <div className="settings-view-shell flex min-h-0 flex-1 overflow-hidden bg-background">
+      <SettingsSidebar
+        activeSectionId={visible.includes(section) ? section : (visible[0] ?? section)}
+        visibleSectionIds={searching ? matches : undefined}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchInputRef={searchInputRef}
+        searchAutoFocus
+        onBack={props.onBack}
+        onSelectSection={setSection}
+      />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-10 px-8 pb-24 pt-10">
+            {visible.length === 0 ? (
+              <div className="flex min-h-[24rem] items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/30 text-sm text-muted-foreground">
+                No settings found for &ldquo;{searchQuery.trim()}&rdquo;
+              </div>
+            ) : (
+              <>
+                {visible.includes("appearance") ? (
+                  <AppearanceSection
+                    theme={props.theme}
+                    onThemeChange={props.onThemeChange}
+                    terminalFontSize={props.terminalFontSize}
+                    onTerminalFontSizeChange={props.onTerminalFontSizeChange}
+                    inspectorVisible={props.inspectorVisible}
+                    onInspectorChange={props.onInspectorChange}
+                  />
+                ) : null}
+                {visible.includes("agents") ? (
+                  <AgentsSection
+                    harnesses={props.harnesses}
+                    defaultHarnessId={props.defaultHarnessId}
+                    onDefaultHarnessChange={props.onDefaultHarnessChange}
+                    harnessDefaults={props.harnessDefaults}
+                    onHarnessDefaultChange={props.onHarnessDefaultChange}
+                  />
+                ) : null}
+                {visible.includes("shortcuts") ? <ShortcutsSection /> : null}
+                {visible.includes("git") ? (
+                  <GitSection workspacePath={props.workspacePath} />
+                ) : null}
+                {visible.includes("notifications") ? (
+                  <NotificationsSection
+                    notifyOnAgentNeedsInput={props.notifyOnAgentNeedsInput}
+                    onNotifyChange={props.onNotifyChange}
+                  />
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

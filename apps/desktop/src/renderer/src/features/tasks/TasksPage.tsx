@@ -152,8 +152,8 @@ export function TasksView({
           </select>
         </label>
         <Input
-          aria-label="Filter issues"
-          placeholder="Filter by title or #number…"
+          aria-label="Search GitHub issues"
+          placeholder="Search GitHub issues..."
           value={data.query}
           onChange={(event) => callbacks.onQuery(event.target.value)}
         />

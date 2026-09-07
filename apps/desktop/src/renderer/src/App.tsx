@@ -127,7 +127,9 @@ import {
   resolveInspectorDefault,
 } from "./theme";
 import type { HarnessAgentDefault, Theme } from "./settings-store";
-import { SettingsPanel } from "./settings-panel";
+import { SettingsPage } from "./features/settings/SettingsPage";
+import { SETTINGS_ROUTE_ID } from "./features/settings/settings-route";
+import type { SettingsSectionId } from "./features/settings/settings-sections";
 import { StatusBar } from "./components/status-bar/StatusBar";
 import {
   loadSavedSelection,
@@ -344,8 +346,13 @@ export function App() {
   const [notifyOnAgentNeedsInput, setNotifyOnAgentNeedsInput] = useState(
     () => settings.get("notifyOnAgentNeedsInput"),
   );
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsOpenerRef = useRef<HTMLButtonElement>(null);
+  // Settings is a full page (route "settings"), not a dialog: opening it
+  // remembers the previous route so "Back to app" returns to that view.
+  const [settingsReturnRoute, setSettingsReturnRoute] = useState<string | null>(
+    null,
+  );
+  const [settingsInitialSection, setSettingsInitialSection] =
+    useState<SettingsSectionId>("appearance");
   const [revision, setRevision] = useState(0);
   const [harnessCapability, setHarnessCapability] = useState(false);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
@@ -647,6 +654,7 @@ export function App() {
   const changesAlive = changesAliveRef.current;
   const filesProps =
     current && status ? { workspace: current, status } : lastPropsRef.current;
+  const settingsSectionRef = useRef<HTMLElement>(null);
   const filesSectionRef = useRef<HTMLElement>(null);
   const changesSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
@@ -1160,6 +1168,16 @@ export function App() {
     setNotifyOnAgentNeedsInput(next);
     settings.set("notifyOnAgentNeedsInput", next);
   };
+  // Gear icons and Cmd+, open the settings page; "Back to app" returns to
+  // the route that was visible before (null is the Terminals home view).
+  const openSettings = (initialSection?: SettingsSectionId) => {
+    setSettingsReturnRoute((current) =>
+      route === SETTINGS_ROUTE_ID ? current : route,
+    );
+    if (initialSection) setSettingsInitialSection(initialSection);
+    setRoute(SETTINGS_ROUTE_ID);
+  };
+  const closeSettings = () => setRoute(settingsReturnRoute);
   // Inspector toggles persist through the settings store; the narrow-viewport
   // guard below keeps overriding the pane shut on shrink without persisting,
   // so an accidental shrink never becomes a saved "closed" choice.
@@ -1235,12 +1253,12 @@ export function App() {
       chord: "CmdOrCtrl+Shift+N",
       handler: guardHandler(() => void create(), isDisabled),
     });
-    // J10: Cmd+, opens Settings from anywhere — never gated on workspace,
-    // connection or busy state.
+    // J10: Cmd+, opens the Settings page from anywhere — never gated on
+    // workspace, connection or busy state.
     registry.register({
       id: "settings.open",
       chord: "CmdOrCtrl+,",
-      handler: () => setSettingsOpen(true),
+      handler: () => openSettings(),
     });
     const keydown = (event: KeyboardEvent) => {
       const action = registry.matchKeyEvent(event, platform);
@@ -1358,8 +1376,8 @@ export function App() {
               : null
           }
           buildTitle={buildInfo ? `Built ${buildInfo.builtAt}` : undefined}
-          onOpenSettings={() => setSettingsOpen(true)}
-          settingsExpanded={settingsOpen}
+          onOpenSettings={() => openSettings()}
+          settingsExpanded={route === SETTINGS_ROUTE_ID}
         />
         <main className="session-area">
           <header className="session-header" style={{ position: "relative" }}>
@@ -1391,34 +1409,17 @@ export function App() {
                 <PanelRight />
               </IconButton>
               <IconButton
-                ref={settingsOpenerRef}
                 label="Settings"
-                aria-expanded={settingsOpen}
-                onClick={() => setSettingsOpen((value) => !value)}
+                aria-expanded={route === SETTINGS_ROUTE_ID}
+                onClick={() =>
+                  route === SETTINGS_ROUTE_ID
+                    ? closeSettings()
+                    : openSettings()
+                }
               >
                 <Settings size={16} />
               </IconButton>
             </div>
-            {settingsOpen && (
-              <SettingsPanel
-                theme={theme}
-                onThemeChange={changeTheme}
-                inspectorVisible={inspector}
-                onInspectorChange={changeInspector}
-                onClose={() => setSettingsOpen(false)}
-                openerRef={settingsOpenerRef}
-                terminalFontSize={terminalFontSize}
-                onTerminalFontSizeChange={changeTerminalFontSize}
-                harnesses={harnesses}
-                defaultHarnessId={defaultHarnessId}
-                onDefaultHarnessChange={changeDefaultHarness}
-                harnessDefaults={harnessDefaults}
-                onHarnessDefaultChange={changeHarnessDefault}
-                notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
-                onNotifyChange={changeNotifyOnAgentNeedsInput}
-                workspacePath={current?.path ?? null}
-              />
-            )}
           </header>
           {error && (
             <div className="error-banner" role="alert">
@@ -1433,6 +1434,36 @@ export function App() {
               </Button>
             </div>
           )}
+          {route === SETTINGS_ROUTE_ID ? (
+            <div className="session-layout">
+              <section
+                ref={settingsSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Settings"
+                style={{ flex: 1 }}
+              >
+                <SettingsPage
+                  theme={theme}
+                  onThemeChange={changeTheme}
+                  terminalFontSize={terminalFontSize}
+                  onTerminalFontSizeChange={changeTerminalFontSize}
+                  inspectorVisible={inspector}
+                  onInspectorChange={changeInspector}
+                  harnesses={harnesses}
+                  defaultHarnessId={defaultHarnessId}
+                  onDefaultHarnessChange={changeDefaultHarness}
+                  harnessDefaults={harnessDefaults}
+                  onHarnessDefaultChange={changeHarnessDefault}
+                  notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
+                  onNotifyChange={changeNotifyOnAgentNeedsInput}
+                  workspacePath={current?.path ?? null}
+                  initialSection={settingsInitialSection}
+                  onBack={closeSettings}
+                />
+              </section>
+            </div>
+          ) : (
           <div className="session-layout">
             <section
               className="terminal-column"
@@ -1763,6 +1794,7 @@ export function App() {
               </aside>
             )}
           </div>
+          )}
         </main>
       </div>
       <CommandPaletteHost
@@ -1793,12 +1825,12 @@ export function App() {
         onOpenFiles={() => setRoute(FILES_ROUTE_ID)}
         onOpenBots={() => setRoute(BOTS_ROUTE_ID)}
         onToggleInspector={toggleInspector}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => openSettings()}
         onSetTheme={changeTheme}
         onAddWorkspace={() => setAdding(true)}
         onOpenFile={openFileInFiles}
       />
-      <StatusBar terminalCount={sessions.length} onOpenSettings={() => setSettingsOpen(true)} />
+      <StatusBar terminalCount={sessions.length} onOpenSettings={() => openSettings()} />
     </Tooltip.Provider>
   );
 }

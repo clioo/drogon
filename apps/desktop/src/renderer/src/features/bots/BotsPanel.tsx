@@ -146,9 +146,12 @@ export function BotsPanel({
             variant="ghost"
             size="icon"
             aria-label="Refresh Bots"
+            disabled={loading}
             onClick={() => void refresh()}
           >
-            <RefreshCw className={loading ? "animate-spin" : undefined} />
+            <RefreshCw
+              className={loading ? "animate-spin motion-reduce:animate-none" : ""}
+            />
           </Button>
         )}
         {canMutate && (
@@ -204,7 +207,7 @@ export function BotsPanel({
               )}
             </div>
           ) : (
-            <ul className="flex flex-col gap-3">
+            <ul className="flex flex-col gap-3" role="list" aria-label="Bots">
               {botRows.map((row) => {
                 const owner = effective.bots.find((bot) => bot.id === row.id);
                 if (!owner) return null;

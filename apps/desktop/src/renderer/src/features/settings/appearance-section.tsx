@@ -1,3 +1,12 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Ported structure from the Orca reference (read-only):
+//   src/renderer/src/components/settings/AppearancePane.tsx
+//     (Interface / Terminal accordion sections with per-section summaries)
+//   src/renderer/src/components/settings/AppearanceInterfaceSection.tsx
+//     (Theme segmented System/Dark/Light first row)
+// Adapted: the MVP keeps this repo's three real controls (theme, terminal
+// font size, session details) grouped under Interface/Terminal subsection
+// headers; no font pickers, zoom or app-icon surface yet.
 import { useState } from "react";
 import { Input } from "../../components/ui/input";
 import type { Theme } from "../../settings-store";
@@ -6,14 +15,15 @@ import {
   SettingsRow,
   SettingsSection,
   SettingsSegmentedControl,
+  SettingsSubsectionHeader,
   SettingsSwitchRow,
 } from "./settings-rows";
 
 export const THEME_SEGMENT_OPTIONS: readonly { value: Theme; label: string }[] =
   [
     { value: "system", label: "System" },
-    { value: "light", label: "Light" },
     { value: "dark", label: "Dark" },
+    { value: "light", label: "Light" },
   ];
 
 export function AppearanceSection({
@@ -39,62 +49,76 @@ export function AppearanceSection({
       title="Appearance"
       description="Theme and terminal text size. Changes apply immediately."
     >
-      <SettingsRow
-        label="Theme"
-        description="System follows the OS color scheme."
-        control={
-          <SettingsSegmentedControl<Theme>
-            value={theme}
-            onChange={onThemeChange}
-            options={THEME_SEGMENT_OPTIONS}
-            ariaLabel="Theme"
+      <div className="divide-y divide-border/40">
+        <div className="space-y-2 pb-4">
+          <SettingsSubsectionHeader
+            title="Interface"
+            description="How the app looks."
           />
-        }
-      />
-      <SettingsRow
-        label="Terminal font size"
-        description="9 to 32 pixels."
-        control={
-          <span className="settings-inline-control">
-            <Input
-              type="number"
-              min={9}
-              max={32}
-              step={1}
-              aria-label="Terminal font size"
-              className="settings-number-input"
-              value={fontDraft ?? String(terminalFontSize)}
-              onChange={(event) => {
-                const raw = event.target.value;
-                setFontDraft(raw);
-                const parsed = Number(raw);
-                if (
-                  raw.trim() === "" ||
-                  !Number.isInteger(parsed) ||
-                  parsed < 9 ||
-                  parsed > 32
-                ) {
-                  setFontError("Enter a whole number from 9 to 32.");
-                  return;
-                }
-                setFontError(null);
-                onTerminalFontSizeChange(parsed);
-              }}
-              onBlur={() => setFontDraft(null)}
-            />
-            <span aria-hidden className="settings-unit">
-              px
-            </span>
-          </span>
-        }
-      />
-      <SettingsFieldError message={fontError} />
-      <SettingsSwitchRow
-        label="Show session details"
-        description="Side pane with the active session's command and state."
-        checked={inspectorVisible}
-        onChange={onInspectorChange}
-      />
+          <SettingsRow
+            label="Theme"
+            description="System follows the OS color scheme."
+            control={
+              <SettingsSegmentedControl<Theme>
+                value={theme}
+                onChange={onThemeChange}
+                options={THEME_SEGMENT_OPTIONS}
+                ariaLabel="Theme"
+              />
+            }
+          />
+        </div>
+        <div className="space-y-2 pt-4">
+          <SettingsSubsectionHeader
+            title="Terminal"
+            description="How terminal sessions read."
+          />
+          <SettingsRow
+            label="Terminal font size"
+            description="9 to 32 pixels."
+            control={
+              <span className="settings-inline-control">
+                <Input
+                  type="number"
+                  min={9}
+                  max={32}
+                  step={1}
+                  aria-label="Terminal font size"
+                  className="settings-number-input"
+                  value={fontDraft ?? String(terminalFontSize)}
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    setFontDraft(raw);
+                    const parsed = Number(raw);
+                    if (
+                      raw.trim() === "" ||
+                      !Number.isInteger(parsed) ||
+                      parsed < 9 ||
+                      parsed > 32
+                    ) {
+                      setFontError("Enter a whole number from 9 to 32.");
+                      return;
+                    }
+                    setFontError(null);
+                    onTerminalFontSizeChange(parsed);
+                  }}
+                  onBlur={() => setFontDraft(null)}
+                />
+                <span aria-hidden className="settings-unit">
+                  px
+                </span>
+              </span>
+            }
+          />
+          <SettingsFieldError message={fontError} />
+          <SettingsSwitchRow
+            label="Show session details"
+            description="Side pane with the active session's command and state."
+            checked={inspectorVisible}
+            onChange={onInspectorChange}
+          />
+        </div>
+      </div>
     </SettingsSection>
   );
 }
