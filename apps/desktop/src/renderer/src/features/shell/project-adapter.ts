@@ -208,6 +208,45 @@ export function relativeActivityTime(
   return new Date(then).toLocaleDateString();
 }
 
+/**
+ * Issue links for worktree cards (journey J6). The Tasks page refreshes
+ * this store from `tasks.links`; cards read it synchronously so no
+ * Sidebar/ProjectList plumbing has to change. Empty by default — a card
+ * without a link shows no badge instead of inventing one.
+ */
+export type WorktreeIssueLink = {
+  worktreeId: string;
+  issueNumber: number;
+};
+
+let worktreeIssueLinks: ReadonlyMap<string, number> = new Map();
+const worktreeIssueLinkListeners = new Set<() => void>();
+
+/** Replaces the whole link set (one refresh owns the full picture). */
+export function setWorktreeIssueLinks(links: WorktreeIssueLink[]): void {
+  const next = new Map<string, number>();
+  for (const link of links) {
+    if (link.worktreeId && Number.isInteger(link.issueNumber)) {
+      next.set(link.worktreeId, link.issueNumber);
+    }
+  }
+  worktreeIssueLinks = next;
+  for (const listener of worktreeIssueLinkListeners) listener();
+}
+
+/** The linked issue number for one worktree, or null when unlinked. */
+export function getWorktreeIssueNumber(worktreeId: string): number | null {
+  return worktreeIssueLinks.get(worktreeId) ?? null;
+}
+
+/** Subscribes to link refreshes; returns the unsubscribe function. */
+export function subscribeWorktreeIssueLinks(listener: () => void): () => void {
+  worktreeIssueLinkListeners.add(listener);
+  return () => {
+    worktreeIssueLinkListeners.delete(listener);
+  };
+}
+
 export type CardAgentSummary = {
   /** Rendered agent state; never invented — `unknown` when unreported. */
   state: AgentState;

@@ -45,6 +45,10 @@ mod worktree_rpc;
 
 mod service_quiescence;
 
+/// Public only for the `gh`-binary test seam (`set_gh_bin_override`);
+/// the RPC surface stays `Engine::dispatch`.
+pub mod tasks_rpc;
+
 pub mod requests;
 
 #[cfg(test)]
@@ -87,6 +91,7 @@ const CAPABILITIES: &[&str] = &[
     "runtime.quiescent-shutdown.v1",
     drogon_protocol::project::PROJECT_CAPABILITY,
     drogon_protocol::worktree::WORKTREE_CAPABILITY,
+    drogon_protocol::tasks::TASKS_CAPABILITY,
     "session.agent-state.v1",
 ];
 
@@ -376,6 +381,10 @@ impl Engine {
             "worktree.create" => self.mutating(request, Self::do_worktree_create),
             "worktree.list" => self.do_worktree_list(&request.params),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
+            "tasks.list" => self.do_tasks_list(&request.params),
+            "tasks.show" => self.do_tasks_show(&request.params),
+            "tasks.start" => self.mutating(request, Self::do_tasks_start),
+            "tasks.links" => self.do_tasks_links(&request.params),
             "orchestration.runCreate"
             | "orchestration.runUse"
             | "orchestration.runList"

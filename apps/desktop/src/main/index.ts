@@ -10,6 +10,7 @@ import { registerAutomationIpc } from "./automation-bridge";
 import { dispatchFileRequest } from "./file-bridge";
 import { registerGitBridge } from "./git-bridge";
 import { registerSettingsProbes } from "./settings-probes";
+import { registerTasksBridge } from "./tasks-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
 import { registerNotificationsIpc } from "./notifications/service";
 import { dispatchBotSnapshot } from "./bot-bridge";
@@ -59,6 +60,7 @@ let window: BrowserWindow | null = null;
 function registerBridge() {
   registerGitBridge(() => window);
   registerSettingsProbes(() => window);
+  registerTasksBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
     ipcMain.handle(`drogon:${method}`, async (event, input: unknown) => {
       if (

@@ -1,7 +1,7 @@
 // Thin wrapper around the J10 settings surface (features/settings): the
 // native modal shell lives here so existing callers keep working, every
 // section lives in the surface.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type { Harness } from "../../shared/session-contract";
 import { Button } from "./components/ui/button";

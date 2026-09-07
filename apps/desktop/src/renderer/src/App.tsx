@@ -81,6 +81,18 @@ import {
   isAutomationsAvailable,
   registerAutomationsRoute,
 } from "./automations-mount";
+import {
+  TASKS_CAPABILITY,
+  TASKS_ROUTE_ID,
+  createGatedTasksBridge,
+  createGatedTasksProjectBridge,
+  isTasksAvailable,
+  isTasksProjectsAvailable,
+  registerTasksRoute,
+  windowTasksBridge,
+} from "./tasks-mount";
+import { refreshWorktreeIssueLinks } from "./features/tasks/issue-links";
+import { TasksPage } from "./features/tasks/TasksPage";
 import { loadBotSnapshot } from "./bots-loader";
 import type { BotsLoadResult } from "./bots-loader";
 import { FILES_CAPABILITY } from "../../shared/file-contract";
@@ -395,6 +407,10 @@ export function App() {
   useEffect(() => {
     gitGateRef.current = isChangesAvailable(liveCapabilities);
   }, [liveCapabilities]);
+  const tasksGateRef = useRef(false);
+  useEffect(() => {
+    tasksGateRef.current = isTasksAvailable(liveCapabilities);
+  }, [liveCapabilities]);
   const botsGateRef = useRef(false);
   useEffect(() => {
     botsGateRef.current = isBotsAvailable(liveCapabilities);
@@ -409,6 +425,27 @@ export function App() {
   );
   const gitGatedBridge = useMemo(
     () => createGatedGitBridge(windowGitBridge(), () => gitGateRef.current),
+    [],
+  );
+  const tasksGatedBridge = useMemo(
+    () => createGatedTasksBridge(windowTasksBridge(), () => tasksGateRef.current),
+    [],
+  );
+  // Interim project bridge (journey J6): feeds the sidebar's project view
+  // with real project/worktree RPCs through the tasks namespace until the
+  // coordinator lands the first-class project bridge. Gated on
+  // project.v1/worktree.v1; when withheld, the workspace fallback below
+  // behaves exactly as before this change.
+  const tasksProjectGateRef = useRef(false);
+  useEffect(() => {
+    tasksProjectGateRef.current = isTasksProjectsAvailable(liveCapabilities);
+  }, [liveCapabilities]);
+  const tasksProjectBridge = useMemo(
+    () =>
+      createGatedTasksProjectBridge(
+        windowTasksBridge(),
+        () => tasksProjectGateRef.current,
+      ),
     [],
   );
   const botsGatedBridge = useMemo(
@@ -495,6 +532,7 @@ export function App() {
                   BOTS_CAPABILITY,
                   GIT_CAPABILITY,
                   AUTOMATIONS_CAPABILITY,
+                  TASKS_CAPABILITY,
                 ],
                 fallbackId: BOTS_ROUTE_ID,
               }),
@@ -512,6 +550,12 @@ export function App() {
       ),
     [filesGatedBridge, gitGatedBridge, browserStaticBridge, automationsGatedBridge],
   );
+  // Tasks host callbacks: stable across renders (the registry memo below
+  // runs once). Groups ride a ref so the page always re-reads the current
+  // projects on mount/refresh instead of a stale closure.
+  const projectGroupsRef = useRef(projectGroups);
+  projectGroupsRef.current = projectGroups;
+  const loadTaskGroups = useCallback(() => projectGroupsRef.current, []);
   const panelRegistry = useMemo(() => {
     if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
       return registerBotsRoute(
@@ -585,6 +629,7 @@ export function App() {
   const botsSectionRef = useRef<HTMLElement>(null);
   const browserSectionRef = useRef<HTMLElement>(null);
   const automationsSectionRef = useRef<HTMLElement>(null);
+  const tasksSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
   useEffect(() => {
     // Real focus, only on explicit user navigation to a panel: background
@@ -600,7 +645,9 @@ export function App() {
               ? browserSectionRef.current
               : route === AUTOMATIONS_ROUTE_ID
                 ? automationsSectionRef.current
-                : null;
+                : route === TASKS_ROUTE_ID
+                  ? tasksSectionRef.current
+                  : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -651,6 +698,23 @@ export function App() {
   )
     automationsAliveRef.current = false;
   const automationsAlive = automationsAliveRef.current;
+  // Tasks keep-alive: unlike the session-bound panels, Tasks is
+  // project-scoped and mounts with no workspace selected, so the first
+  // task can create the first worktree. It unmounts only on settled
+  // workspace loss after one was selected — never for having none yet.
+  const tasksAliveRef = useRef(false);
+  const hadWorkspaceRef = useRef(false);
+  if (current) hadWorkspaceRef.current = true;
+  if (route === TASKS_ROUTE_ID) tasksAliveRef.current = true;
+  else if (
+    status &&
+    !current &&
+    !busy &&
+    !loadingSessions &&
+    hadWorkspaceRef.current
+  )
+    tasksAliveRef.current = false;
+  const tasksAlive = tasksAliveRef.current;
   const botsScopeMatch =
     botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope);
   const botsDescriptor: PanelDescriptor | null =
@@ -676,6 +740,47 @@ export function App() {
       setBusy(false);
     }
   }, []);
+  // Tasks mount block (journey J6): the registry entry, the terminal
+  // opener the page calls after `tasks.start`, and the sidebar badge
+  // refresh. The page surfaces every honest state itself (withheld
+  // capability, folder project, missing gh), so — like Browser — mounting
+  // needs only a settled workspace, never a capability withhold check.
+  // Bumped after a task start creates a worktree, so the effect below
+  // re-reads the project view and the new worktree card (with its issue
+  // badge) appears without a manual refresh.
+  const [projectReloadTick, setProjectReloadTick] = useState(0);
+  const openTaskTerminal = useCallback(
+    (workspaceId: string) =>
+      action(async () => {
+        const result = checked(await window.drogon.start(workspaceId));
+        setSelected(workspaceId);
+        setActive(result.id);
+        setSessions([result]);
+        setProjectReloadTick((tick) => tick + 1);
+      }),
+    [action],
+  );
+  const tasksRegistry = useMemo(
+    () =>
+      registerTasksRoute(filesBaseRegistry, tasksGatedBridge, {
+        loadGroups: loadTaskGroups,
+        onOpenTerminal: (workspaceId: string) => {
+          void openTaskTerminal(workspaceId);
+        },
+      }),
+    [filesBaseRegistry, tasksGatedBridge, loadTaskGroups, openTaskTerminal],
+  );
+  useEffect(() => {
+    // Keeps the sidebar issue badges current: every git project re-reads
+    // its links whenever the projects or the live capabilities change.
+    // Failures stay on the Tasks page; the sidebar keeps prior badges.
+    if (!isTasksAvailable(liveCapabilities)) return;
+    const gitIds = projectGroups
+      .filter((group) => group.project.kind === "git")
+      .map((group) => group.project.id);
+    if (gitIds.length === 0) return;
+    void refreshWorktreeIssueLinks(tasksGatedBridge, gitIds);
+  }, [status, projectGroups, tasksGatedBridge]);
   const refresh = useCallback(
     () =>
       action(async () => {
@@ -715,8 +820,16 @@ export function App() {
     // capabilities change; the adapter degrades to the workspace
     // projection while project.v1/worktree.v1 are withheld or failing.
     let cancelled = false;
+    // The interim tasks project bridge fills the two methods the raw
+    // `window.drogon` never advertised; every other method still comes
+    // from the window bridge, and a withheld capability falls back to the
+    // workspace projection exactly as before.
     void loadProjectView(
-      window.drogon as unknown as ProjectRpcBridge,
+      {
+        ...(window.drogon as unknown as ProjectRpcBridge),
+        projectList: tasksProjectBridge.projectList,
+        worktreeList: tasksProjectBridge.worktreeList,
+      },
       status?.capabilities ?? [],
       workspaces,
     ).then((view) => {
@@ -725,7 +838,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [status, workspaces]);
+  }, [status, workspaces, tasksProjectBridge, projectReloadTick]);
   useEffect(() => {
     // Persists every confirmed selection once it settles against a known
     // workspace, so the next reload's restore has an up-to-date target.
@@ -1180,7 +1293,8 @@ export function App() {
                   (route === BOTS_ROUTE_ID && botsAlive && filesProps !== null) ||
                   (route === AUTOMATIONS_ROUTE_ID &&
                     automationsAlive &&
-                    filesProps !== null)
+                    filesProps !== null) ||
+                  (route === TASKS_ROUTE_ID && tasksAlive)
                     ? "none"
                     : undefined,
               }}
@@ -1347,6 +1461,37 @@ export function App() {
                   workspace={filesProps.workspace}
                   status={filesProps.status}
                 />
+              </section>
+            ) : null}
+            {tasksAlive && status ? (
+              <section
+                ref={tasksSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Tasks"
+                style={{
+                  display: route === TASKS_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                {filesProps ? (
+                  <MountedPanel
+                    descriptor={resolveRoute(tasksRegistry, TASKS_ROUTE_ID)}
+                    workspace={filesProps.workspace}
+                    status={filesProps.status}
+                  />
+                ) : (
+                  // No workspace selected yet (the first task creates the
+                  // first worktree): the registered descriptor's component
+                  // is project-scoped and ignores panel props, so render
+                  // the same page directly instead of inventing a workspace.
+                  <TasksPage
+                    bridge={tasksGatedBridge}
+                    loadGroups={loadTaskGroups}
+                    onOpenTerminal={(workspaceId) => {
+                      void openTaskTerminal(workspaceId);
+                    }}
+                  />
+                )}
               </section>
             ) : null}
             {botsAlive && filesProps ? (
