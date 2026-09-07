@@ -6,7 +6,6 @@
    sidebar carries no complementary role. */
 import { useRef, useState } from "react";
 import { LifeBuoy, Settings } from "lucide-react";
-import type { ReactNode } from "react";
 import type {
   Session,
   Worktree,
@@ -40,15 +39,14 @@ export function Sidebar({
   addDisabled,
   onSelectWorkspace,
   onAddProject,
+  onCreateWorkspace,
   worktreesAvailable,
   projectAction,
   onOpenProjectAction,
   onCloseProjectAction,
   onBrowseProject,
   onSubmitAddProject,
-  onSubmitWorktree,
   onSubmitRemoveWorktree,
-  addSlot,
   serviceLabel,
   buildRevision,
   buildTitle,
@@ -69,6 +67,8 @@ export function Sidebar({
   addDisabled: boolean;
   onSelectWorkspace: (workspaceId: string) => void;
   onAddProject: () => void;
+  /** Opens the new-workspace composer, preselected when given a project. */
+  onCreateWorkspace: (projectId?: string) => void;
   worktreesAvailable: boolean;
   projectAction: ProjectAction | null;
   onOpenProjectAction: (action: ProjectAction) => void;
@@ -78,17 +78,10 @@ export function Sidebar({
     path: string;
     name?: string;
   }) => Promise<string | null>;
-  onSubmitWorktree: (input: {
-    projectId: string;
-    name: string;
-    baseRef?: string;
-  }) => Promise<string | null>;
   onSubmitRemoveWorktree: (
     worktree: Worktree,
     force: boolean,
   ) => Promise<string | null>;
-  /** The existing add-folder form / empty-state markup, owned by App. */
-  addSlot: ReactNode;
   serviceLabel: string;
   buildRevision: string | null;
   buildTitle?: string;
@@ -146,14 +139,18 @@ export function Sidebar({
               action={projectAction}
               onSelectWorkspace={onSelectWorkspace}
               onAddProject={onAddProject}
+              onCreateWorkspace={onCreateWorkspace}
               onOpenAction={onOpenProjectAction}
               onCloseAction={onCloseProjectAction}
               onBrowse={onBrowseProject}
               onSubmitAdd={onSubmitAddProject}
-              onSubmitWorktree={onSubmitWorktree}
               onSubmitRemove={onSubmitRemoveWorktree}
             />
-            {addSlot}
+            {groups.length === 0 && (
+              <p className="sidebar-empty">
+                Open a folder or repository to begin.
+              </p>
+            )}
           </div>
           <footer className="sidebar-footer shell-footer">
             <span className="shell-footer-row">

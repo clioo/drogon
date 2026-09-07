@@ -858,14 +858,18 @@ async function candSetup(page, state, ctx) {
     }
     const opened =
       (await tryClick(page, "button", "Add project")) ||
-      (await tryClick(page, "button", "Add workspace"));
+      (await tryClick(page, "button", "Add Project")) ||
+      (await tryClick(page, "button", "Create workspace"));
     if (!opened) {
       missing.push("no Add project/workspace affordance");
       return false;
     }
     try {
       await page.getByLabel(/^Folder( or repository)? path$/).fill(ctx.workspace);
-      await page.getByRole("button", { name: "Add", exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "Add Project" })
+        .getByRole("button", { name: "Add Project", exact: true })
+        .click();
       await page.waitForFunction(
         () => !document.querySelector(".sidebar-empty"),
         null,

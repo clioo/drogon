@@ -344,13 +344,6 @@ h2 {
   font-family: var(--font-mono);
   font-size: 11px;
 }
-.folder-form {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 12px;
-}
 .form-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1876,4 +1869,131 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* R7-A composer + add-project dialogs (append-only): Radix dialog chrome
+   for the new-workspace composer modal and the ported Add Project folder
+   dialog, mirroring the source's sm:max-w-lg panel, title row and
+   section spacing. */
+.composer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(0 0 0 / 0.5);
+  overflow-y: auto;
+}
+.composer-content {
+  position: fixed;
+  top: 10vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: calc(100% - 32px);
+  max-width: 32rem;
+  max-height: calc(100vh - 20vh);
+  overflow-y: auto;
+  padding: 20px 20px 16px;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.2);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+}
+.composer-content:focus {
+  outline: none;
+}
+.composer-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.composer-heading {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.composer-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.composer-description {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.composer-card {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.composer-form {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+.composer-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.composer-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.composer-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.composer-add-project {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+.composer-select {
+  height: 36px;
+  width: 100%;
+  min-width: 0;
+  border-radius: calc(var(--radius) * 0.8);
+  border: 1px solid var(--input);
+  background: transparent;
+  padding: 4px 12px;
+  font-size: 14px;
+  color: var(--foreground);
+  outline: none;
+}
+.composer-select:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.composer-select:disabled {
+  opacity: 0.5;
+}
+.composer-select option {
+  background: var(--background);
+  color: var(--foreground);
+}
+.composer-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.composer-actions {
+  justify-content: flex-end;
 }

@@ -1,7 +1,8 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/sidebar/SidebarHeader.tsx project-group
    recipe (adapter: props instead of the project store; add opens the
-   existing folder form, filter narrows the visible cards). */
+   folder dialog, the "+" opens the new-workspace composer like the
+   source's "New workspace" control, filter narrows the visible cards). */
 import { useState } from "react";
 import { FolderGit2, FolderPlus, Plus, SlidersHorizontal } from "lucide-react";
 import type {
@@ -13,22 +14,22 @@ import type {
 import type { ProjectGroup } from "./project-adapter";
 import { filterProjectGroups } from "./project-adapter";
 import { AddProjectDialog } from "./AddProjectDialog";
-import { NewWorktreeForm } from "./NewWorktreeForm";
 import { RemoveWorktreeDialog } from "./RemoveWorktreeDialog";
 import { WorktreeCard } from "./WorktreeCard";
 
-/** Which project/worktree dialog the sidebar currently shows, if any. */
+/** Which project dialog the sidebar currently shows, if any. */
 export type ProjectAction =
   | { kind: "add" }
-  | { kind: "worktree"; projectId: string }
   | { kind: "remove"; worktreeId: string };
 
 /**
- * Projects section: header with add/filter icons, one row per project
- * with its worktree cards underneath. Git rows carry a "New worktree"
- * icon that opens the inline form; each removable card's kebab menu
- * opens the remove confirm dialog. All RPCs run in App; every submit
- * resolves a verbatim error string or null on success.
+ * Projects section: header with add/composer/filter icons, one row per
+ * project with its worktree cards underneath. The "+" opens the
+ * new-workspace composer (preselected per row, unselected in the
+ * header), like the source's "New workspace" control; each removable
+ * card's kebab menu opens the remove confirm dialog. All RPCs run in
+ * App; every submit resolves a verbatim error string or null on
+ * success.
  */
 export function ProjectList({
   groups,
@@ -41,11 +42,11 @@ export function ProjectList({
   action,
   onSelectWorkspace,
   onAddProject,
+  onCreateWorkspace,
   onOpenAction,
   onCloseAction,
   onBrowse,
   onSubmitAdd,
-  onSubmitWorktree,
   onSubmitRemove,
 }: {
   groups: ProjectGroup[];
@@ -58,17 +59,14 @@ export function ProjectList({
   action: ProjectAction | null;
   onSelectWorkspace: (workspaceId: string) => void;
   onAddProject: () => void;
+  /** Opens the new-workspace composer, preselected when given a project. */
+  onCreateWorkspace: (projectId?: string) => void;
   onOpenAction: (action: ProjectAction) => void;
   onCloseAction: () => void;
   onBrowse: () => Promise<string | null>;
   onSubmitAdd: (input: {
     path: string;
     name?: string;
-  }) => Promise<string | null>;
-  onSubmitWorktree: (input: {
-    projectId: string;
-    name: string;
-    baseRef?: string;
   }) => Promise<string | null>;
   onSubmitRemove: (worktree: Worktree, force: boolean) => Promise<string | null>;
 }) {
@@ -91,6 +89,16 @@ export function ProjectList({
             onClick={onAddProject}
           >
             <FolderPlus size={15} />
+          </button>
+          <button
+            type="button"
+            className="shell-icon-button"
+            aria-label="New workspace"
+            disabled={addDisabled}
+            title="New workspace"
+            onClick={() => onCreateWorkspace()}
+          >
+            <Plus size={15} />
           </button>
           <button
             type="button"
@@ -134,15 +142,8 @@ export function ProjectList({
           selectedWorkspaceId={selectedWorkspaceId}
           disabled={disabled}
           worktreesAvailable={worktreesAvailable}
-          worktreeFormOpen={
-            action?.kind === "worktree" && action.projectId === group.project.id
-          }
           onSelectWorkspace={onSelectWorkspace}
-          onNewWorktree={() =>
-            onOpenAction({ kind: "worktree", projectId: group.project.id })
-          }
-          onCloseWorktree={onCloseAction}
-          onSubmitWorktree={onSubmitWorktree}
+          onNewWorktree={() => onCreateWorkspace(group.project.id)}
           onRemoveWorktree={(worktree) =>
             onOpenAction({ kind: "remove", worktreeId: worktree.id })
           }
@@ -182,11 +183,8 @@ function ProjectRow({
   selectedWorkspaceId,
   disabled,
   worktreesAvailable,
-  worktreeFormOpen,
   onSelectWorkspace,
   onNewWorktree,
-  onCloseWorktree,
-  onSubmitWorktree,
   onRemoveWorktree,
 }: {
   group: ProjectGroup;
@@ -195,15 +193,8 @@ function ProjectRow({
   selectedWorkspaceId: string;
   disabled: boolean;
   worktreesAvailable: boolean;
-  worktreeFormOpen: boolean;
   onSelectWorkspace: (workspaceId: string) => void;
   onNewWorktree: () => void;
-  onCloseWorktree: () => void;
-  onSubmitWorktree: (input: {
-    projectId: string;
-    name: string;
-    baseRef?: string;
-  }) => Promise<string | null>;
   onRemoveWorktree: (worktree: Worktree) => void;
 }) {
   const project: Project = group.project;
@@ -221,7 +212,6 @@ function ProjectRow({
             type="button"
             className="shell-icon-button"
             aria-label={`New worktree in ${project.name}`}
-            aria-expanded={worktreeFormOpen}
             title={`New worktree in ${project.name}`}
             disabled={disabled}
             onClick={onNewWorktree}
@@ -230,14 +220,6 @@ function ProjectRow({
           </button>
         )}
       </div>
-      {worktreeFormOpen && (
-        <NewWorktreeForm
-          project={project}
-          disabled={disabled}
-          onSubmit={onSubmitWorktree}
-          onClose={onCloseWorktree}
-        />
-      )}
       <div className="shell-project-cards">
         {group.worktrees.map((worktree) => (
           <WorktreeCard
