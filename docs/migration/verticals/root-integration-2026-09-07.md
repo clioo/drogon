@@ -1,5 +1,42 @@
 # Root integration — 2026-09-07
 
+## 12:17 UTC checkpoint (supersedes holds below where noted)
+
+V4 checkpoints are staged as `faa279d` and `0927d1c`. Root independently
+passed automation execution 17/17, responsibility policy 15/15 and runner
+21/21. The combined desktop suite passes 264/264 in 25 files; typechecking
+passes. The bound frozen skill-sharing catalog suite passes 2/2. These are
+isolated policy/adapter/UI contracts, not live automation or mounted Bot parity.
+
+Root added `bot.snapshot` over existing scoped Bot storage and registered
+workspace ownership. Five actual Engine regressions failed with missing methods
+before implementation and now pass: own-scope data, missing/foreign host,
+foreign workspace row, recoverable malformed data, and caller folder override.
+The endpoint is read-only, has no capability advertisement or desktop bridge yet,
+requires an explicit locale, and rejects oversized responses. Deleted-Bot
+history remains stored but is not listed by this live-Bot snapshot.
+
+Windows daemon API dependencies are provisioned in `b001dfc`: existing
+`windows-sys 0.61.2`, six requested features, only one new lockfile dependency
+edge. Locked offline Mac checks pass; this does not compile Windows-only code.
+V5 acceptance corrections and a real Windows CI entry are integrated through
+`a438b0d`; local Windows-probe tests were 21 passed / 7 Windows-only skipped.
+
+Current acceptance holds:
+
+- Files core remains with V3; no `files.v1` advertisement yet. UI `cbe54ad`
+  has a successful A→B→A save-receipt reuse bug, pending-save retirement on
+  file switch, and prop/state transition fencing corrections assigned to V3.
+  V2 may prepare the hidden mount from exact committed UI blobs.
+- Runner recording loses exact session identity and needs retry-safe durable
+  history and observation timestamps. V4 owns the correction and proposal;
+  root retains RPC contracts. No timer or real model activation.
+- V1 actual Windows transport/service wiring remains under review, and final
+  fixture corrections are awaiting a stable handoff. No Windows parity claim.
+
+Audit remains 11/12, 91.7%, medium confidence, delta zero. The fixed target is
+still 16:41:33 UTC; full-parity and installed-build gates remain high risk.
+
 ## 11:51 UTC checkpoint
 
 Integrated candidate: `f3ea46a`, branch `codex/vertical-integration`.
