@@ -16,10 +16,19 @@ export type {
 export {
   HARNESS_DEFAULT_MODEL_LABEL,
   READY_FOR_A_PURPOSE,
+  SESSION_LINKED_LABEL,
+  SESSION_NONE_LABEL,
   botDescription,
   modelLabel,
   projectBotRows,
   projectHistoryRows,
   projectResponsibilityRows,
+  projectSessionLiveness,
   triggerLabel,
 } from "./bots-panel-projection";
+export type { BotsPanelSessionLink } from "./bots-panel-projection";
+export { createBotsPanelDescriptor } from "./bots-panel-descriptor";
+export type {
+  BotsPanelDescriptor,
+  BotsPanelDescriptorInput,
+} from "./bots-panel-descriptor";

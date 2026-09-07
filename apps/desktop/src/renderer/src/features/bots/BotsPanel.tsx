@@ -1,9 +1,12 @@
 import { createElement } from "react";
 import type { BotsPanelProps } from "./bots-panel-contracts";
 import {
+  SESSION_LINKED_LABEL,
+  SESSION_NONE_LABEL,
   projectBotRows,
   projectHistoryRows,
   projectResponsibilityRows,
+  projectSessionLiveness,
 } from "./bots-panel-projection";
 
 // Exported-but-unmounted Bots panel (V2 owns App mounting). Reads only
@@ -13,9 +16,13 @@ import {
 // the order supplied by the caller (the store provides newest-first) and keep
 // orphaned evidence visible through explicit null-join markers; host
 // observations are rendered verbatim as evidence labels, never as a success
-// status. Reactive responsibilities render without a manual run control — the
-// manual scheduled-run path must keep refusing reactive work (source
-// B-reactive), so no such control is offered.
+// status. A stored session is rendered as a link ("Session linked"), never as
+// liveness — liveness appears only when the caller supplies an observed
+// verdict (live | unverifiable | exited), rendered verbatim. There is no
+// create control until the Bot-create service capability lands. Reactive
+// responsibilities render without a manual run control — the manual
+// scheduled-run path must keep refusing reactive work (source B-reactive), so
+// no such control is offered.
 
 const JOINED = (value: string | number | null): string =>
   value === null || value === "" ? "—" : String(value);
@@ -43,8 +50,8 @@ function HistoryRow({
 
 export function BotsPanel({
   snapshot,
-  onCreateBot,
   onRunResponsibility,
+  observedLivenessByBotId,
 }: BotsPanelProps) {
   const botRows = projectBotRows(snapshot.bots);
   const historyRows = projectHistoryRows(snapshot.history);
@@ -53,13 +60,6 @@ export function BotsPanel({
     "section",
     { "data-testid": "bots-panel", "aria-label": "Bots" },
     createElement("h1", null, "Bots"),
-    onCreateBot
-      ? createElement(
-          "button",
-          { type: "button", onClick: onCreateBot },
-          "Create Bot",
-        )
-      : null,
     botRows.length === 0
       ? createElement("p", { "data-testid": "bots-empty" }, "No Bots yet")
       : createElement(
@@ -69,6 +69,10 @@ export function BotsPanel({
             const owner = snapshot.bots.find((bot) => bot.id === row.id);
             if (!owner) return null;
             const responsibilities = projectResponsibilityRows(owner);
+            const observedLiveness = projectSessionLiveness(
+              row.id,
+              observedLivenessByBotId,
+            );
             return createElement(
               "li",
               { key: row.id, "data-testid": `bot-${row.id}` },
@@ -82,8 +86,14 @@ export function BotsPanel({
               createElement(
                 "p",
                 null,
-                `${row.harness} · ${row.modelLabel}`,
-                row.sessionActive ? " · session active" : "",
+                `${row.harness} · ${row.modelLabel} · ${
+                  row.sessionLink === "linked"
+                    ? SESSION_LINKED_LABEL
+                    : SESSION_NONE_LABEL
+                }`,
+                observedLiveness
+                  ? ` · Observed liveness: ${observedLiveness}`
+                  : "",
               ),
               createElement(
                 "ul",
