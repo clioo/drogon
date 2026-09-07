@@ -122,10 +122,10 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J3 CLI | R3 | Muse B | fusionada: terminal wait y guías skills get; browser CLI pendiente | #30 |
 | J1 notificaciones | R3 | Muse C | fusionada: needs_input por hooks y notificación nativa | #35 |
 | J10 Settings | R4 | Muse A | fusionada; falta tamaño de fuente en xterm | #33 |
-| J11 Paquete | R4 | Muse B | pendiente | |
+| J11 Paquete | R4 | Muse B | en curso (R6-D) | |
 | Fidelidad exacta: oráculo fuente + render y auditoría | R5 | Muse | fusionada: `scripts/fidelity/compare-surfaces.mjs`, 30 diferencias rankeadas | #44 |
-| Fidelidad R6-A: chrome de ventana, sidebar 280, nav rows y chords del fuente, landing | R6 | Muse | lanzada | |
+| Fidelidad R6-A: chrome de ventana, sidebar 280, nav rows y chords del fuente, landing | R6 | Muse | fusionada; oráculo: sidebar y barra inferior Δ0 | #48 |
 | Fidelidad R6-C: settings como página completa, copy y ARIA de Automations, Bots, Tasks | R6 | Muse | fusionada | #46 |
-| Fidelidad R6-B: activity bar derecha (Files, Changes), menú + de pestañas, browser como tab | R6 | Muse | pendiente tras R6-A | |
+| Fidelidad R6-B: activity bar derecha (Files, Changes), menú + de pestañas, browser como tab | R6 | Muse | lanzada | |
 | J1 UI: añadir proyecto, crear y quitar worktree, pulido | R4 | Muse C | fusionada | #40 |
 | J4 CLI browser por relay daemon → desktop | R4 | Muse B | fusionada: open, navigate, snapshot, click, fill, tabs | #41 |
