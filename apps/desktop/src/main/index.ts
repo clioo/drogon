@@ -9,6 +9,7 @@ import { readBuildInfo } from "./build-info";
 import { registerAutomationIpc } from "./automation-bridge";
 import { dispatchFileRequest } from "./file-bridge";
 import { registerGitBridge } from "./git-bridge";
+import { registerProjectBridge } from "./project-bridge";
 import { registerSettingsProbes } from "./settings-probes";
 import { registerTasksBridge } from "./tasks-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
@@ -59,6 +60,7 @@ let window: BrowserWindow | null = null;
 
 function registerBridge() {
   registerGitBridge(() => window);
+  registerProjectBridge(() => window);
   registerSettingsProbes(() => window);
   registerTasksBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {

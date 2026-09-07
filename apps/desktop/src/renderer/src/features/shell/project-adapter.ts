@@ -7,15 +7,18 @@ import type {
   Workspace,
 } from "../../../../shared/session-contract";
 
-/**
- * Capability markers for the project/worktree RPCs (journey J1). Kept
- * module-local — shared/session-contract.ts declares the shapes but no
- * capability ids (coordinator-owned) — mirroring the BOTS_CAPABILITY
- * pattern in bots-mount.ts. Values match crates/drogon-protocol
- * PROJECT_CAPABILITY / WORKTREE_CAPABILITY.
- */
-export const PROJECT_CAPABILITY = "project.v1";
-export const WORKTREE_CAPABILITY = "worktree.v1";
+// Single source for the capability ids: the granted
+// shared/project-contract.ts (mirrors crates/drogon-protocol
+// PROJECT_CAPABILITY / WORKTREE_CAPABILITY). Re-exported so existing
+// importers keep working.
+export {
+  PROJECT_CAPABILITY,
+  WORKTREE_CAPABILITY,
+} from "../../../../shared/project-contract";
+import {
+  PROJECT_CAPABILITY,
+  WORKTREE_CAPABILITY,
+} from "../../../../shared/project-contract";
 
 /** True exactly when the live service advertises project RPCs. */
 export function isProjectsAvailable(capabilities: readonly string[]): boolean {
@@ -28,21 +31,38 @@ export function isWorktreesAvailable(capabilities: readonly string[]): boolean {
 }
 
 /**
- * Structural subset of the daemon bridge the R1-S worker is adding
- * (`project.list`, `worktree.list`, `project.add`, `worktree.create`).
- * Every method is optional: App passes `window.drogon` widened to this
- * type and the loader below only calls what exists while the matching
- * capability is advertised.
+ * Structural subset of the `window.drogon.project` namespace
+ * (main/project-bridge.ts). Every method is optional: App reads the live
+ * namespace through `windowProjectBridge` and the loader below only calls
+ * what exists while the matching capability is advertised. `worktreeList`
+ * takes a required projectId — the daemon's `worktree.list` requires it
+ * (crates/drogon-protocol `WorktreeListParams`), so the loader fans out
+ * one call per project.
  */
 export interface ProjectRpcBridge {
   projectList?: () => Promise<Result<{ projects: Project[] }>>;
   worktreeList?: (input: {
-    projectId?: string;
+    projectId: string;
   }) => Promise<Result<{ worktrees: Worktree[] }>>;
   projectAdd?: (input: {
     path: string;
     name?: string;
   }) => Promise<Result<Project>>;
+  worktreeCreate?: (input: {
+    projectId: string;
+    name: string;
+    baseRef?: string;
+  }) => Promise<Result<Worktree>>;
+  worktreeRemove?: (input: {
+    id: string;
+    force?: boolean;
+  }) => Promise<Result<{ id: string; removed: boolean }>>;
+}
+
+/** Reads the live `project` namespace off `window.drogon` (absent → {}). */
+export function windowProjectBridge(host: unknown): ProjectRpcBridge {
+  if (typeof host !== "object" || host === null) return {};
+  return (host as { project?: ProjectRpcBridge }).project ?? {};
 }
 
 /** One project with the worktrees that belong to it, in list order. */
@@ -127,15 +147,35 @@ export async function loadProjectView(
     try {
       const listed = await bridge.projectList();
       if (listed.ok) {
-        const trees = await bridge.worktreeList({});
-        if (trees.ok)
+        // One `worktree.list` per project: the daemon requires a
+        // projectId and synthesizes the implicit worktree for folder
+        // projects, so this single fan-out covers both kinds.
+        const perProject = await Promise.all(
+          listed.result.projects.map((project) =>
+            bridge
+              .worktreeList!({ projectId: project.id })
+              .then(
+                (trees) => ({ project, trees }),
+                () => null,
+              )
+              .catch(() => null),
+          ),
+        );
+        if (
+          perProject.length === listed.result.projects.length &&
+          perProject.every((row) => row !== null && row.trees.ok)
+        ) {
+          const worktrees = perProject.flatMap((row) =>
+            row !== null && row.trees.ok ? row.trees.result.worktrees : [],
+          );
           return {
             groups: groupProjectWorktrees(
               listed.result.projects,
-              trees.result.worktrees,
+              worktrees,
             ),
             source: "rpc",
           };
+        }
       }
     } catch {
       // Fall through to the workspace projection below.
@@ -171,6 +211,43 @@ export function filterProjectGroups(
         group.worktrees.length > 0 ||
         group.project.name.toLowerCase().includes(needle),
     );
+}
+
+/**
+ * Finds the workspace registered for a project path (used after
+ * `project.add` of a folder project, which registers its workspace
+ * immediately). Compares slash-trimmed paths; the daemon canonicalizes,
+ * so an exact match after trimming is the honest signal.
+ */
+export function findWorkspaceForPath(
+  workspaces: Workspace[],
+  path: string,
+): Workspace | null {
+  const needle = path.replace(/\/+$/, "");
+  return (
+    workspaces.find(
+      (workspace) => workspace.path.replace(/\/+$/, "") === needle,
+    ) ?? null
+  );
+}
+
+/**
+ * The git project that owns a workspace, for the "New worktree" affordance.
+ * Null for folder projects (one implicit worktree, nothing to create) and
+ * for the workspace-fallback projection.
+ */
+export function gitProjectForWorkspace(
+  groups: ProjectGroup[],
+  workspaceId: string,
+): Project | null {
+  for (const group of groups) {
+    if (group.project.kind !== "git") continue;
+    if (
+      group.worktrees.some((worktree) => worktree.workspaceId === workspaceId)
+    )
+      return group.project;
+  }
+  return null;
 }
 
 /** Display name for a worktree card: its workspace name, else branch, else short id. */

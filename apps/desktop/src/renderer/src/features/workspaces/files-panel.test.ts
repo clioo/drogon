@@ -18,7 +18,9 @@ import {
   readContentFor,
   readErrorFor,
   runFilesRead,
+  shouldApplyOpenRequest,
   truncationNoticeText,
+  type FileOpenRequestCell,
   type FilesOpenEntry,
   type FilesReadState,
 } from "./files-panel";
@@ -912,6 +914,77 @@ describe("onSave observer rejection handling", () => {
     } finally {
       watch.done();
     }
+  });
+});
+
+describe("quick-open reveal (openRequest)", () => {
+  test("shouldApplyOpenRequest: same-workspace unapplied requests apply; repeats and foreign ones do not", () => {
+    expect(
+      shouldApplyOpenRequest({ workspaceId: "w1", path: "a.ts", nonce: 1 }, "w1", null),
+    ).toBe(true);
+    expect(
+      shouldApplyOpenRequest({ workspaceId: "w1", path: "a.ts", nonce: 1 }, "w1", 1),
+    ).toBe(false);
+    expect(
+      shouldApplyOpenRequest({ workspaceId: "w1", path: "a.ts", nonce: 2 }, "w1", 1),
+    ).toBe(true);
+    expect(
+      shouldApplyOpenRequest({ workspaceId: "w2", path: "a.ts", nonce: 3 }, "w1", null),
+    ).toBe(false);
+    expect(shouldApplyOpenRequest(null, "w1", null)).toBe(false);
+  });
+
+  test("a matching cell request opens that file at mount", () => {
+    const { bridge } = fakeBridge();
+    const cell: FileOpenRequestCell = {
+      current: { workspaceId: "w1", path: "src/a.ts", nonce: 7 },
+    };
+    const descriptor = createFilesPanelDescriptor({ bridge, openRequestCell: cell });
+    const markup = renderToString(
+      createElement(descriptor.component, {
+        routeId: FILES_ROUTE_ID,
+        session,
+        workspace,
+        status: statusWith(["files.v1"]),
+        focusTarget: null,
+      }),
+    );
+    expect(markup).toContain("src/a.ts");
+    expect(markup).not.toContain("No file open");
+  });
+
+  test("a foreign-workspace request never opens under this scope", () => {
+    const { bridge } = fakeBridge();
+    const cell: FileOpenRequestCell = {
+      current: { workspaceId: "w-other", path: "src/a.ts", nonce: 7 },
+    };
+    const descriptor = createFilesPanelDescriptor({ bridge, openRequestCell: cell });
+    const markup = renderToString(
+      createElement(descriptor.component, {
+        routeId: FILES_ROUTE_ID,
+        session,
+        workspace,
+        status: statusWith(["files.v1"]),
+        focusTarget: null,
+      }),
+    );
+    expect(markup).not.toContain("src/a.ts");
+    expect(markup).toContain("No file open");
+  });
+
+  test("no cell means no open, same as before", () => {
+    const { bridge } = fakeBridge();
+    const descriptor = createFilesPanelDescriptor({ bridge });
+    const markup = renderToString(
+      createElement(descriptor.component, {
+        routeId: FILES_ROUTE_ID,
+        session,
+        workspace,
+        status: statusWith(["files.v1"]),
+        focusTarget: null,
+      }),
+    );
+    expect(markup).toContain("No file open");
   });
 });
 

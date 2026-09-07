@@ -13,6 +13,8 @@ const onlineWorkspace: CommandContext = {
   filesAvailable: true,
   botsAvailable: true,
   harnessAvailable: true,
+  worktreesAvailable: true,
+  canCreateWorktree: true,
 };
 
 describe("commandTokenScore", () => {
@@ -101,6 +103,37 @@ describe("rankCommands", () => {
     expect(launch?.enabled).toBe(false);
     expect(launch?.disabledReason).toBe(
       "Harness launch is not advertised by the service",
+    );
+  });
+
+  test("new worktree is enabled only with a capability and a git target", () => {
+    const base = rankCommands({
+      defs: COMMAND_DEFS,
+      query: "",
+      context: onlineWorkspace,
+    });
+    expect(base.find((row) => row.def.id === "worktree.new")?.enabled).toBe(
+      true,
+    );
+    const noCapability = rankCommands({
+      defs: COMMAND_DEFS,
+      query: "",
+      context: { ...onlineWorkspace, worktreesAvailable: false },
+    });
+    const capped = noCapability.find((row) => row.def.id === "worktree.new");
+    expect(capped?.enabled).toBe(false);
+    expect(capped?.disabledReason).toBe(
+      "Worktrees unavailable: service does not advertise worktree.v1",
+    );
+    const noTarget = rankCommands({
+      defs: COMMAND_DEFS,
+      query: "",
+      context: { ...onlineWorkspace, canCreateWorktree: false },
+    });
+    const untargeted = noTarget.find((row) => row.def.id === "worktree.new");
+    expect(untargeted?.enabled).toBe(false);
+    expect(untargeted?.disabledReason).toBe(
+      "No git project selected: add a repository project first",
     );
   });
 
