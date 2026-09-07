@@ -91,6 +91,15 @@ and `src/renderer/src/components/mentu/{MentuPanel,RecipePaneHeader}.tsx`
 (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
 file keeps the MIT notice in its header comment.
 
+The Bots responsibility cards, forms and detail flow in
+`apps/desktop/src/renderer/src/features/bots/{BotResponsibilityCard,BotsPageForms,BotsPanel}.tsx`
+port the Drogon fork's `src/renderer/src/components/bots/{BotResponsibilityCard,BotsPageForms,BotsPage}.tsx`
+and `use-bots-page-controller.ts`; the native responsibility RPCs in
+`crates/drogon-core/src/bot_mutation_rpc.rs` and `bots/storage.rs` adapt
+`src/shared/drogon-bot-contract.ts` and `src/main/bots/bot-service.ts` (fork
+revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
+keeps the MIT notice in its header comment.
+
 ## Packaged dependencies
 
 Dependency versions are fixed in Cargo.lock and pnpm-lock.yaml. Their licenses must accompany redistributed artifacts. Geist is consumed from `@fontsource-variable/geist` with its bundled SIL Open Font License. No Game of Thrones artwork is redistributed in this foundation.

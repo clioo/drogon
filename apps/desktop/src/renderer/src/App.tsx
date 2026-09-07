@@ -654,13 +654,15 @@ export function App() {
   const projectGroupsRef = useRef(projectGroups);
   projectGroupsRef.current = projectGroups;
   const loadTaskGroups = useCallback(() => projectGroupsRef.current, []);
+  // Bots header Back closes the page like the fork: it rides a ref because
+  // the view-history handler is defined further down this component.
+  const botsCloseRef = useRef<() => void>(() => {});
   const panelRegistry = useMemo(() => {
     if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
-      return registerBotsRoute(
-        filesBaseRegistry,
-        botsGatedBridge,
-        buildBotsPanelProps(botsLoad.snapshot, undefined, botsScope),
-      );
+      return registerBotsRoute(filesBaseRegistry, botsGatedBridge, {
+        ...buildBotsPanelProps(botsLoad.snapshot, undefined, botsScope),
+        onClose: () => botsCloseRef.current(),
+      });
     return filesBaseRegistry;
   }, [
     filesBaseRegistry,
@@ -1122,6 +1124,7 @@ export function App() {
     setViewHistory(next);
     applyViewEntry(next.present);
   };
+  botsCloseRef.current = goBackViewHistory;
   const goForwardViewHistory = () => {
     const next = goForwardView(viewHistory);
     if (next === viewHistory) return;

@@ -3,7 +3,9 @@ import {
   BOT_HARNESS_IDS,
   buildBotCreateBody,
   emptyBotCreateForm,
+  emptyResponsibilityForm,
   isBotCreateFormReady,
+  isResponsibilityFormReady,
 } from "./bots-page-model";
 
 describe("bots-page-model", () => {
@@ -51,5 +53,44 @@ describe("bots-page-model", () => {
     const body = buildBotCreateBody(emptyBotCreateForm());
     expect(body).not.toHaveProperty("responsibilities");
     expect(body).not.toHaveProperty("currentSession");
+  });
+});
+
+describe("responsibility form model", () => {
+  const NOW = Date.UTC(2026, 8, 7, 12, 0, 0);
+
+  it("defaults to the every-minute schedule the Automations page uses", () => {
+    expect(emptyResponsibilityForm()).toEqual({
+      name: "",
+      cron: "* * * * *",
+      prompt: "",
+    });
+  });
+
+  it("is ready only with a name, a prompt and a previewable cron", () => {
+    expect(
+      isResponsibilityFormReady(
+        { name: "Duty", cron: "* * * * *", prompt: "Do it." },
+        NOW,
+      ),
+    ).toBe(true);
+    expect(
+      isResponsibilityFormReady(
+        { name: "  ", cron: "* * * * *", prompt: "Do it." },
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      isResponsibilityFormReady(
+        { name: "Duty", cron: "* * * * *", prompt: "  " },
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      isResponsibilityFormReady(
+        { name: "Duty", cron: "FREQ=DAILY", prompt: "Do it." },
+        NOW,
+      ),
+    ).toBe(false);
   });
 });

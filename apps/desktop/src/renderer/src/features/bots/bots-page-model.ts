@@ -11,6 +11,7 @@
 import type { BotCreateInput } from "../../../../shared/bot-contract";
 import type { BotCharacterPreset } from "./bot-characters";
 import { botDisplayName } from "./bot-characters";
+import { previewCronFires } from "../automations/automation-cron-preview";
 
 /** The only harness ids `harness.start` admits (see
  *  apps/desktop/src/shared/bridge-validation.ts's harnessLaunch schema). */
@@ -84,4 +85,31 @@ export function buildBotCreateBody(
 
 export function isBotCreateFormReady(form: BotCreateFormValues): boolean {
   return botDisplayName(form.displayName, form.preset).length > 0;
+}
+
+/** R7-E add-responsibility form: scheduled-only (name, UTC cron, prompt).
+ *  The Bot's workspace and harness come from the selected bot/scope at
+ *  submit time, never from this form -- no fake schedules. */
+export type ResponsibilityFormValues = {
+  name: string;
+  cron: string;
+  prompt: string;
+};
+
+export function emptyResponsibilityForm(): ResponsibilityFormValues {
+  return { name: "", cron: "* * * * *", prompt: "" };
+}
+
+/** Ready only when the daemon could actually schedule it: same cron
+ *  preview helper the Automations page uses, so an expression the form
+ *  accepts is one the scheduler fires. */
+export function isResponsibilityFormReady(
+  form: ResponsibilityFormValues,
+  nowMs: number = Date.now(),
+): boolean {
+  return (
+    form.name.trim().length > 0 &&
+    form.prompt.trim().length > 0 &&
+    previewCronFires(form.cron, nowMs) !== null
+  );
 }

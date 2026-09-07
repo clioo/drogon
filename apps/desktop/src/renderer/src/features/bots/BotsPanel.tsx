@@ -1,67 +1,48 @@
 import { useEffect, useState } from "react";
-import { Bot, Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, Bot, Plus, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { BotsPanelProps, BotsPanelSnapshot } from "./bots-panel-contracts";
 import {
-  SESSION_LINKED_LABEL,
-  SESSION_NONE_LABEL,
   projectBotRows,
-  projectHistoryRows,
-  projectResponsibilityRows,
   projectSessionLiveness,
 } from "./bots-panel-projection";
-import { BotAvatar } from "./BotAvatar";
 import { BotCreationForm } from "./BotCreationForm";
 import { BotConversation } from "./BotConversation";
-import { buildBotCreateBody, emptyBotCreateForm } from "./bots-page-model";
-import type { BotCreateFormValues } from "./bots-page-model";
+import { BotResponsibilityCard } from "./BotResponsibilityCard";
+import { ResponsibilityFormCard } from "./BotsPageForms";
+import {
+  buildBotCreateBody,
+  emptyBotCreateForm,
+  emptyResponsibilityForm,
+} from "./bots-page-model";
+import type {
+  BotCreateFormValues,
+  ResponsibilityFormValues,
+} from "./bots-page-model";
 
 // Bots page. Props only — no store/RPC/session access beyond the caller-
 // supplied `bridge`/`scope` (V2 mounts and owns the single App mount point).
 // Styling: admitted main.css tokens + ui primitives, monochrome and quiet.
+// List rows are the fork's BotResponsibilityCard chrome (ported); selecting
+// a bot opens a detail view (Back button, card, conversation, add form).
 // WHY the wording rules: a stored session is a link, never liveness —
-// liveness renders only from the caller's observed verdicts; history keeps
-// store order with explicit null-join markers because orphaned evidence is
+// liveness renders only from the caller's observed verdicts; orphaned
+// history keeps explicit null-join markers because orphaned evidence is
 // retained, never invented; reactive duties get no manual run control
-// because the source refuses one. Create/chat/select all gate on
+// because the source refuses one. Create/chat/add/delete all gate on
 // `bridge`+`scope` both being present — the same "no control without a real
 // capability behind it" rule the run button already followed, so a caller
 // that supplies neither renders the exact pre-R2-S read-only view.
 
-const JOINED = (value: string | number | null): string =>
-  value === null || value === "" ? "—" : String(value);
-
-function HistoryRow({
-  entry,
-}: {
-  entry: ReturnType<typeof projectHistoryRows>[number];
-}) {
-  return (
-    <tr data-testid={`history-${entry.runId}`}>
-      <td className="border-border py-1 pr-3 text-muted-foreground">
-        {entry.runId}
-      </td>
-      <td className="border-border py-1 pr-3 text-muted-foreground">
-        {entry.responsibilityName ?? "unlinked responsibility"}
-      </td>
-      <td className="border-border py-1 pr-3 text-muted-foreground">
-        {entry.automationName ?? "unlinked automation"}
-      </td>
-      <td className="border-border py-1 pr-3 text-muted-foreground">
-        {JOINED(entry.automationRunNumber)}
-      </td>
-      <td className="border-border py-1 pr-3 text-muted-foreground">
-        {JOINED(entry.hostObservation)}
-      </td>
-      <td className="border-border py-1 pr-3 text-muted-foreground">
-        {JOINED(entry.endedAt)}
-      </td>
-    </tr>
-  );
+function mintRequestId(prefix: string): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${prefix}-${Date.now()}`;
 }
 
 export function BotsPanel({
   snapshot,
+  onClose,
   onRunResponsibility,
   observedLivenessByBotId,
   bridge,
@@ -69,6 +50,12 @@ export function BotsPanel({
   sessionReader,
 }: BotsPanelProps) {
   const canMutate = Boolean(bridge && scope);
+  // Add/delete gate on their own bridge methods, not bare scope: a caller
+  // whose bridge predates R7-E renders the read-only card (same rule the
+  // run button already follows with onRunResponsibility).
+  const canEditResponsibilities = Boolean(
+    bridge?.botResponsibilityCreate && bridge?.botResponsibilityDelete && scope,
+  );
   const [localSnapshot, setLocalSnapshot] = useState<BotsPanelSnapshot | null>(
     null,
   );
@@ -95,6 +82,11 @@ export function BotsPanel({
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  const [showResponsibilityForm, setShowResponsibilityForm] = useState(false);
+  const [responsibilityForm, setResponsibilityForm] =
+    useState<ResponsibilityFormValues>(emptyResponsibilityForm());
+  const [responsibilityBusy, setResponsibilityBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -108,10 +100,7 @@ export function BotsPanel({
     setCreateError(null);
     const response = await bridge.botCreate({
       ...scope,
-      requestId:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `bot-create-${Date.now()}`,
+      requestId: mintRequestId("bot-create"),
       body: buildBotCreateBody(createForm),
     });
     setCreateBusy(false);
@@ -125,8 +114,55 @@ export function BotsPanel({
     await refreshSnapshot();
   }
 
+  async function submitResponsibility(botId: string) {
+    if (!bridge?.botResponsibilityCreate || !scope) return;
+    setResponsibilityBusy(true);
+    setActionError(null);
+    const response = await bridge.botResponsibilityCreate({
+      ...scope,
+      requestId: mintRequestId("bot-responsibility"),
+      botId,
+      name: responsibilityForm.name.trim(),
+      schedule: responsibilityForm.cron.trim(),
+      prompt: responsibilityForm.prompt,
+    });
+    setResponsibilityBusy(false);
+    if (!response.ok) {
+      setActionError(response.error.message);
+      return;
+    }
+    setShowResponsibilityForm(false);
+    setResponsibilityForm(emptyResponsibilityForm());
+    await refreshSnapshot();
+  }
+
+  async function deleteResponsibility(botId: string, responsibilityId: string) {
+    if (!bridge?.botResponsibilityDelete || !scope) return;
+    setActionError(null);
+    const response = await bridge.botResponsibilityDelete({
+      ...scope,
+      requestId: mintRequestId("bot-responsibility"),
+      botId,
+      responsibilityId,
+    });
+    if (!response.ok) {
+      setActionError(response.error.message);
+      return;
+    }
+    await refreshSnapshot();
+  }
+
+  function closeDetail() {
+    setSelectedBotId(null);
+    setShowResponsibilityForm(false);
+    setActionError(null);
+  }
+
   const botRows = projectBotRows(effective.bots);
-  const historyRows = projectHistoryRows(effective.history);
+  const selectedBot =
+    selectedBotId !== null
+      ? (effective.bots.find((bot) => bot.id === selectedBotId) ?? null)
+      : null;
 
   return (
     <section
@@ -135,6 +171,17 @@ export function BotsPanel({
       className="flex h-full min-h-0 flex-col bg-background text-foreground"
     >
       <header className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-3">
+        {onClose ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            className="shrink-0 gap-1.5"
+          >
+            <ArrowLeft className="size-3.5" />
+            Back
+          </Button>
+        ) : null}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">Bots</h1>
           <p className="truncate text-xs text-muted-foreground">
@@ -172,7 +219,84 @@ export function BotsPanel({
               {createError}
             </p>
           )}
-          {canMutate && showCreateForm ? (
+          {actionError && (
+            <div
+              className="rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {actionError}
+            </div>
+          )}
+          {selectedBot ? (
+            <div data-testid="bot-detail" className="flex flex-col gap-4">
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="bot-detail-back"
+                  onClick={closeDetail}
+                  className="gap-1.5"
+                >
+                  <ArrowLeft className="size-3.5" />
+                  Back
+                </Button>
+              </div>
+              <BotResponsibilityCard
+                bot={selectedBot}
+                history={effective.history}
+                observedLiveness={projectSessionLiveness(
+                  selectedBot.id,
+                  observedLivenessByBotId,
+                )}
+                onAddResponsibility={
+                  canEditResponsibilities
+                    ? () => setShowResponsibilityForm(true)
+                    : undefined
+                }
+                onDeleteResponsibility={
+                  canEditResponsibilities
+                    ? (responsibilityId) =>
+                        void deleteResponsibility(
+                          selectedBot.id,
+                          responsibilityId,
+                        )
+                    : undefined
+                }
+                onRunResponsibility={
+                  onRunResponsibility
+                    ? (responsibilityId) =>
+                        onRunResponsibility({
+                          botId: selectedBot.id,
+                          responsibilityId,
+                        })
+                    : undefined
+                }
+              />
+              {canMutate && scope && bridge && (
+                <BotConversation
+                  botId={selectedBot.id}
+                  harnessId={selectedBot.harnessPolicy.defaultHarness}
+                  scope={scope}
+                  bridge={bridge}
+                  sessionReader={sessionReader}
+                />
+              )}
+              {canEditResponsibilities && showResponsibilityForm ? (
+                <ResponsibilityFormCard
+                  form={responsibilityForm}
+                  busy={responsibilityBusy}
+                  onChange={(updates) =>
+                    setResponsibilityForm((current) => ({
+                      ...current,
+                      ...updates,
+                    }))
+                  }
+                  onCancel={() => setShowResponsibilityForm(false)}
+                  onSubmit={() => void submitResponsibility(selectedBot.id)}
+                />
+              ) : null}
+            </div>
+          ) : canMutate && showCreateForm ? (
             <BotCreationForm
               form={createForm}
               busy={createBusy}
@@ -207,146 +331,55 @@ export function BotsPanel({
               )}
             </div>
           ) : (
-            <ul className="flex flex-col gap-3" role="list" aria-label="Bots">
+            <div className="space-y-4" role="list" aria-label="Bots">
               {botRows.map((row) => {
                 const owner = effective.bots.find((bot) => bot.id === row.id);
                 if (!owner) return null;
-                const responsibilities = projectResponsibilityRows(owner);
-                const observedLiveness = projectSessionLiveness(
-                  row.id,
-                  observedLivenessByBotId,
-                );
-                const selected = selectedBotId === row.id;
                 return (
-                  <li
-                    key={row.id}
-                    data-testid={`bot-${row.id}`}
-                    className="flex flex-col gap-2 rounded-md border border-border bg-background p-3"
-                  >
-                    <div className="flex items-start gap-3">
-                      <BotAvatar displayName={row.displayName} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h2 className="text-sm font-medium text-foreground">
-                            {row.displayName}
-                          </h2>
-                          {row.handle && (
-                            <span className="text-xs text-muted-foreground">
-                              @{row.handle}
-                            </span>
-                          )}
-                        </div>
-                        <p
-                          data-testid={`bot-description-${row.id}`}
-                          className="text-sm text-foreground"
-                        >
-                          {row.description}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {row.harness} · {row.modelLabel} ·{" "}
-                          {row.sessionLink === "linked"
-                            ? SESSION_LINKED_LABEL
-                            : SESSION_NONE_LABEL}
-                          {observedLiveness
-                            ? ` · Observed liveness: ${observedLiveness}`
-                            : ""}
-                        </p>
-                      </div>
-                      {canMutate && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          data-testid={`select-bot-${row.id}`}
-                          onClick={() =>
-                            setSelectedBotId(selected ? null : row.id)
-                          }
-                        >
-                          {selected ? "Close chat" : "Chat"}
-                        </Button>
+                  <div key={row.id} role="listitem">
+                    <BotResponsibilityCard
+                      bot={owner}
+                      history={effective.history}
+                      observedLiveness={projectSessionLiveness(
+                        row.id,
+                        observedLivenessByBotId,
                       )}
-                    </div>
-                    {responsibilities.length > 0 && (
-                      <ul className="flex flex-col gap-1">
-                        {responsibilities.map((item) => (
-                          <li
-                            key={item.id}
-                            data-testid={`responsibility-${item.id}`}
-                            className="flex items-center gap-2"
-                          >
-                            <span className="text-xs text-muted-foreground">
-                              {item.name} ({item.kind}) · {item.triggerLabel} ·{" "}
-                              {item.enabled ? "Enabled" : "Disabled"}
-                              {item.recipeRef ? ` · ${item.recipeRef}` : ""}
-                            </span>
-                            {item.canManualRun && onRunResponsibility && (
-                              <Button asChild variant="outline" size="sm">
-                                {/* asChild (Radix Slot): the payload attrs + onClick
-                                live on a native button child because the
-                                primitive's TS props don't declare data-*
-                                keys; Slot merges tokens + data-slot onto it. */}
-                                <button
-                                  type="button"
-                                  data-bot-id={row.id}
-                                  data-responsibility-id={item.id}
-                                  onClick={() =>
-                                    onRunResponsibility({
-                                      botId: row.id,
-                                      responsibilityId: item.id,
-                                    })
-                                  }
-                                >
-                                  {`Run ${item.name}`}
-                                </button>
-                              </Button>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {canMutate && selected && scope && bridge && (
-                      <BotConversation
-                        botId={row.id}
-                        harnessId={owner.harnessPolicy.defaultHarness}
-                        scope={scope}
-                        bridge={bridge}
-                        sessionReader={sessionReader}
-                      />
-                    )}
-                  </li>
+                      onOpenSession={
+                        canMutate
+                          ? () => setSelectedBotId(row.id)
+                          : undefined
+                      }
+                      onAddResponsibility={
+                        canEditResponsibilities
+                          ? () => {
+                              setSelectedBotId(row.id);
+                              setShowResponsibilityForm(true);
+                            }
+                          : undefined
+                      }
+                      onDeleteResponsibility={
+                        canEditResponsibilities
+                          ? (responsibilityId) =>
+                              void deleteResponsibility(
+                                row.id,
+                                responsibilityId,
+                              )
+                          : undefined
+                      }
+                      onRunResponsibility={
+                        onRunResponsibility
+                          ? (responsibilityId) =>
+                              onRunResponsibility({
+                                botId: row.id,
+                                responsibilityId,
+                              })
+                          : undefined
+                      }
+                    />
+                  </div>
                 );
               })}
-            </ul>
-          )}
-          {historyRows.length > 0 && (
-            <table
-              data-testid="bots-history"
-              className="w-full border-collapse text-left text-xs"
-            >
-              <thead>
-                <tr>
-                  {[
-                    "Run",
-                    "Responsibility",
-                    "Automation",
-                    "Automation run",
-                    "Host observation",
-                    "Ended",
-                  ].map((label) => (
-                    <th
-                      key={label}
-                      className="border-border border-b pb-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground"
-                    >
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {historyRows.map((entry) => (
-                  <HistoryRow key={entry.runId} entry={entry} />
-                ))}
-              </tbody>
-            </table>
+            </div>
           )}
         </div>
       </div>

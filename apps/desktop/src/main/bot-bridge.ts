@@ -8,6 +8,10 @@ import {
   botRunResultSchema,
   botHistoryInputSchema,
   botHistoryResultSchema,
+  botResponsibilityCreateInputSchema,
+  botResponsibilityCreateResultSchema,
+  botResponsibilityDeleteInputSchema,
+  botResponsibilityDeleteResultSchema,
 } from "../shared/bot-validation";
 import type { Result } from "../shared/session-contract";
 import type {
@@ -15,6 +19,10 @@ import type {
   BotsPanelSnapshot,
   BotRunReceipt,
   BotHistoryResult,
+  BotResponsibilityCreateInput,
+  BotResponsibilityCreateResult,
+  BotResponsibilityDeleteInput,
+  BotResponsibilityDeleteResult,
 } from "../shared/bot-contract";
 import { dispatchBotCreate } from "./bot-create-bridge";
 import { callNative } from "./native-client";
@@ -34,6 +42,8 @@ resultSchemas["bot.snapshot"] = botSnapshotResultSchema;
 resultSchemas["bot.create"] = botCreateResultSchema;
 resultSchemas["bot.run"] = botRunResultSchema;
 resultSchemas["bot.history"] = botHistoryResultSchema;
+resultSchemas["bot.responsibility_create"] = botResponsibilityCreateResultSchema;
+resultSchemas["bot.responsibility_delete"] = botResponsibilityDeleteResultSchema;
 
 type NativeCall = (
   method: string,
@@ -140,6 +150,82 @@ export async function dispatchBotHistory(
   return { ok: true, result: checked.data };
 }
 
+// R7-E: scheduled-responsibility create/delete dispatchers. Same envelope
+// convention as botCreate above: `requestId` travels as the native
+// envelope id (ledger key), never inside params.
+export async function dispatchBotResponsibilityCreate(
+  input: unknown,
+  call: NativeCall = callNative,
+): Promise<Result<BotResponsibilityCreateResult>> {
+  const parsed = botResponsibilityCreateInputSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: {
+        code: "invalid_argument",
+        message: "Invalid Bot responsibility request.",
+        retryable: false,
+      },
+    };
+  const { requestId, ...params } = parsed.data;
+  const result = await call("bot.responsibility_create", params, requestId);
+  if (!result.ok) return result;
+  const checked = botResponsibilityCreateResultSchema.safeParse(result.result);
+  if (
+    !checked.success ||
+    checked.data.hostId !== params.hostId ||
+    checked.data.workspaceId !== params.workspaceId ||
+    checked.data.botId !== params.botId
+  )
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The created responsibility does not match its requested scope or contract.",
+        retryable: false,
+      },
+    };
+  return { ok: true, result: checked.data };
+}
+
+export async function dispatchBotResponsibilityDelete(
+  input: unknown,
+  call: NativeCall = callNative,
+): Promise<Result<BotResponsibilityDeleteResult>> {
+  const parsed = botResponsibilityDeleteInputSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: {
+        code: "invalid_argument",
+        message: "Invalid Bot responsibility request.",
+        retryable: false,
+      },
+    };
+  const { requestId, ...params } = parsed.data;
+  const result = await call("bot.responsibility_delete", params, requestId);
+  if (!result.ok) return result;
+  const checked = botResponsibilityDeleteResultSchema.safeParse(result.result);
+  if (
+    !checked.success ||
+    checked.data.hostId !== params.hostId ||
+    checked.data.workspaceId !== params.workspaceId ||
+    checked.data.botId !== params.botId ||
+    checked.data.responsibilityId !== params.responsibilityId
+  )
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The deleted responsibility does not match its requested scope or contract.",
+        retryable: false,
+      },
+    };
+  return { ok: true, result: checked.data };
+}
+
 const invalid = {
   ok: false,
   error: {
@@ -150,8 +236,9 @@ const invalid = {
 } as const;
 
 /**
- * Registers `drogon:botCreate`/`drogon:botRun`/`drogon:botHistory` with the
- * same sender/frame gate main/index.ts applies to its own bridge. Own
+ * Registers `drogon:botCreate`/`drogon:botRun`/`drogon:botHistory`/
+ * `drogon:botResponsibilityCreate`/`drogon:botResponsibilityDelete` with
+ * the same sender/frame gate main/index.ts applies to its own bridge. Own
  * registration (rather than `bridgeSchemas` entries) because that map is
  * coordinator-owned; see `main/git-bridge.ts` for the identical precedent.
  * `drogon:botSnapshot` is untouched -- it stays registered through the
@@ -173,4 +260,12 @@ export function registerBotBridge(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle("drogon:botCreate", guarded(dispatchBotCreate));
   ipcMain.handle("drogon:botRun", guarded(dispatchBotRun));
   ipcMain.handle("drogon:botHistory", guarded(dispatchBotHistory));
+  ipcMain.handle(
+    "drogon:botResponsibilityCreate",
+    guarded(dispatchBotResponsibilityCreate),
+  );
+  ipcMain.handle(
+    "drogon:botResponsibilityDelete",
+    guarded(dispatchBotResponsibilityDelete),
+  );
 }
