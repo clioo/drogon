@@ -61,10 +61,12 @@ impl PreparedSession {
         &self.incarnation
     }
 
+    #[cfg(test)]
     pub(crate) fn workspace_id(&self) -> &str {
         &self.workspace_id
     }
 
+    #[cfg(test)]
     pub(crate) fn host_id(&self) -> &str {
         &self.host_id
     }

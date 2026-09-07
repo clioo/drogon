@@ -3,6 +3,11 @@
 ## Latest staffing correction — 08:49 UTC
 
 Carlos changed all five leaders to **Pi / `muse-code` / `muse-spark-1.3`**.
+His subsequent reasoning requirement is **max**, explicitly launched with
+`pi --provider muse-code --model muse-spark-1.3 --thinking max`.
+Installed `pi --help` confirms `max` is a supported CLI value; the actual
+provider's effective level still requires verification during smoke/startup.
+Do not silently clamp or downgrade it.
 The repeated five-leader instruction governs the one later reference to three.
 Coding leaves may use Sonnet 5, GLM-5.3-Flash and Muse Spark 1.3, with load
 distributed by each leader. This supersedes all Sonnet-as-leader language below,
@@ -23,16 +28,17 @@ It does not waive product parity, E5 decisions or independent acceptance.
    review their deliveries, close reproduced defects, test, open PRs, integrate
    accepted work and settle related sessions without discarding files.
 2. Then create five independent Orca-managed worktrees/branches from one verified
-   integrated seed. One actual Sonnet 5 leader owns each V1–V5 vertical.
+   integrated seed. One actual Pi/Muse Spark 1.3 max leader owns each V1–V5 vertical.
 3. Root is director: architecture, shared-file ownership, cross-vertical contracts,
    integration requests, PR/merge order, combined testing and installed acceptance.
-4. Each Sonnet leader delegates implementation to GLM-5.3-Flash or Muse Spark 1.3,
+4. Each Pi/Muse leader delegates implementation to Sonnet 5, GLM-5.3-Flash or Muse Spark 1.3,
    chooses disjoint bounded tasks, reviews/tests their work, and publishes small
    verified vertical checkpoints. Leaders do not hand off review responsibility.
 5. Exactly two delegated generations: root → vertical leader → leaf. Leaves do
    not delegate. Verify the actual Orca depth setting with a bounded launch;
    never bypass a denial through another Run/identity or change global settings.
-6. Carlos authorizes replacing a quota-limited Sonnet leader with GLM or Muse.
+6. The latest explicit choice is five Pi/Muse leaders; an unavailable exact
+   provider/model/reasoning level requires reporting before substituting a leader.
    Preserve its exact worktree, WIP, task map and children; perform a stable explicit
    ownership transfer, never leave two leaders writing the same vertical.
 

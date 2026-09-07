@@ -399,6 +399,7 @@ fn two_concurrent_engine_open_calls_against_the_same_data_dir_both_succeed_consi
             ("automations".to_string(), 2),
             ("bots".to_string(), 2),
             ("coordination_access".to_string(), 1),
+            ("orchestration_attempts".to_string(), 1),
         ]
     );
     assert!(final_snapshot.host_id.is_some());
