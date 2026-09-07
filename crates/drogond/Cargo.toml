@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 clap = { workspace = true }
 base64 = { workspace = true }
 sha2 = { workspace = true }
+getrandom = "=0.4.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

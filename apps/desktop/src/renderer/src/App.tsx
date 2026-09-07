@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Bot,
   Folder,
@@ -8,6 +15,7 @@ import {
   PanelRight,
   Plus,
   RefreshCw,
+  Settings,
   Sun,
   TerminalSquare,
   X,
@@ -75,6 +83,7 @@ import {
   resolveInspectorDefault,
 } from "./theme";
 import type { Theme } from "./settings-store";
+import { SettingsPanel } from "./settings-panel";
 import {
   loadSavedSelection,
   resolveRestoredSelection,
@@ -188,15 +197,20 @@ export function applyConfirmedClose(
   return { sessions, active: nextActive };
 }
 
-export function IconButton({
-  label,
-  children,
-  ...props
-}: React.ComponentProps<typeof Button> & { label: string }) {
+export const IconButton = forwardRef<
+  HTMLButtonElement,
+  React.ComponentProps<typeof Button> & { label: string }
+>(function IconButton({ label, children, ...props }, ref) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <Button variant="ghost" size="icon" aria-label={label} {...props}>
+        <Button
+          ref={ref}
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          {...props}
+        >
           {children}
         </Button>
       </Tooltip.Trigger>
@@ -207,7 +221,7 @@ export function IconButton({
       </Tooltip.Portal>
     </Tooltip.Root>
   );
-}
+});
 
 /**
  * Single App mount for contract-registered panels: resolves the visible
@@ -273,6 +287,8 @@ export function App() {
     ),
   );
   const [theme, setTheme] = useState<Theme>(() => settings.get("theme"));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsOpenerRef = useRef<HTMLButtonElement>(null);
   const [revision, setRevision] = useState(0);
   const [harnessCapability, setHarnessCapability] = useState(false);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
@@ -360,7 +376,10 @@ export function App() {
   const botsScopeWorkspace = botsScope?.workspaceId ?? null;
   const botsScopeLocale = botsScope?.locale ?? null;
   function botsScopeEquals(
-    scope: { hostId: string; workspaceId: string; locale: string } | null | undefined,
+    scope:
+      | { hostId: string; workspaceId: string; locale: string }
+      | null
+      | undefined,
   ): scope is { hostId: string; workspaceId: string; locale: string } {
     return (
       scope != null &&
@@ -387,7 +406,14 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [route, botsAvailable, botsScopeHost, botsScopeWorkspace, botsScopeLocale, botsReload]);
+  }, [
+    route,
+    botsAvailable,
+    botsScopeHost,
+    botsScopeWorkspace,
+    botsScopeLocale,
+    botsReload,
+  ]);
   // Stable files base: Bots snapshot refreshes must never reset the Files
   // descriptor identity (mounted editor drafts/attempts). The bots layer
   // rebuilds on snapshot change; the files base below never does.
@@ -410,7 +436,14 @@ export function App() {
         buildBotsPanelProps(botsLoad.snapshot),
       );
     return filesBaseRegistry;
-  }, [filesBaseRegistry, botsGatedBridge, botsLoad, botsScopeHost, botsScopeWorkspace, botsScopeLocale]);
+  }, [
+    filesBaseRegistry,
+    botsGatedBridge,
+    botsLoad,
+    botsScopeHost,
+    botsScopeWorkspace,
+    botsScopeLocale,
+  ]);
   const filesAvailable =
     isFilesAvailable(liveCapabilities) &&
     checkAvailability(
@@ -442,7 +475,8 @@ export function App() {
   )
     filesAliveRef.current = false;
   const filesAlive = filesAliveRef.current;
-  const filesProps = current && status ? { workspace: current, status } : lastPropsRef.current;
+  const filesProps =
+    current && status ? { workspace: current, status } : lastPropsRef.current;
   const filesSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
@@ -518,10 +552,7 @@ export function App() {
         setSelected((value) =>
           result.workspaces.some((item) => item.id === value)
             ? value
-            : resolveRestoredSelection(
-                result.workspaces,
-                loadSavedSelection(),
-              ),
+            : resolveRestoredSelection(result.workspaces, loadSavedSelection()),
         );
         setRevision((value) => value + 1);
         const supportsHarnesses = supportsHarnessLaunch(connected.capabilities);
@@ -549,7 +580,10 @@ export function App() {
     // workspace, so the next reload's restore has an up-to-date target.
     const workspace = workspaces.find((item) => item.id === selected);
     if (workspace)
-      saveSavedSelection({ workspaceId: workspace.id, hostId: workspace.hostId });
+      saveSavedSelection({
+        workspaceId: workspace.id,
+        hostId: workspace.hostId,
+      });
   }, [selected, workspaces]);
   useEffect(() => {
     const wide = matchMedia("(min-width: 1101px)");
@@ -627,20 +661,24 @@ export function App() {
       setActive(result.id);
     }).then(() => launched);
   };
-  // Inspector toggles persist through the settings store; the narrow-viewport
-  // guard below keeps overriding the pane shut on shrink without persisting,
-  // so an accidental shrink never becomes a saved "closed" choice.
-  const toggleInspector = () => {
-    const next = !inspector;
-    setInspector(next);
-    settings.set("inspectorVisible", next);
-  };
-  const cycleTheme = () => {
-    const next: Theme =
-      theme === "system" ? "dark" : theme === "dark" ? "light" : "system";
+  // Single write path for both the toolbar controls and the Settings panel:
+  // uiSettings() stays the only source of truth, React state just mirrors it.
+  const changeTheme = (next: Theme) => {
     setTheme(next);
     settings.set("theme", next);
   };
+  // Inspector toggles persist through the settings store; the narrow-viewport
+  // guard below keeps overriding the pane shut on shrink without persisting,
+  // so an accidental shrink never becomes a saved "closed" choice.
+  const changeInspector = (next: boolean) => {
+    setInspector(next);
+    settings.set("inspectorVisible", next);
+  };
+  const toggleInspector = () => changeInspector(!inspector);
+  const cycleTheme = () =>
+    changeTheme(
+      theme === "system" ? "dark" : theme === "dark" ? "light" : "system",
+    );
   const close = (session: Session) =>
     action(async () => {
       const result = checked(
@@ -771,11 +809,7 @@ export function App() {
             <button
               key="panel-files"
               className="workspace-row"
-              disabled={
-                busy ||
-                !current ||
-                !isFilesAvailable(liveCapabilities)
-              }
+              disabled={busy || !current || !isFilesAvailable(liveCapabilities)}
               data-current={route === FILES_ROUTE_ID}
               title={
                 isFilesAvailable(liveCapabilities)
@@ -790,11 +824,7 @@ export function App() {
             <button
               key="panel-bots"
               className="workspace-row"
-              disabled={
-                busy ||
-                !current ||
-                !isBotsAvailable(liveCapabilities)
-              }
+              disabled={busy || !current || !isBotsAvailable(liveCapabilities)}
               data-current={route === BOTS_ROUTE_ID}
               title={
                 isBotsAvailable(liveCapabilities)
@@ -872,16 +902,13 @@ export function App() {
           </footer>
         </aside>
         <main className="session-area">
-          <header className="session-header">
+          <header className="session-header" style={{ position: "relative" }}>
             <div className="workspace-heading">
               <strong>{current?.name ?? "Your workspace"}</strong>
               {current && <span className="path">{current.path}</span>}
             </div>
             <div className="header-actions">
-              <IconButton
-                label={`Theme: ${theme}`}
-                onClick={cycleTheme}
-              >
+              <IconButton label={`Theme: ${theme}`} onClick={cycleTheme}>
                 {theme === "system" ? (
                   <Monitor size={16} />
                 ) : theme === "dark" ? (
@@ -903,7 +930,25 @@ export function App() {
               >
                 <PanelRight />
               </IconButton>
+              <IconButton
+                ref={settingsOpenerRef}
+                label="Settings"
+                aria-expanded={settingsOpen}
+                onClick={() => setSettingsOpen((value) => !value)}
+              >
+                <Settings size={16} />
+              </IconButton>
             </div>
+            {settingsOpen && (
+              <SettingsPanel
+                theme={theme}
+                onThemeChange={changeTheme}
+                inspectorVisible={inspector}
+                onInspectorChange={changeInspector}
+                onClose={() => setSettingsOpen(false)}
+                openerRef={settingsOpenerRef}
+              />
+            )}
           </header>
           {error && (
             <div className="error-banner" role="alert">
@@ -1146,8 +1191,8 @@ export function App() {
                         return (
                           <>
                             <p>
-                              Bots snapshot too large: {fresh.message}{" "}
-                              Narrow the workspace scope and retry.
+                              Bots snapshot too large: {fresh.message} Narrow
+                              the workspace scope and retry.
                             </p>
                             <Button
                               disabled={busy}
