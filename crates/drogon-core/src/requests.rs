@@ -15,11 +15,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 
 use drogon_protocol::RpcError;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::error;
+
+#[cfg(test)]
+#[path = "requests_atomic_tests.rs"]
+mod requests_atomic_tests;
 
 type ReceiptOutcome = Result<Value, RpcError>;
 type PersistedReceipt = (String, ReceiptOutcome);
@@ -170,6 +174,33 @@ impl RequestLedger {
             }
         }
     }
+
+    /// DATABASE-only atomic path for coordination state. Unlike [`RequestLedger::run`]
+    /// (built for external effects whose side effects cannot be rolled back), this
+    /// commits domain writes and the success receipt in one `BEGIN IMMEDIATE`
+    /// transaction: a domain write never survives when its receipt cannot commit.
+    ///
+    /// `internal_request_key` is already actor-scoped by the engine caller; no
+    /// authority is derived from it. `authorize` runs inside the transaction
+    /// BEFORE the saved-receipt lookup, on replay too, so a denied caller
+    /// sees its denial even when the fingerprint also changed. Both callbacks
+    /// are DB-only: they must not re-acquire the `db` mutex, do external I/O,
+    /// or issue transaction control. This path never touches the in-flight
+    /// map: one SQLite file with `BEGIN IMMEDIATE` already serializes
+    /// same-key admissions, and a legacy external admission's deliberately
+    /// retained slot must never be waited on.
+    pub(crate) fn run_atomic(
+        &self,
+        db: &Mutex<Connection>,
+        internal_request_key: &str,
+        method: &str,
+        params: &Value,
+        authorize: impl FnOnce(&Transaction<'_>) -> Result<(), RpcError>,
+        work: impl FnOnce(&Transaction<'_>) -> Result<Value, RpcError>,
+    ) -> Result<Value, RpcError> {
+        let fp = fingerprint(method, params);
+        run_atomic_inner(db, internal_request_key, method, &fp, authorize, work)
+    }
 }
 
 fn load_persisted(
@@ -188,9 +219,19 @@ fn load_persisted(
     let Some((fp, status, result_json, error_json)) = row else {
         return Ok(None);
     };
+    decode_receipt(fp, &status, result_json, error_json).map(Some)
+}
+
+// Preserve legacy receipt decoding; pending admissions never authorize another execution.
+fn decode_receipt(
+    fingerprint: String,
+    status: &str,
+    result_json: Option<String>,
+    error_json: Option<String>,
+) -> Result<PersistedReceipt, RpcError> {
     if status == "pending" {
         // Live admissions were checked first; retain fingerprint checks for uncertain receipts.
-        return Ok(Some((fp, Err(persistence_uncertain()))));
+        return Ok((fingerprint, Err(persistence_uncertain())));
     }
     let outcome = if let Some(result) = result_json {
         Ok(serde_json::from_str(&result).map_err(|e| error::internal_error(e.to_string()))?)
@@ -200,7 +241,7 @@ fn load_persisted(
     } else {
         return Err(error::internal_error("corrupt request ledger row"));
     };
-    Ok(Some((fp, outcome)))
+    Ok((fingerprint, outcome))
 }
 
 /// Distinguishes "a row for this requestId is already there" (an internal
@@ -209,6 +250,111 @@ fn load_persisted(
 enum InsertPendingError {
     AlreadyAdmitted,
     Storage(RpcError),
+}
+
+/// Atomic-path worker: every early return drops the transaction, rolling
+/// back whatever it holds. Only a successful `commit` publishes anything.
+fn run_atomic_inner(
+    db: &Mutex<Connection>,
+    key: &str,
+    method: &str,
+    fp: &str,
+    authorize: impl FnOnce(&Transaction<'_>) -> Result<(), RpcError>,
+    work: impl FnOnce(&Transaction<'_>) -> Result<Value, RpcError>,
+) -> Result<Value, RpcError> {
+    let conn = db.lock().unwrap();
+    let tx = match Transaction::new_unchecked(&conn, TransactionBehavior::Immediate) {
+        Ok(tx) => tx,
+        Err(e) => return Err(error::from_sqlite(e)),
+    };
+    // Authorization runs before the saved-receipt lookup, on replay too.
+    authorize(&tx)?;
+    let row: Option<(String, String, Option<String>, Option<String>)> = match tx
+        .query_row(
+            "SELECT fingerprint, status, result_json, error_json FROM requests WHERE request_id = ?1",
+            [key],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()
+    {
+        Ok(row) => row,
+        Err(e) => return Err(error::from_sqlite(e)),
+    };
+    if let Some((db_fp, status, result_json, error_json)) = row {
+        // Saved receipt, or a legacy external-effect admission (`pending`):
+        // replay or report uncertainty, never re-run. A fingerprint mismatch
+        // is a conflict either way.
+        if db_fp != fp {
+            return Err(error::request_conflict());
+        }
+        return match decode_receipt(db_fp, &status, result_json, error_json) {
+            Ok((_, outcome)) => outcome,
+            Err(e) => Err(e),
+        };
+    }
+    // Fresh admission: work runs in a savepoint so only domain changes roll
+    // back, then the receipt lands in the same transaction and one commit
+    // publishes both together.
+    if tx.execute_batch("SAVEPOINT atomic_work").is_err() {
+        return Err(persistence_uncertain());
+    }
+    match work(&tx) {
+        Ok(value) => {
+            if tx.execute_batch("RELEASE atomic_work").is_err()
+                || insert_done_receipt(&tx, key, method, fp, &Ok(value.clone())).is_err()
+            {
+                return Err(persistence_uncertain());
+            }
+            match tx.commit() {
+                Ok(()) => Ok(value),
+                // Commit result unknown: never report success, never claim
+                // the domain write is gone.
+                Err(_) => Err(persistence_uncertain()),
+            }
+        }
+        Err(work_err) => {
+            // A failed savepoint rollback poisons the transaction: publish
+            // nothing and let the outer transaction roll back on drop.
+            if tx.execute_batch("ROLLBACK TO atomic_work").is_err()
+                || tx.execute_batch("RELEASE atomic_work").is_err()
+            {
+                return Err(persistence_uncertain());
+            }
+            if insert_done_receipt(&tx, key, method, fp, &Err(work_err.clone())).is_err() {
+                return Err(persistence_uncertain());
+            }
+            match tx.commit() {
+                Ok(()) => Err(work_err),
+                Err(_) => Err(persistence_uncertain()),
+            }
+        }
+    }
+}
+
+fn insert_done_receipt(
+    tx: &Transaction,
+    key: &str,
+    method: &str,
+    fingerprint: &str,
+    result: &ReceiptOutcome,
+) -> rusqlite::Result<()> {
+    let (result_json, error_json): (Option<String>, Option<String>) = match result {
+        Ok(value) => (Some(value.to_string()), None),
+        Err(err) => (None, Some(serde_json::to_string(err).unwrap_or_default())),
+    };
+    tx.execute(
+        "INSERT INTO requests (request_id, method, fingerprint, status, result_json, error_json, created_at) \
+         VALUES (?1, ?2, ?3, 'done', ?4, ?5, ?6)",
+        rusqlite::params![
+            key,
+            method,
+            fingerprint,
+            result_json,
+            error_json,
+            crate::now_rfc3339()
+        ],
+    )?;
+    Ok(())
 }
 
 fn insert_pending(
