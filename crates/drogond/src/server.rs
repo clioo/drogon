@@ -14,6 +14,9 @@ use drogon_core::Engine;
 use drogon_protocol::{Request, Response, RpcError};
 
 use crate::framing::{read_frame, write_response};
+use crate::service_quiescence::{
+    ConnectionRegistry, DEFAULT_DRAIN_TIMEOUT, DEFAULT_QUIESCENCE_POLL, QuiesceGate,
+};
 
 /// Local IPC on a single-user data directory has no legitimate reason to
 /// need more concurrent connections than this.
@@ -56,6 +59,12 @@ pub fn accept_loop(
 /// Same as `accept_loop`, with the connection cap and idle deadline exposed
 /// so tests can exercise real exhaustion-then-recovery behavior in
 /// milliseconds instead of at production timescales.
+///
+/// This is the production entry: the listener is polled nonblocking with a
+/// bounded interval, and an admitted `runtime.shutdown` is observed at that
+/// poll point (see `run_accept_loop_inner`). Accepted streams are put back
+/// to blocking mode — handlers use blocking read/write deadlines, and a
+/// paused client must not look like a transport error to its handler.
 #[cfg(unix)]
 pub fn accept_loop_with_limits(
     listener: std::os::unix::net::UnixListener,
@@ -64,14 +73,27 @@ pub fn accept_loop_with_limits(
     max_connections: usize,
     idle_timeout: Duration,
 ) -> std::io::Result<()> {
-    run_accept_loop(
-        move || listener.accept().map(|(stream, _)| stream),
+    listener.set_nonblocking(true)?;
+    run_accept_loop_inner(
+        move || {
+            let (stream, _) = listener.accept()?;
+            stream.set_nonblocking(false)?;
+            Ok(stream)
+        },
         engine,
         token,
-        max_connections,
-        idle_timeout,
-        DEFAULT_ACCEPT_ERROR_BACKOFF,
-        DEFAULT_MAX_CONSECUTIVE_ACCEPT_ERRORS,
+        QuiesceGate::default(),
+        AcceptLoopConfig {
+            max_connections,
+            idle_timeout,
+            accept_error_backoff: DEFAULT_ACCEPT_ERROR_BACKOFF,
+            max_consecutive_accept_errors: DEFAULT_MAX_CONSECUTIVE_ACCEPT_ERRORS,
+            // The production accept source is nonblocking: an empty queue
+            // (`WouldBlock`) is the idle poll point, never an error.
+            poll_on_would_block: true,
+            quiescence_poll: DEFAULT_QUIESCENCE_POLL,
+            drain_timeout: DEFAULT_DRAIN_TIMEOUT,
+        },
     )
 }
 
@@ -87,7 +109,7 @@ pub fn accept_loop_with_limits(
 /// an honestly failing service beats a silently dead one.
 #[cfg(unix)]
 pub fn run_accept_loop(
-    mut accept: impl FnMut() -> std::io::Result<UnixStream>,
+    accept: impl FnMut() -> std::io::Result<UnixStream>,
     engine: Arc<Engine>,
     token: Arc<str>,
     max_connections: usize,
@@ -95,15 +117,106 @@ pub fn run_accept_loop(
     accept_error_backoff: Duration,
     max_consecutive_accept_errors: u32,
 ) -> std::io::Result<()> {
+    run_accept_loop_inner(
+        accept,
+        engine,
+        token,
+        QuiesceGate::default(),
+        AcceptLoopConfig {
+            max_connections,
+            idle_timeout,
+            accept_error_backoff,
+            max_consecutive_accept_errors,
+            // Injected accept sources keep the exact pre-quiescence error
+            // contract: a `WouldBlock` they return is an ordinary transient
+            // error and consumes the budget like any other.
+            poll_on_would_block: false,
+            quiescence_poll: DEFAULT_QUIESCENCE_POLL,
+            drain_timeout: DEFAULT_DRAIN_TIMEOUT,
+        },
+    )
+}
+
+/// Tuning bundle for the accept loop; see the constants each field falls
+/// back to in `accept_loop_with_limits` and `run_accept_loop`.
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+struct AcceptLoopConfig {
+    max_connections: usize,
+    idle_timeout: Duration,
+    accept_error_backoff: Duration,
+    max_consecutive_accept_errors: u32,
+    /// Whether a `WouldBlock` from the accept source means "no connection
+    /// pending" (production nonblocking listener) or is an ordinary
+    /// transient error (injected sources, preserving their public budget
+    /// semantics byte for byte).
+    poll_on_would_block: bool,
+    quiescence_poll: Duration,
+    drain_timeout: Duration,
+}
+
+/// The quiescence-aware loop. Everything documented on `run_accept_loop`
+/// still holds; additionally:
+///
+/// - Before each `accept`, an authorized [`QuiesceGate`] ends the loop: the
+///   gate is set by the handler that served an admitted
+///   `runtime.shutdown`, only after the reply write was attempted, so the
+///   listener never stops on the core flag alone (which flips before the
+///   reply exists).
+/// - A `WouldBlock` from the *production* nonblocking accept source is not
+///   an accept failure: it means no connection is pending, and the loop
+///   sleeps `quiescence_poll` and re-checks the gate — the bounded wake
+///   mechanism, which never consumes the transient-error budget and never
+///   reconnects to a socket pathname. Injected accept sources
+///   (`run_accept_loop`) keep the exact pre-quiescence error contract for
+///   every error they return, including `WouldBlock`.
+/// - On exit through the gate, [`ConnectionRegistry::drain`] disposes active
+///   connections within `drain_timeout` and the loop returns `Ok(())`, so
+///   the caller (`drogond::serve`) releases the exclusive data-dir lock
+///   through the normal drop path. Fatal and budget-exhausted accept errors
+///   still return their original error unchanged; a fatal error mid-service
+///   keeps its existing meaning and does not drain.
+#[cfg(unix)]
+fn run_accept_loop_inner(
+    mut accept: impl FnMut() -> std::io::Result<UnixStream>,
+    engine: Arc<Engine>,
+    token: Arc<str>,
+    gate: QuiesceGate,
+    config: AcceptLoopConfig,
+) -> std::io::Result<()> {
+    let AcceptLoopConfig {
+        max_connections,
+        idle_timeout,
+        accept_error_backoff,
+        max_consecutive_accept_errors,
+        poll_on_would_block,
+        quiescence_poll,
+        drain_timeout,
+    } = config;
+    let registry = Arc::new(ConnectionRegistry::new());
     let active = Arc::new(AtomicUsize::new(0));
     let mut consecutive_errors: u32 = 0;
     loop {
+        if gate.is_authorized() {
+            // Shutdown was admitted and its reply already attempted: stop
+            // accepting and dispose of live connections, bounded.
+            break;
+        }
         let stream = match accept() {
             Ok(stream) => {
                 consecutive_errors = 0;
                 stream
             }
             Err(error) => {
+                // Only the production nonblocking accept source reaches
+                // this arm with no connection pending; it is the quiescence
+                // poll point, not a failure, and never burns the budget.
+                // Injected sources keep the pre-quiescence contract, where
+                // a `WouldBlock` is an ordinary transient error.
+                if poll_on_would_block && error.kind() == std::io::ErrorKind::WouldBlock {
+                    std::thread::sleep(quiescence_poll);
+                    continue;
+                }
                 if is_fatal_accept_error(&error) {
                     return Err(error);
                 }
@@ -119,6 +232,12 @@ pub fn run_accept_loop(
                 continue;
             }
         };
+        // A client can race with the admission: once draining starts, never
+        // hand a late-arriving connection to a handler.
+        if gate.is_authorized() {
+            drop(stream);
+            break;
+        }
         if active.fetch_add(1, Ordering::SeqCst) >= max_connections {
             active.fetch_sub(1, Ordering::SeqCst);
             // Why not send an error frame: an over-capacity connection has
@@ -129,14 +248,27 @@ pub fn run_accept_loop(
             drop(stream);
             continue;
         }
+        // Never admit a handler whose transport cannot be drained.
+        let registered = match stream.try_clone() {
+            Ok(registered) => registered,
+            Err(_) => {
+                active.fetch_sub(1, Ordering::SeqCst);
+                continue;
+            }
+        };
+        let registration = registry.register(registered);
         let engine = engine.clone();
         let token = token.clone();
         let active = active.clone();
+        let gate = gate.clone();
         std::thread::spawn(move || {
-            let _ = handle_connection(stream, &engine, &token, idle_timeout);
+            let _registration = registration;
+            let _ = connection_loop(stream, &engine, &token, idle_timeout, Some(&gate));
             active.fetch_sub(1, Ordering::SeqCst);
         });
     }
+    registry.drain(drain_timeout);
+    Ok(())
 }
 
 /// Fatal means "the listener itself is unusable": a bad descriptor, an
@@ -172,6 +304,24 @@ pub fn handle_connection(
     token: &str,
     idle_timeout: Duration,
 ) -> std::io::Result<()> {
+    connection_loop(stream, engine, token, idle_timeout, None)
+}
+
+/// One connection, one dispatch per frame. With a `gate` (the accept loop's
+/// tracked handlers), a frame whose dispatch is an *admitted*
+/// `runtime.shutdown` authorizes the gate after the reply write is
+/// attempted — success, or an error that proves delivery uncertain — and
+/// ends this connection: the service is draining, so nothing further may be
+/// served here. Refused shutdowns (busy, stale, unauthorized) are ordinary
+/// responses and the connection stays open.
+#[cfg(unix)]
+fn connection_loop(
+    stream: UnixStream,
+    engine: &Engine,
+    token: &str,
+    idle_timeout: Duration,
+    gate: Option<&QuiesceGate>,
+) -> std::io::Result<()> {
     stream.set_read_timeout(Some(idle_timeout))?;
     stream.set_write_timeout(Some(idle_timeout))?;
     let write_stream = stream.try_clone()?;
@@ -189,8 +339,25 @@ pub fn handle_connection(
             // state is touched either way.
             Err(_) => return Ok(()),
         };
-        let response = dispatch_frame(&frame, engine, token);
-        write_response(&mut writer, &response)?;
+        let (response, admitted_shutdown) = match parse_request(&frame) {
+            Ok(request) => {
+                let is_shutdown = request.method == "runtime.shutdown";
+                let response = dispatch_request(request, engine, token);
+                let admitted = response.ok;
+                (response, is_shutdown && admitted)
+            }
+            Err(response) => (response, false),
+        };
+        let write_result = write_response(&mut writer, &response);
+        if let (Some(gate), true) = (gate, admitted_shutdown) {
+            // Core persisted the admission before it returned this success,
+            // and the reply has now been written or its delivery is known to
+            // have failed — either satisfies the contract's ordering before
+            // the listener may stop.
+            gate.authorize();
+            return Ok(());
+        }
+        write_result?;
     }
 }
 
@@ -243,23 +410,23 @@ mod tests {
     }
 }
 
-fn dispatch_frame(frame: &[u8], engine: &Engine, token: &str) -> Response {
-    let request: Request = match serde_json::from_slice(frame) {
-        Ok(request) => request,
-        Err(_) => {
-            // No parsed requestId to correlate an error response to;
-            // synthesize one so the wire contract ("one request gets one
-            // response") still holds for a caller who at least sent a
-            // frame, even if this reply cannot be matched to anything.
-            return Response::failure(
-                "unknown".to_string(),
-                RpcError::new(
-                    "invalid_argument",
-                    "frame did not parse as a request envelope",
-                ),
-            );
-        }
-    };
+fn parse_request(frame: &[u8]) -> Result<Request, Response> {
+    serde_json::from_slice(frame).map_err(|_| {
+        // No parsed requestId to correlate an error response to;
+        // synthesize one so the wire contract ("one request gets one
+        // response") still holds for a caller who at least sent a
+        // frame, even if this reply cannot be matched to anything.
+        Response::failure(
+            "unknown".to_string(),
+            RpcError::new(
+                "invalid_argument",
+                "frame did not parse as a request envelope",
+            ),
+        )
+    })
+}
+
+fn dispatch_request(request: Request, engine: &Engine, token: &str) -> Response {
     if request.auth.as_deref() != Some(token) {
         return Response::failure(
             request.request_id,
