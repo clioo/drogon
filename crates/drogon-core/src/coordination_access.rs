@@ -49,7 +49,84 @@ pub(crate) struct WorkerBinding {
     pub(crate) session_id: String,
     pub(crate) incarnation: String,
     pub(crate) revoked: bool,
+    pub(crate) revocation_reason: Option<String>,
 }
+
+/// Only a credential revoked specifically because its dispatch already
+/// reported, AND whose exact attempt row is still the *current* attempt for
+/// its task and actually carries a settled outcome, may recover through the
+/// narrow paths below. The stored `revocation_reason` string alone is not
+/// proof by itself -- it is cheap bookkeeping that could in principle go
+/// stale; this cross-checks the durable attempt state before trusting it.
+/// A retried/replaced attempt (`is_current = 0`, fenced by a later retry)
+/// can never recover this way even if it once reported: root's admission
+/// path is the only current authority for that task now.
+/// Stopped, abandoned or superseded credentials get nothing either way.
+fn revoked_for_report_recovery(
+    conn: &Connection,
+    binding: &WorkerBinding,
+) -> Result<bool, RpcError> {
+    if !binding.revoked || binding.revocation_reason.as_deref() != Some("reported") {
+        return Ok(false);
+    }
+    attempt_is_current_and_settled(
+        conn,
+        &binding.host_id,
+        &binding.run_id,
+        &binding.task_id,
+        &binding.dispatch_id,
+    )
+}
+
+/// Reads the exact attempt row's own stored outcome and current-ness --
+/// never trusts the credential table's revocation reason as proof by itself.
+fn attempt_is_current_and_settled(
+    conn: &Connection,
+    host_id: &str,
+    run_id: &str,
+    task_id: &str,
+    dispatch_id: &str,
+) -> Result<bool, RpcError> {
+    let state_json: Option<String> = conn
+        .query_row(
+            "SELECT state_json FROM orchestration_attempts
+              WHERE dispatch_id = ?1 AND host_id = ?2 AND run_id = ?3 AND task_id = ?4
+                AND is_current = 1",
+            params![dispatch_id, host_id, run_id, task_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(crate::error::from_sqlite)?;
+    let Some(state_json) = state_json else {
+        return Ok(false);
+    };
+    let state: crate::coordination_attempts::Attempt = serde_json::from_str(&state_json)
+        .map_err(|_| crate::error::internal_error("Invalid stored attempt."))?;
+    if state.outcome.is_none()
+        || state.result.run_id != run_id
+        || state.result.task_id != task_id
+        || state.result.dispatch_id != dispatch_id
+    {
+        return Ok(false);
+    }
+    let Some(message_id) = state.report_message_id else {
+        return Ok(false);
+    };
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM orchestration_mail_messages
+          WHERE message_id=?1 AND host_id=?2 AND run_id=?3
+            AND from_kind='dispatch' AND from_dispatch_id=?4 AND kind='finalReport')",
+        params![message_id, host_id, run_id, dispatch_id],
+        |row| row.get(0),
+    )
+    .map_err(crate::error::from_sqlite)
+}
+
+/// A settled-report credential may only prove its own identity (status
+/// preflight, `send` replay/duplicate classification, receipt recovery);
+/// no new mail, no check, no ask/reply.
+const REVOKED_REPORT_RECOVERY_METHODS: &[&str] =
+    &["status", "orchestration.requestShow", "orchestration.send"];
 
 impl std::fmt::Debug for WorkerBinding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -197,12 +274,13 @@ fn row_to_binding(row: &rusqlite::Row) -> rusqlite::Result<WorkerBinding> {
         session_id: row.get(4)?,
         incarnation: row.get(5)?,
         revoked: row.get::<_, i64>(6)? != 0,
+        revocation_reason: row.get(8)?,
     })
 }
 
 fn lookup_by_digest(conn: &Connection, digest: &str) -> Result<Option<WorkerBinding>, RpcError> {
     conn.query_row(
-        "SELECT host_id, run_id, task_id, dispatch_id, session_id, incarnation, revoked, digest
+        "SELECT host_id, run_id, task_id, dispatch_id, session_id, incarnation, revoked, digest, revocation_reason
            FROM orchestration_dispatch_credentials WHERE digest = ?1",
         params![digest],
         row_to_binding,
@@ -227,7 +305,15 @@ pub(crate) fn authorize_worker(
     }
     let digest = digest_presented_secret(presented_secret);
     let binding = lookup_by_digest(conn, &digest)?.ok_or_else(unauthorized)?;
-    if binding.revoked {
+    // Narrow settled-report recovery: a credential revoked specifically for
+    // its own report, with a durable attempt row that actually carries that
+    // settlement, may still prove identity for status/send-replay/receipt
+    // recovery, nothing else; stopped/abandoned/superseded credentials never
+    // pass here.
+    if binding.revoked
+        && !(revoked_for_report_recovery(conn, &binding)?
+            && REVOKED_REPORT_RECOVERY_METHODS.contains(&method))
+    {
         return Err(unauthorized());
     }
     if binding.host_id != execution_host_id {
@@ -285,12 +371,26 @@ fn check_scope_matches(
     Ok(())
 }
 
+/// `method` narrowly allows a binding revoked for its own report through
+/// only for [`REVOKED_REPORT_RECOVERY_METHODS`]: settled-report recovery
+/// must survive the revocation that report itself triggers, but grants no
+/// other effect. Stopped/abandoned/superseded credentials get nothing.
 pub(crate) fn recheck_in_tx(
     tx: &Transaction,
     expected: &WorkerBinding,
+    method: &str,
 ) -> Result<WorkerBinding, RpcError> {
     let binding = lookup_by_digest(tx, &expected.digest)?.ok_or_else(unauthorized)?;
-    if binding.revoked || binding != *expected {
+    let same_identity = binding.host_id == expected.host_id
+        && binding.run_id == expected.run_id
+        && binding.task_id == expected.task_id
+        && binding.dispatch_id == expected.dispatch_id
+        && binding.session_id == expected.session_id
+        && binding.incarnation == expected.incarnation;
+    let revoked_ok = !binding.revoked
+        || (revoked_for_report_recovery(tx, &binding)?
+            && REVOKED_REPORT_RECOVERY_METHODS.contains(&method));
+    if !same_identity || !revoked_ok {
         return Err(unauthorized());
     }
     Ok(binding)

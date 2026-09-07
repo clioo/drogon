@@ -48,6 +48,7 @@ impl std::fmt::Debug for DispatchCredential {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum Actor {
     AdminBootstrap {
         host_id: String,

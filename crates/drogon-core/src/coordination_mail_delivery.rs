@@ -10,10 +10,9 @@ use drogon_protocol::orchestration_mail::{
 use rusqlite::{OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-use super::{
-    PACKING_BUDGET_BYTES, RESPONSE_BUDGET_BYTES, Recipient, StoredMessage, message_kind_str,
-    message_kind_tag,
-};
+#[cfg(test)]
+use super::RESPONSE_BUDGET_BYTES;
+use super::{PACKING_BUDGET_BYTES, Recipient, StoredMessage, message_kind_str, message_kind_tag};
 use crate::error;
 
 #[cfg(test)]

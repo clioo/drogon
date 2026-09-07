@@ -123,28 +123,25 @@ fn revocation_committed_after_entry_authorization_denies_the_real_worker_dispatc
     assert_eq!(response.error.unwrap().code, "unauthorized");
 }
 
+/// Every allow-listed worker method (`status`/`send`/`check`/`ask`/`reply`/
+/// `requestShow`) is now wired; a worker credential asking for a real but
+/// never-allow-listed coordinator-only method must still be refused
+/// honestly with `unauthorized`, never a fake success or a stray
+/// `method_not_found` that would leak past `authorize_worker`'s allowlist.
 #[test]
-fn allowed_but_unimplemented_orchestration_method_is_honest_method_not_found_not_a_fake_success() {
+fn never_allow_listed_orchestration_method_is_honestly_unauthorized_not_a_fake_success() {
     let (_dir, engine, host_id) = open_engine_with_worker(WORKER_SECRET);
-    let scope = json!({
-        "actorKind": "dispatch",
-        "contractVersion": 1,
-        "hostId": host_id,
-        "runId": RUN,
-        "taskId": TASK,
-        "dispatchId": DISPATCH,
-    });
     let request: Request = serde_json::from_value(json!({
         "protocol": PROTOCOL_VERSION,
         "requestId": "r2",
         "auth": WORKER_SECRET,
-        "method": "orchestration.send",
-        "params": { "scope": scope, "payload": {"kind": "heartbeat"} },
+        "method": "orchestration.workerStart",
+        "params": { "hostId": host_id, "runId": RUN, "taskId": TASK },
     }))
     .unwrap();
     let response = engine.dispatch_authenticated(request, SERVICE_CREDENTIAL);
     assert!(!response.ok);
-    assert_eq!(response.error.unwrap().code, "method_not_found");
+    assert_eq!(response.error.unwrap().code, "unauthorized");
 }
 
 #[test]

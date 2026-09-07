@@ -34,7 +34,7 @@ impl Engine {
                     coordinator_actor(scope)
                 }
                 (ReceiptScope::Dispatch(scope), Some(binding)) => {
-                    coordination_access::recheck_in_tx(tx, binding)?;
+                    coordination_access::recheck_in_tx(tx, binding, "orchestration.requestShow")?;
                     if scope.run_id != binding.run_id
                         || scope.task_id != binding.task_id
                         || scope.dispatch_id != binding.dispatch_id

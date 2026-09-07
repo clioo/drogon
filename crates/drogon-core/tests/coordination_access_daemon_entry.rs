@@ -252,7 +252,9 @@ fn worker_credential_cannot_reach_raw_session_workspace_harness_or_shutdown() {
 }
 
 #[test]
-fn worker_credential_authorized_orchestration_method_falls_through_to_honest_method_not_found() {
+fn worker_credential_never_allow_listed_method_falls_through_to_honest_unauthorized() {
+    // `status`/`send`/`check`/`ask`/`reply`/`requestShow` are all wired now;
+    // a coordinator-only method stays refused at the allowlist, not routed.
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();
     let host_id = engine
@@ -266,15 +268,15 @@ fn worker_credential_authorized_orchestration_method_falls_through_to_honest_met
 
     let response = engine.dispatch_authenticated(
         req(
-            "orchestration.send",
+            "orchestration.workerStart",
             "r1",
             Some(WORKER_SECRET),
-            json!({ "scope": own_dispatch_scope(&host_id), "payload": {"kind": "heartbeat"} }),
+            json!({ "hostId": host_id, "runId": RUN, "taskId": TASK }),
         ),
         SERVICE_CREDENTIAL,
     );
     assert!(!response.ok);
-    assert_eq!(response.error.unwrap().code, "method_not_found");
+    assert_eq!(response.error.unwrap().code, "unauthorized");
 }
 
 #[test]

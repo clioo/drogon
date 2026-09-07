@@ -1,6 +1,10 @@
 //! Correlated question/answer mail. A question and its mail message commit
 //! atomically; resume only ever reads; only the addressed actor may reply,
 //! and a reply is idempotent by exact answer body, never overwritten.
+//!
+//! `ask_new_in_tx`/`ask_resume_in_tx`/`reply_in_tx` are the domain functions
+//! for `orchestration.ask`/`orchestration.reply`, called by root's
+//! `coordination_question_rpc.rs`.
 
 use drogon_protocol::RpcError;
 use drogon_protocol::orchestration_common::validate_opaque_token;
@@ -113,6 +117,21 @@ pub(crate) fn ask_new_in_tx(
     let thread_id = summary
         .thread_id
         .expect("append_message_in_tx always sets a thread id");
+    correlate_question_in_tx(tx, host_id, run_id, question_message_id, &thread_id)?;
+    Ok(to_record(question_message_id, false, None, None, thread_id))
+}
+
+/// Inserts the correlation row for an already-appended `question`-kind
+/// message. Any `send` of `kind: "question"` -- not only the dedicated
+/// `ask` path -- must call this atomically with its message insert, or a
+/// later `reply`/resume finds the message but no correlation and refuses.
+pub(crate) fn correlate_question_in_tx(
+    tx: &Transaction,
+    host_id: &str,
+    run_id: &str,
+    question_message_id: &str,
+    thread_id: &str,
+) -> Result<(), RpcError> {
     tx.execute(
         "INSERT INTO orchestration_mail_questions
             (question_message_id, host_id, run_id, thread_id, closed)
@@ -120,7 +139,7 @@ pub(crate) fn ask_new_in_tx(
         params![question_message_id, host_id, run_id, thread_id],
     )
     .map_err(super::mail_storage_error)?;
-    Ok(to_record(question_message_id, false, None, None, thread_id))
+    Ok(())
 }
 
 /// Pure read: never creates mail, never mutates state, regardless of

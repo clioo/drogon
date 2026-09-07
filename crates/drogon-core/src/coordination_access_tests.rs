@@ -361,7 +361,7 @@ fn recheck_in_tx_sees_a_revocation_that_raced_the_initial_authorization() {
         tx.commit().expect("commit revoke");
     }
     let tx = conn.transaction().expect("begin mutating tx");
-    let err = recheck_in_tx(&tx, &binding).unwrap_err();
+    let err = recheck_in_tx(&tx, &binding, "status").unwrap_err();
     assert_eq!(err.code, "unauthorized");
     tx.rollback().expect("rollback");
 }
@@ -372,7 +372,7 @@ fn recheck_in_tx_reports_the_live_binding_when_not_revoked() {
     register(&mut conn, SECRET);
     let binding = authorize_worker(&conn, HOST, SECRET, "status", &json!({})).unwrap();
     let tx = conn.transaction().expect("begin");
-    let binding = recheck_in_tx(&tx, &binding).expect("still authorized");
+    let binding = recheck_in_tx(&tx, &binding, "status").expect("still authorized");
     assert_eq!(binding.run_id, RUN);
     assert_eq!(binding.task_id, TASK);
     assert!(!binding.revoked);
@@ -387,8 +387,154 @@ fn recheck_in_tx_unknown_dispatch_is_unauthorized() {
     let tx = Connection::open_in_memory().unwrap();
     let tx = tx.unchecked_transaction().expect("begin");
     apply_pending_steps_in_tx(&tx).expect("migrate");
-    let err = recheck_in_tx(&tx, &binding).unwrap_err();
+    let err = recheck_in_tx(&tx, &binding, "status").unwrap_err();
     assert_eq!(err.code, "unauthorized");
     tx.rollback().expect("rollback");
     drop(conn);
+}
+
+/// A credential revoked with reason `"reported"` but with no matching
+/// `orchestration_attempts` row at all (never settled, or the row is simply
+/// absent) must never be treated as recovered -- the reason string is a
+/// hint, not proof; the durable attempt state is the only proof.
+#[test]
+fn reported_reason_without_any_matching_attempt_row_is_unauthorized() {
+    let mut conn = migrated_conn();
+    {
+        let tx = conn.transaction().expect("begin");
+        crate::coordination_attempts::migrate(&tx).expect("migrate attempts schema");
+        tx.commit().expect("commit");
+    }
+    register(&mut conn, SECRET);
+    let tx = conn.transaction().expect("begin revoke");
+    revoke_in_tx(&tx, DISPATCH, "reported").expect("revoke");
+    tx.commit().expect("commit revoke");
+
+    for method in ["status", "orchestration.send", "orchestration.requestShow"] {
+        let params = if method == "status" {
+            json!({})
+        } else {
+            json!({ "scope": dispatch_scope() })
+        };
+        let err = authorize_worker(&conn, HOST, SECRET, method, &params).unwrap_err();
+        assert_eq!(err.code, "unauthorized", "method: {method}");
+    }
+}
+
+/// A credential revoked for a real product reason other than its own report
+/// (`"superseded"`, from a retry replacing the current attempt) must never
+/// recover through the narrow settled-report paths, even if some unrelated
+/// attempt row happens to carry a settled outcome.
+#[test]
+fn superseded_reason_never_grants_settled_report_recovery() {
+    let mut conn = migrated_conn();
+    {
+        let tx = conn.transaction().expect("begin");
+        crate::coordination_attempts::migrate(&tx).expect("migrate attempts schema");
+        tx.execute(
+            "INSERT INTO orchestration_attempts(dispatch_id,host_id,run_id,task_id,is_current,fenced,state_json)
+             VALUES (?1,?2,?3,?4,0,1,?5)",
+            rusqlite::params![
+                DISPATCH,
+                HOST,
+                RUN,
+                TASK,
+                json!({
+                    "result": {"runId": RUN, "taskId": TASK, "dispatchId": DISPATCH,
+                        "consumerGeneration":1, "workspaceId":"w", "assignmentState":"completed",
+                        "readiness":"workerObserved", "processVerdict":"unverifiable",
+                        "effects":[], "residualResources":[]},
+                    "launch": {"harnessId":"claude","permissionMode":"inherit"},
+                    "outcome": "succeeded", "report_message_id": "msg-1", "cleanup_owned": false,
+                })
+                .to_string()
+            ],
+        )
+        .expect("seed superseded, already-settled attempt row");
+        tx.commit().expect("commit");
+    }
+    register(&mut conn, SECRET);
+    let tx = conn.transaction().expect("begin revoke");
+    revoke_in_tx(&tx, DISPATCH, "superseded").expect("revoke");
+    tx.commit().expect("commit revoke");
+
+    for method in ["status", "orchestration.send", "orchestration.requestShow"] {
+        let params = if method == "status" {
+            json!({})
+        } else {
+            json!({ "scope": dispatch_scope() })
+        };
+        let err = authorize_worker(&conn, HOST, SECRET, method, &params).unwrap_err();
+        assert_eq!(err.code, "unauthorized", "method: {method}");
+    }
+}
+
+/// A dispatch that genuinely reported (revoked for reason `"reported"`, its
+/// own attempt row carries a settled outcome) but whose attempt has since
+/// been retried and replaced (`is_current = 0`, fenced by the newer attempt
+/// admission created) must never recover through the narrow settled-report
+/// paths -- only the *current* attempt's own settlement counts; a retired
+/// one cannot, even though nothing forged the reason.
+#[test]
+fn reported_but_retired_by_a_later_retry_is_unauthorized() {
+    let mut conn = migrated_conn();
+    {
+        let tx = conn.transaction().expect("begin");
+        crate::coordination_attempts::migrate(&tx).expect("migrate attempts schema");
+        tx.execute(
+            "INSERT INTO orchestration_attempts(dispatch_id,host_id,run_id,task_id,is_current,fenced,state_json)
+             VALUES (?1,?2,?3,?4,0,1,?5)",
+            rusqlite::params![
+                DISPATCH,
+                HOST,
+                RUN,
+                TASK,
+                json!({
+                    "result": {"runId": RUN, "taskId": TASK, "dispatchId": DISPATCH,
+                        "consumerGeneration":1, "workspaceId":"w", "assignmentState":"failed",
+                        "readiness":"workerObserved", "processVerdict":"unverifiable",
+                        "effects":[], "residualResources":[]},
+                    "launch": {"harnessId":"claude","permissionMode":"inherit"},
+                    "outcome": "failed", "report_message_id": "msg-1", "cleanup_owned": false,
+                })
+                .to_string()
+            ],
+        )
+        .expect("seed a genuinely reported but retired (is_current=0) attempt row");
+        // The retry's own new attempt row is the current one for this task now.
+        tx.execute(
+            "INSERT INTO orchestration_attempts(dispatch_id,host_id,run_id,task_id,is_current,fenced,state_json)
+             VALUES ('dispatch-retry',?1,?2,?3,1,0,?4)",
+            rusqlite::params![
+                HOST,
+                RUN,
+                TASK,
+                json!({
+                    "result": {"runId": RUN, "taskId": TASK, "dispatchId": "dispatch-retry",
+                        "consumerGeneration":1, "workspaceId":"w", "assignmentState":"ready",
+                        "readiness":"notObserved", "processVerdict":"unverifiable",
+                        "effects":[], "residualResources":[]},
+                    "launch": {"harnessId":"claude","permissionMode":"inherit"},
+                    "outcome": null, "report_message_id": null, "cleanup_owned": false,
+                })
+                .to_string()
+            ],
+        )
+        .expect("seed the replacing retry's current attempt row");
+        tx.commit().expect("commit");
+    }
+    register(&mut conn, SECRET);
+    let tx = conn.transaction().expect("begin revoke");
+    revoke_in_tx(&tx, DISPATCH, "reported").expect("revoke");
+    tx.commit().expect("commit revoke");
+
+    for method in ["status", "orchestration.send", "orchestration.requestShow"] {
+        let params = if method == "status" {
+            json!({})
+        } else {
+            json!({ "scope": dispatch_scope() })
+        };
+        let err = authorize_worker(&conn, HOST, SECRET, method, &params).unwrap_err();
+        assert_eq!(err.code, "unauthorized", "method: {method}");
+    }
 }

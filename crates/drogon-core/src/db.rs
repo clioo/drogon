@@ -176,6 +176,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     coordination_access::apply_pending_steps_in_tx(&tx)?;
     drogon_orchestration::schema::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_attempts::migrate(&tx).map_err(StartupError::Orchestration)?;
+    crate::coordination_mail::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;

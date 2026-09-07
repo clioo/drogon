@@ -11,7 +11,9 @@ mod coordination_attempts;
 mod coordination_identity;
 mod coordination_launch;
 mod coordination_mail;
+mod coordination_mail_rpc;
 mod coordination_output;
+mod coordination_question_rpc;
 mod coordination_receipts;
 mod coordination_runs;
 mod coordination_worker_control;
@@ -254,7 +256,7 @@ impl Engine {
                 Ok(tx) => tx,
                 Err(err) => return Response::failure(request.request_id, error::from_sqlite(err)),
             };
-            let result = coordination_access::recheck_in_tx(&tx, &binding);
+            let result = coordination_access::recheck_in_tx(&tx, &binding, &request.method);
             let _ = tx.rollback();
             result
         };
@@ -265,6 +267,28 @@ impl Engine {
             }
             Ok(_) if request.method == "orchestration.requestShow" => {
                 match self.show_coordination_receipt(&request, Some(&binding)) {
+                    Ok(value) => Response::success(request.request_id, value),
+                    Err(err) => Response::failure(request.request_id, err),
+                }
+            }
+            Ok(_)
+                if matches!(
+                    request.method.as_str(),
+                    "orchestration.send" | "orchestration.check"
+                ) =>
+            {
+                match self.dispatch_worker_mail(&binding, &request) {
+                    Ok(value) => Response::success(request.request_id, value),
+                    Err(err) => Response::failure(request.request_id, err),
+                }
+            }
+            Ok(_)
+                if matches!(
+                    request.method.as_str(),
+                    "orchestration.ask" | "orchestration.reply"
+                ) =>
+            {
+                match self.dispatch_coordination_question(&request, Some(&binding)) {
                     Ok(value) => Response::success(request.request_id, value),
                     Err(err) => Response::failure(request.request_id, err),
                 }
@@ -306,6 +330,10 @@ impl Engine {
             | "orchestration.workerAbandon"
             | "orchestration.workerRelease" => self.dispatch_coordination_worker(request),
             "orchestration.requestShow" => self.show_coordination_receipt(request, None),
+            "orchestration.send" | "orchestration.check" => self.dispatch_admin_mail(request),
+            "orchestration.ask" | "orchestration.reply" => {
+                self.dispatch_coordination_question(request, None)
+            }
             other => Err(error::method_not_found(other)),
         }
     }

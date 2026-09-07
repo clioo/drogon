@@ -11,6 +11,7 @@ use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
 
 use crate::coordination_attempts::{self as attempts, Attempt};
+use crate::coordination_mail::questions;
 use crate::coordination_runs::{coordinator_actor, encode};
 use crate::{Engine, coordination_access, error, session};
 
@@ -34,6 +35,13 @@ impl Engine {
                     AssignmentState::Abandoned,
                 )?;
                 coordination_access::revoke_in_tx(tx, &params.dispatch_id, "abandoned")?;
+                questions::close_dispatch_questions_in_tx(
+                    tx,
+                    &params.scope.host.host_id,
+                    &params.scope.run_id,
+                    &params.dispatch_id,
+                    "abandoned",
+                )?;
                 block_current_task(tx, &params.scope, &attempt)?;
                 encode(WorkerAbandonResult {
                     dispatch_id: params.dispatch_id.clone(),
@@ -75,6 +83,13 @@ impl Engine {
                     AssignmentState::Stopped,
                 )?;
                 coordination_access::revoke_in_tx(tx, &params.dispatch_id, "stopped")?;
+                questions::close_dispatch_questions_in_tx(
+                    tx,
+                    &params.scope.host.host_id,
+                    &params.scope.run_id,
+                    &params.dispatch_id,
+                    "stopped",
+                )?;
                 block_current_task(tx, &params.scope, &attempt)?;
                 Ok((attempt, already_fenced))
             },
