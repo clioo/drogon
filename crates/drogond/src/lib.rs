@@ -60,11 +60,20 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = Engine::open(data_dir).map_err(ServeError::Engine)?;
     let engine = Arc::new(configure_worker_cli(engine)?);
+    // Daemon-owned automation tick loop (R2-B): a plain OS thread polling
+    // every 15 s. It exits on engine quiescence or here on serve exit.
+    let mut scheduler = drogon_core::automations::scheduler::spawn(
+        engine.clone(),
+        drogon_core::automations::scheduler::TICK_INTERVAL,
+    );
     // Transient accept errors are retried with backoff inside the loop, up
     // to a bounded consecutive-error budget; a fatal listener failure or an
     // exhausted budget surfaces here, and either must end the process with
     // a failure rather than silently stop serving.
-    server::accept_loop(listener, engine, Arc::from(token.as_str())).map_err(ServeError::Io)?;
+    let result =
+        server::accept_loop(listener, engine, Arc::from(token.as_str())).map_err(ServeError::Io);
+    scheduler.shutdown();
+    result?;
     // `_lock` is held for this entire call, released only on process exit
     // or an early `?` return above.
     Ok(())
@@ -89,7 +98,15 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = Engine::open(data_dir).map_err(ServeError::Engine)?;
     let engine = Arc::new(configure_worker_cli(engine)?);
-    server::accept_loop(listener, engine, Arc::from(token.as_str())).map_err(ServeError::Io)?;
+    // Daemon-owned automation tick loop (R2-B); see the Unix serve above.
+    let mut scheduler = drogon_core::automations::scheduler::spawn(
+        engine.clone(),
+        drogon_core::automations::scheduler::TICK_INTERVAL,
+    );
+    let result =
+        server::accept_loop(listener, engine, Arc::from(token.as_str())).map_err(ServeError::Io);
+    scheduler.shutdown();
+    result?;
     Ok(())
 }
 

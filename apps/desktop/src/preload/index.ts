@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge } from "../shared/session-contract";
+import { automationBridge } from "./automation";
 import { installBrowserWindowCloseGuard } from "./browser-window-close-installation";
 import { usageBridge } from "./usage";
 import { git } from "./git";
@@ -8,6 +9,7 @@ import { browser } from "./browser";
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
 const bridge: DesktopBridge = {
+  automation: automationBridge,
   botSnapshot: (value) => ipcRenderer.invoke("drogon:botSnapshot", value),
   fileList: (value) => ipcRenderer.invoke("drogon:fileList", value),
   fileRead: (value) => ipcRenderer.invoke("drogon:fileRead", value),

@@ -5,8 +5,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::client::{
-    HarnessCatalog, MethodResult, Project, ProjectList, ReadResult, Removed, Session, SessionList,
-    StatusResult, Workspace, WorkspaceList, Worktree, WorktreeList, WriteResult,
+    AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, HarnessCatalog,
+    MethodResult, Project, ProjectList, ReadResult, Removed, Session, SessionList, StatusResult,
+    Workspace, WorkspaceList, Worktree, WorktreeList, WriteResult,
 };
 
 pub fn status_line(result: &StatusResult) -> String {
@@ -214,6 +215,123 @@ pub fn session_closed(session: &Session) -> String {
         .map(|code| format!(" exit={code}"))
         .unwrap_or_default();
     format!("Closed {} [{}].{}", session.id, session.verdict_str(), exit)
+}
+
+/// Millisecond-epoch engine times as UTC wall time. Non-finite or negative
+/// inputs render as `-` rather than a fabricated date.
+pub fn format_unix_ms(ms: f64) -> String {
+    if !ms.is_finite() || ms < 0.0 {
+        return "-".to_string();
+    }
+    let secs = (ms / 1000.0).floor() as u64;
+    let days = secs / 86_400;
+    let rem = secs % 86_400;
+    let (y, mo, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{mo:02}-{d:02} {:02}:{:02}:{:02} UTC",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
+fn civil_from_days(days: u64) -> (u64, u64, u64) {
+    let z = days as i64 + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y } as u64, m, d)
+}
+
+fn automation_line(summary: &AutomationSummary) -> String {
+    let last = summary
+        .last_run
+        .as_ref()
+        .map(|run| run.status.clone())
+        .unwrap_or_else(|| "never".to_string());
+    format!(
+        "{} \"{}\" [{}] cron \"{}\" workspace {} next {} last {} ({})",
+        summary.id,
+        summary.name,
+        summary.harness,
+        summary.cron,
+        summary.workspace_id.as_deref().unwrap_or("-"),
+        format_unix_ms(summary.next_run_at),
+        last,
+        if summary.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        },
+    )
+}
+
+pub fn automation_created(summary: &AutomationSummary) -> String {
+    format!("Created automation {}", automation_line(summary))
+}
+
+pub fn automation_list(list: &AutomationList) -> String {
+    if list.automations.is_empty() {
+        return "No automations.".into();
+    }
+    list.automations
+        .iter()
+        .map(automation_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn automation_run_now(result: &AutomationRunNow) -> String {
+    match result.outcome.as_str() {
+        "refused" => format!(
+            "Automation {} refused: {} (recorded as {})",
+            result.automation_id,
+            result.refusal.as_deref().unwrap_or("refused"),
+            result.run_id.as_deref().unwrap_or("-"),
+        ),
+        _ => format!(
+            "Ran automation {} run {} status {}",
+            result.automation_id,
+            result.run_id.as_deref().unwrap_or("-"),
+            result.status.as_deref().unwrap_or("-"),
+        ),
+    }
+}
+
+pub fn automation_history(history: &AutomationHistory, automation_id: &str) -> String {
+    if history.runs.is_empty() {
+        return format!("No runs recorded for automation {automation_id}.");
+    }
+    history
+        .runs
+        .iter()
+        .map(|run| {
+            let detail = run
+                .error
+                .clone()
+                .or_else(|| run.exit_code.map(|code| format!("exit={code}")))
+                .unwrap_or_default();
+            format!(
+                "{} [{}] {} scheduled {} created {}{}",
+                run.id,
+                run.trigger,
+                run.status,
+                format_unix_ms(run.scheduled_for),
+                format_unix_ms(run.created_at),
+                if detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {detail}")
+                },
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// One line per discovered harness; unknown future harness ids render

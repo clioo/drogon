@@ -97,6 +97,12 @@ pub enum Command {
         #[command(subcommand)]
         action: HarnessAction,
     },
+    /// Cron automations: create, list, run now, and run history (requires
+    /// the service capability automation.v1)
+    Automation {
+        #[command(subcommand)]
+        action: AutomationAction,
+    },
     /// Native coordination (requires the service capability
     /// orchestration.native.v1; the preflight decides before any method)
     Orchestration {
@@ -173,6 +179,64 @@ impl PermissionModeArg {
             PermissionModeArg::Unattended => "unattended",
         }
     }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AutomationAction {
+    /// Create a cron automation (schedule runs in UTC)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation create --name <NAME> --cron <EXPR> --workspace <ID> --harness <ID> --prompt <TEXT> [--disabled] [--grace-minutes <N>]\nValid flags: --cron, --data-dir, --disabled, --grace-minutes, --harness, --help, --json, --name, --prompt, --request-id, --retry-request, --workspace"
+    )]
+    Create {
+        #[arg(long, value_name = "NAME")]
+        name: String,
+        /// Standard 5-field cron expression (UTC), e.g. "* * * * *"
+        #[arg(long, value_name = "EXPR")]
+        cron: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        /// Harness id as advertised by `harness list`
+        #[arg(long, value_name = "ID")]
+        harness: String,
+        /// Literal initial prompt: forwarded as one JSON string, never shell
+        /// interpolated, never @-file expanded
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        prompt: String,
+        /// Create the automation disabled (it will not fire on schedule)
+        #[arg(long)]
+        disabled: bool,
+        /// Missed-run grace in minutes (a slot past grace is skipped, never
+        /// run as catch-up)
+        #[arg(long, value_name = "N")]
+        grace_minutes: Option<f64>,
+    },
+    /// List automations with next run time and last outcome
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    List,
+    /// Run an automation now (manual trigger, recorded in history)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation run --id <ID>\nValid flags: --data-dir, --help, --id, --json, --request-id, --retry-request"
+    )]
+    Run {
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+    /// Show an automation's run history, newest first
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation history --id <ID> [--limit <N>]\nValid flags: --data-dir, --help, --id, --json, --limit, --request-id, --retry-request"
+    )]
+    History {
+        #[arg(long, value_name = "ID")]
+        id: String,
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -488,6 +552,52 @@ impl Cli {
                 } => {
                     require_nonempty("session", session)?;
                     require_nonempty("incarnation", incarnation)?;
+                }
+            },
+            Command::Automation { action } => match action {
+                AutomationAction::Create {
+                    name,
+                    cron,
+                    workspace,
+                    harness,
+                    prompt,
+                    grace_minutes,
+                    ..
+                } => {
+                    require_nonempty("name", name)?;
+                    require_nonempty("cron", cron)?;
+                    require_nonempty("workspace", workspace)?;
+                    validate_opaque_id("harness", harness)?;
+                    if prompt.trim().is_empty() {
+                        return Err(CliError::Usage("--prompt must contain visible text".into()));
+                    }
+                    if prompt.len() > 32768 {
+                        return Err(CliError::Usage(
+                            "--prompt must be at most 32768 UTF-8 bytes".into(),
+                        ));
+                    }
+                    if prompt.contains('\0') {
+                        return Err(CliError::Usage("--prompt must not contain NUL".into()));
+                    }
+                    if let Some(grace) = grace_minutes
+                        && (!grace.is_finite() || *grace < 0.0 || *grace > 10_080.0)
+                    {
+                        return Err(CliError::Usage(
+                            "--grace-minutes must be within 0..=10080".into(),
+                        ));
+                    }
+                }
+                AutomationAction::List => {}
+                AutomationAction::Run { id } => {
+                    require_nonempty("id", id)?;
+                }
+                AutomationAction::History { id, limit } => {
+                    require_nonempty("id", id)?;
+                    if let Some(limit) = limit
+                        && (*limit == 0 || *limit > 200)
+                    {
+                        return Err(CliError::Usage("--limit must be within 1..=200".into()));
+                    }
                 }
             },
             Command::Harness { action } => match action {
