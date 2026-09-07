@@ -174,3 +174,33 @@ activation, paid-model launch or packaged installation occurred here.
 Audit closure stays 11/12 (91.7%, medium confidence, delta zero). All 46 product
 obligations remain in scope; no full-parity completion percentage is asserted.
 The fixed 16:41:33 UTC target remains high-risk.
+
+## 13:12 UTC checkpoint
+
+Combined candidate `0e4c115` includes V3 safe file reads (`40cf24a`):
+41 explorer and 8 native Files RPC tests passed. V5 snapshot corrections
+(`d7112a2`, `f2c03ba`, `0e4c115`) now pass all 4 ROOT wire regressions and
+12 snapshot tests. Per-reference UTF-8 byte budgeting rejects oversized
+materialization before parsing; scheduled triggers preserve existing storage
+spelling while adding the admitted desktop field.
+
+The new `accept-desktop.mjs --files` probe checks actual disk content,
+unsaved edits across file/panel switches, save and reload. Its first run
+failed before interaction because service connection was unavailable; this
+is setup failure, not behavioral RED. After rebuilding the desktop, the next
+run passed seven existing real terminal/shell checks and reached the explicit
+Files advertisement assertion (RED, capability intentionally withheld).
+No editor/save acceptance is claimed. Both runs observed owned daemon and
+desktop exit without force. Evidence: `.preflight/acceptance/desktop-1788786638807-97caf570-3241-40a7-87ca-e25f5953f23d/report.json`.
+
+V2 Bots mount `299b315` remains under review: rejected bridge promises leave
+loading unresolved, scope echo needs validation, and Files descriptor identity
+must survive Bot snapshot refreshes. V3 draft-lifetime corrections and V4
+monotonic history/receipt corrections remain with their owners. V1's latest
+dogfood close still reaches an `expect` through its reused spawn helper on
+the unwind path; a fallible close correction is requested. No paid run or
+release installation occurred at this checkpoint.
+
+Audit remains 11/12 groups (91.7%, medium confidence, delta zero). This is
+not a product parity percentage. All 46 obligations remain in scope and the
+fixed 16:41:33 UTC deadline remains high-risk.

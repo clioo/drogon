@@ -12,6 +12,7 @@ import {
   stopAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
+import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import {
   bundlePaths,
   sealedBundleDigest,
@@ -23,10 +24,13 @@ import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 const args = process.argv.slice(2);
 const bundle =
   args[0] === "--bundle" ? path.resolve(args.splice(0, 2)[1]) : null;
+const filesIndex = args.indexOf("--files");
+const withFiles = filesIndex !== -1;
+if (withFiles) args.splice(filesIndex, 1);
 const withHarness = args.join(" ") === "--harness pi";
 assert.ok(
   args.length === 0 || withHarness,
-  "Use [--bundle <Drogon.app>] [--harness pi]",
+  "Use [--bundle <Drogon.app>] [--files] [--harness pi]",
 );
 if (bundle)
   assert.equal(
@@ -339,6 +343,11 @@ try {
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   assert.equal(await page.getByRole("tab").count(), 0);
   report.checks.push("explicitly-closed-tabs-stay-dismissed-after-reload");
+  if (withFiles) {
+    report.checks.push(
+      ...(await probeRenderedFiles({ page, workspace, output })),
+    );
+  }
   if (withHarness) {
     report.checks.push(
       ...(await probeRenderedHarness({
@@ -363,6 +372,9 @@ try {
   report.error = error.message;
   report.errorStack = error.stack;
   if (page) {
+    report.failureService = await page
+      .evaluate(() => window.drogon.status())
+      .catch((cause) => ({ error: cause.message }));
     await page
       .screenshot({ path: path.join(output, "failure.png") })
       .catch(() => {});
