@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+croner.workspace = true
 drogon-harness.workspace = true
 drogon-orchestration.workspace = true
 drogon-protocol = { workspace = true }

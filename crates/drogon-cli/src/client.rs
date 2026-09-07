@@ -238,6 +238,75 @@ pub struct HarnessEntry {
 /// The three availability values fixed by the harness contract.
 pub const HARNESS_AVAILABILITIES: [&str; 3] = ["available", "missing", "unsupported_launcher"];
 
+/// Last-run projection inside `automation.list` items.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationLastRun {
+    pub id: String,
+    pub status: String,
+    pub trigger: String,
+    pub scheduled_for: f64,
+    pub error: Option<String>,
+    pub exit_code: Option<i64>,
+}
+
+/// One `automation.list` / `automation.create` item.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationSummary {
+    pub id: String,
+    pub name: String,
+    pub cron: String,
+    pub workspace_id: Option<String>,
+    pub harness: String,
+    pub prompt: String,
+    pub enabled: bool,
+    pub next_run_at: f64,
+    pub last_run_at: Option<f64>,
+    pub last_run: Option<AutomationLastRun>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationList {
+    pub automations: Vec<AutomationSummary>,
+}
+
+/// One `automation.history` entry, newest first.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRunView {
+    pub id: String,
+    pub automation_id: String,
+    pub status: String,
+    pub trigger: String,
+    pub scheduled_for: f64,
+    pub workspace_id: Option<String>,
+    pub terminal_session_id: Option<String>,
+    pub error: Option<String>,
+    pub exit_code: Option<i64>,
+    pub started_at: Option<f64>,
+    pub dispatched_at: Option<f64>,
+    pub created_at: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationHistory {
+    pub runs: Vec<AutomationRunView>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRunNow {
+    pub automation_id: String,
+    pub run_id: Option<String>,
+    pub outcome: String,
+    pub status: Option<String>,
+    pub refusal: Option<String>,
+    pub error: Option<String>,
+}
+
 /// One decoded, validated protocol result.
 #[derive(Debug, Clone)]
 pub enum MethodResult {
@@ -521,6 +590,52 @@ pub fn decode_terminal_bytes(data: &str, start: u64, next: u64) -> Result<Vec<u8
         ));
     }
     Ok(decoded)
+}
+
+/// Automation identities must be real and timestamps finite: empty ids and
+/// NaN times are structurally decodable but not actionable.
+pub fn check_automation(summary: &AutomationSummary) -> Result<(), String> {
+    require_nonempty("id", &summary.id)?;
+    require_nonempty("name", &summary.name)?;
+    require_nonempty("cron", &summary.cron)?;
+    require_nonempty("harness", &summary.harness)?;
+    if !summary.next_run_at.is_finite() || summary.next_run_at < 0.0 {
+        return Err("nextRunAt must be a finite non-negative time".to_string());
+    }
+    if let Some(last) = &summary.last_run {
+        require_nonempty("lastRun.id", &last.id)?;
+        require_nonempty("lastRun.status", &last.status)?;
+    }
+    Ok(())
+}
+
+pub fn check_automation_list(list: &AutomationList) -> Result<(), String> {
+    for summary in &list.automations {
+        check_automation(summary).map_err(|err| format!("automation {}: {err}", summary.id))?;
+    }
+    Ok(())
+}
+
+pub fn check_automation_history(history: &AutomationHistory) -> Result<(), String> {
+    for run in &history.runs {
+        require_nonempty("id", &run.id)?;
+        require_nonempty("status", &run.status)?;
+        if !run.created_at.is_finite() {
+            return Err(format!("run {} has a non-finite createdAt", run.id));
+        }
+    }
+    Ok(())
+}
+
+pub fn check_automation_run_now(result: &AutomationRunNow) -> Result<(), String> {
+    require_nonempty("automationId", &result.automation_id)?;
+    if result.outcome != "dispatched" && result.outcome != "refused" {
+        return Err(format!(
+            "outcome must be dispatched|refused, got {}",
+            result.outcome
+        ));
+    }
+    Ok(())
 }
 
 /// The service must accept exactly the bytes the CLI sent, no more, no less.

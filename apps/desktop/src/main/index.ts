@@ -6,6 +6,7 @@ import path from "node:path";
 import { bridgeSchemas } from "../shared/bridge-validation";
 import type { Result, Status } from "../shared/session-contract";
 import { readBuildInfo } from "./build-info";
+import { registerAutomationIpc } from "./automation-bridge";
 import { dispatchFileRequest } from "./file-bridge";
 import { registerGitBridge } from "./git-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
@@ -292,6 +293,12 @@ if (!holdsSingleInstanceLock) {
       ]),
     );
     registerBridge();
+    registerAutomationIpc(
+      (event) =>
+        window !== null &&
+        event.sender === window.webContents &&
+        event.senderFrame === window.webContents.mainFrame,
+    );
     registerUsageIpc();
     registerBrowserIpc(() => window);
     await bootstrapDaemon();

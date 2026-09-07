@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
 import { BROWSER_ROUTE_ID } from "../../browser-mount";
+import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
 import { CHANGES_ROUTE_ID } from "../../changes-mount";
 import { FILES_ROUTE_ID } from "../../files-mount";
 
@@ -33,6 +34,7 @@ export function SidebarNav({
   changesAvailable,
   botsAvailable,
   browserEnabled,
+  automationsAvailable,
   onSelectRoute,
   onOpenPalette,
 }: {
@@ -42,6 +44,7 @@ export function SidebarNav({
   changesAvailable: boolean;
   botsAvailable: boolean;
   browserEnabled: boolean;
+  automationsAvailable: boolean;
   onSelectRoute: (route: string | null) => void;
   onOpenPalette: () => void;
 }) {
@@ -158,13 +161,34 @@ export function SidebarNav({
       </button>
       <button
         type="button"
-        {...row(placeholder === "automations")}
-        aria-current={placeholder === "automations" ? "page" : undefined}
-        onClick={() =>
+        {...row(
+          automationsAvailable
+            ? route === AUTOMATIONS_ROUTE_ID
+            : placeholder === "automations",
+        )}
+        aria-current={
+          (automationsAvailable
+            ? route === AUTOMATIONS_ROUTE_ID
+            : placeholder === "automations")
+            ? "page"
+            : undefined
+        }
+        disabled={automationsAvailable && panelsDisabled}
+        title={
+          automationsAvailable
+            ? "Automations"
+            : "Automations unavailable: service does not advertise automation.v1"
+        }
+        onClick={() => {
+          if (automationsAvailable) {
+            setPlaceholder(null);
+            onSelectRoute(AUTOMATIONS_ROUTE_ID);
+            return;
+          }
           setPlaceholder((value) =>
             value === "automations" ? null : "automations",
-          )
-        }
+          );
+        }}
       >
         <CalendarClock size={16} />
         <span>Automations</span>

@@ -530,12 +530,35 @@ pub fn prepare_run_plan_in_tx(
     }))
 }
 
+/// The dispatch-relevant projection of a run plan: the idempotency key and
+/// the exact `harness.start` params. [`RunPlan`] and the bot-free
+/// [`super::direct::DirectPlan`](crate::automations::direct::DirectPlan)
+/// both satisfy this, so both dispatch through this one function -- the
+/// seam call sequence is identical, never a parallel implementation.
+pub trait DispatchPlan {
+    fn request_id(&self) -> &str;
+    fn params(&self) -> &Value;
+}
+
+impl DispatchPlan for RunPlan {
+    fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
+    fn params(&self) -> &Value {
+        &self.params
+    }
+}
+
 /// Phase 2: takes no `Connection` -- the caller MUST have released its DB
 /// guard before calling. Production call shape: lock only across
 /// `prepare_run_plan`, drop it, call this, then re-lock for
 /// `record_run_outcome`.
-pub fn dispatch_run_plan<S: DispatchSeam>(seam: &S, plan: &RunPlan) -> RunnerOutcome {
-    let started = match seam.harness_start(&plan.request_id, plan.params.clone()) {
+pub fn dispatch_run_plan<S: DispatchSeam, P: DispatchPlan + ?Sized>(
+    seam: &S,
+    plan: &P,
+) -> RunnerOutcome {
+    let started = match seam.harness_start(plan.request_id(), plan.params().clone()) {
         Ok(started) => started,
         Err(err) => return RunnerOutcome::DispatchFailed(err),
     };

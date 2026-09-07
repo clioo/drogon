@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { automationResultSchemas } from "./automation-contract";
 import { fileResultSchemas } from "./file-validation";
 
 const id = z.string().min(1).max(128);
@@ -50,6 +51,7 @@ const supportedHarnessIds = new Set([
   "antigravity",
 ]);
 export const resultSchemas: Record<string, z.ZodType> = {
+  ...automationResultSchemas,
   ...fileResultSchemas,
   status: z.object({
     hostId: id,

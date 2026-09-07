@@ -10,6 +10,7 @@ license = "MIT"
 repository = "https://github.com/clioo/drogon"
 
 [workspace.dependencies]
+croner = "=4.0.0"
 drogon-protocol = { path = "crates/drogon-protocol" }
 drogon-core = { path = "crates/drogon-core" }
 drogon-harness = { path = "crates/drogon-harness" }

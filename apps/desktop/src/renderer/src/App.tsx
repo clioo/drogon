@@ -73,6 +73,13 @@ import {
   browserBridge,
   registerBrowserRoute,
 } from "./browser-mount";
+import {
+  AUTOMATIONS_CAPABILITY,
+  AUTOMATIONS_ROUTE_ID,
+  createGatedAutomationBridge,
+  isAutomationsAvailable,
+  registerAutomationsRoute,
+} from "./automations-mount";
 import { loadBotSnapshot } from "./bots-loader";
 import type { BotsLoadResult } from "./bots-loader";
 import { FILES_CAPABILITY } from "../../shared/file-contract";
@@ -379,6 +386,10 @@ export function App() {
   useEffect(() => {
     botsGateRef.current = isBotsAvailable(liveCapabilities);
   }, [liveCapabilities]);
+  const automationsGateRef = useRef(false);
+  useEffect(() => {
+    automationsGateRef.current = isAutomationsAvailable(liveCapabilities);
+  }, [liveCapabilities]);
   const filesGatedBridge = useMemo(
     () => createGatedFileBridge(window.drogon, () => filesGateRef.current),
     [],
@@ -389,6 +400,14 @@ export function App() {
   );
   const botsGatedBridge = useMemo(
     () => createGatedBotBridge(window.drogon, () => botsGateRef.current),
+    [],
+  );
+  const automationsGatedBridge = useMemo(
+    () =>
+      createGatedAutomationBridge(
+        window.drogon.automation,
+        () => automationsGateRef.current,
+      ),
     [],
   );
   // Bots snapshot loads through the gated bridge for the exact live scope;
@@ -453,20 +472,32 @@ export function App() {
   const browserStaticBridge = useMemo(() => browserBridge(), []);
   const filesBaseRegistry = useMemo(
     () =>
-      registerBrowserRoute(
-        registerChangesRoute(
-          registerFilesRoute(
-            createRouteRegistry({
-              capabilities: [FILES_CAPABILITY, BOTS_CAPABILITY, GIT_CAPABILITY],
-              fallbackId: BOTS_ROUTE_ID,
-            }),
-            filesGatedBridge,
+      registerAutomationsRoute(
+        registerBrowserRoute(
+          registerChangesRoute(
+            registerFilesRoute(
+              createRouteRegistry({
+                capabilities: [
+                  FILES_CAPABILITY,
+                  BOTS_CAPABILITY,
+                  GIT_CAPABILITY,
+                  AUTOMATIONS_CAPABILITY,
+                ],
+                fallbackId: BOTS_ROUTE_ID,
+              }),
+              filesGatedBridge,
+            ),
+            gitGatedBridge,
           ),
-          gitGatedBridge,
+          browserStaticBridge,
         ),
-        browserStaticBridge,
+        {
+          bridge: automationsGatedBridge,
+          listWorkspaces: () => window.drogon.workspaces(),
+          listHarnesses: () => window.drogon.harnesses(),
+        },
       ),
-    [filesGatedBridge, gitGatedBridge, browserStaticBridge],
+    [filesGatedBridge, gitGatedBridge, browserStaticBridge, automationsGatedBridge],
   );
   const panelRegistry = useMemo(() => {
     if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
@@ -540,6 +571,7 @@ export function App() {
   const changesSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
   const browserSectionRef = useRef<HTMLElement>(null);
+  const automationsSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
   useEffect(() => {
     // Real focus, only on explicit user navigation to a panel: background
@@ -553,7 +585,9 @@ export function App() {
             ? botsSectionRef.current
             : route === BROWSER_ROUTE_ID
               ? browserSectionRef.current
-              : null;
+              : route === AUTOMATIONS_ROUTE_ID
+                ? automationsSectionRef.current
+                : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -590,6 +624,20 @@ export function App() {
   else if (status && !current && !busy && !loadingSessions)
     browserAliveRef.current = false;
   const browserAlive = browserAliveRef.current;
+  // Automations keep-alive mirrors files: survives switches and
+  // transients, unmounts on explicit withhold or settled workspace loss.
+  const automationsAvailable = isAutomationsAvailable(liveCapabilities);
+  const automationsExplicitWithhold =
+    status !== null && !isAutomationsAvailable(liveCapabilities);
+  const automationsAliveRef = useRef(false);
+  if (route === AUTOMATIONS_ROUTE_ID && automationsAvailable && current)
+    automationsAliveRef.current = true;
+  else if (
+    automationsExplicitWithhold ||
+    (status && !current && !busy && !loadingSessions)
+  )
+    automationsAliveRef.current = false;
+  const automationsAlive = automationsAliveRef.current;
   const botsScopeMatch =
     botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope);
   const botsDescriptor: PanelDescriptor | null =
@@ -860,6 +908,7 @@ export function App() {
           changesAvailable={isChangesAvailable(liveCapabilities)}
           botsAvailable={isBotsAvailable(liveCapabilities)}
           browserEnabled={true}
+          automationsAvailable={isAutomationsAvailable(liveCapabilities)}
           onSelectRoute={setRoute}
           onOpenPalette={openCommandPalette}
           groups={projectGroups}
@@ -1013,6 +1062,10 @@ export function App() {
                     filesProps !== null) ||
                   (route === BROWSER_ROUTE_ID &&
                     browserAlive &&
+                    filesProps !== null) ||
+                  (route === BOTS_ROUTE_ID && botsAlive && filesProps !== null) ||
+                  (route === AUTOMATIONS_ROUTE_ID &&
+                    automationsAlive &&
                     filesProps !== null)
                     ? "none"
                     : undefined,
@@ -1235,6 +1288,26 @@ export function App() {
                     })()}
                   </div>
                 )}
+              </section>
+            ) : null}
+            {automationsAlive && filesProps ? (
+              <section
+                ref={automationsSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                aria-label="Automations"
+                style={{
+                  display: route === AUTOMATIONS_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                <MountedPanel
+                  descriptor={resolveRoute(
+                    filesBaseRegistry,
+                    AUTOMATIONS_ROUTE_ID,
+                  )}
+                  workspace={filesProps.workspace}
+                  status={filesProps.status}
+                />
               </section>
             ) : null}
             {inspector && (

@@ -10,14 +10,17 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    Cli, Command, HarnessAction, ProjectAction, TerminalAction, WorkspaceAction, WorktreeAction,
+    AutomationAction, Cli, Command, HarnessAction, ProjectAction, TerminalAction, WorkspaceAction,
+    WorktreeAction,
 };
 use crate::client::{
-    CallOk, Client, HarnessCatalog, Project, ProjectList, ReadResult, Removed, Session,
-    SessionList, StatusResult, Verdict, Workspace, WorkspaceList, Worktree, WorktreeList,
-    WriteResult, check_harness_catalog, check_project, check_project_list, check_read,
-    check_removed, check_session, check_session_list, check_status, check_workspace,
-    check_workspace_list, check_worktree, check_worktree_list, check_write,
+    AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, CallOk, Client,
+    HarnessCatalog, Project, ProjectList, ReadResult, Removed, Session, SessionList, StatusResult,
+    Verdict, Workspace, WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation,
+    check_automation_history, check_automation_list, check_automation_run_now,
+    check_harness_catalog, check_project, check_project_list, check_read, check_removed,
+    check_session, check_session_list, check_status, check_workspace, check_workspace_list,
+    check_worktree, check_worktree_list, check_write,
 };
 use crate::error::{CliError, method_not_found};
 use crate::output;
@@ -83,6 +86,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Worktree { action } => worktree(&client, &request_id, json, action).await,
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
+        Command::Automation { action } => automation(&client, &request_id, json, action).await,
         Command::Orchestration { command } => {
             crate::orchestration_commands::run(&client, &request_id, json, command).await
         }
@@ -429,6 +433,87 @@ async fn harness(
                 Ok(())
             })?;
             emit(call, json, || output::session_started(&session), 0, None)
+        }
+    }
+}
+
+/// Automation commands negotiate the service capability first, like the
+/// harness commands: no automation method is sent to a service that does
+/// not advertise automation.v1.
+async fn automation(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &AutomationAction,
+) -> Result<RunOutcome, CliError> {
+    capability_preflight(client, request_id, "automation.v1").await?;
+    match action {
+        AutomationAction::Create {
+            name,
+            cron,
+            workspace,
+            harness,
+            prompt,
+            disabled,
+            grace_minutes,
+        } => {
+            let mut params = json!({
+                "name": name,
+                "cron": cron,
+                "workspaceId": workspace,
+                "harness": harness,
+                "prompt": prompt,
+                "enabled": !disabled,
+            });
+            if let Some(grace) = grace_minutes {
+                params["graceMinutes"] = json!(grace);
+            }
+            let call = client
+                .call("automation.create", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let summary: AutomationSummary =
+                Client::decode_checked(&call, "automation.create", check_automation)?;
+            emit(call, json, || output::automation_created(&summary), 0, None)
+        }
+        AutomationAction::List => {
+            let call = client
+                .call("automation.list", json!({}), request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let list: AutomationList =
+                Client::decode_checked(&call, "automation.list", check_automation_list)?;
+            emit(call, json, || output::automation_list(&list), 0, None)
+        }
+        AutomationAction::Run { id } => {
+            let call = client
+                .call(
+                    "automation.run_now",
+                    json!({ "id": id }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let run: AutomationRunNow =
+                Client::decode_checked(&call, "automation.run_now", check_automation_run_now)?;
+            emit(call, json, || output::automation_run_now(&run), 0, None)
+        }
+        AutomationAction::History { id, limit } => {
+            let mut params = json!({ "automationId": id });
+            if let Some(limit) = limit {
+                params["limit"] = json!(limit);
+            }
+            let call = client
+                .call("automation.history", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let history: AutomationHistory =
+                Client::decode_checked(&call, "automation.history", check_automation_history)?;
+            let automation_id = id.clone();
+            emit(
+                call,
+                json,
+                || output::automation_history(&history, &automation_id),
+                0,
+                None,
+            )
         }
     }
 }

@@ -3,6 +3,7 @@
 //! SQLite database and `portable-pty` sessions. `drogond` owns framing,
 //! auth and the transport; this crate never sees a raw socket.
 
+mod automation_rpc;
 pub mod automations;
 mod bot_mutation_rpc;
 pub mod bot_run_rpc;
@@ -71,6 +72,7 @@ use serde_json::{Value, json};
 use session::SessionHandle;
 
 const CAPABILITIES: &[&str] = &[
+    "automation.v1",
     "orchestration.native.v1",
     "workspace.v1",
     "files.v1",
@@ -335,6 +337,12 @@ impl Engine {
             "bot.snapshot" => self.bot_snapshot(&request.params),
             "bot.create" => self.bot_create(request),
             "bot.run" => self.bot_run(request),
+            "automation.create" => self.automation_create(request),
+            "automation.list" => self.automation_list(&request.params),
+            "automation.update" => self.automation_update(request),
+            "automation.delete" => self.automation_delete(request),
+            "automation.run_now" => self.automation_run_now(request),
+            "automation.history" => self.automation_history(&request.params),
             "files.list" => self.do_files_list(&request.params),
             "files.read" => self.do_files_read(&request.params),
             "files.write" => self.mutating(request, Self::do_files_write),
