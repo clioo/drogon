@@ -5,17 +5,11 @@ use serde_json::{Value, json};
 
 use crate::{Engine, bots::storage, error, workspace};
 
-/// Same budget the final materialized-size check below enforces: the
-/// preflight and the final check must never disagree about what "too
-/// large" means, or a caller could distinguish "rejected early" from
-/// "rejected late" by tuning payload shape.
+/// One budget shared by the preflight and the final materialized-size check, so callers
+/// cannot distinguish "rejected early" from "rejected late" by tuning payload shape.
 const SNAPSHOT_BUDGET_BYTES: i64 = (MAX_FRAME_BYTES / 2) as i64;
-/// Cheap upper bound on the number of history rows a snapshot will
-/// consider, checked with a single `COUNT(*)` before any row is fetched and
-/// parsed into a `HistoryEntry`. Many small rows can each be individually
-/// tiny yet still make full materialization (one query plus JSON parse per
-/// row, per bot) arbitrarily expensive; this bounds that cost independent of
-/// the byte budget below.
+/// Upper bound on history rows, enforced by one `COUNT(*)` before any row is fetched:
+/// per-row parse/materialization cost stays bounded independent of the byte budget.
 const MAX_SNAPSHOT_HISTORY_ROWS: i64 = 5_000;
 
 #[derive(Deserialize)]
@@ -75,13 +69,9 @@ impl Engine {
     }
 }
 
-/// Same field-level `rename_all` gap as the history projection above, but
-/// for each responsibility's own `trigger` object as it appears inside the
-/// raw serialized `Bot` structs in the `bots` array: `ResponsibilityTrigger`'s
-/// `rename_all` only renames the `kind` tag, so a scheduled trigger's
-/// `automation_id` field stays snake_case on the wire. Project an additive
-/// camelCase `automationId` alongside it, in place, leaving every other
-/// field (including the retained snake_case one) untouched.
+/// `ResponsibilityTrigger`'s `rename_all` covers only the `kind` tag, so a scheduled
+/// trigger's `automation_id` stays snake_case on the wire; project an additive camelCase
+/// `automationId` in place, leaving every other field (including the snake_case one) intact.
 fn project_bots_trigger_automation_id(bots_json: &mut Value) {
     let Some(bots) = bots_json.as_array_mut() else {
         return;
@@ -114,26 +104,13 @@ fn snapshot_too_large() -> RpcError {
     )
 }
 
-/// Bounded correction for review P2-2: rejects an over-count or
-/// over-size scope with the same `snapshot_too_large` the final
-/// materialized-size check below produces, but computed with a handful of
-/// cheap `COUNT`/`SUM(LENGTH(...))` probes run directly against the store's
-/// own tables -- never by calling `storage::list_bots`/`history_for_bot`
-/// (which parse every row into a domain struct) first.
-///
-/// `history_for_bot` materializes a full `Automation`/`AutomationRun` (via
-/// `get_automation`/`get_automation_run`) for *every* history row that
-/// references one, and re-derives that row's `Responsibility` from its
-/// owning Bot's payload for every row too -- so a linked record's (or a
-/// Bot's own) cost to materialization scales with how many history rows
-/// reference it, not with how many distinct linked rows exist. The budget
-/// below therefore sums each linked payload once per *referencing* history
-/// row (a plain `JOIN`, never `DISTINCT`), plus a repeated-responsibility
-/// budget that likewise charges a Bot's own payload once per history row
-/// that belongs to it. All sums use `LENGTH(CAST(payload_json AS BLOB))`,
-/// not bare `LENGTH(...)`, because SQLite's `LENGTH()` on TEXT counts
-/// characters, not UTF-8 bytes -- undercounting any multi-byte payload
-/// against the final check below, which budgets real serialized bytes.
+/// Preflight bound for review P2-2: rejects an over-count/over-size scope with the same
+/// `snapshot_too_large` as the final materialized-size check, using cheap COUNT/SUM probes
+/// against the store tables -- never `list_bots`/`history_for_bot`, which parse every row.
+/// Sums charge each linked payload once per *referencing* history row (plain `JOIN`, never
+/// `DISTINCT`), because materialization cost scales with referencing rows, not distinct
+/// linked rows. `LENGTH(CAST(... AS BLOB))` counts UTF-8 bytes; bare TEXT `LENGTH` counts
+/// characters and would undercount multi-byte payloads against the real byte check.
 fn preflight_snapshot_budget(
     tx: &rusqlite::Transaction,
     host_id: &str,
