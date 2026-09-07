@@ -357,6 +357,32 @@ export function makeFileSaver(
   };
 }
 
+/**
+ * Fire-and-forget observer for a save the editor is ALREADY tracking via
+ * its fenced runSave. The derived promise created here must never become
+ * an unhandled rejection: transport throws and fail-closed
+ * FilesRequestIdCapError rejections are absorbed explicitly (no markSaved
+ * — the store keeps the draft dirty), while the ORIGINAL promise still
+ * delivers the failure to runSave for its own saveError path.
+ */
+export function observeSaveResult(
+  result: Promise<Result<null>>,
+  drafts: FilesDraftStore,
+  scope: EditorScope,
+  path: string,
+  content: string,
+): void {
+  void result.then(
+    (outcome) => {
+      if (outcome.ok) drafts.markSaved(scope, path, content);
+    },
+    () => {
+      // Rejection observed and handled: the failure is reported by
+      // runSave; nothing to mark saved.
+    },
+  );
+}
+
 function UnavailableFallback({ capability }: { capability: string }) {
   return (
     <div className="files-panel files-panel-unavailable" role="alert">
@@ -511,14 +537,14 @@ function FilesPanel({
   // Update-on-edit (at save-attempt granularity): the attempted draft is
   // recorded in the store before the write, and a service-confirmed write
   // marks the payload saved — the store caches drafts, the service stays
-  // saved-truth.
+  // saved-truth. The observer rejection is handled explicitly (see
+  // observeSaveResult): a transport throw or a fail-closed cap error must
+  // not escape as an unhandled rejection.
   const onSave = (content: string): Promise<Result<null>> => {
     const result = saveDraft(content);
     if (effectiveOpenPath !== null) {
       drafts.recordDraft(scope, effectiveOpenPath, content);
-      void result.then((outcome) => {
-        if (outcome.ok) drafts.markSaved(scope, effectiveOpenPath, content);
-      });
+      observeSaveResult(result, drafts, scope, effectiveOpenPath, content);
     }
     return result;
   };
