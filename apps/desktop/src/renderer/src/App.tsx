@@ -85,6 +85,7 @@ import {
 } from "./theme";
 import type { Theme } from "./settings-store";
 import { SettingsPanel } from "./settings-panel";
+import { StatusBar } from "./components/status-bar/StatusBar";
 import {
   loadSavedSelection,
   resolveRestoredSelection,
@@ -1285,6 +1286,7 @@ export function App() {
         onAddWorkspace={() => setAdding(true)}
         onOpenFile={() => setRoute(FILES_ROUTE_ID)}
       />
+      <StatusBar terminalCount={sessions.length} onOpenSettings={() => setSettingsOpen(true)} />
     </Tooltip.Provider>
   );
 }

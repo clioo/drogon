@@ -849,4 +849,140 @@ h2 {
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--muted-foreground);
+/* R1-A bottom status bar (journey J12). Monochrome tokens only; the bar is a
+   flex sibling under .app-shell, so #root stacks vertically. */
+#root {
+  display: flex;
+  flex-direction: column;
+}
+.app-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--sidebar);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.status-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.status-bar-meters {
+  gap: 14px;
+}
+.status-bar-spacer {
+  flex: 1;
+}
+.status-bar-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.status-bar-icon-button:hover:not(:disabled) {
+  background: var(--sidebar-accent);
+  color: var(--foreground);
+}
+.status-bar-icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.status-bar-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.status-bar-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.status-bar-name {
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.status-bar-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.status-bar-track {
+  width: 44px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--sidebar-accent);
+}
+.status-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+}
+/* Urgency fills mirror Orca's 60/80 bar bands; fixed hues (not theme tokens)
+   because they signal consumption urgency, exactly like the reference. */
+.status-bar-fill-low {
+  background: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+}
+.status-bar-fill-mid {
+  background: #eab308;
+}
+.status-bar-fill-high {
+  background: #ef4444;
+}
+.status-bar-meter-label {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.status-bar-unavailable {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.status-bar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.status-bar-toggle:hover:not(:disabled) {
+  background: var(--sidebar-accent);
+  color: var(--foreground);
+}
+.status-bar-toggle:disabled {
+  cursor: default;
+}
+.status-bar-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+}
+.status-bar-dot-active {
+  background: var(--foreground);
+}
+.status-bar-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }

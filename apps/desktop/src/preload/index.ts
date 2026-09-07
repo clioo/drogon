@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge } from "../shared/session-contract";
 import { installBrowserWindowCloseGuard } from "./browser-window-close-installation";
+import { usageBridge } from "./usage";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -22,5 +23,6 @@ const bridge: DesktopBridge = {
   harnesses: () => ipcRenderer.invoke("drogon:harnesses"),
   startHarness: (value) => ipcRenderer.invoke("drogon:startHarness", value),
   buildInfo: () => ipcRenderer.invoke("drogon:buildInfo"),
+  usage: usageBridge,
 };
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));
