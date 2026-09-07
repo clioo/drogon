@@ -84,7 +84,9 @@ se despachan después. Nada de líderes intermedios ni hojas de hojas.
    render. Un oráculo automático compara ambas apps por superficie y cada
    diferencia se convierte en una tarea de corrección que cita el archivo fuente.
 10. Higiene de procesos: cada worker cierra los Electron, daemons y fixtures
-    que arranca y lo demuestra con `pgrep` en el PR.
+    que arranca y lo demuestra con `pgrep` en el PR. El coordinador cierra el
+    terminal del agente en el mismo paso en que acepta y fusiona su PR, salvo
+    reutilización inmediata; nada de agentes ociosos consumiendo RAM.
 
 Archivos que solo edita el coordinador salvo concesión explícita en la Task:
 `package.json`, `pnpm-lock.yaml`, `Cargo.toml`, `Cargo.lock`,
@@ -116,7 +118,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J7 Automations | R2 | Muse B | fusionada; horarios solo UTC | #29 |
 | J4 Browser | R2 | Muse C | fusionada (pane); CLI browser pendiente | #27 |
 | J9 Mentu | R3 | Sonnet | pendiente | |
-| J6 Tasks | R3 | Muse A | en curso | |
+| J6 Tasks | R3 | Muse A | fusionada: GitHub Issues, start crea worktree con badge #n | #38 |
 | J3 CLI | R3 | Muse B | fusionada: terminal wait y guías skills get; browser CLI pendiente | #30 |
 | J1 notificaciones | R3 | Muse C | fusionada: needs_input por hooks y notificación nativa | #35 |
 | J10 Settings | R4 | Muse A | fusionada; falta tamaño de fuente en xterm | #33 |
