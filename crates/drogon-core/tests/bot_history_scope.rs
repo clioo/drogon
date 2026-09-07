@@ -171,6 +171,7 @@ fn sample_run(id: &str, bot_id: &str, started_at: f64) -> ResponsibilityRun {
         ended_at: None,
         recipe: None,
         host_observation: None,
+        invocation: None,
     }
 }
 
@@ -459,6 +460,7 @@ fn record_responsibility_run_refuses_a_cross_scope_dedup_replay_against_a_fully_
             ended_at: None,
             recipe: None,
             host_observation: None,
+            invocation: None,
         },
     )
     .unwrap();
@@ -468,13 +470,14 @@ fn record_responsibility_run_refuses_a_cross_scope_dedup_replay_against_a_fully_
     // orphaned evidence), then raw-insert a same-id bot directly into
     // folder B: the pre-W1 legacy shape this dedup fence guards against.
     assert!(bstorage::delete_bot(&c, HOST, FOLDER_A, "d1").unwrap());
-    // delete_bot clears ownership of every automation owned by this bot_id
-    // (bot_id is a global key on Automation, not scoped) -- re-claim "a1"
-    // for the recreated "d1" so the test reaches the dedup/merge path
-    // instead of failing on a plain ownership check.
+    // delete_bot removes every automation owned by this bot_id (with its
+    // runs) -- re-create "a1" and its "run-1" row for the recreated "d1"
+    // so the test reaches the dedup/merge path instead of failing on a
+    // missing linked run.
     let mut reclaimed = automation.clone();
     reclaimed.bot_id = Some("d1".to_string());
     automations::storage::upsert_automation(&c, &reclaimed).unwrap();
+    automations::storage::upsert_automation_run(&c, &sample_automation_run("run-1", "a1")).unwrap();
     let bot_b = sample_bot_with_scheduled_responsibility("d1", "Dedup-B", "a1", 10.0);
     let payload_b = serde_json::to_string(&bot_b).unwrap();
     c.execute(
@@ -503,6 +506,7 @@ fn record_responsibility_run_refuses_a_cross_scope_dedup_replay_against_a_fully_
             ended_at: Some(99.0),
             recipe: None,
             host_observation: None,
+            invocation: None,
         },
     )
     .unwrap_err();
@@ -557,6 +561,7 @@ fn record_responsibility_run_keeps_an_existing_unstamped_row_unstamped_after_a_m
             evidence_path: None,
         }),
         host_observation: None,
+        invocation: None,
     };
     let payload = serde_json::to_string(&legacy_run).unwrap();
     c.execute(
@@ -585,6 +590,7 @@ fn record_responsibility_run_keeps_an_existing_unstamped_row_unstamped_after_a_m
             ended_at: Some(42.0),
             recipe: None,
             host_observation: None,
+            invocation: None,
         },
     )
     .unwrap();

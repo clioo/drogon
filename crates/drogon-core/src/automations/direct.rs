@@ -13,8 +13,11 @@
 //! workspace-row ownership check the runner applies beyond the automation's
 //! own `execution_target_id` fence. Recording reuses the same
 //! `automations::storage` run-row primitives and the same `ar:{request_id}`
-//! stable run-id convention as the runner; it only omits the
-//! `ResponsibilityRun` projection, which has no Bot row to attach to here.
+//! stable run-id convention as the runner, plus the `ResponsibilityRun`
+//! projection when the fired automation is Bot-owned (a scheduled
+//! responsibility's automation -- see [`record_direct_outcome`]); a
+//! bot-free automation has no Bot row to attach one to, so only its
+//! `AutomationRun` is written.
 
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
@@ -26,6 +29,8 @@ use super::records::{
 };
 use super::runner::{self, DispatchPlan, HarnessLaunchParams, RunRefusal, RunUnsupported};
 use super::storage as automations_storage;
+use crate::bots::records::{ResponsibilityRun, ResponsibilityRunInvocation};
+use crate::bots::storage as bots_storage;
 
 /// Owned data a bot-free run needs to dispatch + record. Holds no
 /// `Connection`/seam reference by construction, mirroring [`runner::RunPlan`].
@@ -223,14 +228,28 @@ fn status_for_outcome(outcome: &runner::RunnerOutcome) -> (AutomationRunStatus, 
 
 /// Durable record of a dispatched direct run plus the automation-row
 /// advance, in one `BEGIN IMMEDIATE`: a proven `Completed` row is never
-/// regressed by a later observation for the same stable run id.
+/// regressed by a later observation for the same stable run id. When the
+/// fired automation is Bot-owned (a scheduled responsibility's automation),
+/// the same transaction also records the `ResponsibilityRun` projection --
+/// exactly what the manual `bot.run` path writes via
+/// [`runner::record_run_outcome_in_tx`](super::runner::record_run_outcome_in_tx)
+/// (same stable id convention, same accepted-row projection), stamped from
+/// the plan's own trigger (a scheduler fire is scheduled, an
+/// `automation.run_now` is manual) so `bot.snapshot` history shows the
+/// tick. A bot-free (standalone) automation has no owning Bot row, so only
+/// the `AutomationRun` is written -- the `ResponsibilityRun` projection has
+/// no Bot row to attach to, same as before.
+///
+/// Returns [`bots_storage::StorageError`] (a superset covering the
+/// automation-row writes via `From`): callers only render it, never match
+/// on it.
 pub fn record_direct_outcome(
     conn: &Connection,
     plan: &DirectPlan,
     outcome: &runner::RunnerOutcome,
     observed_at: f64,
     reschedule: Reschedule,
-) -> Result<String, automations_storage::StorageError> {
+) -> Result<String, bots_storage::StorageError> {
     let tx = automations_storage::begin_immediate(conn)?;
     let run_id = format!("ar:{}", plan.request_id);
     let existing = automations_storage::get_automation_run(&tx, &run_id)?;
@@ -300,9 +319,51 @@ pub fn record_direct_outcome(
         observed_at: observed,
     };
     automations_storage::upsert_automation_run(&tx, &run)?;
+    record_bot_responsibility_run(&tx, plan, outcome, &run_id)?;
     apply_reschedule(&tx, &plan.automation_id, reschedule, observed_at)?;
     tx.commit()?;
     Ok(run_id)
+}
+
+/// Records the `ResponsibilityRun` for a Bot-owned automation inside the
+/// caller's already-open transaction, or does nothing when no live Bot
+/// responsibility references this automation (standalone automations).
+/// Mirrors [`runner::record_run_outcome_in_tx`](super::runner::record_run_outcome_in_tx)'s
+/// projection: the accepted `AutomationRun` row decides
+/// `host_observation`/`ended_at` (never the raw outcome directly), the run
+/// id is the plan's stable request id, and the invocation follows the
+/// plan's own trigger (scheduler fire: scheduled; `run_now`: manual).
+fn record_bot_responsibility_run(
+    conn: &Connection,
+    plan: &DirectPlan,
+    outcome: &runner::RunnerOutcome,
+    run_id: &str,
+) -> Result<(), bots_storage::StorageError> {
+    let Some(owned) = bots_storage::owning_scheduled_responsibility(conn, &plan.automation_id)?
+    else {
+        return Ok(());
+    };
+    let automation_run = automations_storage::get_automation_run(conn, run_id)?
+        .ok_or(bots_storage::StorageError::NotFound("automation run"))?;
+    let (host_observation, ended_at) = runner::responsibility_projection(&automation_run, outcome);
+    let invocation = match plan.trigger {
+        AutomationRunTrigger::Scheduled => ResponsibilityRunInvocation::Scheduled,
+        AutomationRunTrigger::Manual => ResponsibilityRunInvocation::Manual,
+    };
+    let run = ResponsibilityRun {
+        id: plan.request_id.clone(),
+        bot_id: owned.bot_id.clone(),
+        responsibility_id: owned.responsibility_id.clone(),
+        automation_id: Some(plan.automation_id.clone()),
+        automation_run_id: Some(automation_run.id.clone()),
+        started_at: plan.attempt_at,
+        ended_at,
+        recipe: None,
+        host_observation,
+        invocation: Some(invocation),
+    };
+    bots_storage::record_responsibility_run_in_tx(conn, &owned.host_id, &owned.folder, run)?;
+    Ok(())
 }
 
 /// Durable record of a run that never dispatched (missed past grace, or a

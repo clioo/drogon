@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  dispatchBotDelete,
   dispatchBotResponsibilityCreate,
   dispatchBotResponsibilityDelete,
 } from "./bot-bridge";
@@ -114,6 +115,78 @@ describe("Bot responsibility-delete bridge", () => {
       await dispatchBotResponsibilityDelete(deleteInput, async () => ({
         ok: true,
         result: { ...deleteResult, responsibilityId: "other" },
+      })),
+    ).toMatchObject({ ok: false, error: { code: "internal_error" } });
+  });
+  it("admits the panel scope's locale but strips it before the native call", async () => {
+    const call = vi.fn(async () => ({ ok: true as const, result: deleteResult }));
+    expect(
+      await dispatchBotResponsibilityDelete(
+        { ...deleteInput, locale: "en-US" },
+        call,
+      ),
+    ).toEqual({ ok: true, result: deleteResult });
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.responsibility_delete",
+      {
+        hostId: "host",
+        workspaceId: "workspace",
+        botId: "bot-1",
+        responsibilityId: "resp-1",
+      },
+      "req-2",
+    );
+  });
+});
+
+const botDeleteInput = { ...scope, requestId: "req-3", botId: "bot-1" };
+const botDeleteResult = {
+  ...scope,
+  botId: "bot-1",
+  removed: true,
+  automationIds: ["auto-1"],
+};
+
+describe("Bot delete bridge", () => {
+  it("strips requestId into the native envelope and passes params through", async () => {
+    const call = vi.fn(async () => ({ ok: true as const, result: botDeleteResult }));
+    expect(await dispatchBotDelete(botDeleteInput, call)).toEqual({
+      ok: true,
+      result: botDeleteResult,
+    });
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.delete",
+      { hostId: "host", workspaceId: "workspace", botId: "bot-1" },
+      "req-3",
+    );
+  });
+  it("admits the panel scope's locale but strips it before the native call", async () => {
+    const call = vi.fn(async () => ({ ok: true as const, result: botDeleteResult }));
+    expect(
+      await dispatchBotDelete({ ...botDeleteInput, locale: "en-US" }, call),
+    ).toEqual({ ok: true, result: botDeleteResult });
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.delete",
+      { hostId: "host", workspaceId: "workspace", botId: "bot-1" },
+      "req-3",
+    );
+  });
+  it.each([
+    { ...botDeleteInput, botId: "" },
+    { ...botDeleteInput, extra: true },
+  ])("rejects invalid input before IPC", async (value) => {
+    const call = vi.fn();
+    expect(await dispatchBotDelete(value, call)).toMatchObject({
+      ok: false,
+      error: { code: "invalid_argument" },
+    });
+    expect(call).not.toHaveBeenCalled();
+  });
+  it("rejects results naming a different bot", async () => {
+    expect(
+      await dispatchBotDelete(botDeleteInput, async () => ({
+        ok: true,
+        result: { ...botDeleteResult, botId: "other" },
       })),
     ).toMatchObject({ ok: false, error: { code: "internal_error" } });
   });

@@ -130,6 +130,19 @@ pub struct Bot {
     pub updated_at: f64,
 }
 
+/// How a [`ResponsibilityRun`] was invoked: a daemon scheduler fire of the
+/// responsibility's owned automation, or an explicit `bot.run` call (the
+/// Run control, a `scheduledDue`/`reactiveEvent` reason included -- an
+/// explicit invocation, never a schedule fire). Display-only evidence for
+/// the history's Scheduled/Manual trigger label; never an automation
+/// status or a dispatch authorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResponsibilityRunInvocation {
+    Scheduled,
+    Manual,
+}
+
 /// Source `DrogonBotResponsibilityRun`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -143,6 +156,11 @@ pub struct ResponsibilityRun {
     pub ended_at: Option<f64>,
     pub recipe: Option<RecipeLink>,
     pub host_observation: Option<HostObservation>,
+    /// `None` for rows written before this field existed. Every such row
+    /// was recorded through `bot.run` (the scheduler's direct path never
+    /// wrote responsibility runs), so readers treat `None` as manual.
+    #[serde(default)]
+    pub invocation: Option<ResponsibilityRunInvocation>,
 }
 
 /// `live` / `unverifiable` / `exited`: evidence only, never an automation

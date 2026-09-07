@@ -128,6 +128,7 @@ export interface BotBridge {
   botResponsibilityDelete?(
     input: BotResponsibilityDeleteInput,
   ): Promise<Result<BotResponsibilityDeleteResult>>;
+  botDelete?(input: BotDeleteInput): Promise<Result<BotDeleteResult>>;
 }
 
 // R7-E additive types: a scheduled responsibility is an automation owned by
@@ -140,6 +141,9 @@ export type BotResponsibilityCreateInput = BotScope & {
   name: string;
   schedule: string;
   prompt: string;
+  /** Carried for scope-triple uniformity with botSnapshot/botRun; the
+   *  bridge strips it before the native call (native has no use for it). */
+  locale?: string | null;
 };
 
 export type BotResponsibilityCreateResult = BotScope & {
@@ -152,6 +156,9 @@ export type BotResponsibilityDeleteInput = BotScope & {
   requestId: string;
   botId: string;
   responsibilityId: string;
+  /** Carried for scope-triple uniformity with botSnapshot/botRun; the
+   *  bridge strips it before the native call (native has no use for it). */
+  locale?: string | null;
 };
 
 export type BotResponsibilityDeleteResult = BotScope & {
@@ -159,6 +166,25 @@ export type BotResponsibilityDeleteResult = BotScope & {
   responsibilityId: string;
   removed: boolean;
   automationId: string | null;
+};
+
+// R9-C additive types: bot-level delete removes the bot, its
+// responsibilities and their still-Bot-owned automations atomically;
+// responsibility-run and chat-message rows stay as orphaned evidence.
+// Transport shapes only; native owns validation. Results are lean ids;
+// callers re-read the full list via `botSnapshot`.
+export type BotDeleteInput = BotScope & {
+  requestId: string;
+  botId: string;
+  /** Carried for scope-triple uniformity with botSnapshot/botRun; the
+   *  bridge strips it before the native call (native has no use for it). */
+  locale?: string | null;
+};
+
+export type BotDeleteResult = BotScope & {
+  botId: string;
+  removed: boolean;
+  automationIds: string[];
 };
 
 export type BotsPanelHostObservation = "live" | "unverifiable" | "exited";
@@ -223,6 +249,10 @@ export type BotsPanelHistoryEntry = {
     endedAt: number | null;
     recipe: BotsPanelRecipeLink | null;
     hostObservation: BotsPanelHostObservation | null;
+    /** How the run was invoked. `null` for rows written before native
+     *  stamped it: every such row came through `bot.run`, so readers
+     *  treat `null` as manual. */
+    invocation: "scheduled" | "manual" | null;
   };
   responsibilityName: string | null;
   automationName: string | null;

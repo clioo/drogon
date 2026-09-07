@@ -803,6 +803,7 @@ fn record_responsibility_run_dedupes_on_automation_run_id_with_null_merge_semant
                 evidence_path: None,
             }),
             host_observation: Some(HostObservation::Live),
+            invocation: Some(ResponsibilityRunInvocation::Scheduled),
         },
     )
     .unwrap();
@@ -826,6 +827,7 @@ fn record_responsibility_run_dedupes_on_automation_run_id_with_null_merge_semant
             ended_at: Some(99.0),
             recipe: None,
             host_observation: None,
+            invocation: None,
         },
     )
     .unwrap();
@@ -847,6 +849,11 @@ fn record_responsibility_run_dedupes_on_automation_run_id_with_null_merge_semant
         merged.host_observation,
         Some(HostObservation::Live),
         "null incoming host_observation must preserve the existing value"
+    );
+    assert_eq!(
+        merged.invocation,
+        Some(ResponsibilityRunInvocation::Scheduled),
+        "the merge preserves the existing row's invocation, never the incoming one"
     );
 }
 
@@ -933,6 +940,7 @@ fn record_responsibility_run_is_atomic_across_two_real_concurrent_connections() 
                     evidence_path: None,
                 }),
                 host_observation: None,
+                invocation: None,
             },
         )
     });
@@ -955,6 +963,7 @@ fn record_responsibility_run_is_atomic_across_two_real_concurrent_connections() 
                 ended_at: Some(42.0),
                 recipe: None,
                 host_observation: None,
+                invocation: None,
             },
         )
     });
@@ -1025,6 +1034,7 @@ fn record_responsibility_run_with_no_automation_run_id_never_dedupes() {
                 ended_at: None,
                 recipe: None,
                 host_observation: None,
+                invocation: None,
             },
         )
         .unwrap();
@@ -1070,6 +1080,7 @@ fn history_for_bot_is_newest_first_with_null_joins_for_orphans() {
                 ended_at: None,
                 recipe: None,
                 host_observation: None,
+                invocation: None,
             },
         )
         .unwrap();
@@ -1090,24 +1101,92 @@ fn history_for_bot_is_newest_first_with_null_joins_for_orphans() {
 // --- Deletion semantics ----------------------------------------------------
 
 #[test]
-fn delete_bot_preserves_owned_automations_and_their_history_stripping_only_ownership() {
+fn delete_bot_removes_owned_automations_with_their_runs_but_preserves_responsibility_history() {
     let c = conn();
     bstorage::create_bot(&c, HOST, FOLDER, &sample_bot("b1", "Alice", 0.0)).unwrap();
     let automation = sample_automation("a1", "b1");
     let responsibility = sample_scheduled_responsibility("r1", "a1");
     bstorage::create_scheduled_responsibility(&c, HOST, FOLDER, "b1", responsibility, automation)
         .unwrap();
+    automations::storage::upsert_automation_run(
+        &c,
+        &automations::records::AutomationRun {
+            id: "run-1".to_string(),
+            automation_id: "a1".to_string(),
+            run_context: None,
+            source_context: None,
+            title: "t".to_string(),
+            scheduled_for: 0.0,
+            status: automations::records::AutomationRunStatus::Pending,
+            trigger: automations::records::AutomationRunTrigger::Scheduled,
+            workspace_id: None,
+            workspace_display_name: None,
+            session_kind: automations::records::SessionKind::Terminal,
+            chat_session_id: None,
+            terminal_session_id: None,
+            terminal_pane_key: None,
+            terminal_pty_id: None,
+            output_snapshot: None,
+            precheck_result: None,
+            usage: None,
+            error: None,
+            started_at: None,
+            dispatched_at: None,
+            created_at: 0.0,
+            run_number: None,
+            occurrence_count: None,
+            last_occurrence_at: None,
+            session_incarnation: None,
+            exit_code: None,
+            observed_at: None,
+        },
+    )
+    .unwrap();
+    bstorage::record_responsibility_run(
+        &c,
+        HOST,
+        FOLDER,
+        ResponsibilityRun {
+            id: "run-record-1".to_string(),
+            bot_id: "b1".to_string(),
+            responsibility_id: "r1".to_string(),
+            automation_id: Some("a1".to_string()),
+            automation_run_id: Some("run-1".to_string()),
+            started_at: 0.0,
+            ended_at: None,
+            recipe: None,
+            host_observation: None,
+            invocation: Some(ResponsibilityRunInvocation::Manual),
+        },
+    )
+    .unwrap();
 
     assert!(bstorage::delete_bot(&c, HOST, FOLDER, "b1").unwrap());
     assert!(bstorage::get_bot(&c, HOST, FOLDER, "b1").unwrap().is_none());
-    let surviving = automations::storage::get_automation(&c, "a1")
-        .unwrap()
-        .unwrap();
-    assert_eq!(surviving.bot_id, None, "ownership must be cleared");
-    assert_eq!(
-        surviving.name, "sweep",
-        "every other field must survive untouched"
+    assert!(
+        automations::storage::get_automation(&c, "a1")
+            .unwrap()
+            .is_none(),
+        "the owned automation must be deleted with the Bot, never stranded ownerless"
     );
+    assert!(
+        automations::storage::get_automation_run(&c, "run-1")
+            .unwrap()
+            .is_none(),
+        "the owned automation's runs go with it"
+    );
+    // The responsibility run survives as orphaned evidence with null joins.
+    let history = bstorage::history_for_bot(&c, HOST, FOLDER, "b1").unwrap();
+    assert_eq!(history.len(), 1);
+    assert!(history[0].responsibility.is_none());
+    assert!(history[0].automation.is_none());
+    assert!(history[0].automation_run.is_none());
+    assert_eq!(
+        history[0].responsibility_run.invocation,
+        Some(ResponsibilityRunInvocation::Manual)
+    );
+    // A missing Bot is not an error, just `false`.
+    assert!(!bstorage::delete_bot(&c, HOST, FOLDER, "b1").unwrap());
 }
 
 #[test]

@@ -6,10 +6,13 @@
    admitted main.css tokens; DrogonBotAvatar (character images) is replaced
    by the initials BotAvatar (see BotAvatar.tsx); getAgentLabel is the local
    botHarnessLabel; the source's `history` is the full snapshot history and
-   the card filters per bot exactly like the source; the header Delete
-   (bot delete, no native RPC here) is omitted while each responsibility
+   the card filters per bot exactly like the source. The source deletes the
+   bot immediately from its header Delete; here Delete opens the inline
+   confirm dialog below (the source has no confirm copy, so the copy states
+   this repo's own native `bot.delete` effects) and each responsibility
    row gains a Delete control wired to `bot.responsibility_delete`. */
 
+import { useEffect, useId, useState } from "react";
 import { CalendarClock, Play, Plus, Zap } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type {
@@ -21,6 +24,7 @@ import {
   SESSION_LINKED_LABEL,
   SESSION_NONE_LABEL,
   botDescription,
+  historyTriggerLabel,
   modelLabel,
   triggerLabel,
 } from "./bots-panel-projection";
@@ -50,12 +54,56 @@ function historyDetail(entry: BotsPanelHistoryEntry): string {
   return "Recorded";
 }
 
+/** Inline confirm for the header bot Delete. Pure (no hooks of its own
+ *  besides `useId` for ARIA wiring) so tests render it directly. The
+ *  source deletes immediately with no confirm; the copy here states this
+ *  repo's native `bot.delete` effects instead. */
+export function BotDeleteConfirmDialog({
+  botName,
+  onConfirm,
+  onCancel,
+}: {
+  botName: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): React.JSX.Element {
+  const titleId = useId();
+  const descriptionId = useId();
+  return (
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      data-testid="bot-delete-confirm"
+      className="mt-3 rounded-md border border-border bg-muted/50 px-3 py-2"
+    >
+      <p id={titleId} className="text-sm font-medium">
+        Delete &ldquo;{botName}&rdquo;?
+      </p>
+      <p id={descriptionId} className="mt-1 text-xs text-muted-foreground">
+        This removes the bot, its responsibilities and their scheduled
+        automations. Past runs stay in history.
+      </p>
+      <div className="mt-2 flex items-center justify-end gap-2">
+        <Button variant="outline" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="default" size="sm" onClick={onConfirm}>
+          Delete
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function BotResponsibilityCard({
   bot,
   history,
   observedLiveness,
   onOpenSession,
   onAddResponsibility,
+  onDeleteBot,
   onDeleteResponsibility,
   onRunResponsibility,
 }: {
@@ -64,10 +112,17 @@ export function BotResponsibilityCard({
   observedLiveness?: BotsPanelHostObservation | null;
   onOpenSession?: () => void;
   onAddResponsibility?: () => void;
+  /** Header bot delete (`bot.delete`); the card confirms first. Rendered
+   *  only when supplied, like every other mutation control here. */
+  onDeleteBot?: () => void;
   onDeleteResponsibility?: (responsibilityId: string) => void;
   onRunResponsibility?: (responsibilityId: string) => void;
 }): React.JSX.Element {
   const botHistory = history.filter((entry) => entry.run.botId === bot.id);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => {
+    setConfirmingDelete(false);
+  }, [bot.id]);
   return (
     <div
       data-testid={`bot-${bot.id}`}
@@ -107,7 +162,30 @@ export function BotResponsibilityCard({
               </Button>
             ) : null}
           </div>
+          {onDeleteBot ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid={`delete-bot-${bot.id}`}
+              aria-label={`Delete ${bot.displayIdentity.displayName}`}
+              onClick={() => setConfirmingDelete(true)}
+            >
+              Delete
+            </Button>
+          ) : null}
         </div>
+        {onDeleteBot && confirmingDelete ? (
+          <div className="px-6 pb-4">
+            <BotDeleteConfirmDialog
+              botName={bot.displayIdentity.displayName}
+              onConfirm={() => {
+                setConfirmingDelete(false);
+                onDeleteBot();
+              }}
+              onCancel={() => setConfirmingDelete(false)}
+            />
+          </div>
+        ) : null}
       </div>
       <div className="space-y-5 p-6 pt-6">
         <div className="grid gap-3 text-sm sm:grid-cols-3">
@@ -216,8 +294,13 @@ export function BotResponsibilityCard({
                   data-testid={`history-${entry.run.id}`}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs"
                 >
-                  <span>
-                    {entry.responsibilityName ?? "Removed responsibility"}
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span>
+                      {entry.responsibilityName ?? "Removed responsibility"}
+                    </span>
+                    <span className="rounded-md border border-border px-1.5 py-0.5 font-medium text-muted-foreground">
+                      {historyTriggerLabel(entry.run.invocation)}
+                    </span>
                   </span>
                   <span className="text-muted-foreground">
                     {historyDetail(entry)}

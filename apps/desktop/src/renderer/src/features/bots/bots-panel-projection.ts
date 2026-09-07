@@ -54,7 +54,18 @@ export type BotsPanelHistoryRow = {
   responsibilityName: string | null;
   automationName: string | null;
   automationRunNumber: number | null;
+  triggerLabel: "Scheduled" | "Manual";
 };
+
+/** Display label for how a history run was invoked. A `null` invocation
+ *  predates native's stamp, and every such row was recorded through
+ *  `bot.run` (the scheduler never wrote responsibility runs), so `null`
+ *  reads as manual -- never invented, just the only possible origin. */
+export function historyTriggerLabel(
+  invocation: BotsPanelHistoryEntry["run"]["invocation"],
+): "Scheduled" | "Manual" {
+  return invocation === "scheduled" ? "Scheduled" : "Manual";
+}
 
 export function botDescription(
   entry: Pick<BotsPanelBot, "displayIdentity" | "instructions">,
@@ -136,5 +147,6 @@ export function projectHistoryRows(
     responsibilityName: entry.responsibilityName,
     automationName: entry.automationName,
     automationRunNumber: entry.automationRunNumber,
+    triggerLabel: historyTriggerLabel(entry.run.invocation),
   }));
 }

@@ -470,6 +470,7 @@ fn responsibility_run_history_and_gating_decision_survive_a_real_reopen() {
                     evidence_path: None,
                 }),
                 host_observation: Some(HostObservation::Live),
+                invocation: Some(ResponsibilityRunInvocation::Scheduled),
             },
         )
         .unwrap();
@@ -487,6 +488,7 @@ fn responsibility_run_history_and_gating_decision_survive_a_real_reopen() {
                 ended_at: None,
                 recipe: None,
                 host_observation: None,
+                invocation: Some(ResponsibilityRunInvocation::Manual),
             },
         )
         .unwrap();

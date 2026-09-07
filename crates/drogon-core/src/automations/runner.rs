@@ -289,6 +289,10 @@ pub struct RunPlan {
     pub request_id: String,
     pub params: Value,
     pub attempt_at: f64,
+    /// Why this run was invoked, carried so [`record_run_outcome_in_tx`]
+    /// can stamp the responsibility row's display invocation without
+    /// re-deriving it. Not consulted by dispatch itself.
+    pub reason: crate::automations::execution::InvocationReason,
 }
 
 /// Result of [`prepare_run_plan`].
@@ -527,6 +531,7 @@ pub fn prepare_run_plan_in_tx(
         request_id,
         params,
         attempt_at,
+        reason: reason.clone(),
     }))
 }
 
@@ -834,7 +839,21 @@ fn upsert_linked_automation_run_in_tx(
 /// only correct projection is "none" -- the existing `ResponsibilityRun`
 /// stays byte-identical, never re-derived from this call's own rejected
 /// `outcome` (the regression V4-A5c fixes for non-terminal rows).
-fn responsibility_projection(
+/// Maps an invocation reason onto the responsibility row's display
+/// invocation: only a scheduler-due fire is scheduled; every explicit
+/// `bot.run` call (manual or a supplied reactive event) is manual.
+fn invocation_of(
+    reason: &crate::automations::execution::InvocationReason,
+) -> crate::bots::records::ResponsibilityRunInvocation {
+    match reason {
+        crate::automations::execution::InvocationReason::ScheduledDue => {
+            crate::bots::records::ResponsibilityRunInvocation::Scheduled
+        }
+        _ => crate::bots::records::ResponsibilityRunInvocation::Manual,
+    }
+}
+
+pub(crate) fn responsibility_projection(
     automation_run: &AutomationRun,
     outcome: &RunnerOutcome,
 ) -> (Option<HostObservation>, Option<f64>) {
@@ -919,6 +938,7 @@ pub fn record_run_outcome_in_tx(
             ended_at,
             recipe: None,
             host_observation,
+            invocation: Some(invocation_of(&plan.reason)),
         };
         bots_storage::record_responsibility_run_in_tx(conn, &plan.host_id, &plan.folder, run)?;
     }
