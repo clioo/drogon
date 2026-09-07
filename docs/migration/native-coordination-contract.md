@@ -1,7 +1,8 @@
 # Native coordination contract
 
-Status: coordinator design, awaiting the selected source-test baseline gates. No
-coordination capability is implemented or advertised by this document. This wave
+Status: selected source baselines accepted (59 store and 29 CLI cases); full
+typed method freeze and runtime integration remain pending. No coordination
+capability is implemented or advertised by this document. This wave
 advances the full rewrite; it does not redefine Orca parity as this smaller slice.
 
 Baseline: Drogon `252de85c2fd28bbdc4c09c70c16063a0c7eb901e`; preserved Orca
@@ -102,6 +103,21 @@ types do not freeze every method's fields or advertise a working capability.
 The DB-only receipt seam can proceed independently after its source atomicity
 baseline and candidate RED are accepted. It extends the existing ledger, not the
 public method group. The original external-effect path remains unchanged.
+
+Root accepted CLI credential isolation at `01565b9`, following behavioral RED
+`b403d73`. `DROGON_DISPATCH_CAPABILITY` is authoritative when present: malformed
+values fail locally and usable values travel verbatim without reading the admin
+token. Independent verification passed 115 CLI tests (53 unit, 49 integration,
+6 credential, 7 parser), strict CLI clippy and workspace format checks. Parser
+tests now use private temporary data directories rather than the user's daemon.
+These Unix subprocess cases do not establish Windows execution or server-side
+worker authentication; both remain integration obligations.
+
+Store source evidence is committed at `010f818`: nine retained capsules, 59
+source cases, 922 source/license references and 111 unique pinned files. Root
+also ran 41 verifier tests and inspected all nine retained result/receipt pairs.
+The verifier refuses missing independent expected counts; original process exit
+codes were not retained, so its reconstructed success is not exit-code evidence.
 
 Root accepted the database-only seam after independent focused (16/16) and
 full `drogon-core` test runs on 2026-09-07. The initial implementation was
