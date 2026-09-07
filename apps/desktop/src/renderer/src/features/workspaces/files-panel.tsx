@@ -102,6 +102,42 @@ export function filesReadTarget(
   return available && openPath !== null ? openPath : null;
 }
 
+/**
+ * Quick-open reveal request from the command palette: the workspace file
+ * to open plus a nonce so re-opening the same path still applies. The
+ * workspaceId gates application — a request for another workspace is
+ * inert here, never opened under the wrong scope.
+ */
+export interface FileOpenRequest {
+  workspaceId: string;
+  path: string;
+  nonce: number;
+}
+
+/**
+ * Stable mutable cell carrying the latest reveal request. A cell (not a
+ * prop value) because the panel descriptor is registered once per mount
+ * lifetime: re-registering on every quick-open would remount every panel
+ * and drop descriptor-lifetime draft stores. App bumps its own state to
+ * re-render after writing the cell; the panel applies the newest nonce.
+ */
+export interface FileOpenRequestCell {
+  current: FileOpenRequest | null;
+}
+
+/** True when the request targets this workspace and was not applied yet. */
+export function shouldApplyOpenRequest(
+  request: FileOpenRequest | null,
+  workspaceId: string,
+  appliedNonce: number | null,
+): boolean {
+  return (
+    request !== null &&
+    request.workspaceId === workspaceId &&
+    request.nonce !== appliedNonce
+  );
+}
+
 /** identity of one read for staleness gating. */
 export interface FilesReadState {
   /** Scoped key this read belongs to; null = no read in effect. */
@@ -394,11 +430,13 @@ function FilesPanel({
   bridge,
   drafts,
   requestIds,
+  openRequestCell,
   ...props
 }: FilesPanelProps & {
   bridge: FileBridge;
   drafts: FilesDraftStore;
   requestIds: RequestIdSource;
+  openRequestCell?: FileOpenRequestCell;
 }) {
   const { workspace, status } = props;
   // Files panels never need a terminal session: `session` is deliberately
@@ -410,10 +448,29 @@ function FilesPanel({
     () => ({ hostId, workspaceId }),
     [hostId, workspaceId],
   );
+  // Scope identity precedes state: the open-state seed below stamps it.
+  const scopeKey = `${scope.hostId}/${scope.workspaceId}`;
   // Request-id identity lives at DESCRIPTOR lifetime (injected from the
   // factory), not per mount: an unresolved retry keeps its id across
   // unmount/remount while the draft store claims persistence.
-  const [open, setOpen] = useState<FilesOpenEntry | null>(null);
+  //
+  // Quick-open reveal seeds the same state: a request already in the cell
+  // at mount opens immediately (SSR-safe: no effects needed), later ones
+  // apply through the effect below. Requests for another workspace are
+  // never seeded here.
+  const [open, setOpen] = useState<FilesOpenEntry | null>(() => {
+    const pending = openRequestCell?.current;
+    if (
+      pending &&
+      pending.workspaceId === workspaceId &&
+      pending.path.trim() !== ""
+    )
+      return { scopeKey, path: pending.path };
+    return null;
+  });
+  const [appliedNonce, setAppliedNonce] = useState<number | null>(
+    () => openRequestCell?.current?.nonce ?? null,
+  );
   const [reloadTick, setReloadTick] = useState(0);
   const [selection, setSelection] = useState<{
     node: FilesExplorerRow;
@@ -433,7 +490,6 @@ function FilesPanel({
   // explorer resets its cached children/expansion/selection. Truncation
   // reports are stamped with the scope so a stale notice can never render
   // after a scope switch.
-  const scopeKey = `${scope.hostId}/${scope.workspaceId}`;
   const source = useMemo(
     () =>
       available
@@ -451,6 +507,24 @@ function FilesPanel({
     setOpen((current) => (current !== null && current.scopeKey !== scopeKey ? null : current));
     setSelection((current) => (current !== null && current.scopeKey !== scopeKey ? null : current));
   }, [scopeKey]);
+
+  // Quick-open reveal: applies the newest cell request for THIS workspace
+  // (nonce-keyed so repeats apply, scope-gated so foreign requests never
+  // open here). Selection mirrors the open so the explorer highlights it.
+  useEffect(() => {
+    if (!available) return;
+    const pending = openRequestCell?.current ?? null;
+    if (!shouldApplyOpenRequest(pending, workspaceId, appliedNonce)) return;
+    const request = pending as FileOpenRequest;
+    if (request.path.trim() === "") return;
+    setAppliedNonce(request.nonce);
+    setOpen({ scopeKey, path: request.path });
+    const name = request.path.split("/").pop() ?? request.path;
+    setSelection({
+      node: { name, path: request.path, kind: "file" },
+      scopeKey,
+    });
+  }, [available, workspaceId, scopeKey, appliedNonce, openRequestCell]);
 
   useEffect(() => {
     // Cleanup runs on unmount AND on every scope/path/reload/availability
@@ -601,6 +675,7 @@ export function createFilesPanelDescriptor(deps: {
   bridge: FileBridge;
   drafts?: FilesDraftStore;
   requestIds?: RequestIdSource;
+  openRequestCell?: FileOpenRequestCell;
 }): FilesPanelDescriptor {
   const drafts = deps.drafts ?? createFilesDraftStore();
   const requestIds = deps.requestIds ?? createRequestIdSource();
@@ -613,6 +688,7 @@ export function createFilesPanelDescriptor(deps: {
         bridge={deps.bridge}
         drafts={drafts}
         requestIds={requestIds}
+        openRequestCell={deps.openRequestCell}
       />
     ),
     capability: FILES_CAPABILITY,

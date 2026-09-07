@@ -14,6 +14,10 @@ export interface CommandContext {
   filesAvailable: boolean;
   botsAvailable: boolean;
   harnessAvailable: boolean;
+  /** The service advertises worktree.v1. */
+  worktreesAvailable: boolean;
+  /** A git project is targeted for worktree creation (else the reason says so). */
+  canCreateWorktree: boolean;
 }
 
 export interface CommandDef {
@@ -124,6 +128,22 @@ export const COMMAND_DEFS: readonly CommandDef[] = [
     keywords: ["add workspace", "open folder", "new workspace", "add folder"],
     isEnabled: (context) => context.connected && !context.busy,
     disabledReason: (context) => needsConnection(context),
+  },
+  {
+    id: "worktree.new",
+    label: "New worktree…",
+    keywords: ["new worktree", "create worktree", "branch", "git worktree"],
+    isEnabled: (context) =>
+      context.connected &&
+      !context.busy &&
+      context.worktreesAvailable &&
+      context.canCreateWorktree,
+    disabledReason: (context) => {
+      if (!context.connected || context.busy) return needsConnection(context);
+      if (!context.worktreesAvailable)
+        return "Worktrees unavailable: service does not advertise worktree.v1";
+      return "No git project selected: add a repository project first";
+    },
   },
 ];
 

@@ -6,22 +6,41 @@ import type { Session } from "../../shared/session-contract";
 
 export function TerminalPane({
   session,
+  fontSize,
   onError,
   onSession,
 }: {
   session: Session;
+  /** Terminal font size in px, mirrored from the settings store by App. */
+  fontSize: number;
   onError(message: string): void;
   onSession(value: Session): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const callbacks = useRef({ onError, onSession });
   callbacks.current = { onError, onSession };
+  const fontSizeRef = useRef(fontSize);
+  fontSizeRef.current = fontSize;
+  const live = useRef<{ terminal: Terminal; fit: FitAddon } | null>(null);
+  // Applies a later settings change without remounting the session: the
+  // creation effect below stays keyed on session identity only.
+  useEffect(() => {
+    const current = live.current;
+    if (!current) return;
+    current.terminal.options.fontSize = fontSize;
+    if (
+      container.current &&
+      container.current.clientWidth !== 0 &&
+      container.current.clientHeight !== 0
+    )
+      current.fit.fit();
+  }, [fontSize]);
   useEffect(() => {
     const surface = container.current!;
     const css = getComputedStyle(surface);
     const terminal = new Terminal({
       fontFamily: css.getPropertyValue("--font-mono"),
-      fontSize: 13,
+      fontSize: fontSizeRef.current,
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: false,
@@ -34,6 +53,7 @@ export function TerminalPane({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(surface);
+    live.current = { terminal, fit };
     const scheme = matchMedia("(prefers-color-scheme: dark)");
     const updateTheme = () => {
       const theme = getComputedStyle(surface);
@@ -127,6 +147,7 @@ export function TerminalPane({
     void read();
     return () => {
       disposed = true;
+      live.current = null;
       clearTimeout(timeout);
       scheme.removeEventListener("change", updateTheme);
       observer.disconnect();

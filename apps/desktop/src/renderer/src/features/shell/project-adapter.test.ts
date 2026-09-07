@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 import type { Session, Workspace } from "../../../../shared/session-contract";
 import {
   filterProjectGroups,
+  findWorkspaceForPath,
+  gitProjectForWorkspace,
   groupProjectWorktrees,
   isProjectsAvailable,
   isWorktreesAvailable,
@@ -9,6 +11,7 @@ import {
   projectWorkspacesAsFolderProjects,
   relativeActivityTime,
   summarizeCardSessions,
+  windowProjectBridge,
   worktreeDisplayName,
 } from "./project-adapter";
 
@@ -180,6 +183,140 @@ test("filter narrows cards by branch and keeps empty groups out", () => {
   expect(narrowed).toHaveLength(1);
   expect(narrowed[0].project.name).toBe("beta");
   expect(filterProjectGroups(groups, [], "zzz")).toEqual([]);
+});
+
+test("loader fans worktree.list out once per project id", async () => {
+  const seen: string[] = [];
+  const view = await loadProjectView(
+    {
+      projectList: async () => ({
+        ok: true,
+        result: {
+          projects: [
+            {
+              id: "p1",
+              hostId: "h",
+              path: "/repo",
+              name: "repo",
+              kind: "git",
+              defaultBaseRef: "main",
+            },
+            {
+              id: "p2",
+              hostId: "h",
+              path: "/docs",
+              name: "docs",
+              kind: "folder",
+              defaultBaseRef: null,
+            },
+          ],
+        },
+      }),
+      worktreeList: async (input: { projectId: string }) => {
+        seen.push(input.projectId);
+        return {
+          ok: true,
+          result: {
+            worktrees:
+              input.projectId === "p1"
+                ? [
+                    {
+                      id: "t1",
+                      projectId: "p1",
+                      workspaceId: "w9",
+                      path: "/repo-wt",
+                      branch: "feat",
+                      head: "abc",
+                      baseRef: "main",
+                      createdAt: "2026-09-06T00:00:00Z",
+                    },
+                  ]
+                : [],
+          },
+        };
+      },
+    },
+    ["project.v1", "worktree.v1"],
+    [workspace],
+  );
+  expect(view.source).toBe("rpc");
+  expect(seen.sort()).toEqual(["p1", "p2"]);
+  expect(view.groups).toHaveLength(2);
+  expect(view.groups[0].worktrees[0].branch).toBe("feat");
+});
+
+test("loader falls back when one project's worktree.list fails", async () => {
+  const view = await loadProjectView(
+    {
+      projectList: async () => ({
+        ok: true,
+        result: {
+          projects: [
+            {
+              id: "p1",
+              hostId: "h",
+              path: "/repo",
+              name: "repo",
+              kind: "git",
+              defaultBaseRef: "main",
+            },
+          ],
+        },
+      }),
+      worktreeList: async () => ({
+        ok: false,
+        error: { code: "boom", message: "down", retryable: true },
+      }),
+    },
+    ["project.v1", "worktree.v1"],
+    [workspace],
+  );
+  expect(view.source).toBe("workspace-fallback");
+});
+
+test("windowProjectBridge reads the live project namespace, absent means {}", () => {
+  const bridge = { projectList: async () => null };
+  expect(windowProjectBridge({ project: bridge })).toBe(bridge);
+  expect(windowProjectBridge({})).toEqual({});
+  expect(windowProjectBridge(null)).toEqual({});
+});
+
+test("findWorkspaceForPath matches the daemon-canonical path slash-insensitively", () => {
+  expect(findWorkspaceForPath([workspace], "/repo/a")).toEqual(workspace);
+  expect(findWorkspaceForPath([workspace], "/repo/a/")).toEqual(workspace);
+  expect(findWorkspaceForPath([workspace], "/other")).toBeNull();
+  expect(findWorkspaceForPath([], "/repo/a")).toBeNull();
+});
+
+test("gitProjectForWorkspace targets git owners only", () => {
+  const groups = [
+    ...projectWorkspacesAsFolderProjects([workspace]),
+    {
+      project: {
+        id: "p1",
+        hostId: "h",
+        path: "/repo",
+        name: "repo",
+        kind: "git" as const,
+        defaultBaseRef: "main",
+      },
+      worktrees: [
+        {
+          id: "t1",
+          projectId: "p1",
+          workspaceId: "w9",
+          path: "/repo-wt",
+          branch: "feat",
+          head: "abc",
+          baseRef: "main",
+          createdAt: "",
+        },
+      ],
+    },
+  ];
+  expect(gitProjectForWorkspace(groups, "w1")).toBeNull();
+  expect(gitProjectForWorkspace(groups, "w9")?.id).toBe("p1");
+  expect(gitProjectForWorkspace(groups, "gone")).toBeNull();
 });
 
 test("card summary never invents a state and flags needs_input as unread", () => {

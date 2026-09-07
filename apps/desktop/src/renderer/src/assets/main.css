@@ -1809,3 +1809,107 @@ h2 {
   font-size: 11px;
   color: var(--foreground);
 }
+/* R4-C shell dialogs and card menu (append-only): project add, inline new
+   worktree, remove confirm, kebab menu, and the inner select surface of the
+   restructured worktree card (outer keeps .shell-worktree-card). */
+.shell-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 8px 8px 16px;
+  padding: 10px 12px;
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: calc(var(--radius) * 0.8);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+.shell-dialog label {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.shell-optional {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.shell-form-error {
+  margin: 2px 0;
+  color: #dc2626;
+  overflow-wrap: anywhere;
+}
+.shell-inline-form {
+  margin-left: 16px;
+}
+.shell-confirm-text {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.shell-confirm-text strong {
+  font-family: var(--font-mono);
+}
+.shell-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}
+.shell-worktree-card {
+  position: relative;
+  flex-direction: row;
+  align-items: flex-start;
+}
+.shell-worktree-card-select {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+}
+.shell-worktree-card-select:disabled {
+  cursor: default;
+}
+.shell-worktree-card-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+.shell-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.8);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+.shell-menu-item {
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--foreground);
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.6);
+}
+.shell-menu-item:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.shell-worktree-card-base {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

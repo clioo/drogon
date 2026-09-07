@@ -36,11 +36,17 @@ import {
 import { HarnessLaunchMenu } from "./HarnessLaunchMenu";
 import { Sidebar } from "./features/shell/Sidebar";
 import { TabBar } from "./features/shell/TabBar";
-import { loadProjectView } from "./features/shell/project-adapter";
-import type {
-  ProjectGroup,
-  ProjectRpcBridge,
+import {
+  findWorkspaceForPath,
+  gitProjectForWorkspace,
+  isProjectsAvailable,
+  isWorktreesAvailable,
+  loadProjectView,
+  windowProjectBridge,
 } from "./features/shell/project-adapter";
+import type { ProjectGroup } from "./features/shell/project-adapter";
+import type { ProjectAction } from "./features/shell/ProjectList";
+import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import { openCommandPalette } from "./features/shell/open-palette";
 import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
@@ -352,6 +358,22 @@ export function App() {
   // advertises them (project-adapter falls back to the Workspace list
   // until then, so this is never empty while workspaces exist).
   const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([]);
+  // Sidebar project/worktree dialogs (add project, new worktree, remove
+  // worktree). Null means none open; the palette opens the worktree form
+  // through the same state.
+  const [projectAction, setProjectAction] = useState<ProjectAction | null>(
+    null,
+  );
+  // Quick-open reveal cell: the Files descriptor is registered once (see
+  // filesBaseRegistry), so the request travels through this stable cell
+  // and a re-render tick rather than a re-registration (which would
+  // remount every panel). Monotonic nonce lives in the ref.
+  const fileOpenCell = useMemo<FileOpenRequestCell>(
+    () => ({ current: null }),
+    [],
+  );
+  const fileOpenNonce = useRef(0);
+  const [, setFileOpenTick] = useState(0);
   useEffect(() => {
     // A local file read, not an RPC — available even while disconnected,
     // and simply absent (never fabricated) outside a packaged build. A
@@ -537,6 +559,7 @@ export function App() {
                 fallbackId: BOTS_ROUTE_ID,
               }),
               filesGatedBridge,
+              fileOpenCell,
             ),
             gitGatedBridge,
           ),
@@ -548,7 +571,7 @@ export function App() {
           listHarnesses: () => window.drogon.harnesses(),
         },
       ),
-    [filesGatedBridge, gitGatedBridge, browserStaticBridge, automationsGatedBridge],
+    [filesGatedBridge, gitGatedBridge, browserStaticBridge, automationsGatedBridge, fileOpenCell],
   );
   // Tasks host callbacks: stable across renders (the registry memo below
   // runs once). Groups ride a ref so the page always re-reads the current
@@ -825,11 +848,7 @@ export function App() {
     // from the window bridge, and a withheld capability falls back to the
     // workspace projection exactly as before.
     void loadProjectView(
-      {
-        ...(window.drogon as unknown as ProjectRpcBridge),
-        projectList: tasksProjectBridge.projectList,
-        worktreeList: tasksProjectBridge.worktreeList,
-      },
+      windowProjectBridge(window.drogon),
       status?.capabilities ?? [],
       workspaces,
     ).then((view) => {
@@ -963,6 +982,132 @@ export function App() {
     setSelected(resolution.selected);
     setActive("");
     setSessions([]);
+  };
+  // Project/worktree RPCs behind the sidebar dialogs. Each submit resolves
+  // a verbatim daemon error for the form, or null on success (the dialog
+  // then closes and the lists refresh through `refresh`, which also
+  // reloads the project view via the effect above).
+  const submitAddProject = async (input: {
+    path: string;
+    name?: string;
+  }): Promise<string | null> => {
+    const bridge = windowProjectBridge(window.drogon);
+    if (typeof bridge.projectAdd !== "function")
+      return "Projects unavailable: service does not advertise project.v1";
+    let projectPath: string;
+    try {
+      const result = await bridge.projectAdd(input);
+      if (!result.ok) return result.error.message;
+      projectPath = result.result.path;
+    } catch {
+      return "Could not add the project. Retry the connection.";
+    }
+    setProjectAction(null);
+    await refresh();
+    // A folder project registers its workspace immediately: select it so
+    // its implicit card becomes the selected workspace. A git project has
+    // no workspace until its first worktree is created.
+    try {
+      const listed = await window.drogon.workspaces();
+      if (listed.ok) {
+        const match = findWorkspaceForPath(
+          listed.result.workspaces,
+          projectPath,
+        );
+        if (match) selectWorkspaceId(match.id);
+      }
+    } catch {
+      // Selection stays: the refreshed lists already show the project.
+    }
+    return null;
+  };
+  const submitWorktree = async (input: {
+    projectId: string;
+    name: string;
+    baseRef?: string;
+  }): Promise<string | null> => {
+    const bridge = windowProjectBridge(window.drogon);
+    if (typeof bridge.worktreeCreate !== "function")
+      return "Worktrees unavailable: service does not advertise worktree.v1";
+    let workspaceId: string;
+    try {
+      const result = await bridge.worktreeCreate(input);
+      if (!result.ok) return result.error.message;
+      workspaceId = result.result.workspaceId;
+    } catch {
+      return "Could not create the worktree. Retry the connection.";
+    }
+    setProjectAction(null);
+    await refresh();
+    selectWorkspaceId(workspaceId);
+    return null;
+  };
+  const submitRemoveWorktree = async (
+    worktree: { id: string; workspaceId: string },
+    force: boolean,
+  ): Promise<string | null> => {
+    const bridge = windowProjectBridge(window.drogon);
+    if (typeof bridge.worktreeRemove !== "function")
+      return "Worktrees unavailable: service does not advertise worktree.v1";
+    try {
+      const result = await bridge.worktreeRemove({ id: worktree.id, force });
+      if (!result.ok) return result.error.message;
+    } catch {
+      return "Could not remove the worktree. Retry the connection.";
+    }
+    setProjectAction(null);
+    await refresh();
+    // The removed worktree's workspace is gone: move selection to the
+    // first remaining workspace instead of leaving a stale id.
+    try {
+      const listed = await window.drogon.workspaces();
+      if (
+        listed.ok &&
+        !listed.result.workspaces.some((item) => item.id === selected)
+      )
+        selectWorkspaceId(listed.result.workspaces[0]?.id ?? "");
+    } catch {
+      // Selection stays: the refreshed lists already dropped the card.
+    }
+    return null;
+  };
+  const browseProject = async (): Promise<string | null> => {
+    try {
+      return await window.drogon.chooseFolder();
+    } catch {
+      return null;
+    }
+  };
+  // Palette "New worktree" target: the git project owning the selected
+  // workspace, else the first git project in the view.
+  const newWorktreeTarget = () =>
+    gitProjectForWorkspace(projectGroups, selected) ??
+    projectGroups.find((group) => group.project.kind === "git")?.project ??
+    null;
+  const openNewWorktreeForm = () => {
+    const target = newWorktreeTarget();
+    if (!target) {
+      setError("No git project selected: add a repository project first.");
+      return;
+    }
+    setProjectAction({ kind: "worktree", projectId: target.id });
+  };
+  // Quick-open reveal: records the request for the Files panel and routes
+  // there. The panel applies it when its workspace matches (see
+  // FileOpenRequestCell); the tick re-renders even when already routed.
+  const openFileInFiles = (path: string) => {
+    if (!selected) {
+      setRoute(FILES_ROUTE_ID);
+      return;
+    }
+    fileOpenNonce.current += 1;
+    fileOpenCell.current = {
+      workspaceId: selected,
+      path,
+      nonce: fileOpenNonce.current,
+    };
+    setFileOpenTick((tick) => tick + 1);
+    setRoute(FILES_ROUTE_ID);
   };
   const create = () =>
     action(async () => {
@@ -1135,7 +1280,21 @@ export function App() {
           workspaceDisabled={busy}
           addDisabled={!status || busy}
           onSelectWorkspace={selectWorkspaceId}
-          onAddProject={() => setAdding((value) => !value)}
+          onAddProject={() =>
+            isProjectsAvailable(liveCapabilities) &&
+            typeof windowProjectBridge(window.drogon).projectAdd ===
+              "function"
+              ? setProjectAction({ kind: "add" })
+              : setAdding((value) => !value)
+          }
+          worktreesAvailable={isWorktreesAvailable(liveCapabilities)}
+          projectAction={projectAction}
+          onOpenProjectAction={setProjectAction}
+          onCloseProjectAction={() => setProjectAction(null)}
+          onBrowseProject={browseProject}
+          onSubmitAddProject={submitAddProject}
+          onSubmitWorktree={submitWorktree}
+          onSubmitRemoveWorktree={submitRemoveWorktree}
           addSlot={
             <>
           {adding && (
@@ -1367,6 +1526,7 @@ export function App() {
                   <TerminalPane
                     key={`${terminal.id}:${revision}`}
                     session={terminal}
+                    fontSize={terminalFontSize}
                     onError={setError}
                     onSession={(value) =>
                       setSessions((items) =>
@@ -1615,6 +1775,9 @@ export function App() {
         filesAvailable={isFilesAvailable(liveCapabilities)}
         botsAvailable={isBotsAvailable(liveCapabilities)}
         harnessAvailable={harnessCapability}
+        worktreesAvailable={isWorktreesAvailable(liveCapabilities)}
+        canCreateWorktree={newWorktreeTarget() !== null}
+        onNewWorktree={openNewWorktreeForm}
         theme={theme}
         connected={status !== null}
         busy={busy}
@@ -1633,7 +1796,7 @@ export function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onSetTheme={changeTheme}
         onAddWorkspace={() => setAdding(true)}
-        onOpenFile={() => setRoute(FILES_ROUTE_ID)}
+        onOpenFile={openFileInFiles}
       />
       <StatusBar terminalCount={sessions.length} onOpenSettings={() => setSettingsOpen(true)} />
     </Tooltip.Provider>

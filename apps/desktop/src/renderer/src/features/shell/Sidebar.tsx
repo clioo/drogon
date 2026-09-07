@@ -4,10 +4,15 @@
 import { useState } from "react";
 import { LifeBuoy, Settings } from "lucide-react";
 import type { ReactNode } from "react";
-import type { Session, Workspace } from "../../../../shared/session-contract";
+import type {
+  Session,
+  Worktree,
+  Workspace,
+} from "../../../../shared/session-contract";
 import type { ProjectGroup } from "./project-adapter";
 import { SidebarNav } from "./SidebarNav";
 import { ProjectList } from "./ProjectList";
+import type { ProjectAction } from "./ProjectList";
 import { ShellIconButton } from "./ShellIconButton";
 
 /**
@@ -34,6 +39,14 @@ export function Sidebar({
   addDisabled,
   onSelectWorkspace,
   onAddProject,
+  worktreesAvailable,
+  projectAction,
+  onOpenProjectAction,
+  onCloseProjectAction,
+  onBrowseProject,
+  onSubmitAddProject,
+  onSubmitWorktree,
+  onSubmitRemoveWorktree,
   addSlot,
   serviceLabel,
   buildRevision,
@@ -58,6 +71,24 @@ export function Sidebar({
   addDisabled: boolean;
   onSelectWorkspace: (workspaceId: string) => void;
   onAddProject: () => void;
+  worktreesAvailable: boolean;
+  projectAction: ProjectAction | null;
+  onOpenProjectAction: (action: ProjectAction) => void;
+  onCloseProjectAction: () => void;
+  onBrowseProject: () => Promise<string | null>;
+  onSubmitAddProject: (input: {
+    path: string;
+    name?: string;
+  }) => Promise<string | null>;
+  onSubmitWorktree: (input: {
+    projectId: string;
+    name: string;
+    baseRef?: string;
+  }) => Promise<string | null>;
+  onSubmitRemoveWorktree: (
+    worktree: Worktree,
+    force: boolean,
+  ) => Promise<string | null>;
   /** The existing add-folder form / empty-state markup, owned by App. */
   addSlot: ReactNode;
   serviceLabel: string;
@@ -89,8 +120,16 @@ export function Sidebar({
           selectedWorkspaceId={selectedWorkspaceId}
           disabled={workspaceDisabled}
           addDisabled={addDisabled}
+          worktreesAvailable={worktreesAvailable}
+          action={projectAction}
           onSelectWorkspace={onSelectWorkspace}
           onAddProject={onAddProject}
+          onOpenAction={onOpenProjectAction}
+          onCloseAction={onCloseProjectAction}
+          onBrowse={onBrowseProject}
+          onSubmitAdd={onSubmitAddProject}
+          onSubmitWorktree={onSubmitWorktree}
+          onSubmitRemove={onSubmitRemoveWorktree}
         />
         {addSlot}
       </div>

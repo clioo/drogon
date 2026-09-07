@@ -87,7 +87,7 @@ describe("tasks mount", () => {
     const adapted = createGatedTasksProjectBridge(okBridge, () => true);
     const projects = await adapted.projectList!();
     expect(projects.ok).toBe(true);
-    const trees = await adapted.worktreeList!({});
+    const trees = await adapted.worktreeList!({ projectId: "p" });
     expect(trees.ok).toBe(true);
     const withheld = createGatedTasksProjectBridge(okBridge, () => false);
     const refused = await withheld.projectList!();

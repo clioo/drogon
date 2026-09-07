@@ -11,6 +11,7 @@ import {
   FILES_ROUTE_ID as V3_FILES_ROUTE_ID,
   isFilesAvailable,
 } from "./features/workspaces/files-panel";
+import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import {
   registerRoute,
   routeId,
@@ -100,6 +101,9 @@ export function createGatedFileBridge(
 export function registerFilesRoute(
   registry: RouteRegistry,
   bridge: FileBridge,
+  openRequestCell?: FileOpenRequestCell,
 ): RouteRegistry {
-  return registerFactoryRoute(registry, createFilesPanelDescriptor, bridge);
+  const factory: FilesPanelFactory = (input) =>
+    createFilesPanelDescriptor({ ...input, openRequestCell });
+  return registerFactoryRoute(registry, factory, bridge);
 }

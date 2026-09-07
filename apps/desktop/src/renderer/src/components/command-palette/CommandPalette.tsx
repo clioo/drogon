@@ -39,6 +39,9 @@ export interface CommandPaletteHostProps {
   filesAvailable: boolean;
   botsAvailable: boolean;
   harnessAvailable: boolean;
+  worktreesAvailable: boolean;
+  canCreateWorktree: boolean;
+  onNewWorktree(): void;
   theme: Theme;
   connected: boolean;
   busy: boolean;
@@ -187,6 +190,8 @@ function PaletteDialog(props: DialogProps) {
     filesAvailable: props.filesAvailable,
     botsAvailable: props.botsAvailable,
     harnessAvailable: props.harnessAvailable,
+    worktreesAvailable: props.worktreesAvailable,
+    canCreateWorktree: props.canCreateWorktree,
   };
   const [recentIds, setRecentIds] = useState<string[]>(() =>
     loadRecentCommands(window.localStorage),
@@ -222,6 +227,9 @@ function PaletteDialog(props: DialogProps) {
         break;
       case "workspace.add":
         props.onAddWorkspace();
+        break;
+      case "worktree.new":
+        props.onNewWorktree();
         break;
       default:
         return;
