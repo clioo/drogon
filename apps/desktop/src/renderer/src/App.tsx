@@ -107,7 +107,7 @@ import {
   resolveEffectiveTheme,
   resolveInspectorDefault,
 } from "./theme";
-import type { Theme } from "./settings-store";
+import type { HarnessAgentDefault, Theme } from "./settings-store";
 import { SettingsPanel } from "./settings-panel";
 import { StatusBar } from "./components/status-bar/StatusBar";
 import {
@@ -313,6 +313,18 @@ export function App() {
     ),
   );
   const [theme, setTheme] = useState<Theme>(() => settings.get("theme"));
+  const [terminalFontSize, setTerminalFontSize] = useState(
+    () => settings.get("terminalFontSize"),
+  );
+  const [defaultHarnessId, setDefaultHarnessId] = useState(
+    () => settings.get("defaultHarnessId"),
+  );
+  const [harnessDefaults, setHarnessDefaults] = useState(
+    () => settings.get("harnessDefaults"),
+  );
+  const [notifyOnAgentNeedsInput, setNotifyOnAgentNeedsInput] = useState(
+    () => settings.get("notifyOnAgentNeedsInput"),
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
   const [revision, setRevision] = useState(0);
@@ -814,6 +826,27 @@ export function App() {
     setTheme(next);
     settings.set("theme", next);
   };
+  // J10 settings write through on change, same pattern: state mirrors the store.
+  const changeTerminalFontSize = (next: number) => {
+    setTerminalFontSize(next);
+    settings.set("terminalFontSize", next);
+  };
+  const changeDefaultHarness = (next: string) => {
+    setDefaultHarnessId(next);
+    settings.set("defaultHarnessId", next);
+  };
+  const changeHarnessDefault = (
+    harnessId: string,
+    next: HarnessAgentDefault,
+  ) => {
+    const merged = { ...harnessDefaults, [harnessId]: next };
+    setHarnessDefaults(merged);
+    settings.set("harnessDefaults", merged);
+  };
+  const changeNotifyOnAgentNeedsInput = (next: boolean) => {
+    setNotifyOnAgentNeedsInput(next);
+    settings.set("notifyOnAgentNeedsInput", next);
+  };
   // Inspector toggles persist through the settings store; the narrow-viewport
   // guard below keeps overriding the pane shut on shrink without persisting,
   // so an accidental shrink never becomes a saved "closed" choice.
@@ -889,15 +922,31 @@ export function App() {
       chord: "CmdOrCtrl+Shift+N",
       handler: guardHandler(() => void create(), isDisabled),
     });
+    // J10: Cmd+, opens Settings from anywhere — never gated on workspace,
+    // connection or busy state.
+    registry.register({
+      id: "settings.open",
+      chord: "CmdOrCtrl+,",
+      handler: () => setSettingsOpen(true),
+    });
     const keydown = (event: KeyboardEvent) => {
       const action = registry.matchKeyEvent(event, platform);
-      if (!action || isDisabled()) return;
+      if (!action) return;
+      if (action.id !== "settings.open" && isDisabled()) return;
       event.preventDefault();
       action.handler();
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
   });
+  useEffect(() => {
+    // Terminal font size rides a CSS hook the terminal surface reads, so the
+    // stored choice applies without remounting sessions.
+    document.documentElement.style.setProperty(
+      "--terminal-font-size",
+      `${terminalFontSize}px`,
+    );
+  }, [terminalFontSize]);
   return (
     <Tooltip.Provider delayDuration={400}>
       <div className="app-shell">
@@ -1031,6 +1080,16 @@ export function App() {
                 onInspectorChange={changeInspector}
                 onClose={() => setSettingsOpen(false)}
                 openerRef={settingsOpenerRef}
+                terminalFontSize={terminalFontSize}
+                onTerminalFontSizeChange={changeTerminalFontSize}
+                harnesses={harnesses}
+                defaultHarnessId={defaultHarnessId}
+                onDefaultHarnessChange={changeDefaultHarness}
+                harnessDefaults={harnessDefaults}
+                onHarnessDefaultChange={changeHarnessDefault}
+                notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
+                onNotifyChange={changeNotifyOnAgentNeedsInput}
+                workspacePath={current?.path ?? null}
               />
             )}
           </header>
@@ -1091,6 +1150,8 @@ export function App() {
                     disabled={!selected || !status || busy || loadingSessions}
                     onCreateTerminal={() => void create()}
                     onLaunch={launchHarness}
+                    defaultHarnessId={defaultHarnessId}
+                    launchDefaults={harnessDefaults}
                   />
                 ) : (
                   <IconButton
