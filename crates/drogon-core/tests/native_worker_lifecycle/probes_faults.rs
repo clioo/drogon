@@ -11,7 +11,8 @@ pub fn pending_insert_fault(env: &ProbeEnv) {
     let (_host, run_id, task_id) = env.prepare(&engine, "pf", "fault");
     // Deterministic public-seam fault: a storage trigger aborts exactly the
     // staged pending-receipt INSERT for workerStart, so admission rolls back.
-    let conn = rusqlite::Connection::open(env.data_dir.join("drogon.sqlite3")).expect("sqlite");
+    let conn =
+        rusqlite::Connection::open(env.data_dir.join(drogon_core::DB_FILE_NAME)).expect("sqlite");
     conn.execute_batch(
         "CREATE TRIGGER inject_pending_insert_failure \
          BEFORE INSERT ON requests WHEN NEW.status='pending' \
@@ -62,7 +63,8 @@ pub fn post_spawn_persist_fault(env: &ProbeEnv) {
     // Deterministic public-seam fault: abort the post-spawn liveness persist.
     // Admission is already committed, so the child must be retained and the
     // replay must not spawn a second process.
-    let conn = rusqlite::Connection::open(env.data_dir.join("drogon.sqlite3")).expect("sqlite");
+    let conn =
+        rusqlite::Connection::open(env.data_dir.join(drogon_core::DB_FILE_NAME)).expect("sqlite");
     conn.execute_batch(
         "CREATE TRIGGER inject_session_persist_failure \
          BEFORE UPDATE OF verdict ON sessions WHEN NEW.verdict='live' \
@@ -85,6 +87,12 @@ pub fn post_spawn_persist_fault(env: &ProbeEnv) {
             .as_str()
             .unwrap()
             .contains("could not be persisted")
+    );
+    assert!(
+        result["warning"]
+            .as_str()
+            .unwrap()
+            .contains("does not prove prompt or model readiness")
     );
     let dispatch_id = result["dispatchId"]
         .as_str()

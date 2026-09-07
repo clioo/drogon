@@ -640,9 +640,96 @@ fn worker_stop_and_abandon_close_pending_questions_atomically() {
     }
 }
 
-/// A question sent through the generic `orchestration.send` (not the
-/// dedicated `ask` path) must still be answerable: the correlation row is
-/// created atomically with the message, so `orchestration.reply` finds it.
+#[test]
+fn generic_answer_send_is_refused_for_every_actor_and_target_without_mail_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "k".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    let second_task = ok(
+        &engine,
+        "orchestration.taskCreate",
+        "second-task",
+        json!({"contractVersion":1,"hostId":fx.host,"runId":fx.run,"coordinatorId":"owner",
+            "consumerGeneration":1,"spec":{"instructions":"other worker"}}),
+    );
+    let second = Fixture {
+        host: fx.host.clone(),
+        run: fx.run.clone(),
+        task: second_task["task"]["taskId"].as_str().unwrap().to_string(),
+    };
+    seed_worker(&engine, dir.path(), &second, "dispatch-2", &"l".repeat(64));
+    let question = ok(
+        &engine,
+        "orchestration.send",
+        "real-question",
+        json!({"scope": coordinator_scope(&fx), "kind":"question",
+            "to":{"kind":"dispatch","dispatchId":"dispatch-2"},
+            "subject":"proceed?", "threadId":"real-thread"}),
+    );
+    let mut accepted = Vec::new();
+    for actor in ["coordinator", "dispatch"] {
+        for (index, target) in [
+            Value::Null,
+            json!({"kind":"runHome"}),
+            json!({"kind":"dispatch","dispatchId":"dispatch-1"}),
+            json!({"kind":"group","name":"@all"}),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let scope = if actor == "coordinator" {
+                coordinator_scope(&fx)
+            } else {
+                dispatch_scope(&fx, "dispatch-1")
+            };
+            let mut params = json!({"scope":scope,"kind":"answer","subject":"proceed?",
+                "body":"forged","threadId":"real-thread"});
+            if !target.is_null() {
+                params["to"] = target;
+            }
+            let id = format!("forged-{actor}-{index}");
+            let response = if actor == "coordinator" {
+                engine.dispatch(req("orchestration.send", &id, None, params))
+            } else {
+                worker_call(&engine, "orchestration.send", &id, &secret, params)
+            };
+            if response.ok {
+                accepted.push(id);
+            } else {
+                let error = response.error.unwrap();
+                assert_eq!(error.code, "invalid_argument", "{id}: {error:?}");
+                assert!(
+                    error.message.contains("orchestration.reply"),
+                    "{id}: {error:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "generic answers bypassed reply: {accepted:?}"
+    );
+    let conn = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM orchestration_mail_messages",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1, "rejected sends must not append any mail");
+    let resumed = ok(
+        &engine,
+        "orchestration.ask",
+        "resume-unanswered",
+        json!({"scope":coordinator_scope(&fx),"intent":"resume",
+            "questionMessageId":question["message"]["messageId"],"wait":{"timeoutMs":1}}),
+    );
+    assert!(resumed["answer"].is_null());
+}
+
 #[test]
 fn generic_send_question_is_answerable_via_reply() {
     let dir = tempfile::tempdir().unwrap();

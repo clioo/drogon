@@ -1,5 +1,32 @@
 # Drogon: handoff para cinco verticales independientes
 
+## Actualización operativa — 7 de septiembre, después del cierre nativo
+
+Esta sección y `five-vertical-execution-window.md` superseden el snapshot histórico
+de staffing, base y WIP que sigue abajo. Carlos autorizó cinco líderes reales
+Pi / `muse-code` / `muse-spark-1.3-contributor` con `--thinking max`, cada uno
+con hojas Sonnet 5, GLM-5.3-Flash o Muse, exactamente dos generaciones delegadas.
+La fecha objetivo vigente es **16:41:33 UTC**, sin reiniciar el reloj al lanzarlos.
+Las primeras asignaciones conservan la propiedad de §5 y el reparto completo
+de los 46 paquetes; el texto histórico «no crees descendientes» no aplica a los
+cinco líderes autorizados, sí a sus hojas.
+
+El agregado nativo de PR9 (`codex/native-coordination-contract`) ya incorpora
+las entregas auth/CLI/store y las correcciones de lifecycle/mail/receipts. No
+volver a asignar sus antiguos WIP ni repetir cherry-picks por las filas de §4.
+El baseline de revisión suplementaria es `2ad3118`; ver
+[aceptación combinada y correcciones posteriores](native-coordination-combined-acceptance.md).
+La capability nativa está habilitada para los 18 entry points implementados;
+la paridad restante, incluida federación, Windows, reuse y `@idle`, sigue abierta.
+
+Los cinco worktrees deben salir de **un mismo commit de main verificado después
+de integrar PR9 y probar/instalar su paquete**, no del antiguo `252de85` ni de
+otro checkout dirty. Root registrará ese SHA exacto en cada Task al crearlos.
+V1 recibe ese código integrado y comienza por dogfood nativo/modelo real y los
+gaps restantes; V2 empieza por los dos fallos de navegación archivados; V3 por
+explorer/editor; V4 por Bots/schedule/history; V5 por plataforma y runners.
+Esto aún no prueba que los líderes hayan arrancado ni que el paquete esté instalado.
+
 Preparado para Carlos el 7 de septiembre de 2026. Documento operativo de
 planificación y transferencia; **no crea ramas, worktrees, agentes ni cron, no
 autoriza un merge y no declara terminada la migración**. Snapshot local de refs y

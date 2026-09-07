@@ -113,6 +113,12 @@ impl SendParams {
         if let Some(target) = &self.to {
             target.validate_shape()?;
         }
+        if self.kind == MessageKind::Answer {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Answers require orchestration.reply with an authorized question reference.",
+            ));
+        }
         // Why: a worker's lifecycle state belongs to one exact run home; the
         // source CLI refuses group (and any dispatch) addressing for
         // heartbeat/worker_done, and the wire keeps that rule. Guidance and

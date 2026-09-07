@@ -2,7 +2,47 @@
 
 Checkpoint: 2026-09-07. This supersedes historical implementation notes that
 describe mail/question routes as absent. It is not full Orca parity or
-installed-preview acceptance. PR review, main integration and packaging follow.
+installed-preview acceptance. Supplemental review and its corrections are
+recorded below; main integration and packaging still follow.
+
+## Supplemental review and correction
+
+Three independent read-only Tasks reviewed frozen clean `2ad3118`, focusing on
+`0dab9a4..2ad3118` within PR9's full `252de85..2ad3118` range. Security and mail/data
+used Sonnet 5 high; CLI/integration used OpenCode ZAI GLM-5.3-Flash. No dimension
+hit its 180000-character cap; archived UX audit/unrelated docs were excluded.
+Task/Dispatch pairs in Run `run_ddca7735397e`:
+`task_66ed127461d2/ctx_b332502097cf`, `task_64d33941fcff/ctx_d5d1a1b4b767`,
+`task_67a909562645/ctx_ce64a9b3f7d8`. All settled and declared no repository
+modifications; root verified unchanged HEAD/status. Two owned terminals were
+released/closed; the external GLM terminal was retained without process action.
+All completion deliveries were acknowledged.
+
+Root accepted one P1: generic answer-kind sends bypassed the correlated reply
+operation. An Engine regression reproduced acceptance in all eight actor/target
+combinations (coordinator/worker × omitted/run-home/direct/group). Shared typed
+validation now refuses these before effects and directs callers to
+`orchestration.reply`; existing legitimate reply tests remain green. The regression
+also verifies only the original question exists and remains unanswered. This is
+an intentional tightening of invalid generic-answer requests, not a removed
+question/reply capability or a new wire field/opcode.
+
+The actual worker-owned CLI now proves usage refusal (exit 2, empty stdout,
+stderr directing to reply), followed by successful original-credential reporting,
+replay/recovery and one-message settlement. Initial fixture expectation of a JSON
+error was corrected to the existing CLI usage-error contract, not a production
+error-channel change. All **26 checks passed**, report
+`.preflight/acceptance/core-cli-1788778064300-ca3903f1-2e8a-4c0d-b89a-a460a33ae523.json`.
+Full Rust workspace tests passed after correction (same pre-existing ignore;
+25 mail RPC tests). The passing 25-check receipts below are the earlier baseline.
+
+Three small review corrections reuse the DB filename constant, assert the
+synthetic harness catalog entry, and retain the readiness caveat alongside a
+post-spawn persistence warning. The warning regression was observed RED then
+GREEN with the original no-duplicate-spawn assertions intact. The review's rare
+PID-reuse cleanup concern remains unverified test-infrastructure risk: cleanup
+deliberately fails closed, never treats uncertainty as exit or signals a reused PID.
+Detailed ephemeral reports are local diagnostics, not portable source evidence.
 
 ## Implemented and exercised
 
@@ -69,5 +109,5 @@ are not successful no-ops. The 50-current-attempt group scan ceiling is a
 documented bound, not silent truncation. These remain full-parity obligations,
 not waived requirements or proof that the five verticals are complete.
 
-The earlier independent PR review covered `252de85..0dab9a4`, not these later
-mail changes. A supplemental committed-diff review is still required.
+The earlier independent PR review covered `252de85..0dab9a4`; the supplemental
+committed-diff review and root's tested corrections are recorded at the top.

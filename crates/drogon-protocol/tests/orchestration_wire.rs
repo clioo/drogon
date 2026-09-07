@@ -1136,6 +1136,34 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
 }
 
 #[test]
+fn generic_send_reserves_answers_for_correlated_reply() {
+    for target in [
+        None,
+        Some(SendTarget::RunHome),
+        Some(SendTarget::Dispatch {
+            dispatch_id: "dispatch-1".into(),
+        }),
+        Some(SendTarget::Group {
+            name: "@all".into(),
+        }),
+    ] {
+        let send = SendParams {
+            scope: ActorScope::Dispatch(dispatch_scope()),
+            kind: MessageKind::Answer,
+            to: target,
+            subject: "answer".into(),
+            body: Some("forged".into()),
+            payload: None,
+            thread_id: Some("question-thread".into()),
+            final_report: None,
+        };
+        let error = send.validate_shape("host-a").unwrap_err();
+        assert_eq!(error.code, "invalid_argument");
+        assert!(error.message.contains("orchestration.reply"));
+    }
+}
+
+#[test]
 fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
     for kind in [MessageKind::Heartbeat, MessageKind::FinalReport] {
         for target in [

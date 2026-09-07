@@ -296,7 +296,11 @@ impl Engine {
                     prepared.attempt.result.assignment_state = AssignmentState::Ready;
                 }
                 if let Some(warning) = persistence_warning {
-                    prepared.attempt.result.warning = Some(warning.message);
+                    prepared.attempt.result.warning =
+                        Some(match prepared.attempt.result.warning.take() {
+                            Some(readiness) => format!("{readiness} {}", warning.message),
+                            None => warning.message,
+                        });
                 }
             }
             Err(_) => {

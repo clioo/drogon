@@ -20,6 +20,7 @@ umask 077
 set -eu
 out="$NATIVE_REPORT_FIXTURE"
 cli="$DROGON_CLI_COMMAND"
+if "$cli" --json --request-id fixture-answer orchestration send --kind answer --subject forged --body 'Must use correlated reply' > "$out/answer.stdout" 2> "$out/answer.stderr"; then exit 83; else printf '%s\\n' "$?" > "$out/answer.exit"; fi
 "$cli" --json --request-id fixture-final orchestration send --kind final-report --outcome succeeded --subject completed --body 'Synthetic worker, no model inference' --result '{"testsPassed":7}' > "$out/first.json"
 "$cli" --json --request-id fixture-final orchestration send --kind final-report --outcome succeeded --subject completed --body 'Synthetic worker, no model inference' --result '{"testsPassed":7}' > "$out/replay.json"
 "$cli" --json --request-id fixture-status status > "$out/status.json"
@@ -87,6 +88,10 @@ export async function probeWorkerReportCli({
   const selected = catalog.harnesses.find(
     (item) => item.harnessId === "claude",
   );
+  assert.ok(
+    selected?.executable,
+    "Synthetic claude harness must be discoverable",
+  );
   assert.equal(
     await realpath(selected.executable),
     await realpath(path.join(fixture, "worker-report", "claude")),
@@ -145,6 +150,15 @@ export async function probeWorkerReportCli({
   const result = async (name) =>
     JSON.parse(await readFile(path.join(output, `${name}.json`), "utf8"));
   const first = await result("first");
+  assert.equal(
+    (await readFile(path.join(output, "answer.exit"), "utf8")).trim(),
+    "2",
+  );
+  assert.equal(await readFile(path.join(output, "answer.stdout"), "utf8"), "");
+  assert.match(
+    await readFile(path.join(output, "answer.stderr"), "utf8"),
+    /orchestration\.reply/,
+  );
   assert.equal(first.ok, true);
   assert.equal(first.result.lifecycle.action, "settled");
   assert.deepEqual((await result("replay")).result, first.result);
@@ -184,6 +198,7 @@ export async function probeWorkerReportCli({
   ]);
   assert.equal(released.processVerdict, "exited");
   return [
+    "native-worker-real-cli-rejects-uncorrelated-answer-without-mail-effects",
     "native-worker-real-cli-original-credential-report-replay-and-recovery",
     "native-worker-conflict-denial-and-single-mail-settlement",
     "native-worker-owned-release-after-observed-fixture-exit",
