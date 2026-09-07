@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use drogon_protocol::RpcError;
+use drogon_protocol::tasks::{MAX_TASKS_PAGE, MAX_TASKS_PER_PAGE};
 use drogon_protocol::tasks::{
     TaskIssue, TaskIssueState, TaskLabel, TaskLink, TasksLinksParams, TasksLinksResult,
     TasksListParams, TasksListResult, TasksShowParams, TasksShowResult, TasksStartParams,
@@ -236,6 +237,8 @@ struct GhIssue {
     labels: Vec<GhLabel>,
     #[serde(default)]
     assignees: Vec<GhAssignee>,
+    #[serde(default)]
+    author: Option<GhAssignee>,
     #[serde(rename = "updatedAt", default)]
     updated_at: String,
     #[serde(default)]
@@ -278,13 +281,17 @@ fn convert_issue(raw: GhIssue) -> Result<TaskIssue, RpcError> {
             .map(|assignee| assignee.login)
             .filter(|login| !login.is_empty())
             .collect(),
+        author: raw
+            .author
+            .map(|author| author.login)
+            .filter(|login| !login.is_empty()),
         updated_at: raw.updated_at,
         url: raw.url,
         body: raw.body,
     })
 }
 
-fn list_argv(repo: &str, state: TaskIssueState) -> Vec<String> {
+fn list_argv(repo: &str, state: TaskIssueState, limit: u64) -> Vec<String> {
     vec![
         "issue".to_string(),
         "list".to_string(),
@@ -293,9 +300,9 @@ fn list_argv(repo: &str, state: TaskIssueState) -> Vec<String> {
         "--state".to_string(),
         state.as_gh_flag().to_string(),
         "--limit".to_string(),
-        drogon_protocol::tasks::MAX_TASKS_ISSUES.to_string(),
+        limit.to_string(),
         "--json".to_string(),
-        "number,title,state,labels,assignees,updatedAt,url".to_string(),
+        "number,title,state,labels,assignees,author,updatedAt,url".to_string(),
     ]
 }
 
@@ -442,21 +449,46 @@ impl Engine {
 
     pub(super) fn do_tasks_list(&self, value: &Value) -> Result<Value, RpcError> {
         let params: TasksListParams = decode(value)?;
-        let (state, query) = params.validate()?;
+        let (state, query, page, per_page) = params.validate()?;
         let (_, project_path) = self.tasks_git_project_path(&params.project_id)?;
         let repo = github_repo_for_project(&project_path)?;
-        let stdout = run_gh(Path::new(&project_path), &list_argv(&repo, state))?;
+        // Fetch one row past the requested window so `hasNextPage` is
+        // proven, not guessed from a full page. Bounded by MAX_TASKS_PAGE *
+        // MAX_TASKS_PER_PAGE + 1 (see the protocol constants).
+        let fetch_limit = (page * per_page + 1).min(MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1);
+        let stdout = run_gh(
+            Path::new(&project_path),
+            &list_argv(&repo, state, fetch_limit),
+        )?;
         let raw: Vec<GhIssue> = serde_json::from_str(&stdout)
             .map_err(|_| error::io_error("gh issue list returned unparsable JSON".to_string()))?;
-        let mut issues = Vec::with_capacity(raw.len());
+        let mut matching = Vec::with_capacity(raw.len());
         for item in raw {
             let issue = convert_issue(item)?;
             if query.as_deref().is_some_and(|q| !matches_query(&issue, q)) {
                 continue;
             }
-            issues.push(issue);
+            matching.push(issue);
         }
-        let result = TasksListResult { repo, issues };
+        // Slice the requested window out of the query-filtered stream; the
+        // extra fetched row proves a next page without ever being served.
+        let skip = ((page - 1) * per_page) as usize;
+        let has_next_page = matching.len() > skip + per_page as usize;
+        let issues: Vec<TaskIssue> = matching
+            .into_iter()
+            .skip(skip)
+            .take(per_page as usize)
+            .collect();
+        let result = TasksListResult {
+            repo,
+            issues,
+            page,
+            per_page,
+            has_next_page,
+            // `gh issue list` exposes no total count; the field stays for
+            // upstreams that do (see TasksListResult.total).
+            total: None,
+        };
         serde_json::to_value(&result)
             .map_err(|_| error::internal_error("Could not serialize tasks list"))
     }
@@ -683,6 +715,7 @@ mod tests {
             state: TaskIssueState::Open,
             labels: vec![],
             assignees: vec![],
+            author: None,
             updated_at: String::new(),
             url: String::new(),
             body: None,
