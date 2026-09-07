@@ -77,6 +77,14 @@ se despachan después. Nada de líderes intermedios ni hojas de hojas.
 6. Integración diaria por el coordinador con PRs pequeños contra `main`.
 7. Tarea de medio día como máximo; si crece, se divide antes de asignar.
 8. Los workers de Pi entregan por PR y evidencia; el `worker_done` es cortesía.
+9. Fidelidad exacta: la experiencia y la UI deben ser iguales a orca-drogon.
+   La fuente de verdad es el código fuente de la referencia, componente por
+   componente (estructura, clases y tokens, textos, iconos, teclado, ARIA);
+   la instancia orca-drogon corriendo (CDP 127.0.0.1:9445) solo confirma el
+   render. Un oráculo automático compara ambas apps por superficie y cada
+   diferencia se convierte en una tarea de corrección que cita el archivo fuente.
+10. Higiene de procesos: cada worker cierra los Electron, daemons y fixtures
+    que arranca y lo demuestra con `pgrep` en el PR.
 
 Archivos que solo edita el coordinador salvo concesión explícita en la Task:
 `package.json`, `pnpm-lock.yaml`, `Cargo.toml`, `Cargo.lock`,
@@ -110,6 +118,9 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J9 Mentu | R3 | Sonnet | pendiente | |
 | J6 Tasks | R3 | Muse A | en curso | |
 | J3 CLI | R3 | Muse B | fusionada: terminal wait y guías skills get; browser CLI pendiente | #30 |
-| J1 notificaciones | R3 | Muse C | en curso: needs_input por hooks de Claude y notificación nativa | |
+| J1 notificaciones | R3 | Muse C | fusionada: needs_input por hooks y notificación nativa | #35 |
 | J10 Settings | R4 | Muse A | fusionada; falta tamaño de fuente en xterm | #33 |
 | J11 Paquete | R4 | Muse B | pendiente | |
+| Fidelidad exacta: oráculo fuente + render y auditoría | R5 | Muse | en curso | |
+| J1 UI: añadir proyecto, crear y quitar worktree, pulido | R4 | Muse C | en curso | |
+| J4 CLI browser por relay daemon → desktop | R4 | Muse B | en curso | |
