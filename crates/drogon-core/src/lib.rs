@@ -25,6 +25,7 @@ mod coordination_workers;
 pub mod locale_ordering;
 pub mod session_authority;
 
+mod agent_state;
 mod db;
 mod error;
 pub mod git;
@@ -32,11 +33,13 @@ pub mod git_process;
 mod git_rpc;
 pub mod git_worktree;
 mod harness;
+mod project;
 mod ring;
 mod session;
 mod workspace;
 mod workspace_file_rpc;
 mod workspace_files;
+mod worktree_rpc;
 
 mod service_quiescence;
 
@@ -79,6 +82,9 @@ const CAPABILITIES: &[&str] = &[
     "harness.launch.v1",
     "git.v1",
     "runtime.quiescent-shutdown.v1",
+    drogon_protocol::project::PROJECT_CAPABILITY,
+    drogon_protocol::worktree::WORKTREE_CAPABILITY,
+    "session.agent-state.v1",
 ];
 
 pub(crate) fn now_rfc3339() -> String {
@@ -351,6 +357,15 @@ impl Engine {
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
+            "project.add" => self.mutating(request, Self::do_project_add),
+            "project.list" => {
+                let conn = self.db.lock().unwrap();
+                project::list(&conn)
+            }
+            "project.remove" => self.mutating(request, Self::do_project_remove),
+            "worktree.create" => self.mutating(request, Self::do_worktree_create),
+            "worktree.list" => self.do_worktree_list(&request.params),
+            "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "orchestration.runCreate"
             | "orchestration.runUse"
             | "orchestration.runList"
@@ -630,10 +645,22 @@ impl Engine {
     }
 }
 
+/// This process holds no [`session::SessionHandle`] for a row read straight
+/// from SQLite (it belongs to a prior process instance, per
+/// `db::recover_from_prior_instance`), so there is no PTY activity clock to
+/// derive `working`/`idle`/`needs_input` from here — only the durable
+/// verdict is known. `session::to_json` is the path that has a live handle
+/// and computes the full activity-based state.
 fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
     let id: String = r.get(0)?;
     let args_json: String = r.get(5)?;
     let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
+    let verdict: String = r.get(8)?;
+    let agent_state = if verdict == "exited" {
+        "exited"
+    } else {
+        "unknown"
+    };
     Ok((
         id.clone(),
         json!({
@@ -645,9 +672,11 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "args": args,
             "cols": r.get::<_, i64>(6)?,
             "rows": r.get::<_, i64>(7)?,
-            "verdict": r.get::<_, String>(8)?,
+            "verdict": verdict,
             "exitCode": r.get::<_, Option<i64>>(9)?,
             "createdAt": r.get::<_, String>(10)?,
+            "agentState": agent_state,
+            "agentStateAt": Value::Null,
         }),
     ))
 }

@@ -77,6 +77,16 @@ pub enum Command {
         #[command(subcommand)]
         action: WorkspaceAction,
     },
+    /// Projects: a git repository or a plain folder that owns Worktrees
+    Project {
+        #[command(subcommand)]
+        action: ProjectAction,
+    },
+    /// Worktrees of a git Project (or the implicit one of a folder Project)
+    Worktree {
+        #[command(subcommand)]
+        action: WorktreeAction,
+    },
     Terminal {
         #[command(subcommand)]
         action: TerminalAction,
@@ -184,6 +194,65 @@ pub enum WorkspaceAction {
         override_usage = "drogon-cli workspace list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectAction {
+    /// Register a git repository or a plain folder as a Project
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli project add [OPTIONS] <PATH>\nValid flags: --data-dir, --help, --json, --name, --request-id, --retry-request"
+    )]
+    Add {
+        /// Path to an existing directory
+        path: PathBuf,
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+    },
+    /// List registered Projects
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli project list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WorktreeAction {
+    /// Create a git worktree for a Project on branch NAME
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>]\nValid flags: --base, --data-dir, --help, --json, --name, --project, --request-id, --retry-request"
+    )]
+    Create {
+        #[arg(long, value_name = "ID")]
+        project: String,
+        #[arg(long, value_name = "NAME")]
+        name: String,
+        /// Start point for the new branch; omitted means the Project's
+        /// current HEAD
+        #[arg(long, value_name = "REF")]
+        base: Option<String>,
+    },
+    /// List a Project's worktrees
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree list --project <ID>\nValid flags: --data-dir, --help, --json, --project, --request-id, --retry-request"
+    )]
+    List {
+        #[arg(long, value_name = "ID")]
+        project: String,
+    },
+    /// Remove a worktree; refuses a dirty checkout unless --force
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree rm <ID> [--force]\nValid flags: --data-dir, --force, --help, --json, --request-id, --retry-request"
+    )]
+    Rm {
+        id: String,
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -326,6 +395,36 @@ impl Cli {
                     }
                 }
                 WorkspaceAction::List => {}
+            },
+            Command::Project { action } => match action {
+                ProjectAction::Add { path, name } => {
+                    if path.as_os_str().is_empty() {
+                        return Err(CliError::Usage("project add requires a PATH".into()));
+                    }
+                    if let Some(name) = name {
+                        require_nonempty("name", name)?;
+                    }
+                }
+                ProjectAction::List => {}
+            },
+            Command::Worktree { action } => match action {
+                WorktreeAction::Create {
+                    project,
+                    name,
+                    base,
+                } => {
+                    require_nonempty("project", project)?;
+                    require_nonempty("name", name)?;
+                    if let Some(base) = base {
+                        require_nonempty("base", base)?;
+                    }
+                }
+                WorktreeAction::List { project } => {
+                    require_nonempty("project", project)?;
+                }
+                WorktreeAction::Rm { id, .. } => {
+                    require_nonempty("id", id)?;
+                }
             },
             Command::Terminal { action } => match action {
                 TerminalAction::Create { workspace, command } => {
@@ -602,6 +701,81 @@ mod tests {
         assert_eq!(path, &PathBuf::from("/tmp/dir with spaces/sub dir"));
         assert_eq!(name.as_deref(), Some("My Space"));
         assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn project_add_and_list_parse() {
+        let cli = parse(&["project", "add", "/tmp/repo", "--name", "My Repo"]).unwrap();
+        let Command::Project {
+            action: ProjectAction::Add { path, name },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(path, &PathBuf::from("/tmp/repo"));
+        assert_eq!(name.as_deref(), Some("My Repo"));
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["project", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Project {
+                action: ProjectAction::List
+            }
+        ));
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn worktree_create_list_and_rm_parse() {
+        let cli = parse(&[
+            "worktree",
+            "create",
+            "--project",
+            "p1",
+            "--name",
+            "feature",
+            "--base",
+            "main",
+        ])
+        .unwrap();
+        let Command::Worktree {
+            action:
+                WorktreeAction::Create {
+                    project,
+                    name,
+                    base,
+                },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(project, "p1");
+        assert_eq!(name, "feature");
+        assert_eq!(base.as_deref(), Some("main"));
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["worktree", "list", "--project", "p1"]).unwrap();
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["worktree", "rm", "w1", "--force"]).unwrap();
+        let Command::Worktree {
+            action: WorktreeAction::Rm { id, force },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(id, "w1");
+        assert!(*force);
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn worktree_create_requires_project_and_name() {
+        let cli = parse(&["worktree", "create", "--project", "", "--name", "feature"]).unwrap();
+        assert!(matches!(cli.validate(), Err(CliError::Usage(_))));
+        let cli = parse(&["worktree", "create", "--project", "p1", "--name", ""]).unwrap();
+        assert!(matches!(cli.validate(), Err(CliError::Usage(_))));
     }
 
     #[test]

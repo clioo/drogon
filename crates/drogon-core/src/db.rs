@@ -173,6 +173,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     create_tables(&tx)?;
     automations_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Automations)?;
     bots_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Bots)?;
+    crate::project::apply_pending_steps_in_tx(&tx)?;
     coordination_access::apply_pending_steps_in_tx(&tx)?;
     drogon_orchestration::schema::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_attempts::migrate(&tx).map_err(StartupError::Orchestration)?;

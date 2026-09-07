@@ -34,7 +34,9 @@ fn session_result(id: &str) -> Value {
         "rows": 24,
         "verdict": "live",
         "exitCode": null,
-        "createdAt": "2026-09-05T12:00:00Z"
+        "createdAt": "2026-09-05T12:00:00Z",
+        "agentState": "unknown",
+        "agentStateAt": null
     })
 }
 
@@ -82,7 +84,9 @@ fn echo_behavior() -> Behavior {
                 "rows": 24,
                 "verdict": "exited",
                 "exitCode": 0,
-                "createdAt": "2026-09-05T12:00:00Z"
+                "createdAt": "2026-09-05T12:00:00Z",
+                "agentState": "exited",
+                "agentStateAt": null
             }),
             _ => json!({}),
         };
@@ -429,7 +433,7 @@ async fn read_human_decodes_and_json_preserves_wire_bytes() {
     );
     assert_eq!(human.status.code(), Some(0));
     let text = stdout(&human);
-    assert!(text.starts_with("session sess-1 [live] cursor 0..3 truncated=false"));
+    assert!(text.starts_with("session sess-1 [live] agent=unknown cursor 0..3 truncated=false"));
     assert!(text.contains("hi\n"));
 
     let json = run_cli(
@@ -823,7 +827,8 @@ async fn session_with_empty_id_is_refused() {
             "session": {
                 "id": "", "workspaceId": "w", "hostId": "h", "incarnation": "i",
                 "command": "sh", "args": [], "cols": 80, "rows": 24,
-                "verdict": "live", "exitCode": null, "createdAt": "2026-09-05T12:00:00Z"
+                "verdict": "live", "exitCode": null, "createdAt": "2026-09-05T12:00:00Z",
+                "agentState": "unknown", "agentStateAt": null
             },
             "dataBase64": "",
             "startCursor": 0, "nextCursor": 0, "truncated": false
@@ -851,7 +856,8 @@ async fn resize_result_with_out_of_range_geometry_is_refused() {
             "id": "s1", "workspaceId": "w", "hostId": "h", "incarnation": "i",
             "command": "sh", "args": [],
             "cols": request["params"]["cols"], "rows": 0,
-            "verdict": "live", "exitCode": null, "createdAt": "2026-09-05T12:00:00Z"
+            "verdict": "live", "exitCode": null, "createdAt": "2026-09-05T12:00:00Z",
+            "agentState": "unknown", "agentStateAt": null
         })
     });
     let service = MockService::start(dir.path(), behavior);
@@ -887,7 +893,8 @@ async fn read_with_invalid_base64_is_refused() {
             "session": {
                 "id": "s1", "workspaceId": "w", "hostId": "h", "incarnation": "i",
                 "command": "sh", "args": [], "cols": 80, "rows": 24,
-                "verdict": "live", "exitCode": null, "createdAt": "2026-09-05T12:00:00Z"
+                "verdict": "live", "exitCode": null, "createdAt": "2026-09-05T12:00:00Z",
+                "agentState": "unknown", "agentStateAt": null
             },
             "dataBase64": "!!!not-base64!!!",
             "startCursor": 0, "nextCursor": 3, "truncated": false
@@ -1188,7 +1195,8 @@ async fn close_with_live_verdict_exits_one_but_keeps_identity_on_stdout() {
                 json!({
                     "id": "s1", "workspaceId": "w", "hostId": "h", "incarnation": "tok",
                     "command": "sh", "args": [], "cols": 80, "rows": 24,
-                    "verdict": verdict, "exitCode": null, "createdAt": "2026-09-05T12:00:00Z"
+                    "verdict": verdict, "exitCode": null, "createdAt": "2026-09-05T12:00:00Z",
+                    "agentState": "unknown", "agentStateAt": null
                 })
             }
         });
@@ -1256,7 +1264,8 @@ async fn close_with_exited_verdict_exits_zero() {
         json!({
             "id": "s1", "workspaceId": "w", "hostId": "h", "incarnation": "tok",
             "command": "sh", "args": [], "cols": 80, "rows": 24,
-            "verdict": "exited", "exitCode": 7, "createdAt": "2026-09-05T12:00:00Z"
+            "verdict": "exited", "exitCode": 7, "createdAt": "2026-09-05T12:00:00Z",
+            "agentState": "exited", "agentStateAt": null
         })
     });
     let service = MockService::start(dir.path(), behavior);
