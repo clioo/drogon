@@ -6,6 +6,16 @@
 // display contract, not a second authority for storage semantics; history
 // joins are nullable because orphaned evidence is retained, never invented.
 
+import type { Result } from "./session-contract";
+
+export type BotScope = { hostId: string; workspaceId: string };
+export type BotSnapshotInput = BotScope & { locale: string };
+export interface BotBridge {
+  botSnapshot(
+    input: BotSnapshotInput,
+  ): Promise<Result<BotScope & BotsPanelSnapshot>>;
+}
+
 export type BotsPanelHostObservation = "live" | "unverifiable" | "exited";
 
 export type BotsPanelTrigger =

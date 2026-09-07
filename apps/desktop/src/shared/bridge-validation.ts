@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { fileBridgeSchemas } from "./file-validation";
+import { botSnapshotInputSchema } from "./bot-validation";
 
 const id = z
   .string()
@@ -32,6 +33,7 @@ const harnessLaunch = z.object({
   requestId: id,
 });
 export const bridgeSchemas = {
+  botSnapshot: botSnapshotInputSchema,
   ...fileBridgeSchemas,
   status: z.undefined(),
   workspaces: z.undefined(),

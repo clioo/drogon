@@ -7,6 +7,7 @@ import { bridgeSchemas } from "../shared/bridge-validation";
 import type { Result, Status } from "../shared/session-contract";
 import { readBuildInfo } from "./build-info";
 import { dispatchFileRequest } from "./file-bridge";
+import { dispatchBotSnapshot } from "./bot-bridge";
 import {
   readCursorMismatches,
   writeByteCountMismatches,
@@ -60,6 +61,8 @@ function registerBridge() {
       if (!validated.success) return invalid;
       const value = validated.data;
       switch (method) {
+        case "botSnapshot":
+          return dispatchBotSnapshot(value);
         case "fileList":
         case "fileRead":
         case "fileWrite":
