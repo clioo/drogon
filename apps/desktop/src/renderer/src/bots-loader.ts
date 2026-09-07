@@ -63,7 +63,28 @@ export async function loadBotSnapshot(
       retryable: false,
     };
   }
-  const response = await bridge.botSnapshot(scope);
+  const invalidScope = (message: string): BotsLoadResult => ({
+    scope,
+    status: "error",
+    code: "scope_mismatch",
+    message,
+    retryable: false,
+  });
+  let response: Awaited<ReturnType<BotsSnapshotBridge["botSnapshot"]>>;
+  try {
+    response = await bridge.botSnapshot(scope);
+  } catch (error) {
+    // Transport/preload throws (not Result errors): explicit error with
+    // retry, never an unhandled rejection or a forever-loading UI.
+    return {
+      scope,
+      status: "error",
+      code: "snapshot_transport",
+      message:
+        error instanceof Error ? error.message : "botSnapshot threw",
+      retryable: true,
+    };
+  }
   if (!response.ok) {
     if (response.error.code === "snapshot_too_large") {
       return { scope, status: "too_large", message: response.error.message };
@@ -87,6 +108,17 @@ export async function loadBotSnapshot(
         .join("; "),
       retryable: false,
     };
+  }
+  // The bridge guards scope today, but the loader contract is exact:
+  // a response for another host/workspace is rejected, never shown.
+  if (
+    parsed.data.hostId !== scope.hostId ||
+    parsed.data.workspaceId !== scope.workspaceId
+  ) {
+    return invalidScope(
+      `snapshot scope ${parsed.data.hostId}/${parsed.data.workspaceId} ` +
+        `does not match requested ${scope.hostId}/${scope.workspaceId}`,
+    );
   }
   const { bots, history } = parsed.data;
   return {

@@ -191,3 +191,32 @@ describe("loadBotSnapshot", () => {
     expect(second.snapshot).toEqual({ bots: [], history: [] });
   });
 });
+
+describe("loadBotSnapshot transport and scope regressions", () => {
+  it("maps a thrown transport error to an explicit retryable error", async () => {
+    const bridge = fakeBridge(async () => {
+      throw new Error("ipc gone");
+    });
+    const result = await loadBotSnapshot(bridge, scopeA);
+    expect(result).toMatchObject({
+      scope: scopeA,
+      status: "error",
+      code: "snapshot_transport",
+      retryable: true,
+    });
+    if (result.status === "error") expect(result.message).toContain("ipc gone");
+    else throw new Error("expected error result");
+  });
+  it("rejects a response scoped to another host/workspace", async () => {
+    const bridge = fakeBridge(async () => ({
+      ok: true,
+      result: { hostId: "other-host", workspaceId: "w1", ...snapshot },
+    }));
+    const result = await loadBotSnapshot(bridge, scopeA);
+    expect(result).toMatchObject({
+      scope: scopeA,
+      status: "error",
+      code: "scope_mismatch",
+    });
+  });
+});
