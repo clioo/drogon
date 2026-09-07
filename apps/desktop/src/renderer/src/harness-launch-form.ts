@@ -29,7 +29,7 @@ function optionalField(value: string): string | undefined {
  */
 export type HarnessLaunchParams = Omit<HarnessLaunchInput, "requestId">;
 
-/** `requestId` is attempt-tracking metadata the caller attaches separately (see `HarnessLaunchMenu`), not a form value — this produces everything else. */
+/** `requestId` is attempt-tracking metadata the caller attaches separately (see `TabCreateMenu`), not a form value — this produces everything else. */
 export function normalizeHarnessLaunchInput(
   workspaceId: string,
   harnessId: HarnessId,

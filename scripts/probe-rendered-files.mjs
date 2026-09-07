@@ -11,11 +11,36 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await writeFile(path.join(workspace, second), "second baseline\n", {
     flag: "wx",
   });
-  // Files is no longer a left-nav row (R6-A ported the source sidebar); until
-  // the right activity bar lands (R6-B) the panel opens through the command
-  // palette, which is gated on the same files capability.
-  await openFilesThroughPalette(page);
+  // R6-B: Files lives in the right activity bar ("Explorer" button; the
+  // accessible name carries the chord suffix, so the match is non-exact).
+  // The sidebar may start closed on narrow windows: the source chord opens
+  // it on Explorer when the button is not yet actionable.
+  const mod = process.platform === "darwin" ? "Meta" : "Control";
+  const files = page.getByRole("button", { name: "Explorer" });
+  assert.equal(
+    await files.isEnabled(),
+    true,
+    "The candidate must advertise Explorer before rendered acceptance",
+  );
   const panel = page.locator('section[aria-label="Files"]');
+  // The sidebar may start closed (narrow window): Playwright visibility
+  // ignores zero-width ancestor clipping, so never trust it here. The
+  // source chord opens the sidebar on Explorer from any state, and the
+  // panel's own rect is the only honest admission signal.
+  const ensureFilesVisible = async () => {
+    const box = await panel.boundingBox().catch(() => null);
+    if (box && box.width >= 200) return;
+    await page.keyboard.press(`${mod}+Shift+E`);
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('section[aria-label="Files"]');
+        return el && el.getBoundingClientRect().width >= 200;
+      },
+      null,
+      { timeout: 8000 },
+    );
+  };
+  await ensureFilesVisible();
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
   const editor = page.getByLabel(`Contents of ${first}`, { exact: true });
   await editor.waitFor();
@@ -35,8 +60,11 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
   await editor.waitFor();
   assert.equal(await editor.inputValue(), "unsaved first draft\n");
-  await page.getByRole("button", { name: "Sessions", exact: true }).click();
-  await openFilesThroughPalette(page);
+  // R6-B: switching the activity bar to Source Control hides the mounted
+  // Files panel (keep-alive) without unmounting it; switching back must
+  // retain the unsaved draft, mirroring the old Terminals-route round-trip.
+  await page.getByRole("button", { name: "Source Control" }).click();
+  await files.click();
   await editor.waitFor();
   assert.equal(await editor.inputValue(), "unsaved first draft\n");
   await panel.getByRole("button", { name: "Save", exact: true }).click();
@@ -55,6 +83,9 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   try {
     for (const width of [1440, 760]) {
       await page.setViewportSize({ width, height: 900 });
+      // Resizing can hide the panel (closed sidebar on narrow windows);
+      // reopen on Explorer so every capture measures the real layout.
+      await ensureFilesVisible();
       for (const colorScheme of ["light", "dark"]) {
         await page.emulateMedia({ colorScheme });
         await page.screenshot({
@@ -95,14 +126,20 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   }
   await page.reload();
   await page.getByText("Service 0.1.0", { exact: true }).waitFor();
-  await openFilesThroughPalette(page);
+  await ensureFilesVisible();
+  await files.click();
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
   await editor.waitFor();
   assert.equal(await editor.inputValue(), "unsaved first draft\n");
-  await page.getByRole("button", { name: "Sessions", exact: true }).click();
+  // Back to the terminal view through the strip when a tab exists (the
+  // flow closed every session before this probe ran, so the strip is
+  // usually just the "+" menu over the empty state — already stable).
+  if ((await page.getByRole("tab").count()) > 0) {
+    await page.getByRole("tab").first().click();
+  }
   return [
     "rendered-files-read-edit-switch-retains-unsaved-draft",
-    "rendered-files-terminal-navigation-retains-draft",
+    "rendered-files-activity-switch-retains-draft",
     "rendered-files-save-confirmed-by-exact-disk-content-and-sibling-unchanged",
     "rendered-files-reload-reads-confirmed-disk-content",
     "rendered-files-wide-and-narrow-layout-light-and-dark",
@@ -131,18 +168,3 @@ export function assertFilesLayout(metrics) {
   );
 }
 
-async function openFilesThroughPalette(page) {
-  await page.keyboard.press("Meta+J");
-  const palette = page.getByRole("dialog").or(page.locator("[cmdk-root]"));
-  await palette.first().waitFor({ timeout: 10000 });
-  await page.keyboard.type("Open Files panel");
-  const item = page.getByRole("option", { name: /Open Files panel/ }).first();
-  await item.waitFor({ timeout: 10000 });
-  assert.equal(
-    (await item.getAttribute("aria-disabled")) !== "true",
-    true,
-    "The candidate must advertise Files before rendered acceptance",
-  );
-  await item.click();
-  await page.locator('section[aria-label="Files"]').waitFor({ timeout: 10000 });
-}

@@ -257,8 +257,11 @@ try {
   });
   report.checks.push("isolated-renderer-and-real-folder-registration");
   await page
-    .getByRole("button", { name: "New terminal", exact: true })
+    .getByRole("button", { name: "New tab", exact: true })
     .last()
+    .click();
+  await page
+    .getByRole("menuitem", { name: "New Terminal", exact: true })
     .click();
   await page.getByRole("tab").first().waitFor();
   await page.locator(".xterm-helper-textarea").focus();
@@ -323,9 +326,9 @@ try {
       "packaged-quit-and-reopen-preserves-incumbent-runtime-session-and-output",
     );
   }
-  await page.getByRole("button", { name: "New terminal", exact: true }).click();
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
   await page
-    .getByRole("menuitem", { name: "New terminal", exact: true })
+    .getByRole("menuitem", { name: "New Terminal", exact: true })
     .click();
   await page.waitForFunction(
     () => document.querySelectorAll('[role="tab"]').length === 2,

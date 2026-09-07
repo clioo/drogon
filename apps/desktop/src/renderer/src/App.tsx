@@ -10,7 +10,6 @@ import {
   Monitor,
   Moon,
   PanelRight,
-  Plus,
   RefreshCw,
   Settings,
   Sun,
@@ -32,11 +31,38 @@ import {
   loadDismissedSessions,
   markSessionDismissed,
 } from "./dismissed-sessions";
-import { HarnessLaunchMenu } from "./HarnessLaunchMenu";
 import { Sidebar } from "./features/shell/Sidebar";
 import { NewWorkspaceComposerModal } from "./features/new-workspace/NewWorkspaceComposerModal";
 import { TabBar } from "./features/shell/TabBar";
 import { TitlebarLeftControls } from "./features/shell/TitlebarLeftControls";
+import { RightSidebar } from "./features/right-sidebar/RightSidebar";
+import { SessionDetailsPanel } from "./features/right-sidebar/SessionDetailsPanel";
+import {
+  buildRightSidebarActivityItems,
+  getVisibleRightSidebarActivityItems,
+} from "./features/right-sidebar/activity-bar-items";
+import {
+  loadRightSidebarTab,
+  normalizeRightSidebarTab,
+  resolveRightSidebarEffectiveTab,
+  saveRightSidebarTab,
+  type RightSidebarTab,
+} from "./features/right-sidebar/right-sidebar-route";
+import {
+  clampRightSidebarPanelWidth,
+  loadRightSidebarOpen,
+  loadRightSidebarWidth,
+  saveRightSidebarOpen,
+  saveRightSidebarWidth,
+} from "./features/right-sidebar/right-sidebar-width";
+import {
+  formatSidebarChord,
+  resolveChordPlatform,
+  SIDEBAR_EXPLORER_TOGGLE_CHORD,
+  SIDEBAR_RIGHT_TOGGLE_CHORD,
+  SIDEBAR_SOURCE_CONTROL_TOGGLE_CHORD,
+  TAB_NEW_TERMINAL_CHORD,
+} from "./features/right-sidebar/shortcut-label";
 import {
   canGoBackView,
   canGoForwardView,
@@ -91,11 +117,9 @@ import {
   isBotsAvailable,
   registerBotsRoute,
 } from "./bots-mount";
-import {
-  BROWSER_ROUTE_ID,
-  browserBridge,
-  registerBrowserRoute,
-} from "./browser-mount";
+import { windowBrowserBridge } from "./features/browser/browser-bridge";
+import type { BrowserTabState } from "../../shared/browser-contract";
+import { BrowserPanel } from "./features/browser/browser-panel";
 import {
   AUTOMATIONS_CAPABILITY,
   AUTOMATIONS_ROUTE_ID,
@@ -460,6 +484,52 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     loadSidebarWidth(window.localStorage),
   );
+  // R6-B right sidebar: width, collapsed state and tab persist in the
+  // shell's own localStorage keys (source defaults: width 280, Explorer).
+  // A saved open choice wins; otherwise the open default follows the
+  // inspector default for the viewport, preserving the pre-sidebar
+  // first-run layout for existing users.
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
+    loadRightSidebarWidth(window.localStorage),
+  );
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(
+    () =>
+      loadRightSidebarOpen(window.localStorage) ??
+      resolveInspectorDefault(
+        matchMedia("(min-width: 1101px)").matches,
+        savedInspectorValue(),
+      ),
+  );
+  const [rightSidebarTab, setRightSidebarTab] = useState<RightSidebarTab>(
+    () => loadRightSidebarTab(window.localStorage) ?? "explorer",
+  );
+  // First mount needs explicit user routing per panel (activity bar,
+  // palette, or chord); a persisted tab counts as prior routing for that
+  // panel. Never auto-mounts unopened panels.
+  const filesRoutedRef = useRef(
+    loadRightSidebarTab(window.localStorage) === "explorer",
+  );
+  const changesRoutedRef = useRef(
+    loadRightSidebarTab(window.localStorage) === "source-control",
+  );
+  // Browser tabs live in the main process; the strip mirrors the workspace
+  // scope and owns the selection. A host-created page (capture-links,
+  // relay) auto-selects only while a browser tab is already selected or
+  // the creation came from the "+" menu (expectBrowserTab).
+  const [browserTabs, setBrowserTabs] = useState<BrowserTabState[]>([]);
+  const [activeBrowserTabId, setActiveBrowserTabId] = useState<string | null>(
+    null,
+  );
+  const knownBrowserIds = useRef(new Set<string>());
+  const expectBrowserTab = useRef(false);
+  // Focus follows explicit right-sidebar routing only (never capability
+  // churn): handlers stamp the request, the effect below consumes it.
+  const rightFocusRequest = useRef<RightSidebarTab | null>(null);
+  // Routing intent must recompute the render-time keep-alive flags even
+  // when the tab and open states are unchanged (React bails out on
+  // identical setStates, so stamping the routed ref alone would never
+  // mount the panel). Every explicit routing bumps this tick.
+  const [rightTick, setRightTick] = useState(0);
   const [viewHistory, setViewHistory] = useState(() =>
     initialViewHistory({ route: null, workspaceId: "" }),
   );
@@ -474,26 +544,37 @@ export function App() {
   // exact, bounded one-commit staleness on transitions. The render guard
   // (explicitWithhold below) is synchronous, so the gate is
   // defense-in-depth for races, not the primary fence.
+  // Fresh mounts additionally wait for the write (gatesArmedFor): the gate
+  // refs are parent effects, so a panel mounting in the same commit that
+  // delivers capabilities would otherwise read the previous commit's values
+  // (child effects run first) and fail closed permanently — exactly the
+  // post-reload persisted-tab mount. Deps use the stable snapshot, not the
+  // capabilities array (a fresh [] identity every disconnected render would
+  // loop on the epoch bump).
+  const gateSnapshot = [
+    isFilesAvailable(liveCapabilities),
+    isChangesAvailable(liveCapabilities),
+    isTasksAvailable(liveCapabilities),
+    isBotsAvailable(liveCapabilities),
+    isAutomationsAvailable(liveCapabilities),
+  ].join("|");
+  const [_gateEpoch, setGateEpoch] = useState(0);
+  const gatedSnapshotRef = useRef<string | null>(null);
   const filesGateRef = useRef(false);
-  useEffect(() => {
-    filesGateRef.current = isFilesAvailable(liveCapabilities);
-  }, [liveCapabilities]);
   const gitGateRef = useRef(false);
-  useEffect(() => {
-    gitGateRef.current = isChangesAvailable(liveCapabilities);
-  }, [liveCapabilities]);
   const tasksGateRef = useRef(false);
-  useEffect(() => {
-    tasksGateRef.current = isTasksAvailable(liveCapabilities);
-  }, [liveCapabilities]);
   const botsGateRef = useRef(false);
-  useEffect(() => {
-    botsGateRef.current = isBotsAvailable(liveCapabilities);
-  }, [liveCapabilities]);
   const automationsGateRef = useRef(false);
   useEffect(() => {
+    filesGateRef.current = isFilesAvailable(liveCapabilities);
+    gitGateRef.current = isChangesAvailable(liveCapabilities);
+    tasksGateRef.current = isTasksAvailable(liveCapabilities);
+    botsGateRef.current = isBotsAvailable(liveCapabilities);
     automationsGateRef.current = isAutomationsAvailable(liveCapabilities);
-  }, [liveCapabilities]);
+    gatedSnapshotRef.current = gateSnapshot;
+    setGateEpoch((epoch) => epoch + 1);
+  }, [gateSnapshot]);
+  const gatesArmedFor = gatedSnapshotRef.current === gateSnapshot;
   // Updated synchronously during render (unlike the other feature gates
   // above, which flip in an effect): MentuPanel fetches its recipe list
   // from its own mount effect, in the very commit its parent's conditional
@@ -603,33 +684,31 @@ export function App() {
   // Stable files base: Bots snapshot refreshes must never reset the Files
   // descriptor identity (mounted editor drafts/attempts). The bots layer
   // rebuilds on snapshot change; the files base below never does.
-  // Browser is a local Electron feature (no service capability): the
-  // bridge is static, so it joins the base registry unconditionally.
-  const browserStaticBridge = useMemo(() => browserBridge(), []);
+  // Browser is a local Electron feature (no service capability, no route):
+  // the static bridge feeds the tab strip subscription and the tab-hosted
+  // pane directly.
+  const browserStaticBridge = useMemo(() => windowBrowserBridge(), []);
   const filesBaseRegistry = useMemo(
     () =>
       registerMentuRoute(
         registerAutomationsRoute(
-          registerBrowserRoute(
-            registerChangesRoute(
-              registerFilesRoute(
-                createRouteRegistry({
-                  capabilities: [
-                    FILES_CAPABILITY,
-                    BOTS_CAPABILITY,
-                    GIT_CAPABILITY,
-                    AUTOMATIONS_CAPABILITY,
-                    TASKS_CAPABILITY,
-                    MENTU_CAPABILITY,
-                  ],
-                  fallbackId: BOTS_ROUTE_ID,
-                }),
-                filesGatedBridge,
-                fileOpenCell,
-              ),
-              gitGatedBridge,
+          registerChangesRoute(
+            registerFilesRoute(
+              createRouteRegistry({
+                capabilities: [
+                  FILES_CAPABILITY,
+                  BOTS_CAPABILITY,
+                  GIT_CAPABILITY,
+                  AUTOMATIONS_CAPABILITY,
+                  TASKS_CAPABILITY,
+                  MENTU_CAPABILITY,
+                ],
+                fallbackId: BOTS_ROUTE_ID,
+              }),
+              filesGatedBridge,
+              fileOpenCell,
             ),
-            browserStaticBridge,
+            gitGatedBridge,
           ),
           {
             bridge: automationsGatedBridge,
@@ -642,7 +721,6 @@ export function App() {
     [
       filesGatedBridge,
       gitGatedBridge,
-      browserStaticBridge,
       automationsGatedBridge,
       mentuGatedBridge,
       fileOpenCell,
@@ -672,6 +750,39 @@ export function App() {
     botsScopeWorkspace,
     botsScopeLocale,
   ]);
+  // Right sidebar activity items (source order, MVP set): Explorer always,
+  // Source Control while git.v1 is advertised, Session details always. A
+  // stored tab that is not visible renders the fallback without losing
+  // the stored route.
+  const chordPlatform = resolveChordPlatform(
+    typeof navigator !== "undefined" ? navigator.userAgent : "",
+  );
+  const gitPanelAvailable = isChangesAvailable(liveCapabilities);
+  const rightItems = useMemo(
+    () =>
+      getVisibleRightSidebarActivityItems(
+        buildRightSidebarActivityItems({
+          explorerShortcut: formatSidebarChord(
+            SIDEBAR_EXPLORER_TOGGLE_CHORD,
+            chordPlatform,
+          ),
+          sourceControlShortcut: formatSidebarChord(
+            SIDEBAR_SOURCE_CONTROL_TOGGLE_CHORD,
+            chordPlatform,
+          ),
+        }),
+        { gitAvailable: gitPanelAvailable },
+      ),
+    [chordPlatform, gitPanelAvailable],
+  );
+  const rightEffective = resolveRightSidebarEffectiveTab(
+    normalizeRightSidebarTab(rightSidebarTab),
+    rightItems.map((item) => item.id),
+  );
+  const renderedRightWidth = clampRightSidebarPanelWidth(
+    rightSidebarWidth,
+    typeof window !== "undefined" ? window.innerWidth : null,
+  );
   const filesAvailable =
     isFilesAvailable(liveCapabilities) &&
     checkAvailability(
@@ -695,7 +806,13 @@ export function App() {
   // status null is the only transient that preserves the mount.
   const explicitWithhold =
     status !== null && !isFilesAvailable(liveCapabilities);
-  if (route === FILES_ROUTE_ID && filesAvailable && current)
+  if (
+    rightEffective === "explorer" &&
+    filesRoutedRef.current &&
+    filesAvailable &&
+    current &&
+    gatesArmedFor
+  )
     filesAliveRef.current = true;
   else if (
     explicitWithhold ||
@@ -706,7 +823,7 @@ export function App() {
   // Changes keep-alive mirrors files: survives switches and transients,
   // unmounts on explicit git.v1 withhold or settled workspace loss.
   const changesAvailable =
-    isChangesAvailable(liveCapabilities) &&
+    gitPanelAvailable &&
     checkAvailability(
       resolveRoute(filesBaseRegistry, CHANGES_ROUTE_ID),
       liveCapabilities,
@@ -714,7 +831,13 @@ export function App() {
   const changesAliveRef = useRef(false);
   const changesExplicitWithhold =
     status !== null && !isChangesAvailable(liveCapabilities);
-  if (route === CHANGES_ROUTE_ID && changesAvailable && current)
+  if (
+    rightEffective === "source-control" &&
+    changesRoutedRef.current &&
+    changesAvailable &&
+    current &&
+    gatesArmedFor
+  )
     changesAliveRef.current = true;
   else if (
     changesExplicitWithhold ||
@@ -727,8 +850,8 @@ export function App() {
   const settingsSectionRef = useRef<HTMLElement>(null);
   const filesSectionRef = useRef<HTMLElement>(null);
   const changesSectionRef = useRef<HTMLElement>(null);
+  const sessionSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
-  const browserSectionRef = useRef<HTMLElement>(null);
   const automationsSectionRef = useRef<HTMLElement>(null);
   const mentuSectionRef = useRef<HTMLElement>(null);
   const tasksSectionRef = useRef<HTMLElement>(null);
@@ -737,21 +860,15 @@ export function App() {
     // Real focus, only on explicit user navigation to a panel: background
     // refreshes and re-renders must never steal focus.
     const target =
-      route === FILES_ROUTE_ID
-        ? filesSectionRef.current
-        : route === CHANGES_ROUTE_ID
-          ? changesSectionRef.current
-          : route === BOTS_ROUTE_ID
-            ? botsSectionRef.current
-            : route === BROWSER_ROUTE_ID
-              ? browserSectionRef.current
-              : route === AUTOMATIONS_ROUTE_ID
-                ? automationsSectionRef.current
-                : route === MENTU_ROUTE_ID
-                  ? mentuSectionRef.current
-                  : route === TASKS_ROUTE_ID
-                    ? tasksSectionRef.current
-                    : null;
+      route === BOTS_ROUTE_ID
+        ? botsSectionRef.current
+        : route === AUTOMATIONS_ROUTE_ID
+          ? automationsSectionRef.current
+          : route === MENTU_ROUTE_ID
+            ? mentuSectionRef.current
+            : route === TASKS_ROUTE_ID
+              ? tasksSectionRef.current
+              : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -764,6 +881,22 @@ export function App() {
     }
     prevRouteRef.current = route;
   }, [route, panelRegistry, filesBaseRegistry]);
+  useEffect(() => {
+    // Right sidebar focus follows explicit routing only (activity bar,
+    // palette, chord): capability churn that moves the effective tab must
+    // never steal focus.
+    const requested = rightFocusRequest.current;
+    if (requested === null) return;
+    rightFocusRequest.current = null;
+    const target =
+      requested === "explorer"
+        ? filesSectionRef.current
+        : requested === "source-control"
+          ? changesSectionRef.current
+          : sessionSectionRef.current;
+    target?.focus();
+    // rightTick re-runs this for same-tab re-routing (state bail-outs).
+  }, [rightEffective, rightSidebarOpen, rightTick]);
   // Bots keep-alive mirrors files: survives switches and transients,
   // unmounts on explicit withhold or settled workspace loss. The Bots
   // panel is read-only (no drafts), so remounts on snapshot refresh are
@@ -779,15 +912,68 @@ export function App() {
   )
     botsAliveRef.current = false;
   const botsAlive = botsAliveRef.current;
+  // Browser tab strip mirror: workspace-scoped pages from the host. The
+  // strip selection below (not the host verdict) decides what the tab area
+  // shows; the pane reports bounds for the selected page, which activates
+  // it on the host.
+  useEffect(() => {
+    if (!selected) {
+      setBrowserTabs([]);
+      return;
+    }
+    return browserStaticBridge.onState((event) => {
+      const scoped = event.tabs.filter(
+        (tab) => tab.workspaceId === selectedRef.current,
+      );
+      setBrowserTabs(scoped);
+    });
+  }, [browserStaticBridge, selected]);
+  useEffect(() => {
+    // Workspace switches drop the strip selection (pages are
+    // workspace-scoped); the subscription above repopulates the list.
+    setActiveBrowserTabId(null);
+    knownBrowserIds.current = new Set();
+  }, [selected]);
+  useEffect(() => {
+    const ids = new Set(browserTabs.map((tab) => tab.tabId));
+    const fresh = browserTabs.filter(
+      (tab) => !knownBrowserIds.current.has(tab.tabId),
+    );
+    knownBrowserIds.current = ids;
+    if (
+      fresh.length > 0 &&
+      (activeBrowserTabId !== null || expectBrowserTab.current)
+    ) {
+      setActiveBrowserTabId(fresh[fresh.length - 1].tabId);
+      // Consumed only on use: a transient empty echo between the "+" menu
+      // creation and the host's list must not disarm the pending select
+      // (failures clear the flag at the call site instead).
+      expectBrowserTab.current = false;
+    } else if (
+      activeBrowserTabId !== null &&
+      browserTabs.length > 0 &&
+      !ids.has(activeBrowserTabId)
+    ) {
+      // A confirmed list that dropped the selection falls back; an empty
+      // list is a transient echo, never proof the page closed.
+      setActiveBrowserTabId(browserTabs[browserTabs.length - 1]?.tabId ?? null);
+    }
+  }, [browserTabs, activeBrowserTabId]);
   // Browser keep-alive mirrors files minus the capability withhold (local
-  // feature, always available): survives switches and transients, unmounts
-  // on settled workspace loss. The page itself lives in main, so a remount
-  // only rebuilds chrome and re-reports bounds.
+  // feature, always available): mounts once a page exists or is selected,
+  // survives switches and transients, unmounts on settled workspace loss.
+  // The page itself lives in main, so a remount only rebuilds chrome and
+  // re-reports bounds.
   const browserAliveRef = useRef(false);
-  if (route === BROWSER_ROUTE_ID && current) browserAliveRef.current = true;
+  if (current && (activeBrowserTabId !== null || browserTabs.length > 0))
+    browserAliveRef.current = true;
   else if (status && !current && !busy && !loadingSessions)
     browserAliveRef.current = false;
   const browserAlive = browserAliveRef.current;
+  const activeBrowserTab =
+    activeBrowserTabId !== null
+      ? (browserTabs.find((tab) => tab.tabId === activeBrowserTabId) ?? null)
+      : null;
   // Automations keep-alive mirrors files: survives switches and
   // transients, unmounts on explicit withhold or settled workspace loss.
   const automationsAvailable = isAutomationsAvailable(liveCapabilities);
@@ -966,11 +1152,15 @@ export function App() {
   useEffect(() => {
     const wide = matchMedia("(min-width: 1101px)");
     const adapt = () => {
-      if (!wide.matches) setInspector(false);
+      // Mirrors the old inspector guard: a shrink hides the session panel
+      // without persisting, so an accidental shrink never becomes a saved
+      // "closed" choice.
+      if (!wide.matches && rightEffective === "session")
+        setRightSidebarOpen(false);
     };
     wide.addEventListener("change", adapt);
     return () => wide.removeEventListener("change", adapt);
-  }, []);
+  }, [rightEffective]);
   useEffect(() => {
     if (!selected || !status) {
       setLoadingSessions(false);
@@ -1087,6 +1277,45 @@ export function App() {
   const changeSidebarWidth = (width: number) => {
     setSidebarWidth(width);
     saveSidebarWidth(window.localStorage, width);
+  };
+  // Right sidebar routing (source: showRightSidebarFiles /
+  // revealRightSidebarTab + selectActivityTab): explicit routing opens the
+  // sidebar on the tab, stamps the per-panel first-mount flag and requests
+  // focus; the collapsed/tab choices persist like the source store.
+  const openRightSidebarOn = (tab: RightSidebarTab) => {
+    if (tab === "explorer") filesRoutedRef.current = true;
+    if (tab === "source-control") changesRoutedRef.current = true;
+    rightFocusRequest.current = tab;
+    setRightSidebarTab(tab);
+    saveRightSidebarTab(window.localStorage, tab);
+    setRightSidebarOpen((open) => {
+      if (!open) saveRightSidebarOpen(window.localStorage, true);
+      return true;
+    });
+    // Always re-render: the keep-alive flags below are render-computed.
+    setRightTick((tick) => tick + 1);
+  };
+  const selectRightTab = (tab: RightSidebarTab) => {
+    // The session tab's visible choice persists through the inspector
+    // setting, exactly like the header toggle below.
+    if (tab === "session") changeInspector(true);
+    else openRightSidebarOn(tab);
+  };
+  const showRightExplorer = () => openRightSidebarOn("explorer");
+  const showRightSourceControl = () => openRightSidebarOn("source-control");
+  const toggleRightSidebar = () => {
+    setRightSidebarOpen((open) => {
+      saveRightSidebarOpen(window.localStorage, !open);
+      return !open;
+    });
+  };
+  const changeRightSidebarWidth = (width: number) => {
+    const clamped = clampRightSidebarPanelWidth(
+      width,
+      typeof window !== "undefined" ? window.innerWidth : null,
+    );
+    setRightSidebarWidth(clamped);
+    saveRightSidebarWidth(window.localStorage, clamped);
   };
   // Titlebar history: every user navigation pushes {route, workspace}; the
   // back/forward pair applies entries without pushing (applyingHistory).
@@ -1257,12 +1486,12 @@ export function App() {
   const openComposerForNewWorktree = () => {
     requestCreateWorkspace(newWorktreeTarget()?.id ?? null);
   };
-  // Quick-open reveal: records the request for the Files panel and routes
-  // there. The panel applies it when its workspace matches (see
-  // FileOpenRequestCell); the tick re-renders even when already routed.
+  // Quick-open reveal: records the request for the Files panel and opens
+  // the sidebar there. The panel applies it when its workspace matches
+  // (see FileOpenRequestCell); the tick re-renders even when already open.
   const openFileInFiles = (path: string) => {
     if (!selected) {
-      setRoute(FILES_ROUTE_ID);
+      showRightExplorer();
       return;
     }
     fileOpenNonce.current += 1;
@@ -1272,7 +1501,7 @@ export function App() {
       nonce: fileOpenNonce.current,
     };
     setFileOpenTick((tick) => tick + 1);
-    setRoute(FILES_ROUTE_ID);
+    showRightExplorer();
   };
   const create = () =>
     action(async () => {
@@ -1283,6 +1512,37 @@ export function App() {
       if (!contextMatches(captured, contextRef.current)) return;
       setSessions((items) => appendOrReplaceSession(items, result));
       setActive(result.id);
+    });
+  // Browser pages share the tab strip with sessions: selecting a session
+  // returns to the terminal pane, selecting a page shows the browser pane
+  // for it (the pane reports bounds for the selection, activating it on
+  // the host). Closing a page reconciles through the strip subscription.
+  const selectSessionTab = (id: string) => {
+    setActive(id);
+    setActiveBrowserTabId(null);
+  };
+  const selectBrowserTab = (tabId: string) => {
+    setActiveBrowserTabId(tabId);
+  };
+  const newBrowserTab = () =>
+    action(async () => {
+      const workspaceId = contextRef.current.workspaceId;
+      if (!workspaceId) return;
+      expectBrowserTab.current = true;
+      try {
+        const result = checked(
+          await browserStaticBridge.createTab({ workspaceId }),
+        );
+        if (selectedRef.current !== workspaceId) return;
+        setActiveBrowserTabId(result.tabId);
+      } catch (failure) {
+        expectBrowserTab.current = false;
+        throw failure;
+      }
+    });
+  const closeBrowserTab = (tabId: string) =>
+    action(async () => {
+      checked(await browserStaticBridge.closeTab({ tabId }));
     });
   const launchHarness = (input: HarnessLaunchInput) => {
     const captured = {
@@ -1335,14 +1595,29 @@ export function App() {
     setRoute(SETTINGS_ROUTE_ID);
   };
   const closeSettings = () => setRoute(settingsReturnRoute);
-  // Inspector toggles persist through the settings store; the narrow-viewport
-  // guard below keeps overriding the pane shut on shrink without persisting,
-  // so an accidental shrink never becomes a saved "closed" choice.
+  // The session-details panel lives in the right sidebar; its visible
+  // choice persists through the settings store like the old inspector did.
+  // Showing it opens the sidebar on that tab; hiding it closes the sidebar
+  // only when it is the visible panel, so the Settings toggle never steals
+  // an Explorer/Source Control view.
   const changeInspector = (next: boolean) => {
     setInspector(next);
     settings.set("inspectorVisible", next);
+    if (next) openRightSidebarOn("session");
+    else if (rightEffective === "session" && rightSidebarOpen) {
+      setRightSidebarOpen(false);
+      saveRightSidebarOpen(window.localStorage, false);
+    }
   };
-  const toggleInspector = () => changeInspector(!inspector);
+  const toggleSessionPanel = () => {
+    if (rightSidebarOpen && rightEffective === "session") {
+      changeInspector(false);
+      setRightSidebarOpen(false);
+      saveRightSidebarOpen(window.localStorage, false);
+    } else {
+      changeInspector(true);
+    }
+  };
   const cycleTheme = () =>
     changeTheme(
       theme === "system" ? "dark" : theme === "dark" ? "light" : "system",
@@ -1407,9 +1682,12 @@ export function App() {
       handler: () => openSettings(),
     });
     // R6-A source chords (definitions-core-1/3): Cmd+N opens the
-    // new-workspace composer, Cmd+K clears the focused terminal pane
-    // (reserved: never the palette), Cmd+B toggles the sidebar,
-    // Mod+Alt+arrows walk the view history.
+    // new-workspace composer,
+    // Cmd+K clears the focused terminal pane (reserved: never the palette),
+    // Cmd+B toggles the sidebar, Mod+Alt+arrows walk the view history.
+    // R6-B right sidebar (definitions-core-1.ts): Mod+L toggles the right
+    // sidebar, Mod+Shift+E reveals Explorer, Mod+Shift+G reveals Source
+    // Control (gated on git.v1, like the activity bar).
     registry.register({
       id: "workspace.create",
       chord: "CmdOrCtrl+N",
@@ -1426,6 +1704,21 @@ export function App() {
       id: "sidebar.left.toggle",
       chord: "CmdOrCtrl+B",
       handler: toggleSidebar,
+    });
+    registry.register({
+      id: "sidebar.right.toggle",
+      chord: "CmdOrCtrl+L",
+      handler: toggleRightSidebar,
+    });
+    registry.register({
+      id: "sidebar.explorer.toggle",
+      chord: "CmdOrCtrl+Shift+E",
+      handler: showRightExplorer,
+    });
+    registry.register({
+      id: "sidebar.sourceControl.toggle",
+      chord: "CmdOrCtrl+Shift+G",
+      handler: guardHandler(showRightSourceControl, () => !gitPanelAvailable),
     });
     registry.register({
       id: "worktree.history.back",
@@ -1467,6 +1760,9 @@ export function App() {
         if (
           action.id !== "workspace.create" &&
           action.id !== "sidebar.left.toggle" &&
+          action.id !== "sidebar.right.toggle" &&
+          action.id !== "sidebar.explorer.toggle" &&
+          action.id !== "sidebar.sourceControl.toggle" &&
           action.id !== "worktree.history.back" &&
           action.id !== "worktree.history.forward"
         )
@@ -1576,7 +1872,7 @@ export function App() {
               </IconButton>
               <IconButton
                 label="Toggle session details"
-                onClick={toggleInspector}
+                onClick={toggleSessionPanel}
               >
                 <PanelRight />
               </IconButton>
@@ -1642,17 +1938,9 @@ export function App() {
               aria-label="Terminals"
               style={{
                 display:
-                  (route === FILES_ROUTE_ID && filesAlive) ||
-                  (route === CHANGES_ROUTE_ID &&
-                    changesAlive &&
-                    filesProps !== null) ||
                   (route === BOTS_ROUTE_ID &&
                     botsAlive &&
                     filesProps !== null) ||
-                  (route === BROWSER_ROUTE_ID &&
-                    browserAlive &&
-                    filesProps !== null) ||
-                  (route === BOTS_ROUTE_ID && botsAlive && filesProps !== null) ||
                   (route === AUTOMATIONS_ROUTE_ID &&
                     automationsAlive &&
                     filesProps !== null) ||
@@ -1666,38 +1954,36 @@ export function App() {
             >
               <TabBar
                 sessions={sessions}
-                activeId={active}
+                activeSessionId={active}
+                browserTabs={browserTabs}
+                activeBrowserTabId={activeBrowserTabId}
                 harnesses={harnesses}
+                workspaceId={selected}
+                hostId={status?.hostId ?? null}
+                defaultHarnessId={defaultHarnessId}
+                launchDefaults={harnessDefaults}
+                newTerminalShortcut={formatSidebarChord(
+                  TAB_NEW_TERMINAL_CHORD,
+                  chordPlatform,
+                )}
+                newBrowserShortcut=""
                 closeDisabled={busy || loadingSessions || !status}
                 retryDisabled={retryAffordanceDisabled({
                   refreshInFlight: busy,
                 })}
-                onSelect={setActive}
-                onClose={(item) => void close(item)}
+                createDisabled={
+                  !selected || !status || busy || loadingSessions
+                }
+                onSelectSession={selectSessionTab}
+                onSelectBrowserTab={selectBrowserTab}
+                onCloseSession={(item) => void close(item)}
+                onCloseBrowserTab={(tabId) => void closeBrowserTab(tabId)}
                 onRetry={() => void refresh()}
-                launcher={
-                  harnessCapability ? (
-                  <HarnessLaunchMenu
-                    workspaceId={selected}
-                    hostId={status?.hostId ?? null}
-                    harnesses={harnesses}
-                    disabled={!selected || !status || busy || loadingSessions}
-                    onCreateTerminal={() => void create()}
-                    onLaunch={launchHarness}
-                    defaultHarnessId={defaultHarnessId}
-                    launchDefaults={harnessDefaults}
-                    onOpenMentu={() => setRoute(MENTU_ROUTE_ID)}
-                    mentuAvailable={mentuAvailable}
-                  />
-                ) : (
-                  <IconButton
-                    label="New terminal"
-                    disabled={!selected || !status || busy || loadingSessions}
-                    onClick={() => void create()}
-                  >
-                    <Plus />
-                  </IconButton>
-                )}
+                onCreateTerminal={() => void create()}
+                onLaunchHarness={launchHarness}
+                onNewBrowserTab={() => void newBrowserTab()}
+                onOpenMentu={() => setRoute(MENTU_ROUTE_ID)}
+                mentuAvailable={mentuAvailable}
               />
               <div
                 id="active-session-panel"
@@ -1707,6 +1993,9 @@ export function App() {
                 }
                 className="active-session-panel"
                 aria-busy={loadingSessions}
+                style={{
+                  display: activeBrowserTab ? "none" : undefined,
+                }}
               >
                 {terminal &&
                   status &&
@@ -1780,61 +2069,34 @@ export function App() {
                   </div>
                 )}
               </div>
+              <div
+                id="browser-tab-panel"
+                role="tabpanel"
+                aria-labelledby={
+                  activeBrowserTab
+                    ? `browser-tab-${activeBrowserTab.tabId}`
+                    : undefined
+                }
+                className="active-session-panel"
+                style={{
+                  display: activeBrowserTab ? undefined : "none",
+                }}
+              >
+                {browserAlive && current ? (
+                  // Why: .browser-pane was built for a full-width column
+                  // host; in the tab area it needs an explicit fill wrapper
+                  // or the row flex container shrink-to-fits it.
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <BrowserPanel
+                      bridge={browserStaticBridge}
+                      workspaceId={current.id}
+                      hideTabStrip
+                      controlledTabId={activeBrowserTabId}
+                    />
+                  </div>
+                ) : null}
+              </div>
             </section>
-            {filesAlive && filesProps ? (
-              <section
-                ref={filesSectionRef}
-                tabIndex={-1}
-                className="terminal-column"
-                aria-label="Files"
-                style={{
-                  display: route === FILES_ROUTE_ID ? undefined : "none",
-                }}
-              >
-                <MountedPanel
-                  descriptor={resolveRoute(filesBaseRegistry, FILES_ROUTE_ID)}
-                  workspace={filesProps.workspace}
-                  status={filesProps.status}
-                />
-              </section>
-            ) : null}
-            {changesAlive && filesProps ? (
-              <section
-                ref={changesSectionRef}
-                tabIndex={-1}
-                className="terminal-column"
-                aria-label="Changes"
-                style={{
-                  display: route === CHANGES_ROUTE_ID ? undefined : "none",
-                }}
-              >
-                <MountedPanel
-                  descriptor={resolveRoute(
-                    filesBaseRegistry,
-                    CHANGES_ROUTE_ID,
-                  )}
-                  workspace={filesProps.workspace}
-                  status={filesProps.status}
-                />
-              </section>
-            ) : null}
-            {browserAlive && filesProps ? (
-              <section
-                ref={browserSectionRef}
-                tabIndex={-1}
-                className="terminal-column"
-                aria-label="Browser"
-                style={{
-                  display: route === BROWSER_ROUTE_ID ? undefined : "none",
-                }}
-              >
-                <MountedPanel
-                  descriptor={resolveRoute(filesBaseRegistry, BROWSER_ROUTE_ID)}
-                  workspace={filesProps.workspace}
-                  status={filesProps.status}
-                />
-              </section>
-            ) : null}
             {tasksAlive && status ? (
               <section
                 ref={tasksSectionRef}
@@ -1960,45 +2222,79 @@ export function App() {
                 />
               </section>
             ) : null}
-            {inspector && (
-              <aside className="session-details" aria-label="Session details">
-                <h2>Session</h2>
-                {terminal ? (
-                  <dl>
-                    <dt>Command</dt>
-                    <dd className="path">{terminal.command}</dd>
-                    <dt>State</dt>
-                    <dd>
-                      {terminal.verdict}
-                      {terminal.exitCode !== null
-                        ? ` · exit ${terminal.exitCode}`
-                        : ""}
-                    </dd>
-                    <dt>Execution host</dt>
-                    <dd className="path">{terminal.hostId}</dd>
-                    <dt>Session ID</dt>
-                    <dd className="path">{terminal.id}</dd>
-                  </dl>
-                ) : (
-                  <p>Select a terminal to see its execution details.</p>
-                )}
-                {mentuAvailable && current ? (
-                  <MentuPanel
-                    bridge={mentuGatedBridge}
-                    workspaceId={current.id}
-                    variant="panel"
-                  />
-                ) : (
-                  <div className="migration-note">
-                    <h2>Coming in the migration</h2>
-                    <p>
-                      Bots is not connected in this build. Source control is
-                      available from the Changes panel.
-                    </p>
-                  </div>
-                )}
-              </aside>
-            )}
+            <RightSidebar
+              open={rightSidebarOpen}
+              width={renderedRightWidth}
+              onWidthChange={changeRightSidebarWidth}
+              items={rightItems}
+              effectiveTab={rightEffective}
+              onSelectTab={selectRightTab}
+              onToggle={toggleRightSidebar}
+              toggleShortcutLabel={formatSidebarChord(
+                SIDEBAR_RIGHT_TOGGLE_CHORD,
+                chordPlatform,
+              )}
+              panels={{
+                ...(filesAlive && filesProps
+                  ? {
+                      explorer: (
+                        <section
+                          ref={filesSectionRef}
+                          tabIndex={-1}
+                          className="right-sidebar-panel"
+                          aria-label="Files"
+                        >
+                          <MountedPanel
+                            descriptor={resolveRoute(
+                              filesBaseRegistry,
+                              FILES_ROUTE_ID,
+                            )}
+                            workspace={filesProps.workspace}
+                            status={filesProps.status}
+                          />
+                        </section>
+                      ),
+                    }
+                  : null),
+                ...(changesAlive && filesProps
+                  ? {
+                      "source-control": (
+                        <section
+                          ref={changesSectionRef}
+                          tabIndex={-1}
+                          className="right-sidebar-panel"
+                          aria-label="Changes"
+                        >
+                          <MountedPanel
+                            descriptor={resolveRoute(
+                              filesBaseRegistry,
+                              CHANGES_ROUTE_ID,
+                            )}
+                            workspace={filesProps.workspace}
+                            status={filesProps.status}
+                          />
+                        </section>
+                      ),
+                    }
+                  : null),
+                session: (
+                  <section
+                    ref={sessionSectionRef}
+                    tabIndex={-1}
+                    className="right-sidebar-panel"
+                  >
+                    <SessionDetailsPanel terminal={terminal ?? null} />
+                    {mentuAvailable && current ? (
+                      <MentuPanel
+                        bridge={mentuGatedBridge}
+                        workspaceId={current.id}
+                        variant="panel"
+                      />
+                    ) : null}
+                  </section>
+                ),
+              }}
+            />
           </div>
           )}
             </>
@@ -2015,6 +2311,7 @@ export function App() {
         activeSessionId={active}
         filesAvailable={isFilesAvailable(liveCapabilities)}
         botsAvailable={isBotsAvailable(liveCapabilities)}
+        changesAvailable={isChangesAvailable(liveCapabilities)}
         harnessAvailable={harnessCapability}
         worktreesAvailable={isWorktreesAvailable(liveCapabilities)}
         canCreateWorktree={newWorktreeTarget() !== null}
@@ -2031,9 +2328,12 @@ export function App() {
           setSessions([]);
         }}
         onSelectSession={setActive}
-        onOpenFiles={() => setRoute(FILES_ROUTE_ID)}
+        onOpenFiles={() => showRightExplorer()}
         onOpenBots={() => setRoute(BOTS_ROUTE_ID)}
-        onToggleInspector={toggleInspector}
+        onToggleRightSidebar={toggleRightSidebar}
+        onShowExplorer={showRightExplorer}
+        onShowSourceControl={showRightSourceControl}
+        onToggleInspector={toggleSessionPanel}
         onOpenSettings={() => openSettings()}
         onSetTheme={changeTheme}
         onAddWorkspace={() => requestCreateWorkspace()}

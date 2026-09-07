@@ -12,6 +12,7 @@ const onlineWorkspace: CommandContext = {
   hasWorkspace: true,
   filesAvailable: true,
   botsAvailable: true,
+  changesAvailable: true,
   harnessAvailable: true,
   worktreesAvailable: true,
   canCreateWorktree: true,

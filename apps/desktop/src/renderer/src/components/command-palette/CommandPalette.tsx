@@ -25,7 +25,7 @@ import {
 import { resolvePaletteFocusRestoreTarget } from "./focus-restore";
 import { capPaletteSection } from "./render-cap";
 import { loadRecentCommands, recordRecentCommand } from "./recent-commands";
-import { openHarnessLaunchMenu } from "./harness-menu";
+import { openTabCreateMenu } from "./harness-menu";
 
 export type PaletteMode = "commands" | "quick";
 
@@ -38,6 +38,7 @@ export interface CommandPaletteHostProps {
   activeSessionId: string;
   filesAvailable: boolean;
   botsAvailable: boolean;
+  changesAvailable: boolean;
   harnessAvailable: boolean;
   worktreesAvailable: boolean;
   canCreateWorktree: boolean;
@@ -50,6 +51,9 @@ export interface CommandPaletteHostProps {
   onSelectSession(id: string): void;
   onOpenFiles(): void;
   onOpenBots(): void;
+  onToggleRightSidebar(): void;
+  onShowExplorer(): void;
+  onShowSourceControl(): void;
   onToggleInspector(): void;
   onOpenSettings(): void;
   onSetTheme(theme: Theme): void;
@@ -191,6 +195,7 @@ function PaletteDialog(props: DialogProps) {
     hasWorkspace: props.workspaceId !== "",
     filesAvailable: props.filesAvailable,
     botsAvailable: props.botsAvailable,
+    changesAvailable: props.changesAvailable,
     harnessAvailable: props.harnessAvailable,
     worktreesAvailable: props.worktreesAvailable,
     canCreateWorktree: props.canCreateWorktree,
@@ -204,13 +209,22 @@ function PaletteDialog(props: DialogProps) {
         props.onNewTerminal();
         break;
       case "harness.launch":
-        openHarnessLaunchMenu();
+        openTabCreateMenu();
         break;
       case "panel.files":
         props.onOpenFiles();
         break;
       case "panel.bots":
         props.onOpenBots();
+        break;
+      case "sidebar.right.toggle":
+        props.onToggleRightSidebar();
+        break;
+      case "sidebar.explorer.toggle":
+        props.onShowExplorer();
+        break;
+      case "sidebar.sourceControl.toggle":
+        props.onShowSourceControl();
         break;
       case "inspector.toggle":
         props.onToggleInspector();

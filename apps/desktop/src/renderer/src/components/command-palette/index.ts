@@ -1,6 +1,6 @@
 export { CommandPaletteHost, type PaletteMode } from "./CommandPalette";
 export type { CommandPaletteHostProps } from "./CommandPalette";
-export { openHarnessLaunchMenu } from "./harness-menu";
+export { openTabCreateMenu } from "./harness-menu";
 export {
   COMMAND_DEFS,
   commandTokenScore,
