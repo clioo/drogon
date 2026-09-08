@@ -202,6 +202,12 @@ impl Engine {
                     "OPENCODE_CONFIG_DIR".to_string(),
                     overlay.to_string_lossy().into_owned(),
                 ));
+                extra_env.push((
+                    "DROGON_HOOK_MARKER".to_string(),
+                    harness_hooks::opencode::marker_path(&overlay)
+                        .to_string_lossy()
+                        .into_owned(),
+                ));
                 Ok(Some(ReadyHookInstall {
                     cleanup_path: overlay,
                     extra_env,
@@ -210,7 +216,14 @@ impl Engine {
             }
             PendingHookInstall::Pi { path } => {
                 harness_hooks::pi::write_extension_file(&path)?;
-                let extra_env = crate::session_env::harness_hook_env(cli, prepared.incarnation());
+                let mut extra_env =
+                    crate::session_env::harness_hook_env(cli, prepared.incarnation());
+                extra_env.push((
+                    "DROGON_HOOK_MARKER".to_string(),
+                    harness_hooks::pi::marker_path(&path)
+                        .to_string_lossy()
+                        .into_owned(),
+                ));
                 Ok(Some(ReadyHookInstall {
                     cleanup_path: path,
                     extra_env,

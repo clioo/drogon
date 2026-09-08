@@ -41,6 +41,16 @@ pub(crate) fn overlay_dir(data_dir: &Path, nonce: &str) -> PathBuf {
     data_dir.join("harness-hooks").join("opencode").join(nonce)
 }
 
+/// Where the plugin writes its load-time marker (`DROGON_HOOK_MARKER`):
+/// proof the plugin module actually executed inside OpenCode, independent
+/// of whether any `event.type` the plugin cares about ever fires — needed
+/// for a live launch verification that sends no prompt (no session/turn
+/// event is guaranteed without one). Kept outside `plugins/` so it never
+/// perturbs a caller enumerating that directory's file count.
+pub(crate) fn marker_path(overlay: &Path) -> PathBuf {
+    overlay.join("drogon-plugin-loaded.marker")
+}
+
 /// Builds the overlay: mirrors `existing_config_dir`'s top-level entries
 /// (symlinks, so user edits stay live) except `plugins/`, which becomes a
 /// real directory holding mirrored symlinks of the user's own plugin files
@@ -149,6 +159,16 @@ function report(eventName) {{
   }}
 }}
 
+// Why: proves the plugin module actually executed inside OpenCode even when
+// no event this plugin cares about ever fires (e.g. a live check that sends
+// no prompt) -- independent of the report() transport above.
+try {{
+  var markerPath = process.env.DROGON_HOOK_MARKER;
+  if (markerPath) require("node:fs").writeFileSync(markerPath, String(Date.now()));
+}} catch (err) {{
+  // Why: the marker is a diagnostic only; never fail the OpenCode run over it.
+}}
+
 export const DrogonOpenCodeStatusPlugin = async (_ctx) => {{
   return {{
     event: async ({{ event }}) => {{
@@ -227,6 +247,15 @@ mod tests {
         assert!(source.contains("DROGON_HOOK_CLI"));
         assert!(source.contains("DROGON_SESSION_ID"));
         assert!(source.contains("DROGON_HOOK_INCARNATION"));
+        assert!(source.contains("DROGON_HOOK_MARKER"));
+    }
+
+    #[test]
+    fn marker_path_lives_alongside_the_overlay_not_inside_plugins() {
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = overlay_dir(dir.path(), "abc123");
+        let marker = marker_path(&overlay);
+        assert_eq!(marker.parent().unwrap(), overlay);
     }
 
     #[test]

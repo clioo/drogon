@@ -38,6 +38,19 @@ pub(crate) fn nonce_extension_path(data_dir: &Path, nonce: &str) -> PathBuf {
         .join(format!("{nonce}.ts"))
 }
 
+/// Where the extension writes its load-time marker (`DROGON_HOOK_MARKER`):
+/// proof the extension module actually executed inside Pi, independent of
+/// whether any `pi.on(...)` handler above ever fires — needed for a live
+/// launch verification that sends no prompt (plain Pi's own `session_start`
+/// is a UI-only event this repo does not wire; the source itself treats it
+/// as a no-op for non-OMP kinds, so it is not a reliable pre-prompt signal
+/// either).
+pub(crate) fn marker_path(extension_path: &Path) -> PathBuf {
+    let mut name = extension_path.as_os_str().to_owned();
+    name.push(".loaded");
+    PathBuf::from(name)
+}
+
 pub(crate) fn write_extension_file(path: &Path) -> Result<(), RpcError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -73,6 +86,16 @@ function report(eventName) {{
   }} catch (err) {{
     // Why: a hook-report failure must never fail the pi run.
   }}
+}}
+
+// Why: proves the extension module actually executed inside pi even when no
+// pi.on(...) handler below ever fires (e.g. a live check that sends no
+// prompt) -- independent of the report() transport above.
+try {{
+  var markerPath = process.env.DROGON_HOOK_MARKER
+  if (markerPath) require("node:fs").writeFileSync(markerPath, String(Date.now()))
+}} catch (err) {{
+  // Why: the marker is a diagnostic only; never fail the pi run over it.
 }}
 
 export default function (pi) {{
@@ -133,6 +156,14 @@ mod tests {
         assert!(source.contains("DROGON_HOOK_CLI"));
         assert!(source.contains("DROGON_SESSION_ID"));
         assert!(source.contains("DROGON_HOOK_INCARNATION"));
+        assert!(source.contains("DROGON_HOOK_MARKER"));
+    }
+
+    #[test]
+    fn marker_path_is_a_sibling_of_the_extension_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = nonce_extension_path(dir.path(), "abc123");
+        assert_eq!(marker_path(&path), path.with_extension("ts.loaded"));
     }
 
     #[test]
