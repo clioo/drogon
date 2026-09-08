@@ -2,29 +2,30 @@
 // Status-bar composition ported from the Orca reference (read-only):
 //   src/renderer/src/components/status-bar/StatusBarSurface.tsx (left meters,
 //     refresh control, right resource segments),
+//   src/renderer/src/components/status-bar/StatusBarProviderSegment.tsx
+//     (per-provider states: pulsing "···" while loading, "--" when the
+//     provider is signed out, alert + status label on failed refresh,
+//     MiniBar + verbose windows when data exists, letter badge when
+//     icon-only),
 //   src/renderer/src/components/status-bar/InlineProviderUsage.tsx (per-window
 //     progress bars + percent labels),
 //   src/renderer/src/components/status-bar/CaffeinateStatusSegment.tsx (awake
-//     toggle semantics),
+//     toggle semantics and Off/On · Active/Inactive copy),
+//   src/renderer/src/components/status-bar/resource-usage-status-trigger.tsx
+//     and resource-manager-terminal-copy.ts (memory · terminal cluster),
 //   src/renderer/src/components/status-bar/PortsStatusSegment.tsx (plug icon +
 //     port count),
-//   src/renderer/src/components/status-bar/ResourceUsageStatusSegment.tsx and
-//   resource-memory-metric-copy.ts (memory segment semantics).
+//   src/renderer/src/components/status-bar/usage-error-copy.ts (status labels).
 // Adapted: no zustand store, no popovers/menus; data comes from
-// window.drogon.usage and terminal count from the shell's session list.
-// Unavailable sources render "unavailable" with the reason as tooltip.
+// window.drogon.usage and terminal count from the shell's session list, so
+// each provider segment keeps its detail in the native tooltip instead of a
+// Usage popover, and awake stays a plain Off/On toggle (Drogon has no Auto
+// mode). Unavailable sources render the source's "--"/"···" forms.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  CircleHelp,
-  Coffee,
-  MemoryStick,
-  Plug,
-  RefreshCw,
-  Settings,
-  TerminalSquare,
-} from "lucide-react";
+import { AlertTriangle, CircleHelp, Coffee, MemoryStick, Plug, RefreshCw, Settings, Terminal } from "lucide-react";
 import type {
   AwakeMode,
+  ProviderUsage,
   UsageSnapshot,
 } from "../../../../shared/usage-contract";
 import { ClaudeIcon, OpenAIIcon } from "./provider-icons";
@@ -39,18 +40,19 @@ import {
 import {
   awakeStatusLabel,
   hasVisibleUsage,
-  memoryLabel,
-  memoryTitle,
+  memoryBadge,
   portsLabel,
   portsAriaLabel,
   portsTitle,
+  providerBadgeLetter,
   providerMeterRows,
+  providerStatusLabel,
   providerTitle,
   REFRESH_RATE_LIMITS_LABEL,
   REFRESH_USAGE_DATA_TITLE,
-  terminalsTitle,
+  resourceManagerAriaLabel,
+  resourceManagerTooltipLines,
 } from "./status-bar-copy";
-import type { ProviderUsage } from "../../../../shared/usage-contract";
 
 const POLL_MS = 60_000;
 const CLOCK_TICK_MS = 30_000;
@@ -68,6 +70,20 @@ function loadSnapshot(): Promise<UsageSnapshot | null> {
   }
 }
 
+function providerIcon(provider: ProviderUsage["provider"]): React.JSX.Element {
+  return provider === "claude" ? <ClaudeIcon /> : <OpenAIIcon />;
+}
+
+/**
+ * One provider segment, state-for-state from the source
+ * StatusBarProviderSegment.ProviderSegment:
+ *   idle / fetching without data → icon + pulsing "···"
+ *   unavailable (signed out)     → dimmed icon + "--"
+ *   error without data           → icon + alert + status label
+ *   data (ok, stale or refetch)  → icon + minibar + verbose windows
+ *                                  (+ trailing alert when stale)
+ * The icon-only tier swaps the data state for the source's letter badge.
+ */
 function ProviderMeters({
   provider,
   now,
@@ -80,56 +96,98 @@ function ProviderMeters({
   iconOnly: boolean;
 }): React.JSX.Element {
   const rows = providerMeterRows(provider, now);
-  const Icon = provider.provider === "claude" ? ClaudeIcon : OpenAIIcon;
   const title = providerTitle(provider, now);
-  // Source form (StatusBarSurface roster trigger + ProviderSegment, 1440px):
-  // provider icon, one quiet mini bar for the tightest window, then the
-  // verbose per-window labels joined by "·" — never the provider name.
-  // The tooltip keeps the identity and per-window detail.
-  // Narrow tiers (status-bar-narrow.ts): icon-only keeps the icon with the
-  // full detail in the tooltip; compact drops the minibars and keeps the
-  // tightest window label only.
+  const statusLabel = providerStatusLabel(provider);
+
   if (rows.length === 0) {
-    if (iconOnly) {
+    // Idle / initial load.
+    if (provider.status === "idle" || provider.status === "fetching") {
       return (
-        <span className="inline-flex items-center gap-1.5" title={title}>
-          <Icon />
+        <span
+          className="inline-flex items-center gap-1 text-muted-foreground"
+          title={title}
+          data-provider-segment={provider.provider}
+        >
+          {providerIcon(provider.provider)}
+          <span className="animate-pulse">···</span>
         </span>
       );
     }
+    // Unavailable (provider not signed in).
+    if (provider.status === "unavailable") {
+      return (
+        <span
+          className="inline-flex items-center gap-1 text-muted-foreground/50"
+          title={title}
+          data-provider-segment={provider.provider}
+        >
+          {providerIcon(provider.provider)} --
+        </span>
+      );
+    }
+    // Error with no data.
     return (
-      <span className="inline-flex items-center gap-1.5" title={title}>
-        <Icon />
-        <span className="status-bar-unavailable">unavailable</span>
+      <span
+        className="inline-flex items-center gap-1 text-muted-foreground"
+        title={title}
+        data-provider-segment={provider.provider}
+      >
+        {providerIcon(provider.provider)}
+        {statusLabel ? (
+          <AlertTriangle size={11} className="text-muted-foreground/80" />
+        ) : null}
+        {!compact && statusLabel ? (
+          <span className="text-[11px] font-medium">{statusLabel}</span>
+        ) : null}
       </span>
     );
   }
+
+  // Icon-only tier: the source's letter badge replaces the verbose form.
   if (iconOnly) {
     return (
-      <span className="inline-flex items-center gap-1.5" title={title}>
-        <Icon />
+      <span
+        className="inline-flex items-center gap-1 text-muted-foreground"
+        title={title}
+        data-provider-segment={provider.provider}
+      >
+        <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/60" />
+        {providerBadgeLetter(provider.provider)}
       </span>
     );
   }
+
   const tightest = rows.reduce((current, candidate) =>
     candidate.used > current.used ? candidate : current,
   );
+  const stale = provider.status === "error";
   // Compact priority (status-bar-narrow.ts): the tightest window is the
   // binding constraint, so it is the one label that survives; the rest
   // stay one hover away in the tooltip.
   if (compact) {
     return (
-      <span className="inline-flex items-center gap-1.5" title={title}>
-        <Icon />
+      <span
+        className="inline-flex items-center gap-1.5 text-muted-foreground"
+        title={title}
+        data-provider-segment={provider.provider}
+      >
+        {providerIcon(provider.provider)}
         <span className="tabular-nums" title={tightest.title}>
           {tightest.label}
         </span>
+        {stale ? (
+          <AlertTriangle size={11} className="text-muted-foreground/80" />
+        ) : null}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5" title={title}>
-      <Icon />
+    <span
+      className="inline-flex items-center gap-1.5 text-muted-foreground"
+      title={title}
+      data-provider-segment={provider.provider}
+    >
+      {providerIcon(provider.provider)}
       {/* Source MiniBar: quiet muted fill; urgency lives in the labels. */}
       <span
         data-usage-bar
@@ -148,6 +206,19 @@ function ProviderMeters({
           </span>
         </React.Fragment>
       ))}
+      {stale ? (
+        <AlertTriangle size={11} className="text-muted-foreground/80" />
+      ) : null}
+    </span>
+  );
+}
+
+/** Idle placeholder used before the first snapshot arrives (source idle form). */
+function IdleProviderMeters({ provider }: { provider: "claude" | "codex" }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-muted-foreground">
+      {providerIcon(provider)}
+      <span className="animate-pulse">···</span>
     </span>
   );
 }
@@ -252,9 +323,11 @@ export function StatusBar({
   }, [snapshot]);
 
   const awake = snapshot?.awake;
+  const awakeActive = awake?.active ?? false;
   const awakeModeLabel = awake ? (awake.mode === "on" ? "On" : "Off") : null;
-  // Source form (CaffeinateStatusSegment activityLabel): the accessible name
-  // carries the mode plus the Active/Inactive suffix.
+  // Source form (CaffeinateStatusSegment): the accessible name and tooltip
+  // carry the title plus "mode · activity", e.g.
+  // "Keep computer awake, Off · Inactive".
   const awakeTitle = awake
     ? awake.supported
       ? awakeStatusLabel(awake.mode, awake.active)
@@ -304,9 +377,10 @@ export function StatusBar({
             />
           </>
         ) : (
-          <span className="status-bar-unavailable" title="Loading usage">
-            loading usage…
-          </span>
+          <>
+            <IdleProviderMeters provider="claude" />
+            <IdleProviderMeters provider="codex" />
+          </>
         )}
         {/* Source gate (StatusBarSurface anyVisible && !isEmptyUsageState):
         the refresh control renders only over non-empty usage. */}
@@ -319,7 +393,10 @@ export function StatusBar({
             onClick={handleRefresh}
             disabled={fetching}
           >
-            <RefreshCw size={11} className={fetching ? "animate-spin" : undefined} />
+            <RefreshCw
+              size={11}
+              className={fetching ? "animate-spin" : undefined}
+            />
           </button>
         ) : null}
       </div>
@@ -331,6 +408,8 @@ export function StatusBar({
           compact={collapse.compact}
           iconOnly={collapse.iconOnly}
         />
+        {/* Source CaffeinateStatusSegment form: coffee icon, mode label,
+        activity dot bright when the assertion is held. */}
         <button
           type="button"
           className="status-bar-toggle"
@@ -340,50 +419,70 @@ export function StatusBar({
           onClick={handleAwake}
           disabled={!awake}
         >
-          <Coffee size={12} />
+          <Coffee
+            size={12}
+            className={awakeActive ? "text-foreground" : undefined}
+          />
           {collapse.showAwakeLabel ? (
-            <span>{awakeModeLabel ?? "…"}</span>
+            <span className="text-[11px] font-medium">
+              {awakeModeLabel ?? "…"}
+            </span>
           ) : null}
           <span
             aria-hidden
-            className={`status-bar-dot${awake?.active ? " status-bar-dot-active" : ""}`}
+            className={`status-bar-dot${awakeActive ? " status-bar-dot-active" : ""}`}
           />
         </button>
+        {/* Source resource-trigger form (resource-usage-status-trigger.tsx):
+        memory icon, memory label, "·", terminal icon and the session count in
+        one cluster; the separator lives and dies with the memory label, and an
+        unmeasured figure degrades to the source's em dash. */}
         <span
           className="status-bar-segment"
-          title={snapshot ? memoryTitle(snapshot.memory) : "Memory unavailable"}
+          title={resourceManagerTooltipLines(
+            snapshot ? memoryBadge(snapshot.memory.rssBytes) : null,
+            terminalCount,
+          ).join("\n")}
+          aria-label={resourceManagerAriaLabel(terminalCount)}
+          data-testid="resource-usage-segment"
         >
-          <MemoryStick size={12} />
+          <MemoryStick size={12} className="text-muted-foreground" />
           {collapse.showMemoryLabel ? (
-            <span>
-              {snapshot ? memoryLabel(snapshot.memory.rssBytes) : "…"}
+            <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
+              {memoryBadge(snapshot?.memory.rssBytes ?? null)}
             </span>
           ) : null}
-        </span>
-        <span
-          className="status-bar-segment"
-          title={terminalsTitle(terminalCount)}
-        >
-          <TerminalSquare size={12} />
+          {collapse.showMemoryLabel ? (
+            <span className="text-muted-foreground/50" aria-hidden>
+              ·
+            </span>
+          ) : null}
+          <Terminal size={12} className="text-muted-foreground" />
           {/* Source resource-trigger form: the session count stays while any
           session exists, even icon-only. */}
           {collapse.iconOnly && terminalCount === 0 ? null : (
-            <span>{terminalCount}</span>
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {terminalCount}
+            </span>
           )}
         </span>
+        {/* Source PortsStatusSegment form: icon-only keeps the count while
+        any port exists. */}
         <span
           className="status-bar-segment"
           title={snapshot ? portsTitle(snapshot.ports) : "Ports unavailable"}
           aria-label={
-            snapshot ? portsAriaLabel(snapshot.ports) : "Ports unavailable"
+            snapshot
+              ? portsAriaLabel(snapshot.ports)
+              : "Ports, 0 workspace ports"
           }
         >
-          <Plug size={12} />
-          {/* Source PortsStatusSegment form: icon-only keeps the count while
-          any port exists. */}
+          <Plug size={12} className="text-muted-foreground" />
           {collapse.iconOnly &&
           (snapshot?.ports.listening.length ?? 0) === 0 ? null : (
-            <span>{snapshot ? portsLabel(snapshot.ports) : "…"}</span>
+            <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
+              {snapshot ? portsLabel(snapshot.ports) : "0"}
+            </span>
           )}
         </span>
       </div>

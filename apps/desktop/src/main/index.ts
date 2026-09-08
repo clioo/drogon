@@ -77,7 +77,7 @@ import { handleDaemonRestart } from "./daemon-restart";
 import { installNativeThemeBridge } from "./native-theme-bridge";
 // R1-A: self-registering usage IPC (snapshot/refresh/awake); the module owns
 // its channels and validation, this line only loads it.
-import { registerUsageIpc } from "./usage/service";
+import { registerUsageIpc, disposeUsage } from "./usage/service";
 // R13-B: additive Ports-panel channel (drogon:workspacePorts).
 import { listWorkspacePorts } from "./usage/workspace-port-list";
 
@@ -685,5 +685,10 @@ if (!holdsSingleInstanceLock) {
   });
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
+  });
+  // The keep-awake setting lasts exactly as long as the app: release our
+  // caffeinate child on real quit so quitting awake never orphans it.
+  app.on("will-quit", () => {
+    disposeUsage();
   });
 }

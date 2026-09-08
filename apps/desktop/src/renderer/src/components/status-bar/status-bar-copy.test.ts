@@ -3,15 +3,18 @@ import type { ProviderUsage } from "../../../../shared/usage-contract";
 import {
   awakeStatusLabel,
   hasVisibleUsage,
-  memoryLabel,
-  memoryTitle,
+  memoryBadge,
   portsAriaLabel,
   portsLabel,
   portsTitle,
+  providerBadgeLetter,
   providerMeterRows,
+  providerStatusLabel,
   providerTitle,
   REFRESH_RATE_LIMITS_LABEL,
-  terminalsTitle,
+  resourceManagerAriaLabel,
+  resourceManagerSessionCount,
+  resourceManagerTooltipLines,
 } from "./status-bar-copy";
 
 function claude(): ProviderUsage {
@@ -53,6 +56,53 @@ describe("provider meter projections", () => {
   });
 });
 
+describe("source provider status labels (usage-error-copy.ts)", () => {
+  test("a failed network request is a Network issue", () => {
+    expect(
+      providerStatusLabel({
+        ...claude(),
+        session: null,
+        weekly: null,
+        fableWeekly: null,
+        status: "error",
+        error: "Claude usage is unreachable (HTTP 503).",
+      }),
+    ).toBe("Network issue");
+  });
+  test("a provider-side rate-limit refusal reads Limited", () => {
+    expect(
+      providerStatusLabel({
+        ...claude(),
+        session: null,
+        weekly: null,
+        fableWeekly: null,
+        status: "error",
+        error: "Codex reported rate limits exceeded.",
+      }),
+    ).toBe("Limited");
+  });
+  test("everything else is a failed refresh, and ok statuses have no label", () => {
+    expect(
+      providerStatusLabel({
+        ...claude(),
+        session: null,
+        weekly: null,
+        fableWeekly: null,
+        status: "error",
+        error: "Codex helper exited before reporting usage.",
+      }),
+    ).toBe("Refresh failed");
+    expect(providerStatusLabel(claude())).toBeNull();
+    expect(
+      providerStatusLabel({ ...claude(), status: "unavailable", error: "signed out" }),
+    ).toBeNull();
+  });
+  test("icon-only letter badges match the source (Claude C, Codex X)", () => {
+    expect(providerBadgeLetter("claude")).toBe("C");
+    expect(providerBadgeLetter("codex")).toBe("X");
+  });
+});
+
 describe("source chrome copy (#127)", () => {
   test("refresh names rate limits and gates on non-empty usage", () => {
     expect(REFRESH_RATE_LIMITS_LABEL).toBe("Refresh rate limits");
@@ -73,17 +123,32 @@ describe("source chrome copy (#127)", () => {
   });
 });
 
-describe("resource copy", () => {
-  test("memory renders bytes or unavailable with the reason", () => {
-    expect(memoryLabel(1024 ** 3)).toBe("1.0 GB");
-    expect(memoryLabel(null)).toBe("unavailable");
-    expect(
-      memoryTitle({ rssBytes: null, processCount: null, unavailableReason: "denied" }),
-    ).toContain("denied");
-    expect(
-      memoryTitle({ rssBytes: 1024, processCount: 3, unavailableReason: null }),
-    ).toContain("3 processes");
+describe("resource manager copy (resource-manager-terminal-copy.ts)", () => {
+  test("memory badge uses the source formatMemory tiers and an em dash when unmeasured", () => {
+    expect(memoryBadge(1024 * 1024 * 888.3 * 1)).toBe("888.3 MB");
+    expect(memoryBadge(512 * 1024)).toBe("512 KB");
+    expect(memoryBadge(1536 * 1024 * 1024)).toBe("1.50 GB");
+    expect(memoryBadge(null)).toBe("—");
   });
+  test("session count pluralizes like the source", () => {
+    expect(resourceManagerSessionCount(1)).toBe("1 terminal session");
+    expect(resourceManagerSessionCount(2)).toBe("2 terminal sessions");
+    expect(resourceManagerAriaLabel(1)).toBe("Resource Manager, 1 terminal session");
+    expect(resourceManagerAriaLabel(3)).toBe("Resource Manager, 3 terminal sessions");
+  });
+  test("tooltip lines summarize memory and sessions, then the workspace hint", () => {
+    expect(resourceManagerTooltipLines("888.3 MB", 1)).toEqual([
+      "Resource Manager - 888.3 MB - 1 terminal session",
+      "Terminal sessions are grouped by workspace.",
+    ]);
+    expect(resourceManagerTooltipLines(null, 0)).toEqual([
+      "Resource Manager - memory unavailable - 0 terminal sessions",
+      "No terminal sessions yet.",
+    ]);
+  });
+});
+
+describe("ports copy", () => {
   test("ports count honestly, including the empty and failed scans", () => {
     // Source PortsStatusSegment form: the count alone in the strip; the
     // word "ports" lives in the aria-label and tooltip.
@@ -91,7 +156,7 @@ describe("resource copy", () => {
     expect(
       portsLabel({ listening: [{ port: 3000, process: "node" }], unavailableReason: null }),
     ).toBe("1");
-    expect(portsLabel({ listening: [], unavailableReason: "no lsof" })).toBe("unavailable");
+    expect(portsLabel({ listening: [], unavailableReason: "no lsof" })).toBe("0");
     expect(portsAriaLabel({ listening: [], unavailableReason: null })).toBe(
       "Ports, 0 workspace ports",
     );
@@ -99,7 +164,11 @@ describe("resource copy", () => {
       portsAriaLabel({ listening: [{ port: 3000, process: "node" }], unavailableReason: null }),
     ).toBe("Ports, 1 workspace port");
     expect(portsTitle({ listening: [], unavailableReason: "no lsof" })).toContain("no lsof");
-    expect(terminalsTitle(1)).toBe("1 live terminal");
-    expect(terminalsTitle(2)).toBe("2 live terminals");
+    expect(portsTitle({ listening: [], unavailableReason: null })).toBe(
+      "Ports — 0 workspace ports",
+    );
+    expect(
+      portsTitle({ listening: [{ port: 3000, process: "node" }], unavailableReason: null }),
+    ).toBe("Ports — 1 workspace port");
   });
 });
