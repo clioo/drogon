@@ -193,7 +193,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J4 R16-O: barra de búsqueda, menú contextual, política de menú y banners del browser | R16 | Muse | fusionada | #172 |
 | J6 R16-P: filas, paginación y modo PR de Tasks frente al fuente; pliega #126 | R16 | Muse | fusionada: filas/paginación/modo PR del fuente y estado tasks-rows del oráculo; #126 pendiente de verificar en QA-UI r5 | #181 |
 | J10 R16-Q: pane Terminal, copy de Notifications, filas de Agents y Git (#150 #152 #168 #169, parcial: filas sin backend quedan listadas en el PR) | R16 | Muse | fusionada | #178 |
-| QA fix R16-R: #136 #167 #175 #176 copy y acciones de Source Control, chords del menú New tab | R16 | Muse | fusionada #136 #167 (#182); #175 #176 continúan en R16-R2 (lanzada) | #182 |
+| QA fix R16-R: #136 #167 #175 #176 copy y acciones de Source Control, chords del menú New tab | R16 | Muse | fusionada #136 #167 (#182); #175 #176 fusionados en R16-R2 (#286: fallos de PR mapeados en rama limpia, bucle del efecto de conteos) | #182 #286 |
 | J8 R16-S: Bots de extremo a extremo con el modelo local (crear, responsabilidades, run visible, historial) | R16 | Muse | fusionada (#191: modelo del formulario y Run cableados); #186 #187 (lanzamiento headless de Pi) en R16-S2 (lanzada) | #191 |
 | J7 R16-T: Automations de extremo a extremo (cron real de un minuto, run now, dashboard, run de agente local) | R16 | Muse | fusionada (#211, pliega #188) | #211 |
 | J9 R16-U: Mentu de extremo a extremo con el runtime fijado (aprobar, ejecutar, evidencia, retry, cancelar) | R16 | Muse | fusionada: guardado de recetas, cancelación de nietos, run compartido panel↔tab | #193 |
@@ -241,16 +241,18 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | QA fix R16-AQ2: #236 preview de cron para horarios raros, #246 pastillas Upstream/Origin | R16 | Kimi | fusionada | #269 |
 | QA fix R16-AD3: #241 tema System sigue al SO, #244 #245 controles del pane de atajos | R16 | GLM | fusionada | #267 |
 | R16-AU: catálogo de atajos del fork, despacho compartido, reenvío a terminal/browser | R16 | luna | fusionada | #266 |
-| R16-AX: #257 paleta ⌘J del fork y Retry del banner de error; pliega #270 #272 | R16 | GLM | #274 fusionada; #270 #272 en curso | #274 |
+| R16-AX: #257 paleta ⌘J del fork y Retry del banner de error; pliega #270 #272 | R16 | GLM | fusionada (#274; #270 #272 en #287) | #274 #287 |
 | R16-AZ: cabeceras MIT en 23 ports, THIRD_PARTY_NOTICES, catálogo de fidelidad (43 estados) | R16 | Kimi | fusionada | #276 |
 | R16-AV: barrido de tema claro y anchos 760–1440 en todas las páginas | R16 | luna | fusionada (#283: 11 archivos, 1440/1100/900/760 claro+oscuro) | #283 |
-| R16-AW: #264 cuelgue del renderer con Forward en el browser, #259 Restart daemon en el paquete | R16 | luna | lanzada (bloqueantes) | |
+| R16-AW: #264 cuelgue del renderer con Forward en el browser, #259 Restart daemon en el paquete | R16 | luna | fusionada (#288); R16-AW2 #279 guests locales siguen pintando (#291); R16-AW3 (luna, lanzada): regresión CI #290 `accept:core-cli` (segundo daemon debe rechazar el data-dir con prontitud) | #288 #291 |
 | R16-AY: barra de estado J12 (medidores de uso, awake, contadores, clics) | R16 | GLM | fusionada (#281); restos en R16-AY2 (GLM, lanzada): popover de uso, CTA vacío, awake Auto, clics de segmento | #281 |
 | R16-AS: Source Control de extremo a extremo (J2) coordinado con R16-R2 | R16 | Kimi | lanzada | |
 | R16-BA: README, CHANGELOG, guion de demo y metadatos de licencia para el hackathon | R16 | Kimi | fusionada (#280) | #280 |
-| Instalación: bundle 1d83f98 (sellado 40/40) el 2026-09-08 ~02:1x — icono propio, Bots/Tasks rápidos; siguiente tras R16-AW | R16 | Coordinador | instalado | |
+| Instalación: bundle 1d83f98 (sellado 40/40) el 2026-09-08 ~02:1x — icono propio, Bots/Tasks rápidos | R16 | Coordinador | reemplazada | |
+| Instalación: bundle f1f690f (sellado 40/40) el 2026-09-08 ~04:5x — Forward del browser sin cuelgue, Restart daemon en el paquete (#288); siguiente tras R16-AR2 (#285) | R16 | Coordinador | instalado | |
 | QA funcional rondas 4–6 y QA de UI rondas 7–8 (luna); Muse agotado (429) desde ~02:15 | QA | luna | en curso | #268 |
-| R16-AX2: #270 Close de Tasks, #272 tope de 18 sesiones, #278 acción New worktree bloqueada | R16 | GLM | lanzada | |
+| R16-AX2: #270 Close de Tasks, #272 tope de 18 sesiones, #278 acción New worktree bloqueada | R16 | GLM | fusionada (#287: #270 #272); #278 continúa en R16-AX3 (GLM, lanzada) | #287 |
+| QA-UI ronda 8: estados de oráculo de fidelidad r8 (`compare-surfaces.mjs`) | QA | luna | fusionada (#289); ronda 9 en curso (luna) | #289 |
 | R16-BB: aceptación sellada cubriendo los 12 journeys (bots/automations/tasks/mentu/agent-state con el modelo local) | R16 | Kimi | lanzada | |
 | QA funcional ronda 7 (guion de demo + README sobre el paquete) y QA de UI ronda 8 (48 estados) | QA | luna | en curso | |
 
