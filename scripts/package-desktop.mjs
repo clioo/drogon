@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import { packager } from "@electron/packager";
 import {
   APP_BUNDLE_ID,
+  BUNDLE_ICON_FILE,
+  STOCK_ELECTRON_ICON_FILE,
+  bundleIconFile,
   bundlePaths,
   fingerprintBundle,
   mentuRuntimeSignIgnore,
@@ -149,7 +152,43 @@ const bundle =
   process.platform === "darwin"
     ? path.join(packagedDirectory, "Drogon.app")
     : packagedDirectory;
+if (process.platform === "darwin") await renameBundleIcon(bundle);
 Object.assign(info, await fingerprintBundle(bundle));
+
+// @electron/packager copies the icon: bytes over
+// Resources/electron.icns but keeps the stock plist name, so give the
+// bundle its own icon file and name before sealing/signing (R16-Z2,
+// #201). A future packager that names the file itself skips the rename;
+// anything else fails closed instead of shipping the stock name.
+async function renameBundleIcon(app) {
+  const contents = path.join(app, "Contents");
+  const resourcesDir = path.join(contents, "Resources");
+  const current = await bundleIconFile(app);
+  if (
+    current === BUNDLE_ICON_FILE &&
+    existsSync(path.join(resourcesDir, BUNDLE_ICON_FILE))
+  )
+    return;
+  assert.equal(
+    current,
+    STOCK_ELECTRON_ICON_FILE,
+    `Unexpected bundle icon name ${current}: refusing to guess the rename`,
+  );
+  await runAcceptanceProcess("/bin/mv", [
+    path.join(resourcesDir, STOCK_ELECTRON_ICON_FILE),
+    path.join(resourcesDir, BUNDLE_ICON_FILE),
+  ]);
+  await runAcceptanceProcess(
+    "/usr/libexec/PlistBuddy",
+    [
+      "-c",
+      `Set :CFBundleIconFile ${BUNDLE_ICON_FILE}`,
+      path.join(contents, "Info.plist"),
+    ],
+    { timeout: 30000 },
+  );
+  assert.equal(await bundleIconFile(app), BUNDLE_ICON_FILE);
+}
 await writeFile(bundlePaths(bundle).info, JSON.stringify(info, null, 2) + "\n");
 if (process.platform === "darwin") {
   // Refresh the outer seal after stamping final signed-binary fingerprints.
