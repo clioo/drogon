@@ -19,13 +19,14 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { DropdownMenu } from "radix-ui";
+import { DropdownMenu, Tooltip } from "radix-ui";
 import type { Worktree } from "../../../../shared/session-contract";
 import {
   getFileManagerLabel,
   getWorktreeDeleteLabel,
   getWorktreeDeleteShortcutLabel,
   isWorktreeRenamable,
+  PRIMARY_CHECKOUT_DELETE_DISABLED_HINT,
   worktreeDeleteRowKind,
 } from "./worktree-context-menu-policy";
 import { windowShellBridge } from "./worktree-bridges";
@@ -56,6 +57,7 @@ export function WorktreeContextMenu({
   displayName,
   projectKind,
   implicitFolderWorktree,
+  primaryCheckout,
   disabled,
   onRename,
   onDelete,
@@ -65,13 +67,20 @@ export function WorktreeContextMenu({
   displayName: string;
   projectKind: "git" | "folder";
   implicitFolderWorktree: boolean;
+  /**
+   * The card is the project's main checkout (worktree.path ===
+   * project.path). The source keeps a disabled "Delete Worktree" row and
+   * pairs it with "Remove Project from Drogon".
+   */
+  primaryCheckout: boolean;
   disabled: boolean;
   /** Opens the inline title editor. Absent when the card cannot rename. */
   onRename: (() => void) | null;
   /**
-   * Git worktrees: opens the delete confirm dialog. Folder projects:
-   * opens the remove-project dialog (the source's "Remove Workspace"
-   * removes the workspace entry from the app, never the folder on disk).
+   * Git worktrees: opens the delete confirm dialog. Primary checkout and
+   * folder projects: opens the remove-project dialog (the source's
+   * "Remove Project from Drogon" / "Remove Workspace" never touch the
+   * folder on disk).
    */
   onDelete: (() => void) | null;
   children: React.ReactNode;
@@ -83,7 +92,11 @@ export function WorktreeContextMenu({
 
   const renamable =
     onRename !== null && isWorktreeRenamable({ implicitFolderWorktree });
-  const deleteKind = worktreeDeleteRowKind({ projectKind, implicitFolderWorktree });
+  const deleteKind = worktreeDeleteRowKind({
+    projectKind,
+    implicitFolderWorktree,
+    primaryCheckout,
+  });
   const deleteShortcut = getWorktreeDeleteShortcutLabel(
     typeof navigator === "undefined" ? "" : navigator.platform,
   );
@@ -200,6 +213,30 @@ export function WorktreeContextMenu({
             {onDelete !== null && (
               <>
                 <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
+                {deleteKind === "primary-checkout" ? (
+                  <Tooltip.Root>
+                    <Tooltip.Trigger asChild>
+                      <div>
+                        <DropdownMenu.Item
+                          className="shell-worktree-context-menu-item shell-worktree-context-menu-item-destructive"
+                          disabled
+                        >
+                          <Trash2 className="size-3.5" />
+                          Delete Worktree
+                        </DropdownMenu.Item>
+                      </div>
+                    </Tooltip.Trigger>
+                    <Tooltip.Portal>
+                      <Tooltip.Content
+                        side="right"
+                        sideOffset={8}
+                        className="tooltip max-w-[200px] text-pretty"
+                      >
+                        {PRIMARY_CHECKOUT_DELETE_DISABLED_HINT}
+                      </Tooltip.Content>
+                    </Tooltip.Portal>
+                  </Tooltip.Root>
+                ) : null}
                 <DropdownMenu.Item
                   className="shell-worktree-context-menu-item shell-worktree-context-menu-item-destructive"
                   disabled={disabled}

@@ -479,6 +479,103 @@ const SURFACES = [
     ],
   },
   {
+    id: "menu-worktree-card",
+    label: "Open menu: worktree card context menu",
+    refDir: "src/renderer/src/components/sidebar",
+    refFiles: [
+      "src/renderer/src/components/sidebar/WorktreeContextMenuView.tsx",
+      "src/renderer/src/components/sidebar/WorktreeOpenInMenu.tsx",
+    ],
+    probes: ["Workspace", "Update", "Open in", "Copy Path", "Remove Workspace", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/WorktreeContextMenu.tsx",
+      "apps/desktop/src/renderer/src/features/shell/worktree-context-menu-policy.ts",
+    ],
+  },
+  {
+    id: "menu-session-tab",
+    label: "Open menu: session tab context menu",
+    refDir: "src/renderer/src/components/tab-bar",
+    refFiles: ["src/renderer/src/components/tab-bar/SortableTabContextMenu.tsx"],
+    probes: ["Pin Tab", "Close Others", "Change Title", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/TabContextMenu.tsx",
+      "apps/desktop/src/renderer/src/features/shell/SortableTab.tsx",
+    ],
+  },
+  {
+    id: "menu-editor-tab",
+    label: "Open menu: editor tab context menu",
+    refDir: "src/renderer/src/components/tab-bar",
+    refFiles: ["src/renderer/src/components/tab-bar/EditorFileTabContextMenu.tsx"],
+    probes: ["Close All Editor Tabs", "Copy Relative Path", "Reveal in Finder", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/TabContextMenu.tsx",
+      "apps/desktop/src/renderer/src/features/shell/tab-strip/SortableEditorTab.tsx",
+    ],
+  },
+  {
+    id: "menu-browser-tab",
+    label: "Open menu: browser tab context menu",
+    refDir: "src/renderer/src/components/tab-bar",
+    refFiles: ["src/renderer/src/components/tab-bar/SortableTabContextMenu.tsx"],
+    probes: ["Duplicate Tab", "Open In Browser", "Pin Tab", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/TabContextMenu.tsx",
+      "apps/desktop/src/renderer/src/features/shell/tab-strip/SortableBrowserTab.tsx",
+    ],
+  },
+  {
+    id: "menu-terminal-pane",
+    label: "Open menu: terminal pane context menu",
+    refDir: "src/renderer/src/components/terminal-pane",
+    refFiles: ["src/renderer/src/components/terminal-pane/TerminalContextMenu.tsx"],
+    probes: ["Split Terminal Right", "Copy Terminal ID", "Close Pane", "Clear Screen"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/terminal/TerminalContextMenu.tsx",
+      "apps/desktop/src/renderer/src/features/terminal/TerminalPane.tsx",
+    ],
+  },
+  {
+    id: "menu-explorer-row",
+    label: "Open menu: file explorer row context menu",
+    refDir: "src/renderer/src/components/right-sidebar",
+    refFiles: ["src/renderer/src/components/right-sidebar/file-explorer-row-context-menu.tsx"],
+    probes: ["New File", "Copy Path", "Rename", "Delete", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/file-explorer/FileExplorerMenus.tsx",
+    ],
+  },
+  {
+    id: "menu-sc-entry",
+    label: "Open menu: source control entry context menu",
+    refDir: "src/renderer/src/components/right-sidebar/source-control/listing",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/source-control/listing/entry-context-menu.tsx",
+    ],
+    probes: ["Unstage Changes", "Discard", "Copy Path", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/source-control/entry-context-menu.tsx",
+    ],
+  },
+  {
+    id: "menu-commit-dropdown",
+    label: "Open menu: commit chevron dropdown",
+    refDir: "src/renderer/src/components/right-sidebar/source-control/commit",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/source-control/commit/commit-action-menu.tsx",
+      "src/renderer/src/components/right-sidebar/source-control-dropdown-items.ts",
+      "src/renderer/src/components/right-sidebar/source-control-dropdown-remote-items.ts",
+      "src/renderer/src/components/right-sidebar/source-control-dropdown-labels.ts",
+    ],
+    probes: ["Commit & Push", "Commit & Sync", "Create PR", "Fast-forward", "Fetch", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/source-control/commit-action-menu.tsx",
+      "apps/desktop/src/renderer/src/features/source-control/commit-dropdown-items.ts",
+      "apps/desktop/src/renderer/src/features/source-control/commit-area.tsx",
+    ],
+  },
+  {
     id: "right-rail",
     label: "Right activity rail + panels",
     refDir: "src/renderer/src/components/right-sidebar",
@@ -2535,6 +2632,261 @@ async function refSetup(page, state, ctx) {
       }
       break;
     }
+    case "menu-worktree-card": {
+      // Open-menu state: the worktree card context menu, left open for
+      // capture. Right-click opens an ephemeral overlay only.
+      await dismissOverlays(page);
+      try {
+        // The fork's worktree rows are role=option inside the Worktrees
+        // listbox; when the project is collapsed a click on its header row
+        // expands it (view navigation only, reversible).
+        if ((await page.getByRole("option").count().catch(() => 0)) === 0) {
+          const header = page.getByRole("button", { name: /Project actions for/ }).first();
+          if ((await header.count()) > 0) {
+            await header.click({ timeout: 2500 }).catch(() => {});
+            await delay(600);
+          }
+        }
+        const option = page.getByRole("option").first();
+        const fallbackCard = page.locator('[class*="worktree-card"], [data-worktree-card-id]').first();
+        const card = (await option.count()) > 0 ? option : fallbackCard;
+        if ((await card.count()) > 0) {
+          await card.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`worktree card menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`worktree card menu items: ${items.join(" | ")}`);
+          } else missing.push("worktree card right-click opened no menu");
+        } else missing.push("no worktree card to right-click (ref sidebar empty)");
+      } catch {
+        missing.push("worktree card right-click best-effort only");
+      }
+      break;
+    }
+    case "menu-session-tab": {
+      // Open-menu state: a session tab's context menu, left open.
+      await dismissOverlays(page);
+      try {
+        // The fork's strip tabs are buttons whose name embeds the close
+        // affordance ("<title> Close tab <title>"); role=tab on this page
+        // belongs to inner panel tablists, never the strip.
+        const tab = page.getByRole("button", { name: / Close tab / }).first();
+        if ((await tab.count()) > 0) {
+          await tab.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`session tab menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`session tab menu items: ${items.join(" | ")}`);
+          } else missing.push("session tab right-click opened no menu");
+        } else missing.push("no session tab to right-click (ref strip empty)");
+      } catch {
+        missing.push("session tab right-click best-effort only");
+      }
+      break;
+    }
+    case "menu-editor-tab": {
+      // Open-menu state: open a file through the Explorer, then right-click
+      // its editor tab (the strip's last tab once it opens), left open.
+      await dismissOverlays(page);
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open === 0) {
+        if (!(await tryClick(page, "button", "Explorer (⌘⇧E)", 2500))) {
+          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 2500 }).catch(() => {});
+        }
+      }
+      await delay(600);
+      try {
+        // The fork's explorer rows are plain buttons inside the tree pane
+        // (data-native-file-drop-target="file-explorer"), no treeitem role.
+        const file = page
+          .locator('[data-native-file-drop-target="file-explorer"] button')
+          .filter({ hasText: /\.[a-z0-9]+$/i })
+          .first();
+        const fallback = page.locator('[data-native-file-drop-target="file-explorer"] button').first();
+        const row = (await file.count()) > 0 ? file : fallback;
+        if ((await row.count()) > 0) {
+          const name = ((await row.textContent()) ?? "").trim();
+          await row.click({ timeout: 2500 });
+          await delay(900);
+          const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const tab = page.getByRole("button", { name: new RegExp(escaped) }).last();
+          const target = (await tab.count()) > 0 ? tab : page.getByRole("tab").last();
+          await target.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`editor tab menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`editor tab menu items: ${items.join(" | ")}`);
+          } else missing.push("editor tab right-click opened no menu");
+        } else missing.push("no Explorer file row to open (ref project empty)");
+      } catch {
+        missing.push("editor tab menu best-effort only");
+      }
+      break;
+    }
+    case "menu-browser-tab": {
+      // Open-menu state: right-click an existing browser tab. Tabs are
+      // never created on the reference (navigation only); when none is
+      // open the state records non-coverage.
+      await dismissOverlays(page);
+      try {
+        const tabs = page.getByRole("tab");
+        const count = await tabs.count();
+        let browserTab = null;
+        for (let i = 0; i < count; i++) {
+          const text = ((await tabs.nth(i).textContent()) ?? "").trim();
+          if (/^https?:\/\//i.test(text) || /\.[a-z]{2,}(\/|$)/i.test(text)) {
+            browserTab = tabs.nth(i);
+            break;
+          }
+        }
+        if (!browserTab) {
+          // Fork strip tabs are buttons; a browser tab's name is the page
+          // title (a fresh one reads exactly "New Tab", while the create
+          // trigger is the lowercase "New tab").
+          const forkTab = page.getByRole("button", { name: "New Tab", exact: true }).first();
+          if ((await forkTab.count()) > 0) browserTab = forkTab;
+        }
+        if (browserTab) {
+          await browserTab.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`browser tab menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`browser tab menu items: ${items.join(" | ")}`);
+          } else missing.push("browser tab right-click opened no menu");
+        } else missing.push("ref non-coverage: no browser tab open on the reference (tabs are never created there)");
+      } catch {
+        missing.push("browser tab menu best-effort only");
+      }
+      break;
+    }
+    case "menu-terminal-pane": {
+      // Open-menu state: right-click the terminal viewport of the selected
+      // session tab, left open. Select a session tab first — the reference
+      // may be sitting on a browser/editor tab with no .xterm mounted.
+      await dismissOverlays(page);
+      try {
+        // Fork strip tabs are buttons ("<title> Close tab <title>").
+        const sessionTab = page.getByRole("button", { name: / Close tab / }).first();
+        if ((await sessionTab.count()) > 0) {
+          await sessionTab.click({ timeout: 2500 }).catch(() => {});
+          await delay(800);
+        }
+      } catch {
+        /* tab select best-effort only */
+      }
+      try {
+        const term = page.locator(".xterm").first();
+        if ((await term.count()) > 0) {
+          await term.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`terminal pane menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`terminal pane menu items: ${items.join(" | ")}`);
+          } else missing.push("terminal right-click opened no menu");
+        } else missing.push("no terminal viewport to right-click (ref shows no terminal)");
+      } catch {
+        missing.push("terminal pane menu best-effort only");
+      }
+      break;
+    }
+    case "menu-explorer-row": {
+      // Open-menu state: Explorer row context menu, left open.
+      await dismissOverlays(page);
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open === 0) {
+        if (!(await tryClick(page, "button", "Explorer (⌘⇧E)", 2500))) {
+          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 2500 }).catch(() => {});
+        }
+      }
+      await delay(600);
+      try {
+        // Fork rows are plain buttons in the tree pane (no treeitem role).
+        const forkRow = page.locator('[data-native-file-drop-target="file-explorer"] button').first();
+        const treeRow = page.getByRole("treeitem").first();
+        const row = (await forkRow.count()) > 0 ? forkRow : treeRow;
+        if ((await row.count()) > 0) {
+          await row.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`explorer row menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`explorer row menu items: ${items.join(" | ")}`);
+          } else missing.push("explorer row right-click opened no menu");
+        } else missing.push("no explorer row to right-click (ref project empty)");
+      } catch {
+        missing.push("explorer row menu best-effort only");
+      }
+      break;
+    }
+    case "menu-sc-entry": {
+      // Open-menu state: Source Control changed-file context menu, left
+      // open. Dirty content is ref-owned; a clean ref records non-coverage.
+      await dismissOverlays(page);
+      const open = await page.getByRole("region", { name: "Changes" }).count().catch(() => 0);
+      if (open === 0) {
+        if (!(await tryClick(page, "button", "Source Control (⌘⇧G)", 2500))) {
+          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 2500 }).catch(() => {});
+        }
+      }
+      await delay(500);
+      try {
+        const region = page.getByRole("region", { name: "Changes" });
+        const row = region.getByRole("button").filter({ hasText: /\.[a-z0-9]+/i }).first();
+        if ((await row.count()) > 0) {
+          await row.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`sc entry menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`sc entry menu items: ${items.join(" | ")}`);
+          } else missing.push("sc entry right-click opened no menu");
+        } else missing.push("ref non-coverage: no changed-file rows on the reference");
+      } catch {
+        missing.push("sc entry menu best-effort only");
+      }
+      break;
+    }
+    case "menu-commit-dropdown": {
+      // Open-menu state: the commit split-button chevron dropdown, left
+      // open. The composer renders only with uncommitted changes, so a
+      // clean ref records non-coverage (never dirtied from here).
+      await dismissOverlays(page);
+      const open = await page.getByRole("region", { name: "Changes" }).count().catch(() => 0);
+      if (open === 0) {
+        if (!(await tryClick(page, "button", "Source Control (⌘⇧G)", 2500))) {
+          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 2500 }).catch(() => {});
+        }
+      }
+      await delay(500);
+      try {
+        const chevron = page.getByRole("button", { name: "More commit and remote actions" }).first();
+        if ((await chevron.count()) > 0) {
+          await chevron.click({ timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`commit dropdown open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`commit dropdown items: ${items.join(" | ")}`);
+          } else missing.push("commit chevron click opened no menu");
+        } else missing.push("ref non-coverage: no commit area on the reference (clean worktree)");
+      } catch {
+        missing.push("commit dropdown best-effort only");
+      }
+      break;
+    }
     case "right-rail": {
       // Catalog `right-rail`: cycle the activity bar (Explorer, Mentu,
       // Source Control, Ports) plus an Explorer row menu; ends on Ports.
@@ -4511,6 +4863,247 @@ async function candSetup(page, state, ctx) {
       }
       break;
     }
+    case "menu-worktree-card": {
+      // Open-menu state on the owned fixture: the worktree card menu stays
+      // open for capture.
+      await ensureProject().catch(() => {});
+      try {
+        const card = page.locator("[data-worktree-card-id]").first();
+        if ((await card.count()) > 0) {
+          await card.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`worktree card menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`worktree card menu items: ${items.join(" | ")}`);
+          } else missing.push("worktree card right-click opened no menu");
+        } else missing.push("no worktree card to right-click");
+      } catch {
+        missing.push("worktree card menu best-effort only");
+      }
+      break;
+    }
+    case "menu-session-tab": {
+      const terminal = await ensureTerminal().catch(() => false);
+      if (!terminal) {
+        missing.push("project-terminal fixture unavailable for session tab menu");
+        break;
+      }
+      try {
+        const tab = page.getByRole("tab").first();
+        if ((await tab.count()) > 0) {
+          await tab.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`session tab menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`session tab menu items: ${items.join(" | ")}`);
+          } else missing.push("session tab right-click opened no menu");
+        } else missing.push("no session tab to right-click");
+      } catch {
+        missing.push("session tab menu best-effort only");
+      }
+      break;
+    }
+    case "menu-editor-tab": {
+      await ensureProject().catch(() => {});
+      try {
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "explorer fixture\n");
+      } catch {
+        /* fixture write best-effort only */
+      }
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open === 0) await tryClick(page, "button", "Explorer", 3000);
+      await delay(500);
+      try {
+        const row = page.getByRole("button", { name: /notes\.txt/ }).first();
+        if ((await row.count()) > 0) {
+          await row.click({ timeout: 3000 });
+          await delay(900);
+          const tab = page.getByRole("tab", { name: /notes\.txt/ }).first();
+          if ((await tab.count()) > 0) {
+            await tab.click({ button: "right", timeout: 3000 });
+            await delay(600);
+            const seen = await overlayState(page);
+            if ((seen.menus || 0) > 0) {
+              notes.push(`editor tab menu open (menus=${seen.menus})`);
+              const items = await menuItemNames(page);
+              if (items.length) notes.push(`editor tab menu items: ${items.join(" | ")}`);
+            } else missing.push("editor tab right-click opened no menu");
+          } else missing.push("no editor tab for notes.txt after opening it");
+        } else missing.push("no notes.txt explorer row to open");
+      } catch {
+        missing.push("editor tab menu best-effort only");
+      }
+      break;
+    }
+    case "menu-browser-tab": {
+      await ensureProject().catch(() => {});
+      // Open a browser tab through the + create menu (same path as the
+      // `browser` state), then right-click its tab, left open.
+      if (await tryClick(page, "button", "New tab")) {
+        await delay(600);
+        try {
+          const entry = page.getByRole("menuitem", { name: /^New Browser Tab/ });
+          if ((await entry.count()) > 0) {
+            await entry.first().click({ timeout: 3000 });
+            notes.push("browser tab opened through the + create menu");
+            await delay(800);
+          } else {
+            notes.push("no New Browser Tab menu entry");
+            await dismissOverlays(page);
+          }
+        } catch {
+          notes.push("create-menu selection best-effort only");
+        }
+      } else notes.push("no New tab affordance reachable");
+      try {
+        const tabs = page.getByRole("tab");
+        const count = await tabs.count();
+        const browserTab = count > 0 ? tabs.nth(count - 1) : null;
+        if (browserTab) {
+          await browserTab.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`browser tab menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`browser tab menu items: ${items.join(" | ")}`);
+          } else missing.push("browser tab right-click opened no menu");
+        } else missing.push("no browser tab to right-click");
+      } catch {
+        missing.push("browser tab menu best-effort only");
+      }
+      break;
+    }
+    case "menu-terminal-pane": {
+      const terminal = await ensureTerminal().catch(() => false);
+      if (!terminal) {
+        missing.push("project-terminal fixture unavailable for terminal pane menu");
+        break;
+      }
+      try {
+        const term = page.locator(".xterm").first();
+        if ((await term.count()) > 0) {
+          await term.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`terminal pane menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`terminal pane menu items: ${items.join(" | ")}`);
+          } else missing.push("terminal right-click opened no menu");
+        } else missing.push("no terminal viewport to right-click");
+      } catch {
+        missing.push("terminal pane menu best-effort only");
+      }
+      break;
+    }
+    case "menu-explorer-row": {
+      await ensureProject().catch(() => {});
+      try {
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "explorer fixture\n");
+      } catch {
+        /* fixture write best-effort only */
+      }
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open === 0) await tryClick(page, "button", "Explorer", 3000);
+      await delay(500);
+      try {
+        const row = page.getByRole("button", { name: /notes\.txt/ }).first();
+        if ((await row.count()) > 0) {
+          await row.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) {
+            notes.push(`explorer row menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`explorer row menu items: ${items.join(" | ")}`);
+          } else missing.push("explorer row right-click opened no menu");
+        } else missing.push("no explorer row to right-click");
+      } catch {
+        missing.push("explorer row menu best-effort only");
+      }
+      break;
+    }
+    case "menu-sc-entry": {
+      // Dirty the owned fixture like `source-control-dirty`, then
+      // right-click the untracked row, left open.
+      const scope = await ensureGitProject("menu-sc-entry");
+      if (!scope) break;
+      try {
+        await writeFile(path.join(scope, "notes.txt"), "sc fixture modified\n");
+        await writeFile(path.join(scope, "scratch.txt"), "untracked\n");
+      } catch (error) {
+        missing.push(`dirty fixture failed: ${error.message.split("\n")[0]}`);
+        break;
+      }
+      if (!(await reloadCandidate("menu-sc-entry"))) break;
+      try {
+        const select = page.getByRole("button", { name: /^Select sc-wt/ }).first();
+        await select.waitFor({ timeout: 15000 });
+        await select.click({ timeout: 3000 });
+        await delay(500);
+      } catch {
+        notes.push("sc-wt reselect best-effort only");
+      }
+      await openSourceControl();
+      try {
+        const row = page.locator('[data-testid="source-control-entry"]').first();
+        await row.waitFor({ timeout: 20000 });
+        await row.click({ button: "right", timeout: 3000 });
+        await delay(600);
+        const seen = await overlayState(page);
+        if ((seen.menus || 0) > 0) {
+          notes.push(`sc entry menu open (menus=${seen.menus})`);
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`sc entry menu items: ${items.join(" | ")}`);
+        } else missing.push("sc entry right-click opened no menu");
+      } catch {
+        missing.push("sc entry menu best-effort only");
+      }
+      break;
+    }
+    case "menu-commit-dropdown": {
+      // Same dirty fixture as menu-sc-entry so the commit area renders,
+      // then open the chevron dropdown, left open.
+      const scope = await ensureGitProject("menu-commit-dropdown");
+      if (!scope) break;
+      try {
+        await writeFile(path.join(scope, "notes.txt"), "sc fixture modified\n");
+        await writeFile(path.join(scope, "scratch.txt"), "untracked\n");
+      } catch (error) {
+        missing.push(`dirty fixture failed: ${error.message.split("\n")[0]}`);
+        break;
+      }
+      if (!(await reloadCandidate("menu-commit-dropdown"))) break;
+      try {
+        const select = page.getByRole("button", { name: /^Select sc-wt/ }).first();
+        await select.waitFor({ timeout: 15000 });
+        await select.click({ timeout: 3000 });
+        await delay(500);
+      } catch {
+        notes.push("sc-wt reselect best-effort only");
+      }
+      await openSourceControl();
+      try {
+        const chevron = page.getByRole("button", { name: "More commit and remote actions" }).first();
+        await chevron.waitFor({ timeout: 20000 });
+        await chevron.click({ timeout: 3000 });
+        await delay(600);
+        const seen = await overlayState(page);
+        if ((seen.menus || 0) > 0) {
+          notes.push(`commit dropdown open (menus=${seen.menus})`);
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`commit dropdown items: ${items.join(" | ")}`);
+        } else missing.push("commit chevron click opened no menu");
+      } catch {
+        missing.push("commit dropdown best-effort only");
+      }
+      break;
+    }
     case "right-rail": {
       // Same activity-bar cycle as the reference, on the owned fixture (one
       // file so Explorer is never empty); ends on Ports for capture.
@@ -5792,6 +6385,14 @@ const ALL_STATES = [
   "create-menu",
   "sidebar-menus",
   "tab-menus",
+  "menu-worktree-card",
+  "menu-session-tab",
+  "menu-editor-tab",
+  "menu-browser-tab",
+  "menu-terminal-pane",
+  "menu-explorer-row",
+  "menu-sc-entry",
+  "menu-commit-dropdown",
   "right-rail",
   "dialogs",
   "settings-general",
@@ -5850,6 +6451,14 @@ const CAND_OWNER = {
   "source-control-dirty": "apps/desktop/src/renderer/src/features/source-control/ChangesPanel.tsx, uncommitted-sections.tsx, section-header.tsx",
   "sidebar-menus": "apps/desktop/src/renderer/src/features/shell/ProjectList.tsx, project-actions-menu.tsx, WorktreeContextMenu.tsx",
   "tab-menus": "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx, TabContextMenu.tsx",
+  "menu-worktree-card": "apps/desktop/src/renderer/src/features/shell/WorktreeContextMenu.tsx, worktree-context-menu-policy.ts",
+  "menu-session-tab": "apps/desktop/src/renderer/src/features/shell/TabContextMenu.tsx, SortableTab.tsx",
+  "menu-editor-tab": "apps/desktop/src/renderer/src/features/shell/TabContextMenu.tsx, tab-strip/SortableEditorTab.tsx",
+  "menu-browser-tab": "apps/desktop/src/renderer/src/features/shell/TabContextMenu.tsx, tab-strip/SortableBrowserTab.tsx",
+  "menu-terminal-pane": "apps/desktop/src/renderer/src/features/terminal/TerminalContextMenu.tsx, TerminalPane.tsx",
+  "menu-explorer-row": "apps/desktop/src/renderer/src/features/file-explorer/FileExplorerMenus.tsx",
+  "menu-sc-entry": "apps/desktop/src/renderer/src/features/source-control/entry-context-menu.tsx",
+  "menu-commit-dropdown": "apps/desktop/src/renderer/src/features/source-control/commit-action-menu.tsx, commit-dropdown-items.ts, commit-area.tsx",
   "right-rail": "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx, features/file-explorer/FileExplorerMenus.tsx, features/ports/PortsPanel.tsx",
   dialogs: "apps/desktop/src/renderer/src/features/shell/DeleteWorktreeDialog.tsx, RemoveProjectDialog.tsx",
   "settings-general": "apps/desktop/src/renderer/src/features/settings/general-section.tsx, SettingsPage.tsx, settings-sections.ts",
@@ -5912,6 +6521,14 @@ const STATE_SURFACE = {
   "create-menu": "tab-bar",
   "sidebar-menus": "sidebar-menus",
   "tab-menus": "tab-menus",
+  "menu-worktree-card": "menu-worktree-card",
+  "menu-session-tab": "menu-session-tab",
+  "menu-editor-tab": "menu-editor-tab",
+  "menu-browser-tab": "menu-browser-tab",
+  "menu-terminal-pane": "menu-terminal-pane",
+  "menu-explorer-row": "menu-explorer-row",
+  "menu-sc-entry": "menu-sc-entry",
+  "menu-commit-dropdown": "menu-commit-dropdown",
   "right-rail": "right-rail",
   dialogs: "dialogs",
   "settings-general": "settings-general",
@@ -5963,6 +6580,14 @@ const SOURCE_PREFERENCE = {
   explorer: ["find files", "collapse", "explorer", "classname"],
   "sidebar-menus": ["workspace options", "project actions", "delete", "classname"],
   "tab-menus": ["new terminal", "pin", "close", "classname"],
+  "menu-worktree-card": ["workspace", "update", "open in", "copy path", "remove workspace", "classname"],
+  "menu-session-tab": ["pin tab", "close others", "change title", "classname"],
+  "menu-editor-tab": ["close all editor tabs", "copy relative path", "reveal in finder", "classname"],
+  "menu-browser-tab": ["duplicate tab", "open in browser", "pin tab", "classname"],
+  "menu-terminal-pane": ["split terminal right", "copy terminal id", "close pane", "clear screen"],
+  "menu-explorer-row": ["new file", "copy path", "rename", "delete", "classname"],
+  "menu-sc-entry": ["unstage changes", "discard", "copy path", "classname"],
+  "menu-commit-dropdown": ["commit & push", "commit & sync", "create pr", "fast-forward", "fetch"],
   "right-rail": ["explorer", "ports", "activity", "classname"],
   dialogs: ["delete", "remove", "cancel", "classname"],
   "settings-general": ["general", "workspace directory", "auto save", "classname"],

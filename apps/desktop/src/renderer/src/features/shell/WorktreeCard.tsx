@@ -45,6 +45,7 @@ export function WorktreeCard({
   disabled,
   projectKind,
   implicitFolderWorktree,
+  primaryCheckout = false,
   pr = null,
   onSelect,
   cardIndex = 0,
@@ -63,6 +64,8 @@ export function WorktreeCard({
   disabled: boolean;
   projectKind: "git" | "folder";
   implicitFolderWorktree: boolean;
+  /** The card is the project's main checkout (path === project.path). */
+  primaryCheckout?: boolean;
   /** Known PR for the chip; null hides it (no PR store yet). */
   pr?: WorktreeCardPrDisplay | null;
   onSelect: (workspaceId: string) => void;
@@ -133,6 +136,7 @@ export function WorktreeCard({
       displayName={name}
       projectKind={projectKind}
       implicitFolderWorktree={implicitFolderWorktree}
+      primaryCheckout={primaryCheckout}
       disabled={disabled}
       onRename={onRename ? () => setBeginEditing(true) : null}
       onDelete={onRemove}

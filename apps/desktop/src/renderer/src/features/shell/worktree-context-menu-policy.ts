@@ -25,25 +25,50 @@ export function shouldSuppressContextMenuFollowUpClick(
 
 /**
  * The destructive row the card's context menu ends with, mirroring the
- * source's label ladder: git worktrees delete ("Delete"), folder projects
- * expose one implicit worktree — the folder itself — which the source
- * removes from the app instead ("Remove Workspace").
+ * source's label ladder: git worktrees delete ("Delete"), the primary
+ * checkout cannot be git-worktree-removed so the row pair becomes a
+ * disabled "Delete Worktree" plus "Remove Project from Drogon", and
+ * folder projects expose one implicit worktree — the folder itself —
+ * which the source removes from the app instead ("Remove Workspace").
  */
-export type WorktreeDeleteRowKind = "delete" | "remove-workspace";
+export type WorktreeDeleteRowKind = "delete" | "remove-workspace" | "primary-checkout";
+
+/** The primary checkout is the worktree sitting at the project path. */
+export function isPrimaryCheckoutWorktree(args: {
+  projectKind: "git" | "folder";
+  projectPath: string;
+  worktreePath: string;
+}): boolean {
+  return args.projectKind === "git" && args.projectPath === args.worktreePath;
+}
 
 export function worktreeDeleteRowKind(args: {
   projectKind: "git" | "folder";
   implicitFolderWorktree: boolean;
+  primaryCheckout: boolean;
 }): WorktreeDeleteRowKind {
-  return args.projectKind === "folder" || args.implicitFolderWorktree
-    ? "remove-workspace"
-    : "delete";
+  if (args.projectKind === "folder" || args.implicitFolderWorktree) {
+    return "remove-workspace";
+  }
+  return args.primaryCheckout ? "primary-checkout" : "delete";
 }
 
-/** Destructive row label (source copy: 'Delete' / 'Remove Workspace'). */
+/**
+ * Destructive row label (source copy: 'Delete' / 'Remove Workspace' /
+ * 'Remove Project from Orca', rebranded to Drogon here).
+ */
 export function getWorktreeDeleteLabel(kind: WorktreeDeleteRowKind): string {
-  return kind === "remove-workspace" ? "Remove Workspace" : "Delete";
+  if (kind === "remove-workspace") return "Remove Workspace";
+  if (kind === "primary-checkout") return "Remove Project from Drogon";
+  return "Delete";
 }
+
+/**
+ * Source tooltip copy on the primary checkout's disabled Delete Worktree
+ * row ('Primary worktree — can't be deleted. Remove the project instead.').
+ */
+export const PRIMARY_CHECKOUT_DELETE_DISABLED_HINT =
+  "Primary worktree — can't be deleted. Remove the project instead.";
 
 /**
  * Whether the card offers renaming. The implicit folder worktree's title

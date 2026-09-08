@@ -115,6 +115,71 @@ function clickDeleteMenuItem(): void {
   fireEvent.click(item!);
 }
 
+describe("worktree card menu: primary checkout pair (fork parity)", () => {
+  test("primary checkout renders disabled Delete Worktree + Remove Project from Drogon", () => {
+    const onOpenAction = vi.fn();
+    const primaryProject = { ...project, path: "/work/drogon-wt1" };
+    render(
+      <Tooltip.Provider>
+        <ProjectList
+          groups={[{ project: primaryProject, worktrees: [worktree] }]}
+          workspaces={[workspace]}
+          sessions={[]}
+          selectedWorkspaceId="ws1"
+          activeSessionId=""
+          tabStrip={EMPTY_TAB_STRIP_STATE}
+          onSelectSession={() => {}}
+          disabled={false}
+          addDisabled={false}
+          sidebarWidth={280}
+          worktreesAvailable
+          action={null}
+          onSelectWorkspace={() => {}}
+          onAddProject={() => {}}
+          onCreateWorkspace={() => {}}
+          onOpenAction={onOpenAction}
+          onCloseAction={() => {}}
+          onBrowse={async () => null}
+          onSubmitAdd={async () => null}
+          onSubmitRemove={async () => null}
+          onSubmitRemoveProject={async () => null}
+          onOpenProjectSettings={() => {}}
+          onSubmitRename={async () => null}
+        />
+      </Tooltip.Provider>,
+    );
+    const scope = document.querySelector(
+      '[data-worktree-context-menu-scope="worktree"]',
+    ) as HTMLElement;
+    fireEvent.contextMenu(scope, { clientX: 50, clientY: 50 });
+    const destructive = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".shell-worktree-context-menu-item-destructive",
+      ),
+    );
+    const disabledDelete = destructive.find((el) =>
+      el.textContent?.includes("Delete Worktree"),
+    );
+    expect(disabledDelete).toBeTruthy();
+    expect(disabledDelete?.getAttribute("data-disabled")).not.toBeNull();
+    const removeProject = destructive.find((el) =>
+      el.textContent?.includes("Remove Project from Drogon"),
+    );
+    expect(removeProject).toBeTruthy();
+    // No chord chip on the primary-checkout pair (source rule).
+    expect(
+      removeProject?.querySelector(".shell-worktree-context-menu-shortcut"),
+    ).toBeNull();
+    fireEvent.pointerDown(removeProject!, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(removeProject!, { pointerType: "mouse", button: 0 });
+    fireEvent.click(removeProject!);
+    expect(onOpenAction).toHaveBeenCalledWith({
+      kind: "remove-project",
+      projectId: "p1",
+    });
+  });
+});
+
 describe("worktree Delete menu (#220)", () => {
   test("clicking Delete opens the remove action", () => {
     const onOpenAction = vi.fn();

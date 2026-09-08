@@ -3,6 +3,7 @@ import {
   getFileManagerLabel,
   getWorktreeDeleteLabel,
   getWorktreeDeleteShortcutLabel,
+  isPrimaryCheckoutWorktree,
   isWorktreeRenamable,
   shouldSuppressContextMenuFollowUpClick,
   worktreeDeleteRowKind,
@@ -14,17 +15,50 @@ describe("worktree context menu policy", () => {
       worktreeDeleteRowKind({
         projectKind: "git",
         implicitFolderWorktree: false,
+        primaryCheckout: false,
       }),
     ).toBe("delete");
     expect(
       worktreeDeleteRowKind({
         projectKind: "folder",
         implicitFolderWorktree: true,
+        primaryCheckout: false,
       }),
     ).toBe("remove-workspace");
     expect(
-      worktreeDeleteRowKind({ projectKind: "git", implicitFolderWorktree: true }),
+      worktreeDeleteRowKind({
+        projectKind: "git",
+        implicitFolderWorktree: true,
+        primaryCheckout: false,
+      }),
     ).toBe("remove-workspace");
+  });
+
+  test("the primary checkout keeps the disabled-pair kind", () => {
+    expect(
+      worktreeDeleteRowKind({
+        projectKind: "git",
+        implicitFolderWorktree: false,
+        primaryCheckout: true,
+      }),
+    ).toBe("primary-checkout");
+    expect(getWorktreeDeleteLabel("primary-checkout")).toBe(
+      "Remove Project from Drogon",
+    );
+    expect(
+      isPrimaryCheckoutWorktree({
+        projectKind: "git",
+        projectPath: "/repo",
+        worktreePath: "/repo",
+      }),
+    ).toBe(true);
+    expect(
+      isPrimaryCheckoutWorktree({
+        projectKind: "git",
+        projectPath: "/repo",
+        worktreePath: "/repo-wt",
+      }),
+    ).toBe(false);
   });
 
   test("implicit folder worktrees offer no rename", () => {

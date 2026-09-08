@@ -800,6 +800,9 @@ function ProjectRow({
           <WorktreeCard
             key={worktree.id}
             worktree={worktree}
+            primaryCheckout={
+              project.kind === "git" && worktree.path === project.path
+            }
             workspaces={workspaces}
             sessions={sessions}
             selected={worktree.workspaceId === selectedWorkspaceId}
@@ -818,10 +821,12 @@ function ProjectRow({
             onRemove={
               !worktreesAvailable
                 ? null
-                : isImplicitFolderWorktree(worktree)
-                  ? // Folder projects have one implicit worktree — the folder
-                    // itself; the fork's destructive row is "Remove Workspace"
-                    // and routes to the remove-project confirm dialog.
+                : isImplicitFolderWorktree(worktree) ||
+                    (project.kind === "git" && worktree.path === project.path)
+                  ? // Folder implicit worktrees and the primary checkout
+                    // route to the remove-project confirm dialog (the fork's
+                    // "Remove Workspace" / "Remove Project from Drogon"
+                    // never touch the folder on disk).
                     () => onRemoveProject(project)
                   : () => onRemoveWorktree(worktree)
             }
