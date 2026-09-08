@@ -53,14 +53,13 @@ function menuChordPlatform(): TabCreateMenuChordPlatform {
  * - New Mobile Emulator + promo card: mobile is out of the MVP; the fork
  *   renders the promo only conditionally, so omitting it matches the
  *   unconditional render.
- * - Codex, Gemini, Kimi, Hermes, OpenClaude, Claude Agent Teams: Drogon
- *   ships only Claude, Pi, OpenCode and Antigravity harnesses.
+ * - Gemini, Kimi, Hermes, OpenClaude, Claude Agent Teams: Drogon ships only
+ *   the native Claude, Pi, OpenCode, Antigravity, and Codex harnesses.
  */
 export const TAB_CREATE_MENU_NOT_PORTED: readonly string[] = [
   "Open Markdown...",
   "New Mobile Emulator",
   "Mobile Emulator promo card",
-  "Codex",
   "Gemini",
   "Kimi",
   "Hermes",

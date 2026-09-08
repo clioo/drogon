@@ -65,6 +65,7 @@ describe("settings sections", () => {
     expect(filterSettingsSections("cli")).toEqual(["general"]);
     expect(filterSettingsSections("ask before deleting")).toEqual(["general"]);
     expect(filterSettingsSections("star")).toEqual(["general"]);
+    expect(filterSettingsSections("codex")).toEqual(["agents"]);
   });
 
   test("terminal search bucket matches the manage-sessions rows", () => {
@@ -77,8 +78,9 @@ describe("settings sections", () => {
 
 describe("agent defaults resolution", () => {
   test("an absent harness entry resolves to the fork defaults (#231)", () => {
-    // Fresh Orca launches Claude Code and Antigravity yolo/unattended and
-    // keeps prompts for Pi and OpenCode (YOLO_TUI_AGENT_ARGS).
+    // Fresh Orca launches Claude Code, Antigravity, and Codex
+    // yolo/unattended and keeps prompts for Pi and OpenCode
+    // (YOLO_TUI_AGENT_ARGS).
     expect(resolveLaunchDefaults("pi", {})).toEqual({
       model: "",
       effort: "",
@@ -95,6 +97,11 @@ describe("agent defaults resolution", () => {
       unattended: true,
     });
     expect(resolveLaunchDefaults("antigravity", {})).toEqual({
+      model: "",
+      effort: "",
+      unattended: true,
+    });
+    expect(resolveLaunchDefaults("codex", {})).toEqual({
       model: "",
       effort: "",
       unattended: true,

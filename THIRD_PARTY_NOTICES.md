@@ -313,12 +313,14 @@ and its browser chord matcher (fork revision
 `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
 MIT notice.
 
-The OpenCode status plugin and Pi agent-status extension sources under
-`crates/drogon-core/src/harness_hooks/` port the Drogon fork's
-`src/main/opencode/status-plugin-*-source.ts`, `src/main/opencode/hook-service.ts`
-and `src/main/pi/agent-status-*-source.ts` (fork revision
-`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT), adapted to report through
-`drogon-cli internal hook-event`. Each ported file keeps the MIT notice.
+The OpenCode status plugin, Pi agent-status extension, and Codex disposable-home
+adapter under `crates/drogon-core/src/harness_hooks/` port/adapt the Drogon
+fork's `src/main/opencode/status-plugin-*-source.ts`,
+`src/main/opencode/hook-service.ts`, `src/main/pi/agent-status-*-source.ts`,
+and `src/main/codex/{codex-home-paths,codex-config-mirror,codex-config-path-reference-rewrite,config-toml-line-scan,codex-hook-definition,codex-hook-local-install,config-toml-trust}.ts`
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT), adapted to
+report through `drogon-cli internal hook-event` and keep Codex's real home
+read-only. Each ported file keeps the MIT notice.
 
 The native application menu, window-state persistence, window chrome and
 dock unread badge in `apps/desktop/src/main/{menu,window,dock}/` port the
@@ -356,7 +358,7 @@ comment.
 The agent launch defaults in `apps/desktop/src/shared/agent-defaults.ts`
 port the fork's `src/shared/tui-agent-permissions.ts` (YOLO_TUI_AGENT_ARGS
 per agent) and `src/shared/tui-agent-launch-defaults.ts`
-(DEFAULT_TUI_AGENT_ARGS), adapted to Drogon's four harnesses and the
+(DEFAULT_TUI_AGENT_ARGS), adapted to Drogon's five harnesses and the
 daemon's permission modes; `features/settings/agent-defaults.ts` resolves
 the stored per-harness defaults against these fork defaults for the Agents
 section and every immediate launch path (fork revision

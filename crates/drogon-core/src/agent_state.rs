@@ -5,9 +5,9 @@
 //! classifies them, so the 3s window and the exited/needs-input precedence
 //! are unit-testable without a real PTY or clock.
 //!
-//! `NeedsInput` is produced by `session.hook_event`, fed by three
-//! mechanisms, one per harness (installed by `hooks.rs`/`harness_hooks/**`
-//! for `harness.start`):
+//! `NeedsInput` is produced by `session.hook_event`, fed by four
+//! mechanisms, one per hook-reporting harness (installed by
+//! `hooks.rs`/`harness_hooks/**` for `harness.start`):
 //! - claude: the `Notification`/`Stop` hooks in a per-session `--settings`
 //!   file.
 //! - opencode: a status plugin installed into an `OPENCODE_CONFIG_DIR`
@@ -17,14 +17,17 @@
 //! - pi: an agent-status extension loaded with `--extension`, reporting
 //!   `agent_end`/`agent_settled`/`tool_approval_requested` as
 //!   [`pi_events::AGENT_END`]/[`pi_events::TOOL_APPROVAL_REQUESTED`].
+//! - codex: a private `CODEX_HOME/hooks.json` command hook, reporting
+//!   [`codex_events::PERMISSION_REQUEST`] and [`codex_events::STOP`] as wait
+//!   signals and its turn/tool lifecycle events as clears.
 //!
 //! For claude, later PTY output alone clears the signal back to
 //! activity-based derivation (`session.rs`'s reader thread clears it
 //! unconditionally on every chunk) — a plain CLI that only redraws in
-//! response to real input. OpenCode and Pi are full TUIs that can repaint
-//! (spinners, footers) while genuinely still waiting, so generic PTY output
-//! would clear a real wait signal within a frame or two and make "the agent
-//! is waiting for you" a lie. Their sessions opt out of the generic clear
+//! response to real input. OpenCode, Pi, and interactive Codex can repaint
+//! while genuinely still waiting, so generic PTY output would clear a real
+//! wait signal within a frame or two and make "the agent is waiting for you"
+//! a lie. Their sessions opt out of the generic clear
 //! (`SessionHandle::set_explicit_wait_clear`) and are cleared only by their
 //! own hook's resumption events — [`opencode_events::NEW_TURN`]/
 //! [`opencode_events::TOOL_START`]/[`opencode_events::PERMISSION_REPLIED`]/
@@ -81,6 +84,21 @@ pub(crate) mod pi_events {
     pub(crate) const TOOL_APPROVAL_RESOLVED: &str = "ToolApprovalResolved";
 }
 
+/// Codex hook event names. Codex uses the same names in hooks.json and in the
+/// stdin payload sent to a command hook. `PermissionRequest` and `Stop` are
+/// the only events that mean the root session is waiting for the user;
+/// `SubagentStop` merely completes a child and must not make the root red dot.
+pub(crate) mod codex_events {
+    pub(crate) const SESSION_START: &str = "SessionStart";
+    pub(crate) const USER_PROMPT_SUBMIT: &str = "UserPromptSubmit";
+    pub(crate) const PRE_TOOL_USE: &str = "PreToolUse";
+    pub(crate) const PERMISSION_REQUEST: &str = "PermissionRequest";
+    pub(crate) const POST_TOOL_USE: &str = "PostToolUse";
+    pub(crate) const SUBAGENT_START: &str = "SubagentStart";
+    pub(crate) const SUBAGENT_STOP: &str = "SubagentStop";
+    pub(crate) const STOP: &str = "Stop";
+}
+
 const WAIT_EVENTS: &[&str] = &[
     claude_events::STOP,
     claude_events::NOTIFICATION,
@@ -89,6 +107,8 @@ const WAIT_EVENTS: &[&str] = &[
     opencode_events::ASK_USER_QUESTION,
     pi_events::AGENT_END,
     pi_events::TOOL_APPROVAL_REQUESTED,
+    codex_events::PERMISSION_REQUEST,
+    codex_events::STOP,
 ];
 
 const CLEAR_EVENTS: &[&str] = &[
@@ -99,6 +119,12 @@ const CLEAR_EVENTS: &[&str] = &[
     pi_events::AGENT_START,
     pi_events::TOOL_START,
     pi_events::TOOL_APPROVAL_RESOLVED,
+    codex_events::SESSION_START,
+    codex_events::USER_PROMPT_SUBMIT,
+    codex_events::PRE_TOOL_USE,
+    codex_events::POST_TOOL_USE,
+    codex_events::SUBAGENT_START,
+    codex_events::SUBAGENT_STOP,
 ];
 
 /// What a `session.hook_event` name means: set the wait signal, or clear it.
@@ -111,8 +137,8 @@ pub(crate) enum HookSignal {
 }
 
 /// Classifies a `session.hook_event` event name. A single flat namespace
-/// across all three harnesses is safe: each harness's own hook plumbing is
-/// the only thing that ever names its own events (a claude session's
+/// across all four hook-reporting harnesses is safe: each harness's own
+/// hook plumbing is the only thing that ever names its own events (a claude session's
 /// settings file never embeds `SessionIdle`, for instance), so there is no
 /// cross-harness ambiguity to resolve here.
 pub(crate) fn classify_hook_event(event: &str) -> Option<HookSignal> {
@@ -308,8 +334,21 @@ mod tests {
 
     #[test]
     fn classify_hook_event_refuses_unknown_names() {
-        for event in ["UserPromptSubmit", "PreToolUse", "bogus", ""] {
+        for event in ["NotificationSent", "ToolResult", "bogus", ""] {
             assert_eq!(classify_hook_event(event), None, "{event} must be unknown");
+        }
+        for event in [
+            codex_events::SESSION_START,
+            codex_events::USER_PROMPT_SUBMIT,
+            codex_events::PRE_TOOL_USE,
+            codex_events::POST_TOOL_USE,
+            codex_events::SUBAGENT_START,
+            codex_events::SUBAGENT_STOP,
+        ] {
+            assert_eq!(classify_hook_event(event), Some(HookSignal::Clear));
+        }
+        for event in [codex_events::PERMISSION_REQUEST, codex_events::STOP] {
+            assert_eq!(classify_hook_event(event), Some(HookSignal::Wait));
         }
     }
 

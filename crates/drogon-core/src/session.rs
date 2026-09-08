@@ -69,25 +69,25 @@ pub(crate) struct SessionHandle {
     /// Wall-clock stamp of the most recent `session.hook_event` (`Stop` or
     /// `Notification` from the per-session Claude Code hooks file) that no
     /// later PTY output has cleared yet. `None` for sessions that never got
-    /// one — other harnesses keep purely activity-based states.
+    /// one — sessions without a managed hook keep purely activity-based states.
     needs_input_at: Mutex<Option<String>>,
     /// Per-session harness hook install artifacts `harness.start` wrote for
-    /// this session (claude's `--settings` file; OpenCode's
-    /// `OPENCODE_CONFIG_DIR` overlay directory, one path since its load
-    /// marker lives inside it; Pi's `--extension` file *and* its sibling
-    /// load marker, two paths), all removed when the session exits
-    /// (`hooks::remove_settings_file` handles both a file and a directory
-    /// tree). Empty for sessions launched without hook wiring.
+    /// this session (Claude's `--settings` file; OpenCode's
+    /// `OPENCODE_CONFIG_DIR` overlay directory; Pi's `--extension` file and
+    /// sibling marker; Codex's disposable `CODEX_HOME`), all removed when the
+    /// session exits (`hooks::remove_settings_file` handles both a file and a
+    /// directory tree). Empty for sessions launched without hook wiring.
     hook_cleanup_paths: Mutex<Vec<std::path::PathBuf>>,
-    /// OpenCode/Pi opt out of the reader thread's generic activity-based
-    /// clear (set by `harness.rs` via [`Self::set_explicit_wait_clear`]):
-    /// their TUIs can repaint while genuinely still waiting, so any PTY byte
-    /// clearing `needs_input_at` would make "waiting for you" a lie. Claude
-    /// and plain sessions keep the default generic-activity clear.
+    /// OpenCode/Pi/Codex opt out of the reader thread's generic
+    /// activity-based clear (set by `harness.rs` via
+    /// [`Self::set_explicit_wait_clear`]): their hook lifecycle is authoritative
+    /// once a wait signal is reported, so any unrelated PTY byte clearing
+    /// `needs_input_at` would make "waiting for you" a lie. Claude and plain
+    /// sessions keep the default generic-activity clear.
     explicit_wait_clear: AtomicBool,
     /// Daemon-run mode (bot/automation headless launches: `pi -p`,
-    /// `claude -p`, `opencode run`, `agy -p`). Set once by `harness.start`
-    /// right after launch. A headless run has no approval-answer surface,
+    /// `claude -p`, `opencode run`, `codex exec`, `agy -p`). Set once by
+    /// `harness.start` right after launch. A headless run has no approval-answer surface,
     /// so hook wait signals are ignored for it (see `hooks.rs`) and its
     /// exit advances the linked run rows (see `run_completion.rs`).
     headless: AtomicBool,
@@ -160,15 +160,15 @@ impl SessionHandle {
     }
 
     /// Opts this session out of the reader thread's generic activity-based
-    /// clear. Called once by `harness.start` for OpenCode/Pi sessions,
-    /// right after launch — see the field doc for why.
+    /// clear. Admission sets it before starting the reader thread for
+    /// OpenCode/Pi/Codex sessions — see the field doc for why.
     pub(crate) fn set_explicit_wait_clear(&self) {
         self.explicit_wait_clear.store(true, Ordering::Release);
     }
 
-    /// Marks this session as a headless daemon run. Called once by
-    /// `harness.start` right after launch, before the handle is published —
-    /// no hook event or exit can observe it unset. See the field doc.
+    /// Marks this session as a headless daemon run. Admission sets it before
+    /// starting the reader/poller threads, before a hook event or fast exit
+    /// can observe it unset. See the field doc.
     pub(crate) fn set_headless(&self) {
         self.headless.store(true, Ordering::Release);
     }
@@ -179,8 +179,9 @@ impl SessionHandle {
     }
 
     /// Remembers one per-session hook install artifact so the exit paths
-    /// can remove it. Called once or twice by `harness.start` right after
-    /// launch (Pi has both its `--extension` file and a sibling marker).
+    /// can remove it. The admission helper registers paths before starting
+    /// the exit observer (Pi has both its `--extension` file and a sibling
+    /// marker; Codex owns its disposable home as one directory).
     pub(crate) fn add_hook_cleanup_path(&self, path: std::path::PathBuf) {
         self.hook_cleanup_paths.lock().unwrap().push(path);
     }
@@ -497,10 +498,10 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                     };
                     // Output resumes: the wait signal is spent, back to
                     // activity-based derivation. Skipped for sessions that
-                    // opted into explicit-only clearing (OpenCode/Pi — see
-                    // the `explicit_wait_clear` field doc): their TUIs can
-                    // repaint while genuinely still waiting, so any byte of
-                    // output clearing the signal here would be wrong.
+                    // opted into explicit-only clearing (OpenCode/Pi/Codex —
+                    // see the `explicit_wait_clear` field doc): their hook
+                    // lifecycle can report a genuine wait while PTY bytes
+                    // continue, so output clearing the signal here is wrong.
                     let cleared = if !handle.explicit_wait_clear.load(Ordering::Acquire) {
                         clear_wait_signal_on_activity(&handle)
                     } else {
@@ -515,6 +516,7 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                     // above keeps its throttle.
                     if marked || cleared {
                         crate::session_events::record_snapshot(&snapshot(&handle));
+                    }
                     }
                 }
                 Err(_) => break,

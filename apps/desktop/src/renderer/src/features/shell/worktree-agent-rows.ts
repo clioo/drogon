@@ -38,6 +38,7 @@ const HARNESS_LABELS: Record<HarnessId, string> = {
   pi: "Pi",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  codex: "Codex",
 };
 
 /** Label for a row's harness identity; plain shells read `Shell`. */

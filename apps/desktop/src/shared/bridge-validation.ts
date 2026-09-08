@@ -24,7 +24,7 @@ const opaque = (max: number) =>
     .optional();
 const harnessLaunch = z.object({
   workspaceId: id,
-  harnessId: z.enum(["claude", "pi", "opencode", "antigravity"]),
+  harnessId: z.enum(["claude", "pi", "opencode", "antigravity", "codex"]),
   model: opaque(4096),
   provider: opaque(256),
   effort: opaque(256),

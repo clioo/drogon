@@ -13,10 +13,10 @@
 //! session id), while the hook *commands* embed the real session id and
 //! incarnation (known after admission, written before spawn).
 //!
-//! OpenCode and Pi reuse this same `session.hook_event` RPC and the same
-//! per-session install/cleanup slot (`SessionHandle::set_hook_settings_file`)
-//! through their own installers in `harness_hooks::{opencode, pi}`, driven
-//! by `harness.rs`. Only the event *names* differ per harness — see
+//! OpenCode, Pi, and Codex reuse this same `session.hook_event` RPC and the
+//! same per-session install/cleanup slot through their own installers in
+//! `harness_hooks::{codex, opencode, pi}`, driven by `harness.rs`. Only the
+//! event *names* differ per harness — see
 //! `agent_state::classify_hook_event` for the full set and the wait/clear
 //! split.
 
@@ -136,10 +136,12 @@ impl Engine {
     /// `session.hook_event {sessionId, incarnation, event}`: the
     /// `drogon-cli internal hook-event` callback from a session's harness
     /// hook file (claude's `--settings`, OpenCode's status plugin, or Pi's
-    /// agent-status extension). A wait event stamps the handle
-    /// `needs_input`; a clear event resets it explicitly (OpenCode/Pi only —
-    /// see `SessionHandle::set_explicit_wait_clear`). For claude, later PTY
-    /// output alone already clears it. A stale incarnation or an exited
+    /// agent-status extension, or Codex's managed `CODEX_HOME/hooks.json`). A
+    /// wait event stamps the handle
+    /// `needs_input`; a clear event resets it explicitly for OpenCode, Pi, and
+    /// interactive Codex (see `SessionHandle::set_explicit_wait_clear`). For
+    /// Claude and headless runs, later PTY output/process exit provides the
+    /// ordinary completion behavior. A stale incarnation or an exited
     /// session never gains a wait signal.
     pub(crate) fn do_session_hook_event(&self, params: &Value) -> Result<Value, RpcError> {
         let event = require_str(params, "event")?;
@@ -156,7 +158,7 @@ impl Engine {
         }
         match signal {
             // A headless daemon run (`pi -p`, `claude -p`, `opencode run`,
-            // `agy -p`) has no approval-answer surface: stamping a wait
+            // `codex exec`, `agy -p`) has no approval-answer surface: stamping a wait
             // signal would pin it at `needs_input` forever with nobody able
             // to answer (issue #186). Headless installs no hooks, so a wait
             // signal here is unexpected anyway — ignore it, never report it.

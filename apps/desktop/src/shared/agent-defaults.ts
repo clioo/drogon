@@ -3,11 +3,12 @@
    launch args per agent — `--dangerously-skip-permissions` for Claude Code
    and Antigravity, none for Pi/OpenCode) and
    src/shared/tui-agent-launch-defaults.ts (DEFAULT_TUI_AGENT_ARGS, resolved
-   when the user configured nothing). Adapter: Drogon's four harnesses with
+   when the user configured nothing). Adapter: Drogon's five harnesses with
    this repo's `inherit`/`unattended` permission vocabulary; `unattended`
    maps to the daemon adapter flags in crates/drogon-harness (plan_launch):
-   Claude/Antigravity `--dangerously-skip-permissions`, Pi `--approve`,
-   OpenCode `--auto`. A menu-row click launches immediately with these
+   Claude/Antigravity `--dangerously-skip-permissions`, Codex
+   `--dangerously-bypass-approvals-and-sandbox`, Pi `--approve`, OpenCode
+   `--auto`. A menu-row click launches immediately with these
    resolved values — there is no per-launch dialog, exactly like the fork's
    `launchAgentFromNewTabEntry`. */
 import type {
@@ -18,7 +19,8 @@ import type {
 
 /**
  * Fork-default permission mode per harness: a fresh Orca launches Claude
- * Code (and Antigravity) with its yolo args and Pi/OpenCode bare. A stored
+ * Code (and Antigravity) with its yolo args, Codex with its bypass flag, and
+ * Pi/OpenCode bare. A stored
  * per-harness entry always wins over these.
  */
 export const DEFAULT_HARNESS_PERMISSION_MODES: Record<
@@ -27,6 +29,7 @@ export const DEFAULT_HARNESS_PERMISSION_MODES: Record<
 > = {
   claude: "unattended",
   antigravity: "unattended",
+  codex: "unattended",
   pi: "inherit",
   opencode: "inherit",
 };

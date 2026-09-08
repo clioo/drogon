@@ -238,7 +238,7 @@ export function AutomationEditorDialog({
                   onDraftChange((current) => ({ ...current, harness: event.target.value }))
                 }
               >
-                {(["claude", "pi", "opencode", "antigravity"] as const).map((id) => (
+                {(["claude", "pi", "opencode", "antigravity", "codex"] as const).map((id) => (
                   <option key={id} value={id}>
                     {id}
                   </option>

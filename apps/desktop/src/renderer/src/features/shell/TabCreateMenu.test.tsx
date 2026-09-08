@@ -39,6 +39,7 @@ const HARNESSES: Harness[] = [
   harness("pi", "Pi"),
   harness("opencode", "OpenCode"),
   harness("antigravity", "Antigravity"),
+  harness("codex", "Codex"),
 ];
 
 /**
@@ -117,6 +118,7 @@ describe("TabCreateMenu order and copy", () => {
       "Pi",
       "OpenCode",
       "Antigravity",
+      "Codex",
       "Agent settings…",
     ]);
   });
@@ -167,7 +169,7 @@ describe("TabCreateMenu order and copy", () => {
   it("renders a brand icon inside every harness entry", () => {
     mount();
     openMenu();
-    for (const name of ["Claude", "Pi", "OpenCode", "Antigravity"]) {
+    for (const name of ["Claude", "Pi", "OpenCode", "Antigravity", "Codex"]) {
       const item = screen.getByRole("menuitem", { name });
       expect(item.querySelector("svg")).not.toBeNull();
     }
@@ -222,7 +224,6 @@ describe("TabCreateMenu order and copy", () => {
   it("documents the entries intentionally not ported from the fork", () => {
     for (const entry of [
       "Open Markdown...",
-      "Codex",
       "Gemini",
       "Kimi",
       "Hermes",

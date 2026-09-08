@@ -2,7 +2,7 @@
 //! knows (`src/shared/tui-agent.ts`'s `TuiAgent` union / `isTuiAgent`,
 //! source revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`).
 //!
-//! Deliberately separate from [`crate::HarnessId`] (`ALL`: the 4 harnesses
+//! Deliberately separate from [`crate::HarnessId`] (`ALL`: the 5 harnesses
 //! this rewrite can discover/launch) and from the 14 resumable identities
 //! (`drogon-core::claim_identity`): recognizing an ID here proves nothing
 //! about install/launch/resume. Matching is exact and case-sensitive, same

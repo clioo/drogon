@@ -2,7 +2,7 @@
    src/renderer/src/components/bots/BotCreationForm.tsx (`BotFormCard`).
    Adapters for this repo: the source's detected-agent list
    (`harnesses: readonly TuiAgent[]`, discovered via preflight at load) is
-   the four real harness ids this repo's harness.start admits
+   the five real harness ids this repo's harness.start admits
    (`BOT_HARNESS_IDS` — the daemon has no agent-detection RPC, so the list
    is static and the empty-harness branch below is unreachable in
    production but kept verbatim for the validation copy); `getAgentLabel`

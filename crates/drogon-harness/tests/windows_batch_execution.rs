@@ -20,6 +20,7 @@ fn request(id: HarnessId) -> HarnessLaunchRequest {
         provider: None,
         prompt: None,
         permission_mode: PermissionMode::Inherit,
+        headless: false,
     }
 }
 

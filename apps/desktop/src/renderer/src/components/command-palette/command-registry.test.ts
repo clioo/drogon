@@ -67,6 +67,15 @@ describe("rankCommands", () => {
     expect(ranked[0].def.id).toBe("theme.dark");
   });
 
+  test("Codex query finds the harness launch command", () => {
+    const ranked = rankCommands({
+      defs: COMMAND_DEFS,
+      query: "codex",
+      context: onlineWorkspace,
+    });
+    expect(ranked[0].def.id).toBe("harness.launch");
+  });
+
   test("disabled commands are kept with their reason, never dropped", () => {
     const ranked = rankCommands({
       defs: COMMAND_DEFS,

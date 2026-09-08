@@ -133,7 +133,7 @@ describe("agents projection", () => {
     );
     expect(html).toContain("Agents");
     // Default control is a pressed-button group like the fork's
-    // AgentDefaultSetting (honest subset: None + the four known harnesses).
+    // AgentDefaultSetting (honest subset: None + the five known harnesses).
     expect(html).toContain('aria-label="Default harness"');
     expect(html).toContain('role="radiogroup"');
     expect(html).toContain('role="radio"');

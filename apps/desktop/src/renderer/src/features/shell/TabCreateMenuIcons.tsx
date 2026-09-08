@@ -2,11 +2,11 @@
    src/renderer/src/lib/agent-icon-glyphs.tsx (PiIcon, OpenCodeIcon,
    AgentLetterIcon) and src/renderer/src/components/status-bar/icons.tsx
    (ClaudeIcon). Adapted: only the harnesses Drogon ships (Claude, Pi,
-   OpenCode, Antigravity) — Codex/Gemini/Kimi/Hermes/OpenClaude/Agent Teams
-   are not ported because Drogon does not ship them. Antigravity has no
-   dedicated SVG in the source (it renders a favicon img there); here it
-   uses the source's own offline fallback shape, the letter glyph, so the
-   menu never needs a live network request. */
+   OpenCode, Antigravity, Codex) — Gemini/Kimi/Hermes/OpenClaude/Agent Teams
+   are not ported because Drogon does not ship them. Antigravity and Codex
+   have no dedicated SVG in this shell surface; they use the source's own
+   offline fallback shape, the letter glyph, so the menu never needs a live
+   network request. */
 import type { HarnessId } from "../../../../shared/session-contract";
 
 export function HarnessMenuIcon({

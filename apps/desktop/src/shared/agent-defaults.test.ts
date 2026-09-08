@@ -8,10 +8,11 @@ import {
 } from "./agent-defaults";
 
 describe("fork default permission modes (#231)", () => {
-  test("Claude Code and Antigravity launch yolo, Pi and OpenCode keep prompts", () => {
+  test("Claude Code, Antigravity, and Codex launch unattended", () => {
     expect(DEFAULT_HARNESS_PERMISSION_MODES).toEqual({
       claude: "unattended",
       antigravity: "unattended",
+      codex: "unattended",
       pi: "inherit",
       opencode: "inherit",
     });
@@ -78,6 +79,13 @@ describe("buildImmediateHarnessLaunch", () => {
       model: undefined,
       effort: undefined,
       prompt: undefined,
+      permissionMode: "unattended",
+    });
+  });
+
+  test("Codex rows use the unattended bypass default", () => {
+    expect(buildImmediateHarnessLaunch("ws", "codex", {})).toMatchObject({
+      harnessId: "codex",
       permissionMode: "unattended",
     });
   });

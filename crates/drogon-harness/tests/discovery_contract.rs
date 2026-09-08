@@ -78,6 +78,7 @@ fn cmd_shim_is_unsupported_at_discovery_though_plan_launch_alone_would_wrap_it()
         provider: None,
         prompt: None,
         permission_mode: PermissionMode::Inherit,
+        headless: false,
     };
     assert!(plan_launch(&req, &executable).is_ok());
 }

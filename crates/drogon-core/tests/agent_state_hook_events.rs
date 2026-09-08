@@ -197,7 +197,7 @@ fn hook_event_rejects_bad_identity_events_and_exited_sessions() {
         ),
         "stale_incarnation"
     );
-    for event in ["UserPromptSubmit", "PreToolUse", "bogus", ""] {
+    for event in ["NotificationSent", "ToolResult", "bogus", ""] {
         assert_eq!(
             err_code(
                 &engine,
