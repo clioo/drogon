@@ -312,6 +312,13 @@ and `src/main/pi/agent-status-*-source.ts` (fork revision
 `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT), adapted to report through
 `drogon-cli internal hook-event`. Each ported file keeps the MIT notice.
 
+The native application menu, window-state persistence and dock unread badge in
+`apps/desktop/src/main/{menu,window,dock}/` port the Drogon fork's
+`src/main/menu/register-app-menu.ts`, `app-menu-selection-item.ts`,
+`src/main/window/main-window-state-lifecycle.ts` and `src/main/dock/unread-badge.ts`
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
+file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
