@@ -232,6 +232,14 @@ fork's `src/renderer/src/components/WorktreeJumpPalette.tsx`, its
 (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
 file keeps the MIT notice.
 
+The Bots page exactness pass in `apps/desktop/src/renderer/src/features/bots/`
+(BotsPageStates, DrogonBotAvatar frame, BotCharacterPicker, BotCreationForm,
+BotsPageForms, BotResponsibilityCard, use-bots-page-controller) ports the
+Drogon fork's `src/renderer/src/components/bots/**` page composition, form
+and controller (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`,
+MIT). Character artwork is not redistributed; initials render instead. Each
+ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
