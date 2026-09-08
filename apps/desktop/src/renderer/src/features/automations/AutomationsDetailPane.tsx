@@ -35,6 +35,7 @@ export function AutomationsDetailPane({
   onToggle,
   onDelete,
   onBackToList,
+  onOpenRun,
 }: {
   selected: AutomationSummary | null;
   workspaceName: string;
@@ -50,6 +51,8 @@ export function AutomationsDetailPane({
   onToggle: (automation: AutomationSummary) => void;
   onDelete: (automation: AutomationSummary) => void;
   onBackToList: () => void;
+  /** Source behavior: opening a run navigates to the run details page. */
+  onOpenRun?: (run: AutomationRunView) => void;
 }): React.JSX.Element {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -154,6 +157,7 @@ export function AutomationsDetailPane({
                 runs={runs}
                 automationId={selected.id}
                 now={relativeNow}
+                onOpenRun={onOpenRun}
               />
             )
           ) : (

@@ -64,6 +64,7 @@ describe("AutomationsListPanel render", () => {
         onToggle: noop,
         onDelete: noop,
         onRefresh: noop,
+        onOpenRuns: noop,
         openCreateDialog: noop,
       }),
     );
@@ -100,6 +101,7 @@ describe("AutomationsListPanel render", () => {
         onToggle: noop,
         onDelete: noop,
         onRefresh: noop,
+        onOpenRuns: noop,
         openCreateDialog: noop,
       }),
     );

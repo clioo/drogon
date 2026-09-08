@@ -24,9 +24,11 @@ use drogon_protocol::{
     Request, RpcError,
     automation::{
         AutomationCreateParams, AutomationDeleteParams, AutomationHistoryParams,
-        AutomationHistoryResult, AutomationListResult, AutomationRunNowOutcome,
-        AutomationRunNowParams, AutomationRunNowResult, AutomationRunStatus as WireStatus,
-        AutomationRunTrigger as WireTrigger, AutomationRunView, AutomationSummary,
+        AutomationHistoryResult, AutomationListResult, AutomationRunDetail, AutomationRunListItem,
+        AutomationRunNowOutcome, AutomationRunNowParams, AutomationRunNowResult,
+        AutomationRunOutputFormat, AutomationRunOutputSnapshotView, AutomationRunParams,
+        AutomationRunStatus as WireStatus, AutomationRunTrigger as WireTrigger, AutomationRunView,
+        AutomationRunsAllParams, AutomationRunsAllResult, AutomationSummary,
         AutomationUpdateParams, LastRunSummary,
     },
 };
@@ -44,6 +46,9 @@ const DEFAULT_GRACE_MINUTES: f64 = 15.0;
 const MAX_GRACE_MINUTES: f64 = 10_080.0;
 const MAX_HISTORY_LIMIT: u64 = 200;
 const DEFAULT_HISTORY_LIMIT: usize = 50;
+const DEFAULT_RUNS_ALL_PAGE: u64 = 1;
+const DEFAULT_RUNS_ALL_PER_PAGE: u64 = 50;
+const MAX_RUNS_ALL_PER_PAGE: u64 = 200;
 
 fn invalid_argument(message: impl Into<String>) -> RpcError {
     crate::error::invalid_argument(message)
@@ -205,6 +210,78 @@ fn latest_run(runs: &[AutomationRun]) -> Option<&AutomationRun> {
             .total_cmp(&b.created_at)
             .then_with(|| a.id.cmp(&b.id))
     })
+}
+
+/// The output snapshot the daemon can honestly provide for a run: the
+/// stored snapshot when one was recorded, otherwise the retained tail of
+/// the run's session while that exact session incarnation is still known
+/// to this process. Never fabricated: a gone session with no stored
+/// snapshot yields `None`, and the client falls back to the run's error.
+fn resolve_output_snapshot(
+    engine: &crate::Engine,
+    run: &AutomationRun,
+    now_ms: f64,
+) -> (Option<AutomationRunOutputSnapshotView>, bool) {
+    if let Some(stored) = &run.output_snapshot {
+        return (
+            Some(AutomationRunOutputSnapshotView {
+                format: AutomationRunOutputFormat::PlainText,
+                content: stored.content.clone(),
+                captured_at: stored.captured_at,
+                truncated: stored.truncated,
+            }),
+            run.terminal_session_id.as_ref().is_some_and(|session_id| {
+                session_incarnation_still_known(engine, session_id, &run.session_incarnation)
+            }),
+        );
+    }
+    let Some(session_id) = &run.terminal_session_id else {
+        return (None, false);
+    };
+    let handle = engine.sessions.lock().unwrap().get(session_id).cloned();
+    let Some(handle) = handle else {
+        // No retained handle in this process: the run's session is gone
+        // from this incarnation's point of view (never existed, swept by
+        // crash recovery, or the daemon restarted).
+        return (None, false);
+    };
+    if !session_incarnation_still_known(engine, session_id, &run.session_incarnation) {
+        return (None, false);
+    }
+    let outcome = crate::session::read_tail(&handle);
+    let content = String::from_utf8_lossy(&outcome.bytes).trim().to_string();
+    if content.is_empty() {
+        // A session that exists but has produced no retained output gives
+        // no snapshot rather than an empty one.
+        return (None, true);
+    }
+    (
+        Some(AutomationRunOutputSnapshotView {
+            format: AutomationRunOutputFormat::PlainText,
+            content,
+            captured_at: now_ms,
+            truncated: outcome.truncated,
+        }),
+        true,
+    )
+}
+
+/// Whether this engine currently holds the named session under the run's
+/// recorded incarnation. A missing run incarnation (legacy row) only
+/// matches a live handle by session id.
+fn session_incarnation_still_known(
+    engine: &crate::Engine,
+    session_id: &str,
+    run_incarnation: &Option<String>,
+) -> bool {
+    let handle = engine.sessions.lock().unwrap().get(session_id).cloned();
+    let Some(handle) = handle else {
+        return false;
+    };
+    match run_incarnation {
+        Some(incarnation) => handle.incarnation == *incarnation,
+        None => true,
+    }
 }
 
 fn summarize(conn: &Connection, automation: &Automation) -> Result<AutomationSummary, RpcError> {
@@ -624,5 +701,93 @@ impl crate::Engine {
                 serde_json::to_value(&result).map_err(|e| internal_error(e.to_string()))
             },
         )
+    }
+
+    /// Paged runs across ALL local automations, newest scheduled first:
+    /// one query for the runs dashboard instead of one per automation.
+    pub(crate) fn automation_runs_all(&self, params: &Value) -> Result<Value, RpcError> {
+        let params: AutomationRunsAllParams = parse_params(params, "automation.runs_all")?;
+        let page = params.page.unwrap_or(DEFAULT_RUNS_ALL_PAGE);
+        let per_page = params.per_page.unwrap_or(DEFAULT_RUNS_ALL_PER_PAGE);
+        if page == 0 {
+            return Err(invalid_argument("page must be >= 1"));
+        }
+        if per_page == 0 || per_page > MAX_RUNS_ALL_PER_PAGE {
+            return Err(invalid_argument(format!(
+                "perPage must be within 1..={MAX_RUNS_ALL_PER_PAGE}"
+            )));
+        }
+        let conn = self.db.lock().unwrap();
+        let mut names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for automation in storage::list_all_automations(&conn)
+            .map_err(|e| storage_error(format!("automation list failed: {e}")))?
+        {
+            names.insert(automation.id.clone(), automation.name.clone());
+        }
+        let mut items: Vec<AutomationRunListItem> = Vec::new();
+        for (automation_id, runs) in storage::list_all_automation_runs(&conn)
+            .map_err(|e| storage_error(format!("run history lookup failed: {e}")))?
+        {
+            let Some(automation_name) = names.get(&automation_id) else {
+                // Runs are deleted with their automation; an orphan row is
+                // not surfaced as a dashboard entry.
+                continue;
+            };
+            for run in runs {
+                if let Some(status) = params.status
+                    && wire_status(run.status) != status
+                {
+                    continue;
+                }
+                items.push(AutomationRunListItem {
+                    run: view_run(&run),
+                    title: run.title.clone(),
+                    automation_name: automation_name.clone(),
+                });
+            }
+        }
+        // Newest scheduled run first, like the source's dashboard ordering.
+        items.sort_by(|a, b| {
+            b.run
+                .scheduled_for
+                .total_cmp(&a.run.scheduled_for)
+                .then_with(|| b.run.created_at.total_cmp(&a.run.created_at))
+                .then_with(|| a.run.id.cmp(&b.run.id))
+        });
+        let total = items.len() as u64;
+        let start = (page - 1).saturating_mul(per_page);
+        let runs: Vec<AutomationRunListItem> = items
+            .into_iter()
+            .skip(start as usize)
+            .take(per_page as usize)
+            .collect();
+        let result = AutomationRunsAllResult {
+            runs,
+            page,
+            per_page,
+            total,
+        };
+        serde_json::to_value(&result).map_err(|e| internal_error(e.to_string()))
+    }
+
+    /// One run's detail for the run page: record fields plus the honestly
+    /// available output snapshot and whether the run's session still exists.
+    pub(crate) fn automation_run(&self, request: &Request) -> Result<Value, RpcError> {
+        let params: AutomationRunParams = parse_params(&request.params, "automation.run")?;
+        let run_id = require_id(&params.run_id, "runId")?;
+        let conn = self.db.lock().unwrap();
+        let run = storage::get_automation_run(&conn, &run_id)
+            .map_err(|e| storage_error(format!("run lookup failed: {e}")))?
+            .ok_or_else(|| not_found(format!("automation run {run_id} not found")))?;
+        let now_ms = crate::now_unix_ms() as f64;
+        let (output_snapshot, session_exists) = resolve_output_snapshot(self, &run, now_ms);
+        let detail = AutomationRunDetail {
+            run: view_run(&run),
+            title: run.title.clone(),
+            workspace_display_name: run.workspace_display_name.clone().flatten(),
+            output_snapshot,
+            session_exists,
+        };
+        serde_json::to_value(&detail).map_err(|e| internal_error(e.to_string()))
     }
 }

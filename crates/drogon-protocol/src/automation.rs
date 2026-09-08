@@ -85,6 +85,25 @@ pub struct AutomationHistoryParams {
     pub limit: Option<u64>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AutomationRunsAllParams {
+    /// 1-based page index.
+    #[serde(default)]
+    pub page: Option<u64>,
+    #[serde(default)]
+    pub per_page: Option<u64>,
+    /// Optional run-status filter (wire snake_case value).
+    #[serde(default)]
+    pub status: Option<AutomationRunStatus>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AutomationRunParams {
+    pub run_id: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LastRunSummary {
@@ -149,6 +168,60 @@ pub struct AutomationRunView {
 #[serde(rename_all = "camelCase")]
 pub struct AutomationHistoryResult {
     pub runs: Vec<AutomationRunView>,
+}
+
+/// One dashboard row: a run plus the owning automation's display name
+/// (the runs-all aggregation spans automations, so each row names its own).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRunListItem {
+    #[serde(flatten)]
+    pub run: AutomationRunView,
+    /// The run's display title (the dashboard table's second line).
+    pub title: String,
+    pub automation_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRunsAllResult {
+    pub runs: Vec<AutomationRunListItem>,
+    pub page: u64,
+    pub per_page: u64,
+    /// Total matching runs (after the status filter) across automations.
+    pub total: u64,
+}
+
+/// Output snapshot format; single-valued (`plain_text`) like the source.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationRunOutputFormat {
+    PlainText,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRunOutputSnapshotView {
+    pub format: AutomationRunOutputFormat,
+    pub content: String,
+    pub captured_at: f64,
+    pub truncated: bool,
+}
+
+/// `automation.run` detail: the history view plus the fields the run page
+/// renders (title, workspace display name, the honestly available output
+/// snapshot, and whether the run's terminal session still exists).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRunDetail {
+    #[serde(flatten)]
+    pub run: AutomationRunView,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_display_name: Option<String>,
+    #[serde(default)]
+    pub output_snapshot: Option<AutomationRunOutputSnapshotView>,
+    pub session_exists: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -248,6 +321,109 @@ mod tests {
             automations: vec![],
         };
         assert!(serde_json::to_value(&list).unwrap()["automations"].is_array());
+    }
+
+    #[test]
+    fn runs_all_round_trips_flattened_list_items() {
+        let result = AutomationRunsAllResult {
+            runs: vec![AutomationRunListItem {
+                run: AutomationRunView {
+                    id: "ar:1".into(),
+                    automation_id: "a1".into(),
+                    status: AutomationRunStatus::Completed,
+                    trigger: AutomationRunTrigger::Manual,
+                    scheduled_for: 900.0,
+                    workspace_id: Some("w1".into()),
+                    terminal_session_id: None,
+                    error: None,
+                    exit_code: Some(0),
+                    started_at: Some(900.0),
+                    dispatched_at: Some(900.0),
+                    created_at: 900.0,
+                },
+                title: "nightly run".into(),
+                automation_name: "nightly".into(),
+            }],
+            page: 1,
+            per_page: 50,
+            total: 1,
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        let item = &value["runs"][0];
+        assert_eq!(item["id"], json!("ar:1"));
+        assert_eq!(item["title"], json!("nightly run"));
+        assert_eq!(item["automationName"], json!("nightly"));
+        assert_eq!(item["status"], json!("completed"));
+        assert_eq!(value["page"], json!(1));
+        assert_eq!(value["total"], json!(1));
+        let back: AutomationRunsAllResult = serde_json::from_value(value).unwrap();
+        assert_eq!(back, result);
+    }
+
+    #[test]
+    fn runs_all_params_default_and_reject_unknown_fields() {
+        let ok: AutomationRunsAllParams =
+            serde_json::from_value(json!({ "page": 2, "perPage": 25 })).unwrap();
+        assert_eq!(ok.page, Some(2));
+        assert_eq!(ok.per_page, Some(25));
+        assert_eq!(ok.status, None);
+        // Range checks (page >= 1, perPage <= 200) live in the daemon
+        // handler; the wire layer only pins shape.
+        let zero: AutomationRunsAllParams = serde_json::from_value(json!({"page": 0})).unwrap();
+        assert_eq!(zero.page, Some(0));
+        assert!(serde_json::from_value::<AutomationRunsAllParams>(json!({"bogus": 1})).is_err());
+        let filtered: AutomationRunsAllParams =
+            serde_json::from_value(json!({ "status": "dispatch_failed" })).unwrap();
+        assert_eq!(filtered.status, Some(AutomationRunStatus::DispatchFailed));
+        assert!(
+            serde_json::from_value::<AutomationRunsAllParams>(json!({"status": "bogus"})).is_err()
+        );
+    }
+
+    #[test]
+    fn run_detail_carries_title_snapshot_and_session_flag() {
+        let detail = AutomationRunDetail {
+            run: AutomationRunView {
+                id: "ar:2".into(),
+                automation_id: "a1".into(),
+                status: AutomationRunStatus::Dispatched,
+                trigger: AutomationRunTrigger::Scheduled,
+                scheduled_for: 800.0,
+                workspace_id: Some("w1".into()),
+                terminal_session_id: Some("s1".into()),
+                error: None,
+                exit_code: None,
+                started_at: None,
+                dispatched_at: Some(800.0),
+                created_at: 800.0,
+            },
+            title: "nightly run".into(),
+            workspace_display_name: Some("alpha".into()),
+            output_snapshot: Some(AutomationRunOutputSnapshotView {
+                format: AutomationRunOutputFormat::PlainText,
+                content: "fixture output".into(),
+                captured_at: 810.0,
+                truncated: true,
+            }),
+            session_exists: true,
+        };
+        let value = serde_json::to_value(&detail).unwrap();
+        assert_eq!(value["title"], json!("nightly run"));
+        assert_eq!(value["workspaceDisplayName"], json!("alpha"));
+        assert_eq!(value["outputSnapshot"]["format"], json!("plain_text"));
+        assert_eq!(value["outputSnapshot"]["truncated"], json!(true));
+        assert_eq!(value["sessionExists"], json!(true));
+        assert_eq!(value["terminalSessionId"], json!("s1"));
+        let back: AutomationRunDetail = serde_json::from_value(value).unwrap();
+        assert_eq!(back, detail);
+    }
+
+    #[test]
+    fn run_params_use_exact_camel_case_key() {
+        let params: AutomationRunParams =
+            serde_json::from_value(json!({ "runId": "ar:9" })).unwrap();
+        assert_eq!(params.run_id, "ar:9");
+        assert!(serde_json::from_value::<AutomationRunParams>(json!({"run_id": "ar:9"})).is_err());
     }
 
     #[test]

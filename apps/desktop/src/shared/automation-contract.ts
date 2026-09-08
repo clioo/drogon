@@ -89,6 +89,35 @@ export type AutomationRunNowResult = {
   error: string | null;
 };
 
+/** One runs-dashboard row: a run plus its owning automation's name. */
+export type AutomationRunListItem = AutomationRunView & {
+  title: string;
+  automationName: string;
+};
+
+export type AutomationRunsAllResult = {
+  runs: AutomationRunListItem[];
+  page: number;
+  perPage: number;
+  total: number;
+};
+
+export type AutomationRunOutputSnapshot = {
+  format: "plain_text";
+  content: string;
+  capturedAt: number;
+  truncated: boolean;
+};
+
+/** `automation.run` detail for the run page. */
+export type AutomationRunDetail = AutomationRunView & {
+  title: string;
+  workspaceDisplayName: string | null;
+  outputSnapshot: AutomationRunOutputSnapshot | null;
+  /** Whether the run's terminal session is still known to the daemon. */
+  sessionExists: boolean;
+};
+
 export interface AutomationBridge {
   list(): Promise<Result<{ automations: AutomationSummary[] }>>;
   create(input: AutomationCreateInput): Promise<Result<AutomationSummary>>;
@@ -99,12 +128,27 @@ export interface AutomationBridge {
     automationId: string;
     limit?: number;
   }): Promise<Result<{ runs: AutomationRunView[] }>>;
+  runsAll(input: {
+    page: number;
+    perPage: number;
+    status?: string;
+  }): Promise<Result<AutomationRunsAllResult>>;
+  run(input: { runId: string }): Promise<Result<AutomationRunDetail>>;
 }
 
 // Renderer request envelope for the single `drogon:automation` IPC
 // channel: the op selects the native `automation.*` method.
 export const automationRequestSchema = z.object({
-  op: z.enum(["create", "list", "update", "delete", "runNow", "history"]),
+  op: z.enum([
+    "create",
+    "list",
+    "update",
+    "delete",
+    "runNow",
+    "history",
+    "runsAll",
+    "run",
+  ]),
   params: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -138,6 +182,24 @@ export const automationInputSchemas = {
     automationId: id,
     limit: z.number().int().min(1).max(200).optional(),
   }),
+  runsAll: z.object({
+    page: z.number().int().min(1),
+    perPage: z.number().int().min(1).max(200),
+    status: z
+      .enum([
+        "pending",
+        "dispatching",
+        "dispatched",
+        "completed",
+        "skipped_precheck",
+        "skipped_missed",
+        "skipped_unavailable",
+        "skipped_needs_interactive_auth",
+        "dispatch_failed",
+      ])
+      .optional(),
+  }),
+  run: z.object({ runId: id }),
   list: z.object({}),
 };
 
@@ -163,6 +225,28 @@ const summarySchema = z.object({
   lastRun: lastRunSchema.nullable(),
 });
 
+const runViewSchema = z.object({
+  id: z.string(),
+  automationId: z.string(),
+  status: z.string(),
+  trigger: z.string(),
+  scheduledFor: z.number(),
+  workspaceId: z.string().nullable(),
+  terminalSessionId: z.string().nullable(),
+  error: z.string().nullable(),
+  exitCode: z.number().nullable(),
+  startedAt: z.number().nullable(),
+  dispatchedAt: z.number().nullable(),
+  createdAt: z.number(),
+});
+
+const outputSnapshotSchema = z.object({
+  format: z.literal("plain_text"),
+  content: z.string(),
+  capturedAt: z.number(),
+  truncated: z.boolean(),
+});
+
 // Native result validation (main side, after the RPC round trip).
 export const automationResultSchemas = {
   "automation.create": summarySchema,
@@ -177,24 +261,28 @@ export const automationResultSchemas = {
     refusal: z.string().nullable(),
     error: z.string().nullable(),
   }),
-  "automation.history": z.object({
+  "automation.history": z.object({ runs: z.array(runViewSchema) }),
+  "automation.runs_all": z.object({
     runs: z.array(
-      z.object({
-        id: z.string(),
-        automationId: z.string(),
-        status: z.string(),
-        trigger: z.string(),
-        scheduledFor: z.number(),
-        workspaceId: z.string().nullable(),
-        terminalSessionId: z.string().nullable(),
-        error: z.string().nullable(),
-        exitCode: z.number().nullable(),
-        startedAt: z.number().nullable(),
-        dispatchedAt: z.number().nullable(),
-        createdAt: z.number(),
-      }),
+      runViewSchema.and(
+        z.object({
+          title: z.string(),
+          automationName: z.string(),
+        }),
+      ),
     ),
+    page: z.number(),
+    perPage: z.number(),
+    total: z.number(),
   }),
+  "automation.run": runViewSchema.and(
+    z.object({
+      title: z.string(),
+      workspaceDisplayName: z.string().nullable().optional(),
+      outputSnapshot: outputSnapshotSchema.nullable(),
+      sessionExists: z.boolean(),
+    }),
+  ),
 };
 
 declare module "./session-contract" {

@@ -593,6 +593,19 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
     })
 }
 
+/// Reads the whole retained output tail of a session (cursor 0, one full
+/// ring's worth): used by `automation.run` to snapshot a run's live or
+/// retained session output. The outcome's `truncated` flag is set exactly
+/// when older bytes have already rotated out of the ring.
+pub(crate) fn read_tail(handle: &SessionHandle) -> crate::ring::ReadOutcome {
+    handle
+        .ring
+        .lock()
+        .unwrap()
+        .read(0, crate::ring::CAPACITY_BYTES)
+        .expect("cursor 0 is never a future cursor")
+}
+
 pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(bytes)
