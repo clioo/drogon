@@ -7,7 +7,6 @@ import {
   resolveLaunchDefaults,
   validateAgentDefaultField,
 } from "./agent-defaults";
-import { CliSection } from "./cli-section";
 import {
   SettingsFieldError,
   SettingsRow,
@@ -74,20 +73,20 @@ export function AgentsSection({
       <SettingsRow
         label="Default harness"
         description="Marked in the launch menu; blank fields there fall back to the values below."
+        alignTop
         control={
-          <select
-            aria-label="Default harness"
-            className="settings-select"
+          <SettingsSegmentedControl<string>
+            ariaLabel="Default harness"
             value={defaultHarnessId}
-            onChange={(event) => onDefaultHarnessChange(event.target.value)}
-          >
-            <option value="">None</option>
-            {editorIds.map((id) => (
-              <option key={id} value={id}>
-                {harnessDisplayName(id, harnesses)}
-              </option>
-            ))}
-          </select>
+            onChange={onDefaultHarnessChange}
+            options={[
+              { value: "", label: "None" },
+              ...editorIds.map((id) => ({
+                value: id,
+                label: harnessDisplayName(id, harnesses),
+              })),
+            ]}
+          />
         }
       />
       {editorIds.map((harnessId) => {
@@ -165,7 +164,6 @@ export function AgentsSection({
           </fieldset>
         );
       })}
-      <CliSection />
     </SettingsSection>
   );
 }

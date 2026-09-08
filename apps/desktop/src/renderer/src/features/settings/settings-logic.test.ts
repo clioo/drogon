@@ -17,19 +17,52 @@ import {
   isSettingsSectionId,
   SETTINGS_SECTIONS,
 } from "./settings-sections";
+import { filterSettingsSections } from "./settings-search";
 
 describe("settings sections", () => {
-  test("declares the five J10 sections in reference sidebar order", () => {
+  test("declares the six J10 sections in reference sidebar order", () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
       "agents",
+      "general",
       "git",
       "appearance",
       "notifications",
       "shortcuts",
     ]);
-    expect(DEFAULT_SETTINGS_SECTION).toBe("appearance");
+    expect(DEFAULT_SETTINGS_SECTION).toBe("general");
     expect(isSettingsSectionId("agents")).toBe(true);
+    expect(isSettingsSectionId("general")).toBe(true);
     expect(isSettingsSectionId("bogus")).toBe(false);
+  });
+
+  test("groups follow the reference nav groups (capabilities, setup, workflows, interface)", () => {
+    const byId = new Map(SETTINGS_SECTIONS.map((s) => [s.id, s.group]));
+    expect(byId.get("agents")).toBe("capabilities");
+    expect(byId.get("general")).toBe("setup");
+    expect(byId.get("git")).toBe("workflows");
+    expect(byId.get("appearance")).toBe("interface");
+    expect(byId.get("notifications")).toBe("interface");
+    expect(byId.get("shortcuts")).toBe("interface");
+  });
+
+  test("every section carries the reference nav icon", () => {
+    for (const section of SETTINGS_SECTIONS) {
+      expect(section.icon).toBeDefined();
+    }
+  });
+
+  test("general search bucket matches the ported rows", () => {
+    expect(filterSettingsSections("")).toEqual([
+      "agents",
+      "general",
+      "git",
+      "appearance",
+      "notifications",
+      "shortcuts",
+    ]);
+    expect(filterSettingsSections("cli")).toEqual(["general"]);
+    expect(filterSettingsSections("ask before deleting")).toEqual(["general"]);
+    expect(filterSettingsSections("star")).toEqual(["general"]);
   });
 });
 

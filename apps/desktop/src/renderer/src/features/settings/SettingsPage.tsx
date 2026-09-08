@@ -3,7 +3,7 @@
 //   src/renderer/src/components/settings/settings-page-renderer.tsx
 //     (settings-view-shell: left SettingsSidebar + scrollable content with
 //      max-w-4xl panes, "No settings found" empty state on empty search)
-// Adapted: the MVP section list is this repo's five implemented sections
+// Adapted: the MVP section list is this repo's six implemented sections
 // (no accounts/agents-catalog/repo sections); search filters both the nav
 // and the pane, and ⌘F focuses the search field.
 import { useEffect, useRef, useState } from "react";
@@ -11,6 +11,7 @@ import type { Harness, Project } from "../../../../shared/session-contract";
 import type { HarnessAgentDefault, Theme, TerminalGpuAcceleration } from "../../settings-store";
 import { AgentsSection } from "./agents-section";
 import { AppearanceSection } from "./appearance-section";
+import { GeneralSection } from "./general-section";
 import { GitSection } from "./git-section";
 import { NotificationsSection } from "./notifications-section";
 import { ShortcutsSection } from "./shortcuts-section";
@@ -182,6 +183,7 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     onHarnessDefaultChange={props.onHarnessDefaultChange}
                   />
                 ) : null}
+                {visible.includes("general") ? <GeneralSection /> : null}
                 {visible.includes("git") ? (
                   <GitSection workspacePath={props.workspacePath} />
                 ) : null}

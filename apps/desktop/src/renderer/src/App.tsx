@@ -457,7 +457,7 @@ export function App() {
     null,
   );
   const [settingsInitialSection, setSettingsInitialSection] =
-    useState<SettingsSectionId | "project">("appearance");
+    useState<SettingsSectionId | "project">("general");
   // Per-project settings section (task R14-A): the project whose
   // "Project Settings > {name}" section the settings page shows. Null
   // hides the project section; set together with the initial section.

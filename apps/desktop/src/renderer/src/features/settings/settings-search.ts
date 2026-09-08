@@ -4,7 +4,7 @@
 //     (normalize + match a free-text query against title/description/
 //      keywords entries)
 // Adapted: the reference matches per-row SettingsSearchEntry lists; the MVP
-// page matches per-section keyword buckets instead (five sections, no
+// page matches per-section keyword buckets instead (six sections, no
 // per-row search entries yet) — same normalize/match semantics.
 import type { SettingsSectionId } from "./settings-sections";
 
@@ -24,7 +24,13 @@ export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
     id: "agents",
     title: "Agents",
     description: "Default harness and per-harness launch defaults.",
-    keywords: ["harness", "model", "agent", "default", "launch", "claude", "pi", "opencode", "cli", "shell command", "drogon-cli"],
+    keywords: ["harness", "model", "agent", "default", "launch", "claude", "pi", "opencode"],
+  },
+  {
+    id: "general",
+    title: "General",
+    description: "Workspace defaults, app setup, and maintenance.",
+    keywords: ["general", "workspace", "delete", "deleting", "ask", "ask before", "confirm", "confirmation", "automation", "cli", "shell command", "drogon-cli", "star", "github", "support"],
   },
   {
     id: "git",
