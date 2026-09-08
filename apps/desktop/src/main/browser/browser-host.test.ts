@@ -72,7 +72,12 @@ function fakeContents(session?: GuestSessionLike): GuestContentsLike & {
     getURL: () => "https://example.test/",
     getTitle: () => "Example",
     executeJavaScript: async () => ({ title: "Example", text: "hello" }),
-    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    navigationHistory: {
+      canGoBack: vi.fn(() => false),
+      canGoForward: vi.fn(() => false),
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+    },
     setWindowOpenHandler(
       handler: (details: { url: string }) => { action: "deny" },
     ) { this.windowOpenHandler = handler; },
@@ -183,6 +188,7 @@ describe("browser host behavior", () => {
     const contents = (host as unknown as {
       views: Map<string, GuestViewLike>;
     }).views.get(tabId)?.webContents as ReturnType<typeof fakeContents>;
+    host.navigate(tabId, "https://missing.test/");
     (contents.listeners.get("did-fail-load") as unknown as (
       ...args: unknown[]
     ) => void)?.(
@@ -205,6 +211,123 @@ describe("browser host behavior", () => {
       tabId,
       url: "https://example.test/next",
       loading: true,
+    });
+  });
+  test("back then forward commits the history target instead of stale getURL", () => {
+    const { host } = harness();
+    host.createTab("w1", "https://first.test/");
+    const tabId = host.list().tabs[0].tabId;
+    const contents = (host as unknown as {
+      views: Map<string, GuestViewLike>;
+    }).views.get(tabId)?.webContents as ReturnType<typeof fakeContents>;
+    const history = contents.navigationHistory as {
+      canGoBack: ReturnType<typeof vi.fn>;
+      canGoForward: ReturnType<typeof vi.fn>;
+      goBack: ReturnType<typeof vi.fn>;
+      goForward: ReturnType<typeof vi.fn>;
+    };
+    history.canGoBack.mockReturnValue(true);
+    history.canGoForward.mockReturnValue(false);
+
+    const started = contents.listeners.get("did-start-navigation") as unknown as (
+      event: unknown,
+      url: string,
+      inPlace: boolean,
+      mainFrame: boolean,
+    ) => void;
+    const committed = contents.listeners.get("did-navigate") as unknown as (
+      event: unknown,
+      url: string,
+      responseCode: number,
+      statusText: string,
+    ) => void;
+    const stopped = contents.listeners.get("did-stop-loading") as unknown as () => void;
+
+    started({}, "https://first.test/", false, true);
+    committed({}, "https://first.test/", 200, "OK");
+    expect(host.list().tabs[0]).toMatchObject({
+      url: "https://first.test/",
+      loading: false,
+      committed: true,
+    });
+
+    history.canGoBack.mockReturnValue(true);
+    history.canGoForward.mockReturnValue(false);
+    expect(host.back(tabId)).toMatchObject({ tabId });
+    expect(history.goBack).toHaveBeenCalledTimes(1);
+    started({}, "about:blank", false, true);
+    // A stop event has no target URL and must not settle a history load.
+    stopped();
+    expect(host.list().tabs[0]).toMatchObject({
+      url: "about:blank",
+      loading: true,
+    });
+    committed({}, "about:blank", 200, "OK");
+    expect(host.list().tabs[0]).toMatchObject({
+      url: "about:blank",
+      loading: false,
+    });
+
+    history.canGoBack.mockReturnValue(false);
+    history.canGoForward.mockReturnValue(true);
+    expect(host.forward(tabId)).toMatchObject({ tabId });
+    expect(history.goForward).toHaveBeenCalledTimes(1);
+    started({}, "https://first.test/", false, true);
+    stopped();
+    history.canGoBack.mockReturnValue(true);
+    history.canGoForward.mockReturnValue(false);
+    expect(host.list().tabs[0]).toMatchObject({
+      url: "https://first.test/",
+      loading: true,
+    });
+    committed({}, "https://first.test/", 200, "OK");
+    expect(host.list().tabs[0]).toMatchObject({
+      url: "https://first.test/",
+      loading: false,
+      canGoBack: true,
+      canGoForward: false,
+    });
+  });
+  test("late failure from an older navigation cannot settle the newer target", () => {
+    const { host } = harness();
+    host.createTab("w1", "https://first.test/");
+    const tabId = host.list().tabs[0].tabId;
+    const contents = (host as unknown as {
+      views: Map<string, GuestViewLike>;
+    }).views.get(tabId)?.webContents as ReturnType<typeof fakeContents>;
+    const started = contents.listeners.get("did-start-navigation") as unknown as (
+      event: unknown,
+      url: string,
+      inPlace: boolean,
+      mainFrame: boolean,
+    ) => void;
+    const failed = contents.listeners.get("did-fail-load") as unknown as (
+      event: unknown,
+      code: number,
+      description: string,
+      url: string,
+      mainFrame: boolean,
+    ) => void;
+    started({}, "https://old.test/", false, true);
+    started({}, "https://new.test/", false, true);
+    failed({}, -105, "ERR_NAME_NOT_RESOLVED", "https://old.test/", true);
+    expect(host.list().tabs[0]).toMatchObject({
+      url: "https://new.test/",
+      loading: true,
+      error: null,
+    });
+    const committed = contents.listeners.get("did-navigate") as unknown as (
+      event: unknown,
+      url: string,
+      responseCode: number,
+      statusText: string,
+    ) => void;
+    committed({}, "https://new.test/", 200, "OK");
+    failed({}, -105, "ERR_NAME_NOT_RESOLVED", "https://old.test/", true);
+    expect(host.list().tabs[0]).toMatchObject({
+      url: "https://new.test/",
+      loading: false,
+      error: null,
     });
   });
   test("blocked navigate keeps an honest pane error", () => {

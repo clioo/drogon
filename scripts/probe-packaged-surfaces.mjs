@@ -376,9 +376,19 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
   // loopback HTTP fixture serves the marker page and the agent path
   // (`browser tabs`/`browser snapshot` through the daemon relay) proves it.
   const guest = `DROGON_BROWSER_GUEST_${Date.now()}`;
+  const readme = `${guest}_README`;
   const server = createServer((request, response) => {
     response.writeHead(200, { "content-type": "text/html" });
-    response.end(`<html><body><h1>${guest}</h1></body></html>`);
+    if (request.url === "/README.md") {
+      response.end(`<html><title>README.md</title><body><h1>${readme}</h1></body></html>`);
+      return;
+    }
+    // Keep the first page untitled so the existing tab-strip assertion sees
+    // Electron's URL fallback; the README route has a title for the
+    // Back/Forward navigation target without changing that baseline.
+    response.end(
+      `<html><body><h1>${guest}</h1><a href="/README.md">README.md</a></body></html>`,
+    );
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const guestUrl = `http://127.0.0.1:${server.address().port}/`;
@@ -473,6 +483,61 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
       "CLI browser snapshot must carry the guest marker",
     );
     terminalChecks.push("cli-browser-snapshot-proves-ui-created-guest");
+
+    // #264 regression: a committed page followed by README.md, Back, and
+    // Forward must settle the same tab again. The old host selected the
+    // outgoing getURL() from did-stop-loading, leaving the Electron guest
+    // unresponsive after Forward. Poll the real bridge state (not a mock)
+    // and finish with the daemon relay snapshot so CDP and the guest both
+    // prove liveness.
+    const readmeUrl = new URL("README.md", guestUrl).href;
+    const waitForBrowserTab = async (url) => {
+      const deadline = Date.now() + 30000;
+      let last = null;
+      for (;;) {
+        last = await page
+          .evaluate(async ({ tabId }) => {
+            const state = await window.drogon.browser.getState();
+            if (!state.ok) return null;
+            return state.result.tabs.find((tab) => tab.tabId === tabId) ?? null;
+          }, { tabId })
+          .catch(() => null);
+        if (last && last.url === url && !last.loading && last.error === null)
+          return last;
+        if (Date.now() >= deadline)
+          throw new Error(`browser tab did not settle at ${url}: ${JSON.stringify(last)}`);
+        await delay(100);
+      }
+    };
+    await page.evaluate(async ({ tabId, url }) => {
+      const result = await window.drogon.browser.navigate({ tabId, url });
+      if (!result.ok) throw new Error(result.error.message);
+    }, { tabId, url: readmeUrl });
+    await waitForBrowserTab(readmeUrl);
+    const back = pane.getByRole("button", { name: "Back", exact: true });
+    await back.waitFor();
+    assert.equal(await back.isEnabled(), true);
+    await back.click();
+    const afterBack = await waitForBrowserTab(guestUrl);
+    assert.equal(afterBack.canGoForward, true);
+    const forward = pane.getByRole("button", { name: "Forward", exact: true });
+    await forward.waitFor();
+    assert.equal(await forward.isEnabled(), true);
+    await forward.click();
+    const afterForward = await waitForBrowserTab(readmeUrl);
+    assert.equal(afterForward.canGoBack, true);
+    const forwardSnapshot = await snapshotAttempt();
+    assert.equal(
+      forwardSnapshot.ok,
+      true,
+      `CLI browser snapshot after Forward must succeed: ${JSON.stringify(forwardSnapshot.error ?? forwardSnapshot).slice(0, 300)}`,
+    );
+    assert.equal(
+      browserSnapshotShowsGuest(forwardSnapshot.result, readme),
+      true,
+      "CLI browser snapshot after Forward must carry the README marker",
+    );
+    terminalChecks.push("browser-back-forward-keeps-guest-and-cdp-responsive");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -9,6 +9,7 @@ import {
   type DaemonRestartDeps,
 } from "./daemon-restart";
 import type { Result } from "../shared/session-contract";
+import { resultSchemas } from "../shared/result-validation";
 
 function ok(result: unknown): Result<unknown> {
   return { ok: true, result };
@@ -54,6 +55,20 @@ function scripted(
 }
 
 describe("daemon restart availability", () => {
+  test("the admitted shutdown reply has a native-client result schema", () => {
+    expect(
+      resultSchemas["runtime.shutdown"].safeParse({
+        ...fences,
+        accepted: true,
+      }).success,
+    ).toBe(true);
+    expect(
+      resultSchemas["runtime.shutdown"].safeParse({
+        ...fences,
+        accepted: false,
+      }).success,
+    ).toBe(false);
+  });
   test("a dev daemon without the binary seam is external", () => {
     const availability = restartAvailability(
       deps({ isPackaged: false, devDaemonBinary: null }),
@@ -137,11 +152,8 @@ describe("handleDaemonRestart", () => {
             }),
         ],
         "session.stop": [() => ok({})],
-        // Admitted shutdowns surface as this app's own contract gap
-        // (result-validation has no `runtime.shutdown` entry); the
-        // absence poll below is what proves the stop.
         "runtime.shutdown": [
-          () => fail("internal_error", "expected contract"),
+          () => ok({ ...fences, accepted: true }),
         ],
       },
       seen,

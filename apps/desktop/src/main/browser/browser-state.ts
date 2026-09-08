@@ -41,6 +41,8 @@ export type HostAction =
   | { type: "tab-closed"; tabId: string }
   | { type: "active-changed"; tabId: string | null }
   | { type: "load-started"; tabId: string; url: string }
+  | { type: "navigation-committed"; tabId: string; url: string }
+  | { type: "navigation-aborted"; tabId: string; url: string }
   | { type: "load-stopped"; tabId: string; url: string }
   | {
       type: "load-failed";
@@ -129,6 +131,8 @@ export function applyHostAction(
       return { ...snapshot, activeTabId: action.tabId };
     }
     case "load-started":
+    case "navigation-committed":
+    case "navigation-aborted":
     case "load-stopped":
     case "load-failed":
     case "load-blocked":
@@ -149,7 +153,36 @@ export function applyHostAction(
             loadError: null,
           };
           break;
+        case "navigation-committed":
+          // `did-navigate`/`did-navigate-in-page` are the authoritative
+          // commit signals. `did-stop-loading` can belong to a navigation
+          // that was superseded, so it must never be the event that chooses
+          // the address-bar URL or commits a tab.
+          next = {
+            ...current,
+            phase: "ready",
+            url: action.url,
+            message: null,
+            loadError: null,
+            committed: true,
+          };
+          break;
+        case "navigation-aborted":
+          // An explicit stop or an aborted superseded navigation returns the
+          // chrome to the last committed document. The host supplies that
+          // URL because `getURL()` can still be mid-navigation.
+          next = {
+            ...current,
+            phase: "ready",
+            url: action.url || current.url,
+            message: null,
+            loadError: null,
+          };
+          break;
         case "load-stopped":
+          // Fallback for Electron paths that stop without a commit event
+          // (notably an explicit stop). Keep the host's requested URL rather
+          // than reading a possibly stale getURL() from the outgoing page.
           // A stop/finish for a tab stuck in blocked/error keeps the honest
           // state instead of flipping to ready with no commit.
           next =
@@ -157,10 +190,10 @@ export function applyHostAction(
               ? {
                   ...current,
                   phase: "ready",
-                  url: action.url,
+                  url: current.url || action.url,
                   message: null,
                   loadError: null,
-                  committed: true,
+                  committed: current.committed,
                 }
               : current;
           break;

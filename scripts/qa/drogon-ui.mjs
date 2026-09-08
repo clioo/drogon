@@ -27,6 +27,7 @@
 //
 //   node scripts/qa/drogon-ui.mjs start --bundle <Drogon.app>
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile, open as openFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -39,6 +40,16 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const appDir = path.join(root, "apps", "desktop");
 const qaDir = path.join(root, ".qa");
 const sessionFile = path.join(qaDir, "session.json");
+// macOS limits Unix socket pathnames to SUN_LEN bytes. A checkout path can
+// make `.qa/bundle-data/runtime-v1.sock` too long, so packaged QA keeps only
+// its data directory in a short, checkout-scoped temp path. The profile and
+// session report remain under `.qa`; `--wipe` still removes this exact data.
+const bundleDataRoot = process.env.DROGON_QA_BUNDLE_DATA_DIR
+  ? path.resolve(process.env.DROGON_QA_BUNDLE_DATA_DIR)
+  : path.join(
+      "/tmp",
+      `drogon-ui-bundle-${createHash("sha256").update(root).digest("hex").slice(0, 8)}`,
+    );
 const exe = (name) => (process.platform === "win32" ? `${name}.exe` : name);
 const daemonBin = path.join(root, "target", "debug", exe("drogond"));
 const cliBin = path.join(root, "target", "debug", exe("drogon-cli"));
@@ -128,7 +139,9 @@ async function start() {
   }
   // Bundle runs keep their own data/profile/logs so packaged first-run
   // walkthroughs never touch dev QA state (and vice versa).
-  const dataDir = path.join(qaDir, packaged ? "bundle-data" : "data");
+  const dataDir = packaged
+    ? path.join(bundleDataRoot, "data")
+    : path.join(qaDir, "data");
   const profileDir = path.join(qaDir, packaged ? "bundle-profile" : "profile");
   const logDir = path.join(qaDir, "logs");
   await mkdir(dataDir, { recursive: true });

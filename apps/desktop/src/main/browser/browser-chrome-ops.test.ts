@@ -41,7 +41,12 @@ function fakeContents(): GuestContentsLike & {
     },
     getTitle: () => "Example",
     executeJavaScript: async () => ({}),
-    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    navigationHistory: {
+      canGoBack: () => false,
+      canGoForward: () => false,
+      goBack() {},
+      goForward() {},
+    },
     session: {
       setPermissionRequestHandler() {},
       setPermissionCheckHandler() {},
@@ -280,6 +285,7 @@ describe("browser chrome failure detail", () => {
     const { host } = harness();
     const tabId = openTab(host);
     const contents = contentsOf(host, tabId);
+    host.navigate(tabId, "https://down.test/");
     (
       contents.listeners.get("did-fail-load") as unknown as (
         ...args: unknown[]
@@ -300,6 +306,7 @@ describe("browser chrome failure detail", () => {
     const { host } = harness();
     const tabId = openTab(host);
     const contents = contentsOf(host, tabId);
+    host.navigate(tabId, "https://down.test/");
     (
       contents.listeners.get("did-fail-load") as unknown as (
         ...args: unknown[]

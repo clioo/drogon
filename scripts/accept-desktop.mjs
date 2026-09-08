@@ -19,6 +19,7 @@ import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
+import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
 import {
   probeGhUnavailable,
   probePackagedSurfaces,
@@ -65,7 +66,7 @@ const appRequire = createRequire(path.join(appDir, "package.json"));
 const electron = appRequire("electron");
 const fixture = await mkdtemp(path.join(tmpdir(), "dgu-"));
 const dataDir = path.join(fixture, "data");
-const fixtureDaemon = packaged
+let fixtureDaemon = packaged
   ? packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir)
   : null;
 const workspace = path.join(fixture, "folder");
@@ -325,6 +326,26 @@ try {
       "packaged-quit-and-reopen-preserves-incumbent-runtime-session-and-output",
     );
   }
+  if (packaged) {
+    // Run the destructive daemon-restart probe only after the packaged
+    // quit/reopen check. That check intentionally proves the incumbent
+    // session remains live; restart then turns it into the exited row that
+    // the probe verifies, without invalidating the earlier assertion.
+    report.checks.push(
+      ...(await probeRenderedDaemonRestart({
+        page,
+        workspaceId: registered.id,
+        cli: packaged.cli,
+        dataDir,
+        output,
+      })),
+    );
+    // The fixture handle intentionally pins one service identity. A managed
+    // restart creates a new identity, so capture a fresh handle before the
+    // final quiescent cleanup rather than weakening that ownership check.
+    fixtureDaemon = packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir);
+    await fixtureDaemon.capture();
+  }
   await page.getByRole("button", { name: "New tab", exact: true }).click();
   await page
     .getByRole("menuitem", { name: /^New Terminal/ })
@@ -356,7 +377,16 @@ try {
   await page.waitForFunction(
     () => document.querySelectorAll('[role="tab"]').length === 1,
   );
-  await waitForTerminalText(page, marker);
+  if (!packaged) {
+    await waitForTerminalText(page, marker);
+  } else {
+    // The packaged daemon-restart probe intentionally stops the original
+    // session, so its retained terminal output is no longer the live tab
+    // proof used by this generic keyboard journey. The restart probe already
+    // proves the exited-row reconnect; here only assert that the surviving
+    // tab is rendered after the sibling close.
+    await page.getByRole("tab").first().waitFor();
+  }
   report.checks.push("keyboard-tab-navigation-and-sibling-close");
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });

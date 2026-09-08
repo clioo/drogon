@@ -12,6 +12,13 @@
 
 pub const LOCK_FILE_NAME: &str = ".drogond.lock";
 
+/// A replacement can be launched as soon as the old daemon has admitted
+/// `runtime.shutdown`, but that reply is sent before the serving thread has
+/// drained connections and dropped its process-lifetime data-dir lock. Keep
+/// the normal probe immediate while giving a startup a bounded handoff window
+/// for that owned lock to be released.
+pub const STARTUP_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[cfg(unix)]
 mod unix {
     use std::fs::{File, OpenOptions};
@@ -58,6 +65,29 @@ mod unix {
         Ok(DataDirLock { _file: file })
     }
 
+    /// Acquire the process-lifetime lock, waiting only for a bounded startup
+    /// handoff when the incumbent is already winding down. The immediate
+    /// `acquire_exclusive` remains available for callers that need a pure
+    /// probe; this path is used by the real daemon startup.
+    pub fn acquire_exclusive_with_wait(
+        data_dir: &Path,
+        max_wait: std::time::Duration,
+    ) -> io::Result<DataDirLock> {
+        let deadline = std::time::Instant::now() + max_wait;
+        loop {
+            match acquire_exclusive(data_dir) {
+                Ok(lock) => return Ok(lock),
+                Err(error)
+                    if error.kind() == io::ErrorKind::AddrInUse
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -70,6 +100,19 @@ mod unix {
             assert!(second.is_err());
             drop(first);
             assert!(acquire_exclusive(dir.path()).is_ok());
+        }
+
+        #[test]
+        fn startup_wait_retries_until_the_prior_owner_releases() {
+            let dir = tempfile::tempdir().unwrap();
+            let first = acquire_exclusive(dir.path()).unwrap();
+            let path = dir.path().to_path_buf();
+            let waiter = std::thread::spawn(move || {
+                acquire_exclusive_with_wait(&path, std::time::Duration::from_secs(1)).is_ok()
+            });
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            drop(first);
+            assert!(waiter.join().unwrap());
         }
 
         #[test]
@@ -91,7 +134,7 @@ mod unix {
 }
 
 #[cfg(unix)]
-pub use unix::{DataDirLock, acquire_exclusive};
+pub use unix::{DataDirLock, acquire_exclusive, acquire_exclusive_with_wait};
 
 // Windows uses the OS file lock; data-file ACLs are inherited from the parent.
 #[cfg(windows)]
@@ -158,7 +201,26 @@ mod windows {
         }
         Ok(DataDirLock { _file: file })
     }
+
+    pub fn acquire_exclusive_with_wait(
+        data_dir: &Path,
+        max_wait: std::time::Duration,
+    ) -> io::Result<DataDirLock> {
+        let deadline = std::time::Instant::now() + max_wait;
+        loop {
+            match acquire_exclusive(data_dir) {
+                Ok(lock) => return Ok(lock),
+                Err(error)
+                    if error.kind() == io::ErrorKind::AddrInUse
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
 }
 
 #[cfg(windows)]
-pub use windows::{DataDirLock, acquire_exclusive};
+pub use windows::{DataDirLock, acquire_exclusive, acquire_exclusive_with_wait};
