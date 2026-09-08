@@ -12,12 +12,15 @@
    workspace-relative path, matching the source's title attribute. The
    source's close-button tooltip/shortcut label and its rename, preview
    and git-status tab adornments have no counterpart in this build, so
-   the label row stays a plain base-name span. */
-import { FileText, Pin, X } from "lucide-react";
+   the label row stays a plain base-name span. R16-BJ (#294/#302) ports
+   the source's diff-tab icon (GitCompareArrows) and its missing-file
+   tab state (line-through label plus the mutation badge, verbatim
+   classes and copy from EditorFileTab.tsx's isMissingFileMutation). */
+import { FileText, GitCompareArrows, Pin, X } from "lucide-react";
 import type { DraggableSyntheticListeners } from "@dnd-kit/core";
 import { Tooltip } from "radix-ui";
 import type { EditorTabState } from "../editor-tab";
-import { editorTabLabel } from "../editor-tab";
+import { editorDiffTabLabel, editorTabLabel } from "../editor-tab";
 import {
   ACTIVE_TAB_INDICATOR_CLASSES,
   getDropIndicatorClasses,
@@ -63,7 +66,13 @@ export function EditorStripTab({
   sortableRef?: (node: HTMLElement | null) => void;
   dragListeners?: DraggableSyntheticListeners;
 }): React.JSX.Element {
-  const tabLabel = editorTabLabel(tab.path);
+  const isDiff = tab.diff !== undefined;
+  const tabLabel = isDiff
+    ? editorDiffTabLabel(tab.path, tab.diff!)
+    : editorTabLabel(tab.path);
+  // Why: only deleted/renamed mean the file is gone from its path, which
+  // is what strikethrough conveys (fork EditorFileTab.tsx verbatim).
+  const isMissingFileMutation = tab.missing !== undefined;
   const pinned = isPinned === true;
   const tabRoot = (
     <div
@@ -104,14 +113,30 @@ export function EditorStripTab({
       {isActive && (
         <span className={ACTIVE_TAB_INDICATOR_CLASSES} aria-hidden />
       )}
-      <FileText className="size-3 mr-1 text-muted-foreground" aria-hidden />
+      {isDiff ? (
+        <GitCompareArrows
+          className={`size-3 mr-1 shrink-0 ${isActive ? "text-foreground" : "text-muted-foreground"}`}
+          aria-hidden
+        />
+      ) : (
+        <FileText className="size-3 mr-1 text-muted-foreground" aria-hidden />
+      )}
       {pinned && (
         <Pin
           className="mr-1 size-3 shrink-0 text-muted-foreground"
           aria-hidden
         />
       )}
-      <span className={`${TAB_LABEL_WIDTH_CLASSES} mr-1`}>{tabLabel}</span>
+      <span
+        className={`${TAB_LABEL_WIDTH_CLASSES} mr-1${isMissingFileMutation ? " line-through" : ""}`}
+      >
+        {tabLabel}
+      </span>
+      {isMissingFileMutation && (
+        <span className="shrink-0 text-[10px] leading-none font-semibold tracking-wide text-muted-foreground">
+          {tab.missing}
+        </span>
+      )}
       {/* Dirty dot and close button share the same slot to prevent tab width shift during auto-save.
          When dirty: dot is shown, close button appears on hover (replacing the dot).
          When clean: close button is shown normally (visible on active tab, on hover for others). */}

@@ -26,6 +26,11 @@ export type GitBranch = {
   // older daemons; empty means no remote configured (distinct from
   // no-upstream). The panel treats absent as unknown, never as no-remote.
   remotes?: string[] | null;
+  // #176 residual, additive: the repo's default base ref (fork
+  // repo-default-base-ref.ts: verified origin/HEAD, then the fixed probe
+  // ladder). Null/absent falls back to the literal "base" in the
+  // clean-state sentence.
+  baseRef?: string | null;
 };
 export type GitStatusResult = GitScope & {
   branch: GitBranch;
@@ -154,6 +159,9 @@ export const gitResultSchemas = {
       // #176, additive: nullish so older daemons without the field still
       // validate; names only (the daemon never sends URLs).
       remotes: z.array(z.string().min(1).max(256)).max(32).nullish(),
+      // #176 residual, additive: display ref form ("origin/main", never a
+      // URL or a full refs/ path).
+      baseRef: z.string().min(1).max(1_024).nullish(),
     }),
     entries: z.array(statusEntry).max(50_000),
     truncated: z.boolean(),

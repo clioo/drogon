@@ -205,6 +205,32 @@ describe("editor More-actions menu", () => {
     await openMenu();
     expect(screen.queryByRole("menuitem", { name: "Export as PDF" })).toBeNull();
   });
+
+});
+
+describe("editor initialView (R16-BJ #294: unstaged markdown row click)", () => {
+  const loadChanges = (): Promise<ChangesLoadResult> =>
+    Promise.resolve({ ok: true, diff: DIFF, truncated: false });
+
+  it("initialView=changes lands on the Changes view without a toggle click", async () => {
+    renderPane({ path: "notes.md", loadChanges, initialView: "changes" });
+    expect(await screen.findByTestId("diff-stub")).toBeTruthy();
+    expect(screen.queryByTestId("monaco-stub")).toBeNull();
+  });
+
+  it("toggling back to Edit reports the view mode like the fork's setEditorViewMode", async () => {
+    const onViewModeChange = vi.fn();
+    renderPane({
+      path: "src/a.ts",
+      loadChanges,
+      initialView: "changes",
+      onViewModeChange,
+    });
+    await screen.findByTestId("diff-stub");
+    fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+    expect(onViewModeChange).toHaveBeenCalledWith("edit");
+    expect(await screen.findByTestId("monaco-stub")).toBeTruthy();
+  });
 });
 
 describe("editor save contract", () => {
