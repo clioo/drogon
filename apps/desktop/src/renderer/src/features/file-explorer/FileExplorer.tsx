@@ -31,6 +31,8 @@ import {
   type ExplorerCapabilities,
   type RowMenuItemId,
 } from "./explorer-policy";
+import { MAX_IGNORED_PATHS } from "../../../../shared/file-contract";
+import { useFileExplorerIgnoredPaths } from "./use-file-explorer-ignored-paths";
 
 /** Lazy backend surface the explorer touches — injected, never imported. */
 export interface FileExplorerDataSource {
@@ -42,6 +44,12 @@ export interface FileExplorerDataSource {
   ): Promise<Result<null>>;
   rename?(from: string, to: string): Promise<Result<null>>;
   remove?(paths: string[]): Promise<Result<null>>;
+  /**
+   * Git-ignored classification for visible rows (R16-AM, fork
+   * `useFileExplorerIgnoredPaths` parity). OPTIONAL until the bridge
+   * exposes `files.ignored`: absent means no row is ever decorated.
+   */
+  ignored?(paths: readonly string[]): Promise<Result<readonly string[]>>;
   /**
    * Live change ticks (R16-L #157, fork `fs:changed` ordering). OPTIONAL:
    * absent means the tree refreshes on its own mutations only. The
@@ -215,8 +223,9 @@ export function FileExplorer({
       // explicit error surfaced inline (or in the delete dialog) — the
       // shape never depends on method-sniffing.
       canMutate: true,
-      // No shell bridge exists in this repo: the item stays visible but
-      // disabled with its reason, never a dead click.
+      // Reveal stays disabled: the shell bridge exists, but the row's
+      // absolute root is owned by the host panel (features/workspaces),
+      // which does not pass it down yet. Follow-up, not a dead click.
       canReveal: false,
       canOpenTerminal: !!onOpenTerminal,
     }),
@@ -445,6 +454,25 @@ export function FileExplorer({
     return projectNameFilter(fullCache, filter, { showDotfiles });
   }, [hasFilter, visibleRows, fullCache, filter, showDotfiles]);
   const rowsByPath = useMemo(() => new Map(rows.map((row) => [row.path, row])), [rows]);
+  // Git-ignored dimming (R16-AM, fork useFileExplorerIgnoredPaths parity):
+  // one debounced daemon query over the visible rows; a missing source
+  // method (older daemon) decorates nothing, never errors.
+  const ignoredQuery = useMemo(() => {
+    const query = source?.ignored;
+    if (!query) return null;
+    return async (paths: readonly string[]): Promise<ReadonlySet<string>> => {
+      const result = await query(paths.slice(0, MAX_IGNORED_PATHS));
+      if (!result.ok) return new Set();
+      return new Set(result.result);
+    };
+  }, [source]);
+  const ignoredRowPaths = useMemo(() => rows.map((row) => row.path), [rows]);
+  const ignoredPaths = useFileExplorerIgnoredPaths({
+    scopeKey: workspaceId,
+    relativePaths: ignoredRowPaths,
+    shouldDebounce: hasFilter,
+    queryIgnored: ignoredQuery,
+  });
 
   // Why no `.focus()` here: the fork's autoReveal only scrolls the row into
   // view (useFileExplorerAutoReveal: virtualizer.scrollToIndex + select).
@@ -1043,6 +1071,7 @@ export function FileExplorer({
             expanded={expanded}
             pendingDirs={pendingDirs}
             selectedPaths={selectedPaths}
+            ignoredPaths={ignoredPaths}
             inline={inline}
             hasFilter={hasFilter}
             filterLoading={filterLoading}

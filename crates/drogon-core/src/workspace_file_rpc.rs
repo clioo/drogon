@@ -7,6 +7,7 @@ use drogon_protocol::workspace_files::{
 };
 use drogon_protocol::{MAX_FRAME_BYTES, RpcError};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{Engine, error, workspace, workspace_files};
@@ -131,12 +132,9 @@ impl Engine {
         }))
     }
 
-    // NOT YET DISPATCHED: `lib.rs` (coordinator-owned) has no
-    // `files.create`/`files.rename`/`files.delete` arms yet, so these are
-    // unreachable until that three-line wiring lands — the PR body carries
-    // the exact patch. The `allow` keeps the workspace `-D warnings` gates
-    // green meanwhile; the primitives underneath are covered by the
-    // standalone `tests/workspace_files_explorer.rs` suite.
+    // Dispatched from `lib.rs` (the `files.create` arm landed with R16-L;
+    // the `allow` below stays harmless). Covered by the standalone
+    // `tests/workspace_files_explorer.rs` suite.
     #[allow(dead_code)]
     pub(super) fn do_files_create(&self, value: &Value) -> Result<Value, RpcError> {
         let params: FileCreateParams = decode(value)?;
@@ -154,7 +152,7 @@ impl Engine {
         Ok(result)
     }
 
-    // NOT YET DISPATCHED: see `do_files_create`.
+    // Dispatched from `lib.rs`; see `do_files_create`.
     #[allow(dead_code)]
     pub(super) fn do_files_rename(&self, value: &Value) -> Result<Value, RpcError> {
         let params: FileRenameParams = decode(value)?;
@@ -171,7 +169,37 @@ impl Engine {
         )
     }
 
-    // NOT YET DISPATCHED: see `do_files_create`.
+    /// Read-only `files.ignored` (R16-AM): reports which of the given
+    /// workspace-relative paths git ignores, so the explorer can dim them
+    /// like the reference. Dispatched read-only like `files.list` — git
+    /// state is never mutated, only queried.
+    pub(super) fn do_files_ignored(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: FileIgnoredParams = decode(value)?;
+        params.validate_target(&self.host_id)?;
+        let scope = FileScope {
+            host_id: params.host_id.clone(),
+            workspace_id: params.workspace_id.clone(),
+            path: String::new(),
+        };
+        let root = self.file_workspace_root(&scope)?;
+        let ignored = workspace_files::check_ignored(&root, &params.paths)?;
+        // Leave room for the scope, response envelope and escaped request ID.
+        let mut remaining = MAX_FRAME_BYTES / 2;
+        let mut echoed = Vec::new();
+        for path in ignored {
+            let bytes = path.len() + 1;
+            if bytes > remaining {
+                break;
+            }
+            remaining -= bytes;
+            echoed.push(json!(path));
+        }
+        Ok(
+            json!({"hostId":params.host_id, "workspaceId":params.workspace_id, "ignored":Value::Array(echoed)}),
+        )
+    }
+
+    // Dispatched from `lib.rs`; see `do_files_create`.
     #[allow(dead_code)]
     pub(super) fn do_files_delete(&self, value: &Value) -> Result<Value, RpcError> {
         let params: FileDeleteParams = decode(value)?;
@@ -184,6 +212,33 @@ impl Engine {
         let root = self.file_workspace_root(&scope)?;
         let deleted = workspace_files::delete_paths(&root, &params.paths)?;
         Ok(json!({"hostId":params.host_id, "workspaceId":params.workspace_id, "deleted":deleted}))
+    }
+}
+
+/// Bounded multi-path scope for `files.ignored` (R16-AM): the explorer's
+/// visible workspace-relative rows. Declared here — not in the frozen
+/// protocol crate — like the daemon-local `MAX_IGNORED_PATHS` bound it
+/// mirrors: only the `files.ignored` method name is new on the wire.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileIgnoredParams {
+    host_id: String,
+    workspace_id: String,
+    paths: Vec<String>,
+}
+
+impl FileIgnoredParams {
+    fn validate_target(&self, host_id: &str) -> Result<(), RpcError> {
+        use drogon_protocol::orchestration_common::validate_opaque_token;
+        validate_opaque_token(&self.host_id, 128, "Invalid file execution host.")?;
+        validate_opaque_token(&self.workspace_id, 128, "Invalid file workspace identity.")?;
+        if self.host_id != host_id {
+            return Err(RpcError::new(
+                "unsupported_host",
+                "The file execution host is not served by this endpoint.",
+            ));
+        }
+        Ok(())
     }
 }
 

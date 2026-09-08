@@ -33,7 +33,7 @@ export type ExplorerCapabilities = {
   canMutate: boolean;
   /** Reason shown when mutation UI is disabled. */
   mutateDisabledReason?: string;
-  /** Reveal uses no shell bridge in this repo (see FileExplorerMenus). */
+  /** Reveal waits on the host panel passing the workspace root down. */
   canReveal: boolean;
   /** Open in Terminal spawns through the existing session bridge. */
   canOpenTerminal: boolean;
@@ -104,8 +104,9 @@ export function buildRowMenuItems(
     ...(node.isDirectory && caps.canOpenTerminal
       ? [{ id: "open-in-terminal", label: "Open in Terminal" } as RowMenuItem]
       : []),
-    // No shell bridge exists in this repo: the item stays visible but
-    // disabled with its reason, never a dead click and never hidden.
+    // The host panel does not pass the workspace root down yet: the item
+    // stays visible but disabled with its reason, never a dead click and
+    // never hidden.
     {
       id: "reveal-in-finder",
       label: revealLabel(),
@@ -113,7 +114,7 @@ export function buildRowMenuItems(
         ? {}
         : {
             disabled: true as const,
-            disabledReason: "Reveal in Finder needs the shell bridge, which is not wired in this build.",
+            disabledReason: "Reveal in Finder needs the workspace root from the host panel, which is not wired yet.",
           }),
     },
     {

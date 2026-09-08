@@ -11,6 +11,7 @@ import {
   MAX_FILE_BYTES,
   MAX_FILE_SEARCH_QUERY_BYTES,
   MAX_FILE_SEARCH_RESULTS,
+  MAX_IGNORED_PATHS,
 } from "../shared/file-contract";
 import type { FilesChangedTick } from "../shared/file-contract";
 import type { Result } from "../shared/session-contract";
@@ -102,12 +103,16 @@ const fileSearchResultSchema = z.object({
 });
 
 export type FileSearchMethod = "fileSearch";
+export type FileIgnoredMethod = "fileIgnored";
 
 export async function dispatchFileRequest(
-  method: FileMethod | ExplorerFileMethod | FileSearchMethod,
+  method: FileMethod | ExplorerFileMethod | FileSearchMethod | FileIgnoredMethod,
   input: unknown,
   call: NativeCall = callNative,
 ): Promise<Result<unknown>> {
+  if (method === "fileIgnored") {
+    return dispatchFileIgnoredRequest(input, call);
+  }
   if (method === "fileSearch") {
     const parsed = fileSearchBridgeSchema.safeParse(input);
     if (!parsed.success)
@@ -266,6 +271,80 @@ export async function dispatchFileRequest(
   )
     return invalid();
   return { ok: true, result: output };
+}
+
+/**
+ * Read-only `files.ignored` fan-out (R16-AM): validates the visible-row
+ * batch locally, asks the daemon which rows git ignores, and echoes only
+ * queried rows back — a surprising daemon answer decorates nothing.
+ * An older host without the method reports method-not-found verbatim
+ * (fail-closed, like the explorer mutations above).
+ */
+const fileIgnoredBridgeSchema = z.object({
+  hostId: opaqueId,
+  workspaceId: opaqueId,
+  paths: z.array(relPath).max(MAX_IGNORED_PATHS),
+});
+const fileIgnoredResultSchema = z.object({
+  hostId: opaqueId,
+  workspaceId: opaqueId,
+  ignored: z.array(z.string()),
+});
+
+async function dispatchFileIgnoredRequest(
+  input: unknown,
+  call: NativeCall,
+): Promise<Result<unknown>> {
+  const parsed = fileIgnoredBridgeSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: {
+        code: "invalid_argument",
+        message: "Invalid ignored-paths request.",
+        retryable: false,
+      },
+    };
+  const asked = parsed.data;
+  const result = await call("files.ignored", {
+    hostId: asked.hostId,
+    workspaceId: asked.workspaceId,
+    paths: asked.paths,
+  });
+  if (!result.ok) return result;
+  const checked = fileIgnoredResultSchema.safeParse(result.result);
+  if (!checked.success)
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The ignored-paths response does not match the requested identity.",
+        retryable: false,
+      },
+    };
+  const output = checked.data;
+  if (
+    output.hostId !== asked.hostId ||
+    output.workspaceId !== asked.workspaceId
+  )
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The ignored-paths response does not match the requested identity.",
+        retryable: false,
+      },
+    };
+  const queried = new Set(asked.paths);
+  return {
+    ok: true,
+    result: {
+      ...output,
+      ignored: output.ignored.filter((entry) => queried.has(entry)),
+    },
+  };
 }
 
 async function dispatchExplorerRequest(

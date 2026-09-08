@@ -18,6 +18,8 @@ export interface FileExplorerTreePaneProps {
   expanded: ReadonlySet<string>;
   pendingDirs: ReadonlySet<string>;
   selectedPaths: ReadonlySet<string>;
+  /** Git-ignored row paths (R16-AM): rendered with the source's ignored tint. */
+  ignoredPaths?: ReadonlySet<string>;
   inline: { input: InlineInput; error: string | null } | null;
   hasFilter: boolean;
   filterLoading: boolean;
@@ -81,6 +83,7 @@ export function FileExplorerTreePane(props: FileExplorerTreePaneProps) {
     expanded,
     pendingDirs,
     selectedPaths,
+    ignoredPaths,
     inline,
     hasFilter,
     filterLoading,
@@ -148,6 +151,7 @@ export function FileExplorerTreePane(props: FileExplorerTreePaneProps) {
             isExpanded={expanded.has(node.path)}
             isLoading={node.isDirectory && pendingDirs.has(node.path)}
             isSelected={selectedPaths.has(node.path)}
+            isIgnored={ignoredPaths?.has(node.path) ?? false}
             rowIndex={slot.rowIndex}
             onClick={(event) => {
               if (event.shiftKey) {

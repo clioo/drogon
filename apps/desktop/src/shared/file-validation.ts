@@ -112,4 +112,11 @@ export const fileResultSchemas = {
     files: z.array(z.string().min(1).max(32_768)).max(MAX_FILE_SEARCH_RESULTS),
     truncated: z.boolean(),
   }),
+  // Git-ignored visible-row query (R16-AM, coordinator-owned one-liner):
+  // the daemon echoes the request identity with the ignored subset.
+  "files.ignored": z.object({
+    hostId: id,
+    workspaceId: id,
+    ignored: z.array(z.string()),
+  }),
 };

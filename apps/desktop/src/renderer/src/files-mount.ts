@@ -120,6 +120,15 @@ export function createGatedFileBridge(
             isAllowed() ? source.fileSearch!(input) : refused(),
         }
       : {}),
+    // Git-ignored visible rows (R16-AM `files.ignored`, coordinator-owned
+    // additive lines): same optional forwarding — absent on older hosts,
+    // in which case no row is ever decorated instead of crashing.
+    ...(source.fileIgnored
+      ? {
+          fileIgnored: (input: Parameters<NonNullable<FileBridge["fileIgnored"]>>[0]) =>
+            isAllowed() ? source.fileIgnored!(input) : refused(),
+        }
+      : {}),
   };
 }
 
