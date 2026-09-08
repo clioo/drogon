@@ -23,7 +23,7 @@ export const FIXTURE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 /** Reads the palette opener's darwin chord from the keybinding registry. */
 export function paletteOpenChord(definitionsSource) {
-  // R7-I moved the registry to keybindings/definitions.ts: the command
+  // R7-I moved the registry to keybindings/definitions.ts (R14-B moved it to shared/keybindings): the command
   // palette opens from `worktree.palette`'s darwin binding (Mod+J), never a
   // hardcoded chord.
   const block = /id:\s*"worktree\.palette"[\s\S]*?darwin:\s*\[([^\]]*)\]/.exec(
@@ -634,8 +634,7 @@ export async function probePackagedSurfaces({
         "apps",
         "desktop",
         "src",
-        "renderer",
-        "src",
+        "shared",
         "keybindings",
         "definitions.ts",
       ),
