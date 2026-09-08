@@ -22,5 +22,10 @@ export default defineConfig({
     // never reach it.
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // #312: the ubuntu-22.04 runner kills the whole step tree after ~50
+    // completed files while the forks pool is spawning and reaping worker
+    // PROCESSES. Worker threads do the same work without any process churn,
+    // so there is nothing for the runner's supervisor to react to.
+    pool: "threads",
   },
 });
