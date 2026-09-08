@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction};
 
 use crate::automations::storage as automations_storage;
 use crate::bots::storage as bots_storage;
@@ -124,7 +124,8 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
             rows INTEGER NOT NULL,
             verdict TEXT NOT NULL,
             exit_code INTEGER,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            harness_id TEXT
         );
         CREATE TABLE IF NOT EXISTS requests (
             request_id TEXT PRIMARY KEY,
@@ -180,10 +181,30 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     drogon_orchestration::schema::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_attempts::migrate(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_mail::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
+    migrate_sessions_harness_id(&tx)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;
     Ok(host_id)
+}
+
+/// Additive migration for the sessions launch-identity record: the
+/// `harness_id` column carries which harness (if any) launched the session
+/// so a terminal Restart can re-launch the same harness. Plain `session.start`
+/// sessions keep `NULL`. Idempotent: fresh databases already created the
+/// column in [`create_tables`].
+fn migrate_sessions_harness_id(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let has_column: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'harness_id'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)?;
+    if !has_column {
+        tx.execute_batch("ALTER TABLE sessions ADD COLUMN harness_id TEXT;")?;
+    }
+    Ok(())
 }
 
 /// Runs once per `Engine::open`, inside [`migrate_and_recover`]'s

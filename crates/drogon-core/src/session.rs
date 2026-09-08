@@ -39,6 +39,10 @@ pub(crate) struct SessionHandle {
     pub(crate) host_id: String,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
+    /// Which harness launched this session, when it was `harness.start`
+    /// (additive launch-identity record). Plain `session.start` sessions
+    /// carry `None`. A terminal Restart re-launches from this record.
+    pub(crate) harness_id: Option<String>,
     pub(crate) created_at: String,
     /// The PTY master, dropped once the child's exit has been positively
     /// observed *and* the reader thread finished draining output.
@@ -85,6 +89,7 @@ impl SessionHandle {
         host_id: String,
         command: String,
         args: Vec<String>,
+        harness_id: Option<String>,
         created_at: String,
         cols: u16,
         rows: u16,
@@ -100,6 +105,7 @@ impl SessionHandle {
             host_id,
             command,
             args,
+            harness_id,
             created_at,
             native: Mutex::new(Some(NativePty { master })),
             writer: Mutex::new(Some(writer)),
@@ -155,6 +161,7 @@ pub(crate) fn spawn(
     cwd: &str,
     command: String,
     args: Vec<String>,
+    harness_id: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<(String, Arc<SessionHandle>, Value), RpcError> {
@@ -178,6 +185,7 @@ pub(crate) fn spawn(
             cwd,
             &command,
             &args,
+            harness_id,
             cols,
             rows,
         )?;
@@ -583,6 +591,7 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "incarnation": handle.incarnation,
         "command": handle.command,
         "args": handle.args,
+        "harnessId": handle.harness_id,
         "cols": cols,
         "rows": rows,
         "verdict": verdict,

@@ -107,6 +107,7 @@ import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import { openCommandPalette } from "./features/shell/open-palette";
 import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
+import { projectTerminalRestartLaunch } from "./features/terminal/terminal-restart-launch";
 import {
   TERMINAL_CLEAR_EVENT,
   TERMINAL_CLOSE_EVENT,
@@ -1981,20 +1982,36 @@ export function App() {
       )
         return;
       // The exiting session's own record (when still listed) decides the
-      // scope; the event detail is the fallback. `start` only takes a
-      // workspace — the daemon spawns the same default shell, so "same
-      // command" holds by construction.
+      // scope and the launch identity (R12-E): a harness session restarts
+      // through harness.start with the record's harness id; a plain shell
+      // restarts with the record's exact command/args; with no listed record
+      // the daemon's default shell applies. The record is what makes
+      // "restart" mean the same harness/command instead of a fresh shell.
       const prior =
         typeof detail.sessionId === "string"
           ? sessionsRef.current.find((item) => item.id === detail.sessionId)
           : undefined;
-      const workspaceId = prior?.workspaceId ?? detail.workspaceId;
+      const launch = projectTerminalRestartLaunch(prior, detail.workspaceId);
       void action(async () => {
         const captured = {
           hostId: contextRef.current.hostId,
-          workspaceId,
+          workspaceId: launch.workspaceId,
         };
-        const result = checked(await window.drogon.start(workspaceId));
+        const result = checked(
+          launch.kind === "harness"
+            ? await window.drogon.startHarness({
+                workspaceId: launch.workspaceId,
+                harnessId: launch.harnessId,
+                permissionMode: "inherit",
+                requestId: crypto.randomUUID(),
+              })
+            : await window.drogon.start(
+                launch.workspaceId,
+                launch.kind === "shell"
+                  ? { command: launch.command, args: launch.args }
+                  : undefined,
+              ),
+        );
         // A late reply for a host/workspace no longer current is skipped,
         // exactly like create() above; then the new tab activates.
         if (!contextMatches(captured, contextRef.current)) return;

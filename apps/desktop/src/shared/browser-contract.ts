@@ -109,6 +109,15 @@ export type BrowserSnapshot = {
   truncated: boolean;
 };
 
+/** Additive (R12-E): pane chords forwarded while the guest has focus. */
+export type BrowserPaneChord = "focus-address-bar" | "reload" | "find";
+
+/** Additive (R12-E): one guest-captured pane chord, forwarded by main. */
+export type BrowserChordEvent = {
+  tabId: string;
+  chord: BrowserPaneChord;
+};
+
 export interface BrowserBridge {
   createTab(input: BrowserCreateTabInput): Promise<Result<BrowserTabState>>;
   closeTab(input: BrowserTabRef): Promise<Result<null>>;
@@ -136,6 +145,8 @@ export interface BrowserBridge {
   onFindResult(listener: (event: BrowserFindResultEvent) => void): () => void;
   /** Additive (R11-B chrome): guest context-menu requests for the page menu. */
   onContextMenu(listener: (event: BrowserContextMenuEvent) => void): () => void;
+  /** Additive (R12-E): pane chords captured from the focused guest webContents. */
+  onChord(listener: (event: BrowserChordEvent) => void): () => void;
 }
 
 /**
@@ -238,4 +249,5 @@ export const browserIpcChannels = {
   openDevTools: "drogon:browserOpenDevTools",
   findResult: "drogon:browserFindResult",
   contextMenu: "drogon:browserContextMenu",
+  chord: "drogon:browserChord",
 } as const;

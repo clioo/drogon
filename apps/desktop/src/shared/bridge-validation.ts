@@ -55,7 +55,30 @@ export const bridgeSchemas = {
     .max(32768)
     .refine((value) => !value.includes("\0")),
   sessions: id,
-  start: id,
+  // Additive (R12-E restart reuse): `start` also admits an object carrying
+  // the prior session's recorded argv; the bare workspaceId string remains
+  // valid for an ordinary new terminal.
+  start: z.union([
+    id,
+    z.object({
+      workspaceId: id,
+      command: z
+        .string()
+        .min(1)
+        .max(32768)
+        .refine((value) => !value.includes("\0"))
+        .optional(),
+      args: z
+        .array(
+          z
+            .string()
+            .max(4096)
+            .refine((value) => !value.includes("\0")),
+        )
+        .max(256)
+        .optional(),
+    }),
+  ]),
   read: identity.extend({
     cursor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   }),

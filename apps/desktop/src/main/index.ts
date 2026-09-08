@@ -119,17 +119,34 @@ function registerBridge() {
         }
         case "sessions":
           return callNative("session.list", { workspaceId: value });
-        case "start":
+        case "start": {
+          // Additive (R12-E restart reuse): the input is either the bare
+          // workspaceId or an object carrying the prior session's recorded
+          // argv; an absent command keeps the exact prior default-shell
+          // behavior, and the daemon fills its own default when omitted.
+          const launch =
+            typeof value === "string"
+              ? { workspaceId: value }
+              : (value as {
+                  workspaceId: string;
+                  command?: string;
+                  args?: string[];
+                });
           return callNative("session.start", {
-            workspaceId: value,
-            command:
-              process.platform === "win32"
-                ? process.env.ComSpec || "cmd.exe"
-                : process.env.SHELL || "/bin/sh",
-            args: [],
+            workspaceId: launch.workspaceId,
+            ...(launch.command !== undefined
+              ? { command: launch.command }
+              : {
+                  command:
+                    process.platform === "win32"
+                      ? process.env.ComSpec || "cmd.exe"
+                      : process.env.SHELL || "/bin/sh",
+                }),
+            ...(launch.args !== undefined ? { args: launch.args } : { args: [] }),
             cols: 80,
             rows: 24,
           });
+        }
         case "read": {
           const result = await callNative("session.read", {
             ...(value as object),
