@@ -144,6 +144,18 @@ const SURFACES = [
     candFiles: ["apps/desktop/src/renderer/src/features/source-control/"],
   },
   {
+    id: "explorer",
+    label: "Explorer panel",
+    refDir: "src/renderer/src/components/right-sidebar",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/FileExplorerToolbar.tsx",
+      "src/renderer/src/components/right-sidebar/FileExplorerNameFilter.tsx",
+      "src/renderer/src/components/right-sidebar/file-explorer-entries.ts",
+    ],
+    probes: ["Find files", "Collapse All", "Explorer", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/file-explorer/"],
+  },
+  {
     id: "automations",
     label: "Automations page",
     refDir: "src/renderer/src/components/automations",
@@ -189,6 +201,82 @@ const SURFACES = [
     ],
     probes: ["Bots", "preset", "chat", "aria-label"],
     candFiles: ["apps/desktop/src/renderer/src/features/bots/"],
+  },
+  {
+    id: "sidebar-menus",
+    label: "Sidebar menus (worktree, options, project actions)",
+    refDir: "src/renderer/src/components/sidebar",
+    refFiles: [
+      "src/renderer/src/components/sidebar/SidebarSettingsHelpMenu.tsx",
+      "src/renderer/src/components/sidebar/FilterToggleRow.tsx",
+      "src/renderer/src/components/sidebar/DeleteWorktreeDialog.tsx",
+    ],
+    probes: ["Workspace options", "Project actions", "Delete", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/project-actions-menu.tsx",
+      "apps/desktop/src/renderer/src/features/shell/WorktreeContextMenu.tsx",
+    ],
+  },
+  {
+    id: "tab-menus",
+    label: "Tab menus (create + context)",
+    refDir: "src/renderer/src/components/tab-bar",
+    refFiles: [
+      "src/renderer/src/components/tab-bar/tab-bar-static-create-menu.tsx",
+      "src/renderer/src/components/terminal/terminal-tab-actions.ts",
+      "src/renderer/src/components/terminal/terminal-tab-bulk-actions.ts",
+    ],
+    probes: ["New Terminal", "Pin", "Close", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx",
+      "apps/desktop/src/renderer/src/features/shell/TabContextMenu.tsx",
+    ],
+  },
+  {
+    id: "right-rail",
+    label: "Right activity rail + panels",
+    refDir: "src/renderer/src/components/right-sidebar",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/activity-bar-buttons.tsx",
+      "src/renderer/src/components/right-sidebar/FileExplorerToolbar.tsx",
+      "src/renderer/src/components/right-sidebar/local-workspace-ports-panel.tsx",
+    ],
+    probes: ["Explorer", "Source Control", "Ports", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx",
+      "apps/desktop/src/renderer/src/features/file-explorer/FileExplorerMenus.tsx",
+      "apps/desktop/src/renderer/src/features/ports/PortsPanel.tsx",
+    ],
+  },
+  {
+    id: "dialogs",
+    label: "Confirm dialogs (delete worktree, remove project)",
+    refDir: "src/renderer/src/components/sidebar",
+    refFiles: [
+      "src/renderer/src/components/sidebar/DeleteWorktreeDialog.tsx",
+      "src/renderer/src/components/settings/RepositoryPane.tsx",
+      "src/renderer/src/components/terminal-pane/CloseTerminalDialog.tsx",
+    ],
+    probes: ["Delete", "Remove", "Cancel", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/DeleteWorktreeDialog.tsx",
+      "apps/desktop/src/renderer/src/features/shell/RemoveProjectDialog.tsx",
+    ],
+  },
+  {
+    id: "settings-general",
+    label: "Settings (General pane)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/GeneralPane.tsx",
+      "src/renderer/src/components/settings/GeneralWorkspaceSettingsSection.tsx",
+      "src/renderer/src/components/settings/CliSection.tsx",
+    ],
+    probes: ["General", "Workspace Directory", "Auto Save", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/settings/SettingsPage.tsx",
+      "apps/desktop/src/renderer/src/features/settings/settings-sections.ts",
+    ],
   },
   {
     id: "tokens",
@@ -801,6 +889,249 @@ async function refSetup(page, state, ctx) {
       if (await tryClick(page, "button", "Bots")) notes.push("Bots opened");
       else missing.push("no Bots nav reachable");
       break;
+    case "explorer": {
+      // View navigation only: open the panel when closed, never toggle a
+      // visible panel shut. The activity button precedes panel content in DOM
+      // order, so the first substring match is the trigger.
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open > 0) notes.push("Explorer panel already open; captured as-is");
+      else if (await tryClick(page, "button", "Explorer (⌘⇧E)", 2500)) notes.push("Explorer opened via activity bar");
+      else {
+        try {
+          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Explorer opened via fallback match");
+        } catch {
+          missing.push("no Explorer activity button reachable");
+        }
+      }
+      break;
+    }
+    case "source-control": {
+      const open = await page.getByRole("textbox", { name: "Commit message" }).count().catch(() => 0);
+      if (open > 0) notes.push("Source Control panel already open; captured as-is");
+      else if (await tryClick(page, "button", "Source Control (⌘⇧G)", 2500)) notes.push("Source Control opened via activity bar");
+      else {
+        try {
+          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Source Control opened via fallback match");
+        } catch {
+          missing.push("no Source Control activity button reachable");
+        }
+      }
+      break;
+    }
+    case "create-menu": {
+      // The "+" trigger is a Radix DropdownMenuTrigger (fork
+      // tab-bar/tab-bar-surface.tsx): clicking opens a menu and creates
+      // nothing. Verify the menu census so a behavior change is recorded,
+      // never silently acted on.
+      const tabsBefore = await page.getByRole("tab").count().catch(() => -1);
+      if (await tryClick(page, "button", "New tab")) {
+        await delay(600);
+        const seen = await overlayState(page);
+        if ((seen.menus || 0) > 0) {
+          notes.push(`create menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
+        } else {
+          const tabsAfter = await page.getByRole("tab").count().catch(() => -1);
+          if (tabsBefore >= 0 && tabsAfter > tabsBefore) {
+            missing.push(`New tab click created a tab instead of a menu (tabs ${tabsBefore} -> ${tabsAfter}); left for the human, ref otherwise untouched`);
+          } else missing.push("New tab click opened no menu");
+        }
+      } else missing.push("no New tab affordance reachable (page view has no strip)");
+      break;
+    }
+    case "sidebar-menus": {
+      // Catalog `sidebar-menus`: worktree context menu, Workspace options,
+      // Project actions. View navigation plus ephemeral menus only; Esc
+      // between menus, the Project actions menu stays open for capture.
+      try {
+        const card = page.locator('[class*="worktree-card"], .shell-project-row, [class*="project-row"]').first();
+        if ((await card.count()) > 0) {
+          await card.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          notes.push(seen.menus > 0 ? `worktree context menu open (menus=${seen.menus})` : "worktree right-click opened no menu");
+        } else notes.push("no worktree/project row to right-click");
+      } catch {
+        notes.push("worktree right-click best-effort only");
+      }
+      await dismissOverlays(page);
+      let optionsOk = false;
+      try {
+        const trigger = page.getByRole("button", { name: "Workspace options" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          optionsOk = (seen.menus || 0) > 0;
+          notes.push(optionsOk ? `Workspace options open (menus=${seen.menus})` : "Workspace options click opened no menu");
+        } else notes.push("no Workspace options button reachable");
+      } catch {
+        notes.push("Workspace options best-effort only");
+      }
+      await dismissOverlays(page);
+      let actionsOpen = false;
+      try {
+        const trigger = page.getByRole("button", { name: "Project actions for" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          actionsOpen = (seen.menus || 0) > 0;
+          notes.push(actionsOpen ? `Project actions menu open (menus=${seen.menus})` : "Project actions click opened no menu");
+          if (!actionsOpen) await dismissOverlays(page);
+        } else notes.push("no Project actions trigger reachable");
+      } catch {
+        notes.push("Project actions best-effort only");
+      }
+      if (!actionsOpen && optionsOk) {
+        // Fallback capture: the next-best menu, left open.
+        try {
+          await page.getByRole("button", { name: "Workspace options" }).first().click({ timeout: 2500 });
+          await delay(600);
+          notes.push("capture fallback: Workspace options left open");
+          actionsOpen = true;
+        } catch {
+          notes.push("capture fallback reopen failed");
+        }
+      }
+      if (!actionsOpen) missing.push("no sidebar menu left open for capture (empty ref has no rows)");
+      break;
+    }
+    case "tab-menus": {
+      // Catalog `tab-menus`: the "+" create menu, then the tab context menu
+      // (pin/rename/close variants). The context menu stays open for capture;
+      // `create-menu` keeps covering the "+" menu on its own.
+      if (await tryClick(page, "button", "New tab")) {
+        const seen = await overlayState(page);
+        notes.push(seen.menus > 0 ? `create menu open (menus=${seen.menus})` : "New tab click opened no menu");
+      } else notes.push("no New tab affordance reachable (page view has no strip)");
+      await dismissOverlays(page);
+      try {
+        const tab = page.getByRole("tab").first();
+        if ((await tab.count()) > 0) {
+          await tab.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) notes.push(`tab context menu open (menus=${seen.menus})`);
+          else missing.push("tab right-click opened no menu");
+        } else missing.push("no tab to right-click (empty ref has no strip)");
+      } catch {
+        missing.push("tab right-click best-effort only");
+      }
+      break;
+    }
+    case "right-rail": {
+      // Catalog `right-rail`: cycle the activity bar (Explorer, Mentu,
+      // Source Control, Ports) plus an Explorer row menu; ends on Ports.
+      // View navigation plus one ephemeral menu only.
+      for (const name of ["Explorer", "Mentu", "Source Control"]) {
+        try {
+          const trigger = page.getByRole("button", { name }).first();
+          if ((await trigger.count()) > 0) {
+            await trigger.click({ timeout: 2500 });
+            await delay(350);
+            notes.push(`${name} panel opened`);
+          } else notes.push(`no ${name} activity button reachable`);
+        } catch {
+          notes.push(`${name} best-effort only`);
+        }
+      }
+      try {
+        const row = page.locator('[role="treeitem"]').first();
+        if ((await row.count()) > 0) {
+          await row.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const seen = await overlayState(page);
+          notes.push(seen.menus > 0 ? `Explorer row menu open (menus=${seen.menus})` : "Explorer row right-click opened no menu");
+        } else notes.push("no Explorer row to right-click");
+      } catch {
+        notes.push("Explorer row menu best-effort only");
+      }
+      await dismissOverlays(page);
+      try {
+        const trigger = page.getByRole("button", { name: "Ports" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Ports panel opened for capture");
+        } else notes.push("no Ports activity button reachable");
+      } catch {
+        notes.push("Ports best-effort only");
+      }
+      break;
+    }
+    case "dialogs": {
+      // Catalog `dialogs`: Delete-worktree and Remove-project dialogs. Each
+      // opens from its menu and is Cancel-dismissed (teardown Escape); the
+      // Remove-project dialog stays open for capture. Nothing is confirmed.
+      try {
+        const card = page.locator('[class*="worktree-card"], .shell-project-row, [class*="project-row"]').first();
+        if ((await card.count()) > 0) {
+          await card.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const del = page.getByRole("menuitem", { name: "Delete Worktree" }).first();
+          if ((await del.count()) > 0) {
+            await del.click({ timeout: 2500 });
+            await delay(600);
+            const seen = await overlayState(page);
+            notes.push(seen.dialogs > 0 ? `Delete-worktree dialog open (dialogs=${seen.dialogs})` : "Delete Worktree click opened no dialog");
+          } else notes.push("no Delete Worktree menu entry reachable");
+        } else notes.push("no worktree row to right-click");
+      } catch {
+        notes.push("Delete-worktree dialog best-effort only");
+      }
+      await dismissOverlays(page);
+      let dialogOpen = false;
+      try {
+        const trigger = page.getByRole("button", { name: "Project actions for" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 2500 });
+          await delay(600);
+          const remove = page.getByRole("menuitem", { name: "Remove Project" }).first();
+          if ((await remove.count()) > 0) {
+            await remove.click({ timeout: 2500 });
+            await delay(600);
+            const seen = await overlayState(page);
+            dialogOpen = (seen.dialogs || 0) > 0;
+            notes.push(dialogOpen ? `Remove-project dialog open (dialogs=${seen.dialogs})` : "Remove Project click opened no dialog");
+            if (!dialogOpen) await dismissOverlays(page);
+          } else {
+            notes.push("no Remove Project menu entry reachable");
+            await dismissOverlays(page);
+          }
+        } else notes.push("no Project actions trigger reachable");
+      } catch {
+        notes.push("Remove-project dialog best-effort only");
+      }
+      if (!dialogOpen) {
+        await dismissOverlays(page);
+        missing.push("no dialog left open for capture (empty ref has no rows)");
+      }
+      break;
+    }
+    case "settings-general": {
+      // Catalog `settings-general`: Settings → General (the fork default
+      // view, captured in `09-settings`).
+      if (await tryClick(page, "button", "Settings")) {
+        notes.push("Settings opened via Settings button");
+        let general = await tryClick(page, "button", "General", 1500);
+        if (!general) {
+          try {
+            await page.getByRole("tab", { name: "General" }).first().click({ timeout: 1500 });
+            await delay(350);
+            general = true;
+          } catch {
+            general = false;
+          }
+        }
+        if (general) notes.push("General pane opened");
+        else missing.push("no General nav reachable");
+      } else missing.push("no Settings button reachable");
+      break;
+    }
     case "statusbar-strip":
       notes.push("full-page capture; strip cropped in post");
       break;
@@ -1089,6 +1420,279 @@ async function candSetup(page, state, ctx) {
       if (await tryClick(page, "button", "Bots")) notes.push("Bots route opened");
       else missing.push("no Bots nav reachable");
       break;
+    case "explorer": {
+      await ensureProject().catch(() => {});
+      // Own temp fixture: one file so the tree is never empty. The reference
+      // side is never touched.
+      try {
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "explorer fixture\n");
+        notes.push("fixture: notes.txt written");
+      } catch {
+        notes.push("fixture write best-effort only");
+      }
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open > 0) notes.push("Explorer panel already open; captured as-is");
+      else {
+        try {
+          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Explorer opened through the right activity bar");
+        } catch {
+          missing.push("Explorer activity button unavailable");
+        }
+      }
+      break;
+    }
+    case "source-control": {
+      await ensureProject().catch(() => {});
+      // Own temp fixture: one modified tracked file, mirroring the retired
+      // "changes" state fixture. The reference side is never touched.
+      try {
+        await execFileAsync("git", ["init"], { cwd: ctx.workspace }).catch(() => {});
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "fidelity fixture\n");
+        await execFileAsync("git", ["add", "-A"], { cwd: ctx.workspace }).catch(() => {});
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "fidelity fixture modified\n");
+        notes.push("git fixture: one modified tracked file");
+      } catch {
+        notes.push("git fixture best-effort only");
+      }
+      const open = await page.getByRole("textbox", { name: "Commit message" }).count().catch(() => 0);
+      if (open > 0) notes.push("Source Control panel already open; captured as-is");
+      else {
+        try {
+          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Source Control opened through the right activity bar");
+        } catch {
+          missing.push("Source Control activity button unavailable (capability or fixture)");
+        }
+      }
+      break;
+    }
+    case "create-menu": {
+      // The strip "+" opens the static create menu (New Terminal /
+      // New Browser Tab entries); selecting nothing, capturing the menu open.
+      const terminal = await ensureTerminal().catch(() => false);
+      if (!terminal) {
+        missing.push("project-terminal fixture unavailable for create menu");
+        break;
+      }
+      if (await tryClick(page, "button", "New tab")) {
+        await delay(600);
+        const seen = await overlayState(page);
+        if ((seen.menus || 0) > 0) {
+          notes.push(`create menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
+        } else missing.push("New tab click opened no menu");
+      } else missing.push("no New tab affordance reachable");
+      break;
+    }
+    case "sidebar-menus": {
+      // Same menu walk as the reference, on the owned fixture (a project
+      // always exists here). The Project actions menu stays open for capture.
+      await ensureProject().catch(() => {});
+      try {
+        const card = page.locator('[class*="worktree-card"], .shell-project-row, [class*="project-row"]').first();
+        if ((await card.count()) > 0) {
+          await card.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          notes.push(seen.menus > 0 ? `worktree context menu open (menus=${seen.menus})` : "worktree right-click opened no menu");
+        } else notes.push("no worktree/project row to right-click");
+      } catch {
+        notes.push("worktree right-click best-effort only");
+      }
+      await dismissOverlays(page);
+      let optionsOk = false;
+      try {
+        const trigger = page.getByRole("button", { name: "Workspace options" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          optionsOk = (seen.menus || 0) > 0;
+          notes.push(optionsOk ? `Workspace options open (menus=${seen.menus})` : "Workspace options click opened no menu");
+        } else notes.push("no Workspace options button reachable");
+      } catch {
+        notes.push("Workspace options best-effort only");
+      }
+      await dismissOverlays(page);
+      let actionsOpen = false;
+      try {
+        const trigger = page.getByRole("button", { name: "Project actions for" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          actionsOpen = (seen.menus || 0) > 0;
+          notes.push(actionsOpen ? `Project actions menu open (menus=${seen.menus})` : "Project actions click opened no menu");
+          if (!actionsOpen) await dismissOverlays(page);
+        } else notes.push("no Project actions trigger reachable");
+      } catch {
+        notes.push("Project actions best-effort only");
+      }
+      if (!actionsOpen && optionsOk) {
+        try {
+          await page.getByRole("button", { name: "Workspace options" }).first().click({ timeout: 3000 });
+          await delay(600);
+          notes.push("capture fallback: Workspace options left open");
+          actionsOpen = true;
+        } catch {
+          notes.push("capture fallback reopen failed");
+        }
+      }
+      if (!actionsOpen) missing.push("no sidebar menu left open for capture");
+      break;
+    }
+    case "tab-menus": {
+      // Create menu first (noted, dismissed), then the tab context menu via
+      // right-click, left open for capture.
+      const terminal = await ensureTerminal().catch(() => false);
+      if (!terminal) {
+        missing.push("project-terminal fixture unavailable for tab menus");
+        break;
+      }
+      if (await tryClick(page, "button", "New tab")) {
+        const seen = await overlayState(page);
+        notes.push(seen.menus > 0 ? `create menu open (menus=${seen.menus})` : "New tab click opened no menu");
+      } else notes.push("no New tab affordance reachable");
+      await dismissOverlays(page);
+      try {
+        const tab = page.getByRole("tab").first();
+        if ((await tab.count()) > 0) {
+          await tab.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          if ((seen.menus || 0) > 0) notes.push(`tab context menu open (menus=${seen.menus})`);
+          else missing.push("tab right-click opened no menu");
+        } else missing.push("no tab to right-click");
+      } catch {
+        missing.push("tab right-click best-effort only");
+      }
+      break;
+    }
+    case "right-rail": {
+      // Same activity-bar cycle as the reference, on the owned fixture (one
+      // file so Explorer is never empty); ends on Ports for capture.
+      await ensureProject().catch(() => {});
+      try {
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "right-rail fixture\n");
+        notes.push("fixture: notes.txt written");
+      } catch {
+        notes.push("fixture write best-effort only");
+      }
+      for (const name of ["Explorer", "Mentu", "Source Control"]) {
+        try {
+          const trigger = page.getByRole("button", { name }).first();
+          if ((await trigger.count()) > 0) {
+            await trigger.click({ timeout: 3000 });
+            await delay(350);
+            notes.push(`${name} panel opened`);
+          } else notes.push(`no ${name} activity button reachable`);
+        } catch {
+          notes.push(`${name} best-effort only`);
+        }
+      }
+      try {
+        const row = page.locator('[role="treeitem"]').first();
+        if ((await row.count()) > 0) {
+          await row.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          notes.push(seen.menus > 0 ? `Explorer row menu open (menus=${seen.menus})` : "Explorer row right-click opened no menu");
+        } else notes.push("no Explorer row to right-click");
+      } catch {
+        notes.push("Explorer row menu best-effort only");
+      }
+      await dismissOverlays(page);
+      try {
+        const trigger = page.getByRole("button", { name: "Ports" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Ports panel opened for capture");
+        } else missing.push("no Ports activity button reachable");
+      } catch {
+        missing.push("Ports best-effort only");
+      }
+      break;
+    }
+    case "dialogs": {
+      // Same two-dialog walk as the reference, on the owned fixture. Both
+      // dialogs are Cancel-dismissed (teardown Escape); the Remove-project
+      // dialog stays open for capture. Nothing is confirmed.
+      await ensureProject().catch(() => {});
+      await ensureTerminal().catch(() => {});
+      try {
+        const card = page.locator('[class*="worktree-card"], .shell-project-row, [class*="project-row"]').first();
+        if ((await card.count()) > 0) {
+          await card.click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const del = page.getByRole("menuitem", { name: "Delete Worktree" }).first();
+          if ((await del.count()) > 0) {
+            await del.click({ timeout: 3000 });
+            await delay(600);
+            const seen = await overlayState(page);
+            notes.push(seen.dialogs > 0 ? `Delete-worktree dialog open (dialogs=${seen.dialogs})` : "Delete Worktree click opened no dialog");
+          } else notes.push("no Delete Worktree menu entry reachable");
+        } else notes.push("no worktree row to right-click");
+      } catch {
+        notes.push("Delete-worktree dialog best-effort only");
+      }
+      await dismissOverlays(page);
+      let dialogOpen = false;
+      try {
+        const trigger = page.getByRole("button", { name: "Project actions for" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 3000 });
+          await delay(600);
+          const remove = page.getByRole("menuitem", { name: "Remove Project" }).first();
+          if ((await remove.count()) > 0) {
+            await remove.click({ timeout: 3000 });
+            await delay(600);
+            const seen = await overlayState(page);
+            dialogOpen = (seen.dialogs || 0) > 0;
+            notes.push(dialogOpen ? `Remove-project dialog open (dialogs=${seen.dialogs})` : "Remove Project click opened no dialog");
+            if (!dialogOpen) await dismissOverlays(page);
+          } else {
+            notes.push("no Remove Project menu entry reachable");
+            await dismissOverlays(page);
+          }
+        } else notes.push("no Project actions trigger reachable");
+      } catch {
+        notes.push("Remove-project dialog best-effort only");
+      }
+      if (!dialogOpen) {
+        await dismissOverlays(page);
+        missing.push("no dialog left open for capture");
+      }
+      break;
+    }
+    case "settings-general": {
+      // The candidate has no General section (SETTINGS_SECTIONS omits it:
+      // no MVP row is backed by a real setting). Record the explicit
+      // non-parity and capture Settings as-is.
+      const opened =
+        (await tryClick(page, "button", "Settings")) ||
+        (await tryClick(page, "button", "Settings", 2500));
+      if (!opened) {
+        missing.push("no Settings affordance reachable");
+        break;
+      }
+      notes.push("Settings opened");
+      let general = await tryClick(page, "button", "General", 1500);
+      if (!general) {
+        try {
+          await page.getByRole("tab", { name: "General" }).first().click({ timeout: 1500 });
+          await delay(350);
+          general = true;
+        } catch {
+          general = false;
+        }
+      }
+      if (general) notes.push("General pane opened (non-parity claim refuted: section exists)");
+      else missing.push("no General section (explicit non-parity: SETTINGS_SECTIONS omits General; catalog settings-general)");
+      break;
+    }
     case "statusbar-strip":
       await ensureTerminal().catch(() => {});
       notes.push("full-page capture; strip cropped in post");
@@ -1154,6 +1758,14 @@ const ALL_STATES = [
   "tasks",
   "bots",
   "statusbar-strip",
+  "explorer",
+  "source-control",
+  "create-menu",
+  "sidebar-menus",
+  "tab-menus",
+  "right-rail",
+  "dialogs",
+  "settings-general",
 ];
 
 const CAND_OWNER = {
@@ -1167,6 +1779,12 @@ const CAND_OWNER = {
   browser: "apps/desktop/src/renderer/src/features/browser/",
   tasks: "apps/desktop/src/renderer/src/features/shell/SidebarNav.tsx (placeholder; J6 owner builds the page)",
   bots: "apps/desktop/src/renderer/src/features/bots/",
+  explorer: "apps/desktop/src/renderer/src/features/file-explorer/",
+  "sidebar-menus": "apps/desktop/src/renderer/src/features/shell/ProjectList.tsx, project-actions-menu.tsx, WorktreeContextMenu.tsx",
+  "tab-menus": "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx, TabContextMenu.tsx",
+  "right-rail": "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx, features/file-explorer/FileExplorerMenus.tsx, features/ports/PortsPanel.tsx",
+  dialogs: "apps/desktop/src/renderer/src/features/shell/DeleteWorktreeDialog.tsx, RemoveProjectDialog.tsx",
+  "settings-general": "apps/desktop/src/renderer/src/features/settings/SettingsPage.tsx, settings-sections.ts (General explicitly omitted)",
   tokens: "apps/desktop/src/renderer/src/assets/main.css",
 };
 
@@ -1182,6 +1800,14 @@ const STATE_SURFACE = {
   tasks: "tasks",
   bots: "bots",
   "statusbar-strip": "status-bar",
+  explorer: "explorer",
+  "source-control": "changes",
+  "create-menu": "tab-bar",
+  "sidebar-menus": "sidebar-menus",
+  "tab-menus": "tab-menus",
+  "right-rail": "right-rail",
+  dialogs: "dialogs",
+  "settings-general": "settings-general",
 };
 
 // Preferred source-value keywords per surface: the ranked item must cite the
@@ -1197,6 +1823,12 @@ const SOURCE_PREFERENCE = {
   browser: ["address", "url", "classname"],
   tasks: ["issue", "filter", "classname"],
   bots: ["preset", "chat", "classname"],
+  explorer: ["find files", "collapse", "explorer", "classname"],
+  "sidebar-menus": ["workspace options", "project actions", "delete", "classname"],
+  "tab-menus": ["new terminal", "pin", "close", "classname"],
+  "right-rail": ["explorer", "ports", "activity", "classname"],
+  dialogs: ["delete", "remove", "cancel", "classname"],
+  "settings-general": ["general", "workspace directory", "auto save", "classname"],
   tokens: ["font", "geist", "text-", "leading", "tracking", "weight"],
 };
 
