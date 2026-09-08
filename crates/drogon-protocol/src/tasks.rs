@@ -691,6 +691,8 @@ mod tests {
             head: "abc123".into(),
             base_ref: None,
             title: None,
+            note: None,
+            parent_worktree_id: None,
             created_at: "2026-09-06T12:00:00Z".into(),
         };
         let result = TasksStartResult {

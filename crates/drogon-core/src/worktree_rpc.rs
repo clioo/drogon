@@ -113,6 +113,148 @@ fn optional_bool(params: &Value, field: &str, default: bool) -> Result<bool, Rpc
     }
 }
 
+/// An optional non-empty-after-trim string field (`branch`, `note`,
+/// `parentWorktreeId` on `worktree.create`): absent, null or whitespace
+/// all decode to `None`.
+fn optional_trimmed_str(params: &Value, field: &str) -> Result<Option<String>, RpcError> {
+    match params.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => {
+            let raw = value
+                .as_str()
+                .ok_or_else(|| error::invalid_argument(format!("{field} must be a string")))?;
+            if raw.contains('\0') {
+                return Err(error::invalid_argument(format!(
+                    "{field} must not contain a NUL byte"
+                )));
+            }
+            let trimmed = raw.trim();
+            Ok((!trimmed.is_empty()).then(|| trimmed.to_string()))
+        }
+    }
+}
+
+/// Sparse-checkout directories, normalized like the fork's
+/// `normalizeSparseDirectories`: trimmed, forward-slashed, repo-relative
+/// (no absolute paths, no `..` segments), deduped, never empty entries.
+fn normalize_sparse_directories(params: &Value) -> Result<Vec<String>, RpcError> {
+    let Some(value) = params.get("sparse") else {
+        return Ok(Vec::new());
+    };
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let entries = value
+        .as_array()
+        .ok_or_else(|| error::invalid_argument("sparse must be an array of directory strings"))?;
+    let mut seen = std::collections::HashSet::new();
+    let mut directories = Vec::new();
+    for entry in entries {
+        let raw = entry
+            .as_str()
+            .ok_or_else(|| error::invalid_argument("sparse entries must be strings"))?;
+        if raw.contains('\0') {
+            return Err(error::invalid_argument(
+                "sparse directories must not contain NUL bytes",
+            ));
+        }
+        let trimmed = raw.trim();
+        if trimmed.starts_with('/') || trimmed.starts_with('\\') {
+            return Err(error::invalid_argument(
+                "sparse directories must be repo-relative paths",
+            ));
+        }
+        let normalized = trimmed.replace('\\', "/").trim_matches('/').to_string();
+        if normalized.is_empty() || normalized == "." {
+            continue;
+        }
+        if normalized.split('/').any(|segment| segment == "..") {
+            return Err(error::invalid_argument(
+                "sparse directories must be repo-relative paths",
+            ));
+        }
+        if seen.insert(normalized.clone()) {
+            directories.push(normalized);
+        }
+    }
+    Ok(directories)
+}
+
+/// `project.saveSparsePreset` shares the create path's normalization by
+/// wrapping its directories in the same `{ sparse: [...] }` shape.
+pub(crate) fn normalize_sparse_directories_for_preset(
+    params: &Value,
+) -> Result<Vec<String>, RpcError> {
+    normalize_sparse_directories(params)
+}
+
+/// Resolves a composer "Parent worktree" pick: the parent must be a
+/// recorded worktree of the same project (nesting is sidebar-only, so it
+/// never crosses projects).
+fn validate_parent_worktree(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+    parent_worktree_id: &str,
+) -> Result<(), RpcError> {
+    let parent_project: Option<String> = conn
+        .query_row(
+            "SELECT project_id FROM worktrees WHERE id = ?1",
+            [parent_worktree_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(error::from_sqlite)?;
+    match parent_project {
+        Some(owner) if owner == project_id => Ok(()),
+        Some(_) => Err(error::invalid_argument(
+            "parent worktree belongs to a different project",
+        )),
+        None => Err(error::invalid_argument("parent worktree not found")),
+    }
+}
+
+/// `worktree.update` parent validation: same-project plus cycle refusal
+/// (walk the candidate's ancestor chain; reaching the worktree itself
+/// would close a loop).
+fn validate_parent_update(
+    conn: &rusqlite::Connection,
+    worktree_id: &str,
+    project_id: &str,
+    parent_worktree_id: &str,
+) -> Result<(), RpcError> {
+    if parent_worktree_id == worktree_id {
+        return Err(error::invalid_argument(
+            "a worktree cannot be its own parent",
+        ));
+    }
+    validate_parent_worktree(conn, project_id, parent_worktree_id)?;
+    let mut cursor = parent_worktree_id.to_string();
+    for _ in 0..256 {
+        let next: Option<Option<String>> = conn
+            .query_row(
+                "SELECT parent_worktree_id FROM worktrees WHERE id = ?1",
+                [&cursor],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(error::from_sqlite)?;
+        match next.flatten() {
+            Some(ancestor) => {
+                if ancestor == worktree_id {
+                    return Err(error::invalid_argument(
+                        "parent worktree would create a nesting cycle",
+                    ));
+                }
+                cursor = ancestor;
+            }
+            None => return Ok(()),
+        }
+    }
+    Err(error::invalid_argument(
+        "parent worktree would create a nesting cycle",
+    ))
+}
+
 /// Best-effort canonicalization for path-identity comparisons only; a path
 /// that no longer resolves (removed out from under this process) falls back
 /// to its raw string rather than failing the whole reconciliation.
@@ -133,6 +275,8 @@ fn worktree_json(
     head: &str,
     base_ref: Option<&str>,
     title: Option<&str>,
+    note: Option<&str>,
+    parent_worktree_id: Option<&str>,
     created_at: &str,
 ) -> Value {
     json!({
@@ -144,6 +288,8 @@ fn worktree_json(
         "head": head,
         "baseRef": base_ref,
         "title": title,
+        "note": note,
+        "parentWorktreeId": parent_worktree_id,
         "createdAt": created_at,
     })
 }
@@ -161,6 +307,14 @@ impl Engine {
                     .ok_or_else(|| error::invalid_argument("baseRef must be a non-empty string"))
             })
             .transpose()?;
+        // The composer Advanced rows: an explicit branch name (the fork's
+        // "Branch name" override — the worktree folder keeps `name`), a
+        // free-text note, a sidebar-nesting parent, and sparse-checkout
+        // directories.
+        let branch_override = optional_trimmed_str(params, "branch")?;
+        let note = optional_trimmed_str(params, "note")?;
+        let parent_worktree_id = optional_trimmed_str(params, "parentWorktreeId")?;
+        let sparse = normalize_sparse_directories(params)?;
 
         let project = {
             let conn = self.db.lock().unwrap();
@@ -171,8 +325,33 @@ impl Engine {
                 "worktree.create requires a git project; a folder project has one implicit worktree",
             ));
         }
+        if let Some(parent) = &parent_worktree_id {
+            let conn = self.db.lock().unwrap();
+            validate_parent_worktree(&conn, &project_id, parent)?;
+        }
 
-        git_worktree::validate_worktree_add(&project.path, &name, Some(&name))?;
+        let branch_name = branch_override.clone().unwrap_or_else(|| name.clone());
+        // The fork validates an explicit override with git itself
+        // (`resolveCreateBranchName`): a leading "-" is rejected outright
+        // (option injection), then `git check-ref-format --branch` is the
+        // authoritative validator so the composer surfaces git's own
+        // message. NUL bytes were already refused when the field decoded.
+        if branch_override.is_some() {
+            if branch_name.starts_with('-') {
+                return Err(error::invalid_argument(
+                    "Branch name must not start with \"-\"",
+                ));
+            }
+            run_git(
+                Path::new(&project.path),
+                &[
+                    "check-ref-format".to_string(),
+                    "--branch".to_string(),
+                    branch_name.clone(),
+                ],
+            )?;
+        }
+        git_worktree::validate_worktree_add(&project.path, &name, Some(&branch_name))?;
 
         let workspaces_root = self
             .data_dir
@@ -191,17 +370,67 @@ impl Engine {
             .ok_or_else(|| error::invalid_argument("resolved worktree path is not UTF-8"))?
             .to_string();
 
-        let mut argv = vec![
-            "worktree".to_string(),
-            "add".to_string(),
-            target_str.clone(),
-            "-b".to_string(),
-            name.clone(),
-        ];
+        let mut argv = vec!["worktree".to_string(), "add".to_string()];
+        // Sparse checkouts add with --no-checkout, then materialize only the
+        // picked directories (the fork's addSparseWorktree flow).
+        if !sparse.is_empty() {
+            argv.push("--no-checkout".to_string());
+        }
+        argv.push(target_str.clone());
+        argv.push("-b".to_string());
+        argv.push(branch_name.clone());
         if let Some(base) = &base_ref {
             argv.push(base.clone());
         }
-        run_git(Path::new(&project.path), &argv)?;
+        let create_result = run_git(Path::new(&project.path), &argv).and_then(|_| {
+            if sparse.is_empty() {
+                return Ok(());
+            }
+            let target_path = Path::new(&target_str);
+            run_git(
+                target_path,
+                &[
+                    "sparse-checkout".to_string(),
+                    "init".to_string(),
+                    "--cone".to_string(),
+                ],
+            )?;
+            let mut set_argv = vec![
+                "sparse-checkout".to_string(),
+                "set".to_string(),
+                "--".to_string(),
+            ];
+            set_argv.extend(sparse.iter().cloned());
+            run_git(target_path, &set_argv)?;
+            run_git(target_path, &["checkout".to_string(), branch_name.clone()])?;
+            Ok(())
+        });
+        if let Err(err) = create_result {
+            // Failed-creation rollback (the fork's addSparseWorktree
+            // cleanup): the fresh branch has no user commits, so the
+            // worktree and branch are force-removed rather than left half
+            // created.
+            let removed = run_git(
+                Path::new(&project.path),
+                &[
+                    "worktree".to_string(),
+                    "remove".to_string(),
+                    "--force".to_string(),
+                    target_str.clone(),
+                ],
+            );
+            let branch_deleted = run_git(
+                Path::new(&project.path),
+                &["branch".to_string(), "-D".to_string(), branch_name.clone()],
+            );
+            if removed.is_err() || branch_deleted.is_err() {
+                return Err(error::io_error(format!(
+                    "{} (cleanup also failed — the partially created worktree at \"{}\" may need manual removal)",
+                    err.message, target_str
+                )));
+            }
+            return Err(err);
+        }
 
         let canonical_target = std::fs::canonicalize(&target).map_err(|e| {
             error::io_error(format!(
@@ -230,8 +459,8 @@ impl Engine {
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = now_rfc3339();
         conn.execute(
-            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-            rusqlite::params![id, project_id, workspace_id, canonical_target_str, name, head, base_ref, created_at],
+            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, note, parent_worktree_id, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            rusqlite::params![id, project_id, workspace_id, canonical_target_str, branch_name, head, base_ref, note, parent_worktree_id, created_at],
         )
         .map_err(error::from_sqlite)?;
 
@@ -240,10 +469,12 @@ impl Engine {
             &project_id,
             &workspace_id,
             &canonical_target_str,
-            &name,
+            &branch_name,
             &head,
             base_ref.as_deref(),
             None,
+            note.as_deref(),
+            parent_worktree_id.as_deref(),
             &created_at,
         ))
     }
@@ -268,14 +499,14 @@ impl Engine {
             return Ok(json!({
                 "worktrees": [worktree_json(
                     &project.id, &project.id, &workspace_id, &project.path, "", "", None, None,
-                    &project.created_at,
+                    None, None, &project.created_at,
                 )]
             }));
         }
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, path, branch, head, base_ref, title, created_at FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
+                "SELECT id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         struct Row {
@@ -286,6 +517,8 @@ impl Engine {
             head: String,
             base_ref: Option<String>,
             title: Option<String>,
+            note: Option<String>,
+            parent_worktree_id: Option<String>,
             created_at: String,
         }
         let rows: Vec<Row> = stmt
@@ -298,7 +531,9 @@ impl Engine {
                     head: r.get(4)?,
                     base_ref: r.get(5)?,
                     title: r.get(6)?,
-                    created_at: r.get(7)?,
+                    note: r.get(7)?,
+                    parent_worktree_id: r.get(8)?,
+                    created_at: r.get(9)?,
                 })
             })
             .map_err(error::from_sqlite)?
@@ -344,6 +579,8 @@ impl Engine {
                     &head,
                     row.base_ref.as_deref(),
                     row.title.as_deref(),
+                    row.note.as_deref(),
+                    row.parent_worktree_id.as_deref(),
                     &row.created_at,
                 )
             })
@@ -390,6 +627,7 @@ impl Engine {
     /// display title stored on the worktree row. The git branch and the
     /// worktree directory are untouched — verify by comparing `branch`
     /// and `path` before and after.
+    #[allow(clippy::type_complexity)]
     pub(super) fn do_worktree_rename(&self, params: &Value) -> Result<Value, RpcError> {
         let decoded: drogon_protocol::worktree::WorktreeRenameParams =
             serde_json::from_value(params.clone())
@@ -407,11 +645,35 @@ impl Engine {
         if changed == 0 {
             return Err(error::not_found("worktree not found"));
         }
-        let row: (String, String, String, String, String, String, Option<String>, String) =
-            conn.query_row(
-                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, created_at FROM worktrees WHERE id = ?1",
+        let row: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, note, parent_worktree_id, created_at FROM worktrees WHERE id = ?1",
                 [&decoded.worktree_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                        r.get(9)?,
+                    ))
+                },
             )
             .map_err(error::from_sqlite)?;
         Ok(worktree_json(
@@ -423,7 +685,100 @@ impl Engine {
             &row.5,
             row.6.as_deref(),
             Some(&name),
-            &row.7,
+            row.7.as_deref(),
+            row.8.as_deref(),
+            &row.9,
+        ))
+    }
+
+    /// Worktree-meta update (`worktree.update`): the note (the composer's
+    /// Advanced Note row) and the sidebar-nesting parent. Each field is
+    /// tri-state — absent leaves the column untouched, explicit null
+    /// clears it. The parent is nesting only: it never changes the base
+    /// branch, matching the fork's picker copy.
+    #[allow(clippy::type_complexity)]
+    pub(super) fn do_worktree_update(&self, params: &Value) -> Result<Value, RpcError> {
+        let decoded: drogon_protocol::worktree::WorktreeUpdateParams =
+            serde_json::from_value(params.clone())
+                .map_err(|_| error::invalid_argument("Invalid worktree.update parameters"))?;
+        if let Some(Some(note)) = &decoded.note
+            && note.len() > 64 * 1024
+        {
+            return Err(error::invalid_argument("note is too long"));
+        }
+        let conn = self.db.lock().unwrap();
+        let project_id: String = conn
+            .query_row(
+                "SELECT project_id FROM worktrees WHERE id = ?1",
+                [&decoded.worktree_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(error::from_sqlite)?
+            .ok_or_else(|| error::not_found("worktree not found"))?;
+        if let Some(parent) = &decoded.parent_worktree_id {
+            if let Some(parent_id) = parent {
+                validate_parent_update(&conn, &decoded.worktree_id, &project_id, parent_id)?;
+            }
+            conn.execute(
+                "UPDATE worktrees SET parent_worktree_id = ?1 WHERE id = ?2",
+                rusqlite::params![parent, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+        }
+        if let Some(note) = &decoded.note {
+            let trimmed = note.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            conn.execute(
+                "UPDATE worktrees SET note = ?1 WHERE id = ?2",
+                rusqlite::params![trimmed, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+        }
+        let row: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at FROM worktrees WHERE id = ?1",
+                [&decoded.worktree_id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                        r.get(9)?,
+                        r.get(10)?,
+                    ))
+                },
+            )
+            .map_err(error::from_sqlite)?;
+        Ok(worktree_json(
+            &row.0,
+            &row.1,
+            &row.2,
+            &row.3,
+            &row.4,
+            &row.5,
+            row.6.as_deref(),
+            row.7.as_deref(),
+            row.8.as_deref(),
+            row.9.as_deref(),
+            &row.10,
         ))
     }
 }

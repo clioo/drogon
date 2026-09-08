@@ -6,15 +6,19 @@
    (adapter: project list from the daemon's projects RPC, Run on = the
    source's control over the single local run target (no remote hosts exist
    in Drogon), the Agent combobox lists the daemon's harnesses with the
-   fork's auto-pick/default semantics, and the Advanced section carries the
-   one advanced control the daemon contract has — the base ref. The fork's
-   model/provider text fields do not exist: agent model, effort and
-   permission mode come from Settings → Agents, exactly as the fork's agent
-   settings drive its quick create. Submit still routes through this repo's
-   Project/Worktree RPC contract and `harness.start`; no remote hosts,
-   smart-name sources, setup, sparse-checkout, parent-worktree nesting or
-   note — those data layers do not exist here). */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+   fork's auto-pick/default semantics, and the Advanced rows feed additive
+   branch/note/parent/setup/sparse data layers. The fork's model/provider
+   text fields do not exist: agent model, effort and permission mode come
+   from Settings → Agents. Quick Session creates a daemon-owned scratch
+   folder project before chaining `harness.start`; remote hosts and
+   smart-name sources remain unported). */
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   Harness,
   HarnessId,
@@ -22,9 +26,14 @@ import type {
   Project,
   Workspace,
 } from "../../../../shared/session-contract";
+import type { SparsePresetResult } from "../../../../shared/project-contract";
 import type { HarnessAgentDefault } from "../../settings-store";
 import { cn } from "../../lib/utils";
-import type { ProjectGroup } from "../shell/project-adapter";
+import {
+  windowProjectBridge,
+  type ProjectRpcBridge,
+  type ProjectGroup,
+} from "../shell/project-adapter";
 import {
   composerAgentLaunchInput,
   composerPrimaryActionLabel,
@@ -34,7 +43,10 @@ import {
 } from "./composer-submit";
 import { getScreenSubmitModifierLabel } from "./composer-submit-shortcut";
 import { buildComposerProjectOptions } from "./project-combobox-options";
-import { buildLocalRunTargetOption, type ReadyRunTargetOption } from "./run-target-options";
+import {
+  buildLocalRunTargetOption,
+  type ReadyRunTargetOption,
+} from "./run-target-options";
 import { NewWorkspaceComposerProjectSection } from "./composer-project-section";
 import { NewWorkspaceComposerNameSection } from "./composer-name-section";
 import { NewWorkspaceComposerAgentSection } from "./composer-agent-section";
@@ -66,6 +78,7 @@ export function NewWorkspaceComposer({
   onProjectChange,
   onSubmitWorktree,
   onLaunchAgent,
+  onCreateQuickSession,
   onSelectWorkspace,
   onAddProject,
   onOpenAgentSettings,
@@ -99,6 +112,17 @@ export function NewWorkspaceComposer({
     projectId: string;
     name: string;
     baseRef?: string;
+    branch?: string;
+    note?: string;
+    parentWorktreeId?: string;
+    sparse?: string[];
+    setupScript?: string;
+    waitForSetup?: boolean;
+    agent: ComposerAgentSelection;
+  }) => Promise<string | null>;
+  /** Creates the fork's daemon-owned scratch-folder Quick Session. */
+  onCreateQuickSession?: (input: {
+    name: string;
     agent: ComposerAgentSelection;
   }) => Promise<string | null>;
   /**
@@ -117,8 +141,21 @@ export function NewWorkspaceComposer({
 }) {
   const project: Project | null =
     groups.find((group) => group.project.id === projectId)?.project ?? null;
+  const selectedGroup =
+    groups.find((group) => group.project.id === projectId) ?? null;
   const [name, setName] = useState("");
   const [baseRef, setBaseRef] = useState(project?.defaultBaseRef ?? "");
+  const [branchName, setBranchName] = useState("");
+  const [parentWorktreeId, setParentWorktreeId] = useState<string | null>(null);
+  const [note, setNote] = useState("");
+  const [runSetup, setRunSetup] = useState(
+    Boolean(project?.setupScript?.trim()),
+  );
+  const [waitForSetup, setWaitForSetup] = useState(false);
+  const [sparsePresets, setSparsePresets] = useState<SparsePresetResult[]>([]);
+  const [selectedSparsePresetId, setSelectedSparsePresetId] = useState<
+    string | null
+  >(null);
   const [quickAgent, setQuickAgent] = useState<HarnessId | null>(() =>
     initialComposerAgentId(harnesses, defaultHarnessId),
   );
@@ -126,11 +163,16 @@ export function NewWorkspaceComposer({
   const [createMultiple, setCreateMultiple] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [quickSessionCreating, setQuickSessionCreating] = useState(false);
   const baseRefInputId = React.useId();
+  const branchNameInputId = React.useId();
   const projectDescriptionId = React.useId();
   const nameInputFocusFrameRef = useRef<number | null>(null);
 
-  const projectOptions = useMemo(() => buildComposerProjectOptions(groups), [groups]);
+  const projectOptions = useMemo(
+    () => buildComposerProjectOptions(groups),
+    [groups],
+  );
   const runTargetOptions = useMemo<readonly ReadyRunTargetOption[]>(
     () => (project ? [buildLocalRunTargetOption(project)] : []),
     [project],
@@ -150,6 +192,9 @@ export function NewWorkspaceComposer({
     [harnesses],
   );
   const isGit = project?.kind === "git";
+  const selectedSparsePreset =
+    sparsePresets.find((preset) => preset.id === selectedSparsePresetId) ??
+    null;
   const createDisabled = disabled || sending || project === null;
 
   // A newly picked project brings its own default base ref and local run
@@ -161,9 +206,80 @@ export function NewWorkspaceComposer({
     if (prevProjectId.current !== nextId) {
       prevProjectId.current = nextId;
       setBaseRef(project?.defaultBaseRef ?? "");
+      setBranchName("");
+      setParentWorktreeId(null);
+      setNote("");
+      setRunSetup(Boolean(project?.setupScript?.trim()));
+      setWaitForSetup(false);
+      setSparsePresets([]);
+      setSelectedSparsePresetId(null);
       setError(null);
     }
   });
+
+  // Sparse presets are project-scoped daemon data. An older daemon simply
+  // leaves the picker at Off; no renderer-only fake preset is invented.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      if (!project || !isGit) {
+        setSparsePresets([]);
+        setSelectedSparsePresetId(null);
+        return;
+      }
+      const bridge: ProjectRpcBridge =
+        typeof window === "undefined" ? {} : windowProjectBridge(window.drogon);
+      if (typeof bridge.sparsePresets !== "function") return;
+      try {
+        const result = await bridge.sparsePresets({ projectId: project.id });
+        if (!cancelled && result.ok) setSparsePresets(result.result.presets);
+      } catch {
+        if (!cancelled) setSparsePresets([]);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [isGit, project?.id]);
+
+  const saveSparsePreset = useCallback(
+    async (input: { id?: string; name: string; directories: string[] }) => {
+      if (!project) return null;
+      const bridge: ProjectRpcBridge =
+        typeof window === "undefined" ? {} : windowProjectBridge(window.drogon);
+      if (typeof bridge.saveSparsePreset !== "function") {
+        setError(
+          "Sparse checkout presets are unavailable: service does not advertise project.v1",
+        );
+        return null;
+      }
+      try {
+        const result = await bridge.saveSparsePreset({
+          projectId: project.id,
+          ...input,
+        });
+        if (!result.ok) {
+          setError(result.error.message);
+          return null;
+        }
+        setSparsePresets((items) => {
+          const existing = items.some((item) => item.id === result.result.id);
+          return existing
+            ? items.map((item) =>
+                item.id === result.result.id ? result.result : item,
+              )
+            : [...items, result.result];
+        });
+        setError(null);
+        return result.result;
+      } catch {
+        setError("Could not save the sparse preset. Retry the connection.");
+        return null;
+      }
+    },
+    [project],
+  );
 
   const cancelNameInputFocusFrame = useCallback((): void => {
     if (nameInputFocusFrameRef.current !== null) {
@@ -230,6 +346,18 @@ export function NewWorkspaceComposer({
         projectId: resolved.target.project.id,
         name: resolved.target.name,
         baseRef: resolved.target.baseRef,
+        ...(branchName.trim() ? { branch: branchName.trim() } : {}),
+        ...(note.trim() ? { note: note.trim() } : {}),
+        ...(parentWorktreeId ? { parentWorktreeId } : {}),
+        ...(selectedSparsePreset
+          ? { sparse: selectedSparsePreset.directories }
+          : {}),
+        ...(runSetup && project?.setupScript?.trim()
+          ? {
+              setupScript: project.setupScript,
+              ...(waitForSetup ? { waitForSetup: true } : {}),
+            }
+          : {}),
         agent,
       });
       if (failure) {
@@ -241,6 +369,12 @@ export function NewWorkspaceComposer({
       if (createMultiple) {
         setName("");
         setBaseRef(resolved.target.project.defaultBaseRef ?? "");
+        setBranchName("");
+        setParentWorktreeId(null);
+        setNote("");
+        setRunSetup(Boolean(resolved.target.project.setupScript?.trim()));
+        setWaitForSetup(false);
+        setSelectedSparsePresetId(null);
         focusNameInput();
         return;
       }
@@ -248,6 +382,19 @@ export function NewWorkspaceComposer({
     } finally {
       setSending(false);
     }
+  };
+
+  const createQuickSession = async (): Promise<void> => {
+    if (!quickAgent || quickSessionCreating || !onCreateQuickSession) return;
+    setQuickSessionCreating(true);
+    setError(null);
+    const failure = await onCreateQuickSession({
+      name: name.trim(),
+      agent: { harnessId: quickAgent, model: "", provider: "" },
+    });
+    if (failure) setError(failure);
+    else onClose();
+    setQuickSessionCreating(false);
   };
 
   const mod = getScreenSubmitModifierLabel();
@@ -259,7 +406,10 @@ export function NewWorkspaceComposer({
     <div
       ref={composerRef}
       data-workspace-composer-root="true"
-      className={cn("grid min-w-0 gap-1 rounded-md transition", containerClassName)}
+      className={cn(
+        "grid min-w-0 gap-1 rounded-md transition",
+        containerClassName,
+      )}
     >
       <div className="min-w-0 space-y-4 pt-3">
         <NewWorkspaceComposerProjectSection
@@ -292,7 +442,9 @@ export function NewWorkspaceComposer({
           advancedOpen={advancedOpen}
           onToggleAdvanced={() => setAdvancedOpen((open) => !open)}
           visibleQuickAgents={visibleQuickAgents}
-          defaultTuiAgent={defaultHarnessId === "" ? null : (defaultHarnessId as HarnessId)}
+          defaultTuiAgent={
+            defaultHarnessId === "" ? null : (defaultHarnessId as HarnessId)
+          }
           handleSetDefaultAgent={(next) => {
             if (next !== null) onSetDefaultAgent(next);
           }}
@@ -304,6 +456,25 @@ export function NewWorkspaceComposer({
           baseRef={baseRef}
           onBaseRefChange={setBaseRef}
           defaultBaseRef={project?.defaultBaseRef ?? null}
+          branchName={branchName}
+          branchNameInputId={branchNameInputId}
+          onBranchNameChange={setBranchName}
+          parentWorktrees={selectedGroup?.worktrees ?? []}
+          parentWorktreeId={parentWorktreeId}
+          onParentWorktreeChange={setParentWorktreeId}
+          note={note}
+          onNoteChange={setNote}
+          setupScript={project?.setupScript ?? null}
+          runSetup={runSetup}
+          onRunSetupChange={setRunSetup}
+          waitForSetup={waitForSetup}
+          onWaitForSetupChange={setWaitForSetup}
+          sparsePresets={sparsePresets}
+          selectedSparsePresetId={selectedSparsePresetId}
+          onSparseSelectPreset={(preset) =>
+            setSelectedSparsePresetId(preset?.id ?? null)
+          }
+          onSaveSparsePreset={saveSparsePreset}
         />
       </div>
       <NewWorkspaceComposerFooter
@@ -316,6 +487,9 @@ export function NewWorkspaceComposer({
         creating={sending}
         primaryActionLabel={composerPrimaryActionLabel(project)}
         submitShortcutModifierLabel={mod}
+        onCreateQuickSession={createQuickSession}
+        quickSessionDisabled={disabled || !quickAgent || sending}
+        quickSessionCreating={quickSessionCreating}
       />
     </div>
   );

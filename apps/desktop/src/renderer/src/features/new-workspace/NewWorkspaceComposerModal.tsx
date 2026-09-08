@@ -5,8 +5,8 @@
    instead of layering the fork's hosted AddRepoDialog, and the agent
    settings gear navigates to Settings → Agents instead of opening the
    fork's nested AgentSettingsDialog — Drogon has neither dialog. The
-   fork's DrogonQuickSession footer button is not ported: a folder project's
-   primary action already opens its implicit workspace). */
+   fork's Quick Session footer button maps to the daemon-owned scratch
+   project RPC instead of a folder project's primary action). */
 import { useEffect, useRef, useState } from "react";
 import {
   Dialog,
@@ -52,6 +52,7 @@ export function NewWorkspaceComposerModal({
   harnessDefaults,
   onSubmitWorktree,
   onLaunchAgent,
+  onCreateQuickSession,
   onSelectWorkspace,
   onAddProject,
   onOpenAgentSettings,
@@ -72,6 +73,16 @@ export function NewWorkspaceComposerModal({
     projectId: string;
     name: string;
     baseRef?: string;
+    branch?: string;
+    note?: string;
+    parentWorktreeId?: string;
+    sparse?: string[];
+    setupScript?: string;
+    waitForSetup?: boolean;
+    agent: ComposerAgentSelection;
+  }) => Promise<string | null>;
+  onCreateQuickSession?: (input: {
+    name: string;
     agent: ComposerAgentSelection;
   }) => Promise<string | null>;
   onLaunchAgent: (launch: HarnessLaunchInput) => Promise<string | null>;
@@ -127,7 +138,8 @@ export function NewWorkspaceComposerModal({
       handle.submit();
     };
     window.addEventListener("keydown", onKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, []);
 
   return (
@@ -146,7 +158,9 @@ export function NewWorkspaceComposerModal({
           // so users can start typing immediately.
           event.preventDefault();
           const content = event.currentTarget as HTMLElement;
-          getWorkspaceComposerInitialFocusTarget(content)?.focus({ preventScroll: true });
+          getWorkspaceComposerInitialFocusTarget(content)?.focus({
+            preventScroll: true,
+          });
         }}
       >
         <DialogHeader className="gap-1">
@@ -178,6 +192,7 @@ export function NewWorkspaceComposerModal({
           onProjectChange={setProjectId}
           onSubmitWorktree={onSubmitWorktree}
           onLaunchAgent={onLaunchAgent}
+          onCreateQuickSession={onCreateQuickSession}
           onSelectWorkspace={onSelectWorkspace}
           onAddProject={onAddProject}
           onOpenAgentSettings={onOpenAgentSettings}

@@ -3,8 +3,8 @@
    #316: the composer is the fork's "Create worktree" composer — Project
    type-ahead combobox ("Browse projects"), the Run on field ("Browse run
    targets") with the single local target, the fork's name-field copy, the
-   Agent combobox, the Advanced disclosure with the base ref, and the ⌘↵
-   footer. The submit payload to the daemon is unchanged. */
+   Agent combobox, the Advanced disclosure with branch/parent/note/setup/
+   sparse rows plus the base ref, and the ⌘↵ footer. */
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
@@ -59,6 +59,26 @@ function gitGroup(): ProjectGroup {
   };
 }
 
+function configuredGitGroup(): ProjectGroup {
+  const parent: Worktree = {
+    id: "wt-parent",
+    projectId: "git:1",
+    workspaceId: "ws-parent",
+    path: "/tmp/repo-parent",
+    branch: "main",
+    head: "abc",
+    baseRef: null,
+    createdAt: "",
+  };
+  return {
+    project: {
+      ...gitGroup().project,
+      setupScript: "pnpm install",
+    },
+    worktrees: [parent],
+  };
+}
+
 function workspace(): Workspace {
   return {
     id: "ws-1",
@@ -102,6 +122,7 @@ function mount({
     }) => null,
   ),
   onLaunchAgent = vi.fn(async (_launch: unknown) => null),
+  onCreateQuickSession = vi.fn(async (_input: unknown) => null),
   onSelectWorkspace = vi.fn(),
   onProjectChange = vi.fn(),
   onAddProject = vi.fn(),
@@ -119,6 +140,7 @@ function mount({
     agent: ComposerAgentSelection;
   }) => Promise<string | null>;
   onLaunchAgent: (launch: unknown) => Promise<string | null>;
+  onCreateQuickSession: (input: unknown) => Promise<string | null>;
   onSelectWorkspace: (workspaceId: string) => void;
   onProjectChange: (projectId: string | null) => void;
   onAddProject: () => void;
@@ -127,23 +149,24 @@ function mount({
   return render(
     <TooltipProvider>
       <NewWorkspaceComposer
-      groups={groups}
-      workspaces={workspaces}
-      projectId={projectId}
-      disabled={false}
-      nameInputRef={createRef<HTMLInputElement>()}
-      composerRef={createRef<HTMLDivElement>()}
-      harnesses={harnesses}
-      defaultHarnessId={defaultHarnessId}
-      harnessDefaults={{}}
-      onProjectChange={onProjectChange}
-      onSubmitWorktree={onSubmitWorktree}
-      onLaunchAgent={onLaunchAgent as never}
-      onSelectWorkspace={onSelectWorkspace}
-      onAddProject={onAddProject}
-      onOpenAgentSettings={() => {}}
-      onSetDefaultAgent={() => {}}
-      onClose={onClose}
+        groups={groups}
+        workspaces={workspaces}
+        projectId={projectId}
+        disabled={false}
+        nameInputRef={createRef<HTMLInputElement>()}
+        composerRef={createRef<HTMLDivElement>()}
+        harnesses={harnesses}
+        defaultHarnessId={defaultHarnessId}
+        harnessDefaults={{}}
+        onProjectChange={onProjectChange}
+        onSubmitWorktree={onSubmitWorktree}
+        onLaunchAgent={onLaunchAgent as never}
+        onCreateQuickSession={onCreateQuickSession}
+        onSelectWorkspace={onSelectWorkspace}
+        onAddProject={onAddProject}
+        onOpenAgentSettings={() => {}}
+        onSetDefaultAgent={() => {}}
+        onClose={onClose}
       />
     </TooltipProvider>,
   );
@@ -163,7 +186,9 @@ describe("NewWorkspaceComposer chrome (#316 fork anatomy)", () => {
     mount({});
     // Project combobox + its browse affordance.
     expect(screen.getByRole("combobox", { name: "Project" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Browse projects" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Browse projects" }),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add project" })).toBeTruthy();
     // Run on, local-only, rendered as the fork's ready local host.
     expect(screen.getByRole("combobox", { name: "Run on" })).toBeTruthy();
@@ -212,11 +237,84 @@ describe("NewWorkspaceComposer chrome (#316 fork anatomy)", () => {
     mount({});
     // The source keeps the panel mounted but inert while collapsed.
     expect(
-      screen.getByLabelText(/Base ref/).closest("[aria-hidden]")?.getAttribute("aria-hidden"),
+      screen
+        .getByLabelText(/Base ref/)
+        .closest("[aria-hidden]")
+        ?.getAttribute("aria-hidden"),
     ).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     const baseRef = screen.getByLabelText(/Base ref/) as HTMLInputElement;
     expect(baseRef.value).toBe("main");
+  });
+
+  test("Advanced ports branch, parent, note, setup, sparse and base-ref rows in fork order", () => {
+    mount({ groups: [configuredGitGroup()], projectId: "git:1" });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByLabelText("Branch name")).toBeTruthy();
+    expect(
+      screen.getByRole("combobox", { name: /Parent worktree/ }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Nests this workspace under another in the sidebar. Does not change the base branch.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Note")).toBeTruthy();
+    expect(screen.getByText("Setup script")).toBeTruthy();
+    expect(screen.getByText("pnpm install")).toBeTruthy();
+    expect(
+      screen.getByRole("switch", { name: "Run setup command" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Sparse checkout")).toBeTruthy();
+    expect(screen.getByLabelText(/Base ref/)).toBeTruthy();
+  });
+
+  test("Advanced values reach worktree.create and Quick Session reaches its consumer", async () => {
+    const onSubmitWorktree = vi.fn(async (_input: unknown) => null);
+    const onCreateQuickSession = vi.fn(async (_input: unknown) => null);
+    mount({
+      groups: [configuredGitGroup()],
+      projectId: "git:1",
+      harnesses: [piHarness()],
+      onSubmitWorktree,
+      onCreateQuickSession,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    fillName("workspace-name");
+    fireEvent.change(screen.getByLabelText("Branch name"), {
+      target: { value: "feature/custom" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Note" }), {
+      target: { value: "remember this" },
+    });
+    fireEvent.click(screen.getByRole("combobox", { name: /Parent worktree/ }));
+    fireEvent.click(screen.getByRole("option", { name: /main/ }));
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: "Wait for setup to complete before starting agent",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Quick Session/ }));
+    await vi.waitFor(() =>
+      expect(onCreateQuickSession).toHaveBeenCalledTimes(1),
+    );
+    expect(onCreateQuickSession.mock.calls[0]?.[0]).toMatchObject({
+      name: "workspace-name",
+      agent: { harnessId: "pi" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
+    await vi.waitFor(() => expect(onSubmitWorktree).toHaveBeenCalledTimes(1));
+    expect(onSubmitWorktree.mock.calls[0]?.[0]).toMatchObject({
+      projectId: "git:1",
+      name: "workspace-name",
+      branch: "feature/custom",
+      note: "remember this",
+      parentWorktreeId: "wt-parent",
+      setupScript: "pnpm install",
+      waitForSetup: true,
+      agent: { harnessId: "pi" },
+    });
   });
 
   test("no projects: the fork's empty message and a disabled primary action", () => {

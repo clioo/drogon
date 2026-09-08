@@ -77,6 +77,87 @@ describe("dispatchProjectRequest", () => {
     expect(result).toEqual(created);
   });
 
+  test("forwards the Advanced worktree fields without dropping them", async () => {
+    const seen: Array<{ method: string; params: object }> = [];
+    const result = await dispatchProjectRequest(
+      "worktreeCreate",
+      {
+        projectId: "p1",
+        name: "demo-a",
+        baseRef: "main",
+        branch: "feature/demo-a",
+        note: "remember this",
+        parentWorktreeId: "parent",
+        sparse: ["src", "docs"],
+      },
+      async (method, params) => {
+        seen.push({ method, params });
+        return {
+          ok: true as const,
+          result: {
+            id: "t1",
+            projectId: "p1",
+            workspaceId: "w9",
+            path: "/data/repo/demo-a",
+            branch: "feature/demo-a",
+            head: "abc",
+            baseRef: "main",
+            title: null,
+            note: "remember this",
+            parentWorktreeId: "parent",
+            createdAt: "2026-09-07T00:00:00Z",
+          },
+        };
+      },
+    );
+    expect(seen).toEqual([
+      {
+        method: "worktree.create",
+        params: {
+          projectId: "p1",
+          name: "demo-a",
+          baseRef: "main",
+          branch: "feature/demo-a",
+          note: "remember this",
+          parentWorktreeId: "parent",
+          sparse: ["src", "docs"],
+        },
+      },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  test("creates a Quick Session and validates its project/workspace result", async () => {
+    const seen: Array<{ method: string; params: object }> = [];
+    const result = await dispatchProjectRequest(
+      "quickSessionCreate",
+      { name: "scratch" },
+      async (method, params) => {
+        seen.push({ method, params });
+        return {
+          ok: true as const,
+          result: {
+            project: {
+              id: "quick-project",
+              hostId: "host",
+              path: "/data/quick-sessions/session-1",
+              name: "scratch",
+              kind: "folder",
+              defaultBaseRef: null,
+              setupScript: null,
+              quickSession: true,
+            },
+            workspaceId: "quick-workspace",
+          },
+        };
+      },
+    );
+    expect(seen).toEqual([
+      { method: "project.quickSessionCreate", params: { name: "scratch" } },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
   test("passes service errors through untouched", async () => {
     const failure = {
       ok: false as const,
@@ -139,7 +220,10 @@ describe("dispatchProjectRequest", () => {
       },
     );
     expect(seen).toEqual([
-      { method: "worktree.rename", params: { worktreeId: "t1", name: "My feature" } },
+      {
+        method: "worktree.rename",
+        params: { worktreeId: "t1", name: "My feature" },
+      },
     ]);
     expect(result).toEqual(renamed);
   });
@@ -247,7 +331,7 @@ describe("dispatchProjectRequest", () => {
     let reads = 0;
     const headless = startProjectRegistryWatcher({
       getWindow: () => null,
-      readRevision: async () => (reads += 1) > 1 ? "moved" : "base",
+      readRevision: async () => ((reads += 1) > 1 ? "moved" : "base"),
       pollIntervalMs: 60_000,
     });
     try {

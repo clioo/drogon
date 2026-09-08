@@ -17,6 +17,10 @@ export type Project = {
   name: string;
   kind: "git" | "folder";
   defaultBaseRef: string | null;
+  /** Project Settings → Setup script; absent on older daemon payloads. */
+  setupScript?: string | null;
+  /** Daemon-owned Quick Session scratch project marker. */
+  quickSession?: boolean;
 };
 /**
  * A git worktree (or, for a folder Project, the implicit single worktree
@@ -37,9 +41,14 @@ export type Worktree = {
    * never breaks an existing renderer `Worktree` literal that predates it.
    */
   title?: string | null;
+  /** Composer Advanced → Note. */
+  note?: string | null;
+  /** Composer Advanced → Parent worktree nesting edge. */
+  parentWorktreeId?: string | null;
   createdAt: string;
 };
-export type AgentState = "working" | "idle" | "needs_input" | "exited" | "unknown";
+export type AgentState =
+  "working" | "idle" | "needs_input" | "exited" | "unknown";
 export type Session = {
   id: string;
   workspaceId: string;
@@ -75,12 +84,7 @@ export type Status = {
   version: string;
 };
 export type Identity = { sessionId: string; incarnation: string };
-export type HarnessId =
-  | "claude"
-  | "pi"
-  | "opencode"
-  | "antigravity"
-  | "codex";
+export type HarnessId = "claude" | "pi" | "opencode" | "antigravity" | "codex";
 export type HarnessAvailability =
   "available" | "missing" | "unsupported_launcher";
 export type PermissionMode = "inherit" | "unattended";
