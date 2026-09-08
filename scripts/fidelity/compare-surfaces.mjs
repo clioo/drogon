@@ -739,6 +739,9 @@ async function launchCandidate() {
       DROGON_DATA_DIR: dataDir,
       DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
       DROGON_BACKGROUND_WINDOW: "1",
+      // Real window sized for a 1440x900 content area, parked off the user's
+      // work area: viewport emulation made xterm render at the wrong scale.
+      DROGON_WINDOW_BOUNDS: `${VIEWPORT.width}x${VIEWPORT.height + 28}+4000+4000`,
       ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
     },
   });
@@ -779,7 +782,7 @@ async function launchCandidate() {
   await page
     .getByRole("button", { name: "Reveal active workspace", exact: true })
     .waitFor({ timeout: 25000 });
-  await page.setViewportSize(VIEWPORT);
+  await ensureCandidateViewport(page);
   return { browser, page, desktop, daemon, fixture, dataDir, workspace };
 }
 
@@ -1162,10 +1165,23 @@ async function refTeardown(page, state) {
   return notes;
 }
 
+/**
+ * The owned candidate is launched with a real window whose content area is
+ * VIEWPORT; emulation (setViewportSize) is only a fallback when the window
+ * could not take that size, because device-metrics emulation makes the
+ * xterm canvas render at the wrong scale and misreports the layout.
+ */
+async function ensureCandidateViewport(page, notes = []) {
+  const size = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+  if (size.w === VIEWPORT.width && size.h === VIEWPORT.height) return;
+  notes.push(`candidate window is ${size.w}x${size.h}; emulating ${VIEWPORT.width}x${VIEWPORT.height}`);
+  await page.setViewportSize(VIEWPORT);
+}
+
 async function candSetup(page, state, ctx) {
   const notes = [];
   const missing = [];
-  await page.setViewportSize(VIEWPORT);
+  await ensureCandidateViewport(page, notes);
   await ensureClean(page, notes);
   const chordOverlay = async (chord, label) => {
     await tryKeys(page, chord);

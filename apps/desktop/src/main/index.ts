@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from "electron";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -376,6 +376,12 @@ function createWindow() {
   const seamBounds = parseWindowBoundsEnv(process.env.DROGON_WINDOW_BOUNDS);
   if (!app.isPackaged && seamBounds) {
     window.setBounds(seamBounds);
+  } else if (backgroundWindow) {
+    // Test launches park the window at the bottom-right edge of the work area
+    // so it stays out of the user's way; macOS keeps a corner on screen and
+    // occlusion throttling is off, so CDP captures still render.
+    const area = screen.getPrimaryDisplay().workArea;
+    window.setPosition(area.x + area.width - 120, area.y + area.height - 60);
   }
   console.log("[window] Window bounds at startup:", window.getBounds(),
     "maximized:", window.isMaximized());
