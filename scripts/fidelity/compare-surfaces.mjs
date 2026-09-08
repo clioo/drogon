@@ -316,6 +316,28 @@ const SURFACES = [
     candFiles: ["apps/desktop/src/renderer/src/features/settings/agents-section.tsx"],
   },
   {
+    id: "settings-notifications",
+    label: "Settings (Notifications pane)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/NotificationsPane.tsx",
+      "src/renderer/src/components/settings/NotificationSoundSection.tsx",
+    ],
+    probes: ["Notifications", "Enable Notifications", "Terminal Bell", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/settings/notifications-section.tsx"],
+  },
+  {
+    id: "settings-git",
+    label: "Settings (Git pane)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/GitPane.tsx",
+      "src/renderer/src/components/settings/CompareAgainstUpstreamSetting.tsx",
+    ],
+    probes: ["Git", "Branch Prefix", "Compare Base", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/settings/git-section.tsx"],
+  },
+  {
     id: "settings-shortcuts",
     label: "Settings (Shortcuts pane)",
     refDir: "src/renderer/src/components/settings",
@@ -396,26 +418,6 @@ const SURFACES = [
     ],
     probes: ["Responsibility", "history", "cron", "aria-label"],
     candFiles: ["apps/desktop/src/renderer/src/features/bots/BotResponsibilityCard.tsx"],
-  },
-  {
-    id: "settings-notifications",
-    label: "Settings (Notifications pane)",
-    refDir: "src/renderer/src/components/settings",
-    refFiles: [
-      "src/renderer/src/components/settings/NotificationsPane.tsx",
-    ],
-    probes: ["Notifications", "toggle", "sound", "aria-label"],
-    candFiles: ["apps/desktop/src/renderer/src/features/settings/notifications-section.tsx"],
-  },
-  {
-    id: "settings-git",
-    label: "Settings (Git pane)",
-    refDir: "src/renderer/src/components/settings",
-    refFiles: [
-      "src/renderer/src/components/settings/GitPane.tsx",
-    ],
-    probes: ["Git", "login", "identity", "aria-label"],
-    candFiles: ["apps/desktop/src/renderer/src/features/settings/git-section.tsx"],
   },
   {
     id: "toasts",
@@ -2169,8 +2171,8 @@ async function candSetup(page, state, ctx) {
       break;
     }
     case "settings-terminal": {
-      // No Terminal section exists (typography rows live under Appearance).
-      // Record the explicit non-parity and capture Settings as-is.
+      // R16-Q ships a Terminal section (Manage Sessions; typography rows
+      // stay under Appearance per the merged R16-G decision).
       const opened =
         (await tryClick(page, "button", "Settings")) ||
         (await tryClick(page, "button", "Settings", 2500));
@@ -2193,8 +2195,8 @@ async function candSetup(page, state, ctx) {
           terminal = false;
         }
       }
-      if (terminal) notes.push("Terminal pane opened (non-parity claim refuted: section exists)");
-      else missing.push("no Terminal section (explicit non-parity: typography rows live under Appearance; fork TerminalPane.tsx)");
+      if (terminal) notes.push("Terminal pane opened");
+      else missing.push("no Terminal section reachable");
       break;
     }
     case "settings-agents":
@@ -2534,6 +2536,8 @@ const ALL_STATES = [
   "settings-general",
   "settings-terminal",
   "settings-agents",
+  "settings-notifications",
+  "settings-git",
   "settings-shortcuts",
   "terminal-find",
   "browser-find",
@@ -2541,8 +2545,6 @@ const ALL_STATES = [
   "session-details",
   "automation-runs",
   "bot-responsibilities",
-  "settings-notifications",
-  "settings-git",
   "toasts",
 ];
 
@@ -2563,8 +2565,10 @@ const CAND_OWNER = {
   "right-rail": "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx, features/file-explorer/FileExplorerMenus.tsx, features/ports/PortsPanel.tsx",
   dialogs: "apps/desktop/src/renderer/src/features/shell/DeleteWorktreeDialog.tsx, RemoveProjectDialog.tsx",
   "settings-general": "apps/desktop/src/renderer/src/features/settings/general-section.tsx, SettingsPage.tsx, settings-sections.ts",
-  "settings-terminal": "apps/desktop/src/renderer/src/features/settings/terminal-typography.ts, appearance-section.tsx (no Terminal section; rows live under Appearance)",
+  "settings-terminal": "apps/desktop/src/renderer/src/features/settings/terminal-section.tsx, SettingsPage.tsx, settings-sections.ts",
   "settings-agents": "apps/desktop/src/renderer/src/features/settings/agents-section.tsx, agent-defaults.ts",
+  "settings-notifications": "apps/desktop/src/renderer/src/features/settings/notifications-section.tsx",
+  "settings-git": "apps/desktop/src/renderer/src/features/settings/git-section.tsx",
   "settings-shortcuts": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, keybindings/definitions.ts",
   "terminal-find": "apps/desktop/src/renderer/src/features/terminal/TerminalSearch.tsx, find-query-bounds.ts",
   "browser-find": "apps/desktop/src/renderer/src/features/browser/browser-find-bar.tsx, browser-find-state.ts, browser-page-context-menu.tsx, browser-menu-policy.ts, browser-notices.ts",
@@ -2572,8 +2576,6 @@ const CAND_OWNER = {
   "session-details": "apps/desktop/src/renderer/src/features/right-sidebar/SessionDetailsPanel.tsx",
   "automation-runs": "apps/desktop/src/renderer/src/features/automations/AutomationRunsDashboard.tsx, AutomationRunsTable.tsx, AutomationRunDetailsPage.tsx",
   "bot-responsibilities": "apps/desktop/src/renderer/src/features/bots/BotsPanel.tsx, BotResponsibilityCard.tsx",
-  "settings-notifications": "apps/desktop/src/renderer/src/features/settings/notifications-section.tsx",
-  "settings-git": "apps/desktop/src/renderer/src/features/settings/git-section.tsx",
   toasts: "apps/desktop/src/renderer/src/components/ui/sonner.tsx, App.tsx (Toaster)",
   tokens: "apps/desktop/src/renderer/src/assets/main.css",
 };
@@ -2600,6 +2602,8 @@ const STATE_SURFACE = {
   "settings-general": "settings-general",
   "settings-terminal": "settings-terminal",
   "settings-agents": "settings-agents",
+  "settings-notifications": "settings-notifications",
+  "settings-git": "settings-git",
   "settings-shortcuts": "settings-shortcuts",
   "terminal-find": "terminal-find",
   "browser-find": "browser-find",
@@ -2607,8 +2611,6 @@ const STATE_SURFACE = {
   "session-details": "session-details",
   "automation-runs": "automation-runs",
   "bot-responsibilities": "bot-responsibilities",
-  "settings-notifications": "settings-notifications",
-  "settings-git": "settings-git",
   toasts: "toasts",
 };
 
@@ -2631,8 +2633,10 @@ const SOURCE_PREFERENCE = {
   "right-rail": ["explorer", "ports", "activity", "classname"],
   dialogs: ["delete", "remove", "cancel", "classname"],
   "settings-general": ["general", "workspace directory", "auto save", "classname"],
-  "settings-terminal": ["terminal", "font", "gpu", "classname"],
+  "settings-terminal": ["terminal", "sessions", "kill", "classname"],
   "settings-agents": ["agents", "harness", "default", "classname"],
+  "settings-notifications": ["notifications", "enable", "sound", "classname"],
+  "settings-git": ["git", "branch", "compare", "classname"],
   "settings-shortcuts": ["shortcuts", "chord", "keyboard", "classname"],
   "terminal-find": ["search", "find", "match", "classname"],
   "browser-find": ["find in page", "match", "classname"],

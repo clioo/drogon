@@ -2,7 +2,7 @@
 // Projection tests for the settings panes: each MVP section renders its
 // source-faithful shell (title, controls, ARIA) from props alone, and the
 // sidebar order matches the reference order (Agents, General, Git,
-// Appearance, Notifications, Shortcuts).
+// Terminal, Appearance, Notifications, Shortcuts).
 import { describe, expect, test } from "vitest";
 import { renderToString } from "react-dom/server";
 import { AgentsSection } from "./agents-section";
@@ -12,6 +12,7 @@ import { GeneralSection } from "./general-section";
 import { GitSection } from "./git-section";
 import { NotificationsSection } from "./notifications-section";
 import { SettingsPage } from "./SettingsPage";
+import { TerminalSection } from "./terminal-section";
 import {
   DEFAULT_SETTINGS_SECTION,
   isSettingsSectionId,
@@ -23,11 +24,12 @@ function render(node: React.ReactElement): string {
 }
 
 describe("settings sidebar order (source order for the MVP subset)", () => {
-  test("declares agents, general, git, appearance, notifications, shortcuts", () => {
+  test("declares agents, general, git, terminal, appearance, notifications, shortcuts", () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
       "agents",
       "general",
       "git",
+      "terminal",
       "appearance",
       "notifications",
       "shortcuts",
@@ -198,7 +200,7 @@ describe("git projection", () => {
 });
 
 describe("notifications projection", () => {
-  test("renders the master needs-input switch", () => {
+  test("renders the fork master switch copy", () => {
     const html = render(
       <NotificationsSection
         notifyOnAgentNeedsInput={true}
@@ -206,8 +208,26 @@ describe("notifications projection", () => {
       />,
     );
     expect(html).toContain("Notifications");
-    expect(html).toContain("Notify when an agent needs input");
+    expect(html).toContain(
+      "Native desktop notifications for agent activity and terminal events.",
+    );
+    expect(html).toContain("Enable Notifications");
+    expect(html).toContain("Native system notifications for background events.");
     expect(html).toContain('role="switch"');
+  });
+});
+
+describe("terminal projection", () => {
+  test("initial paint shows the fork pane shell with manage sessions", () => {
+    const html = render(<TerminalSection />);
+    expect(html).toContain('data-settings-section="terminal"');
+    expect(html).toContain("Terminal");
+    expect(html).toContain("Shells, renderer, sessions, and terminal behavior.");
+    expect(html).toContain("Manage Sessions");
+    // Effects never run in SSR: the loading state, never stale data.
+    expect(html).toContain("Loading…");
+    expect(html).toContain('aria-label="Refresh"');
+    expect(html).toContain("Kill all sessions");
   });
 });
 

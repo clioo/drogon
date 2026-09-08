@@ -56,6 +56,7 @@ describe("settings search filter (sidebar + pane share this)", () => {
       "agents",
       "general",
       "git",
+      "terminal",
       "appearance",
       "notifications",
       "shortcuts",
@@ -87,7 +88,7 @@ describe("settings search filter (sidebar + pane share this)", () => {
 
 describe("SettingsPage chrome (Orca settings-page-renderer parity)", () => {
   const noop = () => {};
-  function page(section?: "appearance" | "agents" | "shortcuts" | "git" | "notifications" | "general"): string {
+  function page(section?: "appearance" | "agents" | "shortcuts" | "git" | "terminal" | "notifications" | "general"): string {
     return renderToString(
       createElement(SettingsPage, {
         theme: "system",

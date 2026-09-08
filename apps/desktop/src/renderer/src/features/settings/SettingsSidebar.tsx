@@ -4,7 +4,7 @@
 //     (Back to app row, search field with the shortcut hint, section nav
 //      with aria-current on the active row)
 // Adapted: no zustand store, no setup-guide row —
-// a controlled six-section grouped nav over this repo's settings-sections;
+// a controlled seven-section grouped nav over this repo's settings-sections;
 // the ⌘F hint is a plain kbd pair (no ShortcutKeyCombo dependency).
 import { ArrowLeft, Search } from "lucide-react";
 import type { RefObject } from "react";

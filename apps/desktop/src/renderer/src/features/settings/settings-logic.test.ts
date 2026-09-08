@@ -20,11 +20,12 @@ import {
 import { filterSettingsSections } from "./settings-search";
 
 describe("settings sections", () => {
-  test("declares the six J10 sections in reference sidebar order", () => {
+  test("declares the seven J10 sections in reference sidebar order", () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
       "agents",
       "general",
       "git",
+      "terminal",
       "appearance",
       "notifications",
       "shortcuts",
@@ -40,6 +41,7 @@ describe("settings sections", () => {
     expect(byId.get("agents")).toBe("capabilities");
     expect(byId.get("general")).toBe("setup");
     expect(byId.get("git")).toBe("workflows");
+    expect(byId.get("terminal")).toBe("workflows");
     expect(byId.get("appearance")).toBe("interface");
     expect(byId.get("notifications")).toBe("interface");
     expect(byId.get("shortcuts")).toBe("interface");
@@ -56,6 +58,7 @@ describe("settings sections", () => {
       "agents",
       "general",
       "git",
+      "terminal",
       "appearance",
       "notifications",
       "shortcuts",
@@ -63,6 +66,13 @@ describe("settings sections", () => {
     expect(filterSettingsSections("cli")).toEqual(["general"]);
     expect(filterSettingsSections("ask before deleting")).toEqual(["general"]);
     expect(filterSettingsSections("star")).toEqual(["general"]);
+  });
+
+  test("terminal search bucket matches the manage-sessions rows", () => {
+    expect(filterSettingsSections("sessions")).toEqual(["terminal"]);
+    expect(filterSettingsSections("kill")).toEqual(["terminal"]);
+    expect(filterSettingsSections("shells")).toEqual(["terminal"]);
+    expect(filterSettingsSections("terminal font")).toEqual(["appearance"]);
   });
 });
 
