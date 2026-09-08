@@ -5,13 +5,16 @@
 //! project/create-metadata queries, and the fork's error taxonomy.
 //! MIT Copyright (c) 2026 Lovecast Inc.
 
+pub mod adf;
 pub mod client;
 pub mod identity;
+pub mod issues;
 pub mod mapping;
 pub mod ops;
 pub mod rpc;
 pub mod seal;
 pub mod sites;
+pub mod start_issue;
 
 use std::collections::HashMap;
 use std::path::Path;

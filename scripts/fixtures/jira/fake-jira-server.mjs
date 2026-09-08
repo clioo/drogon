@@ -11,6 +11,14 @@
 //   GET  /rest/api/{2,3}/issue/createmeta/<project>/issuetypes[/<type>]
 //   GET  /rest/api/{2,3}/priority
 //   GET  /rest/api/{2,3}/user/search
+//   GET  /rest/api/{2,3}/issue/<key>            (detail; failure injection via -404/-429/-400 keys)
+//   GET  /rest/api/{2,3}/issue/<key>/transitions
+//   GET  /rest/api/{2,3}/issue/<key>/comment    (paged by `comments`, orderBy=created)
+//   POST /rest/api/{2,3}/issue                  (create; logs its body; FAIL_CREATE summary → 400)
+//   PUT  /rest/api/{2,3}/issue/<key>            (field updates; logs body)
+//   PUT  /rest/api/{2,3}/issue/<key>/assignee   (logs the user ref shape)
+//   POST /rest/api/{2,3}/issue/<key>/transitions
+//   POST /rest/api/{2,3}/issue/<key>/comment    (logs the body shape; returns id 90001)
 //
 // Auth: `Basic base64(<email>:fixture-token)` or `Bearer fixture-token`
 // (the PAT shape). Anything else gets a real 401 body.
@@ -193,6 +201,99 @@ const server = createServer(async (req, res) => {
     logRequest({ path, method: req.method })
     res.writeHead(200, { 'content-type': 'application/json' })
     return res.end(JSON.stringify(dataset.users ?? []))
+  }
+
+  // --- R17-C: issue detail, comments, transitions, mutations --------------
+
+  // Issue detail: dataset lookup by key; failure injection via magic keys
+  // (DROG-404 / DROG-429 / DROG-400) keeps every other test config-free.
+  const issueMatch = path.match(/^\/rest\/api\/[23]\/issue\/([^/]+)$/)
+  if (api && req.method === 'GET' && issueMatch) {
+    const key = decodeURIComponent(issueMatch[1])
+    logRequest({ path, method: req.method, key, fields: url.searchParams.get('fields'), expand: url.searchParams.get('expand') })
+    if (key.endsWith('-404')) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ errorMessages: ['Issue does not exist or you do not have permission to see it.'], errors: {} }))
+    }
+    if (key.endsWith('-429')) {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '7' })
+      return res.end(JSON.stringify({ errorMessages: ['Rate limit exceeded.'], errors: {} }))
+    }
+    if (key.endsWith('-400')) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ errorMessages: ["The value 'NOT_A_FIELD' does not exist for the field 'field'."], errors: {} }))
+    }
+    const issue = (dataset.issues ?? []).find((candidate) => candidate.key === key)
+    if (!issue) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ errorMessages: ['Issue does not exist or you do not have permission to see it.'], errors: {} }))
+    }
+    // Honor a `fields` list the way Jira does (the daemon asks for its
+    // detail field set, description/attachment included).
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify(pickFields(issue, url.searchParams.get('fields')?.split(',') ?? null)))
+  }
+
+  if (api && req.method === 'GET' && path.endsWith('/transitions')) {
+    const key = decodeURIComponent(path.split('/issue/')[1].split('/')[0])
+    logRequest({ path, method: req.method, key })
+    if (key.endsWith('-404') || key.endsWith('-429') || key.endsWith('-400')) {
+      res.writeHead(Number(key.split('-').pop()), { 'content-type': 'application/json', ...(key.endsWith('-429') ? { 'retry-after': '7' } : {}) })
+      return res.end(JSON.stringify({ errorMessages: ['Transition lookup failed (fixture switch).'], errors: {} }))
+    }
+    const issue = (dataset.issues ?? []).find((candidate) => candidate.key === key)
+    const from = issue?.fields.status
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ transitions: (dataset.transitions ?? []).map((transition) => ({ ...transition, from })) }))
+  }
+
+  const commentListMatch = path.match(/^\/rest\/api\/[23]\/issue\/([^/]+)\/comment$/)
+  if (api && req.method === 'GET' && commentListMatch) {
+    const key = decodeURIComponent(commentListMatch[1])
+    logRequest({ path, method: req.method, key, orderBy: url.searchParams.get('orderBy') })
+    const comments = (dataset.comments ?? {})[key] ?? []
+    const start = Number(url.searchParams.get('startAt') ?? 0)
+    const size = Number(url.searchParams.get('maxResults') ?? 50)
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({
+      startAt: start,
+      maxResults: size,
+      total: comments.length,
+      isLast: start + size >= comments.length,
+      comments: comments.slice(start, start + size),
+    }))
+  }
+
+  if (api && req.method === 'POST' && path.endsWith('/issue')) {
+    const body = await readBody(req)
+    logRequest({ path, method: req.method, body })
+    const summary = body?.fields?.summary ?? ''
+    if (typeof summary === 'string' && summary.includes('FAIL_CREATE')) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ errorMessages: ['The issue could not be created (fixture FAIL_CREATE switch).'], errors: {} }))
+    }
+    const maxNumber = Math.max(0, ...(dataset.issues ?? []).map((issue) => Number(issue.key.split('-')[1]) || 0))
+    const key = `DROG-${maxNumber + 1}`
+    res.writeHead(201, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ id: String(10000 + maxNumber + 1), key, self: `https://fixture.local/rest/api/3/issue/${key}` }))
+  }
+
+  const issueWriteMatch = path.match(/^\/rest\/api\/[23]\/issue\/([^/]+)(\/assignee|\/transitions|\/comment)?$/)
+  if (api && (req.method === 'PUT' || req.method === 'POST') && issueWriteMatch) {
+    const key = decodeURIComponent(issueWriteMatch[1])
+    const sub = issueWriteMatch[2] ?? ''
+    const body = await readBody(req)
+    logRequest({ path, method: req.method, key, sub, body })
+    if (key.endsWith('-400')) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ errorMessages: ['The value is invalid (fixture -400 switch).'], errors: {} }))
+    }
+    if (sub === '/comment') {
+      res.writeHead(201, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ id: '90001', self: `https://fixture.local/rest/api/3/issue/${key}/comment/90001` }))
+    }
+    res.writeHead(204, { 'content-type': 'application/json' })
+    return res.end()
   }
 
   res.writeHead(404, { 'content-type': 'application/json' })
