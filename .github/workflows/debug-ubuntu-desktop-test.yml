@@ -122,7 +122,7 @@ jobs:
         run: |
           set -o pipefail
           pnpm exec vitest run --reporter=verbose --sequence.shuffle=false \
-            --pool=forks --minWorkers=2 --maxWorkers=2 2>&1 | tee /tmp/vitest-w2.log
+            --pool=forks --maxWorkers 2 2>&1 | tee /tmp/vitest-w2.log
           echo "vitest pipeline exit: $?" || true
       - name: Boundary
         if: always()
