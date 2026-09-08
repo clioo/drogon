@@ -41,7 +41,11 @@ jobs:
       - run: pnpm test:renderer-contracts
       - run: pnpm test:packaging
       - run: pnpm --filter @drogon/desktop test
+      # The production bundle (Monaco + renderer) exceeds the default Node
+      # heap on macos-14 runners: raise it for this step only.
       - run: pnpm --filter @drogon/desktop build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
       - run: pnpm accept:core-cli
       - name: Verify real live-child service-crash recovery
         run: |
