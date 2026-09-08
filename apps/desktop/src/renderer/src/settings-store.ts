@@ -22,6 +22,14 @@
 // if it needs more than plain JSON. mergeSettingLayers, the debounce and the
 // storage key need no changes.
 
+import {
+  isEditorFontFamily,
+  isTerminalFontFamily,
+  normalizeTerminalFontWeight,
+  normalizeTerminalFontWeightBold,
+  resolveDefaultTerminalFontFamily,
+} from "./features/settings/terminal-typography";
+
 export type Theme = "system" | "dark" | "light";
 
 /** Source vocabulary (global-settings-types.ts): terminal GPU acceleration mode. */
@@ -53,6 +61,20 @@ export type SettingsSubset = {
   locale: string;
   /** Terminal font size in px; consumed by the terminal surface CSS hook. */
   terminalFontSize: number;
+  /**
+   * Terminal font family (source terminalFontFamily). Empty means no
+   * preference; xterm falls through to the monospace fallback chain.
+   */
+  terminalFontFamily: string;
+  /** Terminal regular text weight, normalized to 100-900 (source default 500). */
+  terminalFontWeight: number;
+  /** Terminal bold text weight, normalized to 100-900 (source default 700). */
+  terminalFontWeightBold: number;
+  /**
+   * Opt-in code-editor font; empty (the default) keeps following
+   * `terminalFontFamily` (source editorFontFamily).
+   */
+  editorFontFamily: string;
   /** Default harness for the "+" launch menu; "" means no default. */
   defaultHarnessId: string;
   /** Per-harness launch defaults keyed by harness id; absent key = all defaults. */
@@ -74,6 +96,10 @@ export const SETTINGS_DEFAULTS: SettingsSubset = {
   inspectorVisible: true,
   locale: "en",
   terminalFontSize: 13,
+  terminalFontFamily: resolveDefaultTerminalFontFamily(),
+  terminalFontWeight: 500,
+  terminalFontWeightBold: 700,
+  editorFontFamily: "",
   defaultHarnessId: "",
   harnessDefaults: {},
   notifyOnAgentNeedsInput: true,
@@ -128,6 +154,14 @@ function isTerminalFontSize(value: unknown): value is number {
     value >= 9 &&
     value <= 32
   );
+}
+
+function parseTerminalFontWeight(
+  value: unknown,
+  normalize: (weight: number | null | undefined) => number,
+): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return normalize(value);
 }
 
 function isDefaultHarnessId(value: unknown): value is string {
@@ -216,6 +250,24 @@ export function parsePersistedSettings(
       out.locale = candidate.locale;
     if (isTerminalFontSize(candidate.terminalFontSize))
       out.terminalFontSize = candidate.terminalFontSize;
+    if (isTerminalFontFamily(candidate.terminalFontFamily))
+      out.terminalFontFamily = candidate.terminalFontFamily;
+    {
+      const weight = parseTerminalFontWeight(
+        candidate.terminalFontWeight,
+        normalizeTerminalFontWeight,
+      );
+      if (weight !== null) out.terminalFontWeight = weight;
+    }
+    {
+      const boldWeight = parseTerminalFontWeight(
+        candidate.terminalFontWeightBold,
+        normalizeTerminalFontWeightBold,
+      );
+      if (boldWeight !== null) out.terminalFontWeightBold = boldWeight;
+    }
+    if (isEditorFontFamily(candidate.editorFontFamily))
+      out.editorFontFamily = candidate.editorFontFamily;
     if (isDefaultHarnessId(candidate.defaultHarnessId))
       out.defaultHarnessId = candidate.defaultHarnessId;
     {
@@ -372,6 +424,101 @@ export function writeTerminalGpuAcceleration(
       ...parseUnknownSettingsKeys(raw),
       ...parsePersistedSettings(raw),
       terminalGpuAcceleration: mode,
+    };
+    storage.setItem(key, JSON.stringify({ settings }));
+  } catch {
+    // Storage unavailable: nothing to persist; the caller keeps local state.
+  }
+}
+
+export type TerminalTypographyEnvelope = {
+  terminalFontFamily: string;
+  terminalFontWeight: number;
+  terminalFontWeightBold: number;
+  editorFontFamily: string;
+};
+
+/**
+ * Reads the terminal typography subset straight from the persisted envelope
+ * (source defaults for absent keys). TerminalPane consumes the setting at
+ * pane construction through this reader so the terminal feature does not
+ * need an App-level prop thread (same pattern as the GPU mode reader).
+ */
+export function readTerminalTypography(
+  storage: StorageLike,
+): TerminalTypographyEnvelope {
+  const fallback: TerminalTypographyEnvelope = {
+    terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
+    terminalFontWeight: SETTINGS_DEFAULTS.terminalFontWeight,
+    terminalFontWeightBold: SETTINGS_DEFAULTS.terminalFontWeightBold,
+    editorFontFamily: SETTINGS_DEFAULTS.editorFontFamily,
+  };
+  try {
+    const parsed = parsePersistedSettings(
+      storage.getItem(settingsStorageKey("ui")),
+    );
+    return {
+      terminalFontFamily:
+        parsed.terminalFontFamily ?? fallback.terminalFontFamily,
+      terminalFontWeight:
+        parsed.terminalFontWeight ?? fallback.terminalFontWeight,
+      terminalFontWeightBold:
+        parsed.terminalFontWeightBold ?? fallback.terminalFontWeightBold,
+      editorFontFamily: parsed.editorFontFamily ?? fallback.editorFontFamily,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Envelope read-modify-write for the typography subset that preserves every
+ * other persisted key (known and unknown). Used by the Settings controls,
+ * whose writes do not flow through an App-held store instance.
+ */
+export function writeTerminalTypography(
+  storage: StorageLike,
+  updates: Partial<TerminalTypographyEnvelope>,
+): void {
+  try {
+    const key = settingsStorageKey("ui");
+    const raw = storage.getItem(key);
+    const parsed = parsePersistedSettings(raw);
+    if (
+      updates.terminalFontFamily !== undefined &&
+      !isTerminalFontFamily(updates.terminalFontFamily)
+    )
+      return;
+    if (
+      updates.editorFontFamily !== undefined &&
+      !isEditorFontFamily(updates.editorFontFamily)
+    )
+      return;
+    const normalized = { ...updates };
+    if (normalized.terminalFontWeight !== undefined) {
+      if (
+        typeof normalized.terminalFontWeight !== "number" ||
+        !Number.isFinite(normalized.terminalFontWeight)
+      )
+        return;
+      normalized.terminalFontWeight = normalizeTerminalFontWeight(
+        normalized.terminalFontWeight,
+      );
+    }
+    if (normalized.terminalFontWeightBold !== undefined) {
+      if (
+        typeof normalized.terminalFontWeightBold !== "number" ||
+        !Number.isFinite(normalized.terminalFontWeightBold)
+      )
+        return;
+      normalized.terminalFontWeightBold = normalizeTerminalFontWeightBold(
+        normalized.terminalFontWeightBold,
+      );
+    }
+    const settings = {
+      ...parseUnknownSettingsKeys(raw),
+      ...parsed,
+      ...normalized,
     };
     storage.setItem(key, JSON.stringify({ settings }));
   } catch {

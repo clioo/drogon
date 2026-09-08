@@ -27,8 +27,15 @@ import {
   nextFontZoomSize,
 } from "./terminal-font-zoom";
 import { resolvePaneRendererPolicy } from "./terminal-renderer-policy";
-import { readTerminalGpuAcceleration } from "../../settings-store";
+import {
+  readTerminalGpuAcceleration,
+  readTerminalTypography,
+} from "../../settings-store";
 import type { TerminalGpuAcceleration } from "../../settings-store";
+import {
+  buildTerminalFontFamily,
+  resolveTerminalFontWeights,
+} from "../settings/terminal-typography";
 import TerminalSearch, { type TerminalSearchState } from "./TerminalSearch";
 import TerminalContextMenu, {
   type TerminalContextMenuPoint,
@@ -109,6 +116,42 @@ async function writeClipboardText(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }
 
+/**
+ * Resolves the construction-time typography: explicit props win, otherwise
+ * the persisted envelope (GPU-reader pattern). Pure enough to run once in
+ * the ref initializer; storage failures fall through to xterm defaults.
+ */
+function resolveInitialTypography(options: {
+  fontFamily?: string;
+  fontWeight?: number;
+  fontWeightBold?: number;
+}): { fontFamily: string; fontWeight: number; fontWeightBold: number } {
+  let family = options.fontFamily;
+  let weight = options.fontWeight;
+  let boldWeight = options.fontWeightBold;
+  if (
+    (family === undefined ||
+      weight === undefined ||
+      boldWeight === undefined) &&
+    typeof window !== "undefined"
+  ) {
+    try {
+      const persisted = readTerminalTypography(window.localStorage);
+      family ??= persisted.terminalFontFamily;
+      weight ??= persisted.terminalFontWeight;
+      boldWeight ??= persisted.terminalFontWeightBold;
+    } catch {
+      // Storage unavailable: fall through to the defaults below.
+    }
+  }
+  const weights = resolveTerminalFontWeights(weight, boldWeight);
+  return {
+    fontFamily: buildTerminalFontFamily(family ?? ""),
+    fontWeight: weights.fontWeight,
+    fontWeightBold: weights.fontWeightBold,
+  };
+}
+
 
 type TerminalDebugRegistry = Map<string, Terminal>;
 declare global {
@@ -130,6 +173,9 @@ function unregisterTerminalDebugHandle(sessionId: string, terminal: Terminal) {
 export function TerminalPane({
   session,
   fontSize,
+  fontFamily,
+  fontWeight,
+  fontWeightBold,
   gpuMode,
   onError,
   onSession,
@@ -137,6 +183,15 @@ export function TerminalPane({
   session: Session;
   /** Terminal font size in px, mirrored from the settings store by App. */
   fontSize: number;
+  /**
+   * Source typography options (terminalFontFamily/terminalFontWeight/
+   * terminalFontWeightBold). Optional: when omitted the pane reads the
+   * persisted envelope at construction (same pattern as the GPU mode
+   * reader), so App.tsx needs no new prop thread.
+   */
+  fontFamily?: string;
+  fontWeight?: number;
+  fontWeightBold?: number;
   /** Settings-owned GPU mode (App passes it; tests may omit it). */
   gpuMode?: TerminalGpuAcceleration;
   onError(message: string): void;
@@ -148,6 +203,14 @@ export function TerminalPane({
   callbacks.current = { onError, onSession };
   const fontSizeRef = useRef(fontSize);
   fontSizeRef.current = fontSize;
+  // Typography options resolve once per mount: explicit props win, otherwise
+  // the persisted envelope (Settings change applies on next pane mount; the
+  // live effect below also pushes prop-driven updates without remounting).
+  const typographyRef = useRef<{
+    fontFamily: string;
+    fontWeight: number;
+    fontWeightBold: number;
+  }>(resolveInitialTypography({ fontFamily, fontWeight, fontWeightBold }));
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const [zoomOverride, setZoomOverride] = useState<number | null>(null);
@@ -192,30 +255,37 @@ export function TerminalPane({
 
   // Applies a later settings change without remounting the session: the
   // creation effect below stays keyed on session identity only. A zoom
-  // override wins over the settings size until ⌘0 resets it.
+  // override wins over the settings size until ⌘0 resets it. Typography
+  // props ride the same effect so a Settings edit applies live.
   useEffect(() => {
     const current = live.current;
     if (!current) return;
     current.terminal.options.fontSize = zoomOverride ?? fontSize;
+    const weights = resolveTerminalFontWeights(fontWeight, fontWeightBold);
+    if (fontFamily !== undefined)
+      current.terminal.options.fontFamily = buildTerminalFontFamily(fontFamily);
+    if (fontWeight !== undefined)
+      current.terminal.options.fontWeight = weights.fontWeight;
+    if (fontWeightBold !== undefined)
+      current.terminal.options.fontWeightBold = weights.fontWeightBold;
     if (
       surface.current &&
       surface.current.clientWidth !== 0 &&
       surface.current.clientHeight !== 0
     )
       current.fit.fit();
-  }, [fontSize, zoomOverride]);
+  }, [fontSize, fontFamily, fontWeight, fontWeightBold, zoomOverride]);
 
   useEffect(() => {
     const mount = surface.current!;
-    const css = getComputedStyle(mount);
     const initialScheme = readEffectiveSchemeFromRoot(
       typeof document !== "undefined" ? document.documentElement : null,
     );
     const terminal = new Terminal({
-      fontFamily:
-        css.getPropertyValue("--font-mono").trim() ||
-        '"SF Mono", SFMono-Regular, ui-monospace, "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace',
+      fontFamily: typographyRef.current.fontFamily,
       fontSize: zoomOverrideRef.current ?? fontSizeRef.current,
+      fontWeight: typographyRef.current.fontWeight,
+      fontWeightBold: typographyRef.current.fontWeightBold,
       cursorBlink: true,
       cursorStyle: "block",
       scrollback: 5000,
