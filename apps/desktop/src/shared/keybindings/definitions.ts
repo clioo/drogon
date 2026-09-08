@@ -332,10 +332,9 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
       linux: ["Mod+Shift+D"],
       win32: ["Mod+Shift+D"],
     },
-    status: {
-      kind: "disabled",
-      reason: "Single terminal pane; Drogon has no split model yet.",
-    },
+    // R16-N enables the fork's chord now that the two-pane split model
+    // exists (terminal-split.ts). Split Down stays disabled with #129.
+    status: IMPLEMENTED,
   },
   {
     id: "terminal.splitDown",

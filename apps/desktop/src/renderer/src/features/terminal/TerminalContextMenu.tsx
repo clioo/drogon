@@ -1,13 +1,22 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from
 // src/renderer/src/components/terminal-pane/TerminalContextMenu.tsx.
-// Adapted to the MVP subset (single pane per tab: no splits, no parking, no
-// titles, no quick commands, no native chat): the menu keeps the source's
-// copy strings and item order for Copy, Select All, Paste, Copy Terminal ID,
-// Clear Screen and Close Pane. Radix is replaced by a lightweight
-// fixed-position menu (role="menu") so no new component dependency is needed.
+// Adapted to the Split Terminal Right subset of issue #129 (no split-down,
+// no parking, no titles, no quick commands, no native chat): the menu keeps
+// the source's copy strings and item order for Copy, Select All, Paste,
+// Split Terminal Right (with its own separator section like the source),
+// Copy Terminal ID, Clear Screen and Close Pane. Radix is replaced by a
+// lightweight fixed-position menu (role="menu") so no new component
+// dependency is needed.
 
 import { useEffect, useRef } from "react";
-import { Clipboard, Copy, Eraser, TextSelect, X } from "lucide-react";
+import {
+  Clipboard,
+  Copy,
+  Eraser,
+  PanelRightClose,
+  TextSelect,
+  X,
+} from "lucide-react";
 
 export type TerminalContextMenuPoint = { x: number; y: number };
 
@@ -18,6 +27,10 @@ type TerminalContextMenuProps = {
   onCopy: () => void;
   onSelectAll: () => void;
   onPaste: () => void;
+  /** False once the tab already holds two panes; hides the split section. */
+  canSplit: boolean;
+  splitShortcut: string;
+  onSplitRight: () => void;
   onCopyTerminalId: () => void;
   onClearScreen: () => void;
   onClosePane: () => void;
@@ -60,6 +73,9 @@ export default function TerminalContextMenu({
   onCopy,
   onSelectAll,
   onPaste,
+  canSplit,
+  splitShortcut,
+  onSplitRight,
   onCopyTerminalId,
   onClearScreen,
   onClosePane,
@@ -127,6 +143,16 @@ export default function TerminalContextMenu({
         <Clipboard size={14} />
         Paste
       </MenuItem>
+      {canSplit ? (
+        <>
+          <div className="mx-1 my-1 h-px bg-border" role="separator" />
+          <MenuItem onSelect={onSplitRight} shortcut={splitShortcut}>
+            <PanelRightClose size={14} />
+            Split Terminal Right
+          </MenuItem>
+        </>
+      ) : null}
+      <div className="mx-1 my-1 h-px bg-border" role="separator" />
       <MenuItem onSelect={onCopyTerminalId}>
         <Copy size={14} />
         Copy Terminal ID

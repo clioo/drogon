@@ -111,11 +111,27 @@ import {
   TERMINAL_CLOSE_EVENT,
   TERMINAL_FILE_OPEN_EVENT,
   TERMINAL_RESTART_EVENT,
-  TerminalPane,
   type TerminalCloseDetail,
   type TerminalFileOpenDetail,
   type TerminalRestartDetail,
 } from "./features/terminal/TerminalPane";
+import { TerminalSplitHost } from "./features/terminal/TerminalSplitHost";
+import {
+  activateSplitPane,
+  aggregateSplitAgentState,
+  closeTerminalSplitPane,
+  createTerminalSplit,
+  hydrateTerminalSplits,
+  isSplitPaneSession,
+  migrateSplitTabIdentity,
+  persistTerminalSplits,
+  pruneTerminalSplits,
+  replaceTerminalSplitPane,
+  resizeTerminalSplit,
+  secondarySplitPaneIds,
+  splitForTab,
+  type TerminalSplitMap,
+} from "./features/terminal/terminal-split";
 import { isExternalUrlAllowed } from "../../shared/shell-contract";
 import type { ShellBridge } from "../../shared/shell-contract";
 import { updateSessionProjection } from "./session-projection";
@@ -521,7 +537,6 @@ export function App() {
     return () => query.removeEventListener("change", apply);
   }, [theme]);
   const current = workspaces.find((item) => item.id === selected);
-  const terminal = sessions.find((item) => item.id === active);
   // Single App mount for contract panels. The registry vocabulary is the
   // static contract set (files.v1 declared here); mounting additionally
   // requires the LIVE service to advertise it.
@@ -605,6 +620,70 @@ export function App() {
     setTabStrip(next);
     saveTabStripState(window.localStorage, selected, next);
   };
+  // R16-N Split Terminal Right: splits live inside the tab-strip envelope
+  // (additive `splits` key), so they persist per workspace across renderer
+  // reloads exactly like order/pins/renames. Hydration + pruning are pure
+  // (terminal-split.ts); only this block touches tabStrip for splits.
+  const tabStripRef = useRef(tabStrip);
+  tabStripRef.current = tabStrip;
+  const writeSplits = (splits: TerminalSplitMap) => {
+    const next: TabStripState = {
+      ...tabStripRef.current,
+      splits: persistTerminalSplits(splits),
+    };
+    tabStripRef.current = next;
+    setTabStrip(next);
+    saveTabStripState(window.localStorage, selectedRef.current, next);
+  };
+  const liveSplits: TerminalSplitMap = pruneTerminalSplits(
+    hydrateTerminalSplits(tabStrip.splits ?? {}),
+    new Set(sessions.map((item) => item.id)),
+  );
+  useEffect(() => {
+    // Persists the prune once sessions settle (e.g. a pane's daemon
+    // session is gone after reload): the split dissolves back to single.
+    const persisted = persistTerminalSplits(liveSplits);
+    if (JSON.stringify(persisted) !== JSON.stringify(tabStrip.splits ?? {})) {
+      updateTabStrip({ ...tabStrip, splits: persisted });
+    }
+    // Runs when the inputs settle; the updater above is idempotent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, selected]);
+  // Second panes never own strip tabs: the strip, the sidebar and the
+  // order helpers below only ever see root sessions.
+  const splitSecondaryIds = secondarySplitPaneIds(liveSplits);
+  const stripSessions = sessions.filter(
+    (item) => !splitSecondaryIds.has(item.id),
+  );
+  const sessionById = new Map(sessions.map((item) => [item.id, item]));
+  // Tab title/badge semantics for a split tab: the title stays the root
+  // session's label/rename; the badge aggregates to the hottest pane.
+  const displaySessions = stripSessions.map((item) => {
+    const split = splitForTab(liveSplits, item.id);
+    if (!split) return item;
+    const second = sessionById.get(split.panes[1]);
+    if (!second) return item;
+    const aggregated = aggregateSplitAgentState(
+      item.agentState ?? "unknown",
+      second.agentState ?? "unknown",
+    );
+    return aggregated === (item.agentState ?? "unknown")
+      ? item
+      : { ...item, agentState: aggregated };
+  });
+  // A restored selection can point at a second pane (it was the last
+  // session): the tab it belongs to is its split root.
+  const activeRootId = (() => {
+    if (splitSecondaryIds.has(active)) {
+      for (const split of Object.values(liveSplits)) {
+        if (split.panes[1] === active) return split.rootId;
+      }
+    }
+    return active;
+  })();
+  // The session panel shows the tab's root session; split panes render
+  // inside the host below.
+  const terminal = sessions.find((item) => item.id === activeRootId);
   const knownBrowserIds = useRef(new Set<string>());
   const expectBrowserTab = useRef(false);
   // Focus follows explicit right-sidebar routing only (never capability
@@ -1888,7 +1967,8 @@ export function App() {
     partitionPinnedOrder(
       reconcileTabOrder(
         tabStrip.order,
-        sessions.map((item) => item.id),
+        // Split second panes never own strip tabs (see stripSessions).
+        stripSessions.map((item) => item.id),
         browserTabs.map((tab) => tab.tabId),
         visibleEditorTabs.map((tab) => tab.tabId),
       ),
@@ -1899,7 +1979,7 @@ export function App() {
   const toggleTabPin = (id: string) => {
     const order = reconcileTabOrder(
       tabStrip.order,
-      sessions.map((item) => item.id),
+      stripSessions.map((item) => item.id),
       browserTabs.map((tab) => tab.tabId),
       visibleEditorTabs.map((tab) => tab.tabId),
     );
@@ -1945,7 +2025,8 @@ export function App() {
     }
     for (const target of targets) {
       const session = sessions.find((item) => item.id === target);
-      if (session) void close(session);
+      // Split-aware: closing a split tab stops both panes, never orphans.
+      if (session) void closeTabSession(session);
       else if (visibleEditorTabs.some((tab) => tab.tabId === target))
         closeEditorTab(target);
       else void closeBrowserTab(target);
@@ -2095,6 +2176,140 @@ export function App() {
       setSessions(applied.sessions);
       setActive(applied.active);
     });
+  // R16-N Split Terminal Right actions. Each pane is a daemon session of
+  // the same workspace created through window.drogon.start (the existing
+  // session bridge); the tab keeps its root identity while split.
+  const splitTerminalRight = (sourceSessionId: string) =>
+    action(async () => {
+      const workspaceId = contextRef.current.workspaceId;
+      if (!workspaceId) return;
+      const current = sessionsRef.current;
+      if (
+        current.length === 0 ||
+        splitForTab(
+          pruneTerminalSplits(
+            hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+            new Set(current.map((item) => item.id)),
+          ),
+          sourceSessionId,
+        )
+      )
+        return;
+      const source = current.find((item) => item.id === sourceSessionId);
+      if (!source || source.workspaceId !== workspaceId) return;
+      const captured = {
+        hostId: contextRef.current.hostId,
+        workspaceId,
+      };
+      const result = checked(await window.drogon.start(workspaceId));
+      if (!contextMatches(captured, contextRef.current)) return;
+      // The new session joins the tab as the second pane (never its own
+      // tab: stripSessions hides it); the tab selection stays on the root.
+      setSessions((items) => appendOrReplaceSession(items, result));
+      writeSplits({
+        ...pruneTerminalSplits(
+          hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+          new Set([...current.map((item) => item.id), result.id]),
+        ),
+        [sourceSessionId]: createTerminalSplit(sourceSessionId, result.id),
+      });
+    });
+  const stopOneSession = async (session: Session) => {
+    const result = checked(
+      await window.drogon.stop({
+        sessionId: session.id,
+        incarnation: session.incarnation,
+      }),
+    );
+    if (
+      result.id !== session.id ||
+      result.incarnation !== session.incarnation ||
+      result.hostId !== session.hostId
+    )
+      throw new Error("The service's response was not for this session.");
+    if (result.verdict !== "exited")
+      throw new Error("Session exit is not confirmed. The tab remains open.");
+    markSessionDismissed(session.hostId, session.id, session.incarnation);
+  };
+  // Closing one split pane (header X, context menu, exit overlay): only
+  // that daemon session stops; the survivor keeps the tab as a single.
+  // Closing the root promotes the survivor with its strip identity.
+  const closeSplitPane = (session: Session) =>
+    action(async () => {
+      const splits = pruneTerminalSplits(
+        hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+        new Set(sessionsRef.current.map((item) => item.id)),
+      );
+      const outcome = closeTerminalSplitPane(splits, session.id);
+      if (!outcome.survivorId || !outcome.dissolvedRoot) {
+        void close(session);
+        return;
+      }
+      await stopOneSession(session);
+      const survivorId = outcome.survivorId;
+      const dissolvedRoot = outcome.dissolvedRoot;
+      setSessions((items) =>
+        items.filter(
+          (item) =>
+            !(
+              item.id === session.id &&
+              item.hostId === session.hostId &&
+              item.incarnation === session.incarnation
+            ),
+        ),
+      );
+      // One strip write: the dissolved split plus the survivor's
+      // migrated order/pins/rename land together.
+      const next: TabStripState = {
+        ...migrateSplitTabIdentity(
+          tabStripRef.current,
+          dissolvedRoot,
+          survivorId,
+        ),
+        splits: persistTerminalSplits(outcome.splits),
+      };
+      tabStripRef.current = next;
+      setTabStrip(next);
+      saveTabStripState(window.localStorage, selectedRef.current, next);
+      if (activeRef.current === session.id || activeRef.current === dissolvedRoot)
+        setActive(survivorId);
+    });
+  // Closing a whole tab (strip X, bulk close): a split tab stops both
+  // panes first so no orphan session survives as a surprise new tab.
+  const closeTabSession = (session: Session) =>
+    action(async () => {
+      const splits = pruneTerminalSplits(
+        hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+        new Set(sessionsRef.current.map((item) => item.id)),
+      );
+      const split = splitForTab(splits, session.id);
+      // The snapshot below already excludes the stopped second pane, so
+      // the single applyConfirmedClose removes both sessions at once.
+      const withoutSecond = split
+        ? sessionsRef.current.filter((item) => item.id !== split.panes[1])
+        : sessionsRef.current;
+      if (split) {
+        const second = sessionsRef.current.find(
+          (item) => item.id === split.panes[1],
+        );
+        if (second) await stopOneSession(second);
+        writeSplits(closeTerminalSplitPane(splits, split.panes[1]).splits);
+      }
+      await stopOneSession(session);
+      markSessionDismissed(session.hostId, session.id, session.incarnation);
+      const applied = applyConfirmedClose(
+        withoutSecond,
+        {
+          hostId: session.hostId,
+          id: session.id,
+          incarnation: session.incarnation,
+        },
+        activeRef.current,
+      );
+      if (!applied) return;
+      setSessions(applied.sessions);
+      setActive(applied.active);
+    });
   useEffect(() => {
     // Terminal pane DOM-event contracts (features/terminal): the pane owns
     // the xterm surface and dispatches window CustomEvents for anything it
@@ -2183,6 +2398,34 @@ export function App() {
         // A late reply for a host/workspace no longer current is skipped,
         // exactly like create() above; then the new tab activates.
         if (!contextMatches(captured, contextRef.current)) return;
+        // R16-N: a split pane restarts in place — the replacement session
+        // takes the old pane's slot (and focus) instead of opening a tab,
+        // and the exited pane leaves the list so it never resurfaces.
+        const liveIds = new Set(sessionsRef.current.map((item) => item.id));
+        const hydrated = pruneTerminalSplits(
+          hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+          liveIds,
+        );
+        if (
+          typeof detail.sessionId === "string" &&
+          isSplitPaneSession(hydrated, detail.sessionId)
+        ) {
+          const old = sessionsRef.current.find(
+            (item) => item.id === detail.sessionId,
+          );
+          if (old)
+            markSessionDismissed(old.hostId, old.id, old.incarnation);
+          setSessions((items) =>
+            appendOrReplaceSession(
+              items.filter((item) => item.id !== detail.sessionId),
+              result,
+            ),
+          );
+          writeSplits(
+            replaceTerminalSplitPane(hydrated, detail.sessionId, result.id),
+          );
+          return;
+        }
         setSessions((items) => appendOrReplaceSession(items, result));
         setActive(result.id);
       });
@@ -2193,14 +2436,20 @@ export function App() {
       // The tab's own close path (same confirmation policy): only the
       // exact listed session is confirmed-stopped and dismissed. A stale
       // event for a tab that is already gone is a no-op, never a blind
-      // stop.
+      // stop. R16-N: a split member closes its pane (the survivor keeps
+      // the tab); any other session closes its tab.
       const listed = sessionsRef.current.find(
         (item) =>
           item.id === detail.sessionId &&
           item.workspaceId === detail.workspaceId,
       );
       if (!listed) return;
-      void close(listed);
+      const hydrated = pruneTerminalSplits(
+        hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+        new Set(sessionsRef.current.map((item) => item.id)),
+      );
+      if (isSplitPaneSession(hydrated, listed.id)) void closeSplitPane(listed);
+      else void close(listed);
     };
     const onOpenExternalUrl = (event: Event) => {
       const detail = (event as CustomEvent<{ url: unknown }>).detail;
@@ -2285,6 +2534,17 @@ export function App() {
       "terminal.clear": () => {
         window.dispatchEvent(new CustomEvent(TERMINAL_CLEAR_EVENT));
       },
+      // R16-N: the fork's Split Terminal Right chord (Mod+D / Mod+Shift+D)
+      // splits the active tab; the action itself no-ops while already
+      // split, so the guard only needs a live terminal tab.
+      "terminal.splitRight": guardHandler(
+        () => {
+          if (activeBrowserTabId) return;
+          const id = activeRootId || active;
+          if (id) void splitTerminalRight(id);
+        },
+        () => !activeRootId && !active,
+      ),
       "sidebar.left.toggle": toggleSidebar,
       // R6-B right sidebar (definitions-core-1.ts): Mod+L toggles the right
       // sidebar, Mod+Shift+E reveals Explorer, Mod+Shift+G reveals Source
@@ -2474,7 +2734,8 @@ export function App() {
             showAutomationsButton={appearanceFlags.automationsButtonVisible}
             groups={projectGroups}
             workspaces={workspaces}
-            sessions={sessions}
+            // R16-N: split second panes are not sidebar rows either.
+            sessions={stripSessions}
             selectedWorkspaceId={selected}
             workspaceDisabled={busy}
             addDisabled={!status || busy}
@@ -2645,8 +2906,10 @@ export function App() {
               }}
             >
               <TabBar
-                sessions={sessions}
-                activeSessionId={active}
+                // R16-N: second panes hide (displaySessions also aggregates
+                // the split tab badge); selection stays on the root.
+                sessions={displaySessions}
+                activeSessionId={activeRootId}
                 browserTabs={browserTabs}
                 activeBrowserTabId={activeBrowserTabId}
                 editorTabs={visibleEditorTabs}
@@ -2681,7 +2944,7 @@ export function App() {
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
                 onSelectEditorTab={selectEditorTab}
-                onCloseSession={(item) => void close(item)}
+                onCloseSession={(item) => void closeTabSession(item)}
                 onCloseBrowserTab={(tabId) => void closeBrowserTab(tabId)}
                 onCloseEditorTab={closeEditorTab}
                 onRetry={() => void refresh()}
@@ -2729,17 +2992,49 @@ export function App() {
                     </div>
                   )}
                 {terminal && status ? (
-                  <TerminalPane
-                    key={`${terminal.id}:${revision}`}
-                    session={terminal}
+                  <TerminalSplitHost
+                    rootId={terminal.id}
+                    split={splitForTab(liveSplits, terminal.id)}
+                    panes={(() => {
+                      const split = splitForTab(liveSplits, terminal.id);
+                      const second = split
+                        ? sessionById.get(split.panes[1])
+                        : undefined;
+                      return second
+                        ? ([terminal, second] as const)
+                        : ([terminal] as const);
+                    })()}
+                    revision={revision}
                     fontSize={terminalFontSize}
                     gpuMode={terminalGpuAcceleration}
+                    canSplit={Boolean(
+                      selected && status && !busy && !loadingSessions,
+                    )}
                     onError={setError}
                     onSession={(value) =>
                       setSessions((items) =>
                         updateSessionProjection(items, value),
                       )
                     }
+                    onSplitRight={(paneId) => void splitTerminalRight(paneId)}
+                    onClosePane={(paneId) => {
+                      const listed = sessionById.get(paneId) ??
+                        sessionsRef.current.find((item) => item.id === paneId);
+                      if (listed) void closeSplitPane(listed);
+                    }}
+                    onFocusPane={(paneId) => {
+                      const split = splitForTab(liveSplits, terminal.id);
+                      if (!split || split.activePaneId === paneId) return;
+                      writeSplits(
+                        activateSplitPane(liveSplits, terminal.id, paneId),
+                      );
+                    }}
+                    onResize={(first) => {
+                      if (!splitForTab(liveSplits, terminal.id)) return;
+                      writeSplits(
+                        resizeTerminalSplit(liveSplits, terminal.id, first),
+                      );
+                    }}
                   />
                 ) : (
                   <div className="empty-state">

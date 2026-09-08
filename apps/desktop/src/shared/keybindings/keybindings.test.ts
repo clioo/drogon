@@ -213,9 +213,16 @@ describe("registry uniqueness", () => {
 
   test("disabled rows never match but keep their chords reserved", () => {
     const registry = createKeybindingRegistry();
-    // Mod+W (tab.close) and Mod+D (terminal.splitRight) match nothing…
+    // Mod+W (tab.close) matches nothing…
     expect(registry.match(input("w", { meta: true }), "darwin", "app")).toBeNull();
-    expect(registry.match(input("d", { meta: true }), "darwin", "terminal")).toBeNull();
+    // …while R16-N enables the fork's Mod+D splitRight chord in the
+    // terminal scope (splitDown stays disabled with the rest of #129).
+    expect(
+      registry.match(input("d", { meta: true }), "darwin", "terminal")?.id,
+    ).toBe("terminal.splitRight");
+    expect(
+      registry.match(input("d", { meta: true }), "darwin", "app"),
+    ).toBeNull();
     // …yet the table still owns those chords, so a future registration
     // cannot silently claim them: the conflict scan stays empty only
     // because no second action claims them.

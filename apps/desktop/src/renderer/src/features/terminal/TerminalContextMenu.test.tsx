@@ -1,12 +1,13 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Drogon-new tests for the MVP
-// TerminalContextMenu.tsx (the source menu's splits/quick-commands/native
-// chat are out of the MVP subset; copy strings for the kept items are exact).
+// TerminalContextMenu.tsx (the source menu's split-down/quick-commands/
+// native chat are out of the subset; copy strings for the kept items are
+// exact).
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import TerminalContextMenu from "./TerminalContextMenu";
 
-function renderMenu(open: boolean): string {
+function renderMenu(open: boolean, canSplit = true): string {
   return renderToString(
     createElement(TerminalContextMenu, {
       open,
@@ -15,6 +16,9 @@ function renderMenu(open: boolean): string {
       onCopy: () => {},
       onSelectAll: () => {},
       onPaste: () => {},
+      canSplit,
+      splitShortcut: "⌘D",
+      onSplitRight: () => {},
       onCopyTerminalId: () => {},
       onClearScreen: () => {},
       onClosePane: () => {},
@@ -35,12 +39,20 @@ describe("TerminalContextMenu", () => {
       "Copy",
       "Select All",
       "Paste",
+      "Split Terminal Right",
       "Copy Terminal ID",
       "Clear Screen",
       "Close Pane",
     ]) {
       expect(html).toContain(item);
     }
+    expect(html).toContain("⌘D");
+    expect(html.match(/role="menuitem"/g)).toHaveLength(7);
+  });
+
+  it("hides the split section once the tab already holds two panes", () => {
+    const html = renderMenu(true, false);
+    expect(html).not.toContain("Split Terminal Right");
     expect(html.match(/role="menuitem"/g)).toHaveLength(6);
   });
 

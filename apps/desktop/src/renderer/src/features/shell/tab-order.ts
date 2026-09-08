@@ -6,7 +6,14 @@
    (bulk-close skips pinned tabs). Adapter: the strip holds terminal
    sessions, browser pages and editor (open file) tabs, so the order domain
    is those three id lists; pin/title state lives in this file's
-   per-workspace envelope instead of the zustand tab slice. */
+   per-workspace envelope instead of the zustand tab slice. R16-N adds the
+   split-terminal pair map (terminal-split.ts sanitize) as an additive
+   envelope key. */
+
+import {
+  sanitizeTerminalSplits,
+  type PersistedTerminalSplitMap,
+} from "../terminal/terminal-split";
 
 export type TabStripState = {
   /** Stored strip order (session ids and browser tab ids, deduped at read). */
@@ -15,12 +22,19 @@ export type TabStripState = {
   pinned: string[];
   /** Custom session titles from the rename affordance ("" / absent = default). */
   titles: Record<string, string>;
+  /**
+   * Split-terminal pairs per tab root (R16-N Split Terminal Right): each
+   * root session id maps to its two daemon-session panes with focus and
+   * sizes. Absent/empty while every tab holds one pane.
+   */
+  splits: PersistedTerminalSplitMap;
 };
 
 export const EMPTY_TAB_STRIP_STATE: TabStripState = {
   order: [],
   pinned: [],
   titles: {},
+  splits: {},
 };
 
 /** Storage key pattern mirrors the right-sidebar keys (`drogon:<area>:<name>`); one envelope per workspace. */
@@ -179,26 +193,28 @@ function sanitizeTitles(value: unknown): Record<string, string> {
 }
 
 export function parseTabStripState(raw: string | null | undefined): TabStripState {
-  if (!raw) return { ...EMPTY_TAB_STRIP_STATE, titles: {} };
+  if (!raw) return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-      return { ...EMPTY_TAB_STRIP_STATE, titles: {} };
+      return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
     const candidate = parsed as { state?: unknown };
     if (
       typeof candidate.state !== "object" ||
       candidate.state === null ||
       Array.isArray(candidate.state)
     )
-      return { ...EMPTY_TAB_STRIP_STATE, titles: {} };
+      return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
     const state = candidate.state as Record<string, unknown>;
     const order = sanitizeIdList(state.order);
     const pinned = sanitizeIdList(state.pinned).filter((id) =>
       order.includes(id),
     );
-    return { order, pinned, titles: sanitizeTitles(state.titles) };
+    // Additive R16-N key: older envelopes simply hydrate to no splits.
+    const splits = sanitizeTerminalSplits(state.splits);
+    return { order, pinned, titles: sanitizeTitles(state.titles), splits };
   } catch {
-    return { ...EMPTY_TAB_STRIP_STATE, titles: {} };
+    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
   }
 }
 
@@ -209,7 +225,7 @@ export function loadTabStripState(
   try {
     return parseTabStripState(storage.getItem(tabStripStorageKey(workspaceId)));
   } catch {
-    return { ...EMPTY_TAB_STRIP_STATE, titles: {} };
+    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
   }
 }
 
