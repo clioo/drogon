@@ -23,6 +23,7 @@ import type {
   GitHubOwnerRepo,
   IssueSourcePreference,
 } from "./issue-source-selector";
+import type { TaskSource } from "./task-source-navigation";
 
 /** One row of the GitHub list: a TaskIssue/TaskPullRequest projected into the source's work-item shape. */
 export type TaskPageWorkItem = GitHubWorkItemLike & {
@@ -97,8 +98,9 @@ export type TaskPageSourceContextSummary = { label: string; title: string };
 export type TaskPageSourceAvailabilityNotice = { label: string; blocking: boolean } | null;
 
 export type TaskPageModel = {
-  // Source bar.
-  taskSource: "github";
+  // Source bar. Wider than today's GitHub-only options so a deep-linked
+  // source (sidebar chips, #346) stays selected for R17-B's Jira surface.
+  taskSource: TaskSource;
   visibleSourceOptions: SourceOption[];
   taskSourceAvailabilityNoticeByProvider: Partial<
     Record<string, { label: string; blocking: boolean }>
