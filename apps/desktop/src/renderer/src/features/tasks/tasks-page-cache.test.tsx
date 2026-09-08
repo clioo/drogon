@@ -14,6 +14,7 @@ import {
   clearTasksPageResultCache,
   readTasksPageCache,
 } from "./TasksPage";
+import { clearTasksPageSeedStorage } from "./tasks-page-seed-storage";
 import type { TaskIssue } from "../../../../shared/tasks-contract";
 import type { TasksBridge } from "../../../../shared/tasks-contract";
 import type { ProjectGroup } from "../shell/project-adapter";
@@ -21,6 +22,9 @@ import type { ProjectGroup } from "../shell/project-adapter";
 afterEach(() => {
   cleanup();
   clearTasksPageResultCache();
+  // The persisted seed shares the request keys below: a mount in one case
+  // must never seed the next case's first paint.
+  clearTasksPageSeedStorage();
 });
 
 function issue(number: number, title: string): TaskIssue {
@@ -135,6 +139,35 @@ describe("tasks default load and result cache", () => {
     await waitFor(() => expect(tasksList).toHaveBeenCalledTimes(1));
     pending.resolve(okIssues([[3, "Fresh row three"]]));
     await screen.findByText("Fresh row three");
+  });
+
+  test("a restart paints the persisted seed before the revalidation lands", async () => {
+    const pending = deferred<ReturnType<typeof okIssues>>();
+    const tasksList = vi.fn(() => pending.promise);
+    const first = render(
+      <TooltipProvider>
+        <TasksPage
+          bridge={fakeBridge(async () => okIssues([[6, "Persisted row six"]]))}
+          loadGroups={groups}
+          onOpenTerminal={() => {}}
+        />
+      </TooltipProvider>,
+    );
+    await screen.findByText("Persisted row six");
+    first.unmount();
+    // A renderer restart drops the module map but keeps localStorage.
+    clearTasksPageResultCache();
+
+    render(
+      <TooltipProvider>
+        <TasksPage bridge={fakeBridge(tasksList)} loadGroups={groups} onOpenTerminal={() => {}} />
+      </TooltipProvider>,
+    );
+    // Persisted seed: rows paint synchronously, no skeleton re-run.
+    expect(await screen.findByText("Persisted row six")).toBeTruthy();
+    await waitFor(() => expect(tasksList).toHaveBeenCalledTimes(1));
+    pending.resolve(okIssues([[7, "Fresh row seven"]]));
+    await screen.findByText("Fresh row seven");
   });
 
   test("switching kind back paints cached rows without a skeleton", async () => {
