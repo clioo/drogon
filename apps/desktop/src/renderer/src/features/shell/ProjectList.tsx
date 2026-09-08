@@ -12,7 +12,7 @@
    control; each removable card's kebab menu opens the remove confirm
    dialog. All RPCs run in App; every submit resolves a verbatim error
    string or null on success. */
-import { useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Bell,
   CircleX,
@@ -53,7 +53,47 @@ import {
   filterGroupsBySelectedProjects,
   getProjectsFilterVisibilityLabel,
 } from "./sidebar-options-show";
+import {
+  applyStoredSidebarOrder,
+  loadSidebarProjectOrder,
+  loadSidebarWorktreeOrder,
+  orderedProjectIds,
+  saveSidebarProjectOrder,
+  saveSidebarWorktreeOrder,
+} from "./sidebar-order";
+import { useProjectHeaderDrag } from "./project-header-drag";
+import { useWorktreeCardDrag } from "./worktree-card-drag";
 import { WorktreeCard } from "./WorktreeCard";
+
+/**
+ * Drop line between project headers / worktree cards while dragging.
+ * Ports the fork's WorktreeSidebarDropIndicator structure and classes
+ * (dot-line-dot on the worktree-sidebar ring token).
+ */
+function SidebarDropIndicator({ y }: { y: number }): React.JSX.Element {
+  return (
+    <div
+      role="presentation"
+      aria-hidden="true"
+      className="pointer-events-none absolute left-3 right-2 z-30 flex h-3 -translate-y-1/2 items-center"
+      style={{ top: `${y}px` }}
+    >
+      <span className="size-1.5 shrink-0 rounded-full bg-worktree-sidebar-ring shadow-[0_0_0_2px_var(--worktree-sidebar)]" />
+      <span className="h-0.5 flex-1 rounded-full bg-worktree-sidebar-ring shadow-[0_0_0_2px_var(--worktree-sidebar)]" />
+      <span className="size-1.5 shrink-0 rounded-full bg-worktree-sidebar-ring shadow-[0_0_0_2px_var(--worktree-sidebar)]" />
+    </div>
+  );
+}
+
+function readStoredProjectOrder(): string[] {
+  if (typeof localStorage === "undefined") return [];
+  return loadSidebarProjectOrder(localStorage);
+}
+
+function readStoredWorktreeOrder(): Record<string, string[]> {
+  if (typeof localStorage === "undefined") return {};
+  return loadSidebarWorktreeOrder(localStorage);
+}
 
 /** Which project dialog the sidebar currently shows, if any. */
 export type ProjectAction =
@@ -269,8 +309,47 @@ export function ProjectList({
   const [filter, setFilter] = useState("");
   const [activityOnly, setActivityOnly] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  // Persisted manual order (fork parity: pointer drag on headers/cards).
+  // Applied before filtering so a reorder survives reload; the stored
+  // lists only ever reorder ids the daemon still advertises.
+  const [projectOrder, setProjectOrder] = useState<string[]>(readStoredProjectOrder);
+  const [worktreeOrder, setWorktreeOrder] = useState<Record<string, string[]>>(
+    readStoredWorktreeOrder,
+  );
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const getScrollContainer = useCallback(
+    (): HTMLElement | null =>
+      (sectionRef.current?.closest(".shell-sidebar-scroll") as HTMLElement | null) ??
+      null,
+    [],
+  );
+  const ordered = useMemo(
+    () => applyStoredSidebarOrder(groups, projectOrder, worktreeOrder),
+    [groups, projectOrder, worktreeOrder],
+  );
+  // `ordered` is unfiltered, so its ids are the full commit domain.
+  const allProjectIds = useMemo(() => orderedProjectIds(ordered), [ordered]);
+  const knownProjectIds = useMemo(
+    () => new Set(groups.map((group) => group.project.id)),
+    [groups],
+  );
+  const commitProjectOrder = useCallback((next: string[]) => {
+    setProjectOrder(next);
+    if (typeof localStorage !== "undefined") saveSidebarProjectOrder(localStorage, next);
+  }, []);
+  const commitWorktreeOrder = useCallback(
+    (projectId: string, next: string[]) => {
+      setWorktreeOrder((current) => {
+        const updated = { ...current, [projectId]: next };
+        if (typeof localStorage !== "undefined")
+          saveSidebarWorktreeOrder(localStorage, updated);
+        return updated;
+      });
+    },
+    [],
+  );
   const visible = filterGroupsBySelectedProjects(
-    filterProjectGroups(groups, workspaces, filter),
+    filterProjectGroups(ordered, workspaces, filter),
     selectedProjectIds,
   );
   const active = activityOnly
@@ -303,8 +382,47 @@ export function ProjectList({
     setActivityOnly(false);
     setSelectedProjectIds([]);
   };
+  // Rendered headers/cards are the drag geometry domain (fork: the sidebar
+  // row model); the full ordered lists are the commit domain.
+  const visibleProjectIds = useMemo(
+    () => active.map((group) => group.project.id),
+    [active],
+  );
+  const visibleCardIdsByProject = useMemo(
+    () =>
+      new Map(
+        active.map((group) => [
+          group.project.id,
+          group.worktrees.map((worktree) => worktree.id),
+        ]),
+      ),
+    [active],
+  );
+  const fullCardIdsByProject = useMemo(
+    () =>
+      new Map(
+        ordered.map((group) => [
+          group.project.id,
+          group.worktrees.map((worktree) => worktree.id),
+        ]),
+      ),
+    [ordered],
+  );
+  const projectDrag = useProjectHeaderDrag({
+    allProjectIds,
+    visibleProjectIds,
+    knownProjectIds,
+    onCommitProjectOrder: commitProjectOrder,
+    getScrollContainer,
+  });
+  const cardDrag = useWorktreeCardDrag({
+    visibleCardIdsByProject,
+    fullCardIdsByProject,
+    onCommitWorktreeOrder: commitWorktreeOrder,
+    getScrollContainer,
+  });
   return (
-    <section className="shell-projects">
+    <section ref={sectionRef} className="shell-projects">
       <div className="mt-2 flex h-8 min-w-0 items-center justify-between gap-1.5 px-2">
         <div className="flex min-w-0 items-center gap-1">
           <span
@@ -454,15 +572,27 @@ export function ProjectList({
           onClose={onCloseAction}
         />
       )}
-      {active.map((group) => (
+      {projectDrag.state.draggingProjectId !== null &&
+      projectDrag.state.dropIndicatorY !== null ? (
+        <SidebarDropIndicator y={projectDrag.state.dropIndicatorY} />
+      ) : null}
+      {cardDrag.state.draggingWorktreeId !== null &&
+      cardDrag.state.dropIndicatorY !== null ? (
+        <SidebarDropIndicator y={cardDrag.state.dropIndicatorY} />
+      ) : null}
+      {active.map((group, headerIndex) => (
         <ProjectRow
           key={group.project.id}
           group={group}
+          headerIndex={headerIndex}
           workspaces={workspaces}
           sessions={sessions}
           selectedWorkspaceId={selectedWorkspaceId}
           disabled={disabled}
           worktreesAvailable={worktreesAvailable}
+          onProjectHandlePointerDown={projectDrag.onHandlePointerDown}
+          onCardPointerDown={cardDrag.onCardPointerDown}
+          onCardClickCapture={cardDrag.onCardClickCapture}
           onSelectWorkspace={onSelectWorkspace}
           onNewWorktree={() => onCreateWorkspace(group.project.id)}
           onRemoveWorktree={(worktree) => {
@@ -562,11 +692,15 @@ function findProject(
 
 function ProjectRow({
   group,
+  headerIndex,
   workspaces,
   sessions,
   selectedWorkspaceId,
   disabled,
   worktreesAvailable,
+  onProjectHandlePointerDown,
+  onCardPointerDown,
+  onCardClickCapture,
   onSelectWorkspace,
   onNewWorktree,
   onRemoveWorktree,
@@ -575,11 +709,23 @@ function ProjectRow({
   onRemoveProject,
 }: {
   group: ProjectGroup;
+  /** Index among the rendered project headers (drag geometry). */
+  headerIndex: number;
   workspaces: Workspace[];
   sessions: Session[];
   selectedWorkspaceId: string;
   disabled: boolean;
   worktreesAvailable: boolean;
+  onProjectHandlePointerDown: (
+    event: React.PointerEvent<HTMLElement>,
+    projectId: string,
+  ) => void;
+  onCardPointerDown: (
+    event: React.PointerEvent<HTMLElement>,
+    projectId: string,
+    worktreeId: string,
+  ) => void;
+  onCardClickCapture: (event: React.MouseEvent<HTMLElement>) => void;
   onSelectWorkspace: (workspaceId: string) => void;
   onNewWorktree: () => void;
   onRemoveWorktree: (worktree: Worktree) => void;
@@ -592,7 +738,14 @@ function ProjectRow({
     worktreesAvailable && project.kind === "git" && !project.id.startsWith("folder:");
   return (
     <div className="shell-project">
-      <div className="shell-project-row group relative" title={project.path}>
+      <div
+        className="shell-project-row group relative"
+        title={project.path}
+        data-project-header-id={project.id}
+        data-project-header-index={headerIndex}
+        data-project-header-drag-handle=""
+        onPointerDown={(event) => onProjectHandlePointerDown(event, project.id)}
+      >
         {project.kind === "git" ? (
           <FolderGit2 size={15} aria-hidden="true" />
         ) : null}
@@ -624,7 +777,7 @@ function ProjectRow({
         </div>
       </div>
       <div className="shell-project-cards">
-        {group.worktrees.map((worktree) => (
+        {group.worktrees.map((worktree, cardIndex) => (
           <WorktreeCard
             key={worktree.id}
             worktree={worktree}
@@ -634,6 +787,11 @@ function ProjectRow({
             disabled={disabled}
             projectKind={project.kind}
             implicitFolderWorktree={isImplicitFolderWorktree(worktree)}
+            cardIndex={cardIndex}
+            onCardPointerDown={(event) =>
+              onCardPointerDown(event, project.id, worktree.id)
+            }
+            onCardClickCapture={onCardClickCapture}
             onSelect={onSelectWorkspace}
             onRemove={
               worktreesAvailable && !isImplicitFolderWorktree(worktree)
