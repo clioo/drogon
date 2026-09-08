@@ -311,6 +311,14 @@ fn create_pre_migration_backup_if_needed(conn: &Connection) {
             "drogond: pre-migration backup FAILED for {} (continuing; migrations are rollback-safe): {e}",
             data_dir.display()
         );
+    } else if let Ok(backups) = std::fs::read_dir(data_dir.join("backups")) {
+        let newest = backups.filter_map(|e| e.ok()).map(|e| e.path()).max();
+        if let Some(newest) = newest {
+            eprintln!(
+                "drogond: pre-migration backup created at {} before migrating this data dir forward",
+                newest.display()
+            );
+        }
     }
 }
 

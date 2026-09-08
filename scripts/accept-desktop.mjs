@@ -106,6 +106,8 @@ const report = {
   fixture,
 };
 let daemon, desktop, browser, page, registered;
+let lastLivePage = null; // kept for failure evidence after phase-local cleanup
+let ranUpgradeCheck = false; // guards the explicit exit in the upgrade path
 async function stopOwned(child, label) {
   if (!child) return;
   const result = await stopAcceptanceProcess(child);
@@ -168,6 +170,7 @@ async function launchDesktop(overrideDataDir = null) {
   for (let i = 0; i < 200 && !browser.contexts()[0]?.pages()[0]; i++)
     await delay(50);
   page = browser.contexts()[0].pages()[0];
+  lastLivePage = page;
   await emulatePageFocus(page);
   assert.ok(page, "Electron must create a rendered page");
   page.setDefaultTimeout(15000);
@@ -704,6 +707,7 @@ try {
     report.checks.push(`upgrade-from-previous-build: SKIPPED (${upgradeSkipReason})`);
   } else {
     const previousPaths = bundlePaths(previousBundlePath);
+    const upgradeProjects = [];
     for (const artifact of [
       previousPaths.executable,
       previousPaths.daemon,
@@ -711,6 +715,30 @@ try {
     ])
       assert.ok(existsSync(artifact), `previous bundle artifact missing: ${artifact}`);
     const upgradeDataDir = path.join(fixture, "upgrade-data");
+    // Stops the detached daemons the upgrade phases' packaged apps leave
+    // behind (they outlive their app by design and are never reaped).
+    // Matches ONLY the exact scratch data dir: these are this run's own.
+    const upgradePids = async () => {
+      try {
+        const out = (
+          await runAcceptanceProcess("/usr/bin/pgrep", ["-f", upgradeDataDir], {})
+        ).stdout.trim();
+        return out ? out.split("\n") : [];
+      } catch {
+        return [];
+      }
+    };
+    const stopUpgradePhaseDaemons = async () => {
+      for (const pid of await upgradePids())
+        await runAcceptanceProcess("/bin/kill", [pid], {}).catch(() => {});
+      for (let i = 0; i < 100 && (await upgradePids()).length > 0; i++)
+        await delay(100);
+      for (const pid of await upgradePids())
+        await runAcceptanceProcess("/bin/kill", ["-9", pid], {}).catch(() => {});
+      const left = await upgradePids();
+      assert.equal(left.length, 0, `upgrade-phase daemons must stop, saw ${left}`);
+      report.cleanup.push("upgrade-phase bundled daemon: stopped by exact scratch-dir match");
+    };
     await mkdir(upgradeDataDir, { recursive: true });
     const gitProject = path.join(fixture, "upgrade-git");
     const folderProject = path.join(fixture, "upgrade-folder");
@@ -750,20 +778,21 @@ try {
           await delay(50);
         }
       }
-      const projects = [];
+      const addedProjects = [];
       for (const seedPath of [gitProject, folderProject]) {
         const added = await oldCli(["project", "add", seedPath]);
         assert.equal(added.ok, true, `previous CLI project add failed: ${seedPath}`);
-        projects.push(added.result);
+        addedProjects.push(added.result);
       }
-      assert.equal(projects[0].kind, "git");
-      assert.equal(projects[1].kind, "folder");
+      upgradeProjects.push(...addedProjects);
+      assert.equal(addedProjects[0].kind, "git");
+      assert.equal(addedProjects[1].kind, "folder");
       for (const name of ["alpha", "beta", "gamma"]) {
         const worktree = await oldCli([
           "worktree",
           "create",
           "--project",
-          projects[0].id,
+          addedProjects[0].id,
           "--name",
           name,
         ]);
@@ -780,7 +809,7 @@ try {
               "worktree",
               "list",
               "--project",
-              projects[0].id,
+              addedProjects[0].id,
             ],
             {},
           )
@@ -843,6 +872,10 @@ try {
       assert.equal(refusalOverlay, 0, "a same-or-older data dir must never show the refusal dialog");
       const status = await page.evaluate(() => window.drogon.status());
       assert.equal(status.ok, true, "candidate daemon must serve the upgraded dir");
+      // The sidebar loads workspaces asynchronously after boot; wait for the
+      // seeded projects instead of snapshotting a possibly-empty first frame.
+      for (const name of [path.basename(gitProject), path.basename(folderProject)])
+        await page.getByText(name, { exact: false }).first().waitFor({ timeout: 20_000 });
       const snapshot = await page.locator("body").ariaSnapshot();
       for (const name of [path.basename(gitProject), path.basename(folderProject)])
         assert.ok(
@@ -874,7 +907,7 @@ try {
               "worktree",
               "list",
               "--project",
-              projects[0].id,
+              upgradeProjects[0].id,
             ],
             {},
           )
@@ -887,10 +920,17 @@ try {
     } finally {
       if (browser) await browser.close().catch(() => {});
       await stopOwned(desktop, "upgrade desktop");
+      await stopUpgradePhaseDaemons().catch((error) => {
+        report.cleanup.push(`upgrade-phase daemon cleanup: ${error.message}`);
+        report.status = "FAILED";
+      });
       desktop = null;
       browser = null;
       page = null;
     }
+    // The upgrade phase's finally already stopped its detached daemon; a
+    // second sweep is cheap insurance before the downgrade relaunch.
+    await stopUpgradePhaseDaemons();
     // Downgrade refusal: a future schema version is exactly what a newer
     // build leaves behind. The candidate must refuse with the dialog naming
     // the data dir — never a hang, never a silent blank window.
@@ -917,23 +957,29 @@ try {
     } finally {
       if (browser) await browser.close().catch(() => {});
       await stopOwned(desktop, "refusal desktop");
+      await stopUpgradePhaseDaemons().catch((error) => {
+        report.cleanup.push(`refusal-phase daemon cleanup: ${error.message}`);
+        report.status = "FAILED";
+      });
       desktop = null;
       browser = null;
       page = null;
     }
+    ranUpgradeCheck = true;
   }
   report.status = "PASSED";
 } catch (error) {
   report.error = error.message;
   report.errorStack = error.stack;
-  if (page) {
-    report.failureService = await page
+  const evidencePage = page ?? lastLivePage;
+  if (evidencePage) {
+    report.failureService = await evidencePage
       .evaluate(() => window.drogon.status())
       .catch((cause) => ({ error: cause.message }));
-    await page
+    await evidencePage
       .screenshot({ path: path.join(output, "failure.png") })
       .catch(() => {});
-    report.failureUi = await page
+    report.failureUi = await evidencePage
       .locator("body")
       .ariaSnapshot()
       .catch(() => "Unavailable");
@@ -989,3 +1035,9 @@ try {
   );
 }
 if (report.status !== "PASSED") process.exitCode = 1;
+// The upgrade phases leave an intentionally detached daemon (stopped by
+// exact scratch-dir match in their own finally blocks); on this path a
+// surviving child can hold the runner's stdio long after the report is
+// written, so the harness exits explicitly instead of draining the loop.
+// The default path below keeps the historical drain-and-return behavior.
+if (ranUpgradeCheck) process.exit(process.exitCode ?? 0);
