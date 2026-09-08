@@ -13,6 +13,7 @@ import { project } from "./project";
 import { shell } from "./shell";
 import { browser } from "./browser";
 import { settings } from "./settings";
+import { nativeTheme } from "./native-theme";
 import { notifications } from "./notifications";
 import { tasks } from "./tasks";
 import { mentu } from "./mentu";
@@ -64,6 +65,9 @@ const bridge: DesktopBridge = {
     list: (value) => ipcRenderer.invoke("drogon:workspacePorts", value),
   },
   settings,
+  // R16-AD3 (#241): additive nativeTheme relay (optional namespace; main
+  // side in main/native-theme-bridge.ts).
+  nativeTheme,
 };
 // Reconciles the granted namespaces (git, browser, notifications, tasks,
 // project, shell and the R2-S botCreate/botRun/botHistory additions) with

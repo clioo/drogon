@@ -95,8 +95,33 @@ export interface SettingsProbeBridge {
   cliStatus(): Promise<Result<CliStatusResult>>;
 }
 
+// R16-AD3 (#241): Electron's nativeTheme surface, relayed so the renderer
+// can resolve the "System" theme from main's shouldUseDarkColors (source of
+// truth per the reference: nativeTheme.themeSource set from the stored
+// theme, 'updated' broadcasts on OS changes). Optional like the granted
+// `daemon` namespace, so preloads without it keep typechecking.
+export const nativeThemeSourceSchema = z.enum(["system", "dark", "light"]);
+export type NativeThemeSource = z.infer<typeof nativeThemeSourceSchema>;
+
+export type NativeThemeState = {
+  /** Electron main's nativeTheme.shouldUseDarkColors at reply time. */
+  shouldUseDarkColors: boolean;
+  /** The current themeSource (what the boot sync mirrors from the store). */
+  themeSource: NativeThemeSource;
+};
+
+export interface NativeThemeBridge {
+  /** Pull the current native theme state (boot reconciliation). */
+  state(): Promise<NativeThemeState>;
+  /** Mirror a theme choice into nativeTheme.themeSource (ipc/settings.ts port). */
+  setThemeSource(theme: NativeThemeSource): Promise<NativeThemeState>;
+  /** Live OS updates: nativeTheme 'updated' relayed from main. */
+  onChange(listener: (state: NativeThemeState) => void): () => void;
+}
+
 declare module "./session-contract" {
   interface DesktopBridge {
     settings: SettingsProbeBridge;
+    nativeTheme?: NativeThemeBridge;
   }
 }
