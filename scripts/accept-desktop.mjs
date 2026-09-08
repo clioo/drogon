@@ -14,6 +14,10 @@ import {
   runAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
+import {
+  startForegroundObservation,
+  verifyForegroundObservation,
+} from "./acceptance-foreground.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
 import { probeRenderedSessionRestart } from "./probe-rendered-session-restart.mjs";
 import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
@@ -28,6 +32,17 @@ import {
   probeGhUnavailable,
   probePackagedSurfaces,
 } from "./probe-packaged-surfaces.mjs";
+import {
+  probeAutomationRunNowDetail,
+  probeBotPresetManualRun,
+  probeJumpPaletteSwitch,
+  probeMentuApproveRunEvidence,
+  probePiAgentStateWorkingIdle,
+  probeTasksStartIssue,
+  probeThemePersistsAcrossRelaunch,
+  seedLocalPiProvider,
+  writeFixtureGh,
+} from "./probe-sealed-journeys.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { probeSessionNavigation } from "./probe-session-navigation.mjs";
 import {
@@ -78,6 +93,17 @@ let fixtureDaemon = packaged
   : null;
 const workspace = path.join(fixture, "folder");
 await mkdir(workspace);
+// R16-BB: the sealed journeys run every in-app agent launch on the
+// team-local free model (Pi resolves its config from this isolated dir,
+// never the user's ~/.pi) and the Tasks journey rides a deterministic gh
+// fixture that must be on the daemon PATH before it spawns.
+const piDir = path.join(fixture, "pi");
+const fixtureBin = path.join(fixture, "bin");
+await seedLocalPiProvider(piDir);
+await writeFixtureGh(fixtureBin, [
+  { number: 1, title: "Acceptance issue one" },
+  { number: 2, title: "Acceptance issue two" },
+]);
 const output = path.join(
   root,
   ".preflight",
@@ -104,9 +130,11 @@ const report = {
   startedAt: new Date().toISOString(),
   checks: [],
   cleanup: [],
+  desktopPids: [],
   fixture,
 };
 let daemon, desktop, browser, page, registered;
+let foregroundObservation;
 let lastLivePage = null; // kept for failure evidence after phase-local cleanup
 let ranUpgradeCheck = false; // guards the explicit exit in the upgrade path
 async function stopOwned(child, label) {
@@ -130,8 +158,11 @@ async function launchDesktop(overrideDataDir = null) {
         DROGON_DATA_DIR: activeDataDir,
         DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
         DROGON_BACKGROUND_WINDOW: "1",
+        PI_CODING_AGENT_DIR: piDir,
         ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
-        ...(packaged ? { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" } : {}),
+        ...(packaged
+          ? { PATH: `${fixtureBin}:/usr/bin:/bin:/usr/sbin:/sbin` }
+          : {}),
         ...(withHarness
           ? { PI_CODING_AGENT_DIR: path.join(fixture, "pi") }
           : {}),
@@ -139,6 +170,7 @@ async function launchDesktop(overrideDataDir = null) {
     },
   );
   desktop = child;
+  if (child.pid) report.desktopPids.push(child.pid);
   const endpoint = await new Promise((resolve, reject) => {
     let tail = "";
     const timeout = setTimeout(
@@ -181,7 +213,37 @@ async function launchDesktop(overrideDataDir = null) {
     .getByRole("button", { name: "Reveal active workspace", exact: true })
     .waitFor();
 }
+// R16-BB (J10): quit and reopen the desktop quiescently so a Settings
+// change can be proven across a real relaunch. Fails closed through
+// stopOwned when the quit requires force.
+async function relaunchDesktop() {
+  await browser.close();
+  browser = null;
+  await stopOwned(desktop, "journey-probe desktop relaunch");
+  desktop = null;
+  let lastError = null;
+  // Electron can briefly retain the just-closed profile/single-instance lock;
+  // retry the real quit-and-reopen path a bounded number of times rather than
+  // converting that transient into a false theme failure.
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await delay(attempt * 500);
+      await launchDesktop();
+      return page;
+    } catch (error) {
+      lastError = error;
+      await browser?.close().catch(() => {});
+      browser = null;
+      await stopOwned(desktop, "journey-probe desktop relaunch retry");
+      desktop = null;
+    }
+  }
+  throw lastError;
+}
 try {
+  if (process.env.DROGON_VERIFY_OS_FOCUS === "1") {
+    foregroundObservation = await startForegroundObservation(output);
+  }
   if (bundle) {
     // R16-BO (#319): prove the sealed bundle carries the Drogon icon
     // before any rendered journey runs, so PASSED implies installable.
@@ -210,9 +272,8 @@ try {
         stdio: "ignore",
         env: {
           ...process.env,
-          ...(withHarness
-            ? { PI_CODING_AGENT_DIR: path.join(fixture, "pi") }
-            : {}),
+          PATH: `${fixtureBin}${path.delimiter}${process.env.PATH ?? ""}`,
+          PI_CODING_AGENT_DIR: piDir,
         },
       },
     );
@@ -730,6 +791,71 @@ try {
       })),
     );
   }
+  // R16-BB: sealed journeys J1 (agent state), J5 (jump palette), J6
+  // (Tasks start), J7 (Automations Run now), J8 (Bots preset + manual
+  // run), J9 (Mentu approve & run) and J10 (theme across relaunch). Each
+  // probe deletes the bots/automations/worktrees it created. Runs against
+  // the sealed bundle, on --files, or with DROGON_PROBE_SURFACES=1.
+  if (bundle || withFiles || process.env.DROGON_PROBE_SURFACES === "1") {
+    const journeyCli = packaged
+      ? packaged.cli
+      : path.join(
+          root,
+          "target",
+          "debug",
+          process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
+        );
+    // The model-dependent journeys (J1/J7/J8) run real inference on the
+    // team-local server; DROGON_SKIP_MODEL_JOURNEYS=1 exists only for
+    // local iteration when that server is unavailable — it never defaults.
+    // J1 runs first: it boots right after app launch, closest to a fresh
+    // model-server window, and warms the model for J7/J8 below.
+    if (process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1") {
+      report.checks.push(
+        ...(await probePiAgentStateWorkingIdle({
+          page,
+          workspaceId: registered.id,
+          output,
+        })),
+      );
+    }
+    report.checks.push(
+      ...(await probeJumpPaletteSwitch({ page, root, output })),
+    );
+    report.checks.push(
+      ...(await probeMentuApproveRunEvidence({ page, workspace, output })),
+    );
+    if (process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1") {
+      report.checks.push(
+        ...(await probeAutomationRunNowDetail({
+          page,
+          cli: journeyCli,
+          dataDir,
+          workspaceId: registered.id,
+          output,
+        })),
+      );
+      report.checks.push(
+        ...(await probeBotPresetManualRun({
+          page,
+          cli: journeyCli,
+          dataDir,
+          workspaceId: registered.id,
+          output,
+        })),
+      );
+    }
+    report.checks.push(
+      ...(await probeTasksStartIssue({ page, cli: journeyCli, dataDir, output })),
+    );
+    report.checks.push(
+      ...(await probeThemePersistsAcrossRelaunch({
+        page,
+        relaunch: relaunchDesktop,
+        output,
+      })),
+    );
+  }
   if (bundle) {
     report.checks.push(
       ...(await probeGhUnavailable({
@@ -1144,6 +1270,17 @@ try {
     } catch (error) {
       report.status = "FAILED";
       report.cleanup.push(`packaged fixture cleanup: ${error.message}`);
+    }
+  }
+  if (foregroundObservation) {
+    try {
+      report.osForeground = await foregroundObservation.stop();
+      verifyForegroundObservation(report.osForeground, report.desktopPids);
+      report.checks.push("macos-no-desktop-activation-or-visible-windows");
+      report.cleanup.push("OS foreground observer: exited");
+    } catch (error) {
+      report.status = "FAILED";
+      report.error = [report.error, error.message].filter(Boolean).join("; ");
     }
   }
   report.finishedAt = new Date().toISOString();

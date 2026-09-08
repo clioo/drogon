@@ -163,6 +163,11 @@ pub struct JiraIssue {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site_name: Option<String>,
     pub title: String,
+    /// Detail-path only (R17-C): the daemon renders the ADF body to
+    /// markdown exactly like the fork's `adfToMarkdownText`; list mapping
+    /// deliberately omits it (R17-A).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub url: String,
     pub project: JiraProject,
     pub issue_type: JiraIssueType,
@@ -177,6 +182,114 @@ pub struct JiraIssue {
     pub priority: Option<JiraPriority>,
     pub updated_at: String,
     pub created_at: String,
+}
+
+/// One issue comment, body already rendered ADF→markdown (R17-C). Ported
+/// from the fork's `src/shared/jira-types.ts` `JiraComment`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraComment {
+    pub id: String,
+    pub body: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<JiraUser>,
+}
+
+/// One available workflow transition with its target status (R17-C),
+/// ported from the fork's `JiraTransition`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraTransition {
+    pub id: String,
+    pub name: String,
+    pub to: JiraStatus,
+}
+
+/// The fork's `JiraIssueUpdate`: every field is optional; present fields
+/// are applied, absent ones untouched. `null` clears assignee/priority,
+/// which serde's plain `Option<Option<T>>` cannot express (null collapses
+/// into the outer None), hence the custom deserializer.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraIssueUpdate {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub labels: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "de_nullable_string")]
+    pub assignee_account_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "de_nullable_string")]
+    pub priority_id: Option<Option<String>>,
+    #[serde(default)]
+    pub transition_id: Option<String>,
+}
+
+/// Absent key → `None`; explicit `null` → `Some(None)` (clear the field);
+/// a string → `Some(Some(value))`.
+fn de_nullable_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // `Value` (not `Option<Value>`): serde_json maps a bare `null` token to
+    // `Value::Null`, preserving the absent/null/some three-way distinction
+    // the fork's `JiraIssueUpdate` relies on.
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::String(value) => Ok(Some(Some(value))),
+        other => Err(serde::de::Error::custom(format!(
+            "expected a string or null, got {other}"
+        ))),
+    }
+}
+
+/// `jira.createIssue` parameters (R17-C), the fork's `JiraCreateIssueArgs`.
+/// `custom_fields` values are passed through verbatim except keys listed in
+/// `user_field_keys`, which the daemon shapes into Jira user reference
+/// objects (`{accountId}` Cloud / `{name}` Server) — Jira rejects a bare
+/// string for user fields.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraCreateIssueParams {
+    #[serde(default)]
+    pub site_id: Option<String>,
+    pub project_id: String,
+    pub issue_type_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub custom_fields: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default)]
+    pub user_field_keys: Option<Vec<String>>,
+}
+
+/// The fork's `JiraCreateIssueResult`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraCreateIssueResult {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// The fork's `JiraMutationResult` (`jira.updateIssue`, `jira.addComment`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraMutationResult {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Search/list result: the fork's renderer boundary returns a bare issue
@@ -258,6 +371,42 @@ pub struct JiraCreateFieldsParams {
     pub issue_type_id: String,
     #[serde(default)]
     pub site_id: Option<String>,
+}
+
+/// `jira.startIssue` parameters (R17-C): turn a Jira issue into a
+/// worktree through the same daemon-side creation path as `tasks.start`
+/// (GitHub), named from the issue key the fork's way
+/// (`getJiraIssueWorkspaceSeed`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraStartIssueParams {
+    pub project_id: String,
+    pub key: String,
+    #[serde(default)]
+    pub site_id: Option<String>,
+    /// Display title fallback when the issue cannot be read (the fork
+    /// always has the issue loaded in the dialog; the daemon re-reads it
+    /// for truth and only falls back to the key on failure).
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// `jira.startIssue` result: the created (or already-linked) worktree plus
+/// the fork's seed identity so the renderer can badge and link back to the
+/// issue without a second round trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraStartIssueResult {
+    pub ok: bool,
+    pub key: String,
+    pub url: String,
+    /// The fork's displayName: "DROG-42 Fix the thing" — stored as the
+    /// worktree's display title so the sidebar card carries the issue
+    /// identity (the badge/link back to the issue).
+    pub display_name: String,
+    /// The git-safe slug the fork seeds the workspace name from.
+    pub seed_name: String,
+    pub worktree: crate::worktree::Worktree,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -500,6 +500,15 @@ impl Engine {
             "jira.listCreateFields" => self.jira_list_create_fields(&request.params),
             "jira.listPriorities" => self.jira_list_priorities(&request.params),
             "jira.searchUsers" => self.jira_search_users(&request.params),
+            // R17-C: issue creation, detail dialog, mutations and
+            // start-from-issue (additive method arms).
+            "jira.getIssue" => self.jira_get_issue(&request.params),
+            "jira.comments" => self.jira_comments(&request.params),
+            "jira.transitions" => self.jira_list_transitions(&request.params),
+            "jira.createIssue" => self.jira_create_issue(&request.params),
+            "jira.updateIssue" => self.jira_update_issue(&request.params),
+            "jira.addComment" => self.jira_add_comment(&request.params),
+            "jira.startIssue" => self.mutating(request, Self::jira_start_issue),
             "tasks.remotes" => self.do_tasks_remotes(&request.params),
             "mentu.recipes" => self.mentu_recipes(&request.params),
             "mentu.recipe" => self.mentu_recipe(&request.params),

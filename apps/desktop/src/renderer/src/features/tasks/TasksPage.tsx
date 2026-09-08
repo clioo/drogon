@@ -15,6 +15,12 @@ import {
 } from "../../../../shared/tasks-contract";
 import type { Session } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "../shell/project-adapter";
+import {
+  consumePendingTaskSource,
+  resolveRequestedTaskSource,
+  subscribeTaskSourceNavigation,
+  type TaskSource,
+} from "./task-source-navigation";
 import { TaskPageSurface } from "./task-page/Surface";
 import { getRepoBackedTaskEmptyState } from "./task-page-empty-state";
 import { toPullWorkItem, toWorkItem } from "./task-page-model";
@@ -179,6 +185,19 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     pickDefaultProject(loadGroups()),
   );
   const [githubTaskKind, setGithubTaskKind] = useState<GitHubTaskKind>("issues");
+  // #346: source deep-linked from the sidebar provider chips. The raw
+  // request survives even when the source is not renderable yet (Jira
+  // arrives with R17-B), so it selects as soon as the option exists;
+  // until then the resolution falls back to the default source.
+  const [requestedTaskSource, setRequestedTaskSource] =
+    useState<TaskSource | null>(null);
+  useEffect(() => {
+    const pending = consumePendingTaskSource();
+    if (pending !== null) setRequestedTaskSource(pending);
+    // Why: App keeps this page mounted (hidden) across route switches, so
+    // chip clicks after the first visit arrive through the subscription.
+    return subscribeTaskSourceNavigation(setRequestedTaskSource);
+  }, []);
   // Source preset pill (fork use-task-page-search-actions): set by preset
   // clicks and kind switches, cleared the moment the user types.
   const [activeTaskPreset, setActiveTaskPreset] = useState<GitHubTaskPresetId | null>(() =>
@@ -542,6 +561,13 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   );
 
   const selectedRepo = selectedRepos[0] ?? null;
+  // #346: a request for a source the page cannot render yet (Jira before
+  // R17-B) resolves to the default source instead of blanking the page.
+  const sourceOptions = getSourceOptions();
+  const taskSource: TaskSource = resolveRequestedTaskSource(
+    requestedTaskSource,
+    sourceOptions.map((option) => option.id),
+  );
   const githubEmptyState = getRepoBackedTaskEmptyState({
     provider: "github",
     selectedRepoCount: selectedRepos.length,
@@ -554,8 +580,8 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   const totalPages = hasNextPage ? Math.max(furthestPage, page + 1) : Math.max(1, furthestPage);
 
   const model: TaskPageModel = {
-    taskSource: "github",
-    visibleSourceOptions: getSourceOptions(),
+    taskSource,
+    visibleSourceOptions: sourceOptions,
     taskSourceAvailabilityNoticeByProvider: {},
     // Fork parity (#238): the pill target is the repo identity
     // (owner/repo slug) like the source's provider-identity label — the

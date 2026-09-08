@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import type { Result } from "./session-contract";
+import type { Worktree } from "./session-contract";
 
 export const JIRA_CAPABILITY = "jira.v1";
 
@@ -96,12 +97,66 @@ export type JiraStatus = {
 /** The fork's four Tasks-page filter tabs. */
 export type JiraIssueFilter = "assigned" | "reported" | "all" | "done";
 
+/** One issue comment, body already rendered ADF→markdown (R17-C). */
+export type JiraComment = {
+  id: string;
+  body: string;
+  createdAt: string;
+  updatedAt?: string;
+  user?: JiraUser;
+};
+
+/** One available workflow transition with its target status (R17-C). */
+export type JiraTransition = {
+  id: string;
+  name: string;
+  to: JiraStatus;
+};
+
+/**
+ * The fork's `JiraIssueUpdate`: absent fields are untouched; an explicit
+ * `null` clears assignee/priority (`{ accountId: null }` / `priority: null`
+ * on the wire).
+ */
+export type JiraIssueUpdate = {
+  title?: string;
+  labels?: string[];
+  assigneeAccountId?: string | null;
+  priorityId?: string | null;
+  transitionId?: string;
+};
+
+/** The fork's `JiraCreateIssueResult` — business failures ride the envelope. */
+export type JiraCreateIssueResult =
+  | { ok: true; id: string; key: string; url: string }
+  | { ok: false; error: string };
+
+export type JiraMutationResult = { ok: true; id?: string } | { ok: false; error: string };
+
+/**
+ * `jira.startIssue` result: the created (or already-linked) worktree plus
+ * the fork's seed identity so the renderer can badge and link back to the
+ * issue without a second round trip.
+ */
+export type JiraStartIssueResult = {
+  ok: boolean;
+  key: string;
+  url: string;
+  /** The fork's displayName: "DROG-42 Fix the thing" — also the worktree's display title. */
+  displayName: string;
+  /** The git-safe slug the fork seeds the workspace name from. */
+  seedName: string;
+  worktree: Worktree;
+};
+
 export type JiraIssue = {
   id: string;
   key: string;
   siteId?: string;
   siteName?: string;
   title: string;
+  /** Detail-path only (R17-C): the daemon rendered the ADF body to markdown. */
+  description?: string;
   url: string;
   project: JiraProject;
   issueType: JiraIssueType;
@@ -191,6 +246,61 @@ export interface JiraBridge {
     query?: string;
     siteId?: string;
   }): Promise<Result<JiraUser[]>>;
+  /**
+   * Detail read (R17-C): the fork's `jira:getIssue`. Returns `null` when no
+   * selected site produced the issue (the fork's honest-not-found), with the
+   * ADF description rendered to markdown.
+   */
+  jiraGetIssue(input: {
+    key: string;
+    siteId?: string;
+  }): Promise<Result<JiraIssue | null>>;
+  /** Paged by the daemon; bodies rendered ADF→markdown, ordered by created. */
+  jiraComments(input: {
+    key: string;
+    siteId?: string;
+  }): Promise<Result<JiraComment[]>>;
+  /** The workflow transitions offered for the issue; failures degrade to []. */
+  jiraListTransitions(input: {
+    key: string;
+    siteId?: string;
+  }): Promise<Result<JiraTransition[]>>;
+  /**
+   * The fork's `jira:createIssue`. `customFields` values pass through
+   * verbatim except keys named in `userFieldKeys`, which the daemon shapes
+   * into Jira user reference objects (`{accountId}` / `{name}`); the
+   * renderer builds ADF for textarea custom fields (`jira-create-adf.ts`).
+   */
+  jiraCreateIssue(input: {
+    siteId?: string;
+    projectId: string;
+    issueTypeId: string;
+    title: string;
+    description?: string;
+    customFields?: Record<string, unknown>;
+    userFieldKeys?: string[];
+  }): Promise<Result<JiraCreateIssueResult>>;
+  /** Field/assignee/transition updates; business failures ride the envelope. */
+  jiraUpdateIssue(
+    input: { key: string; siteId?: string } & JiraIssueUpdate,
+  ): Promise<Result<JiraMutationResult>>;
+  /** The fork's `jira:addIssueComment` (ADF body on Cloud, text on Server). */
+  jiraAddComment(input: {
+    key: string;
+    body: string;
+    siteId?: string;
+  }): Promise<Result<JiraMutationResult>>;
+  /**
+   * Start-from-issue (R17-C): creates the worktree through the same daemon
+   * path as `tasks.start`, named from the issue key the fork's way, with the
+   * issue identity stamped as the worktree's display title.
+   */
+  jiraStartIssue(input: {
+    projectId: string;
+    key: string;
+    siteId?: string;
+    title?: string;
+  }): Promise<Result<JiraStartIssueResult>>;
 }
 
 // --- zod validation --------------------------------------------------------
@@ -261,6 +371,41 @@ export const jiraBridgeSchemas = {
     query: z.string().max(256).optional(),
     siteId: siteSelection,
   }),
+  jiraGetIssue: z.object({ key: z.string().min(1).max(128), siteId: siteSelection }),
+  jiraComments: z.object({ key: z.string().min(1).max(128), siteId: siteSelection }),
+  jiraListTransitions: z.object({
+    key: z.string().min(1).max(128),
+    siteId: siteSelection,
+  }),
+  jiraCreateIssue: z.object({
+    siteId: siteSelection,
+    projectId: z.string().min(1).max(128),
+    issueTypeId: z.string().min(1).max(128),
+    title: z.string().max(1024),
+    description: z.string().max(64 * 1024).optional(),
+    customFields: z.record(z.string(), z.unknown()).optional(),
+    userFieldKeys: z.array(z.string().min(1).max(128)).max(64).optional(),
+  }),
+  jiraUpdateIssue: z.object({
+    key: z.string().min(1).max(128),
+    siteId: siteSelection,
+    title: z.string().max(1024).optional(),
+    labels: z.array(z.string().min(1).max(256)).max(100).optional(),
+    assigneeAccountId: z.string().max(128).nullable().optional(),
+    priorityId: z.string().max(128).nullable().optional(),
+    transitionId: z.string().max(128).optional(),
+  }),
+  jiraAddComment: z.object({
+    key: z.string().min(1).max(128),
+    body: z.string().min(1).max(64 * 1024),
+    siteId: siteSelection,
+  }),
+  jiraStartIssue: z.object({
+    projectId: id,
+    key: z.string().min(1).max(128),
+    siteId: siteSelection,
+    title: z.string().max(1024).optional(),
+  }),
 };
 
 const statusSchema: z.ZodType<JiraConnectionStatus> = z.object({
@@ -329,6 +474,7 @@ const issueSchema: z.ZodType<JiraIssue> = z.object({
   siteId: z.string().optional(),
   siteName: z.string().optional(),
   title: z.string(),
+  description: z.string().optional(),
   url: z.string(),
   project: projectSchema,
   issueType: issueTypeSchema,
@@ -353,6 +499,69 @@ const searchResultSchema: z.ZodType<JiraSearchResult> = z.object({
   isLast: z.boolean().optional(),
 });
 
+const commentSchema: z.ZodType<JiraComment> = z.object({
+  id: z.string(),
+  body: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+  user: userSchema.optional(),
+});
+
+const transitionSchema: z.ZodType<JiraTransition> = z.object({
+  id: z.string(),
+  name: z.string(),
+  to: z.object({
+    id: z.string(),
+    name: z.string(),
+    categoryKey: z.string(),
+    categoryName: z.string(),
+    colorName: z.string().optional(),
+  }),
+});
+
+const createIssueResultSchema: z.ZodType<JiraCreateIssueResult> = z.discriminatedUnion(
+  "ok",
+  [
+    z.object({
+      ok: z.literal(true),
+      id: z.string(),
+      key: z.string(),
+      url: z.string(),
+    }),
+    z.object({ ok: z.literal(false), error: z.string() }),
+  ],
+);
+
+const mutationResultSchema: z.ZodType<JiraMutationResult> = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), id: z.string().optional() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+
+const worktreeSchema: z.ZodType<Worktree> = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  workspaceId: z.string(),
+  path: z.string(),
+  branch: z.string(),
+  head: z.string(),
+  // Serialized as an explicit null (no skip attribute on the struct).
+  baseRef: z.string().nullable(),
+  // Skip-serialized when absent, so optional on the wire.
+  title: z.string().nullable().optional(),
+  note: z.string().nullable().optional(),
+  parentWorktreeId: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+
+const startIssueResultSchema = z.object({
+  ok: z.boolean(),
+  key: z.string(),
+  url: z.string(),
+  displayName: z.string(),
+  seedName: z.string(),
+  worktree: worktreeSchema,
+});
+
 /**
  * Result schemas per native method, registered into the shared
  * `resultSchemas` map by main/jira-bridge.ts at module load (the same
@@ -374,4 +583,11 @@ export const jiraResultSchemas = {
   "jira.listCreateFields": z.array(createFieldSchema),
   "jira.listPriorities": z.array(prioritySchema),
   "jira.searchUsers": z.array(userSchema),
+  "jira.getIssue": issueSchema.nullable(),
+  "jira.comments": z.array(commentSchema),
+  "jira.transitions": z.array(transitionSchema),
+  "jira.createIssue": createIssueResultSchema,
+  "jira.updateIssue": mutationResultSchema,
+  "jira.addComment": mutationResultSchema,
+  "jira.startIssue": startIssueResultSchema,
 } satisfies Record<string, z.ZodType>;

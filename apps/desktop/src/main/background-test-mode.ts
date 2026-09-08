@@ -1,6 +1,6 @@
 /**
- * Test instances run with DROGON_BACKGROUND_WINDOW=1 (background window,
- * accessory activation policy). Anything that would put a window of ANOTHER
+ * Test instances run with DROGON_BACKGROUND_WINDOW=1 (hidden window,
+ * prohibited activation policy on macOS). Anything that would put a window of ANOTHER
  * app in front of the user — the system browser, Finder, a native file
  * dialog — is suppressed there and logged, so harness runs never take the
  * user's focus. Product behaviour is untouched outside test mode.

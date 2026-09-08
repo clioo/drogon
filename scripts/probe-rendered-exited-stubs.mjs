@@ -233,8 +233,12 @@ export async function probeRenderedExitedStubs({
     .filter({ hasText: "Could not reconnect to terminal" })
     .first();
   await overlay.waitFor();
+  // The reset→reselect pass can momentarily render two tabs with
+  // aria-selected (the fork's restore keeps the prior selection for one
+  // frame); either stub is acceptable here, so read the first.
   const overlayTabLabel = await page
     .locator('[role="tab"][aria-selected="true"]')
+    .first()
     .getAttribute("aria-label");
   const revivedFromId =
     /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/.exec(

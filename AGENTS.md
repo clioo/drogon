@@ -40,3 +40,42 @@ and orchestration reference; older files under `docs/migration/` are history.
   secrets or raw provider transcripts.
 - Workers with a live Orca dispatch preamble send `worker_done` exactly once
   after the PR exists; if the send fails, the PR is still the deliverable.
+
+## Keep agent validation out of the foreground
+
+- All agents and subagents must preserve the developer's OS focus, including
+  during ad hoc Playwright/CDP checks. Launch a dedicated test instance with
+  `DROGON_BACKGROUND_WINDOW=1` and separate temporary `DROGON_DATA_DIR` and
+  `DROGON_ELECTRON_PROFILE` directories. Reuse existing Drogon launchers; do
+  not drive the developer's working instance for interactive tests.
+- Never call `page.bringToFront()`, CDP `Page.bringToFront`, `app.focus()`,
+  `BrowserWindow.focus()`, or OS activation commands to make a check pass.
+  Background validation windows must stay hidden, including during reloads
+  and saved-window restoration; neither `show()` nor `showInactive()` belongs
+  in that path. Verify OS activation and window visibility, not only DOM focus.
+- Tests specifically exercising native foreground focus require an explicit
+  user request and a documented reason. Never disable background mode as a
+  generic retry or workaround for a failing test.
+- On macOS, run `DROGON_VERIFY_OS_FOCUS=1 node scripts/accept-desktop.mjs`
+  against a current build to record OS activation events and on-screen window
+  owners from before launch through shutdown. This requires the Swift compiler;
+  functional acceptance alone is not evidence that focus was preserved.
+
+## Clean up every test-owned process
+
+- Every agent owns cleanup of the processes it starts for validation: Electron
+  helpers, detached daemons, PTYs, dev servers, and fixture servers. Use
+  `try/finally` or equivalent teardown on success, failure, timeout, and
+  cancellation. Reuse existing Drogon teardown code before writing new logic.
+- Track process identities and isolated directories from launch. Capture
+  descendants before closing their parent; closing a window or passing a test
+  does not prove the daemon or its children exited. Close gracefully, wait with
+  a bounded timeout, then terminate confirmed test-owned survivors, using force
+  only if needed and rechecking identity before signaling to avoid PID reuse.
+- Verify all owned processes exited before deleting their directories or
+  reporting completion; include scoped process-check evidence in the PR.
+  Never use broad executable-name `pkill`/`killall` commands. PPID 1, age, or
+  high RAM alone does not prove abandonment; preserve other active sessions.
+- Verify on the host that owns execution. If ownership or exit cannot be
+  established, report remaining processes as `unverifiable` rather than
+  killing unrelated work or claiming cleanup succeeded.
