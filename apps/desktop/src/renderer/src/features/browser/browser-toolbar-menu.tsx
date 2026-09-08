@@ -26,6 +26,22 @@ import {
 export { resolveBrowserToolbarMenuPolicy };
 export type { BrowserToolbarMenuPolicy };
 
+/**
+ * Fork copy for the rows that carry a shortcut hint (the fork never renders
+ * a raw `Mod+` token as visible text). The hints follow the chord notation
+ * the rest of the app uses: ⌘ glyphs on macOS, Ctrl+ words elsewhere.
+ */
+export const BROWSER_MENU_RELOAD_LABEL = "Reload";
+export const BROWSER_MENU_FIND_LABEL = "Find in page...";
+export const BROWSER_MENU_RESET_ZOOM_LABEL = "Reset zoom";
+
+export type BrowserMenuHintRow = "reload" | "find";
+
+export function getBrowserMenuShortcutHint(row: BrowserMenuHintRow, platform: string): string {
+  const key = row === "reload" ? "R" : "F";
+  return /mac/i.test(platform) ? `⌘${key}` : `Ctrl+${key}`;
+}
+
 export function BrowserToolbarMenu({
   pageUrl,
   externalUrl,
@@ -50,6 +66,9 @@ export function BrowserToolbarMenu({
   writeClipboardText?: (text: string) => void;
 }): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
+  const platform = typeof navigator === "undefined" ? "" : (navigator.platform ?? "");
+  const reloadHint = getBrowserMenuShortcutHint("reload", platform);
+  const findHint = getBrowserMenuShortcutHint("find", platform);
   const open = openExternal ?? windowShellOpenExternal(window.drogon);
   const copy = writeClipboardText ?? ((text: string) => void navigator.clipboard?.writeText(text).catch(() => {}));
   const close = (): void => setMenuOpen(false);
@@ -93,8 +112,8 @@ export function BrowserToolbarMenu({
             close();
           }}
         >
-          Reload
-          <span className="ml-auto text-xs tracking-widest opacity-60">Mod+R</span>
+          {BROWSER_MENU_RELOAD_LABEL}
+          <span className="ml-auto text-xs tracking-widest opacity-60">{reloadHint}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
@@ -115,7 +134,7 @@ export function BrowserToolbarMenu({
             onZoomReset();
           }}
         >
-          Reset zoom
+          {BROWSER_MENU_RESET_ZOOM_LABEL}
           <span className="ml-auto text-xs tracking-widest opacity-60">{zoomPercent}%</span>
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -124,8 +143,8 @@ export function BrowserToolbarMenu({
             close();
           }}
         >
-          Find in page
-          <span className="ml-auto text-xs tracking-widest opacity-60">Mod+F</span>
+          {BROWSER_MENU_FIND_LABEL}
+          <span className="ml-auto text-xs tracking-widest opacity-60">{findHint}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -19,9 +19,30 @@ export const browser: BrowserBridge = {
   stop: (value) => ipcRenderer.invoke(browserIpcChannels.stop, value),
   setBounds: (value) => ipcRenderer.invoke(browserIpcChannels.setBounds, value),
   snapshot: (value) => ipcRenderer.invoke(browserIpcChannels.snapshot, value),
+  getState: () => ipcRenderer.invoke(browserIpcChannels.getState),
   onState: (listener: (event: BrowserStateEvent) => void) => {
     const wrapped = (_event: unknown, state: BrowserStateEvent) => listener(state);
     ipcRenderer.on(browserIpcChannels.state, wrapped);
+    // Replay the host's current tabs on subscribe: without it a fresh
+    // subscriber (renderer reload, workspace reselect) shows an empty
+    // strip until the next host event, while the guests stay alive in
+    // main. A duplicate live event is idempotent downstream (React state
+    // set to the same list), so subscribe-first-then-pull never loses one.
+    void (ipcRenderer.invoke(browserIpcChannels.getState) as Promise<unknown>).then(
+      (result) => {
+        if (
+          result &&
+          typeof result === "object" &&
+          (result as { ok?: unknown }).ok === true &&
+          Array.isArray(
+            (result as { result?: { tabs?: unknown } }).result?.tabs,
+          )
+        ) {
+          listener((result as { result: BrowserStateEvent }).result);
+        }
+      },
+      () => {},
+    );
     return () => ipcRenderer.removeListener(browserIpcChannels.state, wrapped);
   },
   // Additive (R11-B chrome): reload/zoom/find/devtools plus the guest
