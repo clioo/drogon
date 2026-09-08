@@ -11,7 +11,7 @@ import { BOTS_ROUTE_ID } from "../../bots-mount";
 import { MENTU_ROUTE_ID } from "../../mentu-mount";
 import { SETTINGS_ROUTE_ID } from "../settings/settings-route";
 import { TASKS_ROUTE_ID } from "../tasks/TasksPage";
-import { isFullPageRoute } from "./page-host";
+import { isFullPageRoute, noWorkspacePageCopy } from "./page-host";
 import {
   currentView,
   goBackView,
@@ -31,6 +31,21 @@ describe("isFullPageRoute", () => {
     assert.equal(isFullPageRoute(MENTU_ROUTE_ID), false);
     assert.equal(isFullPageRoute("files"), false);
     assert.equal(isFullPageRoute("changes"), false);
+  });
+});
+
+describe("no-workspace page routing", () => {
+  it("keeps workspace-scoped navigation visible without a workspace", () => {
+    assert.deepEqual(noWorkspacePageCopy(BOTS_ROUTE_ID), {
+      title: "Bots",
+      description: "Your team of agents, with memory and a purpose.",
+    });
+    assert.deepEqual(noWorkspacePageCopy(AUTOMATIONS_ROUTE_ID), {
+      title: "Automations",
+      description: "Schedule repeatable work for your workspaces.",
+    });
+    assert.equal(noWorkspacePageCopy(TASKS_ROUTE_ID), null);
+    assert.equal(noWorkspacePageCopy(null), null);
   });
 });
 

@@ -105,7 +105,10 @@ import {
   rewindViewHistoryPastRoute,
 } from "./features/shell/view-history";
 import type { ViewEntry } from "./features/shell/view-history";
-import { isFullPageRoute } from "./features/shell/page-host";
+import {
+  isFullPageRoute,
+  noWorkspacePageCopy,
+} from "./features/shell/page-host";
 import {
   loadSidebarOpen,
   loadSidebarWidth,
@@ -114,6 +117,7 @@ import {
 } from "./features/shell/sidebar-width";
 import { unreadDockBadgeCount } from "./features/shell/unread-badge-count";
 import { Landing } from "./features/landing/Landing";
+import { NoWorkspacePage } from "./features/shell/NoWorkspacePage";
 import {
   findWorkspaceForPath,
   gitProjectForWorkspace,
@@ -1385,6 +1389,7 @@ export function App() {
   const fullPageActive =
     isFullPageRoute(route) &&
     (botsPageActive || automationsPageActive || tasksPageActive);
+  const noWorkspaceCopy = noWorkspacePageCopy(route);
   const checked = <T,>(value: Result<T>): T => {
     if (!value.ok) throw new Error(value.error.message);
     return value.result;
@@ -3629,12 +3634,21 @@ export function App() {
                 />
               </section>
             </div>
-          ) : workspaces.length === 0 ? (
-            <Landing
-              hasProjects={false}
-              onAddProject={requestAddProject}
-              onCreateWorkspace={() => requestCreateWorkspace()}
-            />
+          ) : workspaces.length === 0 && route !== TASKS_ROUTE_ID ? (
+            noWorkspaceCopy ? (
+              <NoWorkspacePage
+                title={noWorkspaceCopy.title}
+                description={noWorkspaceCopy.description}
+                onAddProject={requestAddProject}
+                onCreateWorkspace={() => requestCreateWorkspace()}
+              />
+            ) : (
+              <Landing
+                hasProjects={false}
+                onAddProject={requestAddProject}
+                onCreateWorkspace={() => requestCreateWorkspace()}
+              />
+            )
           ) : (
             <>
           {/* Standalone pages (Bots/Tasks/Automations) replace the session
