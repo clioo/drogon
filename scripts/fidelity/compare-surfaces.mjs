@@ -25,6 +25,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { createServer } from "node:http";
+import { inflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +57,12 @@ const OUT = flag("--out", null);
 const NO_DARK = args.includes("--no-dark");
 const KEEP = args.includes("--keep");
 const STATES_FILTER = flag("--states", null)?.split(",").map((s) => s.trim());
+const WORKTREE_CARD_ROWS_WANTED =
+  !STATES_FILTER || STATES_FILTER.includes("worktree-card-rows");
+const BROWSER_FIXTURE_WANTED =
+  !STATES_FILTER ||
+  STATES_FILTER.includes("browser-tab-loading") ||
+  STATES_FILTER.includes("address-bar-suggestions");
 
 // ---------------------------------------------------------------------------
 // Source inventory: MVP surface -> reference source anchors (read-only).
@@ -62,6 +70,73 @@ const STATES_FILTER = flag("--states", null)?.split(",").map((s) => s.trim());
 // created. Expected values are extracted with the listed line patterns.
 // ---------------------------------------------------------------------------
 const SURFACES = [
+  {
+    id: "worktree-card-rows",
+    label: "Worktree card with nested session rows",
+    refDir: "src/renderer/src/components/sidebar",
+    refFiles: [
+      "src/renderer/src/components/sidebar/worktree-card-compact-agents.tsx",
+      "src/renderer/src/components/sidebar/WorktreeCardAgents.tsx",
+      "src/renderer/src/components/sidebar/WorktreeCard.tsx",
+      "src/renderer/src/components/AgentStateDot.tsx",
+    ],
+    probes: ["session", "agent", "Working", "Waiting for input", "row", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/WorktreeCard.tsx",
+      "apps/desktop/src/renderer/src/features/shell/worktree-card-agent-summary.ts",
+    ],
+  },
+  {
+    id: "browser-tab-loading",
+    label: "Browser tab loading strip",
+    refDir: "src/renderer/src/components/browser-pane",
+    refFiles: [
+      "src/renderer/src/components/browser-pane/BrowserPane.tsx",
+      "src/renderer/src/components/browser-pane/assemble-chrome/browser-navigation-control-row.tsx",
+      "src/renderer/src/components/browser-pane/assemble-chrome/browser-page-chrome-header.tsx",
+    ],
+    probes: ["loading", "Reload", "aria-label", "spinner", "className"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/browser/browser-navigation-control-row.tsx",
+      "apps/desktop/src/renderer/src/features/browser/browser-panel.tsx",
+      "apps/desktop/src/renderer/src/features/shell/tab-strip/SortableBrowserTab.tsx",
+    ],
+  },
+  {
+    id: "address-bar-suggestions",
+    label: "Browser address-bar suggestions",
+    refDir: "src/renderer/src/components/browser-pane/assemble-chrome",
+    refFiles: [
+      "src/renderer/src/components/browser-pane/assemble-chrome/browser-address-bar-suggestions.ts",
+      "src/renderer/src/components/browser-pane/assemble-chrome/browser-chrome-address-slot.ts",
+      "src/renderer/src/components/browser-pane/assemble-chrome/browser-address-bar-edit-session.ts",
+      "src/renderer/src/components/browser-pane/BrowserPane.tsx",
+    ],
+    probes: ["Search Google for", "recent", "suggestion", "address", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/browser/browser-address-bar.tsx",
+      "apps/desktop/src/renderer/src/features/browser/browser-address-bar-suggestions.ts",
+      "apps/desktop/src/renderer/src/features/browser/browser-recent-urls.ts",
+    ],
+  },
+  {
+    id: "editor-header",
+    label: "Editor header controls",
+    refDir: "src/renderer/src/components/editor",
+    refFiles: [
+      "src/renderer/src/components/editor/EditorPanelHeaderPath.tsx",
+      "src/renderer/src/components/editor/EditorViewToggle.tsx",
+      "src/renderer/src/components/editor/EditorPanelMarkdownActionsMenu.tsx",
+      "src/renderer/src/components/editor/EditorPanel.tsx",
+    ],
+    probes: ["More actions", "Back to Edit", "Changes", "Edit", "path", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/editor/EditorPanelHeaderPath.tsx",
+      "apps/desktop/src/renderer/src/features/editor/EditorViewToggle.tsx",
+      "apps/desktop/src/renderer/src/features/editor/EditorPanelMarkdownActionsMenu.tsx",
+      "apps/desktop/src/renderer/src/features/editor/EditorPane.tsx",
+    ],
+  },
   {
     id: "shell-sidebar",
     label: "Shell + sidebar",
@@ -850,10 +925,105 @@ async function captureTriple(page, base, scheme) {
   return { png, aria, dom };
 }
 
+// Small dependency-free PNG reader for report evidence. Electron screenshots
+// are 8-bit RGB/RGBA PNGs; supporting the basic filter set keeps the oracle
+// self-contained and makes each issue cite a reproducible percentage.
+function decodePng(buffer) {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.ok(buffer.subarray(0, 8).equals(signature), "PNG signature missing");
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let colorType = 6;
+  let bitDepth = 8;
+  const idat = [];
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    offset += 12 + length;
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+    } else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+  }
+  assert.equal(bitDepth, 8, `unsupported PNG bit depth ${bitDepth}`);
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : colorType === 0 ? 1 : 0;
+  assert.ok(channels > 0, `unsupported PNG color type ${colorType}`);
+  const rowBytes = width * channels;
+  const raw = inflateSync(Buffer.concat(idat));
+  const rows = Buffer.alloc(height * rowBytes);
+  let source = 0;
+  const paeth = (a, b, c) => {
+    const p = a + b - c;
+    const pa = Math.abs(p - a);
+    const pb = Math.abs(p - b);
+    const pc = Math.abs(p - c);
+    return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+  };
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[source++];
+    const rowStart = y * rowBytes;
+    const priorStart = (y - 1) * rowBytes;
+    for (let x = 0; x < rowBytes; x += 1) {
+      const value = raw[source++];
+      const left = x >= channels ? rows[rowStart + x - channels] : 0;
+      const up = y > 0 ? rows[priorStart + x] : 0;
+      const upLeft = y > 0 && x >= channels ? rows[priorStart + x - channels] : 0;
+      rows[rowStart + x] = filter === 0 ? value
+        : filter === 1 ? (value + left) & 255
+        : filter === 2 ? (value + up) & 255
+        : filter === 3 ? (value + Math.floor((left + up) / 2)) & 255
+        : filter === 4 ? (value + paeth(left, up, upLeft)) & 255
+        : value;
+    }
+  }
+  return { width, height, channels, rows };
+}
+
+export async function pixelDiffPercent(referencePng, candidatePng) {
+  const reference = decodePng(await readFile(referencePng));
+  const candidate = decodePng(await readFile(candidatePng));
+  const width = Math.min(reference.width, candidate.width);
+  const height = Math.min(reference.height, candidate.height);
+  const rgba = (image, x, y) => {
+    const index = y * image.width * image.channels + x * image.channels;
+    const value = image.rows;
+    if (image.channels === 4) return [value[index], value[index + 1], value[index + 2], value[index + 3]];
+    if (image.channels === 3) return [value[index], value[index + 1], value[index + 2], 255];
+    const gray = value[index];
+    return [gray, gray, gray, 255];
+  };
+  let changed = 0;
+  let totalDelta = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const a = rgba(reference, x, y);
+      const b = rgba(candidate, x, y);
+      const delta = Math.max(...a.map((channel, index) => Math.abs(channel - b[index])));
+      totalDelta += delta;
+      if (delta > 12) changed += 1;
+    }
+  }
+  const total = width * height;
+  return {
+    changedPixels: changed,
+    comparedPixels: total,
+    percent: total ? Number(((changed / total) * 100).toFixed(3)) : null,
+    meanDelta: total ? Number((totalDelta / total).toFixed(3)) : null,
+    dimensions: `${reference.width}x${reference.height} vs ${candidate.width}x${candidate.height}`,
+  };
+}
+
 async function dismissOverlays(page) {
   for (let i = 0; i < 3; i++) {
     try {
-      await page.keyboard.press("Escape");
+      const escape = () => page.keyboard.press("Escape");
+      if (REFERENCE_PAGES.has(page)) await refInteract(page, "press Escape", escape);
+      else await escape();
       await delay(150);
     } catch {
       break;
@@ -861,18 +1031,42 @@ async function dismissOverlays(page) {
   }
 }
 
+// Reference pages are read-only. Keep the guard attached to the page object so
+// every shared click/chord helper rejects destructive affordances on the ref,
+// while the owned candidate can still exercise those controls in its fixtures.
+const REFERENCE_PAGES = new WeakSet();
+const REF_FORBIDDEN_ACTION = /\b(close|remove|delete|trash|discard|kill|terminate)\b/i;
+
+export function guardReferencePage(page) {
+  REFERENCE_PAGES.add(page);
+  return page;
+}
+
+export async function refInteract(page, description, operation) {
+  if (REF_FORBIDDEN_ACTION.test(description)) {
+    throw new Error(`reference destructive interaction rejected: ${description}`);
+  }
+  return operation();
+}
+
 // Best-effort click with EXACT accessible-name matching (substring matches
 // previously opened the wrong surface). Returns true when it acted.
 async function tryClick(page, role, name, timeout = 2500) {
-  try {
-    const loc = page.getByRole(role, { name, exact: true });
-    if ((await loc.count()) === 0) return false;
-    await loc.first().click({ timeout });
-    await delay(350);
-    return true;
-  } catch {
-    return false;
+  const interact = async () => {
+    try {
+      const loc = page.getByRole(role, { name, exact: true });
+      if ((await loc.count()) === 0) return false;
+      await loc.first().click({ timeout });
+      await delay(350);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (REFERENCE_PAGES.has(page)) {
+    return refInteract(page, `click ${role} ${name}`, interact);
   }
+  return interact();
 }
 
 // Overlay census: native dialogs/menus plus the candidate's cmdk palette,
@@ -904,26 +1098,46 @@ async function ensureClean(page, notes) {
       return;
     }
     try {
-      await page.keyboard.press("Escape");
+      const escape = () => page.keyboard.press("Escape");
+      if (REFERENCE_PAGES.has(page)) await refInteract(page, "press Escape", escape);
+      else await escape();
       await delay(250);
     } catch {
       break;
     }
   }
-  const left = await overlayState(page);
-  notes.push(
-    `overlays remain before setup (dialogs=${left.dialogs} menus=${left.menus} palettes=${left.palettes})`,
-  );
+  let left = await overlayState(page);
+  if (!REFERENCE_PAGES.has(page) && left.palettes > 0) {
+    try {
+      await page.locator(".command-palette-overlay").first().click({ position: { x: 4, y: 4 } });
+      await delay(250);
+      left = await overlayState(page);
+      if (overlayCount(left) === 0) notes.push("cleaned command palette via backdrop");
+    } catch {
+      /* keep the explicit residue note below */
+    }
+  }
+  if (overlayCount(left) > 0) {
+    notes.push(
+      `overlays remain before setup (dialogs=${left.dialogs} menus=${left.menus} palettes=${left.palettes})`,
+    );
+  }
 }
 
 async function tryKeys(page, chord) {
-  try {
-    await page.keyboard.press(chord);
-    await delay(500);
-    return true;
-  } catch {
-    return false;
+  const interact = async () => {
+    try {
+      await page.keyboard.press(chord);
+      await delay(500);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (REFERENCE_PAGES.has(page)) {
+    return refInteract(page, `press ${chord}`, interact);
   }
+  return interact();
 }
 
 // Best-effort wait for an ARIA marker (proves navigation landed before the
@@ -944,7 +1158,7 @@ async function menuItemNames(page, limit = 24) {
   try {
     return await page.evaluate((max) => {
       const out = [];
-      for (const el of document.querySelectorAll('[role="menuitem"]')) {
+      for (const el of document.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]')) {
         if (el.offsetParent === null) continue;
         const t = (el.getAttribute("aria-label") || el.textContent || "")
           .trim().replace(/\s+/g, " ");
@@ -1134,6 +1348,76 @@ async function ensureTasksRowsFixtureBin(fixture) {
   return binDir;
 }
 
+// A Pi-shaped executable keeps the card-row fixture deterministic. It prints
+// shell output and sleeps; no provider/model inference runs during fidelity.
+const PI_CARD_ROWS_FIXTURE = `#!/bin/sh
+printf 'Drogon Pi local-model fixture\\n'
+while :; do
+  printf 'fixture heartbeat\\n'
+  sleep 1
+done
+`;
+
+async function ensurePiCardRowsFixture(binDir) {
+  const piPath = path.join(binDir, "pi");
+  await writeFile(piPath, PI_CARD_ROWS_FIXTURE, { mode: 0o755 });
+  try {
+    await execFileAsync("chmod", ["+x", piPath]);
+  } catch {
+    /* the writeFile mode already covers unix */
+  }
+}
+
+// Browser fixture pages are served by this process, not a child process, so
+// teardown can close the exact server and sockets it owns. The slow response
+// intentionally remains pending long enough for the strip loading state.
+async function startBrowserFixtureServer() {
+  const timers = new Set();
+  const sockets = new Set();
+  const server = createServer((request, response) => {
+    const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+    if (pathname === "/slow") {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        response.writeHead(200, { "content-type": "text/html" });
+        response.end("<title>Slow fixture</title><main>slow fixture complete</main>");
+      }, 30000);
+      timers.add(timer);
+      response.once("close", () => {
+        clearTimeout(timer);
+        timers.delete(timer);
+      });
+      return;
+    }
+    const label = pathname === "/recent-a" ? "Recent fixture alpha" :
+      pathname === "/recent-b" ? "Recent fixture beta" : "Search fixture";
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end(`<title>${label}</title><main>${label}</main>`);
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object", "browser fixture must bind a TCP port");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  return {
+    server,
+    slowUrl: `${baseUrl}/slow`,
+    recentUrls: [`${baseUrl}/recent-a`, `${baseUrl}/recent-b`],
+    async close() {
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Candidate lifecycle (owned processes): real drogond + production Electron.
 // ---------------------------------------------------------------------------
@@ -1158,16 +1442,18 @@ async function launchCandidate() {
   const workspace = path.join(fixture, "folder");
   await mkdir(workspace, { recursive: true });
 
-  // tasks-rows only: the daemon resolves `gh` from the fixture bin dir
-  // (deterministic rows, no network); every other run keeps the real PATH.
+  // Deterministic row fixtures resolve `gh` and the Pi-shaped shell fixture
+  // from a temp bin dir. Runs without these states keep the real PATH.
   let daemonEnv = null;
-  if (TASKS_ROWS_WANTED && process.platform !== "win32") {
+  if ((TASKS_ROWS_WANTED || WORKTREE_CARD_ROWS_WANTED) && process.platform !== "win32") {
     const fixtureBin = await ensureTasksRowsFixtureBin(fixture);
+    if (WORKTREE_CARD_ROWS_WANTED) await ensurePiCardRowsFixture(fixtureBin);
     daemonEnv = {
       ...process.env,
       PATH: `${fixtureBin}${path.delimiter}${process.env.PATH ?? ""}`,
     };
   }
+  const browserFixture = BROWSER_FIXTURE_WANTED ? await startBrowserFixtureServer() : null;
   const daemon = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], {
     stdio: "ignore",
     ...(daemonEnv ? { env: daemonEnv } : {}),
@@ -1241,7 +1527,7 @@ async function launchCandidate() {
     .getByRole("button", { name: "Reveal active workspace", exact: true })
     .waitFor({ timeout: 25000 });
   await ensureCandidateViewport(page);
-  return { browser, page, desktop, daemon, fixture, dataDir, workspace };
+  return { browser, page, desktop, daemon, fixture, dataDir, workspace, browserFixture };
 }
 
 async function stopCandidate(owned) {
@@ -1262,6 +1548,14 @@ async function stopCandidate(owned) {
       notes.push(`${label}: stop failed (${error.message.split("\n")[0]})`);
     }
   }
+  if (owned.browserFixture) {
+    try {
+      await owned.browserFixture.close();
+      notes.push("browser fixture server: closed");
+    } catch (error) {
+      notes.push(`browser fixture server: close failed (${error.message.split("\\n")[0]})`);
+    }
+  }
   return notes;
 }
 
@@ -1272,11 +1566,6 @@ async function stopCandidate(owned) {
 // The candidate side may use its own temp fixture freely.
 // ---------------------------------------------------------------------------
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
-
-// Remembers the editor tab the reference-side editor-tab state opened (name
-// + strip size before) so teardown can close exactly that tab. Module scope
-// because refTeardown receives no ctx.
-let refEditorTab = null;
 
 async function refSetup(page, state, ctx) {
   const notes = [];
@@ -1302,9 +1591,12 @@ async function refSetup(page, state, ctx) {
   // dismisses the palette on both sides.
   const typePaletteQuery = async (query) => {
     try {
-      let field = page.getByRole("combobox").first();
+      let field = page.getByRole("combobox", { name: "Go to file", exact: true }).first();
       if ((await field.count()) === 0) {
-        field = page.getByPlaceholder(/jump|go to file/i).first();
+        field = page.locator(".command-palette-overlay input.command-palette-input").first();
+      }
+      if ((await field.count()) === 0) {
+        field = page.getByRole("combobox").first();
       }
       if ((await field.count()) === 0) {
         return "query field not found (captured unfiltered)";
@@ -1319,6 +1611,22 @@ async function refSetup(page, state, ctx) {
     }
   };
   switch (state) {
+    case "worktree-card-rows":
+      missing.push("ref non-coverage: creating 2–3 sessions (including Pi local-model) is forbidden on the reference");
+      notes.push("ref unchanged: nested worktree-card session rows compared from fork source anchors");
+      break;
+    case "browser-tab-loading":
+      missing.push("ref non-coverage: opening a new browser tab/loading fixture is forbidden on the reference");
+      notes.push("ref unchanged: loading strip compared from browser navigation source anchors");
+      break;
+    case "editor-header":
+      missing.push("ref non-coverage: opening a file/editor tab is forbidden on the reference");
+      notes.push("ref unchanged: editor path/Edit-Changes/More actions compared from fork source anchors");
+      break;
+    case "address-bar-suggestions":
+      missing.push("ref non-coverage: opening a browser tab and typing a suggestion query is forbidden on the reference");
+      notes.push("ref unchanged: Search Google and recent URL suggestions compared from fork source anchors");
+      break;
     case "empty":
       notes.push(`ref as-is: title=${await page.title().catch(() => "?")}`);
       break;
@@ -1727,55 +2035,13 @@ async function refSetup(page, state, ctx) {
       }
       break;
     }
-    case "dialogs": {
-      // Catalog `dialogs`: Delete-worktree and Remove-project dialogs. Each
-      // opens from its menu and is Cancel-dismissed (teardown Escape); the
-      // Remove-project dialog stays open for capture. Nothing is confirmed.
-      try {
-        const card = page.locator('[class*="worktree-card"], .shell-project-row, [class*="project-row"]').first();
-        if ((await card.count()) > 0) {
-          await card.click({ button: "right", timeout: 2500 });
-          await delay(600);
-          const del = page.getByRole("menuitem", { name: "Delete Worktree" }).first();
-          if ((await del.count()) > 0) {
-            await del.click({ timeout: 2500 });
-            await delay(600);
-            const seen = await overlayState(page);
-            notes.push(seen.dialogs > 0 ? `Delete-worktree dialog open (dialogs=${seen.dialogs})` : "Delete Worktree click opened no dialog");
-          } else notes.push("no Delete Worktree menu entry reachable");
-        } else notes.push("no worktree row to right-click");
-      } catch {
-        notes.push("Delete-worktree dialog best-effort only");
-      }
-      await dismissOverlays(page);
-      let dialogOpen = false;
-      try {
-        const trigger = page.getByRole("button", { name: "Project actions for" }).first();
-        if ((await trigger.count()) > 0) {
-          await trigger.click({ timeout: 2500 });
-          await delay(600);
-          const remove = page.getByRole("menuitem", { name: "Remove Project" }).first();
-          if ((await remove.count()) > 0) {
-            await remove.click({ timeout: 2500 });
-            await delay(600);
-            const seen = await overlayState(page);
-            dialogOpen = (seen.dialogs || 0) > 0;
-            notes.push(dialogOpen ? `Remove-project dialog open (dialogs=${seen.dialogs})` : "Remove Project click opened no dialog");
-            if (!dialogOpen) await dismissOverlays(page);
-          } else {
-            notes.push("no Remove Project menu entry reachable");
-            await dismissOverlays(page);
-          }
-        } else notes.push("no Project actions trigger reachable");
-      } catch {
-        notes.push("Remove-project dialog best-effort only");
-      }
-      if (!dialogOpen) {
-        await dismissOverlays(page);
-        missing.push("no dialog left open for capture (empty ref has no rows)");
-      }
+    case "dialogs":
+      // Opening Delete Worktree / Remove Project would click a destructive
+      // affordance in the live reference. Keep the reference untouched and
+      // compare the candidate dialog against the fork source instead.
+      missing.push("ref non-coverage: destructive Delete Worktree and Remove Project affordances are never clicked");
+      notes.push("ref unchanged: dialog anatomy must be compared from source anchors");
       break;
-    }
     case "settings-general": {
       // Catalog `settings-general`: Settings → General (the fork default
       // view, captured in `09-settings`).
@@ -2007,135 +2273,19 @@ async function refSetup(page, state, ctx) {
       if (!idle.length) notes.push("toast region idle at capture (no toast showing)");
       break;
     }
-    case "editor-tab": {
-      // R16-A: a file row opens as a main tab-group editor tab
-      // (EditorFileTab). View navigation only: the file is never edited; the
-      // opened tab is closed in teardown (best-effort, recorded).
-      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
-      if (open > 0) notes.push("Explorer panel already open; captured as-is");
-      else if (await tryClick(page, "button", "Explorer (⌘⇧E)", 2500)) notes.push("Explorer opened via activity bar");
-      else {
-        try {
-          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 2500 });
-          await delay(350);
-          notes.push("Explorer opened via fallback match");
-        } catch {
-          missing.push("no Explorer activity button reachable");
-          break;
-        }
-      }
-      try {
-        // The fork strip is buttons ("<name> Close tab ..."), not role=tab:
-        // measure those for before/after.
-        const forkTabs = () => page.evaluate(() =>
-          [...document.querySelectorAll('button')].map((el) =>
-            ((el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60)))
-            .filter((n) => /Close tab/.test(n))).catch(() => null);
-        const tabsBefore = await forkTabs();
-        const name = await page.evaluate(() => {
-          const rows = [...document.querySelectorAll("button[data-file-explorer-row]")];
-          const label = (el) =>
-            ((el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80));
-          // A real file extension (dot NOT first: skips dot-dirs like .husky).
-          const fileish = rows.find((el) => /[^.\s]\.\w{1,5}$/.test(label(el)));
-          const pick = fileish || rows[0];
-          return pick ? label(pick) : null;
-        }).catch(() => null);
-        if (!name) {
-          missing.push("no Explorer file rows to open");
-          break;
-        }
-        notes.push(`opening Explorer row "${name.slice(0, 60)}"`);
-        const openRow = async () => {
-          const row = page.getByRole("button", { name, exact: true }).first();
-          if ((await row.count()) > 0) {
-            await row.click({ timeout: 2500 });
-            return "exact";
-          }
-          await page.locator("button[data-file-explorer-row]").first().click({ timeout: 2500 });
-          return "first-row";
-        };
-        const how = await openRow().catch(() => null);
-        await delay(900);
-        let tabsAfter = await forkTabs();
-        if (how && tabsAfter && tabsBefore && tabsAfter.length === tabsBefore.length) {
-          // Single click may only select: double-click opens in the fork.
-          notes.push("single click opened no tab; trying double-click");
-          const row = page.getByRole("button", { name, exact: true }).first();
-          if ((await row.count()) > 0) await row.dblclick({ timeout: 2500 }).catch(() => {});
-          await delay(1500);
-          tabsAfter = await forkTabs();
-        }
-        if (how === "first-row") notes.push("exact-name click missed; clicked first row instead");
-        notes.push(
-          `fork tabs ${(tabsBefore ?? []).length} -> ${(tabsAfter ?? []).length}${tabsAfter?.length ? `: ${tabsAfter.join(" | ")}` : ""}`,
-        );
-        const fresh = (tabsAfter ?? []).filter((n) => !(tabsBefore ?? []).includes(n));
-        if (fresh.length) {
-          refEditorTab = { rowLabel: name, tabButton: fresh[fresh.length - 1] };
-          notes.push(`opened tab button: "${fresh[fresh.length - 1].slice(0, 60)}"`);
-        } else if (tabsAfter && tabsBefore && tabsAfter.length === tabsBefore.length) {
-          missing.push("row click opened no editor tab");
-        }
-      } catch (error) {
-        missing.push(`editor-tab open best-effort only: ${error.message.split("\n")[0]}`);
-      }
+    case "editor-tab":
+      // Opening a reference file would create a tab; closing it later would
+      // violate the read-only contract. Capture the unchanged reference and
+      // compare editor-tab anatomy against the fork source.
+      missing.push("ref non-coverage: opening a file/editor tab is forbidden on the reference");
+      notes.push("ref unchanged: EditorFileTab and TabGroupPanel compared from source anchors");
       break;
-    }
-    case "split-terminal": {
-      // R16-N: Split Terminal Right is offered in the terminal context menu
-      // (fork terminal-pane/TerminalContextMenu.tsx) and as a focused-pane
-      // header button (TerminalPaneHeaderOverlay.tsx). The reference side
-      // never activates either (that would create a pane in the live app):
-      // census the pane menu when a terminal tab exists, Escape, capture.
-      // The fork strip is buttons ("<name> Close tab"), not role=tab.
-      try {
-        const forkTabs = await page.evaluate(() =>
-          [...document.querySelectorAll("button")].map((el) =>
-            ((el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60)))
-            .filter((n) => /Close tab/.test(n))).catch(() => null);
-        if (!forkTabs?.length) {
-          missing.push("no fork tab button to right-click; split render compared from fork source");
-          notes.push("fork anchors: terminal-pane/TerminalContextMenu.tsx (split section), TerminalPaneHeaderOverlay.tsx, tab-group/TabGroupSplitLayout.tsx");
-        } else {
-          notes.push(`fork tab buttons: ${forkTabs.join(" | ")}`);
-          // Right-click the terminal tab button, then the pane header's
-          // Split button container; census each menu, Escape between. No
-          // left-click (never steal the live app's focus) and no activation.
-          for (const target of ["tab-button", "pane-header"]) {
-            try {
-              if (target === "tab-button") {
-                const hit = page.getByRole("button", { name: /Close tab/ }).first();
-                await hit.click({ button: "right", timeout: 2500 });
-              } else {
-                const handle = await page.evaluate(() => {
-                  const split = [...document.querySelectorAll("button")].find((el) =>
-                    ((el.getAttribute("aria-label") || el.textContent || "").trim() === "Split Terminal Right"));
-                  const box = split?.getBoundingClientRect();
-                  return box ? { x: box.x + box.width / 2, y: box.y + box.height + 30 } : null;
-                }).catch(() => null);
-                if (!handle) {
-                  notes.push("pane-header: no Split Terminal Right header button to anchor on");
-                  continue;
-                }
-                await page.mouse.click(handle.x, handle.y, { button: "right" });
-              }
-              await delay(600);
-              const items = await menuItemNames(page);
-              if (items.length) notes.push(`${target} menu items: ${items.join(" | ")}`);
-              else notes.push(`${target}: right-click opened no menu`);
-            } catch (error) {
-              notes.push(`${target} right-click best-effort only: ${error.message.split("\n")[0]}`);
-            }
-            await dismissOverlays(page);
-          }
-          notes.push("split entry never activated on the reference (menu census only)");
-        }
-      } catch {
-        missing.push("split-terminal menu census best-effort only");
-      }
+    case "split-terminal":
+      // Right-clicking the fork's tab close affordance would still violate
+      // the read-only rule. Compare this state against the fork split sources.
+      missing.push("ref non-coverage: Split Terminal Right requires a terminal tab and the reference tab affordance is never clicked");
+      notes.push("ref unchanged: split menu/sash/header compared from source anchors");
       break;
-    }
     case "agent-state": {
       // J1/R16-I visuals: worktree-card dots + tab badges (fork
       // AgentStateDot). No clicks anywhere: the live sidebar/cards are
@@ -2180,40 +2330,8 @@ async function refTeardown(page, state) {
   // Sessions nav) so the next setup starts clean. View navigation only —
   // no data is created or changed.
   const notes = [];
-  if (state === "editor-tab" && refEditorTab) {
-    // Close exactly the tab this state opened: the close affordance is the
-    // [data-tab-close-button] inside the tab button whose text holds the
-    // opened row's label; never touch pre-existing tabs.
-    const { rowLabel } = refEditorTab;
-    refEditorTab = null;
-    try {
-      const closed = await page.evaluate((wanted) => {
-        // closest("button") self-matches (nested buttons), so walk up at
-        // most four ancestors for the tab container holding the row label.
-        // The container must hold EXACTLY one close affordance: the strip
-        // level holds all of them and must never match (r4 closed a
-        // neighboring tab through it).
-        const norm = (s) => (s || "").replace(/\s+/g, " ");
-        const closers = [...document.querySelectorAll("button[data-tab-close-button]")];
-        const hit = closers.find((btn) => {
-          let el = btn.parentElement;
-          for (let d = 0; d < 4 && el; d++, el = el.parentElement) {
-            const t = norm(el.textContent);
-            if (t.includes(wanted) && t.length < 200 &&
-              el.querySelectorAll("button[data-tab-close-button]").length === 1) return true;
-          }
-          return false;
-        });
-        if (!hit) return false;
-        hit.click();
-        return true;
-      }, rowLabel).catch(() => false);
-      await delay(400);
-      notes.push(closed ? `teardown: closed editor tab "${rowLabel.slice(0, 40)}"` : "teardown: editor tab close affordance not found (left open, recorded)");
-    } catch (error) {
-      notes.push(`teardown editor-tab close best-effort only: ${error.message.split("\n")[0]}`);
-    }
-  }
+  // Reference teardown never clicks a close/remove/delete affordance. The
+  // editor-tab state is explicitly source-only, so there is no tab to close.
   if (
     state === "command-palette" ||
     state === "quick-open" ||
@@ -2347,6 +2465,16 @@ async function setupTasksRowsFixture(page, ctx, notes, missing) {
     return false;
   }
   try {
+    const project = page.getByRole("combobox", { name: "Project", exact: true }).first();
+    if ((await project.count()) > 0) {
+      await project.selectOption({ label: "tasks-repo" });
+      await delay(900);
+      notes.push("Tasks project selector set to tasks-repo fixture");
+    }
+  } catch {
+    missing.push("Tasks project selector could not choose tasks-repo fixture");
+  }
+  try {
       await page
         .getByRole("button", { name: "Fixture sidebar issue 137" })
         .first()
@@ -2387,9 +2515,12 @@ async function candSetup(page, state, ctx) {
   // would jump the selection; teardown Escape dismisses the palette).
   const typePaletteQuery = async (query) => {
     try {
-      let field = page.getByRole("combobox").first();
+      let field = page.getByRole("combobox", { name: "Go to file", exact: true }).first();
       if ((await field.count()) === 0) {
-        field = page.getByPlaceholder(/jump|go to file/i).first();
+        field = page.locator(".command-palette-overlay input.command-palette-input").first();
+      }
+      if ((await field.count()) === 0) {
+        field = page.getByRole("combobox").first();
       }
       if ((await field.count()) === 0) {
         return "query field not found (captured unfiltered)";
@@ -2447,8 +2578,8 @@ async function candSetup(page, state, ctx) {
     }
   };
   const ensureTerminal = async () => {
-    const tabs = await page.getByRole("tab").count().catch(() => 0);
-    if (tabs > 0) return true;
+    const terminalTabs = await page.getByRole("tab", { name: /\blive\b/i }).count().catch(() => 0);
+    if (terminalTabs > 0) return true;
     if (!(await ensureProject())) return false;
     // The launcher is the tab strip "+" static create menu ("New tab"
     // button opens New Terminal / per-harness rows / New Browser Tab):
@@ -2627,7 +2758,8 @@ async function candSetup(page, state, ctx) {
     } catch {
       notes.push("sc-wt Select unavailable (reload selection kept)");
     }
-    return ctx.scWorktreePath ?? repo;
+    ctx.editorWorkspacePath = ctx.scWorktreePath ?? repo;
+    return ctx.editorWorkspacePath;
   };
   // The commit composer only renders with uncommitted changes, so panel
   // presence probes region "Changes", not the commit box.
@@ -2648,7 +2780,299 @@ async function candSetup(page, state, ctx) {
       return false;
     }
   };
+  const openBrowserTab = async () => {
+    if (!(await ensureProject())) return null;
+    if (!(await tryClick(page, "button", "New tab"))) {
+      missing.push("no New tab affordance reachable for browser fixture");
+      return null;
+    }
+    await delay(500);
+    try {
+      const entry = page.getByRole("menuitem", { name: /^New Browser Tab/ }).first();
+      if ((await entry.count()) === 0) {
+        missing.push("no New Browser Tab menu entry reachable");
+        await dismissOverlays(page);
+        return null;
+      }
+      await entry.click({ timeout: 3000 });
+      await delay(1200);
+      await dismissOverlays(page);
+      const address = page.getByRole("combobox", { name: "Address", exact: true }).first();
+      await address.waitFor({ timeout: 8000 });
+      return address;
+    } catch (error) {
+      missing.push(`browser tab fixture failed: ${error.message.split("\\n")[0]}`);
+      await dismissOverlays(page);
+      return null;
+    }
+  };
+  const openEditorFile = async () => {
+    await ensureProject().catch(() => {});
+    const editorWorkspace = ctx.editorWorkspacePath ?? ctx.workspace;
+    try {
+      await writeFile(path.join(editorWorkspace, "notes.txt"), "editor header fixture\\n");
+      notes.push("fixture: notes.txt written");
+    } catch {
+      notes.push("fixture write best-effort only");
+    }
+    const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+    if (open === 0) {
+      try {
+        await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 3000 });
+        await delay(350);
+      } catch {
+        missing.push("Explorer activity button unavailable for editor header");
+        return false;
+      }
+    }
+    try {
+      const row = page.getByRole("button", { name: "notes.txt", exact: true }).first();
+      await row.waitFor({ timeout: 8000 });
+      await row.click({ timeout: 3000 });
+      await delay(1200);
+      const editor = page.locator(".editor-pane").first();
+      await editor.waitFor({ timeout: 12000 });
+      notes.push("notes.txt editor opened");
+      return true;
+    } catch (error) {
+      missing.push(`editor header fixture failed: ${error.message.split("\\n")[0]}`);
+      return false;
+    }
+  };
+  const workspaceIdForFixture = async () => {
+    try {
+      const response = await page.evaluate(async () => window.drogon.workspaces());
+      const walk = (value) => {
+        if (Array.isArray(value)) {
+          for (const entry of value) {
+            const found = walk(entry);
+            if (found) return found;
+          }
+        } else if (value && typeof value === "object") {
+          if (typeof value.id === "string" && typeof value.path === "string" && value.path === ctx.workspace) return value.id;
+          for (const entry of Object.values(value)) {
+            const found = walk(entry);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      const payload = response?.result ?? response;
+      const exact = walk(payload);
+      if (exact) return exact;
+      const listed = Array.isArray(payload)
+        ? payload
+        : payload?.workspaces ?? payload?.data?.workspaces ?? response?.workspaces ?? [];
+      const firstListed = listed.find((entry) => typeof entry?.id === "string");
+      if (firstListed) return firstListed.id;
+      const anyWorkspace = (value) => {
+        if (Array.isArray(value)) {
+          return value.map(anyWorkspace).find(Boolean) ?? null;
+        }
+        if (value && typeof value === "object") {
+          if (typeof value.id === "string" && typeof value.path === "string") return value.id;
+          return Object.values(value).map(anyWorkspace).find(Boolean) ?? null;
+        }
+        return null;
+      };
+      return anyWorkspace(response);
+    } catch {
+      return null;
+    }
+  };
+  const openPlainTerminal = async () => {
+    if (!(await tryClick(page, "button", "New tab"))) return false;
+    await delay(500);
+    try {
+      const item = page.getByRole("menuitem", { name: "New Terminal", exact: true }).first();
+      if ((await item.count()) > 0) await item.click({ timeout: 3000 });
+    } catch {
+      return false;
+    }
+    await dismissOverlays(page);
+    try {
+      await page.getByRole("tab").last().waitFor({ timeout: 20000 });
+      await delay(500);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   switch (state) {
+    case "worktree-card-rows": {
+      // Owned-only fixture: two shell sessions plus a Pi-shaped local-model
+      // harness session. The fake Pi executable only prints/sleeps; no model
+      // inference or provider network is used.
+      if (!(await ensureProject()) || !(await ensureTerminal())) {
+        missing.push("project-terminal fixture unavailable for worktree card rows");
+        break;
+      }
+      const workspaceId = await workspaceIdForFixture();
+      const cliBin = path.join(root, "target", "debug", "drogon-cli");
+      if (!workspaceId || !ctx.dataDir) {
+        missing.push("workspace id unavailable for Pi fixture");
+        break;
+      }
+      try {
+        await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json", "terminal", "create",
+          "--workspace", workspaceId, "--", "/bin/sh",
+        ]);
+        notes.push("second shell session started from a shell fixture");
+      } catch (error) {
+        missing.push(`second shell fixture failed: ${error.message.split("\\n")[0]}`);
+      }
+      try {
+        await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json", "harness", "start",
+          "--workspace", workspaceId, "--harness", "pi",
+          "--provider", "dgx-spark", "--model", "qwen3.8-flash-next-nvidia-nvfp4",
+          "--permission-mode", "unattended",
+        ]);
+        notes.push("Pi local-model session started from a shell fixture (no inference)");
+      } catch (error) {
+        missing.push(`Pi local-model fixture failed: ${error.message.split("\\n")[0]}`);
+      }
+      let piSessionSeen = false;
+      const piDeadline = Date.now() + 20000;
+      while (Date.now() < piDeadline && !piSessionSeen) {
+        try {
+          const listed = await execFileAsync(cliBin, [
+            "--data-dir", ctx.dataDir, "--json", "terminal", "list", "--workspace", workspaceId,
+          ]);
+          const payload = JSON.parse(listed.stdout);
+          const sessions = payload.result?.sessions ?? payload.sessions ?? [];
+          piSessionSeen = sessions.some((session) =>
+            session.harnessId === "pi" || session.command === "pi" || session.args?.includes("dgx-spark"),
+          );
+        } catch {
+          /* the daemon may still be persisting the harness session */
+        }
+        if (!piSessionSeen) await delay(500);
+      }
+      if (piSessionSeen) notes.push("Pi session persisted in the daemon fixture");
+      try {
+        await page.waitForFunction(
+          () => (document.body.innerText || "").includes("Pi"),
+          null,
+          { timeout: 15000 },
+        );
+        notes.push("worktree card nested session rows rendered");
+      } catch {
+        missing.push(
+          piSessionSeen
+            ? "Pi session persisted but nested rows did not render within 15s"
+            : "Pi/session rows did not render within 15s",
+        );
+      }
+      break;
+    }
+    case "browser-tab-loading": {
+      const address = await openBrowserTab();
+      if (!address || !ctx.browserFixture) {
+        missing.push("browser loading fixture unavailable");
+        break;
+      }
+      try {
+        await address.fill(ctx.browserFixture.slowUrl);
+        await page.keyboard.press("Enter");
+        await delay(180);
+        notes.push("slow browser fixture requested; captured while loading");
+        const loading = await page.locator("[aria-label*='loading' i], [data-loading='true']").count().catch(() => 0);
+        notes.push(loading > 0 ? "loading indicator DOM visible" : "loading indicator DOM not exposed; strip captured during pending navigation");
+      } catch (error) {
+        missing.push(`browser loading navigation failed: ${error.message.split("\\n")[0]}`);
+      }
+      break;
+    }
+    case "editor-header": {
+      await ensureGitProject("editor-header");
+      if (!(await openEditorFile())) break;
+      const pathButton = await page.locator(".editor-header-path").count().catch(() => 0);
+      const edit = await page.getByRole("radio", { name: "Edit", exact: true }).count().catch(() => 0);
+      const changes = await page.getByRole("radio", { name: "Changes", exact: true }).count().catch(() => 0);
+      notes.push(`editor header controls: path=${pathButton} edit=${edit} changes=${changes}`);
+      if (!pathButton) missing.push("editor file-path button missing");
+      if (!edit || !changes) missing.push("Edit/Changes view toggle missing");
+      try {
+        const more = page.getByRole("button", { name: "More actions", exact: true }).first();
+        if ((await more.count()) === 0) missing.push("editor More actions button missing");
+        else {
+          await more.click({ timeout: 3000 });
+          await delay(500);
+          const items = await menuItemNames(page);
+          notes.push(items.length ? `editor More actions items: ${items.join(" | ")}` : "editor More actions menu opened with no visible items");
+        }
+      } catch (error) {
+        missing.push(`editor More actions menu failed: ${error.message.split("\\n")[0]}`);
+      }
+      break;
+    }
+    case "address-bar-suggestions": {
+      await ensureProject().catch(() => {});
+      const historyWorkspaceId = await workspaceIdForFixture();
+      notes.push(`history workspace: ${historyWorkspaceId ?? "unavailable"}`);
+      if (historyWorkspaceId && ctx.browserFixture) {
+        await page.evaluate(
+          ({ workspaceId, recentUrls }) => {
+            window.localStorage.setItem(
+              `drogon.browser.recentUrls.${workspaceId}`,
+              JSON.stringify(
+                recentUrls.map((url, index) => ({
+                  url,
+                  title: `Fixture page ${index + 1}`,
+                  lastVisitedAt: Date.now() - index * 1000,
+                  visitCount: 1,
+                })),
+              ),
+            );
+          },
+          { workspaceId: historyWorkspaceId, recentUrls: ctx.browserFixture.recentUrls },
+        );
+        notes.push("fixture: seeded workspace-local recent browser URLs");
+      }
+      const address = await openBrowserTab();
+      if (!address || !ctx.browserFixture) {
+        missing.push("browser suggestions fixture unavailable");
+        break;
+      }
+      try {
+        for (const url of ctx.browserFixture.recentUrls) {
+          await address.fill(url);
+          await page.keyboard.press("Enter");
+          await delay(1100);
+        }
+        await page.keyboard.press("Tab");
+        await delay(50);
+        await address.click();
+        await address.fill("fixture");
+        await delay(100);
+        const suggestions = await page.getByRole("option").count().catch(() => 0);
+        const search = await page.getByText(/Search Google for/i).count().catch(() => 0);
+        const addressDebug = await page.evaluate(() => {
+          const input = document.querySelector('[data-drogon-browser-address-bar]');
+          const list = document.querySelector('#browser-history-listbox');
+          return {
+            value: input?.getAttribute('value') ?? (input instanceof HTMLInputElement ? input.value : null),
+            expanded: input?.getAttribute('aria-expanded'),
+            focused: document.activeElement === input,
+            bodyInputs: [...document.querySelectorAll('[data-drogon-browser-address-bar]')].map((node) => ({
+              value: node instanceof HTMLInputElement ? node.value : null,
+              expanded: node.getAttribute('aria-expanded'),
+              focused: document.activeElement === node,
+            })),
+            listText: list?.textContent ?? null,
+            historyKeys: Object.keys(window.localStorage).filter((key) => key.includes('recentUrls')),
+          };
+        }).catch(() => null);
+        notes.push(`address suggestions: options=${suggestions} search-action=${search}`);
+        notes.push(`address debug: ${JSON.stringify(addressDebug)}`);
+        if (!suggestions && !search) missing.push("typed address word produced no suggestion list");
+      } catch (error) {
+        missing.push(`address suggestions fixture failed: ${error.message.split("\\n")[0]}`);
+      }
+      break;
+    }
     case "empty":
       notes.push(ctx.candProjectId ? "project already exists; captured as-is" : "fresh empty app");
       break;
@@ -2704,11 +3128,9 @@ async function candSetup(page, state, ctx) {
       break;
     }
     case "launch-dialog": {
-      // R6: "+" menu, then the Pi harness row opens the launch form
-      // (owned fixture: no launch fires). An unmappable Model value
-      // ("not a model" has spaces, so resolvePiModelField rejects it)
-      // surfaces the fork-exact error alert with zero side effects;
-      // helper copy and error are both in the capture.
+      // R7 source correction: the fork's QuickLaunchButton rows launch
+      // immediately with stored defaults; there is no per-launch form. Keep
+      // the create menu open as the safe, no-launch capture on the candidate.
       await ensureProject().catch(() => {});
       await ensureTerminal().catch(() => {});
       if (!(await tryClick(page, "button", "New tab"))) {
@@ -2716,48 +3138,14 @@ async function candSetup(page, state, ctx) {
         break;
       }
       await delay(600);
-      let formOpen = false;
-      try {
-        const pi = page.getByRole("menuitem", { name: "Pi", exact: true }).first();
-        if ((await pi.count()) > 0) {
-          await pi.click({ timeout: 3000 });
-          await delay(600);
-          notes.push("Pi harness row selected (form expected, no launch)");
-        } else notes.push("no Pi menu entry reachable");
-      } catch {
-        notes.push("Pi menu selection best-effort only");
+      const seen = await overlayState(page);
+      if ((seen.menus || 0) === 0) {
+        missing.push("New tab create menu did not open");
+        break;
       }
-      try {
-        const model = page.getByPlaceholder("Harness default").first();
-        if ((await model.count()) > 0) {
-          await model.fill("not a model");
-          await delay(300);
-          await page.keyboard.press("Enter");
-          await delay(600);
-          formOpen = true;
-          notes.push("Model probe value submitted (unmappable by design)");
-        } else notes.push("no Model field (form did not open)");
-      } catch {
-        notes.push("Model probe best-effort only");
-      }
-      if (formOpen) {
-        try {
-          const alert = await page.getByRole("alert").count();
-          const helper = await page
-            .getByText("Use an exact Pi provider/model ID", { exact: false })
-            .count()
-            .catch(() => 0);
-          notes.push(
-            alert > 0
-              ? "form error alert visible (launch never fired)"
-              : "form open but no error alert appeared",
-          );
-          notes.push(helper > 0 ? "Pi helper copy visible" : "Pi helper copy not found");
-        } catch {
-          notes.push("form census best-effort only");
-        }
-      }
-      if (!formOpen) missing.push("launch form never opened for capture");
+      notes.push(`launch menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
+      const items = await menuItemNames(page);
+      if (items.length) notes.push(`launch menu items: ${items.join(" | ")}`);
       break;
     }
     case "settings-shortcuts-rebind": {
@@ -2900,7 +3288,10 @@ async function candSetup(page, state, ctx) {
     case "tasks":
       await ensureProject().catch(() => {});
       if (await tryClick(page, "button", "Tasks")) {
-        if (await waitForAria(page, "region", "Tasks")) notes.push("Tasks nav opened (marker visible)");
+        const marker =
+          (await page.getByRole("button", { name: "Close tasks", exact: true }).count().catch(() => 0)) > 0 ||
+          (await page.getByPlaceholder(/Search GitHub (issues|PRs)/).count().catch(() => 0)) > 0;
+        if (marker) notes.push("Tasks nav opened (marker visible)");
         else missing.push("Tasks click acted but the page marker never appeared");
       } else missing.push("no Tasks nav reachable");
       break;
@@ -3877,9 +4268,22 @@ function execFileAsync(file, args2, opts) {
   });
 }
 
+async function dismissBrowserAddressEdit(page) {
+  try {
+    const input = page.locator('[data-drogon-browser-address-bar][aria-expanded="true"]').first();
+    if ((await input.count()) === 0) return;
+    await input.press("Escape").catch(() => {});
+    await page.keyboard.press("Tab").catch(() => {});
+    await delay(300);
+  } catch {
+    /* browser address chrome may already be unmounted */
+  }
+}
+
 async function candTeardown(page, state) {
   const notes = [];
-  if (state === "launch-dialog" || state === "settings-shortcuts-rebind") {
+  await dismissBrowserAddressEdit(page);
+  if (state === "launch-dialog" || state === "settings-shortcuts-rebind" || state === "editor-header") {
     // R6: the harness launch Popover and the shortcut recorder are
     // invisible to the overlay census, so Escape unconditionally first
     // (closes the form, cancels recording); the generic path below
@@ -3890,7 +4294,18 @@ async function candTeardown(page, state) {
     }
     notes.push("teardown: Escape x2 for launch form / recorder");
   }
-  if (state === "editor-tab" || state === "split-terminal" || state === "agent-state") {
+  if (
+    state === "worktree-card-rows" ||
+    state === "browser-tab-loading" ||
+    state === "address-bar-suggestions" ||
+    state === "browser" ||
+    state === "browser-find" ||
+    state === "launch-dialog" ||
+    state === "editor-tab" ||
+    state === "editor-header" ||
+    state === "split-terminal" ||
+    state === "agent-state"
+  ) {
     // Close tabs these states opened (editor file tab, split tab, extra
     // agent-state terminals), highest index first; the first strip tab stays
     // so the next state always has a terminal to reuse. A dirty-editor close
@@ -3936,6 +4351,30 @@ async function candTeardown(page, state) {
       notes.push(`teardown tab-close best-effort only (${state})`);
     }
   }
+  const browserOnlyCleanupStates = new Set([
+    "browser-tab-loading",
+    "address-bar-suggestions",
+    "browser",
+    "browser-find",
+  ]);
+  if (browserOnlyCleanupStates.has(state)) {
+    try {
+      const tabs = page.getByRole("tab");
+      if ((await tabs.count()) === 1 && !/\blive\b/i.test(await tabs.first().innerText())) {
+        await tabs.first().click({ button: "right", timeout: 3000 });
+        const close = page.getByRole("menuitem", { name: "Close", exact: true }).first();
+        if ((await close.count()) > 0) {
+          await close.click({ timeout: 3000 });
+          await delay(500);
+          notes.push(`teardown: closed browser-only tab (${state})`);
+        } else {
+          await dismissOverlays(page);
+        }
+      }
+    } catch {
+      notes.push(`teardown browser-only tab best-effort only (${state})`);
+    }
+  }
   // SettingsPanel is a native <dialog>: Escape does not reliably dismiss it,
   // so use its explicit Close button first (exact match; session closes are
   // labeled "Close <name> session" and never match).
@@ -3969,6 +4408,10 @@ async function candTeardown(page, state) {
 // ---------------------------------------------------------------------------
 const ALL_STATES = [
   "empty",
+  "worktree-card-rows",
+  "browser-tab-loading",
+  "editor-header",
+  "address-bar-suggestions",
   "project-terminal",
   "palette",
   "quick-open",
@@ -4012,6 +4455,10 @@ const ALL_STATES = [
 
 const CAND_OWNER = {
   "shell-sidebar": "apps/desktop/src/renderer/src/features/shell/Sidebar.tsx, ProjectList.tsx, WorktreeCard.tsx",
+  "worktree-card-rows": "apps/desktop/src/renderer/src/features/shell/WorktreeCard.tsx, worktree-card-agent-summary.ts",
+  "browser-tab-loading": "apps/desktop/src/renderer/src/features/browser/browser-navigation-control-row.tsx, browser-panel.tsx, features/shell/tab-strip/SortableBrowserTab.tsx",
+  "editor-header": "apps/desktop/src/renderer/src/features/editor/EditorPane.tsx, EditorPanelHeaderPath.tsx, EditorViewToggle.tsx, EditorPanelMarkdownActionsMenu.tsx",
+  "address-bar-suggestions": "apps/desktop/src/renderer/src/features/browser/browser-address-bar.tsx, browser-address-bar-suggestions.ts, browser-recent-urls.ts",
   "tab-bar": "apps/desktop/src/renderer/src/features/shell/TabBar.tsx, TabCreateMenu.tsx, tab-chrome.ts + features/browser/BrowserStripTab.tsx",
   "status-bar": "apps/desktop/src/renderer/src/components/status-bar/StatusBar.tsx",
   palette: "apps/desktop/src/renderer/src/components/command-palette/CommandPalette.tsx + shortcuts.ts",
@@ -4053,6 +4500,10 @@ const CAND_OWNER = {
 
 const STATE_SURFACE = {
   empty: "shell-sidebar",
+  "worktree-card-rows": "worktree-card-rows",
+  "browser-tab-loading": "browser-tab-loading",
+  "editor-header": "editor-header",
+  "address-bar-suggestions": "address-bar-suggestions",
   "project-terminal": "tab-bar",
   palette: "palette",
   "quick-open": "palette",
@@ -4098,6 +4549,10 @@ const STATE_SURFACE = {
 // exact value to adopt (a width, a token, a copy string), not an import line.
 const SOURCE_PREFERENCE = {
   "shell-sidebar": ["min_width", "max_width", "sidebarwidth", "width:", "w-["],
+  "worktree-card-rows": ["session", "agent", "working", "waiting", "aria-label", "classname"],
+  "browser-tab-loading": ["loading", "spinner", "reload", "classname"],
+  "editor-header": ["more actions", "changes", "edit", "path", "classname"],
+  "address-bar-suggestions": ["search google for", "recent", "suggestion", "address", "classname"],
   "tab-bar": ["height", "h-", "min-h", "classname"],
   "status-bar": ["height", "h-6", "min-h", "classname"],
   palette: ["placeholder", "combobox", "input", "shortcut"],
@@ -4425,6 +4880,7 @@ async function main() {
   try {
     refPage = refBrowser.contexts()[0]?.pages()[0];
     assert.ok(refPage, "Reference CDP has no open page");
+    guardReferencePage(refPage);
     refPage.setDefaultTimeout(15000);
     refMeta.initialViewport = refPage.viewportSize();
     refMeta.initialScheme = await refPage.evaluate(() =>
@@ -4457,11 +4913,13 @@ async function main() {
       // tasks-rows drives project/worktree setup through drogon-cli
       // against the owned daemon; external candidates skip that state.
       dataDir: owned?.dataDir ?? null,
+      browserFixture: owned?.browserFixture ?? null,
     };
     const reacquire = async (browser, label) => {
       const page = browser.contexts()[0]?.pages()[0];
       assert.ok(page, `${label} CDP has no open page (reacquire)`);
       page.setDefaultTimeout(15000);
+      if (label === "Reference") guardReferencePage(page);
       return page;
     };
     const safeRun = async (side, page, state, setup, teardown) => {
@@ -4522,7 +4980,18 @@ async function main() {
                 candFont: ch.fontFamily,
               }
             : null;
-        diff = { aria, geom, headline };
+        const pixel = {};
+        for (const scheme of ["light", "dark"]) {
+          const refScheme = ref.caps[scheme];
+          const candScheme = cand.caps[scheme];
+          if (!refScheme || !candScheme) continue;
+          try {
+            pixel[scheme] = await pixelDiffPercent(refScheme.png, candScheme.png);
+          } catch (error) {
+            pixel[scheme] = { error: error.message.split("\\n")[0] };
+          }
+        }
+        diff = { aria, geom, headline, pixel };
       }
       stateResults.push({
         state,
@@ -4535,7 +5004,8 @@ async function main() {
       console.log(
         `state ${state}: ref aria ${refCap ? ariaLines(refCap.aria).length : "?"} lines, ` +
           `cand aria ${candCap ? ariaLines(candCap.aria).length : "?"} lines` +
-          (diff ? `, missing=${diff.aria.missing.length} added=${diff.aria.added.length} changed=${diff.aria.changed.length}` : ""),
+          (diff ? `, missing=${diff.aria.missing.length} added=${diff.aria.added.length} changed=${diff.aria.changed.length}` : "") +
+          (diff?.pixel?.light?.percent != null ? ` pixel=${diff.pixel.light.percent}%` : ""),
       );
     }
 
@@ -4582,7 +5052,7 @@ async function main() {
 
 function renderReport({ runId, states, inventory, stateResults, ranked, refMeta, candVersions, outDir }) {
   const lines = [];
-  lines.push(`# R5-F fidelity report — ${runId}`);
+  lines.push(`# QA UI Round 7 fidelity report — ${runId}`);
   lines.push("");
   lines.push(`Viewport 1440x900, schemes: ${NO_DARK ? "light" : "light + dark"}.`);
   lines.push(`Reference (read-only, confirmation only): CDP ${REF_CDP} — title "${refMeta.title}", url ${refMeta.url}.`);
@@ -4615,8 +5085,14 @@ function renderReport({ runId, states, inventory, stateResults, ranked, refMeta,
     lines.push(`### ${r.state}`);
     lines.push("");
     if (r.diff) {
-      const { aria, geom, headline } = r.diff;
+      const { aria, geom, headline, pixel } = r.diff;
       lines.push(`- ARIA: ref ${aria.refLines} lines vs cand ${aria.candLines} lines — missing ${aria.missing.length}, added ${aria.added.length}, changed ${aria.changed.length}.`);
+      for (const scheme of ["light", "dark"]) {
+        const value = pixel?.[scheme];
+        if (value?.percent != null) {
+          lines.push(`- Pixel diff (${scheme}, threshold >12/255): ${value.percent}% changed (${value.changedPixels}/${value.comparedPixels}); mean channel delta ${value.meanDelta}; ${value.dimensions}.`);
+        }
+      }
       for (const [region, dd] of Object.entries(geom)) {
         if (!dd || dd.missing) {
           lines.push(`- Geometry ${region}: not measurable on ${!dd ? "both" : "one"} side(s) (ref sel ${dd?.refSel ?? "—"}, cand sel ${dd?.candSel ?? "—"}).`);
