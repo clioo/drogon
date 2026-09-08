@@ -21,22 +21,10 @@ export type SettingsSectionSearchBucket = {
 
 export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
   {
-    id: "appearance",
-    title: "Appearance",
-    description: "Theme and terminal text size.",
-    keywords: ["theme", "dark", "light", "system", "font", "terminal", "text size", "interface"],
-  },
-  {
     id: "agents",
     title: "Agents",
     description: "Default harness and per-harness launch defaults.",
-    keywords: ["harness", "model", "agent", "default", "launch", "claude", "pi", "opencode"],
-  },
-  {
-    id: "shortcuts",
-    title: "Keyboard shortcuts",
-    description: "Read-only reference for this window's shortcuts.",
-    keywords: ["keyboard", "shortcut", "keys", "keybinding", "hotkey"],
+    keywords: ["harness", "model", "agent", "default", "launch", "claude", "pi", "opencode", "cli", "shell command", "drogon-cli"],
   },
   {
     id: "git",
@@ -45,10 +33,22 @@ export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
     keywords: ["git", "github", "identity", "auth", "login", "gh"],
   },
   {
+    id: "appearance",
+    title: "Appearance",
+    description: "Theme and terminal text size.",
+    keywords: ["theme", "dark", "light", "system", "font", "terminal", "text size", "interface"],
+  },
+  {
     id: "notifications",
     title: "Notifications",
     description: "When Drogon may interrupt you.",
     keywords: ["notification", "notify", "alert", "input", "sound"],
+  },
+  {
+    id: "shortcuts",
+    title: "Keyboard shortcuts",
+    description: "Read-only reference for this window's shortcuts.",
+    keywords: ["keyboard", "shortcut", "keys", "keybinding", "hotkey"],
   },
 ];
 

@@ -76,9 +76,23 @@ export const ghAuthStatusResultSchema = z.object({
 });
 export type GhAuthStatusResult = z.infer<typeof ghAuthStatusResultSchema>;
 
+export const cliStatusResultSchema = z.object({
+  available: z.boolean(),
+  /** Command name that resolved (`drogon-cli` or the `drogon` alias). */
+  commandName: z.string().min(1).max(128),
+  /** Resolved executable path, or null when no candidate exists. */
+  commandPath: z.string().max(4096).nullable(),
+  /** First line of `<command> --version`, or null when it never ran. */
+  version: z.string().max(256).nullable(),
+  /** Human-readable detail (or the reason it is unavailable). */
+  detail: z.string().max(1024),
+});
+export type CliStatusResult = z.infer<typeof cliStatusResultSchema>;
+
 export interface SettingsProbeBridge {
   gitIdentity(input: GitIdentityInput): Promise<Result<GitIdentityResult>>;
   ghAuthStatus(): Promise<Result<GhAuthStatusResult>>;
+  cliStatus(): Promise<Result<CliStatusResult>>;
 }
 
 declare module "./session-contract" {

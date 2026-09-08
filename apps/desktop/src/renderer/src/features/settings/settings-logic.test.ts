@@ -19,13 +19,13 @@ import {
 } from "./settings-sections";
 
 describe("settings sections", () => {
-  test("declares the five J10 sections in nav order", () => {
+  test("declares the five J10 sections in reference sidebar order", () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
-      "appearance",
       "agents",
-      "shortcuts",
       "git",
+      "appearance",
       "notifications",
+      "shortcuts",
     ]);
     expect(DEFAULT_SETTINGS_SECTION).toBe("appearance");
     expect(isSettingsSectionId("agents")).toBe(true);
