@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use drogon_protocol::workspace_files::{
     FileCreateKind, FileCreateParams, FileDeleteParams, FileListParams, FileReadParams,
-    FileRenameParams, FileScope, FileWriteParams, MAX_FILE_BYTES,
+    FileRenameParams, FileScope, FileSearchParams, FileWriteParams, MAX_FILE_BYTES,
 };
 use drogon_protocol::{MAX_FRAME_BYTES, RpcError};
 use serde::de::DeserializeOwned;
@@ -95,6 +95,40 @@ impl Engine {
         result["size"] = json!(file.size);
         result["mtime"] = json!(file.mtime);
         Ok(result)
+    }
+
+    pub(super) fn do_files_search(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: FileSearchParams = decode(value)?;
+        params.validate_target(&self.host_id)?;
+        let limit = params.limit_or_default()?;
+        let query = params.normalized_query();
+        let scope = FileScope {
+            host_id: params.host_id.clone(),
+            workspace_id: params.workspace_id.clone(),
+            path: String::new(),
+        };
+        let root = self.file_workspace_root(&scope)?;
+        let listing = workspace_files::search_files(&root, &query, limit)?;
+        // Leave room for the scope, response envelope and escaped request ID.
+        let mut remaining = MAX_FRAME_BYTES / 2;
+        let mut truncated = listing.truncated;
+        let mut files = Vec::new();
+        for path in listing.files {
+            let bytes = path.len() + 1;
+            if bytes > remaining {
+                truncated = true;
+                break;
+            }
+            remaining -= bytes;
+            files.push(json!(path));
+        }
+        Ok(json!({
+            "hostId": params.host_id,
+            "workspaceId": params.workspace_id,
+            "query": query,
+            "files": Value::Array(files),
+            "truncated": truncated,
+        }))
     }
 
     // NOT YET DISPATCHED: `lib.rs` (coordinator-owned) has no

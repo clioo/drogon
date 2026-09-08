@@ -41,6 +41,29 @@ export type FileDeleteResult = {
 };
 /** Upper bound on one `files.delete` call; larger batches must be split by the caller. */
 export const MAX_DELETE_PATHS = 128;
+/**
+ * Upper bound on one `files.search` call, mirroring the protocol's
+ * `MAX_FILE_SEARCH_RESULTS`. Quick open ranks client-side, so the daemon
+ * only ever returns a bounded candidate list.
+ */
+export const MAX_FILE_SEARCH_RESULTS = 500;
+/** Default candidate count when the caller omits `limit`. */
+export const DEFAULT_FILE_SEARCH_LIMIT = 100;
+/** Byte cap on a `files.search` query (reference quick-open parity). */
+export const MAX_FILE_SEARCH_QUERY_BYTES = 2048;
+export type FileSearchScope = {
+  hostId: string;
+  workspaceId: string;
+  query: string;
+  limit?: number;
+};
+export type FileSearchResult = {
+  hostId: string;
+  workspaceId: string;
+  query: string;
+  files: string[];
+  truncated: boolean;
+};
 export interface FileBridge {
   fileList(
     input: FileScope & { limitEntries?: number; includeHidden?: boolean },
@@ -67,4 +90,11 @@ export interface FileBridge {
   fileDelete?(
     input: { hostId: string; workspaceId: string; paths: string[] },
   ): Promise<Result<FileDeleteResult>>;
+  /**
+   * Bounded workspace-relative path search for quick open (additive R12-B).
+   * OPTIONAL until the daemon wires `files.search` dispatch and the preload
+   * exposes the channel: quick open treats an absent method as unavailable
+   * (falls back to the `files.list` walk), never as a crash.
+   */
+  fileSearch?(input: FileSearchScope): Promise<Result<FileSearchResult>>;
 }

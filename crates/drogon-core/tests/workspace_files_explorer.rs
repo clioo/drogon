@@ -9,6 +9,9 @@
 #[allow(dead_code)]
 #[path = "../src/error.rs"]
 mod error;
+// Search helpers (R12-B `files.search`) are unused by this explorer suite
+// but live in the same standalone-compiled module; same treatment.
+#[allow(dead_code)]
 #[path = "../src/workspace_files.rs"]
 mod workspace_files;
 

@@ -224,6 +224,14 @@ and `src/shared/{mentu-recipe-validation,mentu-recipe-entry-validation,mentu-rec
 (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
 file keeps the MIT notice.
 
+The jump palette and quick open in
+`apps/desktop/src/renderer/src/features/{jump-palette,quick-open}/` and the
+palette host `components/command-palette/CommandPalette.tsx` port the Drogon
+fork's `src/renderer/src/components/WorktreeJumpPalette.tsx`, its
+`worktree-jump-palette-*` row modules, and `src/shared/quick-open-path-search.ts`
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
+file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

@@ -111,6 +111,15 @@ export function createGatedFileBridge(
             isAllowed() ? source.fileDelete!(input) : refused(),
         }
       : {}),
+    // Bounded quick-open search (R12-B `files.search`): same optional
+    // forwarding — absent on older hosts, in which case quick open falls
+    // back to the `files.list` walk instead of crashing.
+    ...(source.fileSearch
+      ? {
+          fileSearch: (input: Parameters<NonNullable<FileBridge["fileSearch"]>>[0]) =>
+            isAllowed() ? source.fileSearch!(input) : refused(),
+        }
+      : {}),
   };
 }
 

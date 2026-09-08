@@ -24,6 +24,7 @@ const bridge: DesktopBridge = {
   fileCreate: (value) => ipcRenderer.invoke("drogon:fileCreate", value),
   fileRename: (value) => ipcRenderer.invoke("drogon:fileRename", value),
   fileDelete: (value) => ipcRenderer.invoke("drogon:fileDelete", value),
+  fileSearch: (value) => ipcRenderer.invoke("drogon:fileSearch", value),
   status: () => ipcRenderer.invoke("drogon:status"),
   workspaces: () => ipcRenderer.invoke("drogon:workspaces"),
   addWorkspace: (value) => ipcRenderer.invoke("drogon:addWorkspace", value),

@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES } from "./file-contract";
+import {
+  MAX_DIRECTORY_ENTRIES,
+  MAX_FILE_BYTES,
+  MAX_FILE_SEARCH_QUERY_BYTES,
+  MAX_FILE_SEARCH_RESULTS,
+} from "./file-contract";
 
 const id = z
   .string()
@@ -53,5 +58,15 @@ export const fileResultSchemas = {
   "files.write": scope.extend({
     size: size.max(MAX_FILE_BYTES),
     mtime: z.string().max(128),
+  }),
+  // Bounded quick-open search (R12-B): the daemon echoes the trimmed
+  // query with at most `limit` paths; the main bridge re-checks identity
+  // and bounds before the renderer ever sees the result.
+  "files.search": z.object({
+    hostId: id,
+    workspaceId: id,
+    query: z.string().max(MAX_FILE_SEARCH_QUERY_BYTES),
+    files: z.array(z.string().min(1).max(32_768)).max(MAX_FILE_SEARCH_RESULTS),
+    truncated: z.boolean(),
   }),
 };

@@ -189,6 +189,65 @@ pub struct FileWriteParams {
     pub content_base64: String,
 }
 
+/// Upper bound on one `files.search` call; larger result sets must be
+/// narrowed by the caller with a longer query. Quick open ranks
+/// client-side, so the daemon only needs a bounded candidate list.
+pub const MAX_FILE_SEARCH_RESULTS: usize = 500;
+
+/// Default candidate count when the caller omits `limit`.
+pub const DEFAULT_FILE_SEARCH_LIMIT: usize = 100;
+
+/// Byte cap on the search query, mirroring the reference quick-open
+/// `QUICK_OPEN_QUERY_MAX_BYTES` (2 KiB).
+pub const MAX_FILE_SEARCH_QUERY_BYTES: usize = 2048;
+
+/// Scoped query for `files.search`: workspace-relative path candidates
+/// matching `query` (case-insensitive subsequence), bounded by `limit`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSearchParams {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub query: String,
+    pub limit: Option<usize>,
+}
+
+impl FileSearchParams {
+    pub fn validate_target(&self, host_id: &str) -> Result<(), RpcError> {
+        validate_opaque_token(&self.host_id, 128, "Invalid file execution host.")?;
+        validate_opaque_token(&self.workspace_id, 128, "Invalid file workspace identity.")?;
+        if self.host_id != host_id {
+            return Err(RpcError::new(
+                "unsupported_host",
+                "The file execution host is not served by this endpoint.",
+            ));
+        }
+        if self.query.contains('\0') || self.query.len() > MAX_FILE_SEARCH_QUERY_BYTES {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Invalid file search query.",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn limit_or_default(&self) -> Result<usize, RpcError> {
+        let limit = self.limit.unwrap_or(DEFAULT_FILE_SEARCH_LIMIT);
+        if !(1..=MAX_FILE_SEARCH_RESULTS).contains(&limit) {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Invalid file search result limit.",
+            ));
+        }
+        Ok(limit)
+    }
+
+    /// Trimmed query; empty means "first `limit` paths in walk order".
+    pub fn normalized_query(&self) -> String {
+        self.query.trim().to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

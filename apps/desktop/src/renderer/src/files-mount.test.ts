@@ -222,4 +222,38 @@ describe("gated bridge (explicit withhold fails closed, drafts stay mounted)", (
     expect(refused.ok).toBe(false);
     expect(calls).toEqual(["list"]);
   });
+  it("forwards files.search when the source exposes it, absent otherwise", async () => {
+    const searching = {
+      ...source,
+      fileSearch: async (input: { query: string }) => {
+        calls.push(`search:${input.query}`);
+        return {
+          ok: true as const,
+          result: {
+            hostId: "local",
+            workspaceId: "w1",
+            query: input.query,
+            files: ["a.ts"],
+            truncated: false,
+          },
+        };
+      },
+    };
+    const gated = createGatedFileBridge(searching, () => true);
+    const found = await gated.fileSearch!({
+      hostId: "local",
+      workspaceId: "w1",
+      query: "a",
+    });
+    expect(found.ok).toBe(true);
+    expect(calls).toContain("search:a");
+    const withheld = createGatedFileBridge(searching, () => false);
+    const refused = await withheld.fileSearch!({
+      hostId: "local",
+      workspaceId: "w1",
+      query: "a",
+    });
+    expect(refused.ok).toBe(false);
+    expect(createGatedFileBridge(source, () => true).fileSearch).toBeUndefined();
+  });
 });
