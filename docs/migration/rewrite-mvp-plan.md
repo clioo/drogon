@@ -152,7 +152,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J5 R12-B: jump palette ⌘J y quick open ⌘P del fuente con files.search en el daemon y reveal en Explorer | R12 | Muse | fusionada: JumpPalette/QuickOpen del fuente, files.search con git ls-files y walk acotado, reveal en Explorer; 1489 tests | #95 |
 | J1 R12-D: interacciones del tab strip (reordenar con dnd-kit, menú contextual, pin, cerrar variantes) | R12 | Muse | fusionada: orden persistido por workspace, menú del fuente, pin, renombrar, cierre variantes, chevrons | #90 |
 | J1/J4 R12-E: remates de terminal y browser (política de pegado, popover de enlaces, reinicio con el mismo harness, chords con el guest enfocado) | R12 | GLM 5.3 Flash | lanzada | |
-| J7 R12-F: dashboard de Runs y página de detalle de ejecución de Automations | R12 | GLM 5.3 Flash | lanzada | |
+| J7 R12-F: dashboard de Runs y página de detalle de ejecución de Automations | R12 | GLM 5.3 Flash | fusionada: automation.runs_all y automation.run con snapshot honesto de salida, dashboard/tabla/detalle del fuente; 1615 tests | #101 |
 | J6 R12-G: Tasks en modo pull requests con celdas de revisión/checks/merge y start desde PR | R12 | OpenCode Go + Muse 1.3 | fusionada: modo PR del fuente con celdas de revisión/checks/merge, start desde PR | #93 |
 | J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode Go + Muse 1.3 | fusionada: borrador, inspector en modo edición, familia de validación del fork, mentu.recipe_save; 1448 tests | #94 |
 | J10 R12-I: paneles de Settings del fuente (Appearance, General, Agents, Notifications, Git y GitHub) | R12 | Muse | fusionada: orden de secciones del fuente, sección CLI en Agents con sonda real | #89 |
