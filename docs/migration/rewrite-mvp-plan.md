@@ -167,11 +167,17 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | Infra: ventana en segundo plano para pruebas (`DROGON_BACKGROUND_WINDOW=1`: showInactive, política accessory, sin throttling) y foco emulado por CDP en aceptación/oráculo | R14 | Coordinador | fusionada; comprobado: la app en primer plano nunca cambió durante la aceptación | #105 |
 | Infra R15-A: probes del bundle sellado al día con la UI actual (barra de direcciones del browser y demás) para volver a 40/40 | R15 | Muse | fusionada: sellado 40/40 dos veces; destapó el issue qa #114 (barra colapsada en anchos estrechos) | #115 |
 | QA fix R15-B: #114 barra de direcciones del browser en overlay al enfocar en anchos estrechos, como el fork | R15 | Muse | fusionada: overlay del fuente (min 220px, ResizeObserver); en 760px el input pasa de 0 a 126px al enfocar | #121 |
-| QA fix R15-C: #117 badge Working en terminales idle y #118 estado de Pi nunca working/needs_input; una sola proyección del estado del daemon con el mapeo del fork | R15 | Muse | lanzada | |
+| QA fix R15-C: #117 badge Working en terminales idle y #118 estado de Pi nunca working/needs_input; una sola proyección del estado del daemon con el mapeo del fork | R15 | Muse | fusionada: el poller de main reenvía toda transición de estado; verificado con Pi local y notificación nativa; 1808 tests | #139 |
 | Fidelidad UI-AUDIT: catálogo de superficies de referencia (docs/fidelity/reference-surface-catalog.md) con 12 estados de oráculo propuestos | R15 | Muse | fusionada | #120 |
-| QA de UI ronda 1: oráculo contra la referencia, issues `ui-parity`, estados nuevos del oráculo | QA | Muse | lanzada | |
+| QA de UI ronda 1: oráculo contra la referencia, issues `ui-parity`, estados nuevos del oráculo | QA | Muse | hecha: 14 estados, 12 issues (#124–#132, #135–#137), estados explorer/source-control/create-menu | #138 |
+| Shell R14-B follow-up: reveal de ventana y badge del dock guardados por `DROGON_BACKGROUND_WINDOW` con tests | R14 | GLM 5.3 Flash | fusionada | #140 |
+| Infra: probe sellado lee los atajos desde shared/keybindings | R14 | Coordinador | fusionada | #141 |
+| QA fix R16-A: #133 archivos como pestañas del grupo principal (TabGroupPanel del fork), Explorer solo árbol | R16 | Sonnet | lanzada | |
+| QA fix R16-B: #128 Tasks/Automations/Bots como páginas independientes y #130 ítems/gating de la barra de actividad derecha | R16 | Muse | lanzada | |
+| QA fix R16-C: lote copy/tokens #124 #125 #126 #127 #131 #132 #136 | R16 | Muse | lanzada | |
+| QA fix R16-D: #135 menú New tab del fuente y #137 estructura de Explorer y filas de Source Control | R16 | Muse | lanzada | |
 | QA: manos de accesibilidad para el agente QA (`scripts/qa/drogon-ui.mjs`) y probes sellados al día (paleta "Jump to...", Select de Radix en Mentu, conteo de pestañas por tablist) | R14 | Coordinador | fusionada | #108 |
-| QA ronda 1 sobre main 13d4e38: Pi + dgx-spark (qwen3.8-flash-next) usa la app compilada y reporta issues `qa` | QA | Pi local | lanzada | |
+| QA ronda 1 sobre main 13d4e38: Pi + dgx-spark (qwen3.8-flash-next) usa la app compilada y reporta issues `qa` | QA | Pi local | en curso: #117, #118 (corregidos en #139), #133 (R16-A) | |
 
 ## 7. QA continuo
 
