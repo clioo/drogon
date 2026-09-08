@@ -293,7 +293,10 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
     .getByRole("button", { name: "New tab", exact: true })
     .first()
     .waitFor({ state: "visible" });
-  const tabs = () => page.getByRole("tab").count();
+  // Count only the Sessions strip: the right sidebar renders its own tabs
+  // (Mentu's Plan/Evidence) and may switch panels when a session starts.
+  const SESSION_TABS = '[role="tablist"][aria-label="Sessions"] [role="tab"]';
+  const tabs = () => page.locator(SESSION_TABS).count();
   const before = await tabs();
   await page
     .getByRole("button", { name: "New tab", exact: true })
@@ -301,8 +304,8 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
     .click();
   await page.getByRole("menuitem", { name: "New Terminal", exact: true }).click();
   await page.waitForFunction(
-    (count) => document.querySelectorAll('[role="tab"]').length === count,
-    before + 1,
+    ({ selector, count }) => document.querySelectorAll(selector).length === count,
+    { selector: SESSION_TABS, count: before + 1 },
     { timeout: 15000 },
   );
   const marker = `STRIP_${Date.now()}`;

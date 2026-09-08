@@ -10,3 +10,4 @@ out/
 .mentu/runs/
 .mentu/runtime/
 *.log
+.qa/
