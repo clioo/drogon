@@ -16,6 +16,7 @@ import {
   notifyOnAgentNeedsInputSchema,
   settingsSubsetAdditionSchema,
   terminalFontSizeSchema,
+  terminalGpuAccelerationSchema,
 } from "../shared/settings-contract";
 
 const okRun = (
@@ -193,8 +194,13 @@ describe("settings-contract validation", () => {
         defaultHarnessId: "claude",
         harnessDefaults: {},
         notifyOnAgentNeedsInput: true,
+        terminalGpuAcceleration: "auto",
       }).success,
     ).toBe(true);
+  });
+  test("the GPU acceleration mode vocabulary is exactly the source's", () => {
+    expect(terminalGpuAccelerationSchema.safeParse("off").success).toBe(true);
+    expect(terminalGpuAccelerationSchema.safeParse("always").success).toBe(false);
   });
   test("probe schemas reject oversized or mistyped payloads", () => {
     expect(gitIdentityInputSchema.safeParse({ workspacePath: "" }).success).toBe(

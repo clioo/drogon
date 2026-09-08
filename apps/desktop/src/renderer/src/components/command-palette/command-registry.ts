@@ -6,6 +6,8 @@
  * Rewritten standalone: no i18n, no settings/action split.
  */
 
+import { getKeybindingDefinition } from "../../keybindings/definitions";
+
 /** Live App state a command's availability is derived from. */
 export interface CommandContext {
   connected: boolean;
@@ -24,7 +26,12 @@ export interface CommandContext {
 export interface CommandDef {
   id: string;
   label: string;
-  /** Shortcut hint shown in the row (display text, not parsed). */
+  /**
+   * Keybinding-table row that owns this command's title and chord hint;
+   * the labels formatter renders the chord (⌘T on macOS, Ctrl+T elsewhere).
+   */
+  keybindingActionId?: string;
+  /** Static hint for commands with no keybinding-table row. */
   hint?: string;
   keywords: string[];
   isEnabled(context: CommandContext): boolean;
@@ -37,12 +44,20 @@ function needsConnection(context: CommandContext): string | null {
   return null;
 }
 
+// Titles come verbatim from the keybinding definitions table (the single
+// source; Drogon keybindings/definitions.ts ported from the Orca
+// definitions-core files): tab.newTerminal "New terminal tab",
+// workspace.create "Create worktree", sidebar.left.toggle "Toggle Sidebar",
+// sidebar.right.toggle "Toggle Right Sidebar", sidebar.explorer.toggle
+// "Show Explorer", sidebar.sourceControl.toggle "Show Source Control",
+// app.settings "Open Settings". Chord hints render through the keybinding
+// labels formatter; rows without a table entry keep their own wording.
 export const COMMAND_DEFS: readonly CommandDef[] = [
   {
     id: "terminal.new",
-    label: "New terminal",
-    hint: "⇧⌘N",
-    keywords: ["new terminal", "create terminal", "open terminal", "shell"],
+    label: getKeybindingDefinition("tab.newTerminal")?.title ?? "New terminal",
+    keybindingActionId: "tab.newTerminal",
+    keywords: ["new terminal", "new terminal tab", "create terminal", "open terminal", "shell"],
     isEnabled: (context) =>
       context.connected && !context.busy && context.hasWorkspace,
     disabledReason: (context) => {
@@ -88,14 +103,31 @@ export const COMMAND_DEFS: readonly CommandDef[] = [
       return "Bots unavailable: service does not advertise bot.snapshot.v1";
     },
   },
-  // Right sidebar toggles per the source keybinding registry
-  // (src/shared/keybindings/definitions-core-1.ts: sidebar.right.toggle on
-  // Mod+L, sidebar.explorer.toggle on Mod+Shift+E,
-  // sidebar.sourceControl.toggle on Mod+Shift+G).
+  // Sidebar toggles per the source keybinding registry
+  // (src/shared/keybindings/definitions-core-1.ts: sidebar.left.toggle on
+  // Mod+B, sidebar.right.toggle on Mod+L, sidebar.explorer.toggle on
+  // Mod+Shift+E, sidebar.sourceControl.toggle on Mod+Shift+G).
+  {
+    id: "sidebar.left.toggle",
+    label:
+      getKeybindingDefinition("sidebar.left.toggle")?.title ?? "Toggle Sidebar",
+    keybindingActionId: "sidebar.left.toggle",
+    keywords: [
+      "toggle sidebar",
+      "hide sidebar",
+      "show sidebar",
+      "left sidebar",
+      "projects sidebar",
+    ],
+    isEnabled: () => true,
+    disabledReason: () => null,
+  },
   {
     id: "sidebar.right.toggle",
-    label: "Toggle Right Sidebar",
-    hint: "⌘L",
+    label:
+      getKeybindingDefinition("sidebar.right.toggle")?.title ??
+      "Toggle Right Sidebar",
+    keybindingActionId: "sidebar.right.toggle",
     keywords: [
       "toggle right sidebar",
       "sidebar right",
@@ -107,7 +139,9 @@ export const COMMAND_DEFS: readonly CommandDef[] = [
   },
   {
     id: "sidebar.explorer.toggle",
-    label: "Show Explorer",
+    label:
+      getKeybindingDefinition("sidebar.explorer.toggle")?.title ?? "Show Explorer",
+    keybindingActionId: "sidebar.explorer.toggle",
     keywords: ["show explorer", "files panel", "explorer", "browse files"],
     isEnabled: (context) =>
       context.connected && !context.busy && context.filesAvailable,
@@ -118,7 +152,10 @@ export const COMMAND_DEFS: readonly CommandDef[] = [
   },
   {
     id: "sidebar.sourceControl.toggle",
-    label: "Show Source Control",
+    label:
+      getKeybindingDefinition("sidebar.sourceControl.toggle")?.title ??
+      "Show Source Control",
+    keybindingActionId: "sidebar.sourceControl.toggle",
     keywords: [
       "show source control",
       "changes",
@@ -142,7 +179,8 @@ export const COMMAND_DEFS: readonly CommandDef[] = [
   },
   {
     id: "settings.open",
-    label: "Open settings",
+    label: getKeybindingDefinition("app.settings")?.title ?? "Open Settings",
+    keybindingActionId: "app.settings",
     keywords: ["open settings", "preferences", "options"],
     isEnabled: () => true,
     disabledReason: () => null,
@@ -170,14 +208,15 @@ export const COMMAND_DEFS: readonly CommandDef[] = [
   },
   {
     id: "workspace.add",
-    label: "Add workspace…",
-    keywords: ["add workspace", "open folder", "new workspace", "add folder"],
+    label: "Add Project",
+    keywords: ["add project", "add workspace", "open folder", "new workspace", "add folder"],
     isEnabled: (context) => context.connected && !context.busy,
     disabledReason: (context) => needsConnection(context),
   },
   {
     id: "worktree.new",
-    label: "New worktree…",
+    label: getKeybindingDefinition("workspace.create")?.title ?? "Create worktree",
+    keybindingActionId: "workspace.create",
     keywords: ["new worktree", "create worktree", "branch", "git worktree"],
     isEnabled: (context) =>
       context.connected &&

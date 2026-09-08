@@ -20,6 +20,8 @@ import type { LucideIcon } from "lucide-react";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
 import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
 import { TASKS_ROUTE_ID } from "../../tasks-mount";
+import { ShortcutKeyCombo } from "../../components/ShortcutKeyCombo";
+import { useShortcutKeyComboDetails } from "../../components/shortcut-labels";
 import { isDrogonProductSurfaceVisible } from "./product-mode";
 
 function rowClass(active: boolean): string {
@@ -32,30 +34,6 @@ function rowClass(active: boolean): string {
 
 function rowIconClass(active: boolean): string {
   return `size-4 shrink-0${active ? "" : " text-worktree-sidebar-foreground/30"}`;
-}
-
-function isMacPlatform(): boolean {
-  return (
-    typeof navigator !== "undefined" && navigator.userAgent.includes("Mac")
-  );
-}
-
-/** Modifier chips for the worktree palette chord (⌘J on macOS). Always
-    visible so the hint reads in every sidebar state, not only on hover. */
-function PaletteHint(): React.JSX.Element {
-  const keys = isMacPlatform() ? ["\u2318", "J"] : ["Ctrl", "Shift", "J"];
-  return (
-    <span className="pointer-events-none flex shrink-0 items-center gap-1">
-      {keys.map((key) => (
-        <kbd
-          key={key}
-          className="inline-flex gap-0.5 min-w-4 border-worktree-sidebar-border/80 bg-worktree-sidebar-foreground/8 px-1 py-px text-[9px] text-worktree-sidebar-foreground/55 shadow-none"
-        >
-          {key}
-        </kbd>
-      ))}
-    </span>
-  );
 }
 
 function ProductNavButton({
@@ -94,6 +72,11 @@ export function SidebarNav({
   onSelectRoute: (route: string | null) => void;
   onOpenPalette: () => void;
 }): React.JSX.Element {
+  // Hint labels come from the keybinding labels formatter (⌘J on macOS,
+  // Ctrl+Shift+J elsewhere) — never a hardcoded glyph.
+  const worktreePaletteShortcutCombos = useShortcutKeyComboDetails(
+    "worktree.palette",
+  );
   const sessionsActive = route === null;
   const botsActive = route === BOTS_ROUTE_ID;
   const tasksActive = route === TASKS_ROUTE_ID;
@@ -111,7 +94,18 @@ export function SidebarNav({
           strokeWidth={1.75}
         />
         <span className="flex-1">Search</span>
-        <PaletteHint />
+        <span className="pointer-events-none hidden shrink-0 items-center gap-1 group-hover:flex group-focus-within:flex">
+          {worktreePaletteShortcutCombos.map((combo) => (
+            <ShortcutKeyCombo
+              key={combo.keys.join("-")}
+              keys={combo.keys}
+              doubleTap={combo.doubleTap}
+              className="inline-flex gap-0.5"
+              keyCapClassName="min-w-4 border-worktree-sidebar-border/80 bg-worktree-sidebar-foreground/8 px-1 py-px text-[9px] text-worktree-sidebar-foreground/55 shadow-none"
+              separatorClassName="text-[9px] text-worktree-sidebar-foreground/45"
+            />
+          ))}
+        </span>
       </button>
       {isDrogonProductSurfaceVisible("sessions") ? (
         <div className="space-y-0.5">

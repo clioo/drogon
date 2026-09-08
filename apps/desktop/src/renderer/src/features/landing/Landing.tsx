@@ -2,41 +2,32 @@
    src/renderer/src/components/Landing.tsx (adapter: props instead of the
    zustand store; the preflight banner needs Orca runtime and is omitted,
    not stubbed; the star button keeps local state only, see
-   github-star.tsx). */
+   github-star.tsx). Shortcut keycaps render through the keybinding labels
+   formatter like the source's useShortcutKeyDetails + ShortcutKeyCombo. */
 import { FolderPlus, GitBranchPlus } from "lucide-react";
+import { ShortcutKeyCombo } from "../../components/ShortcutKeyCombo";
+import {
+  useShortcutKeyDetails,
+  type ShortcutKeyComboDetails,
+} from "../../components/shortcut-labels";
 import { GitHubStarButton } from "./github-star";
 import logo from "./logo.svg";
 
-function isMacPlatform(): boolean {
-  return (
-    typeof navigator !== "undefined" && navigator.userAgent.includes("Mac")
-  );
-}
-
-function modLabel(): string {
-  return isMacPlatform() ? "\u2318" : "Ctrl";
-}
-
-function ShortcutRow({
-  action,
-  keys,
-}: {
+type ShortcutItem = {
+  id: string;
+  shortcut: ShortcutKeyComboDetails;
   action: string;
-  keys: string[];
-}): React.JSX.Element {
+};
+
+function ShortcutRow({ action, shortcut }: ShortcutItem): React.JSX.Element {
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-3">
       <span className="text-sm text-muted-foreground">{action}</span>
-      <span className="inline-flex items-center gap-1">
-        {keys.map((key) => (
-          <kbd
-            key={key}
-            className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-          >
-            {key}
-          </kbd>
-        ))}
-      </span>
+      <ShortcutKeyCombo
+        keys={shortcut.keys}
+        doubleTap={shortcut.doubleTap}
+        separatorClassName="mx-0.5 text-[10px] text-muted-foreground"
+      />
     </div>
   );
 }
@@ -50,7 +41,16 @@ export function Landing({
   onAddProject: () => void;
   onCreateWorkspace: () => void;
 }): React.JSX.Element {
-  const mod = modLabel();
+  // Source chord sources: workspace.create, worktree.navigateUp,
+  // worktree.navigateDown (definitions-core-1.ts).
+  const createShortcut = useShortcutKeyDetails("workspace.create");
+  const upShortcut = useShortcutKeyDetails("worktree.navigateUp");
+  const downShortcut = useShortcutKeyDetails("worktree.navigateDown");
+  const shortcuts: ShortcutItem[] = [
+    { id: "create", shortcut: createShortcut, action: "Create workspace" },
+    { id: "up", shortcut: upShortcut, action: "Move up workspace" },
+    { id: "down", shortcut: downShortcut, action: "Move down workspace" },
+  ];
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-background">
       <div className="w-full max-w-lg px-6">
@@ -90,9 +90,9 @@ export function Landing({
           </div>
 
           <div className="mt-6 w-full max-w-xs space-y-2">
-            <ShortcutRow action="Create workspace" keys={[mod, "N"]} />
-            <ShortcutRow action="Move up workspace" keys={[mod, "Shift", "↑"]} />
-            <ShortcutRow action="Move down workspace" keys={[mod, "Shift", "↓"]} />
+            {shortcuts.map((shortcut) => (
+              <ShortcutRow key={shortcut.id} {...shortcut} />
+            ))}
           </div>
         </div>
       </div>

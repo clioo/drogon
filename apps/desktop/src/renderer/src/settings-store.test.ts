@@ -4,7 +4,9 @@ import {
   SettingsStore,
   mergeSettingLayers,
   parsePersistedSettings,
+  readTerminalGpuAcceleration,
   settingsStorageKey,
+  writeTerminalGpuAcceleration,
 } from "./settings-store";
 import type { SettingsSubset, StorageLike } from "./settings-store";
 
@@ -16,6 +18,7 @@ const defaults: SettingsSubset = {
   defaultHarnessId: "",
   harnessDefaults: {},
   notifyOnAgentNeedsInput: true,
+  terminalGpuAcceleration: "auto",
 };
 
 class MemoryStorage implements StorageLike {
@@ -191,6 +194,7 @@ describe("persistence round-trip through injected storage", () => {
         defaultHarnessId: "",
         harnessDefaults: {},
         notifyOnAgentNeedsInput: true,
+        terminalGpuAcceleration: "auto",
       },
     });
   });
@@ -376,6 +380,62 @@ describe("unknown-key forward compatibility on read-modify-write", () => {
       defaultHarnessId: "",
       harnessDefaults: {},
       notifyOnAgentNeedsInput: true,
+      terminalGpuAcceleration: "auto",
     });
+  });
+});
+
+describe("terminalGpuAcceleration persistence (R11-A)", () => {
+  it("defaults to auto and round-trips through the store", () => {
+    const storage = new MemoryStorage();
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    expect(store.get("terminalGpuAcceleration")).toBe("auto");
+    store.set("terminalGpuAcceleration", "off");
+    store.flush();
+    const reopened = new SettingsStore(storage, { namespace: "ui" });
+    expect(reopened.get("terminalGpuAcceleration")).toBe("off");
+  });
+  it("drops malformed persisted values back to the default", () => {
+    const storage = new MemoryStorage();
+    storage.seed(
+      settingsStorageKey("ui"),
+      JSON.stringify({ settings: { terminalGpuAcceleration: "ALWAYS" } }),
+    );
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    expect(store.get("terminalGpuAcceleration")).toBe("auto");
+  });
+  it("the envelope reader falls back to auto on absent or garbage data", () => {
+    const storage = new MemoryStorage();
+    expect(readTerminalGpuAcceleration(storage)).toBe("auto");
+    storage.seed(settingsStorageKey("ui"), "not json{");
+    expect(readTerminalGpuAcceleration(storage)).toBe("auto");
+  });
+  it("the envelope writer preserves sibling keys, known and unknown", () => {
+    const storage = new MemoryStorage();
+    storage.seed(
+      settingsStorageKey("ui"),
+      JSON.stringify({
+        settings: { theme: "dark", futureField: "keep", inspectorVisible: false },
+      }),
+    );
+    writeTerminalGpuAcceleration(storage, "on");
+    const raw = JSON.parse(storage.peek(settingsStorageKey("ui")) as string);
+    expect(raw.settings).toEqual({
+      theme: "dark",
+      futureField: "keep",
+      inspectorVisible: false,
+      terminalGpuAcceleration: "on",
+    });
+  });
+  it("a write creates a valid envelope from an empty storage", () => {
+    const storage = new MemoryStorage();
+    writeTerminalGpuAcceleration(storage, "off");
+    const raw = JSON.parse(storage.peek(settingsStorageKey("ui")) as string);
+    expect(raw.settings.terminalGpuAcceleration).toBe("off");
+    expect(
+      new SettingsStore(storage, { namespace: "ui" }).get(
+        "terminalGpuAcceleration",
+      ),
+    ).toBe("off");
   });
 });

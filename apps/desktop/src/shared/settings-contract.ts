@@ -35,11 +35,15 @@ export const harnessDefaultsSchema = z
 
 export const notifyOnAgentNeedsInputSchema = z.boolean();
 
+/** Source vocabulary: terminal renderer policy (global-settings-types.ts). */
+export const terminalGpuAccelerationSchema = z.enum(["auto", "on", "off"]);
+
 export const settingsSubsetAdditionSchema = z.object({
   terminalFontSize: terminalFontSizeSchema,
   defaultHarnessId: defaultHarnessIdSchema,
   harnessDefaults: harnessDefaultsSchema,
   notifyOnAgentNeedsInput: notifyOnAgentNeedsInputSchema,
+  terminalGpuAcceleration: terminalGpuAccelerationSchema,
 });
 
 // Read-only probes: git identity of a workspace path, and `gh auth status`.

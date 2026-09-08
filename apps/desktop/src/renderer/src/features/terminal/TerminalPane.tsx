@@ -26,6 +26,8 @@ import {
   nextFontZoomSize,
 } from "./terminal-font-zoom";
 import { resolvePaneRendererPolicy } from "./terminal-renderer-policy";
+import { readTerminalGpuAcceleration } from "../../settings-store";
+import type { TerminalGpuAcceleration } from "../../settings-store";
 import TerminalSearch, { type TerminalSearchState } from "./TerminalSearch";
 import TerminalContextMenu, {
   type TerminalContextMenuPoint,
@@ -123,12 +125,15 @@ function unregisterTerminalDebugHandle(sessionId: string, terminal: Terminal) {
 export function TerminalPane({
   session,
   fontSize,
+  gpuMode,
   onError,
   onSession,
 }: {
   session: Session;
   /** Terminal font size in px, mirrored from the settings store by App. */
   fontSize: number;
+  /** Settings-owned GPU mode (App passes it; tests may omit it). */
+  gpuMode?: TerminalGpuAcceleration;
   onError(message: string): void;
   onSession(value: Session): void;
 }) {
@@ -235,8 +240,14 @@ export function TerminalPane({
       if (!disposed) callbacks.current.onError(message);
     };
     // WebGL with canvas fallback per the renderer policy: the policy gates
-    // the attempt; a failed load/activation keeps the canvas renderer.
-    if (resolvePaneRendererPolicy({}).gpuEnabled) {
+    // the attempt; a failed load/activation keeps the canvas renderer. The
+    // user GPU mode is read from the persisted settings at pane construction
+    // (source terminalGpuAcceleration; `off` keeps the canvas renderer).
+    if (
+      resolvePaneRendererPolicy({
+        userGpuMode: gpuMode ?? readTerminalGpuAcceleration(window.localStorage),
+      }).gpuEnabled
+    ) {
       void import("@xterm/addon-webgl")
         .then(({ WebglAddon }) => {
           try {

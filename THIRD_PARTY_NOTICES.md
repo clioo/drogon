@@ -194,6 +194,13 @@ The worktree card actions in `apps/desktop/src/renderer/src/features/shell/`
 and `worktree-card-{surface,header,meta-row,status-inputs,agent-summary,pr-display,title-display}.ts(x)`,
 all at the pinned source revision above. Each ported file keeps the MIT notice.
 
+The keycap combo (`components/ShortcutKeyCombo.tsx`), the status bar provider
+and ports segments (`components/status-bar/**`, `main/usage/{workspace-ports,workspace-paths,system}.ts`)
+and the Settings GPU acceleration row port Orca's `components/ShortcutKeyCombo.tsx`,
+`hooks/useShortcutLabel.ts`, `components/status-bar/{StatusBarSurface,InlineProviderUsage,PortsStatusSegment,ResourceUsageStatusSegment}.tsx`,
+`src/main/ports/**` and `components/settings/TerminalRenderingSection.tsx`, all at
+the pinned source revision above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

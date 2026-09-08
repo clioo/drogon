@@ -92,6 +92,8 @@ describe("SettingsPage chrome (Orca settings-page-renderer parity)", () => {
         onThemeChange: noop,
         terminalFontSize: 13,
         onTerminalFontSizeChange: noop,
+        terminalGpuAcceleration: "auto",
+        onTerminalGpuAccelerationChange: noop,
         inspectorVisible: true,
         onInspectorChange: noop,
         harnesses: [],

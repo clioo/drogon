@@ -13,7 +13,7 @@
 // Adapted: no zustand store, no popovers/menus; data comes from
 // window.drogon.usage and terminal count from the shell's session list.
 // Unavailable sources render "unavailable" with the reason as tooltip.
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   CircleHelp,
   Coffee,
@@ -24,14 +24,13 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import type { AwakeMode, UsageSnapshot } from "../../../../shared/usage-contract";
-import { barColorClass } from "../../../../shared/usage-contract";
 import { ClaudeIcon, OpenAIIcon } from "./provider-icons";
 import {
   memoryLabel,
   memoryTitle,
   portsLabel,
+  portsAriaLabel,
   portsTitle,
-  providerDisplayName,
   providerMeterRows,
   providerTitle,
   terminalsTitle,
@@ -63,29 +62,47 @@ function ProviderMeters({
 }): React.JSX.Element {
   const rows = providerMeterRows(provider, now);
   const Icon = provider.provider === "claude" ? ClaudeIcon : OpenAIIcon;
+  // Source form (StatusBarSurface roster trigger + ProviderSegment, 1440px):
+  // provider icon, one quiet mini bar for the tightest window, then the
+  // verbose per-window labels joined by "·" — never the provider name.
+  // The tooltip keeps the identity and per-window detail.
   if (rows.length === 0) {
     return (
-      <span className="status-bar-provider" title={providerTitle(provider, now)}>
+      <span
+        className="inline-flex items-center gap-1.5"
+        title={providerTitle(provider, now)}
+      >
         <Icon />
-        <span className="status-bar-name">{providerDisplayName(provider.provider)}</span>
         <span className="status-bar-unavailable">unavailable</span>
       </span>
     );
   }
+  const tightest = rows.reduce((current, candidate) =>
+    candidate.used > current.used ? candidate : current,
+  );
   return (
-    <span className="status-bar-provider" title={providerTitle(provider, now)}>
+    <span
+      className="inline-flex items-center gap-1.5"
+      title={providerTitle(provider, now)}
+    >
       <Icon />
-      <span className="status-bar-name">{providerDisplayName(provider.provider)}</span>
-      {rows.map((row) => (
-        <span key={row.key} className="status-bar-meter" title={row.title}>
-          <span className="status-bar-track">
-            <span
-              className={`status-bar-fill ${barColorClass(row.used)}`}
-              style={{ width: `${row.used}%` }}
-            />
+      {/* Source MiniBar: quiet muted fill; urgency lives in the labels. */}
+      <span
+        data-usage-bar
+        className="h-[6px] w-[48px] flex-shrink-0 overflow-hidden rounded-full bg-muted"
+      >
+        <span
+          className="block h-full rounded-full bg-muted-foreground/40 transition-all duration-300"
+          style={{ width: `${tightest.used}%` }}
+        />
+      </span>
+      {rows.map((row, index) => (
+        <React.Fragment key={row.key}>
+          {index > 0 ? <span className="text-muted-foreground">·</span> : null}
+          <span className="tabular-nums" title={row.title}>
+            {row.label}
           </span>
-          <span className="status-bar-meter-label">{row.label}</span>
-        </span>
+        </React.Fragment>
       ))}
     </span>
   );
@@ -253,6 +270,7 @@ export function StatusBar({
         <span
           className="status-bar-segment"
           title={snapshot ? portsTitle(snapshot.ports) : "Ports unavailable"}
+          aria-label={snapshot ? portsAriaLabel(snapshot.ports) : "Ports unavailable"}
         >
           <Plug size={12} />
           <span>{snapshot ? portsLabel(snapshot.ports) : "…"}</span>

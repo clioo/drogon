@@ -10,7 +10,9 @@ import type {
 import { AwakeController } from "./awake";
 import { readClaudeUsage } from "./claude";
 import { readCodexUsage } from "./codex";
-import { readMemory, readPorts } from "./system";
+import { readMemory, readWorkspacePorts } from "./system";
+import { readWorkspaceProbes } from "./workspace-paths";
+import type { WorkspacePortProbe } from "./workspace-ports";
 
 export const USAGE_POLL_MS = 60_000;
 const BACKOFF_BASE_MS = 30_000;
@@ -68,7 +70,9 @@ export type UsageStoreDeps = {
   readClaude?: () => Promise<ProviderUsage>;
   readCodex?: () => Promise<ProviderUsage>;
   readMemory?: () => Promise<MemorySnapshot>;
-  readPorts?: () => Promise<PortsSnapshot>;
+  /** Receives the daemon's workspace probes; only workspace-owned listeners count. */
+  readPorts?: (workspaces: readonly WorkspacePortProbe[]) => Promise<PortsSnapshot>;
+  readWorkspaceProbes?: () => Promise<WorkspacePortProbe[]>;
   awake?: AwakeController;
   now?: () => number;
 };
@@ -116,7 +120,8 @@ export class UsageStore {
       readClaude: deps.readClaude ?? readClaudeUsage,
       readCodex: deps.readCodex ?? readCodexUsage,
       readMemory: deps.readMemory ?? readMemory,
-      readPorts: deps.readPorts ?? readPorts,
+      readPorts: deps.readPorts ?? readWorkspacePorts,
+      readWorkspaceProbes: deps.readWorkspaceProbes ?? readWorkspaceProbes,
       awake,
       now: deps.now ?? Date.now,
     };
@@ -168,6 +173,9 @@ export class UsageStore {
 
   private async probeAll(force: boolean): Promise<UsageSnapshot> {
     const forced = forcedUnavailableProviders();
+    const workspaces = await this.deps.readWorkspaceProbes().catch(
+      (): WorkspacePortProbe[] => [],
+    );
     const [claude, codex, memory, ports] = await Promise.all([
       this.probeProvider("claude", forced, force),
       this.probeProvider("codex", forced, force),
@@ -178,7 +186,7 @@ export class UsageStore {
           unavailableReason: "Process list unavailable.",
         }),
       ),
-      this.deps.readPorts().catch(
+      this.deps.readPorts(workspaces).catch(
         (): PortsSnapshot => ({ listening: [], unavailableReason: "Port scan unavailable." }),
       ),
     ]);

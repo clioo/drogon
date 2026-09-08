@@ -24,6 +24,9 @@
 
 export type Theme = "system" | "dark" | "light";
 
+/** Source vocabulary (global-settings-types.ts): terminal GPU acceleration mode. */
+export type TerminalGpuAcceleration = "auto" | "on" | "off";
+
 /** Permission mode vocabulary shared with the harness launch form (inherit = prompts, unattended = skip). */
 export type HarnessPermissionMode = "inherit" | "unattended";
 
@@ -56,6 +59,8 @@ export type SettingsSubset = {
   harnessDefaults: Record<string, HarnessAgentDefault>;
   /** Master switch for agent-needs-input native notifications (wired by another task). */
   notifyOnAgentNeedsInput: boolean;
+  /** Terminal renderer policy: auto/on/off xterm.js WebGL gate (source terminalGpuAcceleration). */
+  terminalGpuAcceleration: TerminalGpuAcceleration;
 };
 
 /** localStorage shape the store needs; injectable for tests and alternative stores. */
@@ -72,6 +77,7 @@ export const SETTINGS_DEFAULTS: SettingsSubset = {
   defaultHarnessId: "",
   harnessDefaults: {},
   notifyOnAgentNeedsInput: true,
+  terminalGpuAcceleration: "auto",
 };
 
 const DEBOUNCE_MS = 1000;
@@ -134,6 +140,10 @@ function isDefaultHarnessId(value: unknown): value is string {
 
 function isPermissionMode(value: unknown): value is HarnessPermissionMode {
   return value === "inherit" || value === "unattended";
+}
+
+function isGpuAcceleration(value: unknown): value is TerminalGpuAcceleration {
+  return value === "auto" || value === "on" || value === "off";
 }
 
 function parseHarnessAgentDefault(value: unknown): HarnessAgentDefault | null {
@@ -214,6 +224,8 @@ export function parsePersistedSettings(
     }
     if (typeof candidate.notifyOnAgentNeedsInput === "boolean")
       out.notifyOnAgentNeedsInput = candidate.notifyOnAgentNeedsInput;
+    if (isGpuAcceleration(candidate.terminalGpuAcceleration))
+      out.terminalGpuAcceleration = candidate.terminalGpuAcceleration;
     return out;
   } catch {
     return {};
@@ -323,5 +335,46 @@ export class SettingsStore {
     } catch {
       // Storage unavailable: keep serving in-memory state; no durability promise.
     }
+  }
+}
+
+/**
+ * Reads the GPU mode straight from the persisted envelope (default "auto").
+ * TerminalPane consumes the setting at pane construction through this reader
+ * so the terminal feature does not need an App-level prop thread.
+ */
+export function readTerminalGpuAcceleration(
+  storage: StorageLike,
+): TerminalGpuAcceleration {
+  try {
+    return (
+      parsePersistedSettings(storage.getItem(settingsStorageKey("ui")))
+        .terminalGpuAcceleration ?? "auto"
+    );
+  } catch {
+    return "auto";
+  }
+}
+
+/**
+ * Envelope read-modify-write for the GPU mode that preserves every other
+ * persisted key (known and unknown). Used by the Settings control, whose
+ * writes do not flow through an App-held store instance.
+ */
+export function writeTerminalGpuAcceleration(
+  storage: StorageLike,
+  mode: TerminalGpuAcceleration,
+): void {
+  try {
+    const key = settingsStorageKey("ui");
+    const raw = storage.getItem(key);
+    const settings = {
+      ...parseUnknownSettingsKeys(raw),
+      ...parsePersistedSettings(raw),
+      terminalGpuAcceleration: mode,
+    };
+    storage.setItem(key, JSON.stringify({ settings }));
+  } catch {
+    // Storage unavailable: nothing to persist; the caller keeps local state.
   }
 }

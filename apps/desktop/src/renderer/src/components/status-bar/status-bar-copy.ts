@@ -11,7 +11,7 @@ import {
 
 export type MeterRow = {
   key: string;
-  /** Compact chip text, e.g. "55% 5h" or "8% used Fable". */
+  /** Compact chip text, e.g. "55% used 5h" or "8% used Fable". */
   label: string;
   /** bar fill 0-100. */
   used: number;
@@ -32,7 +32,7 @@ export function providerMeterRows(provider: ProviderUsage, now: number): MeterRo
     const used = clampUsedPercent(provider.session.usedPercent);
     rows.push({
       key: "session",
-      label: `${used}% ${formatWindowChipLabel(provider.session, now)}`,
+      label: `${used}% used ${formatWindowChipLabel(provider.session, now)}`,
       used,
       title: windowTitle("Session", used, provider.session.resetsAt, now),
     });
@@ -41,7 +41,7 @@ export function providerMeterRows(provider: ProviderUsage, now: number): MeterRo
     const used = clampUsedPercent(provider.weekly.usedPercent);
     rows.push({
       key: "weekly",
-      label: `${used}% ${formatWindowChipLabel(provider.weekly, now)}`,
+      label: `${used}% used ${formatWindowChipLabel(provider.weekly, now)}`,
       used,
       title: windowTitle("Weekly", used, provider.weekly.resetsAt, now),
     });
@@ -90,10 +90,17 @@ export function memoryTitle(args: {
   return `Memory used by the Drogon process tree (${processes}): ${formatBytes(args.rssBytes)}`;
 }
 
+/** Source PortsStatusSegment form: the workspace port count only (the
+    word "ports" lives in the aria-label and tooltip, not the strip). */
 export function portsLabel(ports: PortsSnapshot): string {
   if (ports.unavailableReason !== null) return "unavailable";
+  return `${ports.listening.length}`;
+}
+
+export function portsAriaLabel(ports: PortsSnapshot): string {
+  if (ports.unavailableReason !== null) return "Ports unavailable";
   const count = ports.listening.length;
-  return `${count} ${count === 1 ? "port" : "ports"}`;
+  return `Ports, ${count} workspace ${count === 1 ? "port" : "ports"}`;
 }
 
 export function portsTitle(ports: PortsSnapshot): string {
