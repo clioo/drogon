@@ -1846,7 +1846,10 @@ mod scoped_argv_tests {
         // live against gh 2.89.0), so even a missing body rides as `--body
         // ""`; the UI mapper strips the echoed argv from failures.
         let bare = gh_pr_create_argv("Update index.html", None);
-        assert_eq!(bare.join(" "), "pr create --title Update index.html --body ");
+        assert_eq!(
+            bare.join(" "),
+            "pr create --title Update index.html --body "
+        );
         let with_body = gh_pr_create_argv("T", Some("notes"));
         assert!(with_body.join(" ").ends_with("--body notes"));
     }
