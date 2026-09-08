@@ -1,14 +1,14 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// Projection tests for the R12-I settings panes: each MVP section renders
-// its source-faithful shell (title, controls, ARIA) from props alone, and
-// the sidebar order matches the reference order (Agents, Git, Appearance,
-// Notifications, Shortcuts; General omitted — no MVP row is backed by a
-// real setting).
+// Projection tests for the settings panes: each MVP section renders its
+// source-faithful shell (title, controls, ARIA) from props alone, and the
+// sidebar order matches the reference order (Agents, General, Git,
+// Appearance, Notifications, Shortcuts).
 import { describe, expect, test } from "vitest";
 import { renderToString } from "react-dom/server";
 import { AgentsSection } from "./agents-section";
 import { AppearanceSection } from "./appearance-section";
 import { CliSection } from "./cli-section";
+import { GeneralSection } from "./general-section";
 import { GitSection } from "./git-section";
 import { NotificationsSection } from "./notifications-section";
 import { SettingsPage } from "./SettingsPage";
@@ -23,17 +23,18 @@ function render(node: React.ReactElement): string {
 }
 
 describe("settings sidebar order (source order for the MVP subset)", () => {
-  test("declares agents, git, appearance, notifications, shortcuts", () => {
+  test("declares agents, general, git, appearance, notifications, shortcuts", () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
       "agents",
+      "general",
       "git",
       "appearance",
       "notifications",
       "shortcuts",
     ]);
-    expect(DEFAULT_SETTINGS_SECTION).toBe("appearance");
+    expect(DEFAULT_SETTINGS_SECTION).toBe("general");
     expect(isSettingsSectionId("agents")).toBe(true);
-    expect(isSettingsSectionId("general")).toBe(false);
+    expect(isSettingsSectionId("general")).toBe(true);
     expect(isSettingsSectionId("bogus")).toBe(false);
   });
 });
@@ -118,7 +119,7 @@ describe("appearance projection", () => {
 });
 
 describe("agents projection", () => {
-  test("renders default-harness select, per-harness editors and the CLI section", () => {
+  test("renders default-harness select and per-harness editors (CLI lives in General)", () => {
     const html = render(
       <AgentsSection
         harnesses={[]}
@@ -129,15 +130,43 @@ describe("agents projection", () => {
       />,
     );
     expect(html).toContain("Agents");
+    // Default control is a pressed-button group like the fork's
+    // AgentDefaultSetting (honest subset: None + the four known harnesses).
     expect(html).toContain('aria-label="Default harness"');
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('role="radio"');
+    expect(html).toContain("None");
     // Per-harness editors: live list is empty, so the known ids render.
     expect(html).toContain("Claude Code");
     expect(html).toContain("Pi");
     expect(html).toContain("Default");
+    // The CLI section moved to the General pane (the fork's slot).
+    expect(html).not.toContain("Drogon CLI");
+  });
+});
+
+describe("general projection", () => {
+  test("renders workspace confirms, the CLI section and support row", () => {
+    const html = render(<GeneralSection />);
+    expect(html).toContain('data-settings-section="general"');
+    expect(html).toContain("General");
+    expect(html).toContain("Workspace defaults, app setup, and maintenance.");
+    expect(html).toContain("Workspace");
+    expect(html).toContain("Ask Before Deleting Workspaces");
+    expect(html).toContain(
+      "Show a confirmation before deleting a workspace from the context menu.",
+    );
+    expect(html).toContain("Ask Before Deleting Automations");
+    expect(html).toContain(
+      "Show a confirmation before deleting automations and their run history.",
+    );
+    expect(html).toContain('id="general-skip-delete-worktree-confirm"');
+    expect(html).toContain('id="general-skip-delete-automation-confirm"');
     expect(html).toContain("Drogon CLI");
     expect(html).toContain("Shell command");
     expect(html).toContain("Checking CLI registration…");
-    expect(html).toContain('aria-label="Refresh CLI status"');
+    expect(html).toContain("Support Drogon");
+    expect(html).toContain("Star Drogon on GitHub");
   });
 });
 
@@ -219,5 +248,46 @@ describe("settings page order", () => {
     // renders (the sidebar nav always lists every section title).
     expect(html).toContain('data-settings-section="agents"');
     expect(html).not.toContain('data-settings-section="git"');
+  });
+
+  test("defaults to the General pane like the reference", () => {
+    const noop = () => {};
+    const html = render(
+      <SettingsPage
+        theme="system"
+        onThemeChange={noop}
+        terminalFontSize={13}
+        onTerminalFontSizeChange={noop}
+        terminalGpuAcceleration="auto"
+        onTerminalGpuAccelerationChange={noop}
+        inspectorVisible={true}
+        onInspectorChange={noop}
+        statusBarVisible={true}
+        onStatusBarVisibleChange={noop}
+        tasksButtonVisible={true}
+        onTasksButtonVisibleChange={noop}
+        automationsButtonVisible={true}
+        onAutomationsButtonVisibleChange={noop}
+        titlebarAppNameVisible={true}
+        onTitlebarAppNameVisibleChange={noop}
+        harnesses={[]}
+        defaultHarnessId=""
+        onDefaultHarnessChange={noop}
+        harnessDefaults={{}}
+        onHarnessDefaultChange={noop}
+        notifyOnAgentNeedsInput={true}
+        onNotifyChange={noop}
+        workspacePath={null}
+        onBack={noop}
+      />,
+    );
+    expect(html).toContain('data-settings-section="general"');
+    expect(html).not.toContain('data-settings-section="appearance"');
+    // The grouped nav lists every section title with its group header.
+    expect(html).toContain("AI Capabilities");
+    expect(html).toContain("Set Up");
+    expect(html).toContain("Workflows");
+    expect(html).toContain("Interface");
+    expect(html).toContain(">General<");
   });
 });

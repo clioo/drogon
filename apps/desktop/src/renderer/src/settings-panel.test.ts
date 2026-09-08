@@ -54,6 +54,7 @@ describe("settings search filter (sidebar + pane share this)", () => {
   it("empty query matches every section in nav order", () => {
     expect(filterSettingsSections("")).toEqual([
       "agents",
+      "general",
       "git",
       "appearance",
       "notifications",
@@ -65,8 +66,9 @@ describe("settings search filter (sidebar + pane share this)", () => {
     expect(filterSettingsSections("theme")).toEqual(["appearance"]);
     expect(filterSettingsSections("HARNESS")).toEqual(["agents"]);
     expect(filterSettingsSections("keyboard")).toEqual(["shortcuts"]);
-    expect(filterSettingsSections("github")).toEqual(["git"]);
+    expect(filterSettingsSections("github")).toEqual(["general", "git"]);
     expect(filterSettingsSections("notify")).toEqual(["notifications"]);
+    expect(filterSettingsSections("CLI")).toEqual(["general"]);
   });
 
   it("requires every token to match", () => {
@@ -85,7 +87,7 @@ describe("settings search filter (sidebar + pane share this)", () => {
 
 describe("SettingsPage chrome (Orca settings-page-renderer parity)", () => {
   const noop = () => {};
-  function page(section?: "appearance" | "agents" | "shortcuts" | "git" | "notifications"): string {
+  function page(section?: "appearance" | "agents" | "shortcuts" | "git" | "notifications" | "general"): string {
     return renderToString(
       createElement(SettingsPage, {
         theme: "system",

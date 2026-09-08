@@ -1854,9 +1854,9 @@ async function candSetup(page, state, ctx) {
       break;
     }
     case "settings-general": {
-      // The candidate has no General section (SETTINGS_SECTIONS omits it:
-      // no MVP row is backed by a real setting). Record the explicit
-      // non-parity and capture Settings as-is.
+      // Catalog `settings-general`: Settings → General (the fork default
+      // view). The candidate now ships a General pane (R16-G); click it
+      // and record when the nav entry is missing.
       const opened =
         (await tryClick(page, "button", "Settings")) ||
         (await tryClick(page, "button", "Settings", 2500));
@@ -1875,8 +1875,8 @@ async function candSetup(page, state, ctx) {
           general = false;
         }
       }
-      if (general) notes.push("General pane opened (non-parity claim refuted: section exists)");
-      else missing.push("no General section (explicit non-parity: SETTINGS_SECTIONS omits General; catalog settings-general)");
+      if (general) notes.push("General pane opened");
+      else missing.push("no General section (catalog settings-general)");
       break;
     }
     case "settings-terminal": {
@@ -2142,7 +2142,7 @@ const CAND_OWNER = {
   "tab-menus": "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx, TabContextMenu.tsx",
   "right-rail": "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx, features/file-explorer/FileExplorerMenus.tsx, features/ports/PortsPanel.tsx",
   dialogs: "apps/desktop/src/renderer/src/features/shell/DeleteWorktreeDialog.tsx, RemoveProjectDialog.tsx",
-  "settings-general": "apps/desktop/src/renderer/src/features/settings/SettingsPage.tsx, settings-sections.ts (General explicitly omitted)",
+  "settings-general": "apps/desktop/src/renderer/src/features/settings/general-section.tsx, SettingsPage.tsx, settings-sections.ts",
   "settings-terminal": "apps/desktop/src/renderer/src/features/settings/terminal-typography.ts, appearance-section.tsx (no Terminal section; rows live under Appearance)",
   "settings-agents": "apps/desktop/src/renderer/src/features/settings/agents-section.tsx, agent-defaults.ts",
   "settings-shortcuts": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, keybindings/definitions.ts",
