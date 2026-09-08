@@ -1,5 +1,6 @@
 import {
   applyEditorAction,
+  externalContentFor,
   initialEditorState,
   isDirty,
   openFileKey,
@@ -48,6 +49,15 @@ export interface FilesDraftStore {
   draftOf(scope: EditorScope, path: string): string | null;
   /** Last content confirmed for the exact scope+path, or null. */
   savedContentOf(scope: EditorScope, path: string): string | null;
+  /**
+   * The disagreeing external read retained for the open file, or null.
+   * Set when a confirmed read disagrees with a dirty draft's baseline
+   * (the draft is kept, the flag raised); cleared on save, switch and
+   * clean adoption, exactly like the flag. The host prefers this over
+   * `savedContentOf` for the pane's content prop so the conflict is not
+   * shadowed by the (correctly unchanged) baseline.
+   */
+  externalContentOf(scope: EditorScope, path: string): string | null;
   /** True when the retained draft differs from the last confirmed content. */
   isDirty(scope: EditorScope, path: string): boolean;
 }
@@ -118,6 +128,12 @@ export function createFilesDraftStore(): FilesDraftStore {
     savedContentOf(scope: EditorScope, path: string): string | null {
       const entry = state.files[scopedFileKey(scope, path)];
       return entry?.lastSaved ?? null;
+    },
+    externalContentOf(scope: EditorScope, path: string): string | null {
+      // Open-file-scoped, like the flag it mirrors: a retained conflict
+      // for another file must never leak into this pane's content prop.
+      if (openFileKey(state) !== scopedFileKey(scope, path)) return null;
+      return externalContentFor(state);
     },
     isDirty(scope: EditorScope, path: string): boolean {
       const entry = state.files[scopedFileKey(scope, path)];

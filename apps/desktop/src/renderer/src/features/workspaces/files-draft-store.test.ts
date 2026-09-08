@@ -112,6 +112,62 @@ describe("per-edit recording", () => {
   });
 });
 
+describe("external-content retention (changed-on-disk signal)", () => {
+  test("a disagreeing refresh while dirty is retained; the baseline stays", () => {
+    const store = createFilesDraftStore();
+    store.confirmRead(SCOPE_A, FILE_A, "disk v1");
+    store.recordDraft(SCOPE_A, FILE_A, "my draft");
+    store.confirmRead(SCOPE_A, FILE_A, "disk v2");
+    // Dirty-keep: draft and baseline untouched, but the fresh read is
+    // retained so the host can surface it past the unchanged baseline.
+    expect(store.draftOf(SCOPE_A, FILE_A)).toBe("my draft");
+    expect(store.savedContentOf(SCOPE_A, FILE_A)).toBe("disk v1");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBe("disk v2");
+  });
+
+  test("an agreeing refresh clears the retained read; typing preserves it", () => {
+    const store = createFilesDraftStore();
+    store.confirmRead(SCOPE_A, FILE_A, "disk v1");
+    store.recordDraft(SCOPE_A, FILE_A, "my draft");
+    store.confirmRead(SCOPE_A, FILE_A, "disk v2");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBe("disk v2");
+    // Continued typing must not drop the conflict signal.
+    store.recordDraft(SCOPE_A, FILE_A, "my draft plus");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBe("disk v2");
+    // Disk restored to the baseline: the conflict is over.
+    store.confirmRead(SCOPE_A, FILE_A, "disk v1");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBeNull();
+  });
+
+  test("save and clean adoption clear the retained read", () => {
+    const store = createFilesDraftStore();
+    store.confirmRead(SCOPE_A, FILE_A, "disk v1");
+    store.recordDraft(SCOPE_A, FILE_A, "my draft");
+    store.confirmRead(SCOPE_A, FILE_A, "disk v2");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBe("disk v2");
+    // Explicit save resolves the conflict in favor of the draft.
+    store.markSaved(SCOPE_A, FILE_A, "my draft");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBeNull();
+    // Clean adoption of a later refresh retains nothing either.
+    store.confirmRead(SCOPE_A, FILE_A, "disk v3");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBeNull();
+    expect(store.draftOf(SCOPE_A, FILE_A)).toBe("disk v3");
+  });
+
+  test("never leaks another file's conflict into this file's signal", () => {
+    const store = createFilesDraftStore();
+    store.confirmRead(SCOPE_A, FILE_A, "disk v1");
+    store.recordDraft(SCOPE_A, FILE_A, "my draft");
+    store.confirmRead(SCOPE_A, FILE_A, "disk v2");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBe("disk v2");
+    // Another file/scope sees no conflict, and opening it drops the
+    // open-file-scoped slot with the switch.
+    expect(store.externalContentOf(SCOPE_A, "other.md")).toBeNull();
+    store.confirmRead(SCOPE_A, "other.md", "other body");
+    expect(store.externalContentOf(SCOPE_A, FILE_A)).toBeNull();
+  });
+});
+
 describe("availability: memory-only, never touches the bridge", () => {
   test("the store takes no bridge and performs no file calls by construction", () => {
     // createFilesDraftStore() accepts no bridge; these operations are pure

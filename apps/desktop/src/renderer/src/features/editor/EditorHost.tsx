@@ -9,7 +9,7 @@
  * features/workspaces/files-panel.tsx's embedded `<EditorPane>` — that
  * panel now renders the Explorer tree only.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EditorPane, scopedFileKey, type EditorScope } from "./EditorPane";
 import {
   createRequestIdSource,
@@ -21,6 +21,7 @@ import {
   type FilesReadState,
 } from "./file-read-write";
 import { createFilesDraftStore } from "../workspaces/files-draft-store";
+import { subscribeWorkspaceFilesChanged } from "../file-explorer/files-watch";
 import { MAX_FILE_BYTES, type FileBridge } from "../../../../shared/file-contract";
 import type { Result } from "../../../../shared/session-contract";
 
@@ -56,6 +57,16 @@ export function EditorHost({
     requestIdsRef.current = createRequestIdSource();
   const requestIds = requestIdsRef.current;
 
+  // Scope identity stability: App passes an inline scope literal, so this
+  // memo keeps the pane's file-opened effect from refiring on every App
+  // render. Without it the effect re-adopts the (stale) read baseline over
+  // fresh post-save state on the next render after a save, regressing
+  // lastSaved and orphaning the model from the draft (clioo/drogon#144).
+  const stableScope = useMemo(
+    () => ({ hostId: scope.hostId, workspaceId: scope.workspaceId }),
+    [scope.hostId, scope.workspaceId],
+  );
+
   const [reloadTick, setReloadTick] = useState(0);
   const [read, setRead] = useState<FilesReadState>({
     key: null,
@@ -77,11 +88,11 @@ export function EditorHost({
       return invalidate;
     }
     const generation = ++readGeneration.current;
-    const key = scopedFileKey(scope, path);
+    const key = scopedFileKey(stableScope, path);
     setRead({ key, phase: "loading", content: null, message: "" });
     void runFilesRead({
       bridge,
-      scope: { ...scope, path },
+      scope: { ...stableScope, path },
       maxBytes: MAX_FILE_BYTES,
       generation,
       isCurrent: () => readGeneration.current === generation,
@@ -91,25 +102,38 @@ export function EditorHost({
             ? { key, phase: "ready", content: outcome.content, message: "" }
             : { key, phase: "error", content: null, message: outcome.message },
         );
-        if (outcome.ok) drafts.confirmRead(scope, path, outcome.content);
+        if (outcome.ok) drafts.confirmRead(stableScope, path, outcome.content);
       },
     });
     return invalidate;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bridge, scope.hostId, scope.workspaceId, path, reloadTick, drafts]);
+  }, [bridge, stableScope.hostId, stableScope.workspaceId, path, reloadTick, drafts]);
 
   // Seeds the tab dot for a path that already had a dirty retained draft
   // when it becomes active again (e.g. reselecting a tab after typing in
   // another one) — the per-keystroke report below covers the live case.
   useEffect(() => {
-    if (path !== null) onDirtyChange?.(path, drafts.isDirty(scope, path));
+    if (path !== null) onDirtyChange?.(path, drafts.isDirty(stableScope, path));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
+
+  // Live external-change detection (fork: useEditorPanelExternalContentEvents
+  // over the fs:changed bus; here the Explorer's coarse workspace tick
+  // channel): a write from outside the pane re-reads the open file, so the
+  // pane's same-spot rules surface it as the changed-on-disk mark (dirty
+  // drafts are kept by confirmRead) instead of autosave silently
+  // overwriting the newer content. Self-echo is harmless: our own write
+  // re-reads identical content and every branch is a no-op.
+  useEffect(() => {
+    return subscribeWorkspaceFilesChanged(stableScope.workspaceId, () => {
+      setReloadTick((tick) => tick + 1);
+    });
+  }, [stableScope.workspaceId]);
 
   if (path === null) {
     return (
       <EditorPane
-        scope={scope}
+        scope={stableScope}
         path={null}
         content={null}
         onSave={() => Promise.resolve({ ok: true, result: null })}
@@ -118,26 +142,44 @@ export function EditorHost({
   }
 
   const reload = () => setReloadTick((tick) => tick + 1);
-  const openDirty = drafts.isDirty(scope, path);
+  const openDirty = drafts.isDirty(stableScope, path);
   const restoredDraft = openDirty
     ? {
-        draft: drafts.draftOf(scope, path) ?? "",
-        lastSaved: drafts.savedContentOf(scope, path),
+        draft: drafts.draftOf(stableScope, path) ?? "",
+        lastSaved: drafts.savedContentOf(stableScope, path),
       }
     : null;
-  const baselineContent = openDirty
-    ? drafts.savedContentOf(scope, path)
-    : readContentFor(read, scope, path);
+  // The confirmed baseline is the freshest service-confirmed content, never
+  // the original read: branching on openDirty flapped between the two on
+  // every dirty flip (undo/redo, save), refiring the pane's file-opened
+  // effect, whose clean branch then adopted the stale read over fresh
+  // post-save state and orphaned the model from the draft
+  // (clioo/drogon#144). savedContentOf advances on every confirmed read
+  // AND every confirmed save, so it is always at least as fresh as the
+  // read; the read only matters before any confirmation exists.
+  //
+  // A disagreeing external read while dirty is the one exception: the
+  // store's dirty-keep rule correctly leaves the baseline unchanged, which
+  // would shadow the fresh read forever — the pane's content prop would
+  // never change, its same-spot rules would never raise the changed-on-disk
+  // mark, and autosave would silently overwrite the newer disk content.
+  // The retained external read leads instead; the pane keeps the draft
+  // (the model follows the draft, never this prop) and raises the mark,
+  // which suspends autosave until an explicit Save resolves the conflict.
+  const baselineContent =
+    drafts.externalContentOf(stableScope, path) ??
+    drafts.savedContentOf(stableScope, path) ??
+    readContentFor(read, stableScope, path);
   const saveDraft = makeFileSaver(
     bridge,
-    { ...scope, path },
+    { ...stableScope, path },
     requestIds,
-    scopedFileKey(scope, path),
+    scopedFileKey(stableScope, path),
   );
   const onSave = (content: string): Promise<Result<null>> => {
     const result = saveDraft(content);
-    drafts.recordDraft(scope, path, content);
-    observeSaveResult(result, drafts, scope, path, content);
+    drafts.recordDraft(stableScope, path, content);
+    observeSaveResult(result, drafts, stableScope, path, content);
     void result.then((outcome) => {
       if (outcome.ok) onDirtyChange?.(path, false);
     });
@@ -146,17 +188,20 @@ export function EditorHost({
 
   return (
     <EditorPane
-      scope={scope}
+      scope={stableScope}
       path={path}
       restoredDraft={restoredDraft}
       content={baselineContent}
-      readError={readErrorFor(read, scope, path)}
+      readError={readErrorFor(read, stableScope, path)}
       onReload={reload}
       onSave={onSave}
       onClose={onClose}
       onDraftChange={(draft) => {
-        drafts.recordDraft(scope, path, draft);
-        const baseline = readContentFor(read, scope, path) ?? drafts.savedContentOf(scope, path);
+        drafts.recordDraft(stableScope, path, draft);
+        // Freshest-confirmed first, like baselineContent above: after a
+        // save the read is stale, and comparing against it would report
+        // the just-saved draft dirty again.
+        const baseline = drafts.savedContentOf(stableScope, path) ?? readContentFor(read, stableScope, path);
         onDirtyChange?.(path, draft !== baseline);
       }}
     />

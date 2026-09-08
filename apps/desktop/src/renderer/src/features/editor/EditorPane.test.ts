@@ -4,6 +4,7 @@ import { renderToString } from "react-dom/server";
 import {
   EditorPane,
   applyEditorAction,
+  externalContentFor,
   hasChangedOnDisk,
   initialEditorState,
   initializeEditorPaneState,
@@ -911,6 +912,90 @@ describe("changed-on-disk mark", () => {
       generation: 1,
     });
     expect(hasChangedOnDisk(state)).toBe(false);
+  });
+
+  test("retains the disagreeing read while the mark is set, draft untouched", () => {
+    let state = opened("saved body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "my edits" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "someone else's edit",
+    });
+    expect(externalContentFor(state)).toBe("someone else's edit");
+    expect(state.draft).toBe("my edits");
+    expect(state.lastSaved).toBe("saved body");
+  });
+
+  test("survives continued typing; clears when the read agrees again", () => {
+    let state = opened("saved body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "my edits" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "someone else's edit",
+    });
+    expect(externalContentFor(state)).toBe("someone else's edit");
+    state = applyEditorAction(state, { type: "edited", value: "my edits plus more" });
+    expect(externalContentFor(state)).toBe("someone else's edit");
+    // Disk restored to the baseline: the mark and the retained read clear.
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "saved body",
+    });
+    expect(hasChangedOnDisk(state)).toBe(false);
+    expect(externalContentFor(state)).toBeNull();
+  });
+
+  test("clears with the mark on save, switch and clean adoption", () => {
+    const conflicted = (): EditorState => {
+      let state = opened("saved body", FILE_A, SCOPE_A);
+      state = applyEditorAction(state, { type: "edited", value: "my edits" });
+      return applyEditorAction(state, {
+        type: "file-opened",
+        scope: SCOPE_A,
+        path: FILE_A,
+        content: "someone else's edit",
+      });
+    };
+    expect(externalContentFor(conflicted())).toBe("someone else's edit");
+    // Save resolves the conflict in favor of the draft.
+    let state = applyEditorAction(conflicted(), {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "my edits",
+      generation: 1,
+      allowEmpty: false,
+    });
+    state = applyEditorAction(state, {
+      type: "save-succeeded",
+      key: KEY_A,
+      generation: 1,
+    });
+    expect(externalContentFor(state)).toBeNull();
+    // Switching files drops the open-file-scoped slot with the mark.
+    state = applyEditorAction(conflicted(), {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_B,
+      content: "b body",
+    });
+    expect(externalContentFor(state)).toBeNull();
+    // Clean adoption (undo to baseline, then the same read) has no conflict.
+    state = applyEditorAction(conflicted(), { type: "edited", value: "saved body" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "someone else's edit",
+    });
+    expect(externalContentFor(state)).toBeNull();
+    expect(state.draft).toBe("someone else's edit");
   });
 });
 

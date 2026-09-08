@@ -23,19 +23,27 @@ export type EditorAutosavePlan =
  * Whether the currently open file should have a debounced autosave pending.
  * Mirrors `saveAdmission` minus the dirty check itself (the caller passes
  * `dirty` so this can decide "cancel because clean" distinctly from
- * "cancel because not admissible for another reason").
+ * "cancel because not admissible for another reason"), plus the fork's
+ * conflict suspension (source
+ * src/renderer/src/components/editor/editor-autosave.ts
+ * `isAutosaveSuspendedForFile`): while the disk moved out from under a
+ * dirty draft, autosave must not silently overwrite the newer external
+ * content — only an explicit user save may resolve the conflict.
  */
 export function computeAutosavePlan(input: {
   key: string | null;
   dirty: boolean;
   saveInFlight: boolean;
   readConfirmedOrAllowEmpty: boolean;
+  /** The pane's changed-on-disk mark for the open file. */
+  suspended?: boolean;
 }): EditorAutosavePlan {
   if (
     input.key === null ||
     input.saveInFlight ||
     !input.dirty ||
-    !input.readConfirmedOrAllowEmpty
+    !input.readConfirmedOrAllowEmpty ||
+    input.suspended === true
   ) {
     return { action: "cancel", key: input.key };
   }
@@ -54,6 +62,8 @@ export function useEditorAutosaveController(input: {
   dirty: boolean;
   saveInFlight: boolean;
   readConfirmedOrAllowEmpty: boolean;
+  /** Fork parity: suspend while the disk moved under a dirty draft. */
+  suspended?: boolean;
   delayMs?: number;
   run: () => Promise<void>;
 }): void {
@@ -71,5 +81,5 @@ export function useEditorAutosaveController(input: {
     input.queue.scheduleAutosave(plan.key, delayMs, () => runRef.current());
     return () => input.queue.cancelAutosave(plan.key as string);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input.queue, input.key, input.draft, input.dirty, input.saveInFlight, input.readConfirmedOrAllowEmpty, delayMs]);
+  }, [input.queue, input.key, input.draft, input.dirty, input.saveInFlight, input.readConfirmedOrAllowEmpty, input.suspended, delayMs]);
 }
