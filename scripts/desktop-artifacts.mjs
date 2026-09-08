@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readFile, readdir, readlink, realpath } from "node:fs/promises";
+import {
+  lstat,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  stat,
+} from "node:fs/promises";
 import path from "node:path";
 
 export const APP_BUNDLE_ID = "ai.clioo.drogon";
@@ -402,6 +409,138 @@ export async function verifySealedBundle(
       "the accepted final artifact",
   );
   return actual;
+}
+
+// App-icon fail-closed invariant (R16-BO, #319): packaging must never emit
+// a bundle carrying the stock Electron icon, and sealed acceptance must
+// prove the Drogon icon so PASSED implies installable. The .icns is built
+// from icon.svg by scripts/build-app-icon.mjs; a missing icon or one older
+// than the SVG (or the builder itself) is rebuilt in-process before any
+// bundle byte is produced. A failed rebuild aborts packaging outright.
+export const APP_ICON_SOURCE_FILE = "icon.svg";
+export const APP_ICON_BUILDER_FILE = "build-app-icon.mjs";
+// A real iconset .icns is hundreds of KB; anything at or below this bound
+// is a stub or a corrupt write, never the Drogon mark.
+export const MIN_DROGON_ICON_BYTES = 50 * 1024;
+
+export async function appIconFreshness({ svg, icns, builder }) {
+  let icnsStat = null;
+  try {
+    icnsStat = await stat(icns);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (!icnsStat || !icnsStat.isFile())
+    return { exists: false, stale: true, reason: "missing" };
+  let newestSourceMs = 0;
+  for (const source of [svg, builder]) {
+    try {
+      newestSourceMs = Math.max(
+        newestSourceMs,
+        (await stat(source)).mtimeMs,
+      );
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  if (icnsStat.mtimeMs < newestSourceMs)
+    return { exists: true, stale: true, reason: "stale" };
+  return { exists: true, stale: false, reason: "fresh" };
+}
+
+export async function ensureAppIcon({ svg, icns, builder }, options = {}) {
+  const before = await appIconFreshness({ svg, icns, builder });
+  if (!before.stale) return { rebuilt: false, ...before };
+  const build =
+    options.buildIcon ??
+    (async () => {
+      const { buildAppIcon } = await import("./build-app-icon.mjs");
+      await buildAppIcon(path.dirname(icns));
+    });
+  await build();
+  const after = await appIconFreshness({ svg, icns, builder });
+  assert.ok(
+    after.exists,
+    `App icon build did not produce ${icns}: refusing to package with the stock Electron icon (#319)`,
+  );
+  assert.ok(
+    !after.stale,
+    `App icon at ${icns} is still older than its source: refusing to package with the stock Electron icon (#319)`,
+  );
+  return { rebuilt: true, ...after };
+}
+
+// Sealed-acceptance icon proof (R16-BO, #319): CFBundleIconFile names the
+// Drogon icon, the .icns exists at a real-iconset size, and its bytes match
+// the resources icon when that file is present. Anything else fails closed.
+export async function verifyBundleCarriesDrogonIcon(bundle, options = {}) {
+  const { platform = process.platform, expectedIcon = null } = options;
+  if (platform !== "darwin") return { checked: false, reason: "not-macos" };
+  assert.equal(
+    await bundleIconFile(bundle, platform),
+    BUNDLE_ICON_FILE,
+    `Bundle must carry the Drogon ${BUNDLE_ICON_FILE}, not stock ${STOCK_ELECTRON_ICON_FILE} ` +
+      "(run node scripts/build-app-icon.mjs and re-package)",
+  );
+  const files = bundlePaths(bundle, platform);
+  let bytes = null;
+  try {
+    bytes = await readFile(files.icon);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  assert.ok(
+    bytes,
+    `Bundle icon ${BUNDLE_ICON_FILE} is missing from ${files.resources}: refusing a stock-icon bundle`,
+  );
+  assert.ok(
+    bytes.length > MIN_DROGON_ICON_BYTES,
+    `Bundle icon is ${bytes.length} bytes (need > ${MIN_DROGON_ICON_BYTES}): refusing a stub icon bundle`,
+  );
+  if (expectedIcon) {
+    let expected = null;
+    try {
+      expected = await readFile(expectedIcon);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (expected) {
+      assert.equal(
+        createHash("sha256").update(bytes).digest("hex"),
+        createHash("sha256").update(expected).digest("hex"),
+        "Bundle icon bytes differ from apps/desktop/resources/icon.icns: re-package with a fresh icon",
+      );
+    }
+  }
+  return { checked: true, bytes: bytes.length };
+}
+
+// Previous-preview leniency (R16-BO, #319): the incoming bundle is verified
+// strictly, but the previous preview build exists only for rollback. An old
+// preview that predates a newer invariant (e.g. the #201 icon) must warn,
+// never refuse the install — its build-info is still read best-effort for
+// recovery metadata.
+export async function lenientPreviousBuildInfo(
+  bundle,
+  platform = process.platform,
+) {
+  try {
+    return {
+      info: await verifiedBuildInfo(bundle, platform),
+      strict: true,
+      warning: null,
+    };
+  } catch (error) {
+    let recovery = null;
+    try {
+      recovery = JSON.parse(
+        await readFile(bundlePaths(bundle, platform).info, "utf8"),
+      );
+    } catch {
+      recovery = null;
+    }
+    return { info: recovery, strict: false, warning: error.message };
+  }
 }
 
 // Pure install-authorization check with no filesystem side effects: the

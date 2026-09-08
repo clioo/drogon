@@ -164,8 +164,9 @@ export function assertIconRaster(stats, label) {
   );
 }
 
-async function main() {
-  assert.equal(process.argv.length, 2, "Use: node scripts/build-app-icon.mjs");
+// Callable entry point so scripts/package-desktop.mjs rebuilds a missing or
+// stale icon in-process through this same code path instead of shelling out.
+export async function buildAppIcon(resourcesDir = null) {
   assert.equal(
     process.platform,
     "darwin",
@@ -173,7 +174,8 @@ async function main() {
   );
 
   const root = fileURLToPath(new URL("..", import.meta.url));
-  const resources = path.join(root, "apps", "desktop", "resources");
+  const resources =
+    resourcesDir ?? path.join(root, "apps", "desktop", "resources");
   const svg = path.join(resources, "icon.svg");
   assert.ok(existsSync(svg), `Missing icon source: ${svg}`);
   const svgSource = await readFile(svg, "utf8");
@@ -247,5 +249,6 @@ if (
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  await main();
+  assert.equal(process.argv.length, 2, "Use: node scripts/build-app-icon.mjs");
+  await buildAppIcon();
 }
