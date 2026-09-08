@@ -153,6 +153,28 @@ export function registryLiveness(size, totalRows) {
   return "empty";
 }
 
+/**
+ * Name of the strip tab added between two observations, or null when the
+ * sets are identical. Compared by accessible name, never by position:
+ * editors and sessions share one strip and a newcomer is not necessarily
+ * last (R16-A files-as-tabs; R16-Z qa #198).
+ */
+export function findCreatedStripTabName(namesBefore, namesAfter) {
+  const seen = new Set(namesBefore);
+  return namesAfter.find((name) => !seen.has(name)) ?? null;
+}
+
+/**
+ * Whether reselecting a workspace card has rendered its session view: the
+ * empty-state heading, or at least one tab under that workspace's session
+ * header. The header is matched by tag + name text, never by a role
+ * attribute or CSS class.
+ */
+export function folderViewSettled({ headings, tabCount, headerNames, workspaceName }) {
+  if (headings.includes("Start a session")) return true;
+  return tabCount > 0 && headerNames.includes(workspaceName);
+}
+
 const MENTU_FIXTURE_RECIPE = {
   name: "acceptance-hello",
   description: "packaged acceptance probe",
@@ -303,6 +325,11 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
   const SESSION_TABS = '[role="tablist"][aria-label="Sessions"] [role="tab"]';
   const tabs = () => page.locator(SESSION_TABS).count();
   const before = await tabs();
+  const namesBefore = await page
+    .locator(SESSION_TABS)
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label") ?? ""),
+    );
   await page
     .getByRole("button", { name: "New tab", exact: true })
     .first()
@@ -314,6 +341,23 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
     { timeout: 15000 },
   );
   const marker = `STRIP_${Date.now()}`;
+  // A newly created terminal does not steal focus from an open editor tab
+  // (R16-Z qa #198: App `create()` sets the active session without clearing
+  // the active editor tab, unlike `selectSessionTab`); select the new tab
+  // explicitly, exactly as a user must today, before typing into it. The
+  // new tab is found by name diff, never by position: editors and sessions
+  // share one strip and the newcomer is not necessarily last.
+  const namesAfter = await page
+    .locator(SESSION_TABS)
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label") ?? ""),
+    );
+  const createdName = findCreatedStripTabName(namesBefore, namesAfter);
+  assert.ok(createdName, "the created terminal must add one strip tab");
+  await page
+    .locator('[role="tablist"][aria-label="Sessions"]')
+    .getByRole("tab", { name: createdName, exact: true })
+    .click();
   await page.locator(".xterm-helper-textarea").first().focus();
   await page.keyboard.type(`printf '${marker}\\n'`);
   await page.keyboard.press("Enter");
@@ -346,10 +390,22 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
     await page.setViewportSize({ width: 1440, height: 900 });
     // The fork's BrowserPane expects a user flow: click the address bar,
     // then type and press Enter (fill() bypasses the focus handlers that
-    // open the suggestions and arm Enter-to-navigate).
+    // open the suggestions and arm Enter-to-navigate). The focus handlers
+    // can swallow leading keystrokes on a loaded machine (observed:
+    // "p://..." committed and blocked), so verify the value and retype
+    // boundedly — exactly what a user seeing the wrong text would do.
     const address = pane.getByLabel("Address", { exact: true });
-    await address.click({ timeout: 15000 });
-    await address.pressSequentially(guestUrl, { timeout: 15000 });
+    const selectAll = (await page.evaluate(() => navigator.userAgent.includes("Mac")))
+      ? "Meta+A"
+      : "Control+A";
+    let addressValue = "";
+    for (let attempt = 0; attempt < 3 && addressValue !== guestUrl; attempt++) {
+      await address.click({ timeout: 15000 });
+      await page.keyboard.press(selectAll);
+      await address.pressSequentially(guestUrl, { timeout: 15000 });
+      addressValue = await address.inputValue();
+    }
+    assert.equal(addressValue, guestUrl, "the address bar must hold the full guest URL before navigating");
     await page.keyboard.press("Enter");
     // Browser tabs mirror into the shared strip (the pane mounts with
     // hideTabStrip): the strip names the loaded host once navigation
@@ -392,11 +448,20 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
       );
       await delay(500);
     }
-    const snapshot = await runCliJson(
-      cli,
-      ["--data-dir", dataDir, "--json", "browser", "snapshot", "--tab", tabId],
-      { timeout: 30000 },
-    );
+    // The relay hold must cover a loaded packaged app: `browser.tabs`
+    // answers from daemon state, but `browser.snapshot` rides the desktop
+    // command relay (8s long-poll plus a guest round-trip), which exceeds
+    // the CLI's 15s default hold under acceptance load — while answering in
+    // milliseconds against a quiet app. The failure is typed `retryable`,
+    // so one bounded retry is principled, then fail closed.
+    const snapshotAttempt = () =>
+      runCliJson(
+        cli,
+        ["--data-dir", dataDir, "--json", "browser", "snapshot", "--tab", tabId, "--timeout-ms", "25000"],
+        { timeout: 40000 },
+      );
+    let snapshot = await snapshotAttempt();
+    if (!snapshot.ok && snapshot.error?.retryable) snapshot = await snapshotAttempt();
     assert.equal(
       snapshot.ok,
       true,
@@ -795,12 +860,37 @@ export async function probePackagedSurfaces({
 
   // Right sidebar: staging the unstaged edit moves it into Staged.
   checks.push(...(await probeSourceControlStage({ page, output })));
-  // Later probes address the folder workspace again.
+  // Later probes address the folder workspace again. The explorer probe
+  // above deliberately leaves its file open as a main-group tab (R16-A
+  // files-as-tabs), and open tabs restore on workspace selection — so the
+  // empty-state heading only renders when no tab is open. Either outcome
+  // proves the folder view rendered for the selected card.
   await page.getByRole("button", { name: "Select folder" }).click();
   // R15-C (#161): files opened by the Explorer probe stay as editor tabs in
-  // this workspace, so the empty landing only renders once they are closed.
+  // this workspace, so close them first; the settled wait below still
+  // tolerates a tab restoring on workspace selection (R16-A files-as-tabs).
+  // Either outcome proves the folder view rendered for the selected card.
   await closeOpenStripTabs(page);
-  await page.getByRole("heading", { name: "Start a session" }).waitFor();
+  // Tag selector (never a role attribute or CSS class): the session header
+  // is a top-level <header> carrying the workspace name in <strong>. The
+  // page closure mirrors the unit-tested `folderViewSettled` truth table
+  // (it cannot import it: the packaged renderer rejects page-side eval of
+  // module code, so the logic is repeated literally here).
+  await page.waitForFunction(
+    (workspaceName) => {
+      const headings = [...document.querySelectorAll('[role="heading"]')].map(
+        (node) => node.textContent?.trim(),
+      );
+      const headerNames = [...document.querySelectorAll("header strong")].map(
+        (node) => node.textContent?.trim(),
+      );
+      const tabCount = document.querySelectorAll('[role="tab"]').length;
+      if (headings.includes("Start a session")) return true;
+      return tabCount > 0 && headerNames.includes(workspaceName);
+    },
+    "folder",
+    { timeout: 15000 },
+  );
 
   // Right sidebar: with every session closed the details panel is empty.
   checks.push(

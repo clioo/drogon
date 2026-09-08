@@ -8,8 +8,10 @@ import {
   APP_BUNDLE_ID,
   bundlePaths,
   fingerprintBundle,
+  mentuRuntimeSignIgnore,
   verifiedBuildInfo,
 } from "./desktop-artifacts.mjs";
+import { MENTU_LOCK_REVISION } from "./mentu-runtime-provision.mjs";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import { writePackageNotices } from "./package-notices.mjs";
 
@@ -125,6 +127,11 @@ const [packagedDirectory] = await packager({
           identityValidation: false,
           // osx-sign applies runtime policy per file, including helpers.
           optionsForFile: () => ({ hardenedRuntime: false }),
+          // The pinned Mentu runtime ships byte-identical to the lock the
+          // daemon verifies at install: signing it would append an
+          // LC_CODE_SIGNATURE and break `mentu.runtime_install` (fork
+          // parity: reference `mentuRuntimeSignIgnore` boundary).
+          ignore: mentuRuntimeSignIgnore(MENTU_LOCK_REVISION),
         },
       }
     : {}),

@@ -19,6 +19,13 @@
 //   node scripts/qa/drogon-ui.mjs cli <args...>    # drogon-cli against the QA daemon's data dir
 //   node scripts/qa/drogon-ui.mjs status
 //   node scripts/qa/drogon-ui.mjs stop [--wipe]    # kills only the PIDs it started; --wipe removes .qa data/profile
+//
+// Packaged mode drives a sealed bundle exactly like a first-time user machine:
+// no separately managed daemon (the packaged app bootstraps its bundled one
+// itself), isolated bundle data/profile dirs, and a quiescent daemon shutdown
+// on stop (the same helper the sealed acceptance uses):
+//
+//   node scripts/qa/drogon-ui.mjs start --bundle <Drogon.app>
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile, open as openFile } from "node:fs/promises";
@@ -26,6 +33,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { packagedFixtureDaemon } from "../packaged-fixture-daemon.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const appDir = path.join(root, "apps", "desktop");
@@ -34,6 +42,24 @@ const sessionFile = path.join(qaDir, "session.json");
 const exe = (name) => (process.platform === "win32" ? `${name}.exe` : name);
 const daemonBin = path.join(root, "target", "debug", exe("drogond"));
 const cliBin = path.join(root, "target", "debug", exe("drogon-cli"));
+// Additive (R16-Z): `--bundle <Drogon.app>` drives the sealed packaged app
+// instead of the dev build. Only `start` reads it; every other command
+// follows the recorded session mode.
+const bundleFlagIndex = process.argv.indexOf("--bundle");
+const bundlePath =
+  bundleFlagIndex !== -1 ? path.resolve(process.argv[bundleFlagIndex + 1] ?? "") : null;
+if (bundleFlagIndex !== -1 && !bundlePath) {
+  console.error("usage: drogon-ui.mjs start --bundle <Drogon.app>");
+  process.exit(1);
+}
+/** Packaged executable inside a macOS bundle (packaged acceptance is darwin-only). */
+function bundledExecutable(bundle) {
+  return path.join(bundle, "Contents", "MacOS", "Drogon");
+}
+/** The daemon/CLI pair the bundle ships in its own Resources. */
+function bundledCli(bundle) {
+  return path.join(bundle, "Contents", "Resources", "bin", "drogon-cli");
+}
 
 const [, , command, ...rest] = process.argv;
 const flags = {};
@@ -43,7 +69,7 @@ for (let i = 0; i < rest.length; i++) {
   if (arg.startsWith("--")) {
     const key = arg.slice(2);
     const next = rest[i + 1];
-    if (["selector", "max-lines", "nth", "timeout"].includes(key) && next !== undefined) {
+    if (["selector", "max-lines", "nth", "timeout", "bundle"].includes(key) && next !== undefined) {
       flags[key] = next;
       i++;
     } else flags[key] = true;
@@ -69,33 +95,64 @@ function alive(pid) {
   }
 }
 
+/**
+ * Authenticated daemon identity for a bundle session (the packaged app
+ * spawned its own daemon; no PID was ever recorded). Null when unreachable.
+ */
+async function bundledDaemonIdentity(session) {
+  if (session.mode !== "bundle" || !session.cliBin) return null;
+  const result = spawnSync(
+    session.cliBin,
+    ["--data-dir", session.dataDir, "--json", "status"],
+    { encoding: "utf8" },
+  );
+  const envelope = JSON.parse(String(result.stdout ?? ""));
+  return envelope.ok === true ? envelope.result : null;
+}
+
 async function start() {
   if (existsSync(sessionFile)) {
     const prior = JSON.parse(await readFile(sessionFile, "utf8"));
-    if (alive(prior.electronPid) || alive(prior.daemonPid))
+    if (alive(prior.electronPid) || (prior.daemonPid && alive(prior.daemonPid)))
       die("A QA session is already running; `stop` it first.");
   }
-  if (!existsSync(daemonBin)) die(`Missing ${daemonBin}: run cargo build -p drogond -p drogon-cli`);
-  if (!existsSync(path.join(appDir, "out", "main", "index.js")))
-    die("Missing apps/desktop/out: run pnpm --filter @drogon/desktop build");
-  const dataDir = path.join(qaDir, "data");
-  const profileDir = path.join(qaDir, "profile");
+  const packaged = bundlePath;
+  if (packaged) {
+    if (process.platform !== "darwin") die("--bundle packaged QA currently targets macOS");
+    if (!existsSync(bundledExecutable(packaged))) die(`Not a packaged Drogon bundle: ${packaged}`);
+    if (!existsSync(bundledCli(packaged))) die(`Bundle ships no drogon-cli: ${packaged}`);
+  } else {
+    if (!existsSync(daemonBin)) die(`Missing ${daemonBin}: run cargo build -p drogond -p drogon-cli`);
+    if (!existsSync(path.join(appDir, "out", "main", "index.js")))
+      die("Missing apps/desktop/out: run pnpm --filter @drogon/desktop build");
+  }
+  // Bundle runs keep their own data/profile/logs so packaged first-run
+  // walkthroughs never touch dev QA state (and vice versa).
+  const dataDir = path.join(qaDir, packaged ? "bundle-data" : "data");
+  const profileDir = path.join(qaDir, packaged ? "bundle-profile" : "profile");
   const logDir = path.join(qaDir, "logs");
   await mkdir(dataDir, { recursive: true });
   await mkdir(profileDir, { recursive: true });
   await mkdir(logDir, { recursive: true });
-  const daemonLog = await openFile(path.join(logDir, "drogond.log"), "a");
-  const daemon = spawn(daemonBin, ["--data-dir", dataDir], {
-    detached: true,
-    stdio: ["ignore", daemonLog.fd, daemonLog.fd],
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
-  });
-  daemon.unref();
-  const electron = createRequire(path.join(appDir, "package.json"))("electron");
-  const electronLog = await openFile(path.join(logDir, "electron.log"), "a");
+  // The packaged app bootstraps its bundled daemon itself (isPackaged
+  // runtime bootstrap); only dev mode manages a separate daemon here.
+  let daemon = null;
+  if (!packaged) {
+    const daemonLog = await openFile(path.join(logDir, "drogond.log"), "a");
+    daemon = spawn(daemonBin, ["--data-dir", dataDir], {
+      detached: true,
+      stdio: ["ignore", daemonLog.fd, daemonLog.fd],
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
+    });
+    daemon.unref();
+  }
+  const electron = packaged
+    ? bundledExecutable(packaged)
+    : createRequire(path.join(appDir, "package.json"))("electron");
+  const electronLog = await openFile(path.join(logDir, packaged ? "electron-bundle.log" : "electron.log"), "a");
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(electron, [appDir, "--remote-debugging-port=0"], {
+  const child = spawn(electron, packaged ? ["--remote-debugging-port=0"] : [appDir, "--remote-debugging-port=0"], {
     detached: true,
     stdio: ["ignore", electronLog.fd, "pipe"],
     env: {
@@ -127,14 +184,18 @@ async function start() {
   });
   child.stderr.on("data", (bytes) => electronLog.write(bytes).catch(() => {}));
   child.unref();
+  const cli = packaged ? bundledCli(packaged) : cliBin;
   const session = {
     startedAt: new Date().toISOString(),
+    mode: packaged ? "bundle" : "dev",
+    ...(packaged ? { bundle: packaged } : {}),
     endpoint,
     dataDir,
     profileDir,
-    daemonPid: daemon.pid,
+    daemonPid: daemon ? daemon.pid : null,
     electronPid: child.pid,
-    cli: `${cliBin} --data-dir ${dataDir}`,
+    cliBin: cli,
+    cli: `${cli} --data-dir ${dataDir}`,
   };
   await writeFile(sessionFile, JSON.stringify(session, null, 2) + "\n");
   const { page, browser } = await connect(session);
@@ -150,10 +211,13 @@ async function start() {
 async function connect(session) {
   const browser = await chromium.connectOverCDP(session.endpoint);
   let page = null;
-  for (let i = 0; i < 100 && !page; i++) {
+  // A cold first run (bundled daemon spawn + schema init) can keep the
+  // window pageless for well over ten seconds on a loaded machine; the
+  // sealed acceptance met the same wall, so wait generously here.
+  for (let i = 0; i < 360 && !page; i++) {
     const pages = browser.contexts().flatMap((context) => context.pages());
     page = pages.find((candidate) => !/^https?:/.test(candidate.url())) ?? pages[0] ?? null;
-    if (!page) await new Promise((resolve) => setTimeout(resolve, 100));
+    if (!page) await new Promise((resolve) => setTimeout(resolve, 250));
   }
   if (!page) die("Electron has no page yet.");
   // The window runs unfocused (DROGON_BACKGROUND_WINDOW=1); emulate page
@@ -227,9 +291,15 @@ const commands = {
   async status() {
     if (!existsSync(sessionFile)) return console.log("no session");
     const session = JSON.parse(await readFile(sessionFile, "utf8"));
+    const daemon = await bundledDaemonIdentity(session).catch(() => null);
     console.log(
       JSON.stringify(
-        { ...session, daemonAlive: alive(session.daemonPid), electronAlive: alive(session.electronPid) },
+        {
+          ...session,
+          daemonAlive:
+            session.mode === "bundle" ? daemon !== null : alive(session.daemonPid),
+          electronAlive: alive(session.electronPid),
+        },
         null,
         2,
       ),
@@ -238,7 +308,7 @@ const commands = {
   async stop() {
     if (!existsSync(sessionFile)) return console.log("no session");
     const session = JSON.parse(await readFile(sessionFile, "utf8"));
-    for (const pid of [session.electronPid, session.daemonPid]) {
+    for (const pid of [session.electronPid, session.daemonPid].filter(Boolean)) {
       if (!alive(pid)) continue;
       try {
         process.kill(-pid, "SIGTERM");
@@ -249,9 +319,12 @@ const commands = {
       }
     }
     const deadline = Date.now() + 8000;
-    while (Date.now() < deadline && (alive(session.electronPid) || alive(session.daemonPid)))
+    while (
+      Date.now() < deadline &&
+      (alive(session.electronPid) || (session.daemonPid && alive(session.daemonPid)))
+    )
       await new Promise((resolve) => setTimeout(resolve, 200));
-    for (const pid of [session.electronPid, session.daemonPid]) {
+    for (const pid of [session.electronPid, session.daemonPid].filter(Boolean)) {
       if (!alive(pid)) continue;
       try {
         process.kill(-pid, "SIGKILL");
@@ -259,6 +332,21 @@ const commands = {
         try {
           process.kill(pid, "SIGKILL");
         } catch {}
+      }
+    }
+    // Bundle mode never started a daemon of its own: the packaged app
+    // bootstrapped its bundled one, so shut it down quiescently through
+    // the same helper the sealed acceptance uses (stops live sessions,
+    // asks for shutdown, kernel-verifies the exit).
+    let daemonShutdown = "dev-managed";
+    if (session.mode === "bundle") {
+      try {
+        const fixture = packagedFixtureDaemon(null, session.cliBin, session.dataDir);
+        await fixture.capture();
+        await fixture.stop();
+        daemonShutdown = "quiescent-shutdown-exited";
+      } catch (error) {
+        daemonShutdown = `unverifiable: ${error instanceof Error ? error.message : String(error)}`;
       }
     }
     await rm(sessionFile, { force: true });
@@ -270,7 +358,13 @@ const commands = {
       JSON.stringify({
         stopped: true,
         electronAlive: alive(session.electronPid),
-        daemonAlive: alive(session.daemonPid),
+        daemonAlive:
+          session.mode === "bundle"
+            ? (await bundledDaemonIdentity(session).catch(() => null)) !== null
+            : session.daemonPid
+              ? alive(session.daemonPid)
+              : false,
+        daemonShutdown,
         wiped: Boolean(flags.wipe),
       }),
     );
@@ -386,7 +480,7 @@ const commands = {
   },
   async cli() {
     const session = await readSession();
-    const result = spawnSync(cliBin, ["--data-dir", session.dataDir, ...rest], {
+    const result = spawnSync(session.cliBin ?? cliBin, ["--data-dir", session.dataDir, ...rest], {
       stdio: "inherit",
       env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
     });

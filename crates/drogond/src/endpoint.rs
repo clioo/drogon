@@ -243,11 +243,21 @@ mod unix {
     }
 
     fn scratch_name() -> String {
-        let nanos = SystemTime::now()
+        // SUN_LEN caps the bind path: this name is at most 15 bytes
+        // (".p" + u32 pid hex + "." + 16-bit sliver), strictly shorter than
+        // the 16-byte canonical file name — so whenever the canonical socket
+        // path itself is legal, the scratch bind cannot fail on length.
+        // Uniqueness: the pid is unique among live processes (a stale file
+        // from a recycled pid is removed before binding); the sliver only
+        // separates rapid re-establishes by one process. R16-Z: the old
+        // full-nanos name (~25 bytes) broke `drogond` startup for data dirs
+        // past ~78 chars ("path must be shorter than SUN_LEN"), including
+        // deep worktree QA dirs the packaged app must serve.
+        let sliver = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
+            .map(|d| (d.as_nanos() & 0xffff) as u16)
             .unwrap_or(0);
-        format!(".p{:x}{:x}", std::process::id(), nanos)
+        format!(".p{:x}.{:04x}", std::process::id(), sliver)
     }
 
     /// Binds this process onto the data directory's canonical socket path,
@@ -341,6 +351,31 @@ mod unix {
                 second.is_ok(),
                 "a provably dead incumbent's name must be reclaimable"
             );
+        }
+
+        #[test]
+        fn scratch_name_never_exceeds_the_canonical_name() {
+            // u32 pid hex is at most 8 digits however large the pid grows.
+            assert!(scratch_name().len() <= 15);
+            assert!(scratch_name().len() < SOCKET_FILE_NAME.len());
+        }
+
+        #[test]
+        fn establish_serves_a_deep_data_directory() {
+            // R16-Z: the old full-nanos scratch name (~25 bytes) refused
+            // data dirs past ~78 chars with "path must be shorter than
+            // SUN_LEN", although the canonical socket path itself was
+            // legal. An 85-char dir (canonical 101, scratch <= 101) fails
+            // before and serves after.
+            let outer = tempfile::tempdir().unwrap();
+            let base_len = outer.path().to_str().unwrap().len();
+            assert!(base_len < 60, "temp root too deep for the premise");
+            let deep = outer.path().join("d".repeat(85 - base_len - 1));
+            std::fs::create_dir_all(&deep).unwrap();
+            assert_eq!(deep.to_str().unwrap().len(), 85);
+            let listener = establish(&deep).unwrap();
+            assert!(deep.join(SOCKET_FILE_NAME).exists());
+            drop(listener);
         }
     }
 }
