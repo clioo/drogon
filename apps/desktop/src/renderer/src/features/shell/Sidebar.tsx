@@ -6,6 +6,7 @@
    sidebar carries no complementary role. */
 import { useRef, useState } from "react";
 import type {
+  Project,
   Session,
   Worktree,
   Workspace,
@@ -47,7 +48,9 @@ export function Sidebar({
   onBrowseProject,
   onSubmitAddProject,
   onSubmitRemoveWorktree,
+  onSubmitRemoveProject,
   onSubmitRenameWorktree,
+  onOpenProjectSettings,
   onOpenSettings,
 }: {
   open: boolean;
@@ -79,10 +82,13 @@ export function Sidebar({
     worktree: Worktree,
     force: boolean,
   ) => Promise<string | null>;
+  onSubmitRemoveProject: (project: Project) => Promise<string | null>;
   onSubmitRenameWorktree: (
     worktree: Worktree,
     name: string,
   ) => Promise<string | null>;
+  /** Opens the settings page on the given project's section. */
+  onOpenProjectSettings: (project: Project) => void;
   onOpenSettings: (initialSection?: SettingsSectionId) => void;
 }) {
   const [resizing, setResizing] = useState(false);
@@ -149,7 +155,9 @@ export function Sidebar({
               onBrowse={onBrowseProject}
               onSubmitAdd={onSubmitAddProject}
               onSubmitRemove={onSubmitRemoveWorktree}
+              onSubmitRemoveProject={onSubmitRemoveProject}
               onSubmitRename={onSubmitRenameWorktree}
+              onOpenProjectSettings={onOpenProjectSettings}
             />
           </div>
           <SidebarFooter

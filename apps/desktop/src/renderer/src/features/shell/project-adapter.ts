@@ -48,6 +48,9 @@ export interface ProjectRpcBridge {
     path: string;
     name?: string;
   }) => Promise<Result<Project>>;
+  projectRemove?: (input: {
+    id: string;
+  }) => Promise<Result<{ id: string; removed: boolean }>>;
   worktreeCreate?: (input: {
     projectId: string;
     name: string;

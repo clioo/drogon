@@ -27,6 +27,8 @@ function render(sidebarWidth = 280): string {
         onBrowse: async () => null,
         onSubmitAdd: async () => null,
         onSubmitRemove: async () => null,
+        onSubmitRemoveProject: async () => null,
+        onOpenProjectSettings: () => {},
         onSubmitRename: async () => null,
       }),
     ),
