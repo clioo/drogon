@@ -1,6 +1,7 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/sidebar/SidebarNav.tsx (adapter: Orca's
-   zustand view store becomes props; the Tasks provider-shortcut chips and
+   zustand view store becomes props; the Tasks row is the ported
+   SidebarTaskNavButton with its hover-revealed provider shortcut chips;
    the setup-guide/agent-dashboard entries are out of MVP scope; Meetings
    and Mobile rows stay in the code behind the product-mode gate, hidden).
    In the source Files and Changes live in the right-sidebar activity bar
@@ -11,7 +12,6 @@ import {
   Bot,
   CalendarClock,
   CalendarDays,
-  List,
   Search,
   Smartphone,
   SquareTerminal,
@@ -23,6 +23,7 @@ import { TASKS_ROUTE_ID } from "../../tasks-mount";
 import { ShortcutKeyCombo } from "../../components/ShortcutKeyCombo";
 import { useShortcutKeyComboDetails } from "../../components/shortcut-labels";
 import { isDrogonProductSurfaceVisible } from "./product-mode";
+import { SidebarTaskNavButton } from "./SidebarTaskNavButton";
 
 function rowClass(active: boolean): string {
   return `flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors ${
@@ -139,11 +140,9 @@ export function SidebarNav({
         </div>
       ) : null}
       {showTasksButton ? (
-        <ProductNavButton
-          label="Tasks"
+        <SidebarTaskNavButton
           active={tasksActive}
-          icon={List}
-          onClick={() => onSelectRoute(TASKS_ROUTE_ID)}
+          onOpenTasks={() => onSelectRoute(TASKS_ROUTE_ID)}
         />
       ) : null}
       {showAutomationsButton ? (
