@@ -27,6 +27,7 @@ export function TaskPageGitHubList({
     loadingTargetPage,
     taskLinks,
     showGitHubTaskSkeletons,
+    showPRManagementColumns,
     githubTaskGridClass,
     filteredWorkItems,
     handleLoadPage,
@@ -54,8 +55,18 @@ export function TaskPageGitHubList({
         >
           <span className={GITHUB_TASK_STICKY_ID_HEADER_CLASS}>ID</span>
           <span className={GITHUB_TASK_STICKY_TITLE_HEADER_CLASS}>Title / Context</span>
-          <span>Assignees</span>
-          <span>Status</span>
+          {showPRManagementColumns ? (
+            <>
+              <span>Reviewers</span>
+              <span>Checks</span>
+              <span>Merge</span>
+            </>
+          ) : (
+            <>
+              <span>Assignees</span>
+              <span>Status</span>
+            </>
+          )}
           <span>Updated</span>
           <span />
         </div>

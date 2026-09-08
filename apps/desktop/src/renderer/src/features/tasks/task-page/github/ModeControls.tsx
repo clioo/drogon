@@ -1,20 +1,43 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/task-page/github/ModeControls.tsx. GitHub-only
-// adaptation: the Issues/PRs/Projects sub-mode buttons do not exist here
-// (the daemon serves GitHub issues only), so the controls are the project
-// selector and the open-in-GitHub link, with the source's trigger classes.
+// adaptation: the source's Projects sub-mode has no daemon counterpart (no
+// Projects board is served), so the kind switch is Issues/Pull requests with
+// the source's button classes; the project selector and the open-in-GitHub
+// link keep the source's trigger classes.
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../ui/tooltip";
 import { Button } from "../../../../components/ui/button";
 import { ExternalLink } from "lucide-react";
+import { cn } from "../../cn";
 import type { TaskPageModelProps } from "../../task-page-model";
 
 export function TaskPageGitHubModeControls({
   model,
 }: TaskPageModelProps): React.JSX.Element | null {
-  const { taskSource, taskPickerRepos, repoSelection, setRepoSelection, selectedGitHubRepoExternalLink } =
+  const { taskSource, taskPickerRepos, repoSelection, setRepoSelection, selectedGitHubRepoExternalLink, githubModeButtons, githubTaskKind, onSelectGithubTaskKind } =
     model;
   return taskSource === "github" ? (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="flex items-center gap-1 text-xs">
+        {githubModeButtons.map((mode) => {
+          const active = githubTaskKind === mode.id;
+          return (
+            <button
+              key={mode.id}
+              type="button"
+              onClick={() => onSelectGithubTaskKind(mode.id)}
+              aria-pressed={active}
+              className={cn(
+                "rounded-md border px-2.5 py-1 text-xs font-medium transition",
+                active
+                  ? "border-border/50 bg-foreground/90 text-background shadow-xs"
+                  : "border-border/60 bg-muted/50 text-foreground shadow-xs hover:bg-muted/70",
+              )}
+            >
+              {mode.label}
+            </button>
+          );
+        })}
+      </div>
       {/* Why: Project rows are repo-scoped, so the selection must stay visible in both GitHub modes. */}
       <div className="min-w-0 max-w-[220px] shrink-0">
         {/* Why: a native select keeps the picker dependency-free; the trigger

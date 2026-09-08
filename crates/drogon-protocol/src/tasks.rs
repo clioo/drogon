@@ -46,6 +46,70 @@ impl TaskIssueState {
     }
 }
 
+/// Which collection `tasks.list`/`tasks.start` serve. Serializes lowercase
+/// on the wire; absent means issues, so every pre-PR caller keeps working.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TasksListMode {
+    #[default]
+    Issues,
+    Pulls,
+}
+
+/// PR lifecycle states. `gh pr list --json` reports `OPEN`/`CLOSED`/`MERGED`
+/// plus the `isDraft` flag; the core maps those onto these.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskPullRequestState {
+    Open,
+    Closed,
+    Merged,
+    Draft,
+}
+
+/// `gh`'s `reviewDecision` spelling, echoed verbatim on the wire.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PRReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
+/// Rolled-up check verdict for one PR, derived in the core from `gh`'s
+/// `statusCheckRollup` entries.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CheckState {
+    Success,
+    Failure,
+    Pending,
+    Neutral,
+    None,
+}
+
+/// Counted check outcomes for one PR. The renderer keys its ChecksCell pill
+/// (label and tone) off `state` so the two can never contradict.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCheckSummary {
+    pub state: CheckState,
+    pub total: u64,
+    pub passed: u64,
+    pub failed: u64,
+    pub pending: u64,
+    pub neutral: u64,
+}
+
+/// `gh`'s `mergeable` spelling, echoed verbatim on the wire.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PRMergeableState {
+    Mergeable,
+    Conflicting,
+    Unknown,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskLabel {
@@ -74,8 +138,40 @@ pub struct TaskIssue {
     pub body: Option<String>,
 }
 
-/// The durable link between an issue and the worktree `tasks.start`
-/// created for it. Mirrors the `task_links` row the core keeps.
+/// One GitHub pull request, as listed by `gh pr list --json
+/// (number,title,url,author,assignees,reviewDecision,statusCheckRollup,
+/// mergeable,isDraft,headRefName,baseRefName,updatedAt,labels)`.
+/// `reviewers`/`latestReviews` stay renderer-side concerns (the daemon never
+/// fetches them); `checks` is the core's rollup of `statusCheckRollup`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskPullRequest {
+    pub number: u64,
+    pub title: String,
+    pub state: TaskPullRequestState,
+    pub labels: Vec<TaskLabel>,
+    pub assignees: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    pub updated_at: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_decision: Option<PRReviewDecision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checks: Option<ProviderCheckSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mergeable: Option<PRMergeableState>,
+    #[serde(default)]
+    pub is_draft: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_ref_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_ref_name: Option<String>,
+}
+/// The durable link between an issue (or PR — GitHub shares one
+/// numbering space, so the same `(project_id, issue_number)` row serves
+/// both) and the worktree `tasks.start` created for it. Mirrors the
+/// `task_links` row the core keeps.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskLink {
@@ -109,10 +205,14 @@ pub struct TasksListParams {
     pub page: Option<u64>,
     #[serde(default)]
     pub per_page: Option<u64>,
+    #[serde(default)]
+    pub mode: Option<TasksListMode>,
 }
 
 impl TasksListParams {
-    pub fn validate(&self) -> Result<(TaskIssueState, Option<String>, u64, u64), RpcError> {
+    pub fn validate(
+        &self,
+    ) -> Result<(TaskIssueState, Option<String>, u64, u64, TasksListMode), RpcError> {
         validate_project_id(&self.project_id)?;
         let state = self.state.unwrap_or_default();
         let query = match &self.query {
@@ -140,7 +240,7 @@ impl TasksListParams {
                 "Invalid tasks page size.",
             ));
         }
-        Ok((state, query, page, per_page))
+        Ok((state, query, page, per_page, self.mode.unwrap_or_default()))
     }
 }
 
@@ -163,12 +263,15 @@ impl TasksShowParams {
 pub struct TasksStartParams {
     pub project_id: String,
     pub number: u64,
+    #[serde(default)]
+    pub mode: Option<TasksListMode>,
 }
 
 impl TasksStartParams {
-    pub fn validate(&self) -> Result<(), RpcError> {
+    pub fn validate(&self) -> Result<TasksListMode, RpcError> {
         validate_project_id(&self.project_id)?;
-        validate_issue_number(self.number)
+        validate_issue_number(self.number)?;
+        Ok(self.mode.unwrap_or_default())
     }
 }
 
@@ -191,6 +294,10 @@ pub struct TasksListResult {
     /// which remote answered.
     pub repo: String,
     pub issues: Vec<TaskIssue>,
+    /// Pull requests for `mode: "pulls"`; empty on the issues path (the key
+    /// is skipped then, never null).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pulls: Vec<TaskPullRequest>,
     /// Echoed 1-based page and effective page size, so the renderer's
     /// pagination bar reads back exactly the window this result answers.
     pub page: u64,
@@ -212,9 +319,16 @@ pub struct TasksShowResult {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksStartResult {
+    /// Issue or PR number (GitHub shares one numbering space, and the link
+    /// row keys on it either way).
     pub issue_number: u64,
     pub worktree: Worktree,
     pub link: TaskLink,
+    /// The PR head branch a pulls-mode start checked out. Absent on the
+    /// issues path, where the branch is the generated `issue-N-slug` name
+    /// already carried on `worktree.branch`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_branch: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -271,8 +385,9 @@ mod tests {
         assert_eq!(TaskIssueState::All.as_gh_flag(), "all");
         let params: TasksListParams =
             serde_json::from_value(json!({"projectId": "p1", "future": true})).unwrap();
-        let (state, _, page, per_page) = params.validate().unwrap();
+        let (state, _, page, per_page, mode) = params.validate().unwrap();
         assert_eq!(state, TaskIssueState::Open);
+        assert_eq!(mode, TasksListMode::Issues);
         assert_eq!(page, 1, "page defaults to the first page");
         assert_eq!(
             per_page, DEFAULT_TASKS_PER_PAGE,
@@ -285,6 +400,7 @@ mod tests {
         let result = TasksListResult {
             repo: "example/repo".into(),
             issues: vec![],
+            pulls: vec![],
             page: 2,
             per_page: 36,
             has_next_page: true,
@@ -309,7 +425,7 @@ mod tests {
     fn list_params_bound_page_and_page_size() {
         let parse = |value: Value| -> Result<(u64, u64), RpcError> {
             let params: TasksListParams = serde_json::from_value(value).unwrap();
-            let (_, _, page, per_page) = params.validate()?;
+            let (_, _, page, per_page, _) = params.validate()?;
             Ok((page, per_page))
         };
         assert_eq!(
@@ -334,6 +450,7 @@ mod tests {
             query: None,
             page: None,
             per_page: None,
+            mode: None,
         };
         assert!(bad.validate().is_err());
         let bad = TasksListParams {
@@ -342,6 +459,7 @@ mod tests {
             query: Some("x".repeat(MAX_TASKS_QUERY_BYTES + 1)),
             page: None,
             per_page: None,
+            mode: None,
         };
         assert!(bad.validate().is_err());
         let blank = TasksListParams {
@@ -350,10 +468,78 @@ mod tests {
             query: Some("   ".into()),
             page: None,
             per_page: None,
+            mode: None,
         };
-        let (state, query, _, _) = blank.validate().unwrap();
+        let (state, query, _, _, mode) = blank.validate().unwrap();
         assert_eq!(state, TaskIssueState::Closed);
         assert_eq!(query, None);
+        assert_eq!(mode, TasksListMode::Issues);
+    }
+
+    #[test]
+    fn list_mode_defaults_to_issues_and_parses_pulls() {
+        let params: TasksListParams = serde_json::from_value(json!({"projectId": "p1"})).unwrap();
+        let (_, _, _, _, mode) = params.validate().unwrap();
+        assert_eq!(mode, TasksListMode::Issues);
+        let params: TasksListParams =
+            serde_json::from_value(json!({"projectId": "p1", "mode": "pulls"})).unwrap();
+        let (_, _, _, _, mode) = params.validate().unwrap();
+        assert_eq!(mode, TasksListMode::Pulls);
+        let params: TasksListParams =
+            serde_json::from_value(json!({"projectId": "p1", "mode": "issues"})).unwrap();
+        let (_, _, _, _, mode) = params.validate().unwrap();
+        assert_eq!(mode, TasksListMode::Issues);
+    }
+
+    #[test]
+    fn pull_request_round_trips_with_exact_wire_keys() {
+        let pr = TaskPullRequest {
+            number: 12,
+            title: "Add the PR flow".into(),
+            state: TaskPullRequestState::Open,
+            labels: vec![TaskLabel {
+                name: "enhancement".into(),
+                color: None,
+            }],
+            assignees: vec!["octocat".into()],
+            author: Some("helix".into()),
+            updated_at: "2026-09-06T12:00:00Z".into(),
+            url: "https://github.com/example/repo/pull/12".into(),
+            review_decision: Some(PRReviewDecision::Approved),
+            checks: Some(ProviderCheckSummary {
+                state: CheckState::Success,
+                total: 3,
+                passed: 3,
+                failed: 0,
+                pending: 0,
+                neutral: 0,
+            }),
+            mergeable: Some(PRMergeableState::Mergeable),
+            is_draft: false,
+            head_ref_name: Some("add-pr-flow".into()),
+            base_ref_name: Some("main".into()),
+        };
+        let value = serde_json::to_value(&pr).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "number": 12, "title": "Add the PR flow", "state": "open",
+                "labels": [{"name": "enhancement"}],
+                "assignees": ["octocat"],
+                "author": "helix",
+                "updatedAt": "2026-09-06T12:00:00Z",
+                "url": "https://github.com/example/repo/pull/12",
+                "reviewDecision": "APPROVED",
+                "checks": {"state": "success", "total": 3, "passed": 3,
+                           "failed": 0, "pending": 0, "neutral": 0},
+                "mergeable": "MERGEABLE",
+                "isDraft": false,
+                "headRefName": "add-pr-flow",
+                "baseRefName": "main",
+            })
+        );
+        let back: TaskPullRequest = serde_json::from_value(value).unwrap();
+        assert_eq!(back, pr);
     }
 
     #[test]
@@ -366,8 +552,15 @@ mod tests {
         let start = TasksStartParams {
             project_id: "p1".into(),
             number: 12,
+            mode: None,
         };
-        start.validate().unwrap();
+        assert_eq!(start.validate().unwrap(), TasksListMode::Issues);
+        let start = TasksStartParams {
+            project_id: "p1".into(),
+            number: 12,
+            mode: Some(TasksListMode::Pulls),
+        };
+        assert_eq!(start.validate().unwrap(), TasksListMode::Pulls);
         assert!(
             TasksLinksParams {
                 project_id: "".into()
@@ -400,14 +593,18 @@ mod tests {
                 branch: "issue-7-fix-the-sidebar".into(),
                 created_at: "2026-09-06T12:00:00Z".into(),
             },
+            head_branch: None,
         };
         let value = serde_json::to_value(&result).unwrap();
         assert_eq!(value["issueNumber"], 7);
         assert_eq!(value["worktree"]["branch"], "issue-7-fix-the-sidebar");
         assert_eq!(value["link"]["worktreeId"], "w1");
         assert_eq!(value["link"]["branch"], "issue-7-fix-the-sidebar");
+        // Absent on the issues path: the key must be missing, not null.
+        assert!(value.get("headBranch").is_none());
         let back: TasksStartResult = serde_json::from_value(value).unwrap();
         assert_eq!(back.link.issue_number, 7);
+        assert_eq!(back.head_branch, None);
     }
 
     #[test]

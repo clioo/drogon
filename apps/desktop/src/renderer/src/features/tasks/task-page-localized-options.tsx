@@ -7,7 +7,7 @@
 
 import { GithubIcon } from "./github-icon";
 
-export type GitHubTaskKind = "issues";
+export type GitHubTaskKind = "issues" | "pulls";
 
 export type SourceOption = {
   id: "github";
@@ -38,5 +38,15 @@ export function getGitHubStateFilters(): GitHubStateFilter[] {
     { id: "open", label: "Open" },
     { id: "closed", label: "Closed" },
     { id: "all", label: "All" },
+  ];
+}
+
+// Why: the source's mode buttons are Issues/PRs/Projects; this repo's daemon
+// serves no Projects board, so only the two `gh`-backed kinds survive, with
+// the source's button classes applied in ModeControls.
+export function getGitHubModeButtons(): { id: GitHubTaskKind; label: string }[] {
+  return [
+    { id: "issues", label: "Issues" },
+    { id: "pulls", label: "Pull requests" },
   ];
 }

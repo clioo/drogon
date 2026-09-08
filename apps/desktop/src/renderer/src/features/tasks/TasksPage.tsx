@@ -18,15 +18,15 @@ import type { Session } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "../shell/project-adapter";
 import { TaskPageSurface } from "./task-page/Surface";
 import { getRepoBackedTaskEmptyState } from "./task-page-empty-state";
-import { toWorkItem } from "./task-page-model";
+import { toPullWorkItem, toWorkItem } from "./task-page-model";
 import type {
   TaskPageModel,
   TaskPageWorkItem,
   TaskPickerRepo,
 } from "./task-page-model";
-import { GITHUB_TASK_GRID_CLASS, TASK_SEARCH_DEBOUNCE_MS } from "./task-page-source-context";
-import type { GitHubStateFilterId } from "./task-page-localized-options";
-import { getSourceOptions } from "./task-page-localized-options";
+import { GITHUB_PR_TASK_GRID_CLASS, GITHUB_TASK_GRID_CLASS, TASK_SEARCH_DEBOUNCE_MS } from "./task-page-source-context";
+import type { GitHubStateFilterId, GitHubTaskKind } from "./task-page-localized-options";
+import { getGitHubModeButtons, getSourceOptions } from "./task-page-localized-options";
 
 export const TASKS_ROUTE_ID = "tasks";
 export const TASKS_TITLE = "Tasks";
@@ -85,6 +85,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   const [projectId, setProjectId] = useState<string | null>(() =>
     pickDefaultProject(loadGroups()),
   );
+  const [githubTaskKind, setGithubTaskKind] = useState<GitHubTaskKind>("issues");
   const [stateFilter, setStateFilter] = useState<GitHubStateFilterId>("open");
   const [taskSearchInput, setTaskSearchInput] = useState("");
   const [appliedTaskSearch, setAppliedTaskSearch] = useState("");
@@ -181,9 +182,9 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     refreshLinks();
   }, [refreshLinks]);
 
-  // Reloads the list whenever the project, state, applied query, page or
-  // refresh nonce changes. A late response for an older window is dropped,
-  // never rendered.
+  // Reloads the list whenever the project, kind, state, applied query,
+  // page or refresh nonce changes. A late response for an older window is
+  // dropped, never rendered.
   useEffect(() => {
     if (projectId === null) {
       setWorkItems([]);
@@ -194,6 +195,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     setListPhase("loading");
     setStartError(null);
     const state: TaskIssueState = stateFilter;
+    const kind = githubTaskKind;
     void bridge
       .tasksList({
         projectId,
@@ -201,6 +203,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
         query: appliedTaskSearch.trim() || undefined,
         page,
         perPage: TASKS_PAGE_SIZE,
+        mode: kind,
       })
       .then((result) => {
         if (cancelled) return;
@@ -219,7 +222,11 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
         setTasksError(null);
         setGithubUnavailable(false);
         setRepo(result.result.repo);
-        setWorkItems(result.result.issues.map((issue) => toWorkItem(issue, projectId)));
+        setWorkItems(
+          kind === "pulls"
+            ? (result.result.pulls ?? []).map((pull) => toPullWorkItem(pull, projectId))
+            : result.result.issues.map((issue) => toWorkItem(issue, projectId)),
+        );
         setHasNextPage(result.result.hasNextPage);
         setFurthestPage((current) => Math.max(current, result.result.page));
       })
@@ -227,13 +234,15 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
         if (!cancelled) {
           setLoadingTargetPage(null);
           setListPhase("error");
-          setTasksError("Could not load issues.");
+          setTasksError(
+            kind === "pulls" ? "Could not load pull requests." : "Could not load issues.",
+          );
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [bridge, projectId, stateFilter, appliedTaskSearch, page, refreshNonce]);
+  }, [bridge, projectId, githubTaskKind, stateFilter, appliedTaskSearch, page, refreshNonce]);
 
   // Why: the pagination bar speaks 0-based pages (source contract); the
   // daemon RPC is 1-based, so the adapter converts at the boundary.
@@ -259,15 +268,15 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   }, []);
 
   // Selecting a row keeps the journey-J6 behavior: start a worktree for
-  // the issue (idempotent on the daemon), refresh the #n badge, then open
-  // the worktree's terminal.
+  // the issue or PR (idempotent on the daemon), refresh the #n badge, then
+  // open the worktree's terminal. PR starts check out the PR head branch.
   const handleStartWorkItem = useCallback(
     (item: TaskPageWorkItem) => {
       if (projectId === null || startBusyNumber !== null) return;
       setStartBusyNumber(item.number);
       setStartError(null);
       void bridge
-        .tasksStart({ projectId, number: item.number })
+        .tasksStart({ projectId, number: item.number, mode: githubTaskKind })
         .then((result) => {
           if (!result.ok) {
             setStartError(result.error.message);
@@ -283,7 +292,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
           setStartBusyNumber(null);
         });
     },
-    [bridge, projectId, startBusyNumber, refreshLinks, onOpenTerminal],
+    [bridge, projectId, startBusyNumber, refreshLinks, onOpenTerminal, githubTaskKind],
   );
 
   const selectedRepo = selectedRepos[0] ?? null;
@@ -324,6 +333,14 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
         ? { url: `https://github.com/${repo}`, label: repo }
         : null,
     githubMode: "items",
+    githubTaskKind,
+    onSelectGithubTaskKind: (kind) => {
+      setPage(1);
+      setFurthestPage(1);
+      setGithubTaskKind(kind);
+    },
+    githubModeButtons: getGitHubModeButtons(),
+    showPRManagementColumns: githubTaskKind === "pulls",
     stateFilter,
     onStateFilter: (state) => {
       setPage(1);
@@ -346,7 +363,8 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     tasksError: startError ?? tasksError,
     githubUnavailable,
     showGitHubTaskSkeletons,
-    githubTaskGridClass: GITHUB_TASK_GRID_CLASS,
+    githubTaskGridClass:
+      githubTaskKind === "pulls" ? GITHUB_PR_TASK_GRID_CLASS : GITHUB_TASK_GRID_CLASS,
     currentPage: page - 1,
     totalPages,
     loadingTargetPage: loadingTargetPage === null ? null : loadingTargetPage - 1,

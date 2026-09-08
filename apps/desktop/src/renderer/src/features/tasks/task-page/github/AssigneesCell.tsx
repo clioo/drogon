@@ -17,6 +17,7 @@ export function GHAssigneesCell({
   startBusy: boolean;
 }): React.JSX.Element {
   const assignees = item.assignees ?? [];
+  const emptyLabel = item.type === "pr" ? "Assign pull request" : "Assign issue";
   const triggerContent =
     assignees.length > 0 ? (
       <>
@@ -37,7 +38,7 @@ export function GHAssigneesCell({
   return (
     <span
       aria-label={
-        assignees.length ? `Assigned to ${assignees.map((a) => a.login).join(", ")}` : "Assign issue"
+        assignees.length ? `Assigned to ${assignees.map((a) => a.login).join(", ")}` : emptyLabel
       }
       aria-busy={startBusy}
       className={cn(
