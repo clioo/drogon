@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   PI_MODEL_ERROR,
+  PI_MODEL_EXAMPLE,
+  PI_MODEL_HELPER,
   resolvePiModelField,
 } from "./pi-model-mapping";
 
@@ -89,6 +91,25 @@ describe("resolvePiModelField", () => {
     expect(
       resolvePiModelField({ harnessId: "pi", model: "has spaces", provider: "" }),
     ).toEqual({ error: PI_MODEL_ERROR });
+  });
+
+  test("helper copy is the fork's sentence with the documented example", () => {
+    expect(PI_MODEL_EXAMPLE).toBe(
+      "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+    );
+    expect(PI_MODEL_HELPER).toContain(
+      "Use an exact Pi provider/model ID",
+    );
+    expect(PI_MODEL_HELPER).toContain(PI_MODEL_EXAMPLE);
+    expect(PI_MODEL_HELPER).toContain("Blank uses Pi settings.");
+    // The example itself parses as the fork's provider/model shape.
+    expect(
+      resolvePiModelField({
+        harnessId: "pi",
+        model: PI_MODEL_EXAMPLE,
+        provider: "",
+      }),
+    ).toEqual({ model: PI_MODEL_EXAMPLE });
   });
 
   test("non-pi harnesses take a bare model id; flags are an error", () => {

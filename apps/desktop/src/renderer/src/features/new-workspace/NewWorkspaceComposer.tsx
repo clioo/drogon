@@ -24,9 +24,11 @@ import {
   composerPrimaryActionLabel,
   emptyComposerAgentSelection,
   initialComposerAgentId,
+  resolveComposerAgentModel,
   resolveComposerSubmit,
   type ComposerAgentSelection,
 } from "./composer-submit";
+import { PI_MODEL_HELPER } from "../shell/pi-model-mapping";
 
 function submitModifierLabel(): string {
   return typeof navigator !== "undefined" &&
@@ -120,18 +122,33 @@ export function NewWorkspaceComposer({
       setError(resolved.error);
       return;
     }
+    // #221: the model maps through the fork's Pi semantics before any RPC,
+    // so a flags string or a bare id can never reach the daemon as an
+    // "Invalid model" refusal after the worktree already exists. A failure
+    // keeps every field, so the primary action retries with the same
+    // inputs.
+    const mapped = resolveComposerAgentModel(agent);
+    if ("error" in mapped) {
+      setError(mapped.error);
+      return;
+    }
+    const mappedAgent: ComposerAgentSelection = {
+      ...agent,
+      model: mapped.model ?? "",
+      provider: mapped.provider ?? "",
+    };
     setSending(true);
     setError("");
     try {
       if (resolved.target.kind === "implicit") {
         onSelectWorkspace(resolved.target.workspaceId);
-        if (!resolved.target.agent.harnessId) {
+        if (!mappedAgent.harnessId) {
           onClose();
           return;
         }
         const launch = composerAgentLaunchInput(
           resolved.target.workspaceId,
-          resolved.target.agent,
+          mappedAgent,
           crypto.randomUUID(),
         );
         if (!launch) {
@@ -147,7 +164,7 @@ export function NewWorkspaceComposer({
         projectId: resolved.target.project.id,
         name: resolved.target.name,
         baseRef: resolved.target.baseRef,
-        agent: resolved.target.agent,
+        agent: mappedAgent,
       });
       if (failure) setError(failure);
     } finally {
@@ -300,6 +317,9 @@ export function NewWorkspaceComposer({
               disabled={busy}
               placeholder="Harness default"
             />
+            {agent.harnessId === "pi" && (
+              <p className="composer-hint">{PI_MODEL_HELPER}</p>
+            )}
           </div>
         )}
         {agent.harnessId === "pi" && (

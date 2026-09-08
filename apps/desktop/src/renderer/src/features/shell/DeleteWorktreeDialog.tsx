@@ -9,6 +9,11 @@
    RemoveWorktreeDialog with the same submit contract.) */
 import { useRef, useState } from "react";
 import type { Worktree, Workspace } from "../../../../shared/session-contract";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "../../components/ui/dialog";
 import { DeleteWorktreeDialogDescription } from "./DeleteWorktreeDialogDescription";
 import { DeleteWorktreeDialogFooter } from "./DeleteWorktreeDialogFooter";
 import { DeleteWorktreeTargetPreview } from "./DeleteWorktreeTargetPreview";
@@ -92,59 +97,77 @@ export function DeleteWorktreeDialog({
     }
   };
 
+  // #220: a centered modal, like the fork's Dialog-based confirm and the
+  // sibling RemoveProjectDialog — the previous inline sidebar form
+  // rendered after every project row, so with more than a screenful of
+  // cards the confirm opened below the fold and the menu click looked
+  // like a silent no-op.
   return (
-    <form
-      className="shell-dialog shell-delete-dialog"
-      aria-label={`Delete workspace ${name}`}
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
       }}
     >
-      <p className="shell-dialog-title">Delete Workspace</p>
-      <DeleteWorktreeDialogDescription
-        targetClassName={copy.targetClassName}
-        targetLabel={copy.targetLabel}
-        descriptionSuffix={copy.descriptionSuffix}
-      />
-      <DeleteWorktreeTargetPreview
-        displayName={name}
-        path={worktree.path}
-        dirtyChangeCount={dirtyChangeCount}
-      />
-      <DeleteWorktreeWarningPanels
-        isFolderWorkspaceDelete={isFolderWorkspaceDelete}
-      />
-      {!isFolderWorkspaceDelete && (
-        <label className="shell-check-row" htmlFor="shell-delete-force">
-          <input
-            id="shell-delete-force"
-            type="checkbox"
-            checked={force}
-            disabled={busy}
-            onChange={(event) => setForce(event.target.checked)}
+      <DialogContent
+        className="max-w-sm sm:max-w-sm"
+        showCloseButton={false}
+      >
+        <DialogTitle className="sr-only">Delete Workspace</DialogTitle>
+        <form
+          className="shell-dialog shell-delete-dialog shell-dialog-in-modal"
+          aria-label={`Delete workspace ${name}`}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <p className="shell-dialog-title">Delete Workspace</p>
+          <DeleteWorktreeDialogDescription
+            targetClassName={copy.targetClassName}
+            targetLabel={copy.targetLabel}
+            descriptionSuffix={copy.descriptionSuffix}
           />
-          Force: remove even with uncommitted changes
-        </label>
-      )}
-      {error && (
-        <p className="shell-form-error" role="alert">
-          {error}
-        </p>
-      )}
-      <DeleteWorktreeSkipConfirmOption
-        showDontAskAgain={!isFolderWorkspaceDelete}
-        dontAskAgain={dontAskAgain}
-        onToggleDontAskAgain={() => setDontAskAgain((prev) => !prev)}
-      />
-      <div className="form-actions">
-        <DeleteWorktreeDialogFooter
-          isDeleting={sending}
-          onCancel={onClose}
-          onDelete={() => void submit()}
-          confirmButtonRef={confirmButtonRef}
-        />
-      </div>
-    </form>
+          <DeleteWorktreeTargetPreview
+            displayName={name}
+            path={worktree.path}
+            dirtyChangeCount={dirtyChangeCount}
+          />
+          <DeleteWorktreeWarningPanels
+            isFolderWorkspaceDelete={isFolderWorkspaceDelete}
+          />
+          {!isFolderWorkspaceDelete && (
+            <label className="shell-check-row" htmlFor="shell-delete-force">
+              <input
+                id="shell-delete-force"
+                type="checkbox"
+                checked={force}
+                disabled={busy}
+                onChange={(event) => setForce(event.target.checked)}
+              />
+              Force: remove even with uncommitted changes
+            </label>
+          )}
+          {error && (
+            <p className="shell-form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <DeleteWorktreeSkipConfirmOption
+            showDontAskAgain={!isFolderWorkspaceDelete}
+            dontAskAgain={dontAskAgain}
+            onToggleDontAskAgain={() => setDontAskAgain((prev) => !prev)}
+          />
+          <div className="form-actions">
+            <DeleteWorktreeDialogFooter
+              isDeleting={sending}
+              onCancel={onClose}
+              onDelete={() => void submit()}
+              confirmButtonRef={confirmButtonRef}
+            />
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1915,6 +1915,14 @@ footer[data-testid="status-bar"] {
   font-weight: 600;
   color: var(--foreground);
 }
+/* #220: the delete confirm is a centered modal now (like the fork), so the
+   sidebar inline margins do not apply inside the dialog content. */
+.shell-dialog-in-modal {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
 .shell-optional {
   font-weight: 400;
   color: var(--muted-foreground);

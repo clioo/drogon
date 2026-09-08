@@ -8,6 +8,10 @@ import {
   validateAgentDefaultField,
 } from "./agent-defaults";
 import {
+  PI_MODEL_HELPER,
+  resolvePiModelField,
+} from "../shell/pi-model-mapping";
+import {
   SettingsFieldError,
   SettingsRow,
   SettingsSection,
@@ -92,7 +96,17 @@ export function AgentsSection({
       {editorIds.map((harnessId) => {
         const resolved = resolveLaunchDefaults(harnessId, harnessDefaults);
         const setField = (field: "model" | "effort", value: string) => {
-          const error = validateAgentDefaultField(field, value);
+          // #221: a Pi default flows straight into `harness.start`, so it
+          // must already satisfy the fork's `provider/model` shape — the
+          // fork's error shows inline instead of an "Invalid model"
+          // refusal at launch time.
+          const mapped =
+            field === "model" && harnessId === "pi"
+              ? resolvePiModelField({ harnessId: "pi", model: value, provider: "" })
+              : null;
+          const error =
+            validateAgentDefaultField(field, value) ??
+            (mapped && "error" in mapped ? mapped.error : null);
           setErrors((prev) => ({
             ...prev,
             [`${harnessId}.${field}`]: error,
@@ -113,6 +127,9 @@ export function AgentsSection({
             </legend>
             <SettingsRow
               label="Model"
+              description={
+                harnessId === "pi" ? PI_MODEL_HELPER : undefined
+              }
               control={
                 <Input
                   aria-label={`${harnessDisplayName(harnessId, harnesses)} model`}
