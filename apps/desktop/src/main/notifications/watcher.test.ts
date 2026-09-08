@@ -47,14 +47,64 @@ describe("diffAgentStates", () => {
     ]);
   });
 
-  it("ignores steady non-waiting states and defaults missing state to unknown", () => {
+  it("stays quiet while non-waiting states hold and defaults missing state to unknown", () => {
     const { next, transitions } = diffAgentStates(
-      new Map([["a", "working"]]),
+      new Map([
+        ["a", "idle"],
+        ["b", "unknown"],
+      ]),
       [session("a", "idle"), session("b")],
     );
     expect(transitions).toEqual([]);
     expect(next.get("a")).toBe("idle");
     expect(next.get("b")).toBe("unknown");
+  });
+
+  it("forwards activity transitions without notifying (idle shell leaves working)", () => {
+    const { transitions } = diffAgentStates(
+      new Map([["a", "working"]]),
+      [session("a", "idle")],
+    );
+    expect(transitions).toEqual([
+      { session: expect.objectContaining({ id: "a" }), entered: false },
+    ]);
+  });
+
+  it("forwards a command starting in an idle shell (idle back to working)", () => {
+    const { transitions } = diffAgentStates(
+      new Map([["a", "idle"]]),
+      [session("a", "working")],
+    );
+    expect(transitions).toEqual([
+      { session: expect.objectContaining({ id: "a" }), entered: false },
+    ]);
+  });
+
+  it("forwards a first report replacing unknown (plain shell prints its prompt)", () => {
+    const { transitions } = diffAgentStates(
+      new Map([["a", "unknown"]]),
+      [session("a", "working")],
+    );
+    expect(transitions).toEqual([
+      { session: expect.objectContaining({ id: "a" }), entered: false },
+    ]);
+  });
+
+  it("forwards a session reaching exited without notifying", () => {
+    const { transitions } = diffAgentStates(new Map([["a", "working"]]), [
+      { ...session("a", "working"), agentState: "exited", agentStateAt: null },
+    ]);
+    expect(transitions).toEqual([
+      { session: expect.objectContaining({ id: "a" }), entered: false },
+    ]);
+  });
+
+  it("treats a first sighting as the baseline unless it is already waiting", () => {
+    const { transitions } = diffAgentStates(new Map(), [
+      session("a", "working"),
+      session("b"),
+    ]);
+    expect(transitions).toEqual([]);
   });
 });
 

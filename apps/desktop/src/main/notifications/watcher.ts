@@ -28,9 +28,11 @@ function normalizedState(session: WatchedSession): string {
 
 /**
  * Diffs one `session.list` snapshot against the previous states. Returns
- * the next state map plus the transitions since the previous poll:
- * sessions that entered `needs_input` (notify + badge) and sessions that
- * left it (badge only, including sessions that vanished from the list).
+ * the next state map plus the transitions since the previous poll: one
+ * entry per session whose state changed (the tab badge and the card dot
+ * render the new state; only entering `needs_input` also notifies), plus
+ * a leave entry for a `needs_input` session that vanished from the list.
+ * Steady states stay quiet — the renderer already shows them.
  */
 export function diffAgentStates(
   previous: ReadonlyMap<string, string>,
@@ -42,10 +44,15 @@ export function diffAgentStates(
     const state = normalizedState(session);
     next.set(session.id, state);
     const was = previous.get(session.id);
-    if (state === "needs_input" && was !== "needs_input")
-      transitions.push({ session, entered: true });
-    else if (state !== "needs_input" && was === "needs_input")
-      transitions.push({ session, entered: false });
+    // A first sighting is the poll baseline, not a change — except an
+    // already-waiting session, which the renderer never saw enter.
+    if (was === undefined) {
+      if (state === "needs_input")
+        transitions.push({ session, entered: true });
+      continue;
+    }
+    if (was === state) continue;
+    transitions.push({ session, entered: state === "needs_input" });
   }
   for (const [id, was] of previous) {
     if (was === "needs_input" && !next.has(id))

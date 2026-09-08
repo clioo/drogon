@@ -39,4 +39,17 @@ test("labels stay human-readable for tabs and card dots", () => {
 test("missing agentState renders unknown, never a guess", () => {
   expect(agentStateOf(base)).toBe("unknown");
   expect(agentStateOf({ ...base, agentState: "working" })).toBe("working");
+  expect(agentStateOf({ ...base, agentState: "idle" })).toBe("idle");
+  expect(agentStateOf({ ...base, agentState: "needs_input" })).toBe(
+    "needs_input",
+  );
+  expect(agentStateOf({ ...base, agentState: "exited" })).toBe("exited");
+  expect(agentStateOf({ ...base, agentState: "unknown" })).toBe("unknown");
+});
+
+test("idle and unknown never render as working", () => {
+  expect(agentIconKind(agentStateOf({ ...base, agentState: "idle" }))).toBe(
+    "idle",
+  );
+  expect(agentIconKind(agentStateOf(base))).toBe("unknown");
 });

@@ -100,4 +100,22 @@ describe("card meta badges projection", () => {
       ]),
     ).toBe("1 needs input, 1 working, 1 idle");
   });
+
+  test("agent summary renders unknown as not reporting and covers exited", () => {
+    expect(summarizeCardAgentStates([session("a", "unknown")])).toBe(
+      "1 session not reporting",
+    );
+    expect(summarizeCardAgentStates([session("a", undefined)])).toBe(
+      "1 session not reporting",
+    );
+    expect(summarizeCardAgentStates([session("a", "exited")])).toBe(
+      "1 session exited",
+    );
+    expect(
+      summarizeCardAgentStates([
+        session("a", "idle"),
+        session("b", "unknown"),
+      ]),
+    ).toBe("1 idle, 1 not reporting");
+  });
 });
