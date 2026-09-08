@@ -368,6 +368,61 @@ const SURFACES = [
     probes: ["session", "details", "aria-label"],
     candFiles: ["apps/desktop/src/renderer/src/features/right-sidebar/SessionDetailsPanel.tsx"],
   },
+  {
+    id: "automation-runs",
+    label: "Automation runs dashboard",
+    refDir: "src/renderer/src/components/automations",
+    refFiles: [
+      "src/renderer/src/components/automations/AutomationRunsDashboard.tsx",
+      "src/renderer/src/components/automations/AutomationsPageBreadcrumb.tsx",
+      "src/renderer/src/components/automations/ExternalAutomationRunTable.tsx",
+    ],
+    probes: ["Runs", "dashboard", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/automations/AutomationRunsDashboard.tsx"],
+  },
+  {
+    id: "bot-responsibilities",
+    label: "Bot responsibilities",
+    refDir: "src/renderer/src/components/bots",
+    refFiles: [
+      "src/renderer/src/components/bots/BotsPage.tsx",
+      "src/renderer/src/components/bots/BotResponsibilityCard.tsx",
+      "src/renderer/src/components/bots/BotsPageForms.tsx",
+    ],
+    probes: ["Responsibility", "history", "cron", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/bots/BotResponsibilityCard.tsx"],
+  },
+  {
+    id: "settings-notifications",
+    label: "Settings (Notifications pane)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/NotificationsPane.tsx",
+    ],
+    probes: ["Notifications", "toggle", "sound", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/settings/notifications-section.tsx"],
+  },
+  {
+    id: "settings-git",
+    label: "Settings (Git pane)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/GitPane.tsx",
+    ],
+    probes: ["Git", "login", "identity", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/settings/git-section.tsx"],
+  },
+  {
+    id: "toasts",
+    label: "Toasts (sonner)",
+    refDir: "src/renderer/src/components/ui",
+    refFiles: [
+      "src/renderer/src/components/ui/sonner.tsx",
+      "src/renderer/src/components/terminal-pane/TerminalContextMenu.tsx",
+    ],
+    probes: ["toast", "Toaster", "Copy Terminal ID", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/components/ui/sonner.tsx"],
+  },
 ];
 
 function scoreProbeLine(line) {
@@ -762,6 +817,84 @@ async function tryKeys(page, chord) {
   }
 }
 
+// Best-effort wait for an ARIA marker (proves navigation landed before the
+// capture fires; r3 showed captures racing the settings page load).
+async function waitForAria(page, role, name, timeout = 4000) {
+  try {
+    await page.getByRole(role, { name }).first().waitFor({ timeout });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Visible menuitem census: dismissed menus leave no DOM trace, so record
+// their entries in notes while open (r3 menu states captured empty menus).
+// Limit 24 covers the full New-tab menu (static + harness + settings rows).
+async function menuItemNames(page, limit = 24) {
+  try {
+    return await page.evaluate((max) => {
+      const out = [];
+      for (const el of document.querySelectorAll('[role="menuitem"]')) {
+        if (el.offsetParent === null) continue;
+        const t = (el.getAttribute("aria-label") || el.textContent || "")
+          .trim().replace(/\s+/g, " ");
+        if (t) out.push(t.slice(0, 80));
+        if (out.length >= max) break;
+      }
+      return out;
+    }, limit);
+  } catch {
+    return [];
+  }
+}
+
+// Visible toast census (sonner renders li[data-sonner-toast], exposed as
+// listitem/status): record copy even when the PNG misses the 4s window.
+async function toastTexts(page, limit = 6) {
+  try {
+    return await page.evaluate((max) => {
+      const out = [];
+      for (const el of document.querySelectorAll("[data-sonner-toast]")) {
+        const t = (el.textContent || "").trim().replace(/\s+/g, " ");
+        if (t) out.push(t.slice(0, 160));
+        if (out.length >= max) break;
+      }
+      return out;
+    }, limit);
+  } catch {
+    return [];
+  }
+}
+
+// Known-home start: dismiss overlays, leave full-page views the way a user
+// would (Settings via its back row, Bots/Tasks/Automations via Sessions
+// nav), so one state's page never leaks into the next capture. View
+// navigation only; every step is recorded.
+async function ensureHome(page, notes) {
+  await ensureClean(page, notes);
+  // The back row only counts when the settings search field is also visible:
+  // a lone name match must never drive navigation.
+  const settingsOpen = async () =>
+    (await page.getByRole("button", { name: "Back to app", exact: true }).count().catch(() => 0)) > 0 &&
+    (await page.getByRole("textbox", { name: "Search settings" }).count().catch(() => 0)) > 0;
+  if (await settingsOpen()) {
+    await tryClick(page, "button", "Back to app", 1500);
+    notes.push("home: Back to app from full-page view");
+    await ensureClean(page, notes);
+  }
+  try {
+    const sessions = page.getByRole("button", { name: "Sessions", exact: true });
+    if ((await sessions.count()) > 0) {
+      await sessions.first().click({ timeout: 1500 });
+      await delay(350);
+      notes.push("home: Sessions nav selected");
+    }
+  } catch {
+    /* stay where we are */
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Candidate lifecycle (owned processes): real drogond + production Electron.
 // ---------------------------------------------------------------------------
@@ -894,7 +1027,7 @@ async function refSetup(page, state, ctx) {
   const notes = [];
   const missing = [];
   await page.setViewportSize(VIEWPORT);
-  await ensureClean(page, notes);
+  await ensureHome(page, notes);
   const chordOverlay = async (chord, label) => {
     await tryKeys(page, chord);
     await delay(1200);
@@ -939,7 +1072,9 @@ async function refSetup(page, state, ctx) {
       if (await tryClick(page, "button", "Settings")) {
         await tryClick(page, "button", "Appearance", 1200).catch(() => {});
         await tryClick(page, "tab", "Appearance", 1200).catch(() => {});
-        notes.push("Settings opened via Settings button");
+        if (await waitForAria(page, "textbox", "Search settings")) {
+          notes.push("Settings opened via Settings button (marker visible)");
+        } else missing.push("Settings click acted but the settings marker never appeared (capture may show the previous view)");
       } else missing.push("no Settings button reachable");
       break;
     case "changes":
@@ -948,8 +1083,10 @@ async function refSetup(page, state, ctx) {
       else notes.push("no Changes nav; captured current view");
       break;
     case "automations":
-      if (await tryClick(page, "button", "Automations")) notes.push("Automations opened");
-      else missing.push("no Automations nav reachable");
+      if (await tryClick(page, "button", "Automations")) {
+        if (await waitForAria(page, "heading", "Automations")) notes.push("Automations opened (marker visible)");
+        else missing.push("Automations click acted but the page marker never appeared");
+      } else missing.push("no Automations nav reachable");
       break;
     case "browser":
       if (await tryClick(page, "button", "Browser", 1200)) notes.push("Browser opened");
@@ -959,13 +1096,16 @@ async function refSetup(page, state, ctx) {
       }
       break;
     case "tasks":
-      if ((await tryClick(page, "button", "Tasks")) || (await tryClick(page, "button", "Open GitHub tasks", 1200)))
-        notes.push("Tasks opened");
-      else missing.push("no Tasks nav reachable");
+      if ((await tryClick(page, "button", "Tasks")) || (await tryClick(page, "button", "Open GitHub tasks", 1200))) {
+        if (await waitForAria(page, "textbox", "Search GitHub issues...")) notes.push("Tasks opened (marker visible)");
+        else missing.push("Tasks click acted but the list marker never appeared");
+      } else missing.push("no Tasks nav reachable");
       break;
     case "bots":
-      if (await tryClick(page, "button", "Bots")) notes.push("Bots opened");
-      else missing.push("no Bots nav reachable");
+      if (await tryClick(page, "button", "Bots")) {
+        if (await waitForAria(page, "heading", "Bots")) notes.push("Bots opened (marker visible)");
+        else missing.push("Bots click acted but the page marker never appeared");
+      } else missing.push("no Bots nav reachable");
       break;
     case "explorer": {
       // View navigation only: open the panel when closed, never toggle a
@@ -1011,6 +1151,8 @@ async function refSetup(page, state, ctx) {
         const seen = await overlayState(page);
         if ((seen.menus || 0) > 0) {
           notes.push(`create menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`create menu items: ${items.join(" | ")}`);
         } else {
           const tabsAfter = await page.getByRole("tab").count().catch(() => -1);
           if (tabsBefore >= 0 && tabsAfter > tabsBefore) {
@@ -1031,6 +1173,8 @@ async function refSetup(page, state, ctx) {
           await delay(600);
           const seen = await overlayState(page);
           notes.push(seen.menus > 0 ? `worktree context menu open (menus=${seen.menus})` : "worktree right-click opened no menu");
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`worktree context menu items: ${items.join(" | ")}`);
         } else notes.push("no worktree/project row to right-click");
       } catch {
         notes.push("worktree right-click best-effort only");
@@ -1045,6 +1189,8 @@ async function refSetup(page, state, ctx) {
           const seen = await overlayState(page);
           optionsOk = (seen.menus || 0) > 0;
           notes.push(optionsOk ? `Workspace options open (menus=${seen.menus})` : "Workspace options click opened no menu");
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`Workspace options items: ${items.join(" | ")}`);
         } else notes.push("no Workspace options button reachable");
       } catch {
         notes.push("Workspace options best-effort only");
@@ -1059,6 +1205,8 @@ async function refSetup(page, state, ctx) {
           const seen = await overlayState(page);
           actionsOpen = (seen.menus || 0) > 0;
           notes.push(actionsOpen ? `Project actions menu open (menus=${seen.menus})` : "Project actions click opened no menu");
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`Project actions items: ${items.join(" | ")}`);
           if (!actionsOpen) await dismissOverlays(page);
         } else notes.push("no Project actions trigger reachable");
       } catch {
@@ -1085,6 +1233,8 @@ async function refSetup(page, state, ctx) {
       if (await tryClick(page, "button", "New tab")) {
         const seen = await overlayState(page);
         notes.push(seen.menus > 0 ? `create menu open (menus=${seen.menus})` : "New tab click opened no menu");
+        const items = await menuItemNames(page);
+        if (items.length) notes.push(`create menu items: ${items.join(" | ")}`);
       } else notes.push("no New tab affordance reachable (page view has no strip)");
       await dismissOverlays(page);
       try {
@@ -1093,8 +1243,11 @@ async function refSetup(page, state, ctx) {
           await tab.click({ button: "right", timeout: 2500 });
           await delay(600);
           const seen = await overlayState(page);
-          if ((seen.menus || 0) > 0) notes.push(`tab context menu open (menus=${seen.menus})`);
-          else missing.push("tab right-click opened no menu");
+          if ((seen.menus || 0) > 0) {
+            notes.push(`tab context menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`tab context menu items: ${items.join(" | ")}`);
+          } else missing.push("tab right-click opened no menu");
         } else missing.push("no tab to right-click (empty ref has no strip)");
       } catch {
         missing.push("tab right-click best-effort only");
@@ -1194,7 +1347,11 @@ async function refSetup(page, state, ctx) {
       // Catalog `settings-general`: Settings → General (the fork default
       // view, captured in `09-settings`).
       if (await tryClick(page, "button", "Settings")) {
-        notes.push("Settings opened via Settings button");
+        if (!(await waitForAria(page, "textbox", "Search settings"))) {
+          missing.push("Settings click acted but the settings marker never appeared");
+          break;
+        }
+        notes.push("Settings opened via Settings button (marker visible)");
         let general = await tryClick(page, "button", "General", 1500);
         if (!general) {
           try {
@@ -1205,20 +1362,37 @@ async function refSetup(page, state, ctx) {
             general = false;
           }
         }
-        if (general) notes.push("General pane opened");
+        if (general && (await waitForAria(page, "heading", "General"))) notes.push("General pane opened (marker visible)");
+        else if (general) notes.push("General pane clicked (marker not confirmed)");
         else missing.push("no General nav reachable");
       } else missing.push("no Settings button reachable");
       break;
     }
     case "settings-terminal":
     case "settings-agents":
-    case "settings-shortcuts": {
+    case "settings-shortcuts":
+    case "settings-notifications":
+    case "settings-git": {
       // R2 settings panes: Settings → the named pane (fork workflow-group
       // "Terminal", capability-group "Agents", interface-group "Shortcuts").
-      const pane = state === "settings-terminal" ? "Terminal" : state === "settings-agents" ? "Agents" : "Shortcuts";
+      // R3 adds Notifications and Git & Source Control. The fork nav label
+      // for Git differs from the candidate's honest "Git and GitHub" title,
+      // so both labels are tried on each side.
+      const pane =
+        state === "settings-terminal" ? "Terminal"
+        : state === "settings-agents" ? "Agents"
+        : state === "settings-shortcuts" ? "Shortcuts"
+        : state === "settings-notifications" ? "Notifications"
+        : "Git & Source Control";
+      const paneAlt = state === "settings-git" ? "Git and GitHub" : state === "settings-shortcuts" ? "Keyboard shortcuts" : null;
       if (await tryClick(page, "button", "Settings")) {
-        notes.push("Settings opened via Settings button");
+        if (!(await waitForAria(page, "textbox", "Search settings"))) {
+          missing.push("Settings click acted but the settings marker never appeared");
+          break;
+        }
+        notes.push("Settings opened via Settings button (marker visible)");
         let opened = await tryClick(page, "button", pane, 1500);
+        if (!opened && paneAlt) opened = await tryClick(page, "button", paneAlt, 1500);
         if (!opened) {
           try {
             await page.getByRole("tab", { name: pane }).first().click({ timeout: 1500 });
@@ -1305,6 +1479,84 @@ async function refSetup(page, state, ctx) {
       }
       break;
     }
+    case "automation-runs": {
+      // R3 runs dashboard: Automations → Runs (AutomationRunsDashboard over
+      // automation.runs_all). A first run row is opened best-effort and
+      // immediately backed out of; the dashboard stays for capture. View
+      // navigation only.
+      if (await tryClick(page, "button", "Automations")) {
+        if (!(await waitForAria(page, "heading", "Automations"))) {
+          missing.push("Automations page marker never appeared");
+          break;
+        }
+        if (await tryClick(page, "button", "Runs", 2000)) {
+          await delay(800);
+          notes.push("Runs dashboard opened");
+          try {
+            const row = page.locator("table tbody tr button, [role='row'] button").first();
+            if ((await row.count()) > 0) {
+              await row.click({ timeout: 2500 });
+              await delay(800);
+              notes.push("first run row opened (detail); backing out for the dashboard capture");
+              if (!(await tryClick(page, "button", "Back", 1500))) await dismissOverlays(page);
+              await delay(400);
+            } else notes.push("no run rows to open");
+          } catch {
+            notes.push("run row open best-effort only");
+          }
+        } else missing.push("no Runs button reachable on the Automations page");
+      } else missing.push("no Automations nav reachable");
+      break;
+    }
+    case "bot-responsibilities": {
+      // R3 bot responsibilities: Bots → open a bot → Responsibilities. The
+      // reference owns its data: when no bot exists nothing is created and
+      // the page is captured as-is with an explicit note.
+      if (await tryClick(page, "button", "Bots")) {
+        if (!(await waitForAria(page, "heading", "Bots"))) {
+          missing.push("Bots page marker never appeared");
+          break;
+        }
+        notes.push("Bots page opened (marker visible)");
+        try {
+          const bot = page.locator("[data-testid='bot-detail'], button:has-text('Responsibilities')").first();
+          if ((await bot.count()) > 0) notes.push("bot surface present; opening best-effort");
+          else missing.push("no bot rows to open (reference owns its data; nothing created)");
+        } catch {
+          notes.push("bot open best-effort only");
+        }
+      } else missing.push("no Bots nav reachable");
+      break;
+    }
+    case "toasts": {
+      // R3 toasts: sonner Toaster region after a read-only trigger
+      // (terminal context menu → Copy Terminal ID). Nothing is created,
+      // renamed or deleted; the toast auto-dismisses.
+      try {
+        const panel = page.getByRole("tabpanel").first();
+        if ((await panel.count()) > 0) {
+          await panel.click({ timeout: 2500 });
+          await delay(350);
+          await panel.click({ button: "right", timeout: 2500 });
+          await delay(600);
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`terminal context menu items: ${items.join(" | ")}`);
+          const copy = page.getByRole("menuitem", { name: /copy terminal id/i }).first();
+          if ((await copy.count()) > 0) {
+            await copy.click({ timeout: 2500 });
+            await delay(900);
+            const texts = await toastTexts(page);
+            notes.push(texts.length ? `toast visible: ${texts.join(" | ")}` : "Copy Terminal ID acted but no toast appeared");
+          } else notes.push("no Copy Terminal ID menu entry");
+          await dismissOverlays(page);
+        } else notes.push("no tabpanel to focus (empty ref)");
+      } catch {
+        notes.push("toast trigger best-effort only");
+      }
+      const idle = await toastTexts(page);
+      if (!idle.length) notes.push("toast region idle at capture (no toast showing)");
+      break;
+    }
     case "statusbar-strip":
       notes.push("full-page capture; strip cropped in post");
       break;
@@ -1315,23 +1567,14 @@ async function refSetup(page, state, ctx) {
   return { notes, missing };
 }
 
-const REF_PAGE_STATES = new Set(["automations", "tasks", "bots", "changes", "browser"]);
-
 async function refTeardown(page, state) {
+  // Every state leaves through the known-home path (Settings back row,
+  // Sessions nav) so the next setup starts clean. View navigation only —
+  // no data is created or changed.
   const notes = [];
-  await ensureClean(page, notes);
-  // Settings is a full page, not an overlay: Escape cannot leave it.
-  if (await tryClick(page, "button", "Back to app", 1500)) {
-    notes.push("teardown: Back to app from full-page view");
-    await ensureClean(page, notes);
-  }
-  // Sidebar-nav pages (Automations/Tasks/Bots): return home via Sessions.
-  // View navigation only — no data is created or changed.
-  if (REF_PAGE_STATES.has(state)) {
-    if (await tryClick(page, "button", "Sessions", 1500)) {
-      notes.push("teardown: returned home via Sessions");
-    }
-  }
+  await ensureHome(page, notes);
+  for (const [i, n] of notes.entries()) notes[i] = n.replace(/^home:/, "teardown:");
+  void state;
   return notes;
 }
 
@@ -1352,7 +1595,7 @@ async function candSetup(page, state, ctx) {
   const notes = [];
   const missing = [];
   await ensureCandidateViewport(page, notes);
-  await ensureClean(page, notes);
+  await ensureHome(page, notes);
   const chordOverlay = async (chord, label) => {
     await tryKeys(page, chord);
     await delay(1200);
@@ -1529,7 +1772,8 @@ async function candSetup(page, state, ctx) {
       if (opened) {
         await tryClick(page, "button", "Appearance", 1200).catch(() => {});
         await tryClick(page, "tab", "Appearance", 1200).catch(() => {});
-        notes.push("Settings panel opened");
+        if (await waitForAria(page, "heading", "Appearance")) notes.push("Settings panel opened (marker visible)");
+        else missing.push("Settings click acted but the Appearance marker never appeared");
       } else missing.push("no Settings affordance reachable");
       break;
     }
@@ -1563,8 +1807,10 @@ async function candSetup(page, state, ctx) {
     }
     case "automations":
       await ensureProject().catch(() => {});
-      if (await tryClick(page, "button", "Automations")) notes.push("Automations nav opened");
-      else missing.push("no Automations nav reachable");
+      if (await tryClick(page, "button", "Automations")) {
+        if (await waitForAria(page, "heading", "Automations")) notes.push("Automations nav opened (marker visible)");
+        else missing.push("Automations click acted but the page marker never appeared");
+      } else missing.push("no Automations nav reachable");
       break;
     case "browser":
       await ensureProject().catch(() => {});
@@ -1598,13 +1844,17 @@ async function candSetup(page, state, ctx) {
       break;
     case "tasks":
       await ensureProject().catch(() => {});
-      if (await tryClick(page, "button", "Tasks")) notes.push("Tasks nav opened (may be coming-soon placeholder)");
-      else missing.push("no Tasks nav reachable");
+      if (await tryClick(page, "button", "Tasks")) {
+        if (await waitForAria(page, "region", "Tasks")) notes.push("Tasks nav opened (marker visible)");
+        else missing.push("Tasks click acted but the page marker never appeared");
+      } else missing.push("no Tasks nav reachable");
       break;
     case "bots":
       await ensureProject().catch(() => {});
-      if (await tryClick(page, "button", "Bots")) notes.push("Bots route opened");
-      else missing.push("no Bots nav reachable");
+      if (await tryClick(page, "button", "Bots")) {
+        if (await waitForAria(page, "heading", "Bots")) notes.push("Bots route opened (marker visible)");
+        else missing.push("Bots click acted but the page marker never appeared");
+      } else missing.push("no Bots nav reachable");
       break;
     case "explorer": {
       await ensureProject().catch(() => {});
@@ -1668,6 +1918,8 @@ async function candSetup(page, state, ctx) {
         const seen = await overlayState(page);
         if ((seen.menus || 0) > 0) {
           notes.push(`create menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`create menu items: ${items.join(" | ")}`);
         } else missing.push("New tab click opened no menu");
       } else missing.push("no New tab affordance reachable");
       break;
@@ -1683,6 +1935,8 @@ async function candSetup(page, state, ctx) {
           await delay(600);
           const seen = await overlayState(page);
           notes.push(seen.menus > 0 ? `worktree context menu open (menus=${seen.menus})` : "worktree right-click opened no menu");
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`worktree context menu items: ${items.join(" | ")}`);
         } else notes.push("no worktree/project row to right-click");
       } catch {
         notes.push("worktree right-click best-effort only");
@@ -1697,6 +1951,8 @@ async function candSetup(page, state, ctx) {
           const seen = await overlayState(page);
           optionsOk = (seen.menus || 0) > 0;
           notes.push(optionsOk ? `Workspace options open (menus=${seen.menus})` : "Workspace options click opened no menu");
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`Workspace options items: ${items.join(" | ")}`);
         } else notes.push("no Workspace options button reachable");
       } catch {
         notes.push("Workspace options best-effort only");
@@ -1711,6 +1967,8 @@ async function candSetup(page, state, ctx) {
           const seen = await overlayState(page);
           actionsOpen = (seen.menus || 0) > 0;
           notes.push(actionsOpen ? `Project actions menu open (menus=${seen.menus})` : "Project actions click opened no menu");
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`Project actions items: ${items.join(" | ")}`);
           if (!actionsOpen) await dismissOverlays(page);
         } else notes.push("no Project actions trigger reachable");
       } catch {
@@ -1740,6 +1998,8 @@ async function candSetup(page, state, ctx) {
       if (await tryClick(page, "button", "New tab")) {
         const seen = await overlayState(page);
         notes.push(seen.menus > 0 ? `create menu open (menus=${seen.menus})` : "New tab click opened no menu");
+        const items = await menuItemNames(page);
+        if (items.length) notes.push(`create menu items: ${items.join(" | ")}`);
       } else notes.push("no New tab affordance reachable");
       await dismissOverlays(page);
       try {
@@ -1748,8 +2008,11 @@ async function candSetup(page, state, ctx) {
           await tab.click({ button: "right", timeout: 3000 });
           await delay(600);
           const seen = await overlayState(page);
-          if ((seen.menus || 0) > 0) notes.push(`tab context menu open (menus=${seen.menus})`);
-          else missing.push("tab right-click opened no menu");
+          if ((seen.menus || 0) > 0) {
+            notes.push(`tab context menu open (menus=${seen.menus})`);
+            const items = await menuItemNames(page);
+            if (items.length) notes.push(`tab context menu items: ${items.join(" | ")}`);
+          } else missing.push("tab right-click opened no menu");
         } else missing.push("no tab to right-click");
       } catch {
         missing.push("tab right-click best-effort only");
@@ -1864,7 +2127,11 @@ async function candSetup(page, state, ctx) {
         missing.push("no Settings affordance reachable");
         break;
       }
-      notes.push("Settings opened");
+      if (!(await waitForAria(page, "textbox", "Search settings"))) {
+        missing.push("Settings click acted but the settings marker never appeared");
+        break;
+      }
+      notes.push("Settings opened (marker visible)");
       let general = await tryClick(page, "button", "General", 1500);
       if (!general) {
         try {
@@ -1889,7 +2156,11 @@ async function candSetup(page, state, ctx) {
         missing.push("no Settings affordance reachable");
         break;
       }
-      notes.push("Settings opened");
+      if (!(await waitForAria(page, "textbox", "Search settings"))) {
+        missing.push("Settings click acted but the settings marker never appeared");
+        break;
+      }
+      notes.push("Settings opened (marker visible)");
       let terminal = await tryClick(page, "button", "Terminal", 1500);
       if (!terminal) {
         try {
@@ -1905,10 +2176,17 @@ async function candSetup(page, state, ctx) {
       break;
     }
     case "settings-agents":
-    case "settings-shortcuts": {
+    case "settings-shortcuts":
+    case "settings-notifications":
+    case "settings-git": {
       // Candidate sections carry the honest MVP titles ("Agents",
-      // "Keyboard shortcuts"); the fork nav says "Shortcuts".
-      const pane = state === "settings-agents" ? "Agents" : "Keyboard shortcuts";
+      // "Keyboard shortcuts", "Git and GitHub"); the fork nav says
+      // "Shortcuts" and "Git & Source Control".
+      const pane =
+        state === "settings-agents" ? "Agents"
+        : state === "settings-shortcuts" ? "Keyboard shortcuts"
+        : state === "settings-notifications" ? "Notifications"
+        : "Git and GitHub";
       const opened =
         (await tryClick(page, "button", "Settings")) ||
         (await tryClick(page, "button", "Settings", 2500));
@@ -1916,7 +2194,11 @@ async function candSetup(page, state, ctx) {
         missing.push("no Settings affordance reachable");
         break;
       }
-      notes.push("Settings opened");
+      if (!(await waitForAria(page, "textbox", "Search settings"))) {
+        missing.push("Settings click acted but the settings marker never appeared");
+        break;
+      }
+      notes.push("Settings opened (marker visible)");
       let done = await tryClick(page, "button", pane, 1500);
       if (!done) {
         try {
@@ -1972,6 +2254,9 @@ async function candSetup(page, state, ctx) {
           notes.push("create-menu selection best-effort only");
         }
         await dismissOverlays(page);
+        // The browser chrome renders async after the tab opens (r3b caught
+        // it mid-render); settle before focusing the guest.
+        await delay(1500);
         // Mod+F is owned by the pane container keydown handler: focus must
         // land inside the tabpanel (the tab button is not enough).
         try {
@@ -2044,6 +2329,96 @@ async function candSetup(page, state, ctx) {
       }
       break;
     }
+    case "automation-runs": {
+      // Owned fixture: the Runs dashboard over automation.runs_all (no runs
+      // exist in the fixture, so the empty dashboard is the honest capture).
+      await ensureProject().catch(() => {});
+      if (await tryClick(page, "button", "Automations")) {
+        if (!(await waitForAria(page, "heading", "Automations"))) {
+          missing.push("Automations page marker never appeared");
+          break;
+        }
+        if (await tryClick(page, "button", "Runs", 2000)) {
+          await delay(800);
+          notes.push("Runs dashboard opened");
+          const rows = await page.locator("table tbody tr").count().catch(() => -1);
+          notes.push(rows > 0 ? `run rows present: ${rows}` : "no run rows in fixture (empty dashboard capture)");
+        } else missing.push("no Runs button reachable on the Automations page");
+      } else missing.push("no Automations nav reachable");
+      break;
+    }
+    case "bot-responsibilities": {
+      // Owned fixture: create one bot through the New Bot form, open its
+      // detail, open the Add-responsibility form; the form stays for capture.
+      // Everything created lives in the temp fixture.
+      await ensureProject().catch(() => {});
+      if (!(await tryClick(page, "button", "Bots"))) {
+        missing.push("no Bots nav reachable");
+        break;
+      }
+      if (!(await waitForAria(page, "heading", "Bots"))) {
+        missing.push("Bots page marker never appeared");
+        break;
+      }
+      try {
+        if (await tryClick(page, "button", "New Bot", 2000)) {
+          await page.getByLabel("Name (optional)").fill("Fidelity Bot").catch(() => {});
+          await page.getByPlaceholder("What should this Bot help you with?").fill("Keep the fidelity fixtures honest.").catch(() => {});
+          const create = page.getByRole("button", { name: "Create Bot", exact: true });
+          if ((await create.count()) > 0) {
+            await create.first().click({ timeout: 3000 });
+            await delay(1200);
+            notes.push("fixture bot created through the New Bot form");
+          } else notes.push("no Create Bot submit; capturing list as-is");
+        } else notes.push("no New Bot button; capturing list as-is");
+        if (!(await waitForAria(page, "button", "Add responsibility", 3000))) {
+          const row = page.getByRole("button", { name: /Fidelity Bot/ }).first();
+          if ((await row.count()) > 0) {
+            await row.click({ timeout: 3000 });
+            await delay(800);
+            notes.push("fixture bot detail opened");
+          } else notes.push("no Fidelity Bot row to open");
+        }
+        if (await tryClick(page, "button", "Add responsibility", 2000)) {
+          notes.push("Add-responsibility form opened for capture");
+        } else notes.push("no Add responsibility button (list or detail captured as-is)");
+      } catch (error) {
+        notes.push(`bot fixture best-effort only: ${error.message.split("\n")[0]}`);
+      }
+      break;
+    }
+    case "toasts": {
+      // Owned fixture: terminal context menu → Copy Terminal ID fires the
+      // R13-C sonner toast (success, or the honest clipboard error). The
+      // toast copy is recorded even when the PNG misses the 4s window.
+      const terminal = await ensureTerminal().catch(() => false);
+      if (!terminal) {
+        missing.push("project-terminal fixture unavailable for toast trigger");
+        break;
+      }
+      try {
+        const panel = page.getByRole("tabpanel").first();
+        await panel.click({ timeout: 3000 });
+        await delay(350);
+        await panel.click({ button: "right", timeout: 3000 });
+        await delay(600);
+        const items = await menuItemNames(page);
+        if (items.length) notes.push(`terminal context menu items: ${items.join(" | ")}`);
+        const copy = page.getByRole("menuitem", { name: /copy terminal id/i }).first();
+        if ((await copy.count()) > 0) {
+          await copy.click({ timeout: 3000 });
+          await delay(900);
+          const texts = await toastTexts(page);
+          notes.push(texts.length ? `toast visible: ${texts.join(" | ")}` : "Copy Terminal ID acted but no toast appeared");
+        } else {
+          notes.push("no Copy Terminal ID menu entry");
+          await dismissOverlays(page);
+        }
+      } catch (error) {
+        notes.push(`toast trigger best-effort only: ${error.message.split("\n")[0]}`);
+      }
+      break;
+    }
     case "statusbar-strip":
       await ensureTerminal().catch(() => {});
       notes.push("full-page capture; strip cropped in post");
@@ -2065,12 +2440,6 @@ function execFileAsync(file, args2, opts) {
 
 async function candTeardown(page, state) {
   const notes = [];
-  // Settings is a full page that hides the shell chrome (R9-B): leave it the
-  // way the source does, through its "Back to app" row, before anything else.
-  if (await tryClick(page, "button", "Back to app", 1500)) {
-    notes.push("teardown: Back to app from full-page view");
-    await delay(300);
-  }
   // SettingsPanel is a native <dialog>: Escape does not reliably dismiss it,
   // so use its explicit Close button first (exact match; session closes are
   // labeled "Close <name> session" and never match).
@@ -2078,7 +2447,12 @@ async function candTeardown(page, state) {
     notes.push("teardown: dialog dismissed via Close button");
     await delay(300);
   }
-  await ensureClean(page, notes);
+  // Known-home path (Settings back row, Sessions nav) so full pages never
+  // leak into the next capture; then re-select the first strip tab.
+  await ensureHome(page, notes);
+  for (const [i, n] of notes.entries()) {
+    if (n.startsWith("home:")) notes[i] = n.replace(/^home:/, "teardown:");
+  }
   // Return to a stable view so later states start clean: select the first
   // strip tab when one exists (R6-B: no "Terminals" route button remains;
   // Files/Changes live in the right activity bar, Browser as a tab).
@@ -2124,6 +2498,11 @@ const ALL_STATES = [
   "browser-find",
   "mentu",
   "session-details",
+  "automation-runs",
+  "bot-responsibilities",
+  "settings-notifications",
+  "settings-git",
+  "toasts",
 ];
 
 const CAND_OWNER = {
@@ -2150,6 +2529,11 @@ const CAND_OWNER = {
   "browser-find": "apps/desktop/src/renderer/src/features/browser/browser-find-bar.tsx, browser-find-state.ts",
   mentu: "apps/desktop/src/renderer/src/features/mentu/MentuPanel.tsx, RecipePane*.tsx",
   "session-details": "apps/desktop/src/renderer/src/features/right-sidebar/SessionDetailsPanel.tsx",
+  "automation-runs": "apps/desktop/src/renderer/src/features/automations/AutomationRunsDashboard.tsx, AutomationRunsTable.tsx, AutomationRunDetailsPage.tsx",
+  "bot-responsibilities": "apps/desktop/src/renderer/src/features/bots/BotsPanel.tsx, BotResponsibilityCard.tsx",
+  "settings-notifications": "apps/desktop/src/renderer/src/features/settings/notifications-section.tsx",
+  "settings-git": "apps/desktop/src/renderer/src/features/settings/git-section.tsx",
+  toasts: "apps/desktop/src/renderer/src/components/ui/sonner.tsx, App.tsx (Toaster)",
   tokens: "apps/desktop/src/renderer/src/assets/main.css",
 };
 
@@ -2180,6 +2564,11 @@ const STATE_SURFACE = {
   "browser-find": "browser-find",
   mentu: "mentu",
   "session-details": "session-details",
+  "automation-runs": "automation-runs",
+  "bot-responsibilities": "bot-responsibilities",
+  "settings-notifications": "settings-notifications",
+  "settings-git": "settings-git",
+  toasts: "toasts",
 };
 
 // Preferred source-value keywords per surface: the ranked item must cite the
@@ -2208,6 +2597,11 @@ const SOURCE_PREFERENCE = {
   "browser-find": ["find in page", "match", "classname"],
   mentu: ["recipe", "run", "evidence", "classname"],
   "session-details": ["session", "details", "terminal", "classname"],
+  "automation-runs": ["runs", "dashboard", "classname"],
+  "bot-responsibilities": ["responsibility", "history", "classname"],
+  "settings-notifications": ["notifications", "toggle", "classname"],
+  "settings-git": ["git", "github", "login", "classname"],
+  toasts: ["sonner", "toast", "classname"],
   tokens: ["font", "geist", "text-", "leading", "tracking", "weight"],
 };
 
