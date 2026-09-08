@@ -51,6 +51,8 @@ import { registerSettingsProbes } from "./settings-probes";
 import { registerSettingsCliBridge } from "./settings-bridge";
 import { registerFontsBridge } from "./fonts";
 import { registerTasksBridge } from "./tasks-bridge";
+// R17-A additive wiring: jira data-layer bridge (granted main/jira-bridge.ts).
+import { registerJiraBridge } from "./jira-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
 import {
   observeAgentStateForNotification,
@@ -268,6 +270,8 @@ function registerBridge() {
   registerSettingsCliBridge(() => window);
   registerFontsBridge(() => window);
   registerTasksBridge(() => window);
+  // R17-A additive wiring (granted main/jira-bridge.ts).
+  registerJiraBridge(() => window);
   registerBotBridge(() => window);
   registerMentuBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
