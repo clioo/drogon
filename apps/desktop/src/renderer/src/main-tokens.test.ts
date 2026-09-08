@@ -6,10 +6,11 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const mainCss = fs.readFileSync(
-  new URL("./assets/main.css", import.meta.url),
-  "utf8",
-);
+const mainCss = fs
+  .readFileSync(new URL("./assets/main.css", import.meta.url), "utf8")
+  // Why: Windows checkouts carry CRLF, which would leak a \r into the
+  // multi-line --font-mono value below; the tokens are line-ending agnostic.
+  .replace(/\r\n/g, "\n");
 
 /** Extract `name: value;` pairs from the first CSS block named by selector. */
 function tokenBlock(css: string, selector: string): Map<string, string> {

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   cliCandidates,
@@ -5,6 +6,13 @@ import {
   type CliProbeRunner,
 } from "./settings-bridge";
 import { cliStatusResultSchema } from "../shared/settings-contract";
+
+// Why: the product builds candidate paths with path.join plus a win32
+// ".exe" suffix, so expectations must render the same way per runner OS
+// instead of hardcoding POSIX separators (failed on Windows runners).
+const exe = process.platform === "win32" ? ".exe" : "";
+const shim = (name: string) => path.join("/data", "bin", `${name}${exe}`);
+const onPath = (dir: string, name: string) => path.join(dir, `${name}${exe}`);
 
 const okRun = (
   stdout: string,
@@ -24,12 +32,12 @@ describe("cliCandidates", () => {
   test("prefers the data-dir shims over PATH entries", () => {
     const candidates = cliCandidates("/data", "/usr/bin:/bin", ":");
     expect(candidates.slice(0, 2).map((c) => c.commandPath)).toEqual([
-      "/data/bin/drogon-cli",
-      "/data/bin/drogon",
+      shim("drogon-cli"),
+      shim("drogon"),
     ]);
     expect(candidates[2]).toMatchObject({
       commandName: "drogon-cli",
-      commandPath: "/usr/bin/drogon-cli",
+      commandPath: onPath("/usr/bin", "drogon-cli"),
       fromPath: true,
     });
   });
@@ -41,7 +49,7 @@ describe("probeCliStatus", () => {
     const result = await probeCliStatus({
       dataDir: "/data",
       pathEnv: "",
-      isExecutable: isExecutableOnly(["/data/bin/drogon-cli"]),
+      isExecutable: isExecutableOnly([shim("drogon-cli")]),
       run,
     });
     expect(result).toEqual({
@@ -49,9 +57,9 @@ describe("probeCliStatus", () => {
       result: {
         available: true,
         commandName: "drogon-cli",
-        commandPath: "/data/bin/drogon-cli",
+        commandPath: shim("drogon-cli"),
         version: "drogon-cli 0.3.1",
-        detail: "Available at /data/bin/drogon-cli.",
+        detail: `Available at ${shim("drogon-cli")}.`,
       },
     });
   });
@@ -61,11 +69,11 @@ describe("probeCliStatus", () => {
     const result = await probeCliStatus({
       dataDir: "/data",
       pathEnv: "/usr/local/bin",
-      isExecutable: isExecutableOnly(["/usr/local/bin/drogon"]),
+      isExecutable: isExecutableOnly([onPath("/usr/local/bin", "drogon")]),
       run,
     });
     expect(result.ok && result.result.commandPath).toBe(
-      "/usr/local/bin/drogon",
+      onPath("/usr/local/bin", "drogon"),
     );
     if (result.ok) expect(result.result.commandName).toBe("drogon");
   });
@@ -94,7 +102,7 @@ describe("probeCliStatus", () => {
     const result = await probeCliStatus({
       dataDir: "/data",
       pathEnv: "",
-      isExecutable: isExecutableOnly(["/data/bin/drogon-cli"]),
+      isExecutable: isExecutableOnly([shim("drogon-cli")]),
       run,
     });
     expect(result.ok).toBe(true);
@@ -112,7 +120,7 @@ describe("probeCliStatus", () => {
     const result = await probeCliStatus({
       dataDir: "/data",
       pathEnv: "",
-      isExecutable: isExecutableOnly(["/data/bin/drogon-cli"]),
+      isExecutable: isExecutableOnly([shim("drogon-cli")]),
       run,
     });
     expect(result.ok).toBe(true);
