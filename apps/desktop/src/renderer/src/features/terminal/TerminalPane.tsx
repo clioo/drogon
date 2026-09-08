@@ -27,6 +27,7 @@ import {
 } from "./terminal-font-zoom";
 import { resolvePaneRendererPolicy } from "./terminal-renderer-policy";
 import { readTerminalGpuAcceleration } from "../../settings-store";
+import type { TerminalGpuAcceleration } from "../../settings-store";
 import TerminalSearch, { type TerminalSearchState } from "./TerminalSearch";
 import TerminalContextMenu, {
   type TerminalContextMenuPoint,
@@ -124,12 +125,15 @@ function unregisterTerminalDebugHandle(sessionId: string, terminal: Terminal) {
 export function TerminalPane({
   session,
   fontSize,
+  gpuMode,
   onError,
   onSession,
 }: {
   session: Session;
   /** Terminal font size in px, mirrored from the settings store by App. */
   fontSize: number;
+  /** Settings-owned GPU mode (App passes it; tests may omit it). */
+  gpuMode?: TerminalGpuAcceleration;
   onError(message: string): void;
   onSession(value: Session): void;
 }) {
@@ -241,7 +245,7 @@ export function TerminalPane({
     // (source terminalGpuAcceleration; `off` keeps the canvas renderer).
     if (
       resolvePaneRendererPolicy({
-        userGpuMode: readTerminalGpuAcceleration(window.localStorage),
+        userGpuMode: gpuMode ?? readTerminalGpuAcceleration(window.localStorage),
       }).gpuEnabled
     ) {
       void import("@xterm/addon-webgl")

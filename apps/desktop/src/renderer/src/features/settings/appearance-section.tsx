@@ -13,8 +13,6 @@ import { useState } from "react";
 import { Input } from "../../components/ui/input";
 import type { TerminalGpuAcceleration, Theme } from "../../settings-store";
 import {
-  readTerminalGpuAcceleration,
-  writeTerminalGpuAcceleration,
 } from "../../settings-store";
 import {
   SettingsFieldError,
@@ -50,15 +48,15 @@ export function gpuAccelerationDescription(
   return "Auto tries WebGL, with DOM fallback for unsupported or risky renderers.";
 }
 
-export function GpuAccelerationRow(): React.JSX.Element {
-  // Self-contained persistence: the value lives in the settings envelope and
-  // TerminalPane reads it at pane construction; local state only mirrors it
-  // for the segmented control.
-  const [mode, setMode] = useState<TerminalGpuAcceleration>(() =>
-    typeof window === "undefined"
-      ? "auto"
-      : readTerminalGpuAcceleration(window.localStorage),
-  );
+export function GpuAccelerationRow({
+  mode,
+  onChange,
+}: {
+  mode: TerminalGpuAcceleration;
+  onChange: (mode: TerminalGpuAcceleration) => void;
+}): React.JSX.Element {
+  // Controlled like the font-size row: App owns the single settings store
+  // writer, so a GPU edit can never be reverted by a later settings flush.
   return (
     <SettingsRow
       label="GPU Acceleration"
@@ -69,12 +67,7 @@ export function GpuAccelerationRow(): React.JSX.Element {
       control={
         <SettingsSegmentedControl<TerminalGpuAcceleration>
           value={mode}
-          onChange={(next) => {
-            setMode(next);
-            if (typeof window !== "undefined") {
-              writeTerminalGpuAcceleration(window.localStorage, next);
-            }
-          }}
+          onChange={onChange}
           options={GPU_ACCELERATION_SEGMENT_OPTIONS}
           ariaLabel="GPU Acceleration"
         />
@@ -88,6 +81,8 @@ export function AppearanceSection({
   onThemeChange,
   terminalFontSize,
   onTerminalFontSizeChange,
+  terminalGpuAcceleration,
+  onTerminalGpuAccelerationChange,
   inspectorVisible,
   onInspectorChange,
 }: {
@@ -95,6 +90,8 @@ export function AppearanceSection({
   onThemeChange: (theme: Theme) => void;
   terminalFontSize: number;
   onTerminalFontSizeChange: (size: number) => void;
+  terminalGpuAcceleration: TerminalGpuAcceleration;
+  onTerminalGpuAccelerationChange: (mode: TerminalGpuAcceleration) => void;
   inspectorVisible: boolean;
   onInspectorChange: (visible: boolean) => void;
 }): React.JSX.Element {
@@ -130,7 +127,10 @@ export function AppearanceSection({
             title="Terminal"
             description="How terminal sessions read."
           />
-          <GpuAccelerationRow />
+          <GpuAccelerationRow
+            mode={terminalGpuAcceleration}
+            onChange={onTerminalGpuAccelerationChange}
+          />
           <SettingsRow
             label="Terminal font size"
             description="9 to 32 pixels."

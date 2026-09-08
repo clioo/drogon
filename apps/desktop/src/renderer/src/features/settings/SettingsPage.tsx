@@ -8,7 +8,7 @@
 // and the pane, and ⌘F focuses the search field.
 import { useEffect, useRef, useState } from "react";
 import type { Harness } from "../../../../shared/session-contract";
-import type { HarnessAgentDefault, Theme } from "../../settings-store";
+import type { HarnessAgentDefault, Theme, TerminalGpuAcceleration } from "../../settings-store";
 import { AgentsSection } from "./agents-section";
 import { AppearanceSection } from "./appearance-section";
 import { GitSection } from "./git-section";
@@ -27,6 +27,8 @@ export type SettingsPageProps = {
   onThemeChange: (theme: Theme) => void;
   terminalFontSize: number;
   onTerminalFontSizeChange: (size: number) => void;
+  terminalGpuAcceleration: TerminalGpuAcceleration;
+  onTerminalGpuAccelerationChange: (mode: TerminalGpuAcceleration) => void;
   inspectorVisible: boolean;
   onInspectorChange: (visible: boolean) => void;
   harnesses: Harness[];
@@ -115,6 +117,10 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     onThemeChange={props.onThemeChange}
                     terminalFontSize={props.terminalFontSize}
                     onTerminalFontSizeChange={props.onTerminalFontSizeChange}
+                    terminalGpuAcceleration={props.terminalGpuAcceleration}
+                    onTerminalGpuAccelerationChange={
+                      props.onTerminalGpuAccelerationChange
+                    }
                     inspectorVisible={props.inspectorVisible}
                     onInspectorChange={props.onInspectorChange}
                   />

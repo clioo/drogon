@@ -197,7 +197,7 @@ import {
   resolveEffectiveTheme,
   resolveInspectorDefault,
 } from "./theme";
-import type { HarnessAgentDefault, Theme } from "./settings-store";
+import type { HarnessAgentDefault, Theme, TerminalGpuAcceleration } from "./settings-store";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { SETTINGS_ROUTE_ID } from "./features/settings/settings-route";
 import type { SettingsSectionId } from "./features/settings/settings-sections";
@@ -405,6 +405,9 @@ export function App() {
   const [theme, setTheme] = useState<Theme>(() => settings.get("theme"));
   const [terminalFontSize, setTerminalFontSize] = useState(
     () => settings.get("terminalFontSize"),
+  );
+  const [terminalGpuAcceleration, setTerminalGpuAcceleration] = useState(
+    () => settings.get("terminalGpuAcceleration"),
   );
   const [defaultHarnessId, setDefaultHarnessId] = useState(
     () => settings.get("defaultHarnessId"),
@@ -1654,6 +1657,12 @@ export function App() {
     setTerminalFontSize(next);
     settings.set("terminalFontSize", next);
   };
+  const changeTerminalGpuAcceleration = (
+    next: TerminalGpuAcceleration,
+  ) => {
+    setTerminalGpuAcceleration(next);
+    settings.set("terminalGpuAcceleration", next);
+  };
   const changeDefaultHarness = (next: string) => {
     setDefaultHarnessId(next);
     settings.set("defaultHarnessId", next);
@@ -2084,6 +2093,8 @@ export function App() {
                   onThemeChange={changeTheme}
                   terminalFontSize={terminalFontSize}
                   onTerminalFontSizeChange={changeTerminalFontSize}
+                  terminalGpuAcceleration={terminalGpuAcceleration}
+                  onTerminalGpuAccelerationChange={changeTerminalGpuAcceleration}
                   inspectorVisible={inspector}
                   onInspectorChange={changeInspector}
                   harnesses={harnesses}
@@ -2255,6 +2266,7 @@ export function App() {
                     key={`${terminal.id}:${revision}`}
                     session={terminal}
                     fontSize={terminalFontSize}
+                    gpuMode={terminalGpuAcceleration}
                     onError={setError}
                     onSession={(value) =>
                       setSessions((items) =>
