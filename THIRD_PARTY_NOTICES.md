@@ -297,6 +297,14 @@ Drogon fork's `src/renderer/src/components/mentu/recipe-pane-views.tsx` and
 revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
 keeps the MIT notice.
 
+The terminal paste policy, link action popover, harness-aware restart and
+guest chord forwarding in `apps/desktop/src/renderer/src/features/{terminal,browser}/`
+and `apps/desktop/src/main/browser/` port the Drogon fork's
+`src/renderer/src/components/terminal-pane/{terminal-paste-policy,TerminalLinkActionPopover}*.ts(x)`
+and its browser chord matcher (fork revision
+`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
+MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
