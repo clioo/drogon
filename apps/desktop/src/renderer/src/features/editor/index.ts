@@ -1,12 +1,17 @@
 export {
   EditorPane,
   applyEditorAction,
+  hasChangedOnDisk,
   initialEditorState,
+  initializeEditorPaneState,
   isDirty,
   nextSaveGeneration,
   runSave,
+  saveAdmission,
+  scopedFileKey,
   type EditorAction,
   type EditorFileState,
   type EditorPaneProps,
+  type EditorScope,
   type EditorState,
 } from "./EditorPane";

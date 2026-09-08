@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { runAcceptanceProcess, startAcceptanceProcess, stopAcceptanceProcess } from "./acceptance-process.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
+import { readEditorValue, waitForEditorRegistered } from "./acceptance-editor-text.mjs";
 
 // Extended packaged-acceptance surfaces (journey J11): palette, Settings,
 // Changes, Automations, Bots, status bar and Tasks, each as a real CDP
@@ -192,9 +193,8 @@ async function probeExplorerSurface({ page, workspace, output }) {
   await ensureRightSidebar(page);
   const panel = page.locator('section[aria-label="Files"]');
   await panel.getByRole("treeitem", { name: file, exact: true }).click();
-  const editor = page.getByLabel(`Contents of ${file}`, { exact: true });
-  await editor.waitFor();
-  assert.equal(await editor.inputValue(), "sidebar explorer body\n");
+  await waitForEditorRegistered(page, file);
+  assert.equal(await readEditorValue(page, file), "sidebar explorer body\n");
   await page.screenshot({
     path: path.join(output, "explorer.png"),
     animations: "disabled",

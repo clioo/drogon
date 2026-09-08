@@ -2644,3 +2644,32 @@
 .dark [data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-close-button] {
   border-color: rgb(255 255 255 / 0.14);
 }
+
+/* R12-A: Monaco editor pane content. `.editor-pane-surface` (defined above,
+   ~line 924) was sized for the emitted textarea it directly styled; it is
+   now a plain layout wrapper around Monaco/CsvViewer/the large-file
+   fallback, so its own padding is cleared here — Monaco fills the pane
+   edge to edge like the source, and the fallback textarea gets its own
+   inset (it still IS a textarea, so the mono/size/color it inherits from
+   the wrapper still applies). */
+.editor-pane-surface {
+  padding: 0;
+}
+.editor-pane-large-file-fallback {
+  padding: 12px 14px;
+}
+.editor-pane-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.editor-pane-changed-on-disk {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--destructive);
+}
