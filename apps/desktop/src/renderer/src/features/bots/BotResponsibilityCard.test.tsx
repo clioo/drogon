@@ -77,9 +77,19 @@ describe("BotResponsibilityCard", () => {
     expect(markup).toContain("arya");
     expect(markup).toContain("Guard the realm.");
     expect(markup).toContain("@watcher");
-    // Initials avatar, never a character image.
-    expect(markup).toContain("W");
+    // Initials of the character label on the source's avatar frame, never a
+    // character image.
+    expect(markup).toContain("AS");
     expect(markup).not.toContain("<img");
+  });
+
+  it("renders the source's Bot glyph fallback for the none preset", () => {
+    const markup = render({
+      bot: bot({ characterPreset: "none" }),
+      history: [],
+    });
+    expect(markup).not.toContain("<img");
+    expect(markup).toContain('aria-label="Watcher avatar"');
   });
 
   it("renders the harness/model/session grid with source copy", () => {

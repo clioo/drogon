@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
-import { ArrowLeft, Bot, Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, Plus, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
-import type { BotsPanelProps, BotsPanelSnapshot } from "./bots-panel-contracts";
+import type { BotsPanelProps } from "./bots-panel-contracts";
 import {
   projectBotRows,
   projectSessionLiveness,
@@ -11,20 +10,22 @@ import { BotConversation } from "./BotConversation";
 import { BotResponsibilityCard } from "./BotResponsibilityCard";
 import { ResponsibilityFormCard } from "./BotsPageForms";
 import {
-  buildBotCreateBody,
-  emptyBotCreateForm,
-  emptyResponsibilityForm,
-} from "./bots-page-model";
-import type {
-  BotCreateFormValues,
-  ResponsibilityFormValues,
-} from "./bots-page-model";
+  BotLoadingState,
+  BotsEmptyState,
+  BotsErrorState,
+} from "./BotsPageStates";
+import { useBotsPageController } from "./use-bots-page-controller";
 
 // Bots page. Props only — no store/RPC/session access beyond the caller-
 // supplied `bridge`/`scope` (V2 mounts and owns the single App mount point).
+// Composition follows the fork's BotsPage.tsx: header (Back, title, refresh,
+// New Bot), action-error alert, create form, then loading / error / list /
+// empty states, with the responsibility form under the selected bot.
 // Styling: admitted main.css tokens + ui primitives, monochrome and quiet.
-// List rows are the fork's BotResponsibilityCard chrome (ported); selecting
-// a bot opens a detail view (Back button, card, conversation, add form).
+// Selecting a bot opens a detail view (Back button, card, conversation, add
+// form) — the fork's selection ring has no detail to open into, so selection
+// navigates here instead; the controller semantics (selection, reload after
+// mutations, error alerts, Escape) are the fork's.
 // WHY the wording rules: a stored session is a link, never liveness —
 // liveness renders only from the caller's observed verdicts; orphaned
 // history keeps explicit null-join markers because orphaned evidence is
@@ -33,12 +34,6 @@ import type {
 // `bridge`+`scope` both being present — the same "no control without a real
 // capability behind it" rule the run button already followed, so a caller
 // that supplies neither renders the exact pre-R2-S read-only view.
-
-function mintRequestId(prefix: string): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${prefix}-${Date.now()}`;
-}
 
 export function BotsPanel({
   snapshot,
@@ -60,132 +55,41 @@ export function BotsPanel({
   // whose bridge predates R9-C renders the read-only header (same rule
   // the responsibility controls already follow).
   const canDeleteBot = Boolean(bridge?.botDelete && scope);
-  const [localSnapshot, setLocalSnapshot] = useState<BotsPanelSnapshot | null>(
-    null,
-  );
-  useEffect(() => {
-    setLocalSnapshot(null);
-  }, [snapshot]);
-  const effective = localSnapshot ?? snapshot;
-
-  async function refreshSnapshot() {
-    if (!bridge?.botSnapshot || !scope) return;
-    const response = await bridge.botSnapshot(scope);
-    if (response.ok) {
-      setLocalSnapshot({
-        bots: response.result.bots,
-        history: response.result.history,
-      });
-    }
-  }
-
-  const [loading, setLoading] = useState(false);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createForm, setCreateForm] =
-    useState<BotCreateFormValues>(emptyBotCreateForm());
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
-  const [showResponsibilityForm, setShowResponsibilityForm] = useState(false);
-  const [responsibilityForm, setResponsibilityForm] =
-    useState<ResponsibilityFormValues>(emptyResponsibilityForm());
-  const [responsibilityBusy, setResponsibilityBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  async function refresh() {
-    setLoading(true);
-    await refreshSnapshot();
-    setLoading(false);
-  }
-
-  async function submitCreate() {
-    if (!bridge?.botCreate || !scope) return;
-    setCreateBusy(true);
-    setCreateError(null);
-    const response = await bridge.botCreate({
-      ...scope,
-      requestId: mintRequestId("bot-create"),
-      body: buildBotCreateBody(createForm),
-    });
-    setCreateBusy(false);
-    if (!response.ok) {
-      setCreateError(response.error.message);
-      return;
-    }
-    setShowCreateForm(false);
-    setCreateForm(emptyBotCreateForm());
-    setSelectedBotId(response.result.id);
-    await refreshSnapshot();
-  }
-
-  async function submitResponsibility(botId: string) {
-    if (!bridge?.botResponsibilityCreate || !scope) return;
-    setResponsibilityBusy(true);
-    setActionError(null);
-    const response = await bridge.botResponsibilityCreate({
-      ...scope,
-      requestId: mintRequestId("bot-responsibility"),
-      botId,
-      name: responsibilityForm.name.trim(),
-      schedule: responsibilityForm.cron.trim(),
-      prompt: responsibilityForm.prompt,
-    });
-    setResponsibilityBusy(false);
-    if (!response.ok) {
-      setActionError(response.error.message);
-      return;
-    }
-    setShowResponsibilityForm(false);
-    setResponsibilityForm(emptyResponsibilityForm());
-    await refreshSnapshot();
-  }
-
-  async function deleteResponsibility(botId: string, responsibilityId: string) {
-    if (!bridge?.botResponsibilityDelete || !scope) return;
-    setActionError(null);
-    const response = await bridge.botResponsibilityDelete({
-      ...scope,
-      requestId: mintRequestId("bot-responsibility"),
-      botId,
-      responsibilityId,
-    });
-    if (!response.ok) {
-      setActionError(response.error.message);
-      return;
-    }
-    await refreshSnapshot();
-  }
-
-  async function deleteBot(botId: string) {
-    if (!bridge?.botDelete || !scope) return;
-    setActionError(null);
-    const response = await bridge.botDelete({
-      ...scope,
-      requestId: mintRequestId("bot-delete"),
-      botId,
-    });
-    if (!response.ok) {
-      setActionError(response.error.message);
-      return;
-    }
-    if (selectedBotId === botId) {
-      setSelectedBotId(null);
-      setShowResponsibilityForm(false);
-    }
-    await refreshSnapshot();
-  }
-
-  function closeDetail() {
-    setSelectedBotId(null);
-    setShowResponsibilityForm(false);
-    setActionError(null);
-  }
+  const controller = useBotsPageController({
+    snapshot,
+    bridge,
+    scope,
+    onClose,
+    onRunResponsibility,
+  });
+  const {
+    effective,
+    loading,
+    loadError,
+    showCreateForm,
+    setShowCreateForm,
+    createForm,
+    setCreateForm,
+    createBusy,
+    createError,
+    setSelectedBotId,
+    selectedBot,
+    showResponsibilityForm,
+    setShowResponsibilityForm,
+    responsibilityForm,
+    setResponsibilityForm,
+    responsibilityBusy,
+    actionError,
+    refresh,
+    submitCreate,
+    submitResponsibility,
+    deleteResponsibility,
+    deleteBot,
+    runResponsibility,
+    closeDetail,
+  } = controller;
 
   const botRows = projectBotRows(effective.bots);
-  const selectedBot =
-    selectedBotId !== null
-      ? (effective.bots.find((bot) => bot.id === selectedBotId) ?? null)
-      : null;
 
   return (
     <section
@@ -214,7 +118,7 @@ export function BotsPanel({
         {canMutate && (
           <Button
             variant="ghost"
-            size="icon"
+            size="icon-sm"
             aria-label="Refresh Bots"
             disabled={loading}
             onClick={() => void refresh()}
@@ -235,7 +139,7 @@ export function BotsPanel({
           </Button>
         )}
       </header>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-sleek">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-5 sm:p-7">
           {createError && (
             <p role="alert" className="text-sm text-destructive">
@@ -274,6 +178,9 @@ export function BotsPanel({
                 onDeleteBot={
                   canDeleteBot ? () => void deleteBot(selectedBot.id) : undefined
                 }
+                onOpenSession={
+                  canMutate ? () => setSelectedBotId(selectedBot.id) : undefined
+                }
                 onAddResponsibility={
                   canEditResponsibilities
                     ? () => setShowResponsibilityForm(true)
@@ -291,10 +198,7 @@ export function BotsPanel({
                 onRunResponsibility={
                   onRunResponsibility
                     ? (responsibilityId) =>
-                        onRunResponsibility({
-                          botId: selectedBot.id,
-                          responsibilityId,
-                        })
+                        runResponsibility(selectedBot.id, responsibilityId)
                     : undefined
                 }
               />
@@ -332,30 +236,16 @@ export function BotsPanel({
               onCancel={() => setShowCreateForm(false)}
               onSubmit={() => void submitCreate()}
             />
+          ) : loading ? (
+            <BotLoadingState />
+          ) : loadError && botRows.length === 0 ? (
+            <BotsErrorState error={loadError} onRetry={() => void refresh()} />
           ) : botRows.length === 0 ? (
-            <div
-              data-testid="bots-empty"
-              className="rounded-lg border border-dashed border-border px-5 py-10 text-center"
-            >
-              <Bot
-                className="mx-auto mb-3 size-8 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <p className="text-sm font-medium text-foreground">No Bots yet</p>
-              <p className="mx-auto mt-1 max-w-lg text-sm leading-6 text-muted-foreground">
-                Give a character a purpose. Its identity and memory stay with
-                you across sessions.
-              </p>
-              {canMutate && (
-                <Button
-                  className="mt-4"
-                  onClick={() => setShowCreateForm(true)}
-                >
-                  <Plus />
-                  Create Bot
-                </Button>
-              )}
-            </div>
+            <BotsEmptyState
+              onCreate={
+                canMutate ? () => setShowCreateForm(true) : undefined
+              }
+            />
           ) : (
             <div className="space-y-4" role="list" aria-label="Bots">
               {botRows.map((row) => {
@@ -398,10 +288,7 @@ export function BotsPanel({
                       onRunResponsibility={
                         onRunResponsibility
                           ? (responsibilityId) =>
-                              onRunResponsibility({
-                                botId: row.id,
-                                responsibilityId,
-                              })
+                              runResponsibility(row.id, responsibilityId)
                           : undefined
                       }
                     />

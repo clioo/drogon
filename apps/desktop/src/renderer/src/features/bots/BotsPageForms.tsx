@@ -1,16 +1,25 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/bots/BotsPageForms.tsx (`ResponsibilityFormCard`).
-   Adapters for this repo: the source's Card primitives do not exist here
-   (components/ui has button/input only), so the card renders as a bordered
-   section with admitted tokens; the trigger-type/reactive branch (event key,
-   project id, RRULE/dtstart schedule builder) is omitted -- this repo's
+   src/renderer/src/components/bots/BotsPageForms.tsx (`ResponsibilityFormCard`)
+   onto the Card primitives the fork uses.
+   Adapters for this repo: the source's trigger-type/reactive branch (event
+   key, project id, RRULE/dtstart schedule builder) is omitted — this repo's
    `bot.responsibility_create` creates scheduled (cron) responsibilities
    only, and the cron field reuses the exact helper the Automations page
    uses (`previewCronFires`) so the form can never promise a schedule the
-   daemon would not fire. `BotFormCard` stays owned by BotCreationForm. */
+   daemon would not fire. The `data-testid` and `aria-label` hooks stay:
+   the packaged probe and the contract tests address the form through them.
+   `BotFormCard` stays owned by BotCreationForm. */
 
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Textarea } from "../../components/ui/textarea";
 import { previewCronFires } from "../automations/automation-cron-preview";
 import type { ResponsibilityFormValues } from "./bots-page-model";
 import { isResponsibilityFormReady } from "./bots-page-model";
@@ -35,18 +44,20 @@ export function ResponsibilityFormCard({
   const preview = previewCronFires(form.cron, Date.now());
   const ready = isResponsibilityFormReady(form);
   return (
-    <section
+    <Card
+      className="mt-4"
       aria-label="Add responsibility"
       data-testid="responsibility-form"
-      className="mt-4 rounded-md border border-border bg-background p-4"
     >
-      <h3 className="text-sm font-medium">Add responsibility</h3>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Scheduled work is persisted as a Bot-owned automation and uses the
-        existing scheduler.
-      </p>
-      <div className="mt-3 flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-sm">
+      <CardHeader className="border-b">
+        <CardTitle className="text-sm">Add responsibility</CardTitle>
+        <CardDescription>
+          Scheduled work is persisted as a Bot-owned automation and uses the
+          existing scheduler.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+        <label className="space-y-1.5 text-xs font-medium">
           Name
           <Input
             value={form.name}
@@ -55,7 +66,7 @@ export function ResponsibilityFormCard({
             onChange={(event) => onChange({ name: event.target.value })}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="space-y-1.5 text-xs font-medium">
           Cron expression (UTC)
           <Input
             value={form.cron}
@@ -63,16 +74,17 @@ export function ResponsibilityFormCard({
             placeholder="* * * * *"
             onChange={(event) => onChange({ cron: event.target.value })}
           />
-          <span className="text-muted-foreground">
+          <span className="block font-normal text-muted-foreground">
             Standard 5-field cron in UTC: minute hour day month weekday.
             Every minute is <span className="font-mono">* * * * *</span>.
           </span>
         </label>
-        <div className="text-sm" data-testid="responsibility-cron-preview">
+        <div
+          className="text-xs text-muted-foreground sm:col-span-2"
+          data-testid="responsibility-cron-preview"
+        >
           {preview === null ? (
-            <span className="text-muted-foreground">
-              Next runs: preview unavailable for this expression.
-            </span>
+            <span>Next runs: preview unavailable for this expression.</span>
           ) : (
             <span>
               Next runs:{" "}
@@ -80,17 +92,16 @@ export function ResponsibilityFormCard({
             </span>
           )}
         </div>
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="space-y-1.5 text-xs font-medium sm:col-span-2">
           Prompt
-          <textarea
-            className="rounded-md border border-input bg-background px-2 py-1"
-            rows={4}
+          <Textarea
             value={form.prompt}
+            rows={4}
             placeholder="Describe the work to perform."
             onChange={(event) => onChange({ prompt: event.target.value })}
           />
         </label>
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 sm:col-span-2">
           <Button variant="ghost" onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
@@ -98,8 +109,8 @@ export function ResponsibilityFormCard({
             {busy ? "Saving…" : "Save responsibility"}
           </Button>
         </div>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }
 
