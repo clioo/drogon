@@ -13,6 +13,7 @@ import {
 } from "../shared/shell-contract";
 import type { Result } from "../shared/session-contract";
 import type { ShellOpenExternalResult } from "../shared/shell-contract";
+import { suppressForegroundSideEffect } from "./background-test-mode";
 
 
 // Worktree card menu actions (R9-A): Reveal in Finder / Open in editor go
@@ -58,6 +59,9 @@ export async function dispatchOpenExternalRequest(
   open: ShellOpen = (url) => shell.openExternal(url),
 ): Promise<Result<ShellOpenExternalResult>> {
   if (!isExternalUrlAllowed(input)) return { ...invalid };
+  // Test instances never raise the system browser over the user.
+  if (suppressForegroundSideEffect("openExternal", input))
+    return { ok: true, result: { opened: true } };
   try {
     await open(input);
     return { ok: true, result: { opened: true } };
@@ -101,9 +105,12 @@ export function registerShellBridge(
       const parsed = shellBridgeSchemas[method].safeParse(input);
       if (!parsed.success) return { ...invalid };
       if (method === "showItemInFolder") {
-        shell.showItemInFolder(parsed.data.path);
+        if (!suppressForegroundSideEffect("showItemInFolder", parsed.data.path))
+          shell.showItemInFolder(parsed.data.path);
         return { ok: true as const, result: { shown: true } };
       }
+      if (suppressForegroundSideEffect("openPath", parsed.data.path))
+        return { ok: true as const, result: { opened: true } };
       const error = await shell.openPath(parsed.data.path);
       if (error)
         return {
