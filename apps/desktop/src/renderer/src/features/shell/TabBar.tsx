@@ -1,12 +1,16 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/tab-bar/tab-bar-surface.tsx (strip chrome,
-   tab container/width recipe hooks) and SortableTab.tsx (tab root chrome:
-   border/state classes, active indicator, close affordance). Adapter: no
-   drag reorder, no rename, no context menu, no pin (out of MVP scope) —
-   tabs keep this repo's roving-tabindex keyboard order and role=tab
-   semantics; state comes from session.agentState; browser pages render
-   with the BrowserStripTab chrome. */
-import { RefreshCw, X } from "lucide-react";
+   overflow chevrons) and SortableTab.tsx (tab root chrome: border/state
+   classes, active indicator, close affordance). Adapter: the strip holds
+   terminal sessions plus browser pages (no editor/simulator/agent rows);
+   order/pin/rename state is owned by App through tab-order.ts instead of
+   the zustand tab slice; keyboard reorder runs on Ctrl/Cmd+arrows so the
+   plain-arrow roving-tabindex model stays intact. */
+import { useLayoutEffect, useRef, useState } from "react";
+import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import type { DragEndEvent, DragOverEvent } from "@dnd-kit/core";
+import { SortableContext } from "@dnd-kit/sortable";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import type {
   Harness,
   HarnessLaunchInput,
@@ -22,15 +26,23 @@ import {
 import { agentStateOf } from "./agent-state";
 import { AgentStateIcon } from "./AgentStateIcon";
 import { ShellIconButton } from "./ShellIconButton";
-import { BrowserStripTab } from "../browser/BrowserStripTab";
+import { SortableTab, TAB_STRIP_DRAG_ACTIVATION_PX } from "./SortableTab";
 import { TabCreateMenu } from "./TabCreateMenu";
+import { SortableBrowserTab } from "./tab-strip/SortableBrowserTab";
+import type { DropIndicator } from "./tab-chrome";
 import {
-  ACTIVE_TAB_INDICATOR_CLASSES,
-  getTabRootStateClasses,
-  getTabStripBorderClasses,
-  TAB_CONTAINER_WIDTH_CLASSES,
-  TAB_LABEL_WIDTH_CLASSES,
-} from "./tab-chrome";
+  moveTabOrder,
+  partitionPinnedOrder,
+  reconcileTabOrder,
+  resolveTabTitle,
+  shiftTabOrder,
+} from "./tab-order";
+import {
+  computeTabStripOverflow,
+  scrollTabStripByStep,
+  tabStripFadeClass,
+  type TabStripOverflowState,
+} from "./tab-strip/tab-strip-overflow";
 
 type StripEntry =
   | { kind: "session"; id: string }
@@ -56,6 +68,16 @@ export function TabBar({
   closeDisabled,
   retryDisabled,
   createDisabled,
+  stripOrder,
+  pinnedIds,
+  customTitles,
+  onOrderChange,
+  onTogglePin,
+  onCloseOthers,
+  onCloseToRight,
+  onCloseToLeft,
+  onCommitTitle,
+  onCopyText,
   onSelectSession,
   onSelectBrowserTab,
   onCloseSession,
@@ -81,6 +103,17 @@ export function TabBar({
   closeDisabled: boolean;
   retryDisabled: boolean;
   createDisabled: boolean;
+  /** Persisted strip order for this workspace (reconciled with live ids). */
+  stripOrder: string[];
+  pinnedIds: string[];
+  customTitles: Record<string, string>;
+  onOrderChange: (order: string[]) => void;
+  onTogglePin: (id: string) => void;
+  onCloseOthers: (id: string) => void;
+  onCloseToRight: (id: string) => void;
+  onCloseToLeft: (id: string) => void;
+  onCommitTitle: (id: string, title: string | null) => void;
+  onCopyText: (text: string) => void;
   onSelectSession: (id: string) => void;
   onSelectBrowserTab: (tabId: string) => void;
   onCloseSession: (session: Session) => void;
@@ -94,10 +127,99 @@ export function TabBar({
   onOpenMentu?: () => void;
   mentuAvailable?: boolean;
 }) {
-  const entries: StripEntry[] = [
-    ...sessions.map((item) => ({ kind: "session" as const, id: item.id })),
-    ...browserTabs.map((tab) => ({ kind: "browser" as const, id: tab.tabId })),
-  ];
+  const sessionById = new Map(sessions.map((item) => [item.id, item]));
+  const browserById = new Map(browserTabs.map((tab) => [tab.tabId, tab]));
+  const ordered = partitionPinnedOrder(
+    reconcileTabOrder(
+      stripOrder,
+      sessions.map((item) => item.id),
+      browserTabs.map((tab) => tab.tabId),
+    ),
+    pinnedIds,
+  );
+  const entries: StripEntry[] = ordered.flatMap((id): StripEntry[] => {
+    if (sessionById.has(id)) return [{ kind: "session", id }];
+    if (browserById.has(id)) return [{ kind: "browser", id }];
+    return [];
+  });
+  const pinned = new Set(pinnedIds);
+  const [dropIndicatorById, setDropIndicatorById] = useState<
+    Map<string, DropIndicator>
+  >(new Map());
+  const tabStripRef = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState<TabStripOverflowState>({
+    hasOverflow: false,
+    canScrollStart: false,
+    canScrollEnd: false,
+  });
+
+  // Why: a distance constraint (not delay) so a plain click never becomes
+  // a drag; matches the fork's TAB_DRAG_ACTIVATION_DISTANCE_PX.
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: TAB_STRIP_DRAG_ACTIVATION_PX },
+    }),
+  );
+
+  useLayoutEffect(() => {
+    const el = tabStripRef.current;
+    if (!el) return;
+    const update = () => {
+      const next = computeTabStripOverflow(el);
+      setOverflow((previous) =>
+        previous.hasOverflow === next.hasOverflow &&
+        previous.canScrollStart === next.canScrollStart &&
+        previous.canScrollEnd === next.canScrollEnd
+          ? previous
+          : next,
+      );
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+        event.preventDefault();
+        el.scrollLeft += event.deltaY;
+        update();
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      el.removeEventListener("wheel", onWheel);
+      observer.disconnect();
+    };
+  }, [entries.length]);
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const activeId = String(event.active.id);
+    const overId = event.over ? String(event.over.id) : null;
+    if (!overId || activeId === overId) {
+      setDropIndicatorById(new Map());
+      return;
+    }
+    const from = ordered.indexOf(activeId);
+    const to = ordered.indexOf(overId);
+    if (from === -1 || to === -1) {
+      setDropIndicatorById(new Map());
+      return;
+    }
+    setDropIndicatorById(
+      new Map([[overId, from < to ? "right" : "left"]]),
+    );
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setDropIndicatorById(new Map());
+    const activeId = String(event.active.id);
+    const overId = event.over ? String(event.over.id) : null;
+    if (!overId || activeId === overId) return;
+    const next = moveTabOrder(ordered, activeId, overId);
+    onOrderChange(next);
+  };
+
   const focusEntry = (entry: StripEntry) => {
     const selector =
       entry.kind === "session"
@@ -105,17 +227,45 @@ export function TabBar({
         : `[data-tab-id="${CSS.escape(entry.id)}"]`;
     document.querySelector<HTMLElement>(selector)?.focus();
   };
+  const selectEntry = (entry: StripEntry) => {
+    if (entry.kind === "session") onSelectSession(entry.id);
+    else onSelectBrowserTab(entry.id);
+  };
   const stepEntry = (currentId: string, delta: number) => {
     if (entries.length === 0) return;
     const at = entries.findIndex((entry) => entry.id === currentId);
     const next =
       entries[(at < 0 ? (delta < 0 ? 0 : -1) : at + delta + entries.length) %
         entries.length];
-    if (next.kind === "session") onSelectSession(next.id);
-    else onSelectBrowserTab(next.id);
+    selectEntry(next);
     focusEntry(next);
   };
+  const reorderEntry = (currentId: string, delta: number) => {
+    const next = shiftTabOrder(ordered, currentId, delta);
+    if (next.join() === ordered.join()) return;
+    onOrderChange(next);
+    // Why: no refocus needed — the moved tab keeps its React key, so the
+    // focused DOM node survives the reorder with focus intact. A deferred
+    // focus would also steal focus from an open context menu.
+  };
   const stripKeyDown = (event: React.KeyboardEvent, currentId: string) => {
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+      event.preventDefault();
+      reorderEntry(currentId, event.key === "ArrowRight" ? 1 : -1);
+      return;
+    }
+    if (mod && (event.key === "Home" || event.key === "End")) {
+      event.preventDefault();
+      const at = ordered.indexOf(currentId);
+      if (at === -1) return;
+      const next = [...ordered];
+      const [moved] = next.splice(at, 1);
+      if (event.key === "Home") next.unshift(moved);
+      else next.push(moved);
+      onOrderChange(next);
+      return;
+    }
     if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
       event.preventDefault();
       stepEntry(currentId, event.key === "ArrowRight" ? 1 : -1);
@@ -126,8 +276,7 @@ export function TabBar({
       const next =
         entries[event.key === "Home" ? 0 : entries.length - 1];
       if (!next) return;
-      if (next.kind === "session") onSelectSession(next.id);
-      else onSelectBrowserTab(next.id);
+      selectEntry(next);
       focusEntry(next);
     }
   };
@@ -142,107 +291,158 @@ export function TabBar({
       // Why: preload routes native OS drops by this marker — only the tab strip opens files in the editor, not terminal panes.
       data-native-file-drop-target="editor"
     >
-      {/* Why: no-drag lets tab interactions work inside the titlebar's drag region (outer container stays window-draggable). */}
-      <div className="group/tab-strip relative flex min-h-0 min-w-0 max-w-full flex-[0_1_auto]">
-        <div
-          className="terminal-tab-strip flex h-full min-w-0 max-w-full flex-1 items-stretch overflow-x-auto overflow-y-hidden border-r border-border/70"
-          role="tablist"
-          aria-label="Sessions"
+      {overflow.hasOverflow && (
+        <button
+          type="button"
+          aria-label="Scroll tabs left"
+          aria-disabled={!overflow.canScrollStart}
+          disabled={!overflow.canScrollStart}
+          className="mx-0.5 my-auto h-6 w-5 shrink-0 text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:opacity-35"
+          onClick={() => {
+            const el = tabStripRef.current;
+            if (el) scrollTabStripByStep(el, "start");
+          }}
         >
-          {sessions.map((item, index) => {
-            const isActive =
-              item.id === activeSessionId && activeBrowserTabId === null;
-            // Accessible name keeps the legacy "<label> <verdict>" shape
-            // (the verdict text moved off the visible row into the name so
-            // the strip matches the source chrome without losing the
-            // screen-reader state both probes assert on).
-            const text = recoveryTabLabel({
-              label: sessionLabel(item, harnesses),
-              verdict: item.verdict,
-              id: item.id,
-              incarnation: item.incarnation,
-            });
-            return (
-              <div
-                key={item.id}
-                className={TAB_CONTAINER_WIDTH_CLASSES}
-              >
-                <div
-                  className={`group relative flex items-center h-full px-1.5 text-xs cursor-pointer select-none outline-none focus:outline-none focus-visible:outline-none ${getTabStripBorderClasses(index < entries.length - 1)} ${getTabRootStateClasses(isActive)}`}
-                  role="tab"
-                  id={`session-tab-${item.id}`}
-                  data-tab-id={item.id}
-                  data-active={isActive ? "true" : "false"}
-                  aria-selected={isActive}
-                  aria-controls="active-session-panel"
-                  aria-label={`${text} ${item.verdict}`}
-                  tabIndex={isActive ? 0 : -1}
-                  onKeyDown={(event) => stripKeyDown(event, item.id)}
-                  onClick={() => onSelectSession(item.id)}
-                >
-                  {isActive && (
-                    <span
-                      className={ACTIVE_TAB_INDICATOR_CLASSES}
-                      aria-hidden
+          <ChevronLeft className="size-3.5" />
+        </button>
+      )}
+      {/* Why: no strategy stops dnd-kit animating siblings, so tabs stay anchored during drag; only the insertion bar moves. */}
+      <DndContext
+        sensors={sensors}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setDropIndicatorById(new Map())}
+      >
+        {/* Why: no-drag lets tab interactions work inside the titlebar's drag region (outer container stays window-draggable). */}
+        <SortableContext items={ordered}>
+          <div className="group/tab-strip relative flex min-h-0 min-w-0 max-w-full flex-[0_1_auto]">
+            <div
+              ref={tabStripRef}
+              className={[
+                "terminal-tab-strip flex h-full min-w-0 max-w-full flex-1 items-stretch overflow-x-auto overflow-y-hidden border-r border-border/70",
+                tabStripFadeClass(overflow),
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              role="tablist"
+              aria-label="Sessions"
+            >
+              {entries.map((entry, index) => {
+                const hasTabsToRight = index < entries.length - 1;
+                const hasTabsToLeft = index > 0;
+                if (entry.kind === "browser") {
+                  const tab = browserById.get(entry.id);
+                  if (!tab) return null;
+                  return (
+                    <SortableBrowserTab
+                      key={tab.tabId}
+                      tab={tab}
+                      isActive={tab.tabId === activeBrowserTabId}
+                      isPinned={pinned.has(tab.tabId)}
+                      hasTabsToRight={hasTabsToRight}
+                      hasTabsToLeft={hasTabsToLeft}
+                      tabCount={entries.length}
+                      dropIndicator={dropIndicatorById.get(tab.tabId)}
+                      onActivate={() => onSelectBrowserTab(tab.tabId)}
+                      onClose={() => onCloseBrowserTab(tab.tabId)}
+                      onCloseOthers={() => onCloseOthers(tab.tabId)}
+                      onCloseToRight={() => onCloseToRight(tab.tabId)}
+                      onCloseToLeft={() => onCloseToLeft(tab.tabId)}
+                      onTogglePin={() => onTogglePin(tab.tabId)}
+                      onCopyUrl={() => onCopyText(tab.url)}
+                      onStripKeyDown={(event) =>
+                        stripKeyDown(event, tab.tabId)
+                      }
                     />
-                  )}
-                  <AgentStateIcon state={agentStateOf(item)} size={13} />
-                  <span className={`${TAB_LABEL_WIDTH_CLASSES} mr-1`}>
-                    {text}
-                  </span>
-                  {recoveryActionFor(item.verdict, {
+                  );
+                }
+                const item = sessionById.get(entry.id);
+                if (!item) return null;
+                const isActive =
+                  item.id === activeSessionId && activeBrowserTabId === null;
+                // Accessible name keeps the legacy "<label> <verdict>" shape
+                // (the verdict text moved off the visible row into the name
+                // so the strip matches the source chrome without losing the
+                // screen-reader state both probes assert on).
+                const defaultText = recoveryTabLabel({
+                  label: sessionLabel(item, harnesses),
+                  verdict: item.verdict,
+                  id: item.id,
+                  incarnation: item.incarnation,
+                });
+                const text = resolveTabTitle(
+                  item.id,
+                  defaultText,
+                  customTitles,
+                );
+                const retryable =
+                  recoveryActionFor(item.verdict, {
                     // A confirmed close removes the tab, so a still-listed
                     // exited session is one the user did not request.
                     exitExpected: false,
-                  }).kind === "retry-connection" && (
-                    <ShellIconButton
-                      label="Retry connection"
-                      disabled={retryDisabled}
-                      onClick={onRetry}
-                    >
-                      <RefreshCw />
-                    </ShellIconButton>
-                  )}
-                  <button
-                    type="button"
-                    aria-label={`Close ${sessionLabel(item, harnesses)} session`}
-                    disabled={closeDisabled}
-                    className={`relative z-10 flex items-center justify-center w-4 h-4 rounded-sm shrink-0 ${
-                      isActive
-                        ? "text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:text-foreground focus-visible:bg-muted"
-                        : "text-transparent group-hover:text-muted-foreground hover:!text-foreground hover:!bg-muted focus-visible:!text-foreground focus-visible:!bg-muted"
-                    }`}
-                    onPointerDown={(event) => {
-                      if (event.button === 0) event.stopPropagation();
+                  }).kind === "retry-connection";
+                return (
+                  <SortableTab
+                    key={item.id}
+                    id={item.id}
+                    title={text}
+                    ariaLabel={`${text} ${item.verdict}`}
+                    closeLabel={`Close ${sessionLabel(item, harnesses)} session`}
+                    icon={
+                      <AgentStateIcon state={agentStateOf(item)} size={13} />
+                    }
+                    retry={
+                      retryable ? (
+                        <ShellIconButton
+                          label="Retry connection"
+                          disabled={retryDisabled}
+                          onClick={onRetry}
+                        >
+                          <RefreshCw />
+                        </ShellIconButton>
+                      ) : null
+                    }
+                    isActive={isActive}
+                    isPinned={pinned.has(item.id)}
+                    hasTabsToRight={hasTabsToRight}
+                    hasTabsToLeft={hasTabsToLeft}
+                    tabCount={entries.length}
+                    closeDisabled={closeDisabled}
+                    dropIndicator={dropIndicatorById.get(item.id)}
+                    onActivate={onSelectSession}
+                    onClose={(id) => {
+                      const session = sessionById.get(id);
+                      if (session) onCloseSession(session);
                     }}
-                    onMouseDown={(event) => {
-                      if (event.button === 0) event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onCloseSession(item);
-                    }}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-          {browserTabs.map((tab, offset) => (
-            <BrowserStripTab
-              key={tab.tabId}
-              tab={tab}
-              isActive={tab.tabId === activeBrowserTabId}
-              hasTabsToRight={sessions.length + offset < entries.length - 1}
-              onActivate={() => onSelectBrowserTab(tab.tabId)}
-              onClose={() => onCloseBrowserTab(tab.tabId)}
-              onStripKeyDown={(event) => stripKeyDown(event, tab.tabId)}
-            />
-          ))}
-        </div>
-      </div>
+                    onCloseOthers={onCloseOthers}
+                    onCloseToRight={onCloseToRight}
+                    onCloseToLeft={onCloseToLeft}
+                    onTogglePin={onTogglePin}
+                    onCommitTitle={onCommitTitle}
+                    onCopyId={onCopyText}
+                    onStripKeyDown={stripKeyDown}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </SortableContext>
+      </DndContext>
+      {overflow.hasOverflow && (
+        <button
+          type="button"
+          aria-label="Scroll tabs right"
+          aria-disabled={!overflow.canScrollEnd}
+          disabled={!overflow.canScrollEnd}
+          className="mx-0.5 my-auto h-6 w-5 shrink-0 text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:opacity-35"
+          onClick={() => {
+            const el = tabStripRef.current;
+            if (el) scrollTabStripByStep(el, "end");
+          }}
+        >
+          <ChevronRight className="size-3.5" />
+        </button>
+      )}
       <TabCreateMenu
         workspaceId={workspaceId}
         hostId={hostId}

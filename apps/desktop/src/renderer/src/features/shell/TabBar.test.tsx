@@ -1,0 +1,220 @@
+// @vitest-environment jsdom
+// Tab strip interactions: pinned-first render order, Ctrl/Cmd+arrow keyboard
+// reorder, plain-arrow navigation preserved, context menu entries in source
+// order, and rename commit.
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { Tooltip } from "radix-ui";
+import type { Session } from "../../../../shared/session-contract";
+import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
+import { TabBar } from "./TabBar";
+
+beforeEach(installRadixJsdomStubs);
+afterEach(cleanup);
+
+function session(id: string): Session {
+  return {
+    id,
+    workspaceId: "ws",
+    hostId: "host",
+    incarnation: "1",
+    command: `cmd-${id}`,
+    args: [],
+    cols: 80,
+    rows: 24,
+    verdict: "live",
+    exitCode: null,
+    createdAt: "2026-09-08T00:00:00Z",
+  };
+}
+
+function renderStrip(overrides: {
+  sessions?: Session[];
+  stripOrder?: string[];
+  pinnedIds?: string[];
+  customTitles?: Record<string, string>;
+  onOrderChange?: (order: string[]) => void;
+  onCommitTitle?: (id: string, title: string | null) => void;
+  onTogglePin?: (id: string) => void;
+}) {
+  const onOrderChange = overrides.onOrderChange ?? (() => {});
+  const onCommitTitle = overrides.onCommitTitle ?? (() => {});
+  // Why: App owns the single Tooltip.Provider; the strip needs one here too.
+  return render(
+    <Tooltip.Provider>
+    <TabBar
+      sessions={overrides.sessions ?? [session("a"), session("b"), session("c")]}
+      activeSessionId="a"
+      browserTabs={[]}
+      activeBrowserTabId={null}
+      harnesses={[]}
+      workspaceId="ws"
+      hostId="host"
+      newTerminalShortcut=""
+      newBrowserShortcut=""
+      closeDisabled={false}
+      retryDisabled={false}
+      createDisabled={false}
+      stripOrder={overrides.stripOrder ?? []}
+      pinnedIds={overrides.pinnedIds ?? []}
+      customTitles={overrides.customTitles ?? {}}
+      onOrderChange={onOrderChange}
+      onTogglePin={overrides.onTogglePin ?? (() => {})}
+      onCloseOthers={() => {}}
+      onCloseToRight={() => {}}
+      onCloseToLeft={() => {}}
+      onCommitTitle={onCommitTitle}
+      onCopyText={() => {}}
+      onSelectSession={() => {}}
+      onSelectBrowserTab={() => {}}
+      onCloseSession={() => {}}
+      onCloseBrowserTab={() => {}}
+      onRetry={() => {}}
+      onCreateTerminal={() => {}}
+      onLaunchHarness={() => Promise.resolve(false)}
+      onNewBrowserTab={() => {}}
+    />
+    </Tooltip.Provider>,
+  );
+}
+
+function tabIds(): string[] {
+  return screen
+    .getAllByRole("tab")
+    .map((tab) => tab.getAttribute("data-tab-id") ?? "");
+}
+
+describe("TabBar strip order", () => {
+  it("renders pinned tabs first in stored relative order", () => {
+    renderStrip({ pinnedIds: ["c"] });
+    expect(tabIds()).toEqual(["c", "a", "b"]);
+    expect(
+      screen
+        .getByRole("tab", { name: /cmd-c/ })
+        .getAttribute("data-pinned"),
+    ).toBe("true");
+  });
+
+  it("follows the stored order and shows custom titles", () => {
+    renderStrip({
+      stripOrder: ["c", "b", "a"],
+      customTitles: { b: "db" },
+    });
+    expect(tabIds()).toEqual(["c", "b", "a"]);
+    expect(screen.getByRole("tab", { name: /db/ })).not.toBeNull();
+  });
+
+  it("reorders with Ctrl+Arrow without moving selection", () => {
+    const onOrderChange = vi.fn();
+    renderStrip({ onOrderChange });
+    const first = screen.getAllByRole("tab")[0];
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowRight", ctrlKey: true });
+    expect(onOrderChange).toHaveBeenCalledWith(["b", "a", "c"]);
+  });
+
+  it("keeps plain-arrow roving navigation (accept-desktop contract)", () => {
+    const onSelect = vi.fn();
+    const { unmount } = renderStrip({});
+    unmount();
+    render(
+      <Tooltip.Provider>
+      <TabBar
+        sessions={[session("a"), session("b")]}
+        activeSessionId="a"
+        browserTabs={[]}
+        activeBrowserTabId={null}
+        harnesses={[]}
+        workspaceId="ws"
+        hostId="host"
+        newTerminalShortcut=""
+        newBrowserShortcut=""
+        closeDisabled={false}
+        retryDisabled={false}
+        createDisabled={false}
+        stripOrder={[]}
+        pinnedIds={[]}
+        customTitles={{}}
+        onOrderChange={() => {}}
+        onTogglePin={() => {}}
+        onCloseOthers={() => {}}
+        onCloseToRight={() => {}}
+        onCloseToLeft={() => {}}
+        onCommitTitle={() => {}}
+        onCopyText={() => {}}
+        onSelectSession={onSelect}
+        onSelectBrowserTab={() => {}}
+        onCloseSession={() => {}}
+        onCloseBrowserTab={() => {}}
+        onRetry={() => {}}
+        onCreateTerminal={() => {}}
+        onLaunchHarness={() => Promise.resolve(false)}
+        onNewBrowserTab={() => {}}
+      />
+      </Tooltip.Provider>,
+    );
+    const first = screen.getAllByRole("tab")[0];
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(onSelect).toHaveBeenCalledWith("b");
+  });
+});
+
+describe("TabBar context menu", () => {
+  it("opens with the source's entries in order", async () => {
+    renderStrip({});
+    const first = screen.getAllByRole("tab")[0];
+    fireEvent.contextMenu(first);
+    const items = await screen.findAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Pin Tab",
+      "Close",
+      "Close Others",
+      "Close Tabs To The Right",
+      "Close Tabs To The Left",
+      "Change Title",
+      "Copy Session ID",
+    ]);
+  });
+
+  it("pins through the menu", async () => {
+    const onTogglePin = vi.fn();
+    renderStrip({ onTogglePin });
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((tab) => tab.getAttribute("data-tab-id"))).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+    fireEvent.contextMenu(tabs[1]);
+    expect(tabs[1].isConnected).toBe(true);
+    const item = await screen.findByRole("menuitem", { name: "Pin Tab" });
+    fireEvent.click(item);
+    expect(onTogglePin).toHaveBeenCalledWith("b");
+  });
+});
+
+describe("TabBar rename", () => {
+  it("commits a double-click rename on Enter", async () => {
+    const onCommitTitle = vi.fn();
+    renderStrip({ onCommitTitle });
+    const first = screen.getAllByRole("tab")[0];
+    fireEvent.doubleClick(first);
+    const input = (await screen.findByDisplayValue(
+      "cmd-a",
+    )) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "db" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onCommitTitle).toHaveBeenCalledWith("a", "db");
+  });
+
+  it("cancels the rename on Escape", async () => {
+    const onCommitTitle = vi.fn();
+    renderStrip({ onCommitTitle });
+    fireEvent.doubleClick(screen.getAllByRole("tab")[0]);
+    const input = await screen.findByDisplayValue("cmd-a");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onCommitTitle).not.toHaveBeenCalled();
+  });
+});
