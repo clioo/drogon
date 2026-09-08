@@ -11,6 +11,7 @@ import {
 } from "../../harness-launch-form";
 import type { ProjectGroup } from "../shell/project-adapter";
 import { normalizeBaseRef, validateWorktreeName } from "../shell/project-forms";
+import { resolvePiModelField } from "../shell/pi-model-mapping";
 
 /**
  * Pure submit decisions for the new-workspace composer (journey J1): a
@@ -149,6 +150,25 @@ export function resolveComposerSubmit(
       agent: input.agent,
     },
   };
+}
+
+/**
+ * Maps the composer's free-text model/provider through the fork's model
+ * semantics (#221, same resolver as the "+" launch form): Pi accepts
+ * `provider/model`, a bare id, or a pasted `--provider/--model` flags
+ * string; other harnesses take a bare model id. Anything else is a
+ * fork-copy error for the inline form — never a backend "Invalid model"
+ * after the worktree already exists.
+ */
+export function resolveComposerAgentModel(
+  agent: ComposerAgentSelection,
+): { model?: string; provider?: string } | { error: string } {
+  if (!agent.harnessId) return {};
+  return resolvePiModelField({
+    harnessId: agent.harnessId,
+    model: agent.model,
+    provider: agent.provider,
+  });
 }
 
 /** Primary action copy: the source's per-kind composer labels. */

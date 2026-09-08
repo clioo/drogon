@@ -16,6 +16,16 @@ import type { HarnessId } from "../../../../shared/session-contract";
 export const PI_MODEL_ERROR =
   "Use an exact provider/model ID with Pi, or keep the agent default.";
 
+/** The QA-documented local model id, used in helper copy as the example. */
+export const PI_MODEL_EXAMPLE = "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4";
+
+/**
+ * Fork-exact Pi model helper (BotCreationForm.tsx: "Use an exact Pi
+ * provider/model ID. Blank uses Pi settings."), with the documented
+ * example appended so the `provider/model` shape is concrete (#221).
+ */
+export const PI_MODEL_HELPER = `Use an exact Pi provider/model ID, e.g. ${PI_MODEL_EXAMPLE}. Blank uses Pi settings.`;
+
 /** Fork-exact Pi model shape (launch-drogon-bot-session.ts). */
 const PI_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/:+-]*$/;
 

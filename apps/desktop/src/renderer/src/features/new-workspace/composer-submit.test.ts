@@ -12,9 +12,11 @@ import {
   emptyComposerAgentSelection,
   initialComposerAgentId,
   initialComposerProjectId,
+  resolveComposerAgentModel,
   resolveComposerSubmit,
   type ComposerAgentSelection,
 } from "./composer-submit";
+import { PI_MODEL_ERROR } from "../shell/pi-model-mapping";
 
 function folderProject(): Project {
   return {
@@ -303,6 +305,71 @@ describe("composerAgentLaunchInput", () => {
         "req-1",
       )?.provider,
     ).toBeUndefined();
+  });
+});
+
+describe("resolveComposerAgentModel", () => {
+  test("no harness means no model mapping", () => {
+    expect(resolveComposerAgentModel(noAgent())).toEqual({});
+  });
+
+  test("the issue's flags string maps to provider+model, never raw", () => {
+    expect(
+      resolveComposerAgentModel({
+        harnessId: "pi",
+        model: "--provider dgx-spark --model qwen3.8-flash-next-nvidia-nvfp4",
+        provider: "",
+      }),
+    ).toEqual({
+      provider: "dgx-spark",
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+    });
+  });
+
+  test("provider/model and bare ids pass through for Pi", () => {
+    expect(
+      resolveComposerAgentModel({
+        harnessId: "pi",
+        model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+        provider: "",
+      }),
+    ).toEqual({ model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4" });
+    expect(
+      resolveComposerAgentModel({
+        harnessId: "pi",
+        model: "qwen3.8-flash",
+        provider: "",
+      }),
+    ).toEqual({ model: "qwen3.8-flash" });
+    expect(
+      resolveComposerAgentModel({ harnessId: "pi", model: "", provider: "" }),
+    ).toEqual({});
+  });
+
+  test("an unmappable Pi model is the fork's error, blocking submit", () => {
+    expect(
+      resolveComposerAgentModel({
+        harnessId: "pi",
+        model: "has spaces",
+        provider: "",
+      }),
+    ).toEqual({ error: PI_MODEL_ERROR });
+  });
+
+  test("non-Pi harnesses take a bare model id; flags are an error", () => {
+    expect(
+      resolveComposerAgentModel({
+        harnessId: "claude",
+        model: "opus",
+        provider: "",
+      }),
+    ).toEqual({ model: "opus" });
+    const flags = resolveComposerAgentModel({
+      harnessId: "claude",
+      model: "--model opus",
+      provider: "",
+    });
+    expect("error" in flags).toBe(true);
   });
 });
 
