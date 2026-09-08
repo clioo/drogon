@@ -37,6 +37,18 @@ export interface JumpWorktree {
   isCurrent: boolean;
 }
 
+/** One open editor tab (an open file in the main tab group) in the palette. */
+export interface JumpEditorTab {
+  tabId: string;
+  workspaceId: string;
+  /** Workspace-relative path; the row shows the name with this dimmed. */
+  path: string;
+  /** Tab-strip label: the base name, matching the fork's editor tabs. */
+  name: string;
+  dirty: boolean;
+  isActive: boolean;
+}
+
 /** One open browser tab in the palette. */
 export interface JumpBrowserTab {
   tabId: string;
@@ -76,6 +88,7 @@ export interface JumpSection {
 
 export type JumpItem =
   | { kind: "tab"; tab: JumpTab }
+  | { kind: "editor-tab"; tab: JumpEditorTab }
   | { kind: "worktree"; worktree: JumpWorktree }
   | { kind: "browser-tab"; tab: JumpBrowserTab }
   | { kind: "quick-action"; action: JumpQuickAction }
@@ -85,6 +98,8 @@ export function jumpItemId(item: JumpItem): string {
   switch (item.kind) {
     case "tab":
       return `tab:${item.tab.id}`;
+    case "editor-tab":
+      return `editor-tab:${item.tab.tabId}`;
     case "worktree":
       return `worktree:${item.worktree.id}`;
     case "browser-tab":

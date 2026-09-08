@@ -31,6 +31,12 @@ export function isPaletteOpen(): boolean {
 
 export function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
+  // Ported from the read-only reference
+  // `src/renderer/src/lib/editable-target.ts`: xterm.js focuses a hidden
+  // `<textarea class="xterm-helper-textarea">` for keyboard input. That
+  // element IS a textarea, but global shortcuts (⌘J/⌘P palettes, ⌘1–9
+  // workspace jump) must NOT be suppressed while the terminal is focused.
+  if (target.classList.contains("xterm-helper-textarea")) return false;
   if (target.isContentEditable) return true;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";

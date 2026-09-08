@@ -27,11 +27,13 @@ import { resolvePaletteFocusRestoreTarget } from "./focus-restore";
 import {
   JumpPalette,
   buildJumpBrowserTabs,
+  buildJumpEditorTabs,
   buildJumpQuickActions,
   buildJumpTabs,
   buildJumpWorktrees,
   type JumpQuickActionId,
 } from "../../features/jump-palette";
+import type { EditorTabState } from "../../features/shell/editor-tab";
 import { QuickOpen } from "../../features/quick-open";
 import type { ProjectGroup } from "../../features/shell/project-adapter";
 
@@ -44,6 +46,9 @@ export interface CommandPaletteHostProps {
   workspaces: Workspace[];
   sessions: Session[];
   activeSessionId: string;
+  /** Current workspace's open files for the jump palette's editor rows. */
+  editorTabs: EditorTabState[];
+  activeEditorTabId: string | null;
   projectGroups: ProjectGroup[];
   browserTabs: BrowserTabState[];
   activeBrowserTabId: string | null;
@@ -61,6 +66,7 @@ export interface CommandPaletteHostProps {
   onNewBrowserTab(): void;
   onSelectWorkspace(id: string): void;
   onSelectSession(id: string): void;
+  onSelectEditorTab(tabId: string): void;
   onSelectBrowserTab(tabId: string): void;
   onOpenFiles(): void;
   onOpenBots(): void;
@@ -215,6 +221,10 @@ function JumpPaletteSurface(
     () => buildJumpTabs(props.sessions, props.activeSessionId),
     [props.sessions, props.activeSessionId],
   );
+  const editorTabs = useMemo(
+    () => buildJumpEditorTabs(props.editorTabs, props.activeEditorTabId),
+    [props.editorTabs, props.activeEditorTabId],
+  );
   const worktrees = useMemo(
     () =>
       buildJumpWorktrees(props.projectGroups, props.sessions, props.workspaceId),
@@ -263,11 +273,13 @@ function JumpPaletteSurface(
       onQueryChange={props.onQueryChange}
       onClose={props.onClose}
       tabs={tabs}
+      editorTabs={editorTabs}
       worktrees={worktrees}
       browserTabs={browserTabs}
       quickActions={quickActions}
       canCreateWorktree={props.canCreateWorktree}
       onSelectSession={props.onSelectSession}
+      onSelectEditorTab={props.onSelectEditorTab}
       onSelectWorkspace={props.onSelectWorkspace}
       onSelectBrowserTab={props.onSelectBrowserTab}
       onQuickAction={onQuickAction}

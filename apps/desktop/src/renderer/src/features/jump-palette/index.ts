@@ -1,6 +1,7 @@
 export { JumpPalette, type JumpPaletteProps } from "./JumpPalette";
 export {
   buildJumpBrowserTabs,
+  buildJumpEditorTabs,
   buildJumpQuickActions,
   buildJumpTabs,
   buildJumpWorktrees,
@@ -19,6 +20,7 @@ export {
   jumpAgentStatusLabel,
   jumpItemId,
   type JumpBrowserTab,
+  type JumpEditorTab,
   type JumpItem,
   type JumpQuickAction,
   type JumpQuickActionId,

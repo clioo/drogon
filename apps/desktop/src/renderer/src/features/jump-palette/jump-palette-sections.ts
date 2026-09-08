@@ -9,6 +9,7 @@ import type {
   AgentState,
   Session,
 } from "../../../../shared/session-contract";
+import { editorTabLabel, type EditorTabState } from "../shell/editor-tab";
 import type { ProjectGroup } from "../shell/project-adapter";
 import type { BrowserTabState } from "../../../../shared/browser-contract";
 import { rankJumpRows } from "./jump-palette-filter";
@@ -19,6 +20,8 @@ import {
   JUMP_LABELS,
   JUMP_SECTION_RENDER_CAP,
   type JumpBrowserTab,
+  type JumpEditorTab,
+  type JumpItem,
   type JumpQuickAction,
   type JumpQuickActionId,
   type JumpSection,
@@ -100,6 +103,25 @@ export function buildJumpWorktrees(
   return rows;
 }
 
+/**
+ * Editor tabs for the jump palette, in strip order. Like the source's
+ * workspace-tab rows, open files sit with the terminal tabs: the caller
+ * passes the current workspace's tabs (the same set the strip renders).
+ */
+export function buildJumpEditorTabs(
+  tabs: readonly EditorTabState[],
+  activeEditorTabId: string | null,
+): JumpEditorTab[] {
+  return tabs.map((tab) => ({
+    tabId: tab.tabId,
+    workspaceId: tab.workspaceId,
+    path: tab.path,
+    name: editorTabLabel(tab.path),
+    dirty: tab.dirty,
+    isActive: tab.tabId === activeEditorTabId,
+  }));
+}
+
 export function buildJumpBrowserTabs(
   tabs: readonly BrowserTabState[],
   activeBrowserTabId: string | null,
@@ -169,6 +191,7 @@ export function buildJumpQuickActions(
 
 export interface JumpSectionsInput {
   tabs: readonly JumpTab[];
+  editorTabs: readonly JumpEditorTab[];
   worktrees: readonly JumpWorktree[];
   browserTabs: readonly JumpBrowserTab[];
   quickActions: readonly JumpQuickAction[];
@@ -199,6 +222,43 @@ function actionHaystack(action: JumpQuickAction): readonly string[] {
   return [action.title, action.description];
 }
 
+function editorHaystack(tab: JumpEditorTab): readonly string[] {
+  return [tab.name, tab.path];
+}
+
+type TabPoolEntry =
+  | { kind: "tab"; tab: JumpTab; haystack: readonly string[] }
+  | { kind: "editor-tab"; tab: JumpEditorTab; haystack: readonly string[] };
+
+/**
+ * Sessions and open files share the tab sections, like the source's
+ * workspace-tab rows (terminal and editor content in one list). Sessions
+ * lead ties: they precede editor tabs in the pool and the rank is stable.
+ */
+function tabPool(
+  tabs: readonly JumpTab[],
+  editorTabs: readonly JumpEditorTab[],
+): TabPoolEntry[] {
+  return [
+    ...tabs.map((tab) => ({ kind: "tab" as const, tab, haystack: tabHaystack(tab) })),
+    ...editorTabs.map((tab) => ({
+      kind: "editor-tab" as const,
+      tab,
+      haystack: editorHaystack(tab),
+    })),
+  ];
+}
+
+function isPoolEntryActive(entry: TabPoolEntry): boolean {
+  return entry.tab.isActive;
+}
+
+function toTabItem(entry: TabPoolEntry): JumpItem {
+  return entry.kind === "tab"
+    ? { kind: "tab", tab: entry.tab }
+    : { kind: "editor-tab", tab: entry.tab };
+}
+
 /**
  * Projects palette sections in source order. Empty query shows recent
  * tabs (active first) and recent worktrees under their caps; a typed
@@ -206,12 +266,12 @@ function actionHaystack(action: JumpQuickAction): readonly string[] {
  * the query names something new.
  */
 export function projectJumpSections(input: JumpSectionsInput): JumpSectionsResult {
-  const { tabs, worktrees, browserTabs, quickActions, query } = input;
+  const { tabs, editorTabs, worktrees, browserTabs, quickActions, query } = input;
   const hasQuery = query.trim() !== "";
   const sections: JumpSection[] = [];
 
   if (hasQuery) {
-    const visibleTabs = rankJumpRows(tabs, tabHaystack, query).slice(
+    const visibleTabs = rankJumpRows(tabPool(tabs, editorTabs), (entry) => entry.haystack, query).slice(
       0,
       JUMP_SECTION_RENDER_CAP,
     );
@@ -219,7 +279,7 @@ export function projectJumpSections(input: JumpSectionsInput): JumpSectionsResul
       sections.push({
         id: "recent-tabs",
         label: JUMP_LABELS.openTabsQuery,
-        items: visibleTabs.map((tab) => ({ kind: "tab" as const, tab })),
+        items: visibleTabs.map(toTabItem),
       });
     }
     const visibleWorktrees = rankJumpRows(worktrees, worktreeHaystack, query).slice(
@@ -278,13 +338,22 @@ export function projectJumpSections(input: JumpSectionsInput): JumpSectionsResul
   }
 
   // Empty query: recent tabs first (active tab leads), then worktrees.
-  const recentTabs = [...tabs].sort((a, b) => Number(b.isActive) - Number(a.isActive));
-  const visibleTabs = recentTabs.slice(0, EMPTY_QUERY_RECENT_TAB_CAP);
+  // Open files follow sessions, active first within each kind — one
+  // shared recent cap.
+  const recentPool = tabPool(tabs, editorTabs);
+  const activeFirst = [...recentPool].sort((a, b) => {
+    const kindOrder = Number(a.kind === "editor-tab") - Number(b.kind === "editor-tab");
+    return (
+      kindOrder ||
+      Number(isPoolEntryActive(b)) - Number(isPoolEntryActive(a))
+    );
+  });
+  const visibleTabs = activeFirst.slice(0, EMPTY_QUERY_RECENT_TAB_CAP);
   if (visibleTabs.length > 0) {
     sections.push({
       id: "recent-tabs",
       label: JUMP_LABELS.recentTabs,
-      items: visibleTabs.map((tab) => ({ kind: "tab" as const, tab })),
+      items: visibleTabs.map(toTabItem),
     });
   }
   const worktreeCap = Math.min(
