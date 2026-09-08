@@ -174,8 +174,16 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | Infra: probe sellado lee los atajos desde shared/keybindings | R14 | Coordinador | fusionada | #141 |
 | QA fix R16-A: #133 archivos como pestañas del grupo principal (TabGroupPanel del fork), Explorer solo árbol | R16 | Sonnet | lanzada | |
 | QA fix R16-B: #128 Tasks/Automations/Bots como páginas independientes y #130 ítems/gating de la barra de actividad derecha | R16 | Muse | lanzada | |
-| QA fix R16-C: lote copy/tokens #124 #125 #126 #127 #131 #132 #136 | R16 | Muse | lanzada | |
-| QA fix R16-D: #135 menú New tab del fuente y #137 estructura de Explorer y filas de Source Control | R16 | Muse | lanzada | |
+| QA fix R16-C: lote copy/tokens #124 #125 #126 #127 #131 #132 #136 | R16 | Muse | fusionada: un commit por issue; no portado: aviso de gestor externo, presets de asignado, selector de fuente, botón de resource manager | #143 |
+| QA fix R16-D: #135 menú New tab del fuente y #137 estructura de Explorer y filas de Source Control | R16 | Muse | fusionada: combobox de búsqueda, orden/chords/iconos del fuente, filas planas; 1831 tests | #148 |
+| Infra: ventanas de prueba aparcadas fuera del área de trabajo; el oráculo dimensiona la candidata en nativo (sin emulación de viewport) | R16 | Coordinador | fusionada | #151 |
+| QA fix R16-E: #145 barra de título nativa (hiddenInset y semáforos del fork) y #147 títulos de pestaña, línea de la tarjeta, panel Explorer por defecto | R16 | Muse | lanzada | |
+| QA fix R16-F: #146 proyecto añadido por CLI no aparece en el sidebar | R16 | Muse | lanzada | |
+| J10 R16-G: Settings General y navegación del fuente; pliega #150 y #152 | R16 | Muse | lanzada | |
+| J9 R16-H: runtime fijado de Mentu empaquetado como el fork (provisión por script, instalación en el data dir con sha verificado); pliega #149 | R16 | Sonnet | lanzada | |
+| J1 R16-I: visuales de estado del agente y copy de notificaciones del fuente | R16 | Muse | lanzada | |
+| QA fix R16-J: #153 terminal a media escala en el cuadrante inferior izquierdo al montar antes del layout | R16 | Muse | lanzada | |
+| QA de UI ronda 2 sobre main 5d12eab | QA | Muse | en curso: #149, #150, #152 plegados en R16-G/H | |
 | QA: manos de accesibilidad para el agente QA (`scripts/qa/drogon-ui.mjs`) y probes sellados al día (paleta "Jump to...", Select de Radix en Mentu, conteo de pestañas por tablist) | R14 | Coordinador | fusionada | #108 |
 | QA ronda 1 sobre main 13d4e38: Pi + dgx-spark (qwen3.8-flash-next) usa la app compilada y reporta issues `qa` | QA | Pi local | en curso: #117, #118 (corregidos en #139), #133 (R16-A) | |
 
