@@ -186,6 +186,14 @@ and `src/shared/{mentu-pane-types,mentu-recipe-dependencies,mentu-run-status}.ts
 (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
 file keeps the MIT notice.
 
+The worktree card actions in `apps/desktop/src/renderer/src/features/shell/`
+(context menu, inline rename, delete dialog, meta badges) port Orca's
+`src/renderer/src/components/sidebar/{WorktreeCard,WorktreeContextMenu,WorktreeContextMenuView,WorktreeTitleInlineRename,DeleteWorktreeDialog,DeleteWorktreeDialogDescription,DeleteWorktreeDialogFooter,DeleteWorktreeDirtyChangeHint,DeleteWorktreeTargetPreview,DeleteWorktreeWarningPanels,DeleteWorktreeSkipConfirmOption,WorktreeCardMeta,WorktreeCardMetaBadges,WorktreeCardStatusSlot,AutoRenameFailedDialog}.tsx`,
+`use-worktree-context-menu-{model,commands,secondary-actions}.ts`,
+`worktree-context-menu-policy.ts`, `delete-worktree-{dialog-copy,dirty-change-counts,flow}.ts`
+and `worktree-card-{surface,header,meta-row,status-inputs,agent-summary,pr-display,title-display}.ts(x)`,
+all at the pinned source revision above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
