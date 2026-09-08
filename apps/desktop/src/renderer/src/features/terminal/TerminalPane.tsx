@@ -5,14 +5,19 @@
 // container keydown below), TerminalSearch.tsx, terminal-handle-links.ts /
 // terminal-web-link-click.ts / terminal-file-link-actions.ts (adapted),
 // TerminalContextMenu.tsx, terminal-selection-copy.ts, terminal-handle-copy.ts,
-// osc52-clipboard.ts, TerminalProcessExitOverlay.tsx and
-// terminal-renderer-policy.ts.
+// osc52-clipboard.ts, TerminalProcessExitOverlay.tsx,
+// terminal-renderer-policy.ts and terminal-webgl-lifecycle.ts (WebGL
+// activation order and DPR guards from the fork's pane-manager:
+// pane-webgl-renderer.ts, terminal-canvas-dpr-repair.ts,
+// terminal-webgl-addon-loader.ts, pane-fit-webgl-attach-signal.ts and
+// terminal-visibility-resume.ts).
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ILinkProvider, ILink } from "@xterm/xterm";
 import { TerminalInputQueue } from "./terminal-input-queue";
 import {
@@ -27,6 +32,16 @@ import {
   nextFontZoomSize,
 } from "./terminal-font-zoom";
 import { resolvePaneRendererPolicy } from "./terminal-renderer-policy";
+import {
+  clearTerminalWebglAtlas,
+  disposeTerminalWebglAddon,
+  hasMeasurableTerminalBox,
+  observeTerminalWebglCanvasBackingStore,
+  primeTerminalWebglAddon,
+  rearmTerminalWebglAddonLoad,
+  repairTerminalWebglBackingStore,
+  shouldAttachTerminalWebgl,
+} from "./terminal-webgl-lifecycle";
 import {
   readTerminalGpuAcceleration,
   readTerminalTypography,
@@ -262,6 +277,16 @@ export function TerminalPane({
     input: TerminalInputQueue;
     focus: () => void;
     pasteFromClipboard: (source: TerminalPasteSource) => void;
+    /** Re-fit plus WebGL attach/DPR repair (every fit is a heal chance). */
+    syncRenderer: () => void;
+  } | null>(null);
+  const gpuModeRef = useRef(gpuMode);
+  gpuModeRef.current = gpuMode;
+  // Lets the settings-owned GPU mode effect below drive the mount effect's
+  // WebGL state without remounting the session.
+  const webglSyncRef = useRef<{
+    disable(): void;
+    recover(): void;
   } | null>(null);
 
   const showExit = (exit: TerminalProcessExit | null) => {
@@ -295,12 +320,9 @@ export function TerminalPane({
       current.terminal.options.fontWeight = weights.fontWeight;
     if (fontWeightBold !== undefined)
       current.terminal.options.fontWeightBold = weights.fontWeightBold;
-    if (
-      surface.current &&
-      surface.current.clientWidth !== 0 &&
-      surface.current.clientHeight !== 0
-    )
-      current.fit.fit();
+    // A metrics change can strand the WebGL backing store exactly like a DPR
+    // change, so this goes through the same fit+attach+repair sync (#153).
+    current.syncRenderer();
   }, [fontSize, fontFamily, fontWeight, fontWeightBold, zoomOverride]);
 
   useEffect(() => {
@@ -341,27 +363,168 @@ export function TerminalPane({
     const report = (message: string) => {
       if (!disposed) callbacks.current.onError(message);
     };
-    // WebGL with canvas fallback per the renderer policy: the policy gates
-    // the attempt; a failed load/activation keeps the canvas renderer. The
-    // user GPU mode is read from the persisted settings at pane construction
-    // (source terminalGpuAcceleration; `off` keeps the canvas renderer).
-    if (
+    // WebGL with canvas fallback per the renderer policy (#153, fork
+    // pane-webgl-renderer.ts): the addon bakes cell metrics and the DPR at
+    // construction, so it activates only after the first non-zero layout
+    // while visible; a late attach is followed by a refit (the grid was
+    // measured under the DOM renderer) and every fit/resize/visibility/DPR
+    // event re-offers attach plus a backing-store repair. A failed
+    // load/activation keeps the canvas renderer and latches only until the
+    // next recovery boundary — never a permanent downgrade.
+    const webgl: {
+      addon: WebglAddon | null;
+      attachPending: boolean;
+      failedSinceRecovery: boolean;
+      refitRafId: number | null;
+    } = { addon: null, attachPending: false, failedSinceRecovery: false, refitRafId: null };
+    // IntersectionObserver is the reveal signal (fork schedulePaneRevealRepaint);
+    // until it fires, page visibility is the best known state.
+    const paneVisible = {
+      current:
+        typeof document === "undefined" ||
+        document.visibilityState !== "hidden",
+    };
+    const isGpuEnabled = () =>
       resolvePaneRendererPolicy({
-        userGpuMode: gpuMode ?? readTerminalGpuAcceleration(window.localStorage),
-      }).gpuEnabled
-    ) {
-      void import("@xterm/addon-webgl")
-        .then(({ WebglAddon }) => {
-          try {
-            terminal.loadAddon(new WebglAddon());
-          } catch {
-            // Canvas fallback: the terminal stays usable without WebGL.
-          }
+        userGpuMode:
+          gpuModeRef.current ?? readTerminalGpuAcceleration(window.localStorage),
+      }).gpuEnabled;
+    const refreshViewport = () => {
+      try {
+        terminal.refresh(0, Math.max(0, terminal.rows - 1));
+      } catch {
+        // Pane may be mid-teardown; the next reveal/fit retries.
+      }
+    };
+    const cancelPendingWebglRefit = () => {
+      if (webgl.refitRafId === null) return;
+      if (typeof cancelAnimationFrame === "function") {
+        try {
+          cancelAnimationFrame(webgl.refitRafId);
+        } catch {
+          // Ignore: the frame may already have run.
+        }
+      }
+      webgl.refitRafId = null;
+    };
+    let disconnectCanvasWatch: (() => void) | null = null;
+    const unwatchWebglCanvasBackingStore = () => {
+      disconnectCanvasWatch?.();
+      disconnectCanvasWatch = null;
+    };
+    const watchWebglCanvasBackingStore = () => {
+      unwatchWebglCanvasBackingStore();
+      if (disposed || webgl.addon === null) return;
+      // The addon's own device-pixel observer resizes the backing store
+      // behind the renderer's back when the compositor DPR disagrees with
+      // the cached one (#153): no fit/resize/visibility event follows, so
+      // the canvas itself is watched and a silent resize rebuilds through
+      // the resize path. Predicate-gated: a converged canvas goes quiet.
+      disconnectCanvasWatch = observeTerminalWebglCanvasBackingStore(
+        terminal,
+        () => {
+          if (!disposed) repairTerminalWebglBackingStore(terminal);
+        },
+      );
+    };
+    const attachWebgl = () => {
+      if (
+        !shouldAttachTerminalWebgl({
+          gpuEnabled: isGpuEnabled(),
+          hasLayout: hasMeasurableTerminalBox(mount),
+          isVisible: paneVisible.current,
+          alreadyAttached: webgl.addon !== null || webgl.attachPending,
+          attachFailedSinceRecovery: webgl.failedSinceRecovery,
         })
-        .catch(() => {
-          // Canvas fallback: missing WebGL support keeps DOM rendering.
-        });
-    }
+      ) {
+        return;
+      }
+      // Fetch off the critical path (fork primeTerminalWebglAddon); the
+      // layout/visibility gates re-run in the continuation because the pane
+      // may have hidden while the chunk loaded.
+      webgl.attachPending = true;
+      void primeTerminalWebglAddon().then((constructor) => {
+        webgl.attachPending = false;
+        if (disposed || webgl.addon !== null || webgl.failedSinceRecovery) {
+          return;
+        }
+        if (
+          !shouldAttachTerminalWebgl({
+            gpuEnabled: isGpuEnabled(),
+            hasLayout: hasMeasurableTerminalBox(mount),
+            isVisible: paneVisible.current,
+            alreadyAttached: false,
+            attachFailedSinceRecovery: false,
+          })
+        ) {
+          return;
+        }
+        if (!constructor) {
+          // Chunk load failed: latch like a failed construction so the pane
+          // retries at a recovery boundary instead of on every frame.
+          webgl.failedSinceRecovery = true;
+          return;
+        }
+        let addon: WebglAddon | null = null;
+        try {
+          // Single-addon invariant: never stack a second addon on a live one.
+          unwatchWebglCanvasBackingStore();
+          disposeTerminalWebglAddon(webgl.addon);
+          webgl.addon = null;
+          addon = new constructor();
+          addon.onContextLoss(() => {
+            // Lost context wipes the glyph atlas: fall back to canvas until
+            // the next recovery boundary (fork context-loss policy).
+            webgl.failedSinceRecovery = true;
+            unwatchWebglCanvasBackingStore();
+            disposeTerminalWebglAddon(webgl.addon);
+            if (!disposed) webgl.addon = null;
+          });
+          terminal.loadAddon(addon);
+          webgl.addon = addon;
+          watchWebglCanvasBackingStore();
+          // A newly attached canvas starts empty; repaint immediately so the
+          // pane does not look frozen until new output lands.
+          refreshViewport();
+          // The running grid was measured under the DOM renderer (WebGL
+          // floors the device cell width): refit on the next frame, once
+          // xterm has re-measured against the new renderer.
+          cancelPendingWebglRefit();
+          const refit = () => {
+            webgl.refitRafId = null;
+            fitAndSyncTerminal();
+          };
+          if (typeof requestAnimationFrame === "function") {
+            webgl.refitRafId = requestAnimationFrame(refit);
+          } else {
+            setTimeout(refit, 0);
+          }
+        } catch {
+          webgl.failedSinceRecovery = true;
+          try {
+            addon?.dispose();
+          } catch {
+            // A half-constructed addon may throw on dispose.
+          }
+          if (!disposed) webgl.addon = null;
+        }
+      });
+    };
+    // Every successful layout is the event-anchored moment a canvas-stuck
+    // pane can heal (fork attachWebglAfterFitIfMissing): fit() itself no-ops
+    // when cols/rows match, so the attach offer and the DPR repair must run
+    // explicitly — they are the only path that rebuilds a stale backing
+    // store and glyph atlas.
+    const fitAndSyncTerminal = () => {
+      if (disposed || !hasMeasurableTerminalBox(mount)) return;
+      try {
+        fit.fit();
+      } catch {
+        return;
+      }
+      if (webgl.addon === null) attachWebgl();
+      repairTerminalWebglBackingStore(terminal);
+    };
     const osc52Handler = createOsc52OscHandler({
       // OSC 52 clipboard defaults on (source gate); queries stay blocked.
       getSettingEnabled: () => true,
@@ -515,6 +678,7 @@ export function TerminalPane({
       input: queue,
       focus: () => terminal.focus(),
       pasteFromClipboard: (source: TerminalPasteSource) => paste.pasteFromClipboard(source),
+      syncRenderer: fitAndSyncTerminal,
     };
     // Paste policy target (R12-E): plan/execute writes bracketed or chunked
     // paste payloads through the same policy modules as the source. The
@@ -587,11 +751,9 @@ export function TerminalPane({
       if (text === "\x03") markTerminalBracketedPasteInterrupted(terminal);
       void queue.enqueue(text);
     });
-    const fitTerminal = () => {
-      if (disposed || mount.clientWidth === 0 || mount.clientHeight === 0)
-        return;
-      fit.fit();
-    };
+    // 0x0 containers stay deferred: the ResizeObserver below retries once
+    // the pane has a live box (fork canMeasurePaneForFit).
+    const fitTerminal = () => fitAndSyncTerminal();
     const resize = terminal.onResize(({ cols, rows }) => {
       if (canWrite && !disposed)
         void window.drogon
@@ -603,7 +765,95 @@ export function TerminalPane({
     });
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(mount);
+    // Reveal is a recovery boundary (fork terminal-visibility-resume): a pane
+    // created while its tab was hidden attaches, repairs and repaints here,
+    // once it has a live box. A stale failure latch must not strand it on
+    // the canvas renderer (fork resumeRendering).
+    const revealPane = () => {
+      if (disposed || !paneVisible.current) return;
+      webgl.failedSinceRecovery = false;
+      fitAndSyncTerminal();
+      // A hidden-time DPR change can strand the glyph atlas at the old scale
+      // while canvas and dimensions still agree (fork settled-reveal reset).
+      if (webgl.addon !== null) clearTerminalWebglAtlas(webgl.addon);
+      refreshViewport();
+    };
+    let visibility: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver === "function") {
+      visibility = new IntersectionObserver((entries) => {
+        const entry = entries[entries.length - 1];
+        paneVisible.current = !!entry?.isIntersecting;
+        if (paneVisible.current) revealPane();
+      });
+      visibility.observe(mount);
+    }
+    const onPageVisibilityChange = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "hidden") {
+        paneVisible.current = false;
+        return;
+      }
+      paneVisible.current = true;
+      revealPane();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onPageVisibilityChange);
+    }
+    // xterm's own DPR monitor misses changes that land while the pane has no
+    // box (parked/off-screen window, #153): re-arm per DPR and re-sync, so a
+    // display move heals through the same fit+attach+repair path.
+    let dprMedia: MediaQueryList | null = null;
+    const onDprChange = () => {
+      armDprListener();
+      fitAndSyncTerminal();
+    };
+    const armDprListener = () => {
+      dprMedia?.removeEventListener("change", onDprChange);
+      dprMedia = null;
+      if (
+        typeof matchMedia !== "function" ||
+        typeof window === "undefined" ||
+        typeof window.devicePixelRatio !== "number"
+      ) {
+        return;
+      }
+      dprMedia = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprMedia.addEventListener("change", onDprChange);
+    };
+    armDprListener();
+    // Lets the settings-owned GPU mode apply live without remounting.
+    webglSyncRef.current = {
+      disable: () => {
+        // User turned the GPU off: canvas fallback, no failure latch.
+        cancelPendingWebglRefit();
+        unwatchWebglCanvasBackingStore();
+        disposeTerminalWebglAddon(webgl.addon);
+        webgl.addon = null;
+        if (!disposed && hasMeasurableTerminalBox(mount)) {
+          try {
+            fit.fit();
+          } catch {
+            // Container may not have dimensions yet.
+          }
+          refreshViewport();
+        }
+      },
+      recover: () => {
+        // GPU-mode change is a recovery boundary (fork
+        // resetTerminalWebglSuggestion): re-arm the load and retry WebGL
+        // instead of stranding the pane on the canvas renderer.
+        rearmTerminalWebglAddonLoad();
+        webgl.failedSinceRecovery = false;
+        if (disposed) return;
+        attachWebgl();
+        fitAndSyncTerminal();
+      },
+    };
     fitTerminal();
+    // First attach offer defers itself while the box is 0x0 or hidden; the
+    // observers above retry (fork: activate only after first non-zero layout).
+    // The addon chunk fetch starts here, off the critical path.
+    attachWebgl();
     if (document.activeElement?.getAttribute("role") !== "tab")
       terminal.focus();
     async function read() {
@@ -655,12 +905,22 @@ export function TerminalPane({
     return () => {
       disposed = true;
       live.current = null;
+      webglSyncRef.current = null;
       unregisterTerminalDebugHandle(session.id, terminal);
       setSearchAddon(null);
       clearTimeout(timeout);
       media.removeEventListener("change", updateTheme);
       rootObserver.disconnect();
       observer.disconnect();
+      visibility?.disconnect();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onPageVisibilityChange);
+      }
+      dprMedia?.removeEventListener("change", onDprChange);
+      cancelPendingWebglRefit();
+      unwatchWebglCanvasBackingStore();
+      disposeTerminalWebglAddon(webgl.addon);
+      webgl.addon = null;
       disposePasteListeners();
       linkPointerGesture.current?.dispose();
       linkPointerGesture.current = null;
@@ -674,6 +934,18 @@ export function TerminalPane({
     // Keyed on session identity only; font size rides the effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.incarnation]);
+
+  // Settings-owned GPU mode applies live without remounting the session
+  // (R11-A single writer): `off` drops to the canvas renderer, `on`/`auto`
+  // re-arms the addon load and retries the attach at this recovery boundary.
+  useEffect(() => {
+    const sync = webglSyncRef.current;
+    if (!sync) return;
+    if (gpuMode === "off") sync.disable();
+    else sync.recover();
+    // Keyed on the mode only; the mount effect owns everything else.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gpuMode]);
 
   const isMac =
     typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
