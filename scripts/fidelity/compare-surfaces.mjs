@@ -79,7 +79,10 @@ const NO_DARK = args.includes("--no-dark");
 const KEEP = args.includes("--keep");
 const STATES_FILTER = flag("--states", null)?.split(",").map((s) => s.trim());
 const WORKTREE_CARD_ROWS_WANTED =
-  !STATES_FILTER || STATES_FILTER.includes("worktree-card-rows");
+  !STATES_FILTER ||
+  STATES_FILTER.includes("worktree-card-rows") ||
+  STATES_FILTER.includes("automation-run-detail") ||
+  STATES_FILTER.includes("bots-history");
 const BROWSER_FIXTURE_WANTED =
   !STATES_FILTER ||
   STATES_FILTER.includes("browser-tab-loading") ||
@@ -689,6 +692,135 @@ const SURFACES = [
       "apps/desktop/src/renderer/src/features/shell/agent-state.ts",
       "apps/desktop/src/renderer/src/features/shell/AgentStateIcon.tsx",
       "apps/desktop/src/renderer/src/features/shell/worktree-card-agent-summary.ts",
+    ],
+  },
+  {
+    id: "workspace-composer",
+    label: "New workspace composer",
+    refDir: "src/renderer/src/components/new-workspace",
+    refFiles: [
+      "src/renderer/src/components/NewWorkspaceComposerCard.tsx",
+      "src/renderer/src/components/NewWorkspaceComposerModal.tsx",
+      "src/renderer/src/components/new-workspace/NewWorkspaceComposerProjectSection.tsx",
+      "src/renderer/src/components/new-workspace/NewWorkspaceComposerAdvancedSection.tsx",
+    ],
+    probes: ["New workspace", "Project", "Agent", "Run target", "Advanced", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposer.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposerModal.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/composer-submit.ts",
+    ],
+  },
+  {
+    id: "session-details-panel",
+    label: "Session details panel",
+    refDir: "src/renderer/src/components/right-sidebar",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/SessionRowTrailingActions.tsx",
+      "src/renderer/src/components/right-sidebar/AiVaultSessionDetails.tsx",
+      "src/renderer/src/components/right-sidebar/AiVaultSessionRow.tsx",
+    ],
+    probes: ["Session details", "Details", "harness", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/right-sidebar/SessionDetailsPanel.tsx",
+      "apps/desktop/src/renderer/src/features/shell/WorktreeAgentRow.tsx",
+    ],
+  },
+  {
+    id: "ports-listening",
+    label: "Ports panel with listening server",
+    refDir: "src/renderer/src/components/right-sidebar",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/local-workspace-ports-panel.tsx",
+      "src/renderer/src/components/right-sidebar/local-port-section.tsx",
+      "src/renderer/src/components/right-sidebar/local-port-details-dialog.tsx",
+    ],
+    probes: ["Ports", "Listening", "Open in Browser", "Details", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/ports/PortsPanel.tsx",
+      "apps/desktop/src/renderer/src/features/ports/local-workspace-ports-panel.tsx",
+      "apps/desktop/src/renderer/src/features/ports/local-port-details-dialog.tsx",
+    ],
+  },
+  {
+    id: "explorer-selected-file",
+    label: "Explorer nested tree with selected file",
+    refDir: "src/renderer/src/components/right-sidebar",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/FileExplorer.tsx",
+      "src/renderer/src/components/right-sidebar/file-explorer-entries.ts",
+      "src/renderer/src/components/right-sidebar/FileExplorerToolbar.tsx",
+    ],
+    probes: ["Find files", "Collapse All", "selected", "tree", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/file-explorer/FileExplorer.tsx",
+      "apps/desktop/src/renderer/src/features/file-explorer/FileExplorerTreePane.tsx",
+      "apps/desktop/src/renderer/src/features/file-explorer/FileExplorerRow.tsx",
+    ],
+  },
+  {
+    id: "editor-dirty-close",
+    label: "Dirty editor tab close confirmation",
+    refDir: "src/renderer/src/components/tab-bar",
+    refFiles: [
+      "src/renderer/src/components/tab-bar/EditorFileTab.tsx",
+      "src/renderer/src/components/tab-bar/EditorFileTabCloseButton.tsx",
+      "src/renderer/src/components/tab-group/useTabGroupTabCloseCommands.ts",
+      "src/renderer/src/components/editor/editor-autosave.ts",
+    ],
+    probes: ["isDirty", "unsaved", "Save", "Discard", "close", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/tab-strip/EditorStripTab.tsx",
+      "apps/desktop/src/renderer/src/features/shell/TabBar.tsx",
+      "apps/desktop/src/renderer/src/App.tsx",
+    ],
+  },
+  {
+    id: "automation-run-detail",
+    label: "Automation run detail",
+    refDir: "src/renderer/src/components/automations",
+    refFiles: [
+      "src/renderer/src/components/automations/AutomationRunsDashboard.tsx",
+      "src/renderer/src/components/automations/AutomationRunDetailsPage.tsx",
+      "src/renderer/src/components/automations/AutomationRunPageFrame.tsx",
+    ],
+    probes: ["Run details", "Output", "Host", "Prompt", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/automations/AutomationRunDetailsPage.tsx",
+      "apps/desktop/src/renderer/src/features/automations/AutomationRunPageFrame.tsx",
+      "apps/desktop/src/renderer/src/features/automations/automation-run-content.ts",
+    ],
+  },
+  {
+    id: "bots-history",
+    label: "Bots history",
+    refDir: "src/renderer/src/components/bots",
+    refFiles: [
+      "src/renderer/src/components/bots/BotsPage.tsx",
+      "src/renderer/src/components/bots/BotResponsibilityCard.tsx",
+      "src/renderer/src/components/bots/bots-page-model.ts",
+    ],
+    probes: ["History", "Responsibility history", "Scheduled", "Manual", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/bots/BotsPanel.tsx",
+      "apps/desktop/src/renderer/src/features/bots/BotResponsibilityCard.tsx",
+      "apps/desktop/src/renderer/src/features/bots/bots-panel-projection.ts",
+    ],
+  },
+  {
+    id: "mentu-evidence",
+    label: "Mentu Evidence tab",
+    refDir: "src/renderer/src/components/mentu",
+    refFiles: [
+      "src/renderer/src/components/mentu/MentuPanel.tsx",
+      "src/renderer/src/components/mentu/recipe-pane-views.tsx",
+      "src/renderer/src/components/mentu/recipe-pane-inspector.tsx",
+    ],
+    probes: ["Evidence", "stdout", "stderr", "No evidence", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/mentu/MentuPanel.tsx",
+      "apps/desktop/src/renderer/src/features/mentu/RecipePaneContent.tsx",
+      "apps/desktop/src/renderer/src/features/mentu/RecipePaneInspector.tsx",
     ],
   },
 ];
@@ -1532,7 +1664,15 @@ async function ensureTasksRowsFixtureBin(fixture) {
 
 // A Pi-shaped executable keeps the card-row fixture deterministic. It prints
 // shell output and sleeps; no provider/model inference runs during fidelity.
-const PI_CARD_ROWS_FIXTURE = `#!/bin/sh
+const PI_CARD_ROWS_FIXTURE =
+  STATES_FILTER?.includes("bots-history") &&
+  !STATES_FILTER.includes("worktree-card-rows") &&
+  !STATES_FILTER.includes("automation-run-detail")
+    ? `#!/bin/sh
+printf 'Drogon Pi history fixture\\n'
+printf 'fixture completed\\n'
+`
+    : `#!/bin/sh
 printf 'Drogon Pi local-model fixture\\n'
 while :; do
   printf 'fixture heartbeat\\n'
@@ -2525,6 +2665,105 @@ async function refSetup(page, state, ctx) {
       }
       break;
     }
+    case "workspace-composer": {
+      // The composer is a view-only draft surface here. Opening it does not
+      // create a workspace; no field is filled and no submit is pressed.
+      let opened = await tryClick(page, "button", "Create workspace", 2500);
+      if (!opened) opened = await tryClick(page, "button", "New workspace", 2500);
+      if (opened) {
+        await delay(500);
+        notes.push("workspace composer opened without submitting");
+        const advanced = page.getByRole("button", { name: "Advanced", exact: true }).first();
+        if ((await advanced.count()) > 0) {
+          await advanced.click({ timeout: 2500 });
+          await delay(300);
+          notes.push("Advanced section expanded (view-only)");
+        }
+      } else {
+        missing.push("no Create workspace/New workspace affordance reachable");
+      }
+      break;
+    }
+    case "session-details-panel": {
+      // Same read-only navigation as session-details, kept as a separate
+      // oracle state so the panel anatomy has its own evidence row.
+      try {
+        const trigger = page.getByRole("button", { name: "Session details" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Session details panel opened");
+        } else missing.push("no Session details activity button reachable");
+      } catch {
+        missing.push("Session details best-effort only");
+      }
+      break;
+    }
+    case "ports-listening": {
+      // Reference data is immutable: inspect the Ports surface without
+      // creating a listener. The missing fixture is recorded explicitly.
+      if (await tryClick(page, "button", "Ports", 2000)) {
+        notes.push("Ports panel opened");
+        missing.push("ref non-coverage: listening server cannot be created on the reference");
+      } else missing.push("no Ports activity button reachable");
+      break;
+    }
+    case "explorer-selected-file": {
+      // Selecting/opening a reference file would mutate tab state, so only
+      // the read-only tree surface is opened.
+      if (await tryClick(page, "button", "Explorer", 2000)) {
+        notes.push("Explorer panel opened");
+        missing.push("ref non-coverage: selecting/opening a file is forbidden on the reference");
+      } else missing.push("no Explorer activity button reachable");
+      break;
+    }
+    case "editor-dirty-close":
+      missing.push("ref non-coverage: opening and dirtying an editor tab is forbidden on the reference");
+      notes.push("ref unchanged: dirty editor/close anatomy compared from source anchors");
+      break;
+    case "automation-run-detail": {
+      if (await tryClick(page, "button", "Automations")) {
+        if (!(await waitForAria(page, "heading", "Automations"))) {
+          missing.push("Automations page marker never appeared");
+          break;
+        }
+        if (await tryClick(page, "button", "Runs", 2000)) {
+          await delay(700);
+          const row = page.locator("table tbody tr button, [role='row'] button").first();
+          if ((await row.count()) > 0) {
+            await row.click({ timeout: 2500 });
+            await delay(700);
+            notes.push("first run row opened for detail capture");
+          } else missing.push("ref non-coverage: no retained automation run to open");
+        } else missing.push("no Runs button reachable on the Automations page");
+      } else missing.push("no Automations nav reachable");
+      break;
+    }
+    case "bots-history": {
+      if (await tryClick(page, "button", "Bots")) {
+        if (!(await waitForAria(page, "heading", "Bots"))) {
+          missing.push("Bots page marker never appeared");
+          break;
+        }
+        notes.push("Bots page opened");
+        const history = page.getByText("Responsibility history", { exact: true }).first();
+        if ((await history.count()) > 0) notes.push("responsibility history visible");
+        else missing.push("ref non-coverage: no Bot responsibility history retained to display");
+      } else missing.push("no Bots nav reachable");
+      break;
+    }
+    case "mentu-evidence": {
+      if (await tryClick(page, "button", "Mentu")) {
+        await delay(350);
+        const evidence = page.getByRole("tab", { name: "Evidence", exact: true }).first();
+        if ((await evidence.count()) > 0) {
+          await evidence.click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Mentu Evidence tab opened");
+        } else missing.push("no Mentu Evidence tab reachable");
+      } else missing.push("no Mentu activity button reachable");
+      break;
+    }
     case "session-details": {
       // R2 session details: the right-sidebar session item, captured as-is.
       try {
@@ -2683,6 +2922,7 @@ async function refTeardown(page, state) {
     state === "command-palette" ||
     state === "quick-open" ||
     state === "launch-dialog" ||
+    state === "workspace-composer" ||
     state === "settings-shortcuts-rebind" ||
     state === "automation-editor-cron-preview"
   ) {
@@ -2695,7 +2935,7 @@ async function refTeardown(page, state) {
       await page.keyboard.press("Escape").catch(() => {});
       await delay(200);
     }
-    notes.push("teardown: Escape x2 for palette/menu/recorder overlay");
+    notes.push("teardown: Escape x2 for palette/menu/recorder/composer overlay");
   }
   await ensureHome(page, notes);
   for (const [i, n] of notes.entries()) notes[i] = n.replace(/^home:/, "teardown:");
@@ -2932,6 +3172,33 @@ async function candSetup(page, state, ctx) {
       return true;
     } catch (error) {
       missing.push(`project registration failed: ${error.message.split("\n")[0]}`);
+      return false;
+    }
+  };
+  const selectFixtureWorkspace = async () => {
+    try {
+      const fixtureName = path.basename(ctx.workspace);
+      const select = page.getByRole("button", { name: new RegExp(`^Select ${fixtureName.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}`) }).first();
+      if ((await select.count()) > 0) {
+        await select.click({ timeout: 3000 });
+        await delay(500);
+        notes.push(`fixture workspace selected: ${fixtureName}`);
+        return true;
+      }
+    } catch {
+      /* active workspace may already be selected */
+    }
+    return false;
+  };
+  const clickActivity = async (name) => {
+    try {
+      const escaped = name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&");
+      const trigger = page.getByRole("button", { name: new RegExp(`^${escaped}(?:$|\\s|\\()`) }).first();
+      if ((await trigger.count()) === 0) return false;
+      await trigger.click({ timeout: 3000 });
+      await delay(350);
+      return true;
+    } catch {
       return false;
     }
   };
@@ -4469,6 +4736,372 @@ async function candSetup(page, state, ctx) {
       }
       break;
     }
+    case "workspace-composer": {
+      // Open the owned composer only. The fixture is intentionally not
+      // submitted, so this state cannot create a workspace or session.
+      let opened = await tryClick(page, "button", "Create workspace", 3000);
+      if (!opened) opened = await tryClick(page, "button", "New workspace", 3000);
+      if (opened) {
+        await delay(500);
+        notes.push("workspace composer opened without submitting");
+        const advanced = page.getByRole("button", { name: "Advanced", exact: true }).first();
+        if ((await advanced.count()) > 0) {
+          await advanced.click({ timeout: 3000 });
+          await delay(300);
+          notes.push("Advanced section expanded");
+        }
+      } else missing.push("no Create workspace/New workspace affordance reachable");
+      break;
+    }
+    case "session-details-panel": {
+      await ensureProject().catch(() => {});
+      await ensureTerminal().catch(() => {});
+      try {
+        const trigger = page.getByRole("button", { name: "Session details" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Session details panel opened");
+        } else missing.push("no Session details activity button reachable");
+      } catch {
+        missing.push("Session details best-effort only");
+      }
+      break;
+    }
+    case "ports-listening": {
+      await ensureProject().catch(() => {});
+      await selectFixtureWorkspace();
+      try {
+        await writeFile(path.join(ctx.workspace, "ports-fixture.txt"), "ports fixture\\n");
+      } catch {
+        /* the panel itself remains useful when the file watch is delayed */
+      }
+      // Start a deterministic local listener outside the app UI. This is an
+      // owned fixture and is closed in candTeardown after the capture.
+      try {
+        const server = createServer((_request, response) => {
+          response.writeHead(200, { "content-type": "text/plain" });
+          response.end("Drogon fidelity port fixture\n");
+        });
+        await new Promise((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(4173, "127.0.0.1", resolve);
+        });
+        ctx.portFixture = {
+          server,
+          async close() {
+            server.closeAllConnections?.();
+            await Promise.race([
+              new Promise((resolve) => server.close(() => resolve())),
+              delay(1500),
+            ]);
+          },
+        };
+        notes.push("fixture: listening server bound to 127.0.0.1:4173");
+      } catch (error) {
+        missing.push(`listening server fixture failed: ${error.message.split("\\n")[0]}`);
+      }
+      // Match the proven right-rail walk: the activity buttons are mounted
+      // after the active workspace has a watched file, then Ports is left
+      // open for the capture.
+      for (const name of ["Explorer", "Mentu", "Source Control"]) {
+        await clickActivity(name);
+        await delay(180);
+      }
+      if (await clickActivity("Ports")) {
+        await delay(900);
+        notes.push("Ports panel opened");
+      } else missing.push("no Ports activity button reachable");
+      break;
+    }
+    case "explorer-selected-file": {
+      await ensureProject().catch(() => {});
+      await selectFixtureWorkspace();
+      try {
+        await mkdir(path.join(ctx.workspace, "src", "fixture"), { recursive: true });
+        await writeFile(path.join(ctx.workspace, "src", "fixture", "selected.ts"), "export const fixture = true;\\n");
+        await writeFile(path.join(ctx.workspace, "README.md"), "explorer fixture\\n");
+        notes.push("fixture: nested Explorer tree files written");
+      } catch {
+        missing.push("Explorer nested-tree fixture write failed");
+      }
+      // The right rail is mounted after a watched workspace file exists.
+      await writeFile(path.join(ctx.workspace, "explorer-fixture.txt"), "explorer fixture\\n").catch(() => {});
+      if (!(await clickActivity("Explorer"))) {
+        // Re-select Sessions once before declaring the activity rail absent;
+        // this is view navigation, not a mutation.
+        await tryClick(page, "button", "Sessions", 1500).catch(() => false);
+        await delay(350);
+      }
+      if (!(await clickActivity("Explorer"))) {
+        missing.push("no Explorer activity button reachable");
+        break;
+      }
+      await delay(700);
+      const find = page.getByRole("textbox", { name: "Find files" }).first();
+      if ((await find.count()) === 0) missing.push("Explorer tree did not expose Find files");
+      for (const directory of ["src", "fixture"]) {
+        const folder = page.getByRole("button", { name: directory, exact: true }).first();
+        if ((await folder.count()) > 0) {
+          await folder.click({ timeout: 3000 });
+          await delay(500);
+        }
+      }
+      const row = page.getByRole("button", { name: "selected.ts", exact: true }).first();
+      try {
+        await row.waitFor({ timeout: 8000 });
+        await row.click({ timeout: 3000 });
+        await delay(500);
+        notes.push("selected.ts row selected (no editor open)");
+      } catch {
+        missing.push("no selected.ts row in Explorer tree");
+      }
+      break;
+    }
+    case "editor-dirty-close": {
+      await ensureProject().catch(() => {});
+      await selectFixtureWorkspace();
+      try {
+        await writeFile(path.join(ctx.workspace, "dirty-fixture.txt"), "dirty editor fixture\\n");
+        notes.push("fixture: dirty-fixture.txt written");
+      } catch {
+        missing.push("dirty editor fixture write failed");
+      }
+      if (!(await clickActivity("Explorer"))) {
+        await tryClick(page, "button", "Sessions", 1500).catch(() => false);
+        await delay(350);
+      }
+      if (!(await clickActivity("Explorer"))) {
+        missing.push("Explorer activity button unavailable");
+        break;
+      }
+      await delay(700);
+      const row = page.getByRole("button", { name: "dirty-fixture.txt", exact: true }).first();
+      if ((await row.count()) === 0) {
+        missing.push("no dirty-fixture.txt Explorer row to open");
+        break;
+      }
+      await row.click({ timeout: 3000 });
+      await delay(800);
+      const editor = page.locator(".monaco-editor").first();
+      if ((await editor.count()) === 0) {
+        missing.push("dirty-fixture.txt opened no editor");
+        break;
+      }
+      try {
+        await editor.click({ timeout: 5000 });
+        await page.keyboard.type("x");
+        await delay(600);
+        const snap = await page.locator("body").ariaSnapshot({ timeout: 8000 }).catch(() => "");
+        const markers = String(snap).split("\\n").filter((line) => /unsaved|dirty|Save|Discard/i.test(line)).slice(0, 8)
+          .map((line) => line.trim().slice(0, 100));
+        notes.push(markers.length ? `dirty markers: ${markers.join(" | ")}` : "dirty probe: no unsaved/dirty/Save marker in aria");
+        // Leave the prompt/tab state for the screenshot; teardown reverts the
+        // byte and dismisses any close prompt without confirming discard.
+      } catch (error) {
+        missing.push(`dirty editor probe failed: ${error.message.split("\\n")[0]}`);
+      }
+      break;
+    }
+    case "automation-run-detail": {
+      await ensureProject().catch(() => {});
+      if (!(await tryClick(page, "button", "Automations"))) {
+        missing.push("no Automations nav reachable");
+        break;
+      }
+      if (!(await waitForAria(page, "heading", "Automations"))) {
+        missing.push("Automations page marker never appeared");
+        break;
+      }
+      if (!(await tryClick(page, "button", "Runs", 2500))) {
+        missing.push("no Runs button reachable on the Automations page");
+        break;
+      }
+      await delay(800);
+      let row = page.locator("table tbody tr button, [role='row'] button").first();
+      if ((await row.count()) === 0) {
+        // Use the same safe shell-backed automation fixture as the existing
+        // automation-runs state, then re-open Runs for a retained row.
+        const workspaceId = await page.evaluate(async () => {
+          try {
+            const r = await window.drogon.workspaces();
+            return r.ok ? r.result.workspaces[0]?.id : null;
+          } catch { return null; }
+        }).catch(() => null);
+        if (workspaceId && ctx.dataDir) {
+          const cliBin = path.join(root, "target", "debug", process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli");
+          try {
+            const out = await execFileAsync(cliBin, [
+              "--data-dir", ctx.dataDir, "--json", "automation", "create",
+              "--workspace", workspaceId, "--name", "Fidelity run detail",
+              "--harness", "pi", "--prompt", "Deterministic fidelity run fixture.",
+              "--cron", "0 0 1 1 *",
+            ]);
+            ctx.automationDetailId = JSON.parse(out.stdout).result?.id ?? null;
+            if (ctx.automationDetailId) {
+              const dispatched = await execFileAsync(cliBin, [
+                "--data-dir", ctx.dataDir, "--json", "automation", "run",
+                "--id", ctx.automationDetailId,
+              ]);
+              const dispatchResult = JSON.parse(dispatched.stdout).result;
+              notes.push(`automation dispatch outcome=${dispatchResult?.outcome ?? "unknown"}`);
+              let historyReady = false;
+              for (let attempt = 0; attempt < 20 && !historyReady; attempt += 1) {
+                await delay(500);
+                try {
+                  const history = await execFileAsync(cliBin, [
+                    "--data-dir", ctx.dataDir, "--json", "automation", "history",
+                    "--id", ctx.automationDetailId, "--limit", "5",
+                  ]);
+                  historyReady = (JSON.parse(history.stdout).result?.runs?.length ?? JSON.parse(history.stdout).result?.length ?? 0) > 0;
+                } catch {
+                  /* the run ledger can become visible between polls */
+                }
+              }
+              notes.push(historyReady ? "automation run history visible in fixture" : "automation run history not visible before capture");
+            } else notes.push("fixture automation created without a readable id");
+          } catch (error) {
+            notes.push(`automation fixture create best-effort only: ${error.message.split("\\n")[0]}`);
+          }
+        }
+        await delay(800);
+        const refreshRuns = page.getByRole("button", { name: "Refresh runs", exact: true }).first();
+        if ((await refreshRuns.count()) > 0) {
+          await refreshRuns.click({ timeout: 3000 });
+          await delay(1000);
+        }
+        row = page.getByRole("button", { name: /Fidelity run detail/ }).first();
+        if ((await row.count()) === 0) {
+          row = page.locator("table tbody tr button, [role='row'] button, [data-testid^='automation-run-'] button").first();
+        }
+      }
+      if ((await row.count()) > 0) {
+        await row.click({ timeout: 3000 });
+        await delay(700);
+        notes.push("automation run detail opened");
+      } else missing.push("no automation run row to open");
+      break;
+    }
+    case "bots-history": {
+      await ensureProject().catch(() => {});
+      const workspaceId = await workspaceIdForFixture();
+      const cliBin = path.join(root, "target", "debug", process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli");
+      if (!workspaceId || !ctx.dataDir) {
+        missing.push("workspace id unavailable for Bots history fixture");
+        break;
+      }
+      try {
+        const statusOut = await execFileAsync(cliBin, ["--data-dir", ctx.dataDir, "--json", "status"]);
+        const status = JSON.parse(statusOut.stdout);
+        const hostId = status.result?.hostId ?? status.status?.hostId ?? status.hostId;
+        if (!hostId) throw new Error("status response did not include hostId");
+        const createBody = {
+          workspaceId,
+          hostId,
+          locale: "en",
+          body: {
+            characterPreset: "arya",
+            displayIdentity: { displayName: "Fidelity History Bot", handle: null, title: "QA history fixture" },
+            harnessPolicy: { defaultHarness: "pi", explicitModel: null },
+            instructions: "Deterministic Bot history fixture.",
+            memories: [],
+          },
+        };
+        const created = await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json", "rpc", "bot.create", "--params", JSON.stringify(createBody),
+        ]);
+        const bot = JSON.parse(created.stdout).result;
+        const botId = bot?.id;
+        if (!botId) throw new Error("bot.create response did not include id");
+        const responsibility = await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json", "rpc", "bot.responsibility_create",
+          "--params", JSON.stringify({
+            workspaceId,
+            hostId,
+            botId,
+            name: "Fidelity history responsibility",
+            schedule: "0 0 1 1 *",
+            prompt: "Print the deterministic fidelity history fixture and exit.",
+          }),
+        ]);
+        const responsibilityId = JSON.parse(responsibility.stdout).result?.responsibilityId;
+        if (!responsibilityId) throw new Error("responsibility_create response did not include id");
+        const runOut = await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json",
+          "--request-id", `fidelity-bot-run-${randomUUID()}`,
+          "rpc", "bot.run",
+          "--params", JSON.stringify({
+            workspaceId,
+            hostId,
+            botId,
+            responsibilityId,
+            harness: { harnessId: "pi" },
+            reason: "manual",
+            eventIdentity: `fidelity-history-${randomUUID()}`,
+          }),
+        ]);
+        const runResult = JSON.parse(runOut.stdout).result;
+        if (runResult?.outcome && runResult.outcome !== "dispatched") {
+          throw new Error(`bot.run outcome=${runResult.outcome} error=${runResult.error ?? "none"}`);
+        }
+        let historyReady = false;
+        for (let attempt = 0; attempt < 20 && !historyReady; attempt += 1) {
+          await delay(500);
+          try {
+            const snapshot = await execFileAsync(cliBin, [
+              "--data-dir", ctx.dataDir, "--json", "rpc", "bot.snapshot",
+              "--params", JSON.stringify({ workspaceId, hostId, locale: "en" }),
+            ]);
+            historyReady = (JSON.parse(snapshot.stdout).result?.history?.length ?? 0) > 0;
+          } catch {
+            /* the dispatch ledger can become visible between polls */
+          }
+        }
+        ctx.historyBotId = botId;
+        notes.push(historyReady
+          ? "fixture Bot, scheduled responsibility, and manual history run created (fake pi; no model inference)"
+          : "fixture Bot/run created; history ledger was not visible before capture");
+      } catch (error) {
+        missing.push(`Bots history fixture failed: ${error.message.split("\\n")[0]}`);
+        break;
+      }
+      if (!(await tryClick(page, "button", "Bots", 2500))) {
+        missing.push("no Bots nav reachable");
+        break;
+      }
+      if (!(await waitForAria(page, "heading", "Bots"))) {
+        missing.push("Bots page marker never appeared");
+        break;
+      }
+      const refresh = page.getByRole("button", { name: "Refresh Bots", exact: true }).first();
+      if ((await refresh.count()) > 0) {
+        await refresh.click({ timeout: 3000 });
+        await delay(1200);
+      } else {
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+        await emulatePageFocus(page).catch(() => {});
+        await page.getByRole("button", { name: "Reveal active workspace", exact: true }).waitFor({ timeout: 25000 }).catch(() => {});
+        await tryClick(page, "button", "Bots", 3000);
+      }
+      const history = page.getByText("Responsibility history", { exact: true }).first();
+      if ((await history.count()) > 0) notes.push("responsibility history visible");
+      else missing.push("Bot responsibility history did not render after refresh");
+      break;
+    }
+    case "mentu-evidence": {
+      await ensureProject().catch(() => {});
+      await selectFixtureWorkspace();
+      if (await clickActivity("Mentu")) {
+        await delay(350);
+        const evidence = page.getByRole("tab", { name: "Evidence", exact: true }).first();
+        if ((await evidence.count()) > 0) {
+          await evidence.click({ timeout: 3000 });
+          await delay(400);
+          notes.push("Mentu Evidence tab opened");
+        } else missing.push("no Mentu Evidence tab reachable");
+      } else missing.push("no Mentu activity button reachable");
+      break;
+    }
     case "session-details": {
       // Owned fixture with a live terminal so the panel has a session.
       await ensureProject().catch(() => {});
@@ -4900,10 +5533,19 @@ async function dismissBrowserAddressEdit(page) {
   }
 }
 
-async function candTeardown(page, state) {
+async function candTeardown(page, state, ctx) {
   const notes = [];
+  if (ctx?.portFixture) {
+    try {
+      await ctx.portFixture.close();
+      ctx.portFixture = null;
+      notes.push("teardown: listening server closed");
+    } catch {
+      notes.push("teardown: listening server close unverifiable");
+    }
+  }
   await dismissBrowserAddressEdit(page);
-  if (state === "launch-dialog" || state === "settings-shortcuts-rebind" || state === "editor-header" || state === "automation-editor-cron-preview") {
+  if (state === "launch-dialog" || state === "workspace-composer" || state === "settings-shortcuts-rebind" || state === "editor-header" || state === "automation-editor-cron-preview") {
     // R6: the harness launch Popover and the shortcut recorder are
     // invisible to the overlay census, so Escape unconditionally first
     // (closes the form, cancels recording); the generic path below
@@ -4912,7 +5554,7 @@ async function candTeardown(page, state) {
       await page.keyboard.press("Escape").catch(() => {});
       await delay(200);
     }
-    notes.push("teardown: Escape x2 for launch form / recorder");
+    notes.push("teardown: Escape x2 for launch form / recorder / composer");
   }
   if (
     state === "worktree-card-rows" ||
@@ -4923,6 +5565,7 @@ async function candTeardown(page, state) {
     state === "launch-dialog" ||
     state === "automation-editor-cron-preview" ||
     state === "editor-tab" ||
+    state === "editor-dirty-close" ||
     state === "editor-header" ||
     state === "split-terminal" ||
     state === "agent-state"
@@ -4931,7 +5574,7 @@ async function candTeardown(page, state) {
     // agent-state terminals), highest index first; the first strip tab stays
     // so the next state always has a terminal to reuse. A dirty-editor close
     // prompt is never confirmed: Escape leaves the tab open, recorded.
-    if (state === "editor-tab") {
+    if (state === "editor-tab" || state === "editor-dirty-close") {
       // Revert the dirty probe (undo + save) so the tab closes cleanly and
       // the fixture file stays pristine for later states.
       try {
@@ -5078,6 +5721,14 @@ const ALL_STATES = [
   "editor-tab",
   "split-terminal",
   "agent-state",
+  "workspace-composer",
+  "session-details-panel",
+  "ports-listening",
+  "explorer-selected-file",
+  "editor-dirty-close",
+  "automation-run-detail",
+  "bots-history",
+  "mentu-evidence",
 ];
 
 const CAND_OWNER = {
@@ -5127,6 +5778,14 @@ const CAND_OWNER = {
   "editor-tab": "apps/desktop/src/renderer/src/features/shell/editor-tab.ts, features/editor/EditorPane.tsx",
   "split-terminal": "apps/desktop/src/renderer/src/features/terminal/TerminalSplitHost.tsx, TerminalSplitHeaderOverlay.tsx",
   "agent-state": "apps/desktop/src/renderer/src/features/shell/agent-state.ts, AgentStateIcon.tsx",
+  "workspace-composer": "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposer.tsx, NewWorkspaceComposerModal.tsx, composer-submit.ts",
+  "session-details-panel": "apps/desktop/src/renderer/src/features/right-sidebar/SessionDetailsPanel.tsx, features/shell/WorktreeAgentRow.tsx",
+  "ports-listening": "apps/desktop/src/renderer/src/features/ports/PortsPanel.tsx, local-workspace-ports-panel.tsx, local-port-details-dialog.tsx",
+  "explorer-selected-file": "apps/desktop/src/renderer/src/features/file-explorer/FileExplorer.tsx, FileExplorerTreePane.tsx, FileExplorerRow.tsx",
+  "editor-dirty-close": "apps/desktop/src/renderer/src/features/shell/tab-strip/EditorStripTab.tsx, features/shell/TabBar.tsx, App.tsx",
+  "automation-run-detail": "apps/desktop/src/renderer/src/features/automations/AutomationRunDetailsPage.tsx, AutomationRunPageFrame.tsx, automation-run-content.ts",
+  "bots-history": "apps/desktop/src/renderer/src/features/bots/BotsPanel.tsx, BotResponsibilityCard.tsx, bots-panel-projection.ts",
+  "mentu-evidence": "apps/desktop/src/renderer/src/features/mentu/MentuPanel.tsx, RecipePaneContent.tsx, RecipePaneInspector.tsx",
   tokens: "apps/desktop/src/renderer/src/assets/main.css",
 };
 
@@ -5180,6 +5839,14 @@ const STATE_SURFACE = {
   "editor-tab": "editor-tab",
   "split-terminal": "split-terminal",
   "agent-state": "agent-state",
+  "workspace-composer": "workspace-composer",
+  "session-details-panel": "session-details-panel",
+  "ports-listening": "ports-listening",
+  "explorer-selected-file": "explorer-selected-file",
+  "editor-dirty-close": "editor-dirty-close",
+  "automation-run-detail": "automation-run-detail",
+  "bots-history": "bots-history",
+  "mentu-evidence": "mentu-evidence",
 };
 
 // Preferred source-value keywords per surface: the ranked item must cite the
@@ -5228,6 +5895,14 @@ const SOURCE_PREFERENCE = {
   "editor-tab": ["dirty", "save", "close", "classname"],
   "split-terminal": ["split", "sash", "separator", "classname"],
   "agent-state": ["working", "waiting", "idle", "classname"],
+  "workspace-composer": ["new workspace", "project", "agent", "advanced", "classname"],
+  "session-details-panel": ["session details", "details", "harness", "classname"],
+  "ports-listening": ["listening", "open in browser", "details", "classname"],
+  "explorer-selected-file": ["find files", "collapse all", "selected", "classname"],
+  "editor-dirty-close": ["dirty", "unsaved", "save", "discard", "classname"],
+  "automation-run-detail": ["run details", "output", "host", "prompt", "classname"],
+  "bots-history": ["history", "responsibility history", "scheduled", "manual", "classname"],
+  "mentu-evidence": ["evidence", "stdout", "stderr", "classname"],
   tokens: ["font", "geist", "text-", "leading", "tracking", "weight"],
 };
 
@@ -5721,7 +6396,7 @@ async function main() {
 
 function renderReport({ runId, states, inventory, stateResults, ranked, refMeta, candVersions, outDir }) {
   const lines = [];
-  lines.push(`# QA UI Round 9 fidelity report — ${runId}`);
+  lines.push(`# QA UI Round 10 fidelity report — ${runId}`);
   lines.push("");
   lines.push(`Viewport ${VIEWPORT.width}x${VIEWPORT.height}, schemes: ${NO_DARK ? "light" : "light + dark"}.`);
   lines.push(`Viewport options: --viewport WIDTHxHEIGHT (or --width/--height); this run was captured at the requested native size.`);
