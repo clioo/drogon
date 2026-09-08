@@ -48,8 +48,18 @@ describe("source control render", () => {
         entry: { path: "fresh-dir/", area: "untracked", status: "untracked" },
       }),
     );
-    expect(out).toContain('aria-label="fresh-dir (U)"');
     expect(out).toContain("fresh-dir");
+  });
+
+  test("file rows are non-interactive divs with separate action buttons", () => {
+    const out = html(createElement(UncommittedEntryRow, rowProps));
+    // Fork parity: no role=button wrapper with nested buttons — the row
+    // div only carries identity attrs; Discard/Stage are sibling buttons.
+    expect(out).not.toContain('role="button"');
+    expect(out).not.toContain("tabindex");
+    expect(out).toContain('data-testid="source-control-entry"');
+    expect(out).toContain('aria-label="Discard changes"');
+    expect(out).toContain('aria-label="Stage"');
   });
 
   test("file rows show the status letter, name, dimmed directory and line counts", () => {

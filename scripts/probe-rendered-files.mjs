@@ -48,7 +48,7 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     );
   };
   await ensureFilesVisible();
-  await panel.getByRole("treeitem", { name: first, exact: true }).click();
+  await panel.getByRole("button", { name: first, exact: true }).click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "first baseline\n");
   await setEditorValue(page, first, "unsaved first draft\n");
@@ -57,10 +57,10 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     await readFile(path.join(workspace, first), "utf8"),
     "first baseline\n",
   );
-  await panel.getByRole("treeitem", { name: second, exact: true }).click();
+  await panel.getByRole("button", { name: second, exact: true }).click();
   await waitForEditorRegistered(page, second);
   assert.equal(await readEditorValue(page, second), "second baseline\n");
-  await panel.getByRole("treeitem", { name: first, exact: true }).click();
+  await panel.getByRole("button", { name: first, exact: true }).click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
   // R6-B: switching the activity bar to Source Control hides the mounted
@@ -134,7 +134,7 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     .waitFor();
   await ensureFilesVisible();
   await files.click();
-  await panel.getByRole("treeitem", { name: first, exact: true }).click();
+  await panel.getByRole("button", { name: first, exact: true }).click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
   // Back to the terminal view through the strip when a tab exists (the

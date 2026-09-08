@@ -117,14 +117,17 @@ describe("FileExplorerTreePane", () => {
       ...extra,
     });
 
-  test("rows carry treeitem roles with level, expansion and selection", () => {
+  test("rows are plain buttons with no tree roles, selection in data attrs", () => {
     const html = renderToString(pane());
-    expect(html).toContain('role="tree"');
-    expect(html).toContain('role="treeitem"');
-    expect(html).toContain('aria-level="1"');
-    expect(html).toContain('aria-level="2"');
-    expect(html).toContain('aria-expanded="true"');
-    expect(html).toContain('aria-selected="true"');
+    expect(html).not.toContain('role="tree"');
+    expect(html).not.toContain('role="treeitem"');
+    expect(html).not.toContain("aria-level");
+    expect(html).not.toContain("aria-expanded");
+    expect(html).not.toContain("aria-selected");
+    // Plain-button structure like the source: one button per entry, the
+    // selected row flagged for styling, git status as visible text.
+    expect(html).toContain("data-file-explorer-row");
+    expect(html).toContain('data-selected="true"');
     expect(html).toContain("src/main.ts");
   });
 

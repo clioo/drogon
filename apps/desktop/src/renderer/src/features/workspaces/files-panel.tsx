@@ -751,8 +751,13 @@ function FilesPanel({
     truncation !== null && truncation.scopeKey === scopeKey && truncation.truncated
       ? truncation
       : null;
+  // Why a plain div, not a labelled section: the source explorer panel is
+  // flat (no wrapping region), and the route host already announces the
+  // "Files" region — a second "Workspace files" region nests regions the
+  // source does not have (R16-D #137). The editor region below stays
+  // R16-A's to move.
   return (
-    <section className="files-panel" aria-label="Workspace files">
+    <div className="files-panel">
       <FileExplorer
         workspaceId={workspaceId}
         workspaceName={workspace.name}
@@ -793,7 +798,7 @@ function FilesPanel({
           }
         }}
       />
-    </section>
+    </div>
   );
 }
 
