@@ -117,6 +117,9 @@ type WorktreeRef = {
   branch: string;
   head: string;
   baseRef: string | null;
+  // Synthetic rows have no daemon row to rename; daemon rows always carry
+  // the key (null when never renamed), so this stays required, never absent.
+  title: string | null;
   createdAt: string;
 };
 
@@ -241,6 +244,7 @@ export async function dispatchTasksProjectRequest(
         branch: "",
         head: "",
         baseRef: null,
+        title: null,
         createdAt: "",
       });
     }

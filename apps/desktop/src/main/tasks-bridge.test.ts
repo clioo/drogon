@@ -278,6 +278,35 @@ describe("tasks project passthrough", () => {
     expect(seen).toMatchObject({ projectId: "p1" });
   });
 
+  it("preserves the daemon rename title and nulls synthetic rows", async () => {
+    const renamed = { ...nativeWorktree, title: "ZQ" };
+    const call = nativeCall({
+      "project.list": { projects: [nativeProject] },
+      "workspace.list": {
+        workspaces: [
+          { id: "ws2", path: "/docs", name: "docs", kind: "folder", hostId: "h" },
+        ],
+      },
+      "worktree.list": { worktrees: [renamed] },
+    });
+    const result = await dispatchTasksProjectRequest(
+      "tasksWorktrees",
+      {},
+      call,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const worktrees = (
+      result.result as { worktrees: { id: string; title: unknown }[] }
+    ).worktrees;
+    expect(
+      worktrees.find((item) => item.id === "w1")?.title,
+    ).toBe("ZQ");
+    expect(
+      worktrees.find((item) => item.id === "implicit:ws2")?.title,
+    ).toBe(null);
+  });
+
   it("fails closed when the service errors", async () => {
     const call = nativeCall({});
     for (const [method, input] of [

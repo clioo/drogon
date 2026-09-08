@@ -23,6 +23,15 @@ export type ProjectBridge = {
     id: string;
     force?: boolean;
   }): Promise<Result<{ id: string; removed: boolean }>>;
+  /**
+   * Display-title rename (`worktree.rename { worktreeId, name }`): renames
+   * the card title only, never the git branch or directory (Orca's
+   * `updateWorktreeMeta(displayName)` semantics).
+   */
+  worktreeRename(input: {
+    worktreeId: string;
+    name: string;
+  }): Promise<Result<WorktreeResult>>;
 };
 
 export type ProjectResult = {
@@ -42,6 +51,8 @@ export type WorktreeResult = {
   branch: string;
   head: string;
   baseRef: string | null;
+  /** Display title from `worktree.rename`; null when never renamed. */
+  title: string | null;
   createdAt: string;
 };
 
@@ -77,6 +88,14 @@ export const projectBridgeSchemas = {
   }),
   worktreeList: z.object({ projectId: id }),
   worktreeRemove: z.object({ id, force: z.boolean().optional() }),
+  worktreeRename: z.object({
+    worktreeId: id,
+    name: z
+      .string()
+      .min(1)
+      .max(256)
+      .refine((value) => !value.includes("\0")),
+  }),
 };
 
 const projectResult = z.object({
@@ -96,6 +115,10 @@ const worktreeResult = z.object({
   branch: z.string(),
   head: z.string(),
   baseRef: z.string().nullable(),
+  // Nullish, not just optional: the service serializes an unset title as
+  // explicit null, and a present-null must validate the same as a missing
+  // key rather than failing the whole worktree response.
+  title: z.string().nullable().nullish(),
   createdAt: z.string(),
 });
 
@@ -106,4 +129,5 @@ export const projectResultSchemas = {
   "worktree.create": worktreeResult,
   "worktree.list": z.object({ worktrees: z.array(worktreeResult) }),
   "worktree.remove": z.object({ id: z.string(), removed: z.boolean() }),
+  "worktree.rename": worktreeResult,
 };

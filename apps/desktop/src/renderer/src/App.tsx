@@ -1532,6 +1532,27 @@ export function App() {
     }
     return null;
   };
+  // Worktree display-title rename (task R9-A): renames the card title
+  // only, never the branch or directory; refresh re-reads the title.
+  const submitRenameWorktree = async (
+    worktree: { id: string },
+    name: string,
+  ): Promise<string | null> => {
+    const bridge = windowProjectBridge(window.drogon);
+    if (typeof bridge.worktreeRename !== "function")
+      return "Worktrees unavailable: service does not advertise worktree.v1";
+    try {
+      const result = await bridge.worktreeRename({
+        worktreeId: worktree.id,
+        name,
+      });
+      if (!result.ok) return result.error.message;
+    } catch {
+      return "Could not rename the worktree. Retry the connection.";
+    }
+    await refresh();
+    return null;
+  };
   const browseProject = async (): Promise<string | null> => {
     try {
       return await window.drogon.chooseFolder();
@@ -2044,6 +2065,7 @@ export function App() {
             onBrowseProject={browseProject}
             onSubmitAddProject={submitAddProject}
             onSubmitRemoveWorktree={submitRemoveWorktree}
+            onSubmitRenameWorktree={submitRenameWorktree}
             onOpenSettings={openSettings}
           />
         ) : null}

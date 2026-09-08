@@ -30,6 +30,7 @@ const nativeMethodFor: Record<ProjectMethod, string> = {
   worktreeCreate: "worktree.create",
   worktreeList: "worktree.list",
   worktreeRemove: "worktree.remove",
+  worktreeRename: "worktree.rename",
 };
 
 const invalid = {
@@ -77,6 +78,7 @@ const channelFor: Record<ProjectMethod, string> = {
   worktreeCreate: "drogon:worktreeCreate",
   worktreeList: "drogon:worktreeList",
   worktreeRemove: "drogon:worktreeRemove",
+  worktreeRename: "drogon:worktreeRename",
 };
 
 /**

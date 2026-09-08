@@ -57,6 +57,10 @@ export interface ProjectRpcBridge {
     id: string;
     force?: boolean;
   }) => Promise<Result<{ id: string; removed: boolean }>>;
+  worktreeRename?: (input: {
+    worktreeId: string;
+    name: string;
+  }) => Promise<Result<Worktree>>;
 }
 
 /** Reads the live `project` namespace off `window.drogon` (absent → {}). */
@@ -250,11 +254,16 @@ export function gitProjectForWorkspace(
   return null;
 }
 
-/** Display name for a worktree card: its workspace name, else branch, else short id. */
+/**
+ * Display name for a worktree card: the stored rename title first (set by
+ * `worktree.rename`, Orca's display-title-only inline rename), then its
+ * workspace name, else branch, else short id.
+ */
 export function worktreeDisplayName(
   worktree: Worktree,
   workspaces: Workspace[],
 ): string {
+  if (worktree.title?.trim()) return worktree.title.trim();
   const workspace = workspaces.find((item) => item.id === worktree.workspaceId);
   if (workspace) return workspace.name;
   if (worktree.branch) return worktree.branch;

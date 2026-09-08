@@ -1,9 +1,11 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/sidebar/worktree-card-surface.tsx and
    worktree-card-header.tsx (adapter: Orca's store-driven card becomes a
-   pure props card over this repo's Worktree/Session contract). */
+   pure props card over this repo's Worktree/Session contract; the title
+   is the inline-rename editor, the meta row is the badges projection,
+   and right-click / Menu-key / kebab open the worktree context menu.) */
 import { useState, useSyncExternalStore } from "react";
-import { GitBranch, MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
 import {
@@ -13,13 +15,21 @@ import {
   worktreeDisplayName,
 } from "./project-adapter";
 import type { Workspace } from "../../../../shared/session-contract";
+import { WorktreeContextMenu } from "./WorktreeContextMenu";
+import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
+import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
+import { summarizeCardAgentStates } from "./worktree-card-agent-summary";
+import type { WorktreeCardPrDisplay } from "./worktree-card-pr-display";
+import { useWorktreeGitStatus } from "./use-worktree-git-status";
 
 /**
- * One worktree card: branch and base ref, display name, agent-state dot,
- * unread marker for needs_input sessions, and relative activity time.
- * The main surface selects the workspace the worktree attaches to; the
- * kebab menu holds worktree actions (remove). Agent markers are unchanged
- * by the menu addition.
+ * One worktree card: inline-rename title, agent-state dot, unread marker
+ * for needs_input sessions, meta badges (issue, branch, ahead/behind,
+ * PR chip when known, agent summary) and relative activity time. The
+ * main surface selects the workspace the worktree attaches to; the
+ * context menu (right-click, Menu key, Shift+F10, or the kebab button)
+ * holds Open in editor / Reveal in Finder / Copy path, Rename, Create
+ * worktree from here and Delete worktree.
  */
 export function WorktreeCard({
   worktree,
@@ -27,26 +37,40 @@ export function WorktreeCard({
   sessions,
   selected,
   disabled,
+  projectKind,
+  implicitFolderWorktree,
+  pr = null,
   onSelect,
   onRemove,
+  onRename,
+  onCreateWorktree,
 }: {
   worktree: Worktree;
   workspaces: Workspace[];
   sessions: Session[];
   selected: boolean;
   disabled: boolean;
+  projectKind: "git" | "folder";
+  implicitFolderWorktree: boolean;
+  /** Known PR for the chip; null hides it (no PR store yet). */
+  pr?: WorktreeCardPrDisplay | null;
   onSelect: (workspaceId: string) => void;
   /** Null for implicit folder worktrees, which have nothing to remove. */
   onRemove: (() => void) | null;
+  /**
+   * Submits an inline-rename title; resolves an error message or null.
+   * Null for implicit folder worktrees, whose title is the folder.
+   */
+  onRename: ((name: string) => Promise<string | null>) | null;
+  /** Opens the new-workspace composer for this project, or null. */
+  onCreateWorktree: (() => void) | null;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [beginEditing, setBeginEditing] = useState(false);
   const attached = sessions.filter(
     (session) => session.workspaceId === worktree.workspaceId,
   );
   const summary = summarizeCardSessions(attached);
-  const liveCount = attached.filter(
-    (session) => session.verdict === "live",
-  ).length;
+  const agentSummary = summarizeCardAgentStates(attached);
   // Linked GitHub issue from the tasks link store (journey J6); null when
   // the worktree was not started from a task — no badge then.
   const issueNumber = useSyncExternalStore(
@@ -54,46 +78,64 @@ export function WorktreeCard({
     () => getWorktreeIssueNumber(worktree.id),
   );
   const name = worktreeDisplayName(worktree, workspaces);
+  const hostId =
+    workspaces.find((item) => item.id === worktree.workspaceId)?.hostId ??
+    null;
+  const gitStatus = useWorktreeGitStatus({
+    hostId,
+    workspaceId: worktree.workspaceId,
+    enabled: projectKind === "git" && !implicitFolderWorktree,
+  });
   return (
-    <div
-      className="shell-worktree-card"
-      data-active={selected}
-      aria-label={`${name}${summary.unread ? ", needs input" : ""}`}
+    <WorktreeContextMenu
+      worktree={worktree}
+      displayName={name}
+      projectKind={projectKind}
+      implicitFolderWorktree={implicitFolderWorktree}
+      disabled={disabled}
+      onRename={onRename ? () => setBeginEditing(true) : null}
+      onCreateWorktree={onCreateWorktree}
+      onDelete={onRemove}
     >
-      <button
-        type="button"
-        className="shell-worktree-card-select"
-        aria-current={selected ? "page" : undefined}
-        aria-label={`Select ${name}`}
-        disabled={disabled}
-        onClick={() => onSelect(worktree.workspaceId)}
+      <div
+        className="shell-worktree-card"
+        data-active={selected}
+        aria-label={`${name}${summary.unread ? ", needs input" : ""}`}
       >
-        <span className="shell-worktree-card-top">
-          <AgentStateIcon state={summary.state} size={14} />
-          <span className="shell-worktree-card-name">{name}</span>
-          {summary.unread && (
-            <span
-              className="shell-unread-dot"
-              aria-label="Unread agent request"
-              title="An agent in this worktree is waiting for input"
+        <button
+          type="button"
+          className="shell-worktree-card-select"
+          aria-current={selected ? "page" : undefined}
+          aria-label={`Select ${name}`}
+          disabled={disabled}
+          onClick={() => onSelect(worktree.workspaceId)}
+        >
+          <span className="shell-worktree-card-top">
+            <AgentStateIcon state={summary.state} size={14} />
+            <WorktreeTitleInlineRename
+              displayName={name}
+              disabled={disabled || onRename === null}
+              beginEditing={beginEditing}
+              onBeginEditingConsumed={() => setBeginEditing(false)}
+              onRename={(next) => onRename?.(next) ?? Promise.resolve(null)}
             />
-          )}
-        </span>
-        <span className="shell-worktree-card-meta">
-          {issueNumber !== null && (
-            <span
-              className="shell-worktree-card-issue"
-              title={`Started from issue #${issueNumber}`}
-            >
-              #{issueNumber}
-            </span>
-          )}
-          {worktree.branch ? (
-            <span className="shell-worktree-card-branch">
-              <GitBranch size={12} aria-hidden="true" />
-              <span>{worktree.branch}</span>
-            </span>
-          ) : null}
+            {summary.unread && (
+              <span
+                className="shell-unread-dot"
+                aria-label="Unread agent request"
+                title="An agent in this worktree is waiting for input"
+              />
+            )}
+          </span>
+          <WorktreeCardMetaBadges
+            branch={worktree.branch}
+            ahead={gitStatus?.branch.ahead ?? null}
+            behind={gitStatus?.branch.behind ?? null}
+            upstream={gitStatus?.branch.upstream ?? null}
+            issueNumber={issueNumber}
+            pr={pr}
+            agentSummary={agentSummary}
+          />
           {worktree.baseRef ? (
             <span
               className="shell-worktree-card-base"
@@ -102,60 +144,43 @@ export function WorktreeCard({
               base {worktree.baseRef}
             </span>
           ) : null}
-          {liveCount > 0 && (
-            <span className="shell-worktree-card-sessions">
-              {liveCount} live
-            </span>
-          )}
           {summary.activeRelative && (
             <span className="shell-worktree-card-time">
               {summary.activeRelative}
             </span>
           )}
-        </span>
-        <span className="shell-worktree-card-state">
-          {attached.length > 0
-            ? `${attached.length} session${attached.length === 1 ? "" : "s"}`
-            : "No sessions yet"}
-        </span>
-      </button>
-      {onRemove && (
+          <span className="shell-worktree-card-state">
+            {attached.length > 0
+              ? `${attached.length} session${attached.length === 1 ? "" : "s"}`
+              : "No sessions yet"}
+          </span>
+        </button>
         <span className="shell-worktree-card-menu">
           <button
             type="button"
             className="shell-icon-button"
             aria-label={`Worktree actions for ${name}`}
             aria-haspopup="menu"
-            aria-expanded={menuOpen}
             disabled={disabled}
-            onClick={() => setMenuOpen((value) => !value)}
+            onClick={(event) => {
+              // The kebab opens the same Radix menu as right-click: route
+              // through a contextmenu event at the button so there is one
+              // menu implementation for pointer, touch and keyboard.
+              const rect = event.currentTarget.getBoundingClientRect();
+              event.currentTarget.dispatchEvent(
+                new MouseEvent("contextmenu", {
+                  bubbles: true,
+                  cancelable: true,
+                  clientX: rect.left + rect.width / 2,
+                  clientY: rect.bottom,
+                }),
+              );
+            }}
           >
             <MoreHorizontal size={15} />
           </button>
-          {menuOpen && (
-            <span
-              role="menu"
-              aria-label={`Worktree actions for ${name}`}
-              className="shell-menu"
-              onKeyDown={(event) => {
-                if (event.key === "Escape") setMenuOpen(false);
-              }}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className="shell-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onRemove();
-                }}
-              >
-                Remove worktree
-              </button>
-            </span>
-          )}
         </span>
-      )}
-    </div>
+      </div>
+    </WorktreeContextMenu>
   );
 }

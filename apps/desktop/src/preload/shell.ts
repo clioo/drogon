@@ -8,4 +8,7 @@ import type { ShellBridge } from "../shared/shell-contract";
 /** `window.drogon.shell.*` namespace; channels are handled by main/shell-bridge.ts. */
 export const shell: ShellBridge = {
   openExternal: (url) => ipcRenderer.invoke(SHELL_OPEN_EXTERNAL_CHANNEL, url),
+  showItemInFolder: (value) =>
+    ipcRenderer.invoke("drogon:showItemInFolder", value),
+  openPath: (value) => ipcRenderer.invoke("drogon:openPath", value),
 };

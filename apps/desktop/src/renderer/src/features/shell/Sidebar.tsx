@@ -47,6 +47,7 @@ export function Sidebar({
   onBrowseProject,
   onSubmitAddProject,
   onSubmitRemoveWorktree,
+  onSubmitRenameWorktree,
   onOpenSettings,
 }: {
   open: boolean;
@@ -77,6 +78,10 @@ export function Sidebar({
   onSubmitRemoveWorktree: (
     worktree: Worktree,
     force: boolean,
+  ) => Promise<string | null>;
+  onSubmitRenameWorktree: (
+    worktree: Worktree,
+    name: string,
   ) => Promise<string | null>;
   onOpenSettings: (initialSection?: SettingsSectionId) => void;
 }) {
@@ -144,6 +149,7 @@ export function Sidebar({
               onBrowse={onBrowseProject}
               onSubmitAdd={onSubmitAddProject}
               onSubmitRemove={onSubmitRemoveWorktree}
+              onSubmitRename={onSubmitRenameWorktree}
             />
           </div>
           <SidebarFooter

@@ -30,6 +30,13 @@ export type Worktree = {
   branch: string;
   head: string;
   baseRef: string | null;
+  /**
+   * Display title set by `worktree.rename` (Orca's inline rename renames
+   * the card title only — never the branch, never the directory).
+   * Nullish when never renamed; optional here only so this additive field
+   * never breaks an existing renderer `Worktree` literal that predates it.
+   */
+  title?: string | null;
   createdAt: string;
 };
 export type AgentState = "working" | "idle" | "needs_input" | "exited" | "unknown";

@@ -47,6 +47,9 @@ export type TasksStartResult = {
     branch: string;
     head: string;
     baseRef: string | null;
+    // Optional: the daemon omits the key when never renamed (unlike
+    // `worktree.list`, which serializes an explicit null).
+    title?: string | null;
     createdAt: string;
   };
   link: TaskLink;
@@ -100,6 +103,8 @@ export type TasksWorktreeRef = {
   branch: string;
   head: string;
   baseRef: string | null;
+  /** Display title from `worktree.rename`; null when never renamed. */
+  title: string | null;
   createdAt: string;
 };
 export type TasksProjectsResult = { projects: TasksProjectRef[] };
@@ -155,6 +160,9 @@ const worktree = z.object({
   branch: z.string(),
   head: z.string(),
   baseRef: z.string().nullable(),
+  // The daemon serializes the rename title here too (absent when never
+  // renamed); keep it so the strip does not silently drop it.
+  title: z.string().nullable().nullish(),
   createdAt: z.string(),
 });
 const link = z.object({
@@ -181,6 +189,10 @@ const worktreeRef = z.object({
   branch: z.string(),
   head: z.string(),
   baseRef: z.string().nullable(),
+  // Nullish like the project bridge: the daemon serializes an unset title
+  // as explicit null, and zod strips unknown keys — without this the
+  // shared native registry entry silently drops the rename title.
+  title: z.string().nullable().nullish(),
   createdAt: z.string(),
 });
 

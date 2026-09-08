@@ -395,7 +395,7 @@ fn ensure_task_links_table(conn: &rusqlite::Connection) -> Result<(), RpcError> 
 
 fn worktree_struct(conn: &rusqlite::Connection, worktree_id: &str) -> Result<Worktree, RpcError> {
     conn.query_row(
-        "SELECT id, project_id, workspace_id, path, branch, head, base_ref FROM worktrees WHERE id = ?1",
+        "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title FROM worktrees WHERE id = ?1",
         [worktree_id],
         |row| {
             Ok(Worktree {
@@ -406,6 +406,7 @@ fn worktree_struct(conn: &rusqlite::Connection, worktree_id: &str) -> Result<Wor
                 branch: row.get(4)?,
                 head: row.get(5)?,
                 base_ref: row.get(6)?,
+                title: row.get(7)?,
                 created_at: String::new(),
             })
         },
