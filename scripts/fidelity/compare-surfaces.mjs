@@ -144,6 +144,18 @@ const SURFACES = [
     candFiles: ["apps/desktop/src/renderer/src/features/source-control/"],
   },
   {
+    id: "explorer",
+    label: "Explorer panel",
+    refDir: "src/renderer/src/components/right-sidebar",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/FileExplorerToolbar.tsx",
+      "src/renderer/src/components/right-sidebar/FileExplorerNameFilter.tsx",
+      "src/renderer/src/components/right-sidebar/file-explorer-entries.ts",
+    ],
+    probes: ["Find files", "Collapse All", "Explorer", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/file-explorer/"],
+  },
+  {
     id: "automations",
     label: "Automations page",
     refDir: "src/renderer/src/components/automations",
@@ -801,6 +813,59 @@ async function refSetup(page, state, ctx) {
       if (await tryClick(page, "button", "Bots")) notes.push("Bots opened");
       else missing.push("no Bots nav reachable");
       break;
+    case "explorer": {
+      // View navigation only: open the panel when closed, never toggle a
+      // visible panel shut. The activity button precedes panel content in DOM
+      // order, so the first substring match is the trigger.
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open > 0) notes.push("Explorer panel already open; captured as-is");
+      else if (await tryClick(page, "button", "Explorer (⌘⇧E)", 2500)) notes.push("Explorer opened via activity bar");
+      else {
+        try {
+          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Explorer opened via fallback match");
+        } catch {
+          missing.push("no Explorer activity button reachable");
+        }
+      }
+      break;
+    }
+    case "source-control": {
+      const open = await page.getByRole("textbox", { name: "Commit message" }).count().catch(() => 0);
+      if (open > 0) notes.push("Source Control panel already open; captured as-is");
+      else if (await tryClick(page, "button", "Source Control (⌘⇧G)", 2500)) notes.push("Source Control opened via activity bar");
+      else {
+        try {
+          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Source Control opened via fallback match");
+        } catch {
+          missing.push("no Source Control activity button reachable");
+        }
+      }
+      break;
+    }
+    case "create-menu": {
+      // The "+" trigger is a Radix DropdownMenuTrigger (fork
+      // tab-bar/tab-bar-surface.tsx): clicking opens a menu and creates
+      // nothing. Verify the menu census so a behavior change is recorded,
+      // never silently acted on.
+      const tabsBefore = await page.getByRole("tab").count().catch(() => -1);
+      if (await tryClick(page, "button", "New tab")) {
+        await delay(600);
+        const seen = await overlayState(page);
+        if ((seen.menus || 0) > 0) {
+          notes.push(`create menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
+        } else {
+          const tabsAfter = await page.getByRole("tab").count().catch(() => -1);
+          if (tabsBefore >= 0 && tabsAfter > tabsBefore) {
+            missing.push(`New tab click created a tab instead of a menu (tabs ${tabsBefore} -> ${tabsAfter}); left for the human, ref otherwise untouched`);
+          } else missing.push("New tab click opened no menu");
+        }
+      } else missing.push("no New tab affordance reachable (page view has no strip)");
+      break;
+    }
     case "statusbar-strip":
       notes.push("full-page capture; strip cropped in post");
       break;
@@ -1089,6 +1154,72 @@ async function candSetup(page, state, ctx) {
       if (await tryClick(page, "button", "Bots")) notes.push("Bots route opened");
       else missing.push("no Bots nav reachable");
       break;
+    case "explorer": {
+      await ensureProject().catch(() => {});
+      // Own temp fixture: one file so the tree is never empty. The reference
+      // side is never touched.
+      try {
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "explorer fixture\n");
+        notes.push("fixture: notes.txt written");
+      } catch {
+        notes.push("fixture write best-effort only");
+      }
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open > 0) notes.push("Explorer panel already open; captured as-is");
+      else {
+        try {
+          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Explorer opened through the right activity bar");
+        } catch {
+          missing.push("Explorer activity button unavailable");
+        }
+      }
+      break;
+    }
+    case "source-control": {
+      await ensureProject().catch(() => {});
+      // Own temp fixture: one modified tracked file, mirroring the retired
+      // "changes" state fixture. The reference side is never touched.
+      try {
+        await execFileAsync("git", ["init"], { cwd: ctx.workspace }).catch(() => {});
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "fidelity fixture\n");
+        await execFileAsync("git", ["add", "-A"], { cwd: ctx.workspace }).catch(() => {});
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "fidelity fixture modified\n");
+        notes.push("git fixture: one modified tracked file");
+      } catch {
+        notes.push("git fixture best-effort only");
+      }
+      const open = await page.getByRole("textbox", { name: "Commit message" }).count().catch(() => 0);
+      if (open > 0) notes.push("Source Control panel already open; captured as-is");
+      else {
+        try {
+          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Source Control opened through the right activity bar");
+        } catch {
+          missing.push("Source Control activity button unavailable (capability or fixture)");
+        }
+      }
+      break;
+    }
+    case "create-menu": {
+      // The strip "+" opens the static create menu (New Terminal /
+      // New Browser Tab entries); selecting nothing, capturing the menu open.
+      const terminal = await ensureTerminal().catch(() => false);
+      if (!terminal) {
+        missing.push("project-terminal fixture unavailable for create menu");
+        break;
+      }
+      if (await tryClick(page, "button", "New tab")) {
+        await delay(600);
+        const seen = await overlayState(page);
+        if ((seen.menus || 0) > 0) {
+          notes.push(`create menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
+        } else missing.push("New tab click opened no menu");
+      } else missing.push("no New tab affordance reachable");
+      break;
+    }
     case "statusbar-strip":
       await ensureTerminal().catch(() => {});
       notes.push("full-page capture; strip cropped in post");
@@ -1154,6 +1285,9 @@ const ALL_STATES = [
   "tasks",
   "bots",
   "statusbar-strip",
+  "explorer",
+  "source-control",
+  "create-menu",
 ];
 
 const CAND_OWNER = {
@@ -1167,6 +1301,7 @@ const CAND_OWNER = {
   browser: "apps/desktop/src/renderer/src/features/browser/",
   tasks: "apps/desktop/src/renderer/src/features/shell/SidebarNav.tsx (placeholder; J6 owner builds the page)",
   bots: "apps/desktop/src/renderer/src/features/bots/",
+  explorer: "apps/desktop/src/renderer/src/features/file-explorer/",
   tokens: "apps/desktop/src/renderer/src/assets/main.css",
 };
 
@@ -1182,6 +1317,9 @@ const STATE_SURFACE = {
   tasks: "tasks",
   bots: "bots",
   "statusbar-strip": "status-bar",
+  explorer: "explorer",
+  "source-control": "changes",
+  "create-menu": "tab-bar",
 };
 
 // Preferred source-value keywords per surface: the ranked item must cite the
@@ -1197,6 +1335,7 @@ const SOURCE_PREFERENCE = {
   browser: ["address", "url", "classname"],
   tasks: ["issue", "filter", "classname"],
   bots: ["preset", "chat", "classname"],
+  explorer: ["find files", "collapse", "explorer", "classname"],
   tokens: ["font", "geist", "text-", "leading", "tracking", "weight"],
 };
 
