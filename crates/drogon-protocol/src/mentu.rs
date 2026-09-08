@@ -270,6 +270,38 @@ impl MentuRunIdParams {
     }
 }
 
+/// Params for `mentu.recipe_save` (journey J9, recipe editing): `content`
+/// is the exact new JSON source text for the recipe. The daemon validates
+/// it like the load path (JSON object with `name` and a `steps` array of
+/// labeled steps), writes it atomically inside `.mentu/recipes`, and
+/// invalidates approvals bound to the old content hash.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipeSaveParams {
+    pub workspace_id: String,
+    pub recipe_id: String,
+    pub content: String,
+}
+
+/// The 1 MiB safety limit the daemon also enforces on recipe sources at
+/// rest (`recipe.rs`); params carrying more are refused before any I/O.
+pub const MAX_MENTU_RECIPE_SOURCE_BYTES: usize = 1024 * 1024;
+
+impl MentuRecipeSaveParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_workspace_id(&self.workspace_id)?;
+        validate_recipe_id(&self.recipe_id)?;
+        let bytes = self.content.len();
+        if bytes == 0 || bytes > MAX_MENTU_RECIPE_SOURCE_BYTES {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Invalid Mentu recipe content.",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MentuRecipesResult {
@@ -310,6 +342,12 @@ pub struct MentuRunsResult {
 #[serde(rename_all = "camelCase")]
 pub struct MentuCancelResult {
     pub run: MentuRun,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipeSaveResult {
+    pub recipe: MentuRecipeDetail,
 }
 
 #[cfg(test)]
@@ -460,5 +498,65 @@ mod tests {
                 .get("verifyCommands")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn recipe_save_params_validate_ids_and_bound_the_content_size() {
+        let base = MentuRecipeSaveParams {
+            workspace_id: "ws1".into(),
+            recipe_id: "hello".into(),
+            content: r#"{"name":"hello","steps":[]}"#.into(),
+        };
+        base.validate().unwrap();
+        // Additive params stay forward-compatible: unknown fields deserialize.
+        let forward: MentuRecipeSaveParams = serde_json::from_value(
+            json!({"workspaceId": "ws1", "recipeId": "hello", "content": "{}", "future": true}),
+        )
+        .unwrap();
+        forward.validate().unwrap();
+        let empty = MentuRecipeSaveParams {
+            content: String::new(),
+            ..base.clone()
+        };
+        assert_eq!(empty.validate().unwrap_err().code, "invalid_argument");
+        let oversize = MentuRecipeSaveParams {
+            content: "x".repeat(MAX_MENTU_RECIPE_SOURCE_BYTES + 1),
+            ..base.clone()
+        };
+        assert_eq!(oversize.validate().unwrap_err().code, "invalid_argument");
+        // Shape validation only: empty and whitespace ids are refused here;
+        // traversal (`../escape`) stays valid on the wire and is refused by
+        // the daemon's containment checks, the same division of labor as
+        // every other `mentu.*` method.
+        for bad_id in ["", "has space", "has\nnewline"] {
+            let bad = MentuRecipeSaveParams {
+                recipe_id: bad_id.into(),
+                ..base.clone()
+            };
+            assert!(
+                bad.validate().is_err(),
+                "recipe id {bad_id:?} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn recipe_save_result_carries_the_new_detail_with_exact_wire_keys() {
+        let detail = MentuRecipeDetail {
+            id: "hello".into(),
+            path: ".mentu/recipes/hello.json".into(),
+            name: "hello".into(),
+            description: None,
+            content_hash: "a".repeat(64),
+            steps: Vec::new(),
+            source: "{}".into(),
+        };
+        let value = serde_json::to_value(MentuRecipeSaveResult {
+            recipe: detail.clone(),
+        })
+        .unwrap();
+        assert_eq!(value["recipe"]["contentHash"], json!("a".repeat(64)));
+        let back: MentuRecipeSaveResult = serde_json::from_value(value).unwrap();
+        assert_eq!(back.recipe, detail);
     }
 }

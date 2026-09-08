@@ -443,6 +443,7 @@ impl Engine {
             "tasks.links" => self.do_tasks_links(&request.params),
             "mentu.recipes" => self.mentu_recipes(&request.params),
             "mentu.recipe" => self.mentu_recipe(&request.params),
+            "mentu.recipe_save" => self.mentu_recipe_save(request),
             "mentu.runtime" => self.mentu_runtime_info(&request.params),
             "mentu.approve" => self.mentu_approve(request),
             "mentu.run" => self.mentu_run(request),

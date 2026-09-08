@@ -3,12 +3,14 @@
 // `src/renderer/src/components/mentu/RecipePaneContent.tsx`: the Graph /
 // Run / Evidence / Metrics tabs with the reference's DOM, Tailwind classes,
 // copy, icons, keyboard and ARIA. Adapted only in the data layer (this
-// repo's `MentuPaneController`): the Run tab's source-JSON editor is
-// read-only and has no Apply affordance because the daemon exposes no
-// recipe-save RPC, and the result card reports the run record's status and
-// error instead of raw command output.
+// repo's `MentuPaneController`): the Run tab's source-JSON editor writes
+// through `mentu.recipe_save` with Save/Discard over a draft distinct
+// from the saved recipe, and the result card reports the run record's
+// status and error instead of raw command output.
 
 import { CircleDashed, Gauge, Network, Play, FileJson, Stethoscope } from "lucide-react";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Textarea } from "../../components/ui/textarea";
@@ -73,7 +75,21 @@ export function RecipePaneContent({
                   </p>
                 ) : null}
               </ScrollArea>
-              <SelectedNodeInspector node={controller.selectedNode} />
+              <SelectedNodeInspector
+                node={controller.selectedNode}
+                editStep={controller.editStep}
+                backends={controller.availableBackends}
+                inheritBackendLabel={controller.inheritBackendLabel}
+                editable={controller.editable}
+                // Editing is gated on busyness only, not on runtime
+                // availability: unlike the fork's host-routed save (which
+                // needed an `available` capability), `mentu.recipe_save`
+                // is daemon-local validation plus an atomic file write.
+                // Execution (Review/Approve&run below) stays runtime-gated.
+                disabled={controller.busy || controller.saving}
+                saving={controller.saving}
+                onSave={(draft) => controller.saveSelectedStep(draft)}
+              />
             </div>
           ) : graph ? (
             <div
@@ -133,14 +149,73 @@ export function RecipePaneContent({
                   </div>
                 ) : null}
                 <details className="rounded-lg border border-border bg-card p-3">
-                  <summary className="cursor-pointer text-xs font-medium">Source JSON</summary>
+                  <summary className="cursor-pointer text-xs font-medium">
+                    Source JSON
+                    {controller.dirty ? (
+                      <Badge variant="secondary" className="ml-2">
+                        Unsaved changes
+                      </Badge>
+                    ) : null}
+                  </summary>
                   <div className="mt-3 space-y-2">
                     <Textarea
                       value={controller.draftSource}
-                      readOnly
+                      onChange={(event) => controller.setDraftSource(event.target.value)}
                       aria-label="Mentu source JSON"
                       className="min-h-48 resize-y font-mono text-[11px]"
+                      disabled={controller.busy || controller.saving}
                     />
+                    {controller.draftIssues.length > 0 ? (
+                      <p className="text-xs text-destructive" role="alert">
+                        {controller.draftIssues
+                          .map((issue) => `${issue.path}: ${issue.message}`)
+                          .join(" · ")}
+                      </p>
+                    ) : null}
+                    {controller.error ? (
+                      <p className="text-xs text-destructive" role="alert">
+                        {controller.error}
+                      </p>
+                    ) : null}
+                    {controller.saveNotice ? (
+                      <p className="text-xs text-muted-foreground" role="status">
+                        {controller.saveNotice}
+                      </p>
+                    ) : null}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => void controller.saveDraft()}
+                        disabled={
+                          !controller.dirty || controller.busy || controller.saving
+                        }
+                      >
+                        {controller.saving ? "Saving…" : "Save"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => controller.applyDraft()}
+                        disabled={
+                          !controller.recipe ||
+                          !controller.dirty ||
+                          controller.busy ||
+                          controller.saving
+                        }
+                      >
+                        Apply draft
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => controller.discardDraft()}
+                        disabled={
+                          !controller.dirty || controller.busy || controller.saving
+                        }
+                      >
+                        Discard
+                      </Button>
+                    </div>
                   </div>
                 </details>
               </div>

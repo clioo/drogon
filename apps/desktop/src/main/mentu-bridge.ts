@@ -25,6 +25,7 @@ type NativeCall = (
 const nativeMethodFor: Record<MentuMethod, string> = {
   mentuRecipes: "mentu.recipes",
   mentuRecipe: "mentu.recipe",
+  mentuRecipeSave: "mentu.recipe_save",
   mentuRuntime: "mentu.runtime",
   mentuApprove: "mentu.approve",
   mentuRun: "mentu.run",
@@ -72,6 +73,7 @@ export async function dispatchMentuRequest(
 const channelFor: Record<MentuMethod, string> = {
   mentuRecipes: "drogon:mentuRecipes",
   mentuRecipe: "drogon:mentuRecipe",
+  mentuRecipeSave: "drogon:mentuRecipeSave",
   mentuRuntime: "drogon:mentuRuntime",
   mentuApprove: "drogon:mentuApprove",
   mentuRun: "drogon:mentuRun",

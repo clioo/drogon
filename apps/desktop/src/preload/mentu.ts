@@ -5,6 +5,7 @@ import type { MentuBridge } from "../shared/mentu-contract";
 export const mentu: MentuBridge = {
   mentuRecipes: (value) => ipcRenderer.invoke("drogon:mentuRecipes", value),
   mentuRecipe: (value) => ipcRenderer.invoke("drogon:mentuRecipe", value),
+  mentuRecipeSave: (value) => ipcRenderer.invoke("drogon:mentuRecipeSave", value),
   mentuRuntime: () => ipcRenderer.invoke("drogon:mentuRuntime", {}),
   mentuApprove: (value) => ipcRenderer.invoke("drogon:mentuApprove", value),
   mentuRun: (value) => ipcRenderer.invoke("drogon:mentuRun", value),

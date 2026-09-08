@@ -98,6 +98,7 @@ export type MentuRun = {
 
 export type MentuRecipesResult = { recipes: MentuRecipeSummary[] };
 export type MentuRecipeResult = { recipe: MentuRecipeDetail };
+export type MentuRecipeSaveResult = { recipe: MentuRecipeDetail };
 export type MentuRuntimeResult = { runtime: MentuRuntimeInfo };
 export type MentuApproveResult = { approval: MentuApproval };
 export type MentuRunResult = { run: MentuRun };
@@ -109,6 +110,13 @@ export interface MentuBridge {
     workspaceId: string;
     recipeId: string;
   }): Promise<Result<MentuRecipeResult>>;
+  // Optional so older preload builds still satisfy the interface; the
+  // tab disables saving when it is absent.
+  mentuRecipeSave?: (input: {
+    workspaceId: string;
+    recipeId: string;
+    content: string;
+  }) => Promise<Result<MentuRecipeSaveResult>>;
   mentuRuntime(): Promise<Result<MentuRuntimeResult>>;
   mentuApprove(input: {
     workspaceId: string;
@@ -139,6 +147,10 @@ const workspaceId = z.object({ workspaceId: id });
 export const mentuBridgeSchemas = {
   mentuRecipes: workspaceId,
   mentuRecipe: workspaceId.extend({ recipeId: id }),
+  mentuRecipeSave: workspaceId.extend({
+    recipeId: id,
+    content: z.string().min(1).max(1024 * 1024),
+  }),
   mentuRuntime: z.object({}),
   mentuApprove: workspaceId.extend({
     recipeId: id,
@@ -232,6 +244,7 @@ const run = z.object({
 export const mentuResultSchemas = {
   "mentu.recipes": z.object({ recipes: z.array(recipeSummary) }),
   "mentu.recipe": z.object({ recipe: recipeDetail }),
+  "mentu.recipe_save": z.object({ recipe: recipeDetail }),
   "mentu.runtime": z.object({ runtime: runtimeInfo }),
   "mentu.approve": z.object({ approval }),
   "mentu.run": z.object({ run }),

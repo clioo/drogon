@@ -462,3 +462,129 @@ fn cancel_stops_a_running_recipe_and_the_status_lands_as_cancelled() {
     let finished = fx.wait_for_completion(&run_id);
     assert_eq!(finished["status"], "cancelled");
 }
+
+#[test]
+fn recipe_save_round_trips_a_step_edit_and_returns_the_new_hash() {
+    let fx = Fixture::new();
+    fx.write_recipe("success");
+    let before = fx.recipe_detail("success");
+    let before_hash = before["contentHash"].as_str().unwrap().to_string();
+
+    let edited = recipe_json("success").replace("30", "60");
+    assert_ne!(edited, recipe_json("success"));
+    let saved = ok(
+        &fx.engine,
+        "mentu.recipe_save",
+        json!({
+            "workspaceId": fx.workspace_id,
+            "recipeId": "success",
+            "content": edited,
+        }),
+    )["recipe"]
+        .clone();
+    assert_eq!(saved["name"], "success");
+    assert_eq!(saved["source"], edited);
+    assert_ne!(saved["contentHash"], before_hash);
+    assert_eq!(saved["contentHash"].as_str().unwrap().len(), 64);
+    // The catalog still lists the recipe as valid under the new bytes.
+    let after = fx.recipe_detail("success");
+    assert_eq!(after, saved);
+}
+
+#[test]
+fn recipe_save_refuses_invalid_recipes_and_traversal() {
+    let fx = Fixture::new();
+    fx.write_recipe("success");
+    let before = fx.recipe_detail("success");
+
+    for bad in [
+        "{not json",
+        r#"{"steps": [{"label": "a"}]}"#,
+        r#"{"name": "success"}"#,
+        r#"{"name": "success", "steps": [{"backend": "shell"}]}"#,
+        "",
+    ] {
+        let code = err_code(
+            &fx.engine,
+            "mentu.recipe_save",
+            json!({
+                "workspaceId": fx.workspace_id,
+                "recipeId": "success",
+                "content": bad,
+            }),
+        );
+        assert_eq!(code, "invalid_argument", "content {bad:?} must be refused");
+    }
+    for traversal in ["../secret", "/etc/passwd", "a/../../b"] {
+        let code = err_code(
+            &fx.engine,
+            "mentu.recipe_save",
+            json!({
+                "workspaceId": fx.workspace_id,
+                "recipeId": traversal,
+                "content": recipe_json("success"),
+            }),
+        );
+        assert_eq!(code, "invalid_argument", "id {traversal:?} must be refused");
+    }
+    // Saving a recipe that does not exist is `not_found`, not a write.
+    let code = err_code(
+        &fx.engine,
+        "mentu.recipe_save",
+        json!({
+            "workspaceId": fx.workspace_id,
+            "recipeId": "missing",
+            "content": recipe_json("missing"),
+        }),
+    );
+    assert_eq!(code, "not_found");
+    // Every refusal left the recipe untouched.
+    assert_eq!(fx.recipe_detail("success"), before);
+}
+
+#[test]
+fn recipe_save_invalidates_the_old_approval_and_the_new_hash_runs() {
+    let fx = Fixture::new();
+    fx.write_recipe("success");
+    let before_hash = fx.recipe_detail("success")["contentHash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let approval_id = fx.approve("success");
+
+    // Edit the recipe: the pre-save approval must die with the old bytes.
+    let edited = recipe_json("success").replace("30", "60");
+    let saved = ok(
+        &fx.engine,
+        "mentu.recipe_save",
+        json!({
+            "workspaceId": fx.workspace_id,
+            "recipeId": "success",
+            "content": edited,
+        }),
+    )["recipe"]
+        .clone();
+    assert_ne!(saved["contentHash"].as_str().unwrap(), before_hash);
+
+    let code = err_code(
+        &fx.engine,
+        "mentu.run",
+        json!({
+            "workspaceId": fx.workspace_id,
+            "recipeId": "success",
+            "approvalId": approval_id,
+        }),
+    );
+    assert_eq!(
+        code, "mentu_approval_consumed",
+        "the pre-save approval must be invalidated, not merely hash-mismatched"
+    );
+
+    // A fresh review of the new bytes approves and runs to completion.
+    let fresh_approval_id = fx.approve("success");
+    assert_ne!(fresh_approval_id, approval_id);
+    let started = fx.run("success", &fresh_approval_id);
+    let run_id = started["id"].as_str().unwrap().to_string();
+    let finished = fx.wait_for_completion(&run_id);
+    assert_eq!(finished["status"], "succeeded");
+}

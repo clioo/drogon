@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 use drogon_protocol::mentu::{
     MentuApproval, MentuApproveParams, MentuApproveResult, MentuCancelResult, MentuRecipeParams,
-    MentuRecipeResult, MentuRecipesResult, MentuRunIdParams, MentuRunParams, MentuRunResult,
-    MentuRunStatus, MentuRunsParams, MentuRunsResult, MentuRuntimeResult,
-    MentuWorkspaceScopeParams,
+    MentuRecipeResult, MentuRecipeSaveParams, MentuRecipeSaveResult, MentuRecipesResult,
+    MentuRunIdParams, MentuRunParams, MentuRunResult, MentuRunStatus, MentuRunsParams,
+    MentuRunsResult, MentuRuntimeResult, MentuWorkspaceScopeParams,
 };
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
@@ -52,6 +52,31 @@ impl Engine {
     pub(crate) fn mentu_runtime_info(&self, _params: &Value) -> Result<Value, RpcError> {
         let info = runtime::runtime_info(self.data_dir());
         to_value(MentuRuntimeResult { runtime: info })
+    }
+
+    pub(crate) fn mentu_recipe_save(&self, request: &Request) -> Result<Value, RpcError> {
+        self.mutating(request, Self::do_mentu_recipe_save)
+    }
+
+    fn do_mentu_recipe_save(&self, params: &Value) -> Result<Value, RpcError> {
+        let parsed: MentuRecipeSaveParams = parse(params, "mentu.recipe_save")?;
+        parsed.validate()?;
+        let workspace_path = {
+            let conn = self.db.lock().unwrap();
+            workspace::get_path(&conn, &parsed.workspace_id)?
+        };
+        let workspace_root = PathBuf::from(workspace_path);
+        let detail = recipe::save_recipe(&workspace_root, &parsed.recipe_id, &parsed.content)?;
+        {
+            let conn = self.db.lock().unwrap();
+            storage::invalidate_stale_approvals(
+                &conn,
+                &parsed.workspace_id,
+                &parsed.recipe_id,
+                &detail.content_hash,
+            )?;
+        }
+        to_value(MentuRecipeSaveResult { recipe: detail })
     }
 
     pub(crate) fn mentu_approve(&self, request: &Request) -> Result<Value, RpcError> {

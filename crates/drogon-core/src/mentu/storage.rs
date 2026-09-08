@@ -151,6 +151,29 @@ pub fn consume_approval(
     Ok(row.content_hash)
 }
 
+/// Marks every not-yet-consumed approval for `(workspace_id, recipe_id)`
+/// whose content hash differs from `new_hash` as consumed, so a review
+/// bound to the pre-save bytes can never start a run after
+/// `mentu.recipe_save` rewrites the recipe. Returns the number of
+/// approvals invalidated. The caller (the save RPC) invokes this right
+/// after the atomic write lands, keeping approvals honest: running the
+/// edited recipe requires a fresh review.
+pub fn invalidate_stale_approvals(
+    conn: &Connection,
+    workspace_id: &str,
+    recipe_id: &str,
+    new_hash: &str,
+) -> Result<u64, RpcError> {
+    let affected = conn
+        .execute(
+            "UPDATE mentu_approvals SET consumed_at = ?1
+              WHERE workspace_id = ?2 AND recipe_id = ?3 AND content_hash != ?4 AND consumed_at IS NULL",
+            params![crate::now_rfc3339(), workspace_id, recipe_id, new_hash],
+        )
+        .map_err(error::from_sqlite)?;
+    Ok(affected as u64)
+}
+
 pub struct NewRun<'a> {
     pub id: &'a str,
     pub workspace_id: &'a str,
@@ -373,6 +396,36 @@ mod tests {
         .unwrap();
         assert!(consume_approval(&conn, "appr-1", "ws2", "hello").is_err());
         assert!(consume_approval(&conn, "missing", "ws1", "hello").is_err());
+    }
+
+    #[test]
+    fn invalidate_stale_approvals_consumes_only_the_old_hash() {
+        let conn = conn();
+        let approval = |id: &str, hash: &str, recipe: &str| MentuApproval {
+            id: id.into(),
+            workspace_id: "ws1".into(),
+            recipe_id: recipe.into(),
+            content_hash: hash.into(),
+            approved_at: "2026-09-07T00:00:00Z".into(),
+        };
+        insert_approval(&conn, &approval("old", &"a".repeat(64), "hello")).unwrap();
+        insert_approval(&conn, &approval("current", &"b".repeat(64), "hello")).unwrap();
+        insert_approval(&conn, &approval("other-recipe", &"a".repeat(64), "world")).unwrap();
+        let invalidated =
+            invalidate_stale_approvals(&conn, "ws1", "hello", &"b".repeat(64)).unwrap();
+        assert_eq!(invalidated, 1);
+        // The stale approval can no longer start a run.
+        let err = consume_approval(&conn, "old", "ws1", "hello").unwrap_err();
+        assert_eq!(err.code, "mentu_approval_consumed");
+        // The current-hash and other-recipe approvals survive.
+        assert_eq!(
+            consume_approval(&conn, "current", "ws1", "hello").unwrap(),
+            "b".repeat(64)
+        );
+        assert_eq!(
+            consume_approval(&conn, "other-recipe", "ws1", "world").unwrap(),
+            "a".repeat(64)
+        );
     }
 
     #[test]
