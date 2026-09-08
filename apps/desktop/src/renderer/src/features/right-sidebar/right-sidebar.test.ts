@@ -5,8 +5,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
+  DEFAULT_RIGHT_SIDEBAR_TAB,
   normalizeRightSidebarTab,
+  resolveInitialRightSidebarTab,
   resolveRightSidebarEffectiveTab,
+  RIGHT_SIDEBAR_TAB_STORAGE_KEY,
 } from "./right-sidebar-route";
 import {
   clampRightSidebarPanelWidth,
@@ -37,6 +40,33 @@ describe("normalizeRightSidebarTab", () => {
     assert.equal(normalizeRightSidebarTab("checks"), "explorer");
     assert.equal(normalizeRightSidebarTab(undefined), "explorer");
     assert.equal(normalizeRightSidebarTab("plugin:other/panel"), "explorer");
+  });
+});
+
+describe("resolveInitialRightSidebarTab", () => {
+  function storageWith(value: string | null) {
+    const store = new Map<string, string>();
+    if (value !== null) store.set(RIGHT_SIDEBAR_TAB_STORAGE_KEY, value);
+    return {
+      getItem: (key: string) => store.get(key) ?? null,
+    };
+  }
+  it("defaults to the Explorer panel when nothing was stored", () => {
+    assert.equal(DEFAULT_RIGHT_SIDEBAR_TAB, "explorer");
+    assert.equal(
+      resolveInitialRightSidebarTab(storageWith(null)),
+      "explorer",
+    );
+  });
+  it("keeps a stored tab and resets unknown values to Explorer", () => {
+    assert.equal(
+      resolveInitialRightSidebarTab(storageWith("source-control")),
+      "source-control",
+    );
+    assert.equal(
+      resolveInitialRightSidebarTab(storageWith("checks")),
+      "explorer",
+    );
   });
 });
 

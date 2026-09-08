@@ -18,7 +18,6 @@ import type {
 } from "../../../../shared/session-contract";
 import type { BrowserTabState } from "../../../../shared/browser-contract";
 import type { HarnessAgentDefault } from "../../settings-store";
-import { sessionLabel } from "../../session-label";
 import {
   recoveryActionFor,
   recoveryTabLabel,
@@ -37,6 +36,7 @@ import {
   resolveTabTitle,
   shiftTabOrder,
 } from "./tab-order";
+import { defaultTerminalTabTitle } from "./tab-title";
 import {
   computeTabStripOverflow,
   scrollTabStripByStep,
@@ -143,6 +143,20 @@ export function TabBar({
     return [];
   });
   const pinned = new Set(pinnedIds);
+  // Why: fork tabs read "Terminal N" until renamed (tabs-create-actions
+  // `Terminal ${n}`); the shell process name never becomes the tab label.
+  // Numbering follows strip position so labels stay dense after closes.
+  const defaultTitleBySessionId = new Map<string, string>();
+  let sessionPosition = 0;
+  for (const entry of entries) {
+    if (entry.kind === "session") {
+      sessionPosition += 1;
+      defaultTitleBySessionId.set(
+        entry.id,
+        defaultTerminalTabTitle(sessionPosition),
+      );
+    }
+  }
   const [dropIndicatorById, setDropIndicatorById] = useState<
     Map<string, DropIndicator>
   >(new Map());
@@ -287,7 +301,10 @@ export function TabBar({
       // is NOT set — in this column layout it would stretch the strip to
       // fill the pane area (the source surface sits in a row parent where
       // flex-1 only shares horizontal space).
-      className="flex items-stretch h-10 shrink-0 overflow-hidden min-w-0 w-full"
+      // Why: with hiddenInset the empty strip area is a window-drag region
+      // (fork TabGroupPanel tab row); tabs and controls opt out via the
+      // tab-strip-window-drag CSS so they stay clickable.
+      className="flex items-stretch h-10 shrink-0 overflow-hidden min-w-0 w-full tab-strip-window-drag"
       // Why: preload routes native OS drops by this marker — only the tab strip opens files in the editor, not terminal panes.
       data-native-file-drop-target="editor"
     >
@@ -364,17 +381,17 @@ export function TabBar({
                 // (the verdict text moved off the visible row into the name
                 // so the strip matches the source chrome without losing the
                 // screen-reader state both probes assert on).
-                const defaultText = recoveryTabLabel({
-                  label: sessionLabel(item, harnesses),
+                const text = recoveryTabLabel({
+                  label: resolveTabTitle(
+                    item.id,
+                    defaultTitleBySessionId.get(item.id) ??
+                      defaultTerminalTabTitle(1),
+                    customTitles,
+                  ),
                   verdict: item.verdict,
                   id: item.id,
                   incarnation: item.incarnation,
                 });
-                const text = resolveTabTitle(
-                  item.id,
-                  defaultText,
-                  customTitles,
-                );
                 const retryable =
                   recoveryActionFor(item.verdict, {
                     // A confirmed close removes the tab, so a still-listed
@@ -387,7 +404,7 @@ export function TabBar({
                     id={item.id}
                     title={text}
                     ariaLabel={`${text} ${item.verdict}`}
-                    closeLabel={`Close ${sessionLabel(item, harnesses)} session`}
+                    closeLabel={`Close ${text} session`}
                     icon={
                       <AgentStateIcon state={agentStateOf(item)} size={13} />
                     }

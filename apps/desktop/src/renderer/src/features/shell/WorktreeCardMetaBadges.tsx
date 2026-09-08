@@ -3,8 +3,10 @@
    worktree-card-meta-row.tsx (adapter: the reference badges cover issue,
    Linear, Jira, review, comment, automation and CLI provenance over store
    state; the MVP subset projects branch, ahead/behind from `git.status`,
-   the linked-issue badge, the PR chip when a PR is known, and the agent
-   summary from card sessions. Pure projection over props.) */
+   the linked-issue badge and the PR chip when a PR is known. The agent
+   summary lives on the card's summary line with the relative time, like
+   the fork's compact agent summary — never duplicated as a badge. Pure
+   projection over props.) */
 import { GitBranch, GitPullRequest } from "lucide-react";
 import {
   getPrChipAccessibleLabel,
@@ -20,21 +22,18 @@ export type WorktreeCardMetaBadgesProps = {
   upstream: string | null;
   issueNumber: number | null;
   pr: WorktreeCardPrDisplay | null;
-  agentSummary: string;
 };
 
 /** True when at least one badge has something to show. */
 export function hasWorktreeCardMetaBadges(args: {
   issueNumber: number | null;
   pr: WorktreeCardPrDisplay | null;
-  agentSummary: string;
   ahead: number | null;
   behind: number | null;
 }): boolean {
   return Boolean(
     args.issueNumber !== null ||
       args.pr ||
-      args.agentSummary ||
       (args.ahead ?? 0) > 0 ||
       (args.behind ?? 0) > 0,
   );
@@ -58,7 +57,6 @@ export function WorktreeCardMetaBadges({
   upstream,
   issueNumber,
   pr,
-  agentSummary,
 }: WorktreeCardMetaBadgesProps) {
   const aheadBehind = formatAheadBehindLabel(ahead, behind);
   return (
@@ -98,14 +96,6 @@ export function WorktreeCardMetaBadges({
         >
           <GitPullRequest size={12} aria-hidden="true" />
           <span>{getPrChipLabel(pr)}</span>
-        </span>
-      )}
-      {agentSummary && (
-        <span
-          className="shell-worktree-card-agents"
-          title={`${agentSummary} in this worktree`}
-        >
-          {agentSummary}
         </span>
       )}
     </span>

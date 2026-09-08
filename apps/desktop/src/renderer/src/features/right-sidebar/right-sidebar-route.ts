@@ -14,6 +14,12 @@ export type RightSidebarTab =
 
 export const RIGHT_SIDEBAR_TAB_STORAGE_KEY = "drogon:right-sidebar:tab";
 
+/**
+ * Default panel the fork shows whenever the right sidebar is open: the
+ * sidebar never renders a blank panel.
+ */
+export const DEFAULT_RIGHT_SIDEBAR_TAB: RightSidebarTab = "explorer";
+
 /** Nullable read of the saved tab: null means nothing was saved yet. */
 export function loadRightSidebarTab(
   storage: Pick<Storage, "getItem">,
@@ -35,6 +41,18 @@ export function saveRightSidebarTab(
   } catch {
     // No durability promise; in-memory state stays authoritative.
   }
+}
+
+/**
+ * Initial tab: a stored tab wins; nothing stored (or anything unknown)
+ * resolves to the default Explorer panel, so an opened sidebar never
+ * renders blank. A fresh default counts as routed Explorer — the caller
+ * must mount the panel without waiting for an explicit routing event.
+ */
+export function resolveInitialRightSidebarTab(
+  storage: Pick<Storage, "getItem">,
+): RightSidebarTab {
+  return loadRightSidebarTab(storage) ?? DEFAULT_RIGHT_SIDEBAR_TAB;
 }
 
 /** Port of normalizeRightSidebarRoute: unknown persisted tabs reset to Explorer. */
