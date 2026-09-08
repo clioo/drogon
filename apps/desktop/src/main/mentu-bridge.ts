@@ -1,5 +1,7 @@
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import type { BrowserWindow } from "electron";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import {
   mentuBridgeSchemas,
   mentuResultSchemas,
@@ -106,5 +108,73 @@ export function registerMentuBridge(
         return { ...invalid };
       return dispatchMentuRequest(method, input);
     });
+  }
+}
+
+// Must match `MENTU_LOCK_REVISION` in `crates/drogon-core/src/mentu/runtime.rs`
+// and `scripts/mentu-runtime-provision.mjs`.
+const MENTU_RUNTIME_LOCK_REVISION = "b72a1203d46c1d930be1aead65388ddfbe9a8fc4";
+
+/**
+ * Where `scripts/mentu-runtime-provision.mjs` staged a runtime for this
+ * build: `process.resourcesPath` once packaged (populated by
+ * `scripts/package-desktop.mjs`'s conditional `extraResource`), or the
+ * repo's own `apps/desktop/resources` in dev. Most installs have neither —
+ * the fork ships the binary inside its own bundle; this repo instead
+ * fetches it via this file's one-time install below, only when the
+ * coordinator (or a developer) provisioned one.
+ */
+function bundledMentuRuntimeSourcePath(): string {
+  const resourcesRoot = app.isPackaged
+    ? process.resourcesPath
+    : path.join(app.getAppPath(), "resources");
+  const executable = process.platform === "win32" ? "mentu-recipes.exe" : "mentu-recipes";
+  return path.join(
+    resourcesRoot,
+    "mentu-runtime",
+    MENTU_RUNTIME_LOCK_REVISION,
+    "bin",
+    executable,
+  );
+}
+
+/**
+ * One-time, local-only provisioning of the pinned Mentu runtime (journey J9
+ * fresh-install usability) from this build's bundled copy, when one exists.
+ * No-ops silently when it does not — most installs ship without one until
+ * `scripts/mentu-runtime-provision.mjs` staged it — and never touches the
+ * network, `PATH` or Homebrew: `mentu.runtime_install` only copies local
+ * bytes that already match the lock's sha256. There is no renderer-facing
+ * install affordance to wire this through: the read-only reference's own
+ * `MentuRuntimeMessage`/`recipe-pane-controller.ts` have no install button
+ * either, since the fork instead bakes its runtime into the app bundle at
+ * build time (see the PR for the full comparison).
+ *
+ * `sourcePath`/`call`/`retryDelayMs`/`attempts` are overridable for tests,
+ * so they never touch the real `electron` app, a real daemon connection, or
+ * a real clock delay.
+ */
+export async function autoInstallBundledMentuRuntime(
+  call: NativeCall = callNative,
+  sourcePath: string = bundledMentuRuntimeSourcePath(),
+  retryDelayMs = 500,
+  // `bootstrapDaemon()` already waited for the daemon to answer once before
+  // this runs, but a cold first-run daemon (fresh SQLite schema, a loaded
+  // dev machine) can still take a beat past that to accept a second
+  // connection; retry generously rather than silently skipping install.
+  attempts = 10,
+): Promise<void> {
+  if (!existsSync(sourcePath)) return;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const result = await call("mentu.runtime_install", { sourcePath });
+    if (result.ok) {
+      console.log(`[drogon] mentu runtime auto-install: ${JSON.stringify(result.result)}`);
+      return;
+    }
+    if (!result.error.retryable || attempt === attempts) {
+      console.error(`[drogon] mentu runtime auto-install failed: ${result.error.message}`);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
   }
 }

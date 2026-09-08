@@ -227,6 +227,7 @@ const recipeDetail = z.object({
   steps: z.array(step),
   source: z.string(),
 });
+const runtimeInstallStatus = z.enum(["installed", "already_installed"]);
 const runtimeInfo = z.object({
   available: z.boolean(),
   path: z.string().nullable().optional().default(null),
@@ -295,6 +296,11 @@ export const mentuResultSchemas = {
   "mentu.recipe": z.object({ recipe: recipeDetail }),
   "mentu.recipe_save": z.object({ recipe: recipeDetail }),
   "mentu.runtime": z.object({ runtime: runtimeInfo }),
+  // Additive (journey J9 fresh-install usability). Not part of `MentuBridge`:
+  // called only by the desktop main process's one-time bundled-runtime
+  // install (`main/mentu-bridge.ts`), never from the renderer — the fork
+  // has no install UI to wire this through (see that file's comment).
+  "mentu.runtime_install": z.object({ runtime: runtimeInfo, status: runtimeInstallStatus }),
   "mentu.approve": z.object({ approval }),
   "mentu.run": z.object({ run }),
   "mentu.runs": z.object({ runs: z.array(run) }),

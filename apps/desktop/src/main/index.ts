@@ -48,7 +48,7 @@ import { registerBrowserIpc } from "./browser/browser-ipc";
 import { registerNotificationsIpc } from "./notifications/service";
 import { startBrowserRelay } from "./browser/relay-poller";
 import { dispatchBotSnapshot, registerBotBridge } from "./bot-bridge";
-import { registerMentuBridge } from "./mentu-bridge";
+import { autoInstallBundledMentuRuntime, registerMentuBridge } from "./mentu-bridge";
 import {
   readCursorMismatches,
   writeByteCountMismatches,
@@ -500,6 +500,7 @@ if (!holdsSingleInstanceLock) {
     startBrowserRelay(registerBrowserIpc(() => window));
     registerNotificationsIpc(() => window);
     await bootstrapDaemon();
+    void autoInstallBundledMentuRuntime();
     if (backgroundWindow && process.platform === "darwin")
       app.setActivationPolicy("accessory");
     createWindow();

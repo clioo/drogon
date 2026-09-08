@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,6 +94,11 @@ const info = {
 };
 const infoPath = path.join(staging, "build-info.json");
 await writeFile(infoPath, JSON.stringify(info, null, 2) + "\n");
+// Additive, optional: a runtime staged by
+// `scripts/mentu-runtime-provision.mjs` (gitignored, never committed).
+// Ships it when present, skips cleanly otherwise — the sealed acceptance
+// stays green without it, same as before this runtime existed.
+const bundledMentuRuntime = path.join(root, "apps", "desktop", "resources", "mentu-runtime");
 const [packagedDirectory] = await packager({
   dir: source,
   name: "Drogon",
@@ -107,7 +113,9 @@ const [packagedDirectory] = await packager({
   overwrite: false,
   asar: false,
   prune: false,
-  extraResource: [binaries, infoPath, notices],
+  extraResource: existsSync(bundledMentuRuntime)
+    ? [binaries, infoPath, notices, bundledMentuRuntime]
+    : [binaries, infoPath, notices],
   ...(process.platform === "darwin"
     ? {
         darwinDarkModeSupport: true,
