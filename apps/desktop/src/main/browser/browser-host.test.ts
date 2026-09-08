@@ -72,6 +72,7 @@ function fakeContents(session?: GuestSessionLike): GuestContentsLike & {
     getURL: () => "https://example.test/",
     getTitle: () => "Example",
     executeJavaScript: async () => ({ title: "Example", text: "hello" }),
+    setBackgroundThrottling: vi.fn(),
     navigationHistory: {
       canGoBack: vi.fn(() => false),
       canGoForward: vi.fn(() => false),
@@ -143,6 +144,15 @@ describe("guest trust boundary", () => {
     host.createTab("w1", "example.test");
     expect(createdPrefs).toHaveLength(2);
     for (const prefs of createdPrefs) expect(prefs).toEqual(GUEST_WEB_PREFERENCES);
+  });
+  test("created guests opt out of Chromium background throttling", () => {
+    const { host } = harness();
+    host.createTab("w1", "example.test");
+    const tabId = host.list().tabs[0].tabId;
+    const contents = (host as unknown as {
+      views: Map<string, GuestViewLike>;
+    }).views.get(tabId)?.webContents as ReturnType<typeof fakeContents>;
+    expect(contents.setBackgroundThrottling).toHaveBeenCalledWith(false);
   });
   test("permission requests denied and downloads blocked", () => {
     const session = fakeSession();
