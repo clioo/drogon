@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
-import type { ProviderUsage } from "../../../../shared/usage-contract";
+import { formatResetDuration, type ProviderUsage } from "../../../../shared/usage-contract";
 import {
+  agentAwakeModeLabel,
+  AWAKE_MODE_DESCRIPTIONS,
   awakeStatusLabel,
   hasVisibleUsage,
+  isUsageEmptyState,
   memoryBadge,
   portsAriaLabel,
   portsLabel,
@@ -15,6 +18,12 @@ import {
   resourceManagerAriaLabel,
   resourceManagerSessionCount,
   resourceManagerTooltipLines,
+  usageRosterMaxUsed,
+  usageRosterResetLabel,
+  usageRosterRowState,
+  usageRosterTightest,
+  usageRosterWindows,
+  usageTextColorClass,
 } from "./status-bar-copy";
 
 function claude(): ProviderUsage {
@@ -120,6 +129,122 @@ describe("source chrome copy (#127)", () => {
   test("awake carries the mode plus the Active/Inactive suffix", () => {
     expect(awakeStatusLabel("off", false)).toBe("Keep computer awake, Off · Inactive");
     expect(awakeStatusLabel("on", true)).toBe("Keep computer awake, On · Active");
+    // Auto renders the fork's user-facing label "Agent".
+    expect(awakeStatusLabel("auto", true)).toBe("Keep computer awake, Agent · Active");
+    expect(awakeStatusLabel("auto", false)).toBe("Keep computer awake, Agent · Inactive");
+  });
+  test("awake mode labels and menu descriptions match the fork", () => {
+    expect(agentAwakeModeLabel("on")).toBe("On");
+    expect(agentAwakeModeLabel("auto")).toBe("Agent");
+    expect(agentAwakeModeLabel("off")).toBe("Off");
+    expect(AWAKE_MODE_DESCRIPTIONS.on).toBe("Keep this computer awake continuously");
+    expect(AWAKE_MODE_DESCRIPTIONS.auto).toBe("Stay awake while an agent is working");
+    expect(AWAKE_MODE_DESCRIPTIONS.off).toBe("Allow normal system sleep behavior");
+  });
+});
+
+describe("usage empty state and roster rows (R16-AY2)", () => {
+  test("isUsageEmptyState: every provider settled and unavailable; error stays visible", () => {
+    const unavailable = (provider: "claude" | "codex"): ProviderUsage => ({
+      provider,
+      session: null,
+      weekly: null,
+      fableWeekly: null,
+      updatedAt: 1,
+      error: `${provider} is not signed in on this machine.`,
+      status: "unavailable",
+    });
+    const fetching: ProviderUsage = {
+      provider: "claude",
+      session: null,
+      weekly: null,
+      fableWeekly: null,
+      updatedAt: 1,
+      error: null,
+      status: "fetching",
+    };
+    const failing: ProviderUsage = {
+      ...unavailable("claude"),
+      status: "error",
+      error: "Claude usage is unreachable (HTTP 503).",
+    };
+    // Pending snapshot: never empty (the fork waits for settle).
+    expect(isUsageEmptyState([fetching, unavailable("codex")])).toBe(false);
+    // A configured provider failing transiently stays visible on purpose.
+    expect(isUsageEmptyState([failing, unavailable("codex")])).toBe(false);
+    // Every provider unconfigured: the empty state.
+    expect(isUsageEmptyState([unavailable("claude"), unavailable("codex")])).toBe(true);
+    expect(isUsageEmptyState([])).toBe(false);
+  });
+
+  test("usageRosterRowState follows the fork's kind vocabulary", () => {
+    const base = (over: Partial<ProviderUsage>): ProviderUsage => ({
+      provider: "claude",
+      session: null,
+      weekly: null,
+      fableWeekly: null,
+      updatedAt: 1,
+      error: null,
+      status: "ok",
+      ...over,
+    });
+    expect(usageRosterRowState(base({ status: "idle" }), false)).toEqual({
+      kind: "loading",
+      statusLabel: "Loading usage…",
+    });
+    expect(usageRosterRowState(base({ status: "ok" }), true)).toEqual({
+      kind: "usage",
+      statusLabel: null,
+    });
+    expect(
+      usageRosterRowState(
+        base({ status: "unavailable", error: "Claude is not signed in on this machine." }),
+        false,
+      ),
+    ).toEqual({ kind: "sign-in", statusLabel: "not signed in" });
+    // Auth-adjacent wording without an explicit sign-out is NOT a sign-in.
+    expect(
+      usageRosterRowState(base({ status: "unavailable", error: "oauth token expired" }), false),
+    ).toEqual({ kind: "unavailable", statusLabel: "Usage unavailable" });
+    expect(
+      usageRosterRowState(base({ status: "error", error: "Claude usage is unreachable (HTTP 503)." }), false),
+    ).toEqual({ kind: "error", statusLabel: "Network issue" });
+    expect(usageRosterRowState(base({ status: "ok" }), false)).toEqual({
+      kind: "empty",
+      statusLabel: "No usage data",
+    });
+  });
+
+  test("roster windows, tightest and reset labels match the fork's shapes", () => {
+    const now = 10_000_000;
+    const provider: ProviderUsage = {
+      provider: "claude",
+      session: { usedPercent: 55, windowMinutes: 300, resetsAt: now + 3_600_000, resetDescription: null },
+      weekly: { usedPercent: 72, windowMinutes: 10080, resetsAt: now + 86_400_000, resetDescription: null },
+      fableWeekly: { usedPercent: 8, windowMinutes: 10080, resetsAt: null, resetDescription: null },
+      updatedAt: 1,
+      error: null,
+      status: "ok",
+    };
+    expect(usageRosterWindows(provider)).toEqual([
+      { key: "session", label: "5h", used: 55, resetsAt: now + 3_600_000 },
+      { key: "weekly", label: "wk", used: 72, resetsAt: now + 86_400_000 },
+      { key: "fable", label: "Fable", used: 8, resetsAt: null },
+    ]);
+    expect(usageRosterMaxUsed(provider)).toBe(72);
+    // Tightest by consumption, chip label prefers the live remaining duration.
+    expect(usageRosterTightest(provider, now)).toEqual({
+      label: formatResetDuration(86_400_000),
+      used: 72,
+    });
+    // Soonest reset of any window.
+    expect(usageRosterResetLabel(provider, now)).toBe(
+      `Resets in ${formatResetDuration(3_600_000)}`,
+    );
+    // The percent color mirrors the 60/80 bar bands.
+    expect(usageTextColorClass(55)).toBe("text-foreground");
+    expect(usageTextColorClass(65)).toBe("text-yellow-500");
+    expect(usageTextColorClass(85)).toBe("text-red-500");
   });
 });
 

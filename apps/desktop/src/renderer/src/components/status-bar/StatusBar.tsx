@@ -1,26 +1,36 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
 // Status-bar composition ported from the Orca reference (read-only):
 //   src/renderer/src/components/status-bar/StatusBarSurface.tsx (left meters,
-//     refresh control, right resource segments),
+//     refresh control, right resource segments, empty-usage CTA gate and the
+//     roster-pill → Usage popover wiring),
 //   src/renderer/src/components/status-bar/StatusBarProviderSegment.tsx
 //     (per-provider states: pulsing "···" while loading, "--" when the
 //     provider is signed out, alert + status label on failed refresh,
 //     MiniBar + verbose windows when data exists, letter badge when
 //     icon-only),
+//   src/renderer/src/components/status-bar/UsageRosterPanel.tsx (popover
+//     content; ported in full in UsageRosterPanel.tsx),
+//   src/renderer/src/components/status-bar/StatusBarUsageEmptyCta.tsx
+//     (empty-usage CTA; ported in StatusBarUsageEmptyCta.tsx),
 //   src/renderer/src/components/status-bar/InlineProviderUsage.tsx (per-window
 //     progress bars + percent labels),
 //   src/renderer/src/components/status-bar/CaffeinateStatusSegment.tsx (awake
-//     toggle semantics and Off/On · Active/Inactive copy),
+//     dropdown: On/Agent/Off radio group with descriptions, "Keep computer
+//     awake" label with the live "mode · activity" status, coffee icon tint
+//     and activity dot),
 //   src/renderer/src/components/status-bar/resource-usage-status-trigger.tsx
-//     and resource-manager-terminal-copy.ts (memory · terminal cluster),
+//     and resource-manager-terminal-copy.ts (memory · terminal cluster, a
+//     click target like the fork's trigger),
 //   src/renderer/src/components/status-bar/PortsStatusSegment.tsx (plug icon +
-//     port count),
+//     port count, a click target like the fork's popover trigger),
 //   src/renderer/src/components/status-bar/usage-error-copy.ts (status labels).
-// Adapted: no zustand store, no popovers/menus; data comes from
-// window.drogon.usage and terminal count from the shell's session list, so
-// each provider segment keeps its detail in the native tooltip instead of a
-// Usage popover, and awake stays a plain Off/On toggle (Drogon has no Auto
-// mode). Unavailable sources render the source's "--"/"···" forms.
+// Adapted: no zustand store; data comes from window.drogon.usage and terminal
+// count from the shell's session list. Popover detail lives in the Usage
+// roster dropdown and native titles (this repo's tooltip convention). Segment
+// click targets (R16-AY2): the roster pill opens the Usage popover; the
+// resource cluster opens Settings → Terminal (the session-behavior pane;
+// Drogon has no Resource Manager page); ports opens the right-sidebar Ports
+// panel (this repo's matching surface for the fork's ports popover).
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CircleHelp, Coffee, MemoryStick, Plug, RefreshCw, Settings, Terminal } from "lucide-react";
 import type {
@@ -28,7 +38,22 @@ import type {
   ProviderUsage,
   UsageSnapshot,
 } from "../../../../shared/usage-contract";
+import type { SettingsSectionId } from "../../features/settings/settings-sections";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import { ClaudeIcon, OpenAIIcon } from "./provider-icons";
+import {
+  UsageRosterPanel,
+  type StatusBarUsageMode,
+} from "./UsageRosterPanel";
+import { StatusBarUsageEmptyCta } from "./StatusBarUsageEmptyCta";
 // R16-M (coordinator-approved option A): the daemon connection segment owns
 // its own monitor subscription; the bar only mounts it, leading the right
 // group like the fork's host segment.
@@ -38,8 +63,11 @@ import {
   statusBarCollapseForWidth,
 } from "./status-bar-narrow";
 import {
+  agentAwakeModeLabel,
+  AWAKE_MODE_DESCRIPTIONS,
   awakeStatusLabel,
   hasVisibleUsage,
+  isUsageEmptyState,
   memoryBadge,
   portsLabel,
   portsAriaLabel,
@@ -54,7 +82,12 @@ import {
   resourceManagerTooltipLines,
 } from "./status-bar-copy";
 
-const POLL_MS = 60_000;
+// Poll the cached snapshot every 5s: the IPC reads the main-side cache (real
+// probes stay gated by the store's own 60s staleness check), so the awake dot
+// follows Auto-mode transitions within one watcher poll instead of a minute —
+// the fork's segment subscribes to pushed onChanged events, a channel this
+// repo's preload contract does not carry (R16-AY2 adaptation).
+const POLL_MS = 5_000;
 const CLOCK_TICK_MS = 30_000;
 
 function loadSnapshot(): Promise<UsageSnapshot | null> {
@@ -223,15 +256,26 @@ function IdleProviderMeters({ provider }: { provider: "claude" | "codex" }) {
   );
 }
 
+const AWAKE_MODES: readonly AwakeMode[] = ["on", "auto", "off"];
+
 export function StatusBar({
   terminalCount,
   onOpenSettings,
+  onOpenPorts,
 }: {
   terminalCount: number;
-  onOpenSettings: () => void;
+  /** Opens the settings page; a section id preselects the pane (fork
+      openSettingsTarget + openSettingsPage collapsed to one callback). */
+  onOpenSettings: (section?: SettingsSectionId) => void;
+  /** Opens the right-sidebar Ports panel (the fork's ports popover surface). */
+  onOpenPorts: () => void;
 }): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
   const [fetching, setFetching] = useState(false);
+  const [usageMenuOpen, setUsageMenuOpen] = useState(false);
+  // Fork's persisted statusBarUsageMode, session-scoped here: Drogon has no
+  // settings key for it yet (coordinator-owned settings store).
+  const [usageMode, setUsageMode] = useState<StatusBarUsageMode>("verbose");
   const [now, setNow] = useState(() => Date.now());
   // Narrow tiers (status-bar-narrow.ts, fork use-status-bar-controller
   // thresholds): the bar measures its own width so segments collapse to
@@ -306,10 +350,10 @@ export function StatusBar({
       .finally(() => setFetching(false));
   }, [fetching]);
 
-  const handleAwake = useCallback(() => {
+  // Fork CaffeinateStatusSegment setMode: the dropdown's radio group.
+  const handleAwakeMode = useCallback((next: AwakeMode) => {
     const bridge = window.drogon?.usage;
-    if (!bridge || !snapshot) return;
-    const next: AwakeMode = snapshot.awake.mode === "on" ? "off" : "on";
+    if (!bridge) return;
     void bridge
       .setAwake(next)
       .then((result) => {
@@ -320,11 +364,19 @@ export function StatusBar({
         }
       })
       .catch(() => {});
-  }, [snapshot]);
+  }, []);
+
+  const providers =
+    snapshot !== null ? [snapshot.claude, snapshot.codex] : [];
+  // Source gate (StatusBarSurface): the empty-usage CTA replaces the meters
+  // while every provider reports itself unconfigured; pending snapshots
+  // (null) keep the idle "···" placeholders instead.
+  const emptyUsage = snapshot !== null && isUsageEmptyState(providers);
+  const showMeters = snapshot !== null && !emptyUsage;
 
   const awake = snapshot?.awake;
   const awakeActive = awake?.active ?? false;
-  const awakeModeLabel = awake ? (awake.mode === "on" ? "On" : "Off") : null;
+  const awakeModeLabel = awake ? agentAwakeModeLabel(awake.mode) : null;
   // Source form (CaffeinateStatusSegment): the accessible name and tooltip
   // carry the title plus "mode · activity", e.g.
   // "Keep computer awake, Off · Inactive".
@@ -333,6 +385,9 @@ export function StatusBar({
       ? awakeStatusLabel(awake.mode, awake.active)
       : "Keep computer awake is not supported on this platform"
     : "Awake state unavailable";
+  const awakeStatusText = awake
+    ? `${awakeModeLabel} · ${awakeActive ? "Active" : "Inactive"}`
+    : "…";
 
   return (
     <footer
@@ -347,7 +402,7 @@ export function StatusBar({
           className="status-bar-icon-button"
           title="Settings"
           aria-label="Settings"
-          onClick={onOpenSettings}
+          onClick={() => onOpenSettings()}
         >
           <Settings size={12} />
         </button>
@@ -361,30 +416,74 @@ export function StatusBar({
       </div>
 
       <div className="status-bar-group status-bar-meters">
-        {snapshot ? (
-          <>
-            <ProviderMeters
-              provider={snapshot.claude}
-              now={now}
-              compact={collapse.compact}
-              iconOnly={collapse.iconOnly}
-            />
-            <ProviderMeters
-              provider={snapshot.codex}
-              now={now}
-              compact={collapse.compact}
-              iconOnly={collapse.iconOnly}
-            />
-          </>
-        ) : (
+        {snapshot === null ? (
           <>
             <IdleProviderMeters provider="claude" />
             <IdleProviderMeters provider="codex" />
           </>
+        ) : emptyUsage ? (
+          // Source empty state: name the surface and route to the accounts
+          // pane (StatusBarUsageEmptyCta); nothing else is rendered here.
+          <StatusBarUsageEmptyCta onOpenSettings={() => onOpenSettings("agents")} />
+        ) : (
+          // Consolidated roster pill → opens the all-agents Usage popover.
+          <DropdownMenu
+            open={usageMenuOpen}
+            onOpenChange={setUsageMenuOpen}
+            modal={false}
+          >
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-3 rounded px-1 py-0.5 hover:bg-accent/70"
+                aria-label="Usage"
+                data-testid="usage-roster-trigger"
+              >
+                <ProviderMeters
+                  provider={snapshot.claude}
+                  now={now}
+                  compact={collapse.compact}
+                  iconOnly={collapse.iconOnly}
+                />
+                <ProviderMeters
+                  provider={snapshot.codex}
+                  now={now}
+                  compact={collapse.compact}
+                  iconOnly={collapse.iconOnly}
+                />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="top"
+              align="start"
+              sideOffset={8}
+              // Keep the popover above the status bar instead of overlapping
+              // it — bottom padding ≈ footer height (fork collisionPadding).
+              collisionPadding={{ top: 8, bottom: 32, left: 8, right: 8 }}
+              className="w-[360px] p-0"
+            >
+              <UsageRosterPanel
+                providers={providers}
+                now={now}
+                usageMode={usageMode}
+                onUsageModeChange={setUsageMode}
+                isRefreshing={fetching}
+                onRefresh={handleRefresh}
+                onOpenProvider={() => {
+                  setUsageMenuOpen(false);
+                  onOpenSettings("agents");
+                }}
+                onManageAccounts={() => {
+                  setUsageMenuOpen(false);
+                  onOpenSettings("agents");
+                }}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         {/* Source gate (StatusBarSurface anyVisible && !isEmptyUsageState):
         the refresh control renders only over non-empty usage. */}
-        {snapshot && hasVisibleUsage([snapshot.claude, snapshot.codex], now) ? (
+        {showMeters && hasVisibleUsage(providers, now) ? (
           <button
             type="button"
             className="status-bar-icon-button"
@@ -408,43 +507,76 @@ export function StatusBar({
           compact={collapse.compact}
           iconOnly={collapse.iconOnly}
         />
-        {/* Source CaffeinateStatusSegment form: coffee icon, mode label,
-        activity dot bright when the assertion is held. */}
-        <button
-          type="button"
-          className="status-bar-toggle"
-          title={awakeTitle}
-          aria-label={awakeTitle}
-          aria-pressed={awake?.mode === "on"}
-          onClick={handleAwake}
-          disabled={!awake}
-        >
-          <Coffee
-            size={12}
-            className={awakeActive ? "text-foreground" : undefined}
-          />
-          {collapse.showAwakeLabel ? (
-            <span className="text-[11px] font-medium">
-              {awakeModeLabel ?? "…"}
-            </span>
-          ) : null}
-          <span
-            aria-hidden
-            className={`status-bar-dot${awakeActive ? " status-bar-dot-active" : ""}`}
-          />
-        </button>
+        {/* Source CaffeinateStatusSegment: a dropdown trigger (coffee icon,
+        mode label, activity dot) over an On/Agent/Off radio group with the
+        live status in the menu label. */}
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="status-bar-toggle"
+              title={awakeTitle}
+              aria-label={awakeTitle}
+              aria-haspopup="menu"
+              data-testid="awake-segment"
+              disabled={!awake}
+            >
+              <Coffee
+                size={12}
+                className={awakeActive ? "text-foreground" : undefined}
+              />
+              {collapse.showAwakeLabel ? (
+                <span className="text-[11px] font-medium">
+                  {awakeModeLabel ?? "…"}
+                </span>
+              ) : null}
+              <span
+                aria-hidden
+                className={`status-bar-dot${awakeActive ? " status-bar-dot-active" : ""}`}
+              />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="end" sideOffset={8} className="w-64">
+            <DropdownMenuLabel className="flex items-center justify-between gap-3">
+              <span>Keep computer awake</span>
+              <span className="font-normal text-muted-foreground">
+                {awakeStatusText}
+              </span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuRadioGroup
+              value={awake?.mode ?? "off"}
+              onValueChange={(next) => handleAwakeMode(next as AwakeMode)}
+            >
+              {AWAKE_MODES.map((mode) => (
+                <DropdownMenuRadioItem key={mode} value={mode} className="py-1.5">
+                  <span className="flex flex-col">
+                    <span>{agentAwakeModeLabel(mode)}</span>
+                    <span className="text-[11px] font-normal text-muted-foreground">
+                      {AWAKE_MODE_DESCRIPTIONS[mode]}
+                    </span>
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {/* Source resource-trigger form (resource-usage-status-trigger.tsx):
         memory icon, memory label, "·", terminal icon and the session count in
         one cluster; the separator lives and dies with the memory label, and an
-        unmeasured figure degrades to the source's em dash. */}
-        <span
-          className="status-bar-segment"
+        unmeasured figure degrades to the source's em dash. The fork's trigger
+        opens the Resource Manager; Drogon's matching pane is Settings →
+        Terminal (session behavior). */}
+        <button
+          type="button"
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent/70"
           title={resourceManagerTooltipLines(
             snapshot ? memoryBadge(snapshot.memory.rssBytes) : null,
             terminalCount,
           ).join("\n")}
           aria-label={resourceManagerAriaLabel(terminalCount)}
           data-testid="resource-usage-segment"
+          onClick={() => onOpenSettings("terminal")}
         >
           <MemoryStick size={12} className="text-muted-foreground" />
           {collapse.showMemoryLabel ? (
@@ -465,17 +597,21 @@ export function StatusBar({
               {terminalCount}
             </span>
           )}
-        </span>
+        </button>
         {/* Source PortsStatusSegment form: icon-only keeps the count while
-        any port exists. */}
-        <span
-          className="status-bar-segment"
+        any port exists. The fork's trigger opens the ports popover; Drogon's
+        matching surface is the right-sidebar Ports panel. */}
+        <button
+          type="button"
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent/70"
           title={snapshot ? portsTitle(snapshot.ports) : "Ports unavailable"}
           aria-label={
             snapshot
               ? portsAriaLabel(snapshot.ports)
               : "Ports, 0 workspace ports"
           }
+          data-testid="ports-segment"
+          onClick={onOpenPorts}
         >
           <Plug size={12} className="text-muted-foreground" />
           {collapse.iconOnly &&
@@ -484,7 +620,7 @@ export function StatusBar({
               {snapshot ? portsLabel(snapshot.ports) : "0"}
             </span>
           )}
-        </span>
+        </button>
       </div>
     </footer>
   );

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { ProviderUsage } from "../../shared/usage-contract";
+import { AwakeController } from "./awake";
 import {
   forcedUnavailableProviders,
   mergeProviderReading,
@@ -212,5 +213,27 @@ describe("store fixture seam and dispose", () => {
     });
     store.dispose();
     expect(killed).toEqual([true]);
+  });
+
+  // R16-AY2: auto is a first-class mode and the watcher's activity report
+  // lands in the served snapshot.
+  test("setAwake carries auto and setAgentWorking updates the served snapshot", () => {
+    const controller = new AwakeController({ platform: "darwin" });
+    const store = new UsageStore({
+      awake: controller,
+      readWorkspaceProbes: () => Promise.resolve([]),
+    });
+    const auto = store.setAwake("auto");
+    expect(auto.mode).toBe("auto");
+    expect(auto.active).toBe(false);
+    // Served snapshot reflects the mode switch.
+    expect(store.current().awake.mode).toBe("auto");
+    // An agent starts working: the served snapshot flips to active.
+    const working = store.setAgentWorking(true);
+    expect(working.active).toBe(true);
+    expect(store.current().awake.active).toBe(true);
+    // Idle releases it again.
+    expect(store.setAgentWorking(false).active).toBe(false);
+    expect(store.current().awake.active).toBe(false);
   });
 });

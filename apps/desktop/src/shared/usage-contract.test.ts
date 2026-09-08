@@ -53,12 +53,14 @@ describe("usage contract (fail closed at the boundary)", () => {
     provider.claude = { ...(provider.claude as object), provider: "gemini" };
     expect(usageSnapshotSchema.safeParse(provider).success).toBe(false);
   });
-  test("awake input accepts only on/off", () => {
+  test("awake input accepts only on/auto/off", () => {
     expect(setAwakeInputSchema.safeParse("on").success).toBe(true);
     expect(setAwakeInputSchema.safeParse("off").success).toBe(true);
-    expect(setAwakeInputSchema.safeParse("auto").success).toBe(false);
+    // R16-AY2: auto is the fork's agent-working mode.
+    expect(setAwakeInputSchema.safeParse("auto").success).toBe(true);
     expect(setAwakeInputSchema.safeParse("").success).toBe(false);
     expect(setAwakeInputSchema.safeParse(null).success).toBe(false);
+    expect(setAwakeInputSchema.safeParse("Agent").success).toBe(false);
   });
 });
 

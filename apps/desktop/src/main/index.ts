@@ -77,9 +77,11 @@ import { handleDaemonRestart } from "./daemon-restart";
 import { installNativeThemeBridge } from "./native-theme-bridge";
 // R1-A: self-registering usage IPC (snapshot/refresh/awake); the module owns
 // its channels and validation, this line only loads it.
-import { registerUsageIpc, disposeUsage } from "./usage/service";
+import { registerUsageIpc, disposeUsage, getUsageStore } from "./usage/service";
 // R13-B: additive Ports-panel channel (drogon:workspacePorts).
 import { listWorkspacePorts } from "./usage/workspace-port-list";
+// R16-AY2: awake Auto watcher (caffeinate held only while an agent works).
+import { createAwakeAutoWatcher } from "./awake-auto";
 
 // Bounds one probe connection attempt within the overall bootstrap budget
 // below; not a substitute for it (the overall budget is what actually
@@ -657,6 +659,9 @@ if (!holdsSingleInstanceLock) {
       }
     });
   }
+  // R16-AY2 awake Auto: hold caffeinate only while an agent session works;
+  // assigned when ready, stopped on quit so auto never outlives the app.
+  let awakeAutoWatcher: ReturnType<typeof createAwakeAutoWatcher> | null = null;
   void app.whenReady().then(async () => {
     session.defaultSession.setPermissionRequestHandler(
       (_webContents, _permission, callback) => callback(false),
@@ -674,6 +679,12 @@ if (!holdsSingleInstanceLock) {
         event.senderFrame === window.webContents.mainFrame,
     );
     registerUsageIpc();
+    awakeAutoWatcher = createAwakeAutoWatcher({
+      isAuto: () => getUsageStore().awakeSnapshot().mode === "auto",
+      setAgentWorking: (working) => {
+        getUsageStore().setAgentWorking(working);
+      },
+    });
     startBrowserRelay(registerBrowserIpc(() => window));
     registerNotificationsIpc(() => window);
     await bootstrapDaemon();
@@ -689,8 +700,10 @@ if (!holdsSingleInstanceLock) {
     if (process.platform !== "darwin") app.quit();
   });
   // The keep-awake setting lasts exactly as long as the app: release our
-  // caffeinate child on real quit so quitting awake never orphans it.
+  // caffeinate child on real quit so quitting awake never orphans it (auto
+  // mode included: the watcher stops first, then the child is killed).
   app.on("will-quit", () => {
+    awakeAutoWatcher?.stop();
     disposeUsage();
   });
 }

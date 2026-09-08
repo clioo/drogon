@@ -4088,7 +4088,11 @@ export function App() {
       {appearanceFlags.statusBarVisible ? (
         <StatusBar
           terminalCount={sessions.length}
-          onOpenSettings={() => openSettings()}
+          // R16-AY2 segment click targets: settings/preselect via the existing
+          // openSettings(section) hook; ports opens the right-sidebar Ports
+          // panel, this repo's matching surface for the fork's ports popover.
+          onOpenSettings={openSettings}
+          onOpenPorts={() => openRightSidebarOn("ports")}
         />
       ) : null}
       <Toaster closeButton toastOptions={{ className: "font-sans text-sm" }} />
