@@ -15,7 +15,7 @@ describe("ShortcutsSection edit surface", () => {
   test("implemented rows render recorder buttons", () => {
     const html = render();
     expect(html).toContain("Change shortcut for Toggle Sidebar");
-    expect(html).toContain("Keyboard shortcuts");
+    expect(html).toContain("Keyboard Shortcuts");
   });
   test("the status rail replaces the bare search box (#245)", () => {
     const html = render();
