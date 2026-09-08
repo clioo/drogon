@@ -200,6 +200,45 @@ async function serving(call: NativeCall): Promise<boolean> {
 }
 
 /**
+ * `runtime.shutdown` authorizes the listener to stop before the serving
+ * process has returned and dropped its data-directory lock. Wait for the
+ * endpoint itself to become absent before spawning the replacement: status
+ * loss alone can race that final teardown, while making daemon startup wait
+ * would make every second daemon invocation hang behind an owned directory.
+ */
+async function waitForEndpointAbsent(
+  deps: Pick<
+    DaemonRestartDeps,
+    "observeEndpoint" | "sleep" | "pollIntervalMs" | "shutdownWaitMs"
+  >,
+): Promise<boolean> {
+  const deadline = Date.now() + deps.shutdownWaitMs;
+  let sawAbsent = false;
+  while (Date.now() < deadline) {
+    try {
+      const observation = await deps.observeEndpoint(
+        new AbortController().signal,
+      );
+      if (observation.kind === "absent") {
+        // The listener can close just before the serving process drops its
+        // process-lifetime lock. Require two absent samples, one poll apart,
+        // so replacement startup cannot race that final handoff.
+        if (sawAbsent) return true;
+        sawAbsent = true;
+      } else sawAbsent = false;
+    } catch {
+      // A probe failure is not evidence that the old owner released its
+      // endpoint; keep the bounded wait fail-closed.
+      sawAbsent = false;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await deps.sleep(Math.min(deps.pollIntervalMs, remaining));
+  }
+  return false;
+}
+
+/**
  * Runs one restart: probe short-circuits, otherwise stop-all then the
  * daemon's own shutdown, then a startup-shaped respawn. Every failure
  * leaves the previous state intact except the named one: sessions stay
@@ -271,6 +310,11 @@ export async function handleDaemonRestart(
         );
       await deps.sleep(deps.pollIntervalMs);
     }
+    if (!(await waitForEndpointAbsent(deps)))
+      return notRestarted(
+        deps,
+        "The daemon stopped answering but did not release its endpoint.",
+      );
   }
 
   const outcome = await bootstrapNativeRuntime({
