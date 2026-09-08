@@ -293,6 +293,81 @@ const SURFACES = [
     ],
     candFiles: ["apps/desktop/src/renderer/src/assets/main.css"],
   },
+  {
+    id: "settings-terminal",
+    label: "Settings (Terminal pane)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/TerminalPane.tsx",
+      "src/renderer/src/components/settings/TerminalAppearanceSection.tsx",
+    ],
+    probes: ["Terminal", "font", "GPU", "rendering", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/settings/terminal-typography.ts"],
+  },
+  {
+    id: "settings-agents",
+    label: "Settings (Agents pane)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/AgentsPane.tsx",
+      "src/renderer/src/components/settings/AgentDefaultSetting.tsx",
+    ],
+    probes: ["Agents", "harness", "default", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/settings/agents-section.tsx"],
+  },
+  {
+    id: "settings-shortcuts",
+    label: "Settings (Shortcuts pane)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/ShortcutsPane.tsx",
+      "src/renderer/src/components/settings/shortcut-groups.ts",
+    ],
+    probes: ["Shortcuts", "chord", "shortcut", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx"],
+  },
+  {
+    id: "terminal-find",
+    label: "Terminal find bar",
+    refDir: "src/renderer/src/components",
+    refFiles: [
+      "src/renderer/src/components/TerminalSearch.tsx",
+      "src/renderer/src/components/terminal-search-safe-find.ts",
+    ],
+    probes: ["search", "find", "match", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/terminal/TerminalSearch.tsx"],
+  },
+  {
+    id: "browser-find",
+    label: "Browser find in page",
+    refDir: "src/renderer/src/components/browser-pane/assemble-chrome",
+    refFiles: [
+      "src/renderer/src/components/browser-pane/assemble-chrome/BrowserFind.tsx",
+    ],
+    probes: ["find", "match", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/browser/browser-find-bar.tsx"],
+  },
+  {
+    id: "mentu",
+    label: "Mentu panel",
+    refDir: "src/renderer/src/components/mentu",
+    refFiles: [
+      "src/renderer/src/components/mentu/MentuPanel.tsx",
+      "src/renderer/src/components/mentu/RecipePaneHeader.tsx",
+    ],
+    probes: ["recipe", "run", "evidence", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/mentu/MentuPanel.tsx"],
+  },
+  {
+    id: "session-details",
+    label: "Session details panel",
+    refDir: "src/renderer/src/components/right-sidebar",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/SessionRowTrailingActions.tsx",
+    ],
+    probes: ["session", "details", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/right-sidebar/SessionDetailsPanel.tsx"],
+  },
 ];
 
 function scoreProbeLine(line) {
@@ -1135,6 +1210,101 @@ async function refSetup(page, state, ctx) {
       } else missing.push("no Settings button reachable");
       break;
     }
+    case "settings-terminal":
+    case "settings-agents":
+    case "settings-shortcuts": {
+      // R2 settings panes: Settings → the named pane (fork workflow-group
+      // "Terminal", capability-group "Agents", interface-group "Shortcuts").
+      const pane = state === "settings-terminal" ? "Terminal" : state === "settings-agents" ? "Agents" : "Shortcuts";
+      if (await tryClick(page, "button", "Settings")) {
+        notes.push("Settings opened via Settings button");
+        let opened = await tryClick(page, "button", pane, 1500);
+        if (!opened) {
+          try {
+            await page.getByRole("tab", { name: pane }).first().click({ timeout: 1500 });
+            await delay(350);
+            opened = true;
+          } catch {
+            opened = false;
+          }
+        }
+        if (opened) notes.push(`${pane} pane opened`);
+        else missing.push(`no ${pane} nav reachable`);
+      } else missing.push("no Settings button reachable");
+      break;
+    }
+    case "terminal-find": {
+      // R2 terminal find: focus the first tab and press the source chord
+      // (Mod+F opens TerminalSearch); the role=search bar stays open for
+      // capture. View navigation plus a chord only.
+      // terminal.search is terminal-scope: focus must land inside the pane.
+      try {
+        const panel = page.getByRole("tabpanel").first();
+        if ((await panel.count()) > 0) {
+          await panel.click({ timeout: 2500 });
+          await delay(350);
+          notes.push("tabpanel focused for find");
+        } else notes.push("no tabpanel to focus (empty ref)");
+      } catch {
+        notes.push("tabpanel focus best-effort only");
+      }
+      await tryKeys(page, `${MOD}+F`);
+      await delay(800);
+      const bars = await page.locator('[role="search"]').count().catch(() => -1);
+      if (bars > 0) notes.push(`find bar open (role=search count=${bars})`);
+      else missing.push("Mod+F opened no find bar");
+      break;
+    }
+    case "browser-find": {
+      // R2 browser find: open a browser tab when reachable, focus its guest
+      // and press Mod+F (BrowserFind). Best-effort; capture as-is.
+      if (await tryClick(page, "button", "Browser", 1200)) notes.push("Browser opened");
+      else notes.push("no Browser nav button in ref sidebar");
+      try {
+        const tab = page.getByRole("tab").first();
+        if ((await tab.count()) > 0) {
+          await tab.click({ timeout: 2500 });
+          await delay(350);
+        }
+      } catch {
+        notes.push("tab focus best-effort only");
+      }
+      await tryKeys(page, `${MOD}+F`);
+      await delay(800);
+      const bars = await page.locator('[role="search"]').count().catch(() => -1);
+      if (bars > 0) notes.push(`find bar open (role=search count=${bars})`);
+      else missing.push("Mod+F opened no find bar");
+      break;
+    }
+    case "mentu": {
+      // R2 Mentu panel: activity-bar item only; the recipe draft/empty state
+      // is captured as-is ("Open full tab" is never followed).
+      try {
+        const trigger = page.getByRole("button", { name: "Mentu" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Mentu panel opened");
+        } else notes.push("no Mentu activity button reachable");
+      } catch {
+        notes.push("Mentu best-effort only");
+      }
+      break;
+    }
+    case "session-details": {
+      // R2 session details: the right-sidebar session item, captured as-is.
+      try {
+        const trigger = page.getByRole("button", { name: "Session details" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Session details panel opened");
+        } else notes.push("no Session details activity button reachable");
+      } catch {
+        notes.push("Session details best-effort only");
+      }
+      break;
+    }
     case "statusbar-strip":
       notes.push("full-page capture; strip cropped in post");
       break;
@@ -1709,6 +1879,171 @@ async function candSetup(page, state, ctx) {
       else missing.push("no General section (explicit non-parity: SETTINGS_SECTIONS omits General; catalog settings-general)");
       break;
     }
+    case "settings-terminal": {
+      // No Terminal section exists (typography rows live under Appearance).
+      // Record the explicit non-parity and capture Settings as-is.
+      const opened =
+        (await tryClick(page, "button", "Settings")) ||
+        (await tryClick(page, "button", "Settings", 2500));
+      if (!opened) {
+        missing.push("no Settings affordance reachable");
+        break;
+      }
+      notes.push("Settings opened");
+      let terminal = await tryClick(page, "button", "Terminal", 1500);
+      if (!terminal) {
+        try {
+          await page.getByRole("tab", { name: "Terminal" }).first().click({ timeout: 1500 });
+          await delay(350);
+          terminal = true;
+        } catch {
+          terminal = false;
+        }
+      }
+      if (terminal) notes.push("Terminal pane opened (non-parity claim refuted: section exists)");
+      else missing.push("no Terminal section (explicit non-parity: typography rows live under Appearance; fork TerminalPane.tsx)");
+      break;
+    }
+    case "settings-agents":
+    case "settings-shortcuts": {
+      // Candidate sections carry the honest MVP titles ("Agents",
+      // "Keyboard shortcuts"); the fork nav says "Shortcuts".
+      const pane = state === "settings-agents" ? "Agents" : "Keyboard shortcuts";
+      const opened =
+        (await tryClick(page, "button", "Settings")) ||
+        (await tryClick(page, "button", "Settings", 2500));
+      if (!opened) {
+        missing.push("no Settings affordance reachable");
+        break;
+      }
+      notes.push("Settings opened");
+      let done = await tryClick(page, "button", pane, 1500);
+      if (!done) {
+        try {
+          await page.getByRole("tab", { name: pane }).first().click({ timeout: 1500 });
+          await delay(350);
+          done = true;
+        } catch {
+          done = false;
+        }
+      }
+      if (done) notes.push(`${pane} pane opened`);
+      else missing.push(`no ${pane} section reachable`);
+      break;
+    }
+    case "terminal-find": {
+      // Owned fixture terminal, first tab focused, Mod+F opens
+      // TerminalSearch (role=search "Terminal search"), left open.
+      const terminal = await ensureTerminal().catch(() => false);
+      if (!terminal) {
+        missing.push("project-terminal fixture unavailable for terminal find");
+        break;
+      }
+      // The Mod+F chord is owned by the pane container keydown handler, so
+      // focus must land inside the tabpanel (the tab button is not enough).
+      try {
+        await page.getByRole("tabpanel").first().click({ timeout: 3000 });
+        await delay(350);
+        notes.push("tabpanel focused for find");
+      } catch {
+        notes.push("tabpanel focus best-effort only");
+      }
+      await tryKeys(page, `${MOD}+F`);
+      await delay(800);
+      const bars = await page.locator('[role="search"]').count().catch(() => -1);
+      if (bars > 0) notes.push(`TerminalSearch open (role=search count=${bars})`);
+      else missing.push("Mod+F opened no TerminalSearch");
+      break;
+    }
+    case "browser-find": {
+      // Owned browser tab (same path as the browser state), guest focused,
+      // Mod+F opens the find bar (role=search "Find in page"), left open.
+      await ensureProject().catch(() => {});
+      if (await tryClick(page, "button", "New tab")) {
+        await delay(600);
+        try {
+          const entry = page.getByRole("menuitem", { name: "New Browser Tab", exact: true });
+          if ((await entry.count()) > 0) {
+            await entry.first().click({ timeout: 3000 });
+            notes.push("browser tab opened through the + create menu");
+            await delay(800);
+          } else notes.push("no New Browser Tab menu entry; captured as-is");
+        } catch {
+          notes.push("create-menu selection best-effort only");
+        }
+        await dismissOverlays(page);
+        // Mod+F is owned by the pane container keydown handler: focus must
+        // land inside the tabpanel (the tab button is not enough).
+        try {
+          await page.getByRole("tabpanel").first().click({ timeout: 3000 });
+          await delay(350);
+          notes.push("tabpanel focused for find");
+        } catch {
+          notes.push("tabpanel focus best-effort only");
+        }
+        await tryKeys(page, `${MOD}+F`);
+        await delay(800);
+        let bars = await page.locator('[role="search"]').count().catch(() => -1);
+        if (bars > 0) notes.push(`browser find bar open via Mod+F (role=search count=${bars})`);
+        else {
+          // Fallback user path: the ⋯ toolbar menu documents Mod+F on its
+          // "Find in page" row; open the bar through it instead.
+          notes.push("Mod+F opened no browser find bar; trying toolbar menu path");
+          try {
+            const trigger = page.getByRole("button", { name: "Browser menu" }).first();
+            if ((await trigger.count()) > 0) {
+              await trigger.click({ timeout: 3000 });
+              await delay(600);
+              const entry = page.getByRole("menuitem", { name: "Find in page" }).first();
+              if ((await entry.count()) > 0) {
+                await entry.click({ timeout: 3000 });
+                await delay(800);
+                notes.push("Find in page chosen from toolbar menu");
+              } else notes.push("no Find in page menu entry");
+              // No dismissOverlays here: the menu closes itself and Escape
+              // would shut the freshly opened find bar (panel-level close).
+            } else notes.push("no Browser menu trigger reachable");
+          } catch {
+            notes.push("toolbar menu path best-effort only");
+          }
+          bars = await page.locator('[role="search"]').count().catch(() => -1);
+          if (bars > 0) notes.push(`browser find bar open (role=search count=${bars})`);
+          else missing.push("Mod+F nor toolbar menu opened the browser find bar");
+        }
+      } else missing.push("no New tab affordance reachable");
+      break;
+    }
+    case "mentu": {
+      // Owned fixture; the Mentu panel (recipe empty state) ends open.
+      await ensureProject().catch(() => {});
+      try {
+        const trigger = page.getByRole("button", { name: "Mentu" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Mentu panel opened");
+        } else notes.push("no Mentu activity button reachable");
+      } catch {
+        notes.push("Mentu best-effort only");
+      }
+      break;
+    }
+    case "session-details": {
+      // Owned fixture with a live terminal so the panel has a session.
+      await ensureProject().catch(() => {});
+      await ensureTerminal().catch(() => {});
+      try {
+        const trigger = page.getByRole("button", { name: "Session details" }).first();
+        if ((await trigger.count()) > 0) {
+          await trigger.click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Session details panel opened");
+        } else missing.push("no Session details activity button reachable");
+      } catch {
+        missing.push("Session details best-effort only");
+      }
+      break;
+    }
     case "statusbar-strip":
       await ensureTerminal().catch(() => {});
       notes.push("full-page capture; strip cropped in post");
@@ -1782,6 +2117,13 @@ const ALL_STATES = [
   "right-rail",
   "dialogs",
   "settings-general",
+  "settings-terminal",
+  "settings-agents",
+  "settings-shortcuts",
+  "terminal-find",
+  "browser-find",
+  "mentu",
+  "session-details",
 ];
 
 const CAND_OWNER = {
@@ -1801,6 +2143,13 @@ const CAND_OWNER = {
   "right-rail": "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx, features/file-explorer/FileExplorerMenus.tsx, features/ports/PortsPanel.tsx",
   dialogs: "apps/desktop/src/renderer/src/features/shell/DeleteWorktreeDialog.tsx, RemoveProjectDialog.tsx",
   "settings-general": "apps/desktop/src/renderer/src/features/settings/SettingsPage.tsx, settings-sections.ts (General explicitly omitted)",
+  "settings-terminal": "apps/desktop/src/renderer/src/features/settings/terminal-typography.ts, appearance-section.tsx (no Terminal section; rows live under Appearance)",
+  "settings-agents": "apps/desktop/src/renderer/src/features/settings/agents-section.tsx, agent-defaults.ts",
+  "settings-shortcuts": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, keybindings/definitions.ts",
+  "terminal-find": "apps/desktop/src/renderer/src/features/terminal/TerminalSearch.tsx, find-query-bounds.ts",
+  "browser-find": "apps/desktop/src/renderer/src/features/browser/browser-find-bar.tsx, browser-find-state.ts",
+  mentu: "apps/desktop/src/renderer/src/features/mentu/MentuPanel.tsx, RecipePane*.tsx",
+  "session-details": "apps/desktop/src/renderer/src/features/right-sidebar/SessionDetailsPanel.tsx",
   tokens: "apps/desktop/src/renderer/src/assets/main.css",
 };
 
@@ -1824,6 +2173,13 @@ const STATE_SURFACE = {
   "right-rail": "right-rail",
   dialogs: "dialogs",
   "settings-general": "settings-general",
+  "settings-terminal": "settings-terminal",
+  "settings-agents": "settings-agents",
+  "settings-shortcuts": "settings-shortcuts",
+  "terminal-find": "terminal-find",
+  "browser-find": "browser-find",
+  mentu: "mentu",
+  "session-details": "session-details",
 };
 
 // Preferred source-value keywords per surface: the ranked item must cite the
@@ -1845,6 +2201,13 @@ const SOURCE_PREFERENCE = {
   "right-rail": ["explorer", "ports", "activity", "classname"],
   dialogs: ["delete", "remove", "cancel", "classname"],
   "settings-general": ["general", "workspace directory", "auto save", "classname"],
+  "settings-terminal": ["terminal", "font", "gpu", "classname"],
+  "settings-agents": ["agents", "harness", "default", "classname"],
+  "settings-shortcuts": ["shortcuts", "chord", "keyboard", "classname"],
+  "terminal-find": ["search", "find", "match", "classname"],
+  "browser-find": ["find in page", "match", "classname"],
+  mentu: ["recipe", "run", "evidence", "classname"],
+  "session-details": ["session", "details", "terminal", "classname"],
   tokens: ["font", "geist", "text-", "leading", "tracking", "weight"],
 };
 
