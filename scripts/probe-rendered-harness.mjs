@@ -59,6 +59,15 @@ export async function waitForSessionStripTab(page, sessionId, verdict) {
   });
 }
 
+/** Self-contained: true once the session owns no tab in the Sessions strip. */
+export function sessionStripTabGone({ id }) {
+  return (
+    document.querySelector(
+      `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
+    ) === null
+  );
+}
+
 // Local-only model fixture for every agent launch in acceptance: never a
 // paid model.
 const PI_MODEL = "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4";
@@ -297,7 +306,12 @@ export async function probeRenderedHarness({
   assert.equal(stopped?.verdict, "exited");
   await page.reload();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
-  assert.equal(await page.getByRole("tab").count(), 0);
+  // The closed Pi session owns no strip tab after reload. (No global tab
+  // count: editor tabs persist across reload by design, and the right
+  // sidebar renders its own overlapping tab roles.)
+  await page.waitForFunction(sessionStripTabGone, {
+    id: identity.sessionId,
+  });
   return [
     "agents-settings-defaults-drive-immediate-pi-launch",
     "agent-defaults-survive-reload",
