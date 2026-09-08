@@ -34,6 +34,7 @@ import {
   markSessionDismissed,
 } from "./dismissed-sessions";
 import { Sidebar } from "./features/shell/Sidebar";
+import { DaemonConnectionBanner } from "./features/shell/DaemonConnectionBanner";
 import {
   bulkCloseTargets,
   loadTabStripState,
@@ -2870,19 +2871,30 @@ export function App() {
               </IconButton>
             </div>
           </header>
-          {error && (
-            <div className="error-banner" role="alert">
-              <span>{error}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={() => void refresh()}
-              >
-                Retry
-              </Button>
-            </div>
-          )}
+          {/* R16-M daemon connection (fork parity): the ported banner owns
+              the retry ladder, the disconnect toast and the down→up reload;
+              while connected an unrelated error keeps the legacy banner. */}
+          <DaemonConnectionBanner
+            error={error}
+            retryDisabled={busy}
+            onRetry={() => void refresh()}
+            onReconnected={() => {
+              // Re-attaches without remounting panes: a fresh status
+              // identity retriggers the sessions effect while the unchanged
+              // revision keeps every same-identity pane — and its scrollback
+              // — mounted. A full refresh() here would remount all panes and
+              // clear their buffers just as the service returns. Errors set
+              // during the outage belonged to it, so a success clears them.
+              void window.drogon
+                .status()
+                .then((response) => {
+                  if (!response.ok) return;
+                  setError("");
+                  setStatus(response.result);
+                })
+                .catch(() => {});
+            }}
+          />
             </>
           )}
           <div className="session-layout">

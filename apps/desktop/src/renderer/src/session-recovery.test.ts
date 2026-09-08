@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Verdict } from "../../shared/session-contract";
 import {
+  isRecoverableAfterReconnect,
   recoveryActionFor,
   recoveryTabLabel,
   retryAffordanceDisabled,
@@ -91,5 +92,17 @@ describe("retryAffordanceDisabled", () => {
   });
   it("is enabled when no refresh is in flight", () => {
     expect(retryAffordanceDisabled({ refreshInFlight: false })).toBe(false);
+  });
+});
+
+describe("isRecoverableAfterReconnect", () => {
+  it("re-attaches live and unverifiable sessions when the daemon returns", () => {
+    expect(isRecoverableAfterReconnect("live")).toBe(true);
+    expect(isRecoverableAfterReconnect("unverifiable")).toBe(true);
+  });
+  it("never re-attaches a positively-exited session", () => {
+    // Loss of contact is unverifiable, never exited; a confirmed exit stays
+    // final, so the daemon banner must not cover its exit overlay.
+    expect(isRecoverableAfterReconnect("exited")).toBe(false);
   });
 });

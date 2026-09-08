@@ -53,3 +53,14 @@ export function retryAffordanceDisabled(input: {
 }): boolean {
   return input.refreshInFlight;
 }
+
+/**
+ * Whether a session with this verdict can re-attach when the daemon
+ * connection returns. Live and unverifiable sessions keep their tab and
+ * scrollback and resume polling; a positively-exited session never comes
+ * back, so the daemon banner must not cover its exit overlay — loss of
+ * contact is unverifiable, never exited, and a confirmed exit stays final.
+ */
+export function isRecoverableAfterReconnect(verdict: Verdict): boolean {
+  return verdict === "live" || verdict === "unverifiable";
+}
