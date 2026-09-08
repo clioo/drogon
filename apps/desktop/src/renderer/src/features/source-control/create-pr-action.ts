@@ -6,6 +6,8 @@
 // backend here, so the rule is expressed over the daemon's upstream status
 // (gitStatus branch + the git.pr_create RPC) with the fork's titles.
 
+import { NO_REMOTE_SYNC_TITLE } from "./sync-row";
+
 export type CreatePrToolbarAction = {
   label: "Create PR";
   title: string;
@@ -22,6 +24,7 @@ export function resolveCreatePrToolbarAction({
   upstream,
   ahead,
   hasUncommitted,
+  hasRemote = null,
 }: {
   /** A commit or remote operation is in flight. */
   busy: boolean;
@@ -29,11 +32,25 @@ export function resolveCreatePrToolbarAction({
   ahead: number | null;
   /** The worktree has staged, unstaged or untracked changes. */
   hasUncommitted: boolean;
+  /**
+   * Whether the repo has any remote configured (#176). Null means unknown
+   * (older daemon): the rule falls back to the upstream-only reasons and
+   * never claims "no remote" it cannot prove. False disables first, before
+   * every other reason — without a remote `gh` cannot run at all.
+   */
+  hasRemote?: boolean | null;
 }): CreatePrToolbarAction {
   if (busy) {
     return {
       label: "Create PR",
       title: "Wait for the remote operation to finish.",
+      disabled: true,
+    };
+  }
+  if (hasRemote === false) {
+    return {
+      label: "Create PR",
+      title: NO_REMOTE_SYNC_TITLE,
       disabled: true,
     };
   }

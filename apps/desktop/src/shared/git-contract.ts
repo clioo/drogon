@@ -22,6 +22,10 @@ export type GitBranch = {
   upstream?: string | null;
   ahead?: number | null;
   behind?: number | null;
+  // #176, additive: remote names from `git remote` (never URLs). Absent on
+  // older daemons; empty means no remote configured (distinct from
+  // no-upstream). The panel treats absent as unknown, never as no-remote.
+  remotes?: string[] | null;
 };
 export type GitStatusResult = GitScope & {
   branch: GitBranch;
@@ -147,6 +151,9 @@ export const gitResultSchemas = {
       upstream: z.string().max(1_024).nullish(),
       ahead: z.number().int().nullish(),
       behind: z.number().int().nullish(),
+      // #176, additive: nullish so older daemons without the field still
+      // validate; names only (the daemon never sends URLs).
+      remotes: z.array(z.string().min(1).max(256)).max(32).nullish(),
     }),
     entries: z.array(statusEntry).max(50_000),
     truncated: z.boolean(),

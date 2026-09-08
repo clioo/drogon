@@ -56,6 +56,9 @@ impl Engine {
             "upstream": parsed.header.upstream,
             "ahead": parsed.header.ahead,
             "behind": parsed.header.behind,
+            // #176: remote names (never URLs) so the panel distinguishes
+            // "no remote configured" from "no upstream on a remote".
+            "remotes": parsed.remotes,
         });
         let mut entries = Vec::with_capacity(parsed.entries.len());
         let mut remaining = MAX_FRAME_BYTES / 2;

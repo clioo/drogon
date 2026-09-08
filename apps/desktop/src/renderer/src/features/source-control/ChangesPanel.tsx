@@ -58,7 +58,7 @@ import type { SourceControlViewMode } from "./section-file-list";
 import { handleSourceControlCommitShortcut } from "./commit-shortcut";
 import { getDiscardAllPaths, runDiscardAllForArea } from "./discard-sequence";
 import { getDiscardFailureToastCopy } from "./discard-failure-toast";
-import { toGitDisplayError } from "./git-error-copy";
+import { toGitDisplayError, toPrCreateDisplayError } from "./git-error-copy";
 import { resolveCreatePrToolbarAction } from "./create-pr-action";
 import { parseUnifiedDiff } from "./unified-diff";
 import { reconstructDiffContent } from "./diff/diff-hunk-reconstruction";
@@ -110,6 +110,10 @@ type StatusLoad =
       ahead: number | null;
       behind: number | null;
       oid: string | null;
+      // #176: remote names from the daemon (`git remote`, never URLs).
+      // Null means unknown (older daemon): the panel falls back to the
+      // upstream-only states and never claims "No remote" it cannot prove.
+      remotes: string[] | null;
     }
   | { phase: "error"; message: string };
 
@@ -254,6 +258,7 @@ export function ChangesPanel({
         ahead: result.result.branch.ahead ?? null,
         behind: result.result.branch.behind ?? null,
         oid: result.result.branch.oid ?? null,
+        remotes: result.result.branch.remotes ?? null,
       });
     });
     return () => {
@@ -323,8 +328,17 @@ export function ChangesPanel({
 
   const branch =
     load.phase === "ready"
-      ? { head: load.head, upstream: load.upstream, ahead: load.ahead, behind: load.behind, oid: load.oid }
-      : { head: null, upstream: null, ahead: null, behind: null, oid: null };
+      ? {
+          head: load.head,
+          upstream: load.upstream,
+          ahead: load.ahead,
+          behind: load.behind,
+          oid: load.oid,
+          remotes: load.remotes,
+        }
+      : { head: null, upstream: null, ahead: null, behind: null, oid: null, remotes: null };
+  // #176: null (unknown daemon) never counts as no-remote.
+  const hasRemote = branch.remotes === null ? null : branch.remotes.length > 0;
 
   useEffect(() => {
     if (!selection) {
@@ -625,6 +639,10 @@ export function ChangesPanel({
   }, [bridge, scope]);
 
   const doPrCreate = useCallback(async () => {
+    // #176: without a remote `gh pr create` cannot succeed — the button is
+    // disabled with the reason, and this guard keeps any other caller from
+    // running gh anyway.
+    if (hasRemote === false) return;
     setSyncBusy("pr");
     setPrNotice(null);
     try {
@@ -633,10 +651,14 @@ export function ChangesPanel({
         (selection ? `Update ${selection.path}` : "Update");
       const result = await bridge.gitPrCreate({ ...scope, title });
       if (!result.ok) {
-        setPrNotice({
-          message: errorNotice(errorMessage(result, "Could not create a pull request.")),
-          tone: "destructive",
-        });
+        // Raw `gh` stderr (argv echoes, exit-status wrappers) never reaches
+        // the UI: it is logged inside toPrCreateDisplayError (see #176),
+        // which keeps the fork's short copy while the raw text stays in
+        // the console log (main's errorMessage only strips git internals).
+        const message = toPrCreateDisplayError(
+          result.error.message || `Request failed (${result.error.code}).`,
+        );
+        setPrNotice({ message: errorNotice(message), tone: "destructive" });
         return;
       }
       setPrUrl(result.result.url);
@@ -645,7 +667,7 @@ export function ChangesPanel({
       setSyncBusy(null);
       setRevision((value) => value + 1);
     }
-  }, [bridge, commitMessage, scope, selection]);
+  }, [bridge, commitMessage, hasRemote, scope, selection]);
 
   const requestDiscardAllInArea = useCallback(
     (area: "staged" | "unstaged" | "untracked", paths?: readonly string[]) => {
@@ -667,8 +689,11 @@ export function ChangesPanel({
         upstream: branch.upstream,
         ahead: branch.ahead,
         hasUncommitted: rows.length > 0,
+        // #176: without a remote the action resolves disabled with the
+        // no-remote reason, so `gh` never runs from the toolbar either.
+        hasRemote,
       }),
-    [busy, syncBusy, branch.upstream, branch.ahead, rows.length],
+    [busy, syncBusy, branch.upstream, branch.ahead, rows.length, hasRemote],
   );
 
   const openReviewPage = useCallback(() => {
@@ -738,6 +763,7 @@ export function ChangesPanel({
         behind={branch.behind}
         busyKind={syncBusy}
         actionsAvailable={{ pull: pullAvailable, fetch: fetchAvailable }}
+        hasRemote={hasRemote}
         onPush={() => void doPush()}
         onPull={() => void doPull()}
         onFetch={() => void doFetch()}

@@ -45,6 +45,32 @@ describe("resolveCreatePrToolbarAction", () => {
     expect(action.title).toBe("Publish commits before creating a pull request.");
   });
 
+  test("#176: disables without a remote before any other reason", () => {
+    // Even a push-backed branch with no uncommitted changes stays disabled
+    // when the repo has no remote: `gh` cannot run at all.
+    const action = resolveCreatePrToolbarAction({
+      busy: false,
+      upstream: "origin/main",
+      ahead: 2,
+      hasUncommitted: false,
+      hasRemote: false,
+    });
+    expect(action).toEqual({
+      label: "Create PR",
+      title: "No remote configured for this repository — add one with git remote add, then retry",
+      disabled: true,
+    });
+    // Unknown (older daemon) falls back to the upstream-only reasons.
+    expect(
+      resolveCreatePrToolbarAction({
+        busy: false,
+        upstream: null,
+        ahead: null,
+        hasUncommitted: false,
+      }).title,
+    ).toBe("Publish commits before creating a pull request.");
+  });
+
   test("disables with uncommitted changes", () => {
     const action = resolveCreatePrToolbarAction({
       busy: false,

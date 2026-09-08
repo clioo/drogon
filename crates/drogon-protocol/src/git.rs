@@ -259,6 +259,10 @@ pub struct GitBranch {
     pub ahead: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub behind: Option<i64>,
+    /// Remote names from `git remote` (never URLs). `None`/empty means the
+    /// repo has no remote configured (#176: distinct from no-upstream).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remotes: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -504,6 +508,7 @@ mod tests {
                 upstream: None,
                 ahead: Some(1),
                 behind: Some(0),
+                remotes: None,
             },
             entries: vec![GitStatusEntry {
                 path: "a.txt".into(),
