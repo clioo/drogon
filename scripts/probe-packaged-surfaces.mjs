@@ -697,6 +697,10 @@ export async function probePackagedSurfaces({
   checks.push("settings-page-opens-from-shortcut");
   await page.getByRole("button", { name: "Back to app", exact: true }).click();
   await settings.waitFor({ state: "hidden" });
+  // R16-X (#210) leaves its typed-journey.txt editor tab open in the
+  // Sessions strip, so the empty landing only renders once lingering editor
+  // tabs are closed (same helper as the pre-session-details pass below).
+  await closeOpenStripTabs(page);
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   checks.push("settings-page-returns-to-prior-view");
 
