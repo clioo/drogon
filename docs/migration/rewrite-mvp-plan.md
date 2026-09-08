@@ -194,28 +194,37 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J6 R16-P: filas, paginación y modo PR de Tasks frente al fuente; pliega #126 | R16 | Muse | fusionada: filas/paginación/modo PR del fuente y estado tasks-rows del oráculo; #126 pendiente de verificar en QA-UI r5 | #181 |
 | J10 R16-Q: pane Terminal, copy de Notifications, filas de Agents y Git (#150 #152 #168 #169, parcial: filas sin backend quedan listadas en el PR) | R16 | Muse | fusionada | #178 |
 | QA fix R16-R: #136 #167 #175 #176 copy y acciones de Source Control, chords del menú New tab | R16 | Muse | fusionada #136 #167 (#182); #175 #176 continúan en R16-R2 (lanzada) | #182 |
-| J8 R16-S: Bots de extremo a extremo con el modelo local (crear, responsabilidades, run visible, historial) | R16 | Muse | PR #191 en integración; #186 #187 (lanzamiento headless de Pi) continúan en R16-S2 (lanzada) | #191 |
+| J8 R16-S: Bots de extremo a extremo con el modelo local (crear, responsabilidades, run visible, historial) | R16 | Muse | fusionada (#191: modelo del formulario y Run cableados); #186 #187 (lanzamiento headless de Pi) en R16-S2 (lanzada) | #191 |
 | J7 R16-T: Automations de extremo a extremo (cron real de un minuto, run now, dashboard, run de agente local) | R16 | Muse | lanzada | |
-| J9 R16-U: Mentu de extremo a extremo con el runtime fijado (aprobar, ejecutar, evidencia, retry, cancelar) | R16 | Muse | PR #193 en integración (guardado de recetas, cancelación de nietos, run compartido panel↔tab) | #193 |
-| J1 R16-V: bucle J1 de extremo a extremo con el modelo local (composer → harness → estados → persistencia → reinicio) | R16 | Muse | PR #190 en integración (composer → provider/modelo de Pi, persistencia de estado tras reinicio); #185 continúa en R16-V2 (lanzada) | #190 |
+| J9 R16-U: Mentu de extremo a extremo con el runtime fijado (aprobar, ejecutar, evidencia, retry, cancelar) | R16 | Muse | fusionada: guardado de recetas, cancelación de nietos, run compartido panel↔tab | #193 |
+| J1 R16-V: bucle J1 de extremo a extremo con el modelo local (composer → harness → estados → persistencia → reinicio) | R16 | Muse | fusionada (#190); #185 corregido en R16-V2 (#204, fusionada) | #190 #204 |
 | J6 R16-W: Tasks de extremo a extremo contra GitHub real (`gh`, start desde issue) | R16 | Muse | fusionada: listas filtradas completas, consulta gh honesta, start desde issue y PR | #183 |
 | QA fix R16-X: #144 el editor no recibe teclado; J2 editar/guardar de extremo a extremo con check sellado que teclea | R16 | Muse | lanzada | |
-| J4 R16-Y: browser de extremo a extremo (barra, navegación, buscar, zoom, menús, CLI, persistencia) y #179 chords del menú | R16 | Muse | lanzada | |
+| J4 R16-Y: browser de extremo a extremo (barra, navegación, buscar, zoom, menús, CLI, persistencia) y #179 chords del menú | R16 | Muse | fusionada: menú del browser con glifos (#179), replay de estado del browser tras reload | #203 |
 | QA de UI ronda 3 sobre main f0ce137 | QA | Muse | hecha: verificados #125 #127 #132 (parcial) #128 #130; nuevos #167 #168 #169; estados automation-runs, bot-responsibilities, toasts, settings-notifications/git | #170 |
 | QA de UI ronda 4 sobre main 11c1bbb | QA | Muse | hecha: 34 estados, verificados #128 #130 #146 #153 y remanentes de #150 #152 #168 #169; nuevos #195 #196 #197; incidente: cerró una pestaña Terminal 1 de la referencia (regla endurecida) | #199 |
 | J11 R16-Z: primer arranque del paquete instalado de extremo a extremo (data dir limpio, recursos, runtime Mentu, reinicio) | R16 | Muse | lanzada | |
-| J3 R16-AA: drogon-cli de extremo a extremo desde una sesión (agent-context v1, project remove, alias de wait del fuente) | R16 | Muse | PR #200 en integración; queda el tramo con Electron y modelo local | #200 |
-| J5 R16-AC: paletas ⌘J/⌘P/⌘K y cambio de workspace/sesión de extremo a extremo | R16 | Muse | lanzada | |
-| QA fix R16-AE: #192 modelo del diálogo de lanzamiento, #194 derivación única del estado del agente, #197 filas New Markdown y Agent settings | R16 | Muse | lanzada | |
+| J3 R16-AA: drogon-cli de extremo a extremo desde una sesión (agent-context v1, project remove, alias de wait del fuente) | R16 | Muse | fusionada: agent-context v1, project remove, alias de wait del fuente; queda el tramo con Electron y modelo local | #200 |
+| J5 R16-AC: paletas ⌘J/⌘P/⌘K y cambio de workspace/sesión de extremo a extremo | R16 | Muse | fusionada | #205 |
+| QA fix R16-AE: #192 modelo del diálogo de lanzamiento, #194 derivación única del estado del agente, #197 filas New Markdown y Agent settings | R16 | Muse | fusionada: #192 #194 #197 cerrados | #206 |
 | QA fix R16-T (plegado): #188 runs programados con la política de harness del bot | R16 | Muse | en R16-T | |
 | QA fix R16-X (plegado): #195 #196 punto de sucio y cabecera del editor del fuente | R16 | Muse | en R16-X | |
-| Infra: tests Rust robustos (fixtures git aislados de la config global, deadline de arranque del daemon bajo carga); ventana de fondo sin activación ni banners nativos; #198 nueva terminal activa sobre pestaña de editor | R16 | Coordinador | en integración | |
+| Infra: tests Rust robustos (fixtures git aislados de la config global, deadline de arranque del daemon bajo carga); ventana de fondo sin activación ni banners nativos; #198 nueva terminal activa sobre pestaña de editor | R16 | Coordinador | fusionada; además #198 | #202 |
 | QA ronda 1 (continuación) | QA | Pi local | issues nuevos: #144 (R16-X), #163 (verificar), #175 #176 (R16-R2), #179 (R16-Y), #192 #194 (R16-AE) | |
+| J10 R16-AD: Settings persisten y surten efecto de extremo a extremo (tema, harness por defecto, atajos, notificaciones, Git) | R16 | Muse | lanzada | |
+| QA fix R16-AF: #126 chrome de filtros de Tasks y verificación de #163 | R16 | Muse | lanzada | |
+| J1 R16-AG: menú nativo, badge del Dock, notificaciones y estado de ventana de extremo a extremo | R16 | Muse | lanzada | |
+| J1 R16-AH: superficie del terminal de extremo a extremo (salida larga, buscar, links, pegar, zoom, overlay de salida, restauración) | R16 | Muse | lanzada | |
+| QA fix R16-Z (plegado): #201 icono propio de Drogon en el paquete (arte original, generador reproducible) | R16 | Muse | en R16-Z | |
+| Regla (Carlos, 2026-09-08): el PR en verde y MERGEABLE es responsabilidad del worker antes de worker_done; el coordinador solo fusiona y corre una cadena consolidada sobre main | R16 | Coordinador | vigente en spec-r-common | |
+| QA ronda 2 sobre main 224ce7d: QA en Muse Spark, sesiones dentro de la app solo con el modelo local | QA | Muse | en curso | |
+| QA de UI ronda 5 sobre main ≥ 91d01c0 (antes rebase de #199; fixture git para Source Control) | QA | Muse | en curso | |
 
 ## 7. QA continuo
 
-Un agente QA (Pi con el modelo local `dgx-spark/qwen3.8-flash-next-nvidia-nvfp4`,
-sin costo por token) usa la app compilada desde `origin/main` como un usuario:
+Un agente QA (Pi con Muse Spark 1.3 Contributor; las sesiones que lanza dentro de la
+app usan solo el modelo local `dgx-spark/qwen3.8-flash-next-nvidia-nvfp4`, sin costo
+por token) usa la app compilada desde `origin/main` como un usuario:
 arranca daemon y Electron en ventana de fondo con `scripts/qa/drogon-ui.mjs`,
 lee la pantalla por el árbol de accesibilidad (`snapshot`, `landmarks`) y actúa
 con `click`, `fill`, `type`, `press`, `terminal-text`; nunca escribe scripts de
