@@ -1,44 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { createElement } from "react";
-import { renderToString } from "react-dom/server";
 import {
   createFilesDraftStore,
   editorContentFor,
   type FilesDraftStore,
 } from "./files-draft-store";
-import {
-  createFilesPanelDescriptor,
-  filesReadTarget,
-  isFilesAvailable,
-  FILES_ROUTE_ID,
-} from "./files-panel";
-import type { FileBridge } from "../../../../shared/file-contract";
-import type { Session, Status, Workspace } from "../../../../shared/session-contract";
+import { isFilesAvailable } from "./files-panel";
+import { filesReadTarget } from "../editor/file-read-write";
 
 const SCOPE_A = { hostId: "h1", workspaceId: "w1" };
 const SCOPE_B = { hostId: "h2", workspaceId: "w2" };
 const FILE_A = "src/a.ts";
-
-const noopBridge = (): FileBridge => ({
-  fileList: () => Promise.reject(new Error("must never be called")),
-  fileRead: () => Promise.reject(new Error("must never be called")),
-  fileWrite: () => Promise.reject(new Error("must never be called")),
-});
-
-const workspace: Workspace = {
-  id: "w1",
-  path: "/repo",
-  name: "repo",
-  kind: "git",
-  hostId: "h1",
-};
-const statusWith = (capabilities: string[]): Status => ({
-  hostId: "status-host",
-  serviceInstanceId: "svc",
-  protocol: 1,
-  capabilities,
-  version: "0.1.0",
-});
 
 describe("draft store lifecycle (unmount/remount survival)", () => {
   test("edit A -> simulated unmount -> navigation -> reopen A retains the draft", () => {
@@ -174,44 +145,10 @@ describe("availability: memory-only, never touches the bridge", () => {
   });
 });
 
-describe("factory wiring with the descriptor-owned store", () => {
-  test("the public factory signature stays stable and the optional drafts dep is honored", () => {
-    const descriptor = createFilesPanelDescriptor({ bridge: noopBridge() });
-    expect(descriptor.id).toBe(FILES_ROUTE_ID);
-    expect(typeof descriptor.component).toBe("function");
-    // The store is created per factory call and closed over; passing one
-    // explicitly (tests / alternate hosts) must be equally accepted:
-    const injected = createFilesDraftStore();
-    const withStore = createFilesPanelDescriptor({
-      bridge: noopBridge(),
-      drafts: injected,
-    });
-    expect(withStore.id).toBe(FILES_ROUTE_ID);
-  });
-
-  test("drafts survive simulated remounts: the same descriptor renders twice with the store intact", () => {
-    const store = createFilesDraftStore();
-    store.confirmRead(SCOPE_A, FILE_A, "saved body");
-    store.recordDraft(SCOPE_A, FILE_A, "survivor draft");
-    const descriptor = createFilesPanelDescriptor({
-      bridge: noopBridge(),
-      drafts: store,
-    });
-    const mount = () =>
-      renderToString(
-        createElement(descriptor.component, {
-          routeId: FILES_ROUTE_ID,
-          session: null as Session | null,
-          workspace,
-          status: statusWith(["files.v1"]),
-          focusTarget: null,
-        }),
-      );
-    const first = mount(); // initial mount
-    void first;
-    mount(); // simulated unmount + remount (new component instance, same store)
-    // The remounted panel must not have wiped the store:
-    expect(store.draftOf(SCOPE_A, FILE_A)).toBe("survivor draft");
-    expect(store.isDirty(SCOPE_A, FILE_A)).toBe(true);
-  });
-});
+// The old "factory wiring with the descriptor-owned store" suite is gone
+// (R16-A): that concern — a draft store surviving a V2 route unmount/
+// remount — belonged to the embedded sidebar editor. The main tab group's
+// EditorHost (features/editor/EditorHost.tsx) now owns its own store for
+// its own (much longer) mount lifetime — it stays mounted for as long as
+// any editor tab exists, independent of right-sidebar route switches —
+// so there is no factory-injection seam left to test here.

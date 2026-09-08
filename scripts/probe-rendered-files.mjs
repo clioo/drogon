@@ -48,11 +48,20 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     );
   };
   await ensureFilesVisible();
+  // R16-A (fixes #133): a row click opens/reuses a MAIN TAB GROUP editor
+  // tab — a full-width Monaco pane, never an editor embedded in the Explorer
+  // column. The panel renders the tree only; rows are buttons (R16-D).
   await panel.getByRole("button", { name: first, exact: true }).click();
   await waitForEditorRegistered(page, first);
+  assert.equal(
+    await panel.locator('[aria-label^="Editor"], .editor-pane-surface').count(),
+    0,
+    "The Files panel must never embed the file editor (fixes #133)",
+  );
+  await page.getByRole("tab", { name: first, exact: true }).waitFor();
   assert.equal(await readEditorValue(page, first), "first baseline\n");
   await setEditorValue(page, first, "unsaved first draft\n");
-  await page.getByLabel("Unsaved changes", { exact: true }).waitFor();
+  await page.getByLabel("Unsaved changes", { exact: true }).first().waitFor();
   assert.equal(
     await readFile(path.join(workspace, first), "utf8"),
     "first baseline\n",
@@ -60,21 +69,33 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await panel.getByRole("button", { name: second, exact: true }).click();
   await waitForEditorRegistered(page, second);
   assert.equal(await readEditorValue(page, second), "second baseline\n");
-  await panel.getByRole("button", { name: first, exact: true }).click();
+  // Reopening the first file reuses its existing tab (never a duplicate):
+  // the strip must show exactly one tab per open file. Its label now
+  // carries the dirty suffix, so the lookup is a prefix match.
+  const firstTab = page.getByRole("tab", { name: new RegExp(`^${first}`) });
+  await firstTab.click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
-  // R6-B: switching the activity bar away from Explorer hides the mounted
-  // Files panel (keep-alive) without unmounting it; switching back must
-  // retain the unsaved draft, mirroring the old Terminals-route round-trip.
-  // R16-B: Source Control is git-only per the fork's activity gating, so
-  // the round-trip switches to Ports (workspace-gated, served here).
+  assert.equal(
+    await firstTab.count(),
+    1,
+    "Reopening an already-open file must reuse its tab, never duplicate it",
+  );
+  // R6-B: switching the activity bar away from Explorer hides the tree
+  // (keep-alive) without unmounting it; the open editor tab lives in the
+  // main tab group, independent of the right-sidebar panel. R16-B: Source
+  // Control is git-only per the fork's gating, so the round-trip uses Ports.
   await page.getByRole("button", { name: /^Ports/ }).click();
   await files.click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
-  await panel.getByRole("button", { name: "Save", exact: true }).click();
+  await page
+    .locator("#editor-tab-panel")
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
   await page
     .getByLabel("Unsaved changes", { exact: true })
+    .first()
     .waitFor({ state: "hidden" });
   assert.equal(
     await readFile(path.join(workspace, first), "utf8"),
@@ -97,9 +118,9 @@ export async function probeRenderedFiles({ page, workspace, output }) {
           path: path.join(output, `files-${width}-${colorScheme}.png`),
           animations: "disabled",
         });
-        const metrics = await panel.evaluate((element) => {
+        const metrics = await page.evaluate(() => {
           const box = (selector) => {
-            const bounds = element
+            const bounds = document
               .querySelector(selector)
               ?.getBoundingClientRect();
             return bounds
@@ -111,16 +132,27 @@ export async function probeRenderedFiles({ page, workspace, output }) {
                 }
               : null;
           };
+          const filesPanel = document.querySelector(
+            'section[aria-label="Files"]',
+          );
           return {
+            // `main` also hosts the right sidebar as a flex child (it is NOT
+            // terminal/editor-content-only), so the full-width claim is
+            // checked against `.terminal-column` — the tab strip's own
+            // host, shared by the terminal, browser and (now) editor panes.
+            terminalColumn: box(".terminal-column"),
             editor: box(".editor-pane-surface"),
-            rows: [...element.querySelectorAll('[data-file-explorer-row]')]
+            editorInsideFilesPanel:
+              filesPanel?.querySelector(".editor-pane-surface") != null,
+            rows: [
+              ...(filesPanel?.querySelectorAll("[data-file-explorer-row]") ??
+                []),
+            ]
               .slice(0, 2)
               .map((row) => {
                 const bounds = row.getBoundingClientRect();
                 return { y: bounds.y, height: bounds.height };
               }),
-            clientWidth: element.clientWidth,
-            scrollWidth: element.scrollWidth,
           };
         });
         assertFilesLayout(metrics);
@@ -139,9 +171,15 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await panel.getByRole("button", { name: first, exact: true }).click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
-  // Back to the terminal view through the strip when a tab exists (the
-  // flow closed every session before this probe ran, so the strip is
-  // usually just the "+" menu over the empty state — already stable).
+  // Closing the (only) editor tab returns to the terminal tab, like the
+  // fork — the strip's remaining tab (if any) becomes active again.
+  await page
+    .getByRole("tab", { name: new RegExp(`^${first}`) })
+    .getByRole("button", { name: `Close ${first}` })
+    .click();
+  await page.getByRole("tab", { name: new RegExp(`^${first}`) }).waitFor({
+    state: "detached",
+  });
   if ((await page.getByRole("tab").count()) > 0) {
     await page.getByRole("tab").first().click();
   }
@@ -156,7 +194,19 @@ export async function probeRenderedFiles({ page, workspace, output }) {
 
 export function assertFilesLayout(metrics) {
   assert.ok(metrics.editor, "The file editor must be rendered");
-  assert.ok(metrics.editor.width >= 200, "The editor must retain usable width");
+  assert.equal(
+    metrics.editorInsideFilesPanel,
+    false,
+    "The editor must never be embedded inside the right sidebar Explorer panel (fixes #133)",
+  );
+  assert.ok(
+    metrics.terminalColumn,
+    "The tab strip's host column must be rendered",
+  );
+  assert.ok(
+    metrics.editor.width >= metrics.terminalColumn.width * 0.95,
+    `The editor must fill the tab strip's own column width (editor ${metrics.editor.width}px vs column ${metrics.terminalColumn.width}px), exactly like the terminal and browser panes, not a fixed narrow sidebar width`,
+  );
   assert.ok(
     metrics.editor.height >= 240,
     "The editor must retain usable height",
@@ -164,15 +214,10 @@ export function assertFilesLayout(metrics) {
   assert.equal(
     metrics.rows.length,
     2,
-    "Both fixture file rows must be rendered",
+    "Both fixture file rows must be rendered in the Explorer tree",
   );
   assert.ok(
     metrics.rows[1].y >= metrics.rows[0].y + metrics.rows[0].height - 1,
     "Explorer entries must form distinct vertical rows",
   );
-  assert.ok(
-    metrics.scrollWidth <= metrics.clientWidth + 1,
-    "The Files panel must not overflow horizontally",
-  );
 }
-

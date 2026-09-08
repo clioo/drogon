@@ -319,6 +319,13 @@ The native application menu, window-state persistence and dock unread badge in
 (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
 file keeps the MIT notice.
 
+The editor tabs in the main tab group (`apps/desktop/src/renderer/src/features/{shell,editor}/`
+editor tab kind, EditorHost and openers) port the Drogon fork's
+`src/renderer/src/components/tab-group/TabGroupPanel.tsx` and
+`src/renderer/src/components/editor/**` tab semantics (fork revision
+`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
+MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

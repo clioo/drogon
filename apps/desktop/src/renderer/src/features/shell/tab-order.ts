@@ -4,9 +4,9 @@
    src/renderer/src/store/slices/tabs/tabs-tab-order.ts (pinned partition)
    and src/renderer/src/store/slices/tabs/tabs-bulk-close-actions.ts
    (bulk-close skips pinned tabs). Adapter: the strip holds terminal
-   sessions plus browser pages only, so the order domain is those two id
-   lists; pin/title state lives in this file's per-workspace envelope
-   instead of the zustand tab slice. */
+   sessions, browser pages and editor (open file) tabs, so the order domain
+   is those three id lists; pin/title state lives in this file's
+   per-workspace envelope instead of the zustand tab slice. */
 
 export type TabStripState = {
   /** Stored strip order (session ids and browser tab ids, deduped at read). */
@@ -38,8 +38,9 @@ export function reconcileTabOrder(
   storedOrder: readonly string[] | undefined,
   sessionIds: readonly string[],
   browserIds: readonly string[] = [],
+  editorIds: readonly string[] = [],
 ): string[] {
-  const valid = new Set([...sessionIds, ...browserIds]);
+  const valid = new Set([...sessionIds, ...browserIds, ...editorIds]);
   const result: string[] = [];
   const seen = new Set<string>();
   for (const id of storedOrder ?? []) {
@@ -48,7 +49,7 @@ export function reconcileTabOrder(
       seen.add(id);
     }
   }
-  for (const id of [...sessionIds, ...browserIds]) {
+  for (const id of [...sessionIds, ...browserIds, ...editorIds]) {
     if (!seen.has(id)) {
       result.push(id);
       seen.add(id);

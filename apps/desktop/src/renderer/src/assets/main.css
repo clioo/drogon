@@ -751,21 +751,6 @@
   flex: 1;
   border-left: none;
 }
-/* Why: the Files panel was built for a full-width column (240px tree
-   beside the editor). In the 280px sidebar that row layout squeezes the
-   editor to nothing, so the host forces the documented narrow stacking
-   (tree over editor) regardless of viewport width. */
-.right-sidebar-panel .files-panel {
-  flex-direction: column;
-}
-.right-sidebar-panel .workspace-explorer {
-  width: auto;
-  flex-shrink: 0;
-  max-height: 40%;
-  border-right: 0;
-  border-bottom: 1px solid
-    color-mix(in srgb, var(--border) 72%, transparent);
-}
 .migration-note {
   margin-top: 32px;
   padding-top: 20px;
@@ -873,13 +858,12 @@
   align-items: center;
   gap: 6px !important;
 }
-/* Files split (contrast-report.md Follow-up B, V2-owned half): the panel
-   mounts session-less; tree fixed 240px, editor canvas flexes on
-   --editor-surface (values byte-identical to the frozen source anchors).
-   Narrow widths stack tree-over-editor at the inspector breakpoint. */
+/* R16-A (fixes #133): the Files panel is Explorer-tree-only now — the
+   embedded editor moved to the main tab group's EditorHost, so this is a
+   single-child column host, not the old tree-beside-editor split row. */
 .files-panel {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
   min-height: 0;

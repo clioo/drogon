@@ -1,10 +1,13 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/tab-bar/SortableTabContextMenu.tsx (item
-   order, icons and disabled rules) and BrowserTab.tsx (browser menu:
-   pin, close variants). Adapter: no split/view-mode/color rows (no pane
-   splits, chat views or tab colors in this build); session tabs gain
-   "Copy Session ID" (the id is this build's addressable handle) and
-   browser tabs gain "Copy URL"; radix-ui stands in for the shadcn menu. */
+   order, icons and disabled rules), BrowserTab.tsx (browser menu: pin,
+   close variants) and the editor tab menu in
+   src/renderer/src/components/tab-bar/TabBar.tsx (no rename row; "Copy
+   Path" instead of "Copy Session ID"/"Copy URL"). Adapter: no
+   split/view-mode/color rows (no pane splits, chat views or tab colors in
+   this build); session tabs gain "Copy Session ID" (the id is this build's
+   addressable handle), browser tabs gain "Copy URL" and editor tabs gain
+   "Copy Path"; radix-ui stands in for the shadcn menu. */
 
 import {
   Copy,
@@ -26,7 +29,7 @@ import {
 } from "../../components/ui/dropdown-menu";
 import { TAB_CONTEXT_MENU_CONTENT_CLASS } from "./tab-chrome";
 
-export type TabMenuKind = "session" | "browser";
+export type TabMenuKind = "session" | "browser" | "editor";
 
 /** Window event that closes every other open tab menu before one opens. */
 export const TAB_STRIP_CLOSE_MENUS_EVENT = "drogon-close-tab-menus";
@@ -155,10 +158,10 @@ export function TabContextMenu({
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onSelect={onCopy}>
-          {policy.kind === "session" ? (
-            <Copy className="size-3.5 shrink-0" />
-          ) : (
+          {policy.kind === "browser" ? (
             <Link2 className="size-3.5 shrink-0" />
+          ) : (
+            <Copy className="size-3.5 shrink-0" />
           )}
           {copyLabel}
         </DropdownMenuItem>

@@ -175,7 +175,9 @@ async function ensureRightSidebar(page) {
   );
 }
 
-/** Explorer (right sidebar): fixture tree renders and opens into the editor. */
+/** Explorer (right sidebar): fixture tree renders and opens the file into a
+ *  main tab-group editor tab (R16-A, fixes #133) — never embedded in the
+ *  right sidebar's 200-280px column. */
 async function probeExplorerSurface({ page, workspace, output }) {
   const file = "sidebar-explorer.txt";
   await writeFile(path.join(workspace, file), "sidebar explorer body\n");
@@ -188,6 +190,12 @@ async function probeExplorerSurface({ page, workspace, output }) {
   await panel.getByRole("button", { name: file, exact: true }).click();
   await waitForEditorRegistered(page, file);
   assert.equal(await readEditorValue(page, file), "sidebar explorer body\n");
+  assert.equal(
+    await panel.locator(".editor-pane-surface").count(),
+    0,
+    "The Files panel must never embed the file editor (fixes #133)",
+  );
+  await page.getByRole("tab", { name: file, exact: true }).waitFor();
   await page.screenshot({
     path: path.join(output, "explorer.png"),
     animations: "disabled",
