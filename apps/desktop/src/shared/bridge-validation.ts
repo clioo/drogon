@@ -88,6 +88,11 @@ export const bridgeSchemas = {
     rows: z.number().int().min(1).max(1000),
   }),
   stop: identity,
+  // R16-AL2 (issue #228): user-initiated close paths. `close` stops a
+  // live PTY and forgets the record; `forget` removes a record with no
+  // live handle (the daemon refuses to forget a live one).
+  close: identity,
+  forget: identity,
   harnesses: z.undefined(),
   startHarness: harnessLaunch,
   buildInfo: z.undefined(),

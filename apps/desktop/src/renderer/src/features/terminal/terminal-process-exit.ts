@@ -5,7 +5,13 @@
 // verbatim so the overlay copy stays exact).
 export type TerminalProcessExitReason =
   | "process-failed"
-  | "git-bash-console-capacity";
+  | "git-bash-console-capacity"
+  // R16-AL2 (issue #228): offered after an explicit Retry connection click
+  // re-listed the session and it is still `unverifiable` — the tab cannot
+  // be revived by waiting. The overlay stays the fork's exited-overlay
+  // structure; only the copy is adapted, and it never claims the session
+  // exited (loss of contact is not exit).
+  | "connection-unrecoverable";
 
 export type TerminalProcessExit = {
   exitCode: number | null;
@@ -36,6 +42,13 @@ export function describeTerminalProcessExit(exit: TerminalProcessExit): {
       title: "Git Bash console limit reached",
       detail:
         "Git Bash reached its 128-console limit. Close unused Git Bash terminals, then restart this terminal.",
+    };
+  }
+  if (exit.reason === "connection-unrecoverable") {
+    return {
+      title: "Could not reconnect to terminal",
+      detail:
+        "Drogon could not re-establish this terminal's session. Its output is preserved. Restart relaunches it with the same command, or close the tab.",
     };
   }
   return {

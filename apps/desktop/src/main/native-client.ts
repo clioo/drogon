@@ -248,6 +248,8 @@ export function identityMismatch(
       );
     case "session.resize":
     case "session.stop":
+    case "session.close":
+    case "session.forget":
       return checkSession(
         result as SessionIdentity,
         { sessionId, incarnation },

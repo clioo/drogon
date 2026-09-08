@@ -61,7 +61,10 @@ import {
 } from "./TerminalProcessExitOverlay";
 import { DaemonReconnectBanner } from "./DaemonReconnectBanner";
 import { useDaemonConnection } from "../shell/daemon-connection-store";
-import { isRecoverableAfterReconnect } from "../../session-recovery";
+import {
+  isRecoverableAfterReconnect,
+  showRecoveryOverlay,
+} from "../../session-recovery";
 import {
   projectTerminalProcessExit,
   type TerminalProcessExit,
@@ -134,9 +137,10 @@ export type TerminalRestartDetail = {
 };
 
 /**
- * Dispatched by the context menu's Close Pane item after stopping the PTY.
- * App wires it to tab dismissal; the stop() call below is the real effect
- * until then (the session flips to exited and the overlay takes over).
+ * Dispatched by the context menu's Close Pane item. App owns the close
+ * effect (R16-AL2, issue #228): the event routes to the confirmed
+ * `session.close` path, which stops a live PTY and forgets the record —
+ * the pane only reports the event.
  */
 export const TERMINAL_CLOSE_EVENT = "drogon:terminal-close";
 
@@ -219,6 +223,7 @@ export function TerminalPane({
   gpuMode,
   canSplit,
   onSplitRight,
+  recoveryNonce = 0,
   onError,
   onSession,
 }: {
@@ -244,6 +249,16 @@ export function TerminalPane({
   canSplit?: boolean;
   /** Split entry point for this pane (context menu item). */
   onSplitRight?: () => void;
+  /**
+   * R16-AL2 (issue #228): advances each time the user clicked Retry
+   * connection and the fresh session list confirmed THIS pane's session
+   * is still `unverifiable`. While the nonce is ahead of the pane's
+   * dismissed nonce, the pane shows the recovery overlay (the fork's
+   * exited-overlay structure with its Restart action) instead of the inert
+   * retry loop. Omitted by hosts that never retry (tests, split host
+   * callers pre-dating the prop): the overlay simply never shows.
+   */
+  recoveryNonce?: number;
   onError(message: string): void;
   onSession(value: Session): void;
 }) {
@@ -278,6 +293,11 @@ export function TerminalPane({
   const [processExit, setProcessExit] = useState<TerminalProcessExit | null>(
     () => projectTerminalProcessExit(session),
   );
+  // R16-AL2 (issue #228): the nonce of the retry offer this pane has
+  // dismissed. A remounting pane (tabs are cleared while a retry
+  // refreshes) starts un-dismissed at the current nonce, so the offer only
+  // ever re-arms on a NEW retry click that again confirms unverifiable.
+  const [dismissedRecoveryNonce, setDismissedRecoveryNonce] = useState(0);
   // R12-E: the source's link action popover — plain clicks on a file link
   // open this instead of doing nothing; direct (⌘/Ctrl) clicks still open.
   const [linkActionRequest, setLinkActionRequest] =
@@ -1098,20 +1118,12 @@ export function TerminalPane({
       sessionId: sessionRef.current.id,
       workspaceId: sessionRef.current.workspaceId,
     };
+    // App owns close semantics (R16-AL2, issue #228): the event routes to
+    // the confirmed `session.close` path, which stops a live PTY and
+    // forgets the record — including unverifiable stubs. A second,
+    // pane-local stop here would race that RPC (a stub already forgotten
+    // answers `not_found` and would surface a spurious error banner).
     window.dispatchEvent(new CustomEvent(TERMINAL_CLOSE_EVENT, { detail }));
-    const identity = {
-      sessionId: detail.sessionId,
-      incarnation: sessionRef.current.incarnation,
-    };
-    void window.drogon
-      .stop(identity)
-      .then((result) => {
-        if (!result.ok) callbacks.current.onError(result.error.message);
-        else callbacks.current.onSession(result.result);
-      })
-      .catch(() => {
-        callbacks.current.onError("The terminal process could not be stopped.");
-      });
   };
 
   const restartExits = () => {
@@ -1126,6 +1138,21 @@ export function TerminalPane({
   const dismissExit = () => {
     dismissedExitKey.current = `${sessionRef.current.id}:${sessionRef.current.incarnation}`;
     setProcessExit(null);
+    current?.focus();
+  };
+  // R16-AL2 (issue #228): the recovery overlay for a session an explicit
+  // Retry click confirmed still unverifiable. Same overlay component and
+  // actions as the exit overlay (Restart re-launches the same harness,
+  // Close dismisses the offer); only the copy differs and never asserts
+  // an exit. `null` while the offer does not apply.
+  const recoveryOffer = showRecoveryOverlay({
+    verdict: session.verdict,
+    recoveryNonce,
+    dismissedNonce: dismissedRecoveryNonce,
+    connected: daemonConnection.state === "connected",
+  });
+  const dismissRecoveryOffer = () => {
+    setDismissedRecoveryNonce(recoveryNonce);
     current?.focus();
   };
 
@@ -1158,6 +1185,12 @@ export function TerminalPane({
           processExit={processExit}
           onRestart={restartExits}
           onClose={dismissExit}
+        />
+      ) : recoveryOffer ? (
+        <TerminalProcessExitOverlay
+          processExit={{ exitCode: null, reason: "connection-unrecoverable" }}
+          onRestart={restartExits}
+          onClose={dismissRecoveryOffer}
         />
       ) : null}
       {/* Daemon loss keeps the tab and its scrollback: the banner covers

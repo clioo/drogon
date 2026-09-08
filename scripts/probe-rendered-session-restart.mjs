@@ -185,8 +185,11 @@ export async function probeRenderedSessionRestart({
   const tabsBefore = await page.getByRole("tab").count();
   await newTab.first().click();
   await page.getByRole("menuitem", { name: /^New Terminal/ }).click();
+  // At-least-one-more, not exact equality: the reconnect re-list can land
+  // in the same React commit as the create (7 → 10), so an exact count
+  // predicate would miss the transition it waits for (R16-AL2 hardening).
   await page.waitForFunction(
-    (count) => document.querySelectorAll('[role="tab"]').length === count + 1,
+    (count) => document.querySelectorAll('[role="tab"]').length >= count + 1,
     tabsBefore,
   );
   const created = (await bridgeSessions(page, workspaceId)).find(

@@ -73,7 +73,7 @@ fn echo_behavior() -> Behavior {
                 session["rows"] = request["params"]["rows"].clone();
                 session
             }
-            Some("session.stop") => json!({
+            Some("session.stop") | Some("session.close") => json!({
                 "id": "sess-1",
                 "workspaceId": "ws-1",
                 "hostId": "host-1",
@@ -503,7 +503,7 @@ async fn resize_and_close_send_incarnation_gated_params() {
         .into_iter()
         .nth(1)
         .expect("second captured request is the close");
-    assert_eq!(request["method"], "session.stop");
+    assert_eq!(request["method"], "session.close");
     assert!(stdout(&close).contains("exited"));
     assert!(stdout(&close).contains("exit=0"));
     drop(service);
@@ -681,7 +681,9 @@ async fn missing_auth_token_file_is_unverifiable() {
 async fn server_error_codes_pass_through_verbatim() {
     let dir = temp_data_dir("stale");
     let behavior: Behavior = std::sync::Arc::new(|request| match request["method"].as_str() {
-        Some("session.stop") => Action::Respond(error_envelope(
+        // `terminal close` goes through `session.close` (R16-AL2, #228):
+        // stop when live, forget the record either way.
+        Some("session.close") => Action::Respond(error_envelope(
             request["requestId"].as_str().unwrap_or(""),
             "stale_incarnation",
             "Session identity changed; refresh before acting.",
@@ -1183,9 +1185,14 @@ async fn read_limit_bytes_out_of_protocol_range_is_a_usage_error() {
 }
 
 // --- terminal close verdict semantics ---
-
+// R16-AL2 (#228): `terminal close` calls `session.close` — the daemon
+// stops a live PTY and forgets the durable record, so the command succeeds
+// for every honest verdict (a forgotten post-restart stub answers
+// `unverifiable`, never a fabricated `exited`). The verdict stays on
+// stdout as context, but exit 1 is reserved for RPC failures now: with the
+// record gone there is nothing left to retry.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn close_with_live_verdict_exits_one_but_keeps_identity_on_stdout() {
+async fn close_with_any_verdict_exits_zero_but_keeps_identity_on_stdout() {
     for verdict in ["live", "unverifiable"] {
         let dir = temp_data_dir("close-verdict");
         let verdict_label = verdict.to_string();
@@ -1215,8 +1222,8 @@ async fn close_with_live_verdict_exits_one_but_keeps_identity_on_stdout() {
         );
         assert_eq!(
             human.status.code(),
-            Some(1),
-            "verdict {verdict} must not exit 0"
+            Some(0),
+            "verdict {verdict}: the close was accepted, so the command succeeds"
         );
         let text = stdout(&human);
         assert!(text.contains("s1"), "identity stays on stdout: {text}");
@@ -1225,8 +1232,8 @@ async fn close_with_live_verdict_exits_one_but_keeps_identity_on_stdout() {
             "verdict stays on stdout: {text}"
         );
         assert!(
-            stderr(&human).contains("did not confirm exit"),
-            "text mode warns on stderr: {}",
+            !stderr(&human).contains("did not confirm exit"),
+            "with the record forgotten there is nothing left to retry: {}",
             stderr(&human)
         );
 
@@ -1244,11 +1251,14 @@ async fn close_with_live_verdict_exits_one_but_keeps_identity_on_stdout() {
         );
         assert_eq!(
             json.status.code(),
-            Some(1),
+            Some(0),
             "verdict {verdict} in json mode"
         );
         let envelope: Value = serde_json::from_str(&stdout(&json)).expect("one JSON envelope");
-        assert_eq!(envelope["ok"], true, "the RPC succeeded; the close did not");
+        assert_eq!(
+            envelope["ok"], true,
+            "the RPC succeeded; the close was accepted"
+        );
         assert_eq!(
             envelope["result"]["verdict"], verdict_label,
             "context retained for the caller"

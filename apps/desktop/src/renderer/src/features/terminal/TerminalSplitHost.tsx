@@ -25,6 +25,7 @@ export function TerminalSplitHost({
   fontSize,
   gpuMode,
   canSplit,
+  recoveryNonce,
   onError,
   onSession,
   onSplitRight,
@@ -44,6 +45,8 @@ export function TerminalSplitHost({
   gpuMode?: TerminalGpuAcceleration;
   /** False while disconnected/busy: the split entry points hide. */
   canSplit: boolean;
+  /** R16-AL2 (issue #228): retry-offer nonce, straight through to panes. */
+  recoveryNonce?: number;
   onError: (message: string) => void;
   onSession: (value: Session) => void;
   onSplitRight: (paneSessionId: string) => void;
@@ -93,6 +96,7 @@ export function TerminalSplitHost({
         revision={revision}
         fontSize={fontSize}
         gpuMode={gpuMode}
+        recoveryNonce={recoveryNonce}
         onError={onError}
         onSession={onSession}
         onSplitRight={() => onSplitRight(panes[0].id)}
@@ -152,6 +156,7 @@ export function TerminalSplitHost({
             revision={revision}
             fontSize={fontSize}
             gpuMode={gpuMode}
+            recoveryNonce={recoveryNonce}
             onError={onError}
             onSession={onSession}
             onSplitRight={() => onSplitRight(panes[1].id)}
@@ -174,6 +179,7 @@ function SplitPane({
   revision,
   fontSize,
   gpuMode,
+  recoveryNonce,
   onError,
   onSession,
   onSplitRight,
@@ -189,6 +195,7 @@ function SplitPane({
   revision: number;
   fontSize: number;
   gpuMode?: TerminalGpuAcceleration;
+  recoveryNonce?: number;
   onError: (message: string) => void;
   onSession: (value: Session) => void;
   onSplitRight: () => void;
@@ -209,6 +216,7 @@ function SplitPane({
         session={session}
         fontSize={fontSize}
         gpuMode={gpuMode}
+        recoveryNonce={recoveryNonce}
         canSplit={showSplit}
         onSplitRight={onSplitRight}
         onError={onError}

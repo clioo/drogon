@@ -284,38 +284,25 @@ async fn terminal(
                 "sessionId": session,
                 "incarnation": incarnation,
             });
+            // `session.close` (R16-AL2, #228) stops a live PTY and then
+            // forgets the durable record, so a close clears every kind of
+            // row — including a post-restart `unverifiable` stub, which
+            // `session.stop` could only report about. The returned verdict
+            // stays honest (`unverifiable` when exit was never observed),
+            // but the close itself was accepted: the record is gone, so
+            // the command succeeds and prints the verdict for the record.
             let call = client
-                .call("session.stop", params, request_id, DEFAULT_TIMEOUT)
+                .call("session.close", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let session_value: Session =
-                Client::decode_checked(&call, "session.stop", check_session)?;
-            // Only an observed exit is a successful close. A live or
-            // unverifiable session keeps its rendered identity/context on
-            // stdout but the invocation fails so callers notice.
-            match session_value.verdict {
-                Verdict::Exited => emit(
-                    call,
-                    json,
-                    || output::session_closed(&session_value),
-                    0,
-                    None,
-                ),
-                Verdict::Live | Verdict::Unverifiable => {
-                    let note = format!(
-                        "warning: close did not confirm exit; session {} verdict is {}",
-                        session_value.id,
-                        session_value.verdict_str()
-                    );
-                    let stderr_note = if json { None } else { Some(note) };
-                    emit(
-                        call,
-                        json,
-                        || output::session_closed(&session_value),
-                        1,
-                        stderr_note,
-                    )
-                }
-            }
+                Client::decode_checked(&call, "session.close", check_session)?;
+            emit(
+                call,
+                json,
+                || output::session_closed(&session_value),
+                0,
+                None,
+            )
         }
     }
 }

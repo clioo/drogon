@@ -32,6 +32,7 @@ import type {
   DaemonRestartInput,
   DaemonRestartResult,
 } from "../../../../shared/daemon-contract";
+import { SESSIONS_INVALIDATE_EVENT } from "../../session-recovery";
 import { Button } from "../../components/ui/button";
 import { SettingsSection, SettingsSubsectionHeader } from "./settings-rows";
 
@@ -48,7 +49,11 @@ type LoadState =
 function windowDrogon(): {
   workspaces: () => Promise<{ ok: boolean; result?: { workspaces: Workspace[] }; error?: { message: string } }>;
   sessions: (workspaceId: string) => Promise<{ ok: boolean; result?: { sessions: Session[] }; error?: { message: string } }>;
-  stop: (input: { sessionId: string; incarnation: string }) => Promise<{ ok: boolean; error?: { message: string } }>;
+  stop: (input: { sessionId: string; incarnation: string }) => Promise<{ ok: boolean; result?: Session; error?: { message: string } }>;
+  // R16-AL2 (issue #228): close kills a live PTY and forgets the record,
+  // so Kill all clears post-restart `unverifiable` stubs too — `stop`
+  // can only report about those, never remove them.
+  close?: (input: { sessionId: string; incarnation: string }) => Promise<{ ok: boolean; result?: Session; error?: { message: string } }>;
   daemon?: {
     restart: (input?: DaemonRestartInput) => Promise<DaemonRestartResult>;
   };
@@ -182,13 +187,29 @@ export function TerminalSection(): React.JSX.Element {
       setKilling(row.session.id);
       let outcome: string | null = null;
       try {
-        const result = await bridge.stop({
-          sessionId: row.session.id,
-          incarnation: row.session.incarnation,
-        });
+        // R16-AL2 (issue #228): a row the current service instance cannot
+        // verify (a post-restart stub) has no PTY to kill — `stop` only
+        // reports about it. `close` forgets the record, which is the only
+        // honest dismissal for a row that can never be marked exited.
+        // Live rows keep `stop`: the session ends, the record (and its
+        // retained output) stays listed as exited, like the fork.
+        const result = row.session.verdict === "unverifiable"
+          ? await (bridge.close ?? bridge.stop)({
+              sessionId: row.session.id,
+              incarnation: row.session.incarnation,
+            })
+          : await bridge.stop({
+              sessionId: row.session.id,
+              incarnation: row.session.incarnation,
+            });
         outcome = result.ok
           ? "Killed session."
           : (result.error?.message ?? "Could not kill session.");
+        // The daemon registry changed (a live stop or a stub forget): the
+        // strip re-lists on this signal so forgotten rows release their
+        // tabs without waiting for the next natural refresh.
+        if (result.ok)
+          window.dispatchEvent(new CustomEvent(SESSIONS_INVALIDATE_EVENT));
       } catch {
         outcome = "Could not kill session.";
       } finally {
@@ -211,15 +232,22 @@ export function TerminalSection(): React.JSX.Element {
     const total = load.rows.length;
     let killed = 0;
     try {
+      // R16-AL2 (issue #228): `close`, not `stop`, so the sweep acts on
+      // every row kind: live PTYs are killed, exited rows and post-restart
+      // `unverifiable` stubs are forgotten. `stop` alone was a silent
+      // no-op on stubs — it reports their verdict but can never remove
+      // them, so they (and the tabs they re-list as) survived Kill all.
       for (const row of load.rows) {
-        const result = await bridge
-          .stop({
-            sessionId: row.session.id,
-            incarnation: row.session.incarnation,
-          })
-          .catch(() => null);
+        const result = await (bridge.close ?? bridge.stop)({
+          sessionId: row.session.id,
+          incarnation: row.session.incarnation,
+        }).catch(() => null);
         if (result?.ok) killed += 1;
       }
+      // Rows were killed and/or forgotten: let the strip re-list now (see
+      // killOne for why the event matters).
+      if (killed > 0)
+        window.dispatchEvent(new CustomEvent(SESSIONS_INVALIDATE_EVENT));
     } finally {
       if (mounted.current) {
         setKillingAll(false);

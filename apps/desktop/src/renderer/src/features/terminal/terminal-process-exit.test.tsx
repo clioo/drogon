@@ -47,6 +47,18 @@ describe("describeTerminalProcessExit", () => {
     expect(described.title).toBe("Git Bash console limit reached");
     expect(described.detail).toContain("128-console limit");
   });
+
+  it("offers the recovery copy without ever claiming an exit (issue #228)", () => {
+    const described = describeTerminalProcessExit({
+      exitCode: null,
+      reason: "connection-unrecoverable",
+    });
+    expect(described.title).toBe("Could not reconnect to terminal");
+    expect(described.detail).toContain("could not re-establish");
+    // Honesty: loss of contact is not exit, so the copy must not assert a
+    // shell exit code for a session that was never observed to exit.
+    expect(described.detail).not.toContain("exit code");
+  });
 });
 
 describe("TerminalProcessExitOverlay", () => {
@@ -78,5 +90,20 @@ describe("TerminalProcessExitOverlay", () => {
       }),
     );
     expect(html).toContain("128-console limit");
+  });
+
+  it("renders the recovery offer with the same restart/close actions (issue #228)", () => {
+    const onRestart = vi.fn();
+    const html = renderToString(
+      createElement(TerminalProcessExitOverlay, {
+        processExit: { exitCode: null, reason: "connection-unrecoverable" },
+        onRestart,
+        onClose: vi.fn(),
+      }),
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Could not reconnect to terminal");
+    expect(html).toContain("Restart");
+    expect(html).toContain("Close");
   });
 });

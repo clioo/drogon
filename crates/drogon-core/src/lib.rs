@@ -429,6 +429,14 @@ impl Engine {
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
+            // R16-AL2 (issue #228): the user-initiated close paths. `close`
+            // stops a live PTY this instance owns and then forgets the
+            // record; `forget` removes a record that has no live handle
+            // (a stub or an exited row) and refuses a live one. Both keep
+            // the liveness rule: the returned verdict is only ever observed
+            // truth, never loss-of-contact rewritten as exit.
+            "session.close" => self.mutating(request, Self::do_session_close),
+            "session.forget" => self.mutating(request, Self::do_session_forget),
             "session.hook_event" => self.mutating(request, Self::do_session_hook_event),
             "project.add" => self.mutating(request, Self::do_project_add),
             "project.list" => {
@@ -701,6 +709,51 @@ impl Engine {
         // every subsequent read/write/resize/stop report the true verdict;
         // write/resize additionally refuse to act on an exited session.
         session::stop(&handle)
+    }
+
+    fn do_session_close(&self, params: &Value) -> Result<Value, RpcError> {
+        let session_id = require_str(params, "sessionId")?.to_string();
+        let incarnation = require_str(params, "incarnation")?;
+        // The same identity distinction `session.stop` makes: unknown id ->
+        // `not_found`, wrong incarnation -> `stale_incarnation`.
+        let row_value = self.session_row_as_value(&session_id, incarnation)?;
+        let handle = self.sessions.lock().unwrap().get(&session_id).cloned();
+        let value = if let Some(handle) = handle {
+            session::check_incarnation(&handle, incarnation)?;
+            // The reply carries the observed truth: `exited` with the code
+            // when the kill confirms within the stop budget, `unverifiable`
+            // when it does not. Either way the child has been signalled and
+            // the record is forgotten below — an explicit close is final.
+            session::stop(&handle)?
+        } else {
+            // No handle in this instance: a prior-instance row this process
+            // never owned. Nothing to stop; the stored verdict (honest for
+            // both `unverifiable` stubs and `exited` history) is the reply.
+            row_value
+        };
+        self.sessions.lock().unwrap().remove(&session_id);
+        let conn = self.db.lock().unwrap();
+        session::forget_record(&conn, &session_id)?;
+        Ok(value)
+    }
+
+    fn do_session_forget(&self, params: &Value) -> Result<Value, RpcError> {
+        let session_id = require_str(params, "sessionId")?.to_string();
+        let incarnation = require_str(params, "incarnation")?;
+        let row_value = self.session_row_as_value(&session_id, incarnation)?;
+        if let Some(handle) = self.sessions.lock().unwrap().get(&session_id).cloned() {
+            session::check_incarnation(&handle, incarnation)?;
+            if !handle.is_exited() {
+                // Forgetting a live session would orphan its PTY: the one
+                // outcome the session owner must never produce. `close` is
+                // the route that stops first.
+                return Err(error::invalid_argument("session is live; close it instead"));
+            }
+        }
+        self.sessions.lock().unwrap().remove(&session_id);
+        let conn = self.db.lock().unwrap();
+        session::forget_record(&conn, &session_id)?;
+        Ok(row_value)
     }
 
     fn session_row_as_value(&self, session_id: &str, incarnation: &str) -> Result<Value, RpcError> {

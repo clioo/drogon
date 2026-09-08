@@ -384,6 +384,14 @@ function registerBridge() {
           return callNative("session.resize", value as object);
         case "stop":
           return callNative("session.stop", value as object);
+        // R16-AL2 (issue #228): the user-initiated close paths. `close`
+        // stops a live PTY and then forgets the durable record, so exited
+        // and unverifiable stubs alike release their tab; `forget` removes
+        // a record the daemon holds no live handle for.
+        case "close":
+          return callNative("session.close", value as object);
+        case "forget":
+          return callNative("session.forget", value as object);
         case "harnesses":
           return callNative("harness.list", {});
         case "startHarness": {
