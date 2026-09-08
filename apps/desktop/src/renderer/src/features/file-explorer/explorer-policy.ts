@@ -45,6 +45,7 @@ export type RowMenuItemId =
   | "copy-path"
   | "copy-relative-path"
   | "open-in-terminal"
+  | "collapse-folder"
   | "reveal-in-finder"
   | "rename"
   | "delete";
@@ -72,13 +73,20 @@ export function revealLabel(platform?: string): string {
 /**
  * Row context-menu model in source order (MVP subset): New File, New
  * Folder, Copy Path, Copy Relative Path, Open in Terminal (directories
- * only), Reveal in Finder, Rename, Delete. Mutation items disable (never
- * hide) when the bridge lacks the methods, so the menu shape stays stable.
+ * only), Collapse Folder (expanded directories only, like the source's
+ * shouldShowCollapseFolderAction), Reveal in Finder, Rename, Delete.
+ * Mutation items disable (never hide) when the bridge lacks the methods,
+ * so the menu shape stays stable. The source's Copy (OS file clipboard),
+ * Duplicate, View File, Open in Orca Browser, Open Markdown Preview,
+ * Download, Find in Folder and Add as Project rows have no backend or
+ * surface in this repo and are not ported (listed in the PR).
  */
 export function buildRowMenuItems(
   node: ExplorerNode,
   selectionSize: number,
   caps: ExplorerCapabilities,
+  /** Expanded state of the row (drives Collapse Folder, source-gated). */
+  isExpanded = false,
 ): RowMenuItem[] {
   const mutateDisabled = caps.canMutate
     ? {}
@@ -103,6 +111,11 @@ export function buildRowMenuItems(
     },
     ...(node.isDirectory && caps.canOpenTerminal
       ? [{ id: "open-in-terminal", label: "Open in Terminal" } as RowMenuItem]
+      : []),
+    // Source order: Collapse Folder sits between Find in Folder (not
+    // ported) and Reveal in Finder, and shows only for expanded dirs.
+    ...(node.isDirectory && isExpanded
+      ? [{ id: "collapse-folder", label: "Collapse Folder" } as RowMenuItem]
       : []),
     // Hosts without the shell bridge keep the item visible but disabled
     // with its reason, never a dead click and never hidden.

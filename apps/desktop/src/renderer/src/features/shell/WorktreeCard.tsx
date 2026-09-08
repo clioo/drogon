@@ -45,6 +45,7 @@ export function WorktreeCard({
   disabled,
   projectKind,
   implicitFolderWorktree,
+  primaryCheckout = false,
   pr = null,
   onSelect,
   cardIndex = 0,
@@ -52,7 +53,6 @@ export function WorktreeCard({
   onCardClickCapture,
   onRemove,
   onRename,
-  onCreateWorktree,
   onSelectSession = null,
   activeSessionId = "",
   tabStrip,
@@ -64,6 +64,8 @@ export function WorktreeCard({
   disabled: boolean;
   projectKind: "git" | "folder";
   implicitFolderWorktree: boolean;
+  /** The card is the project's main checkout (path === project.path). */
+  primaryCheckout?: boolean;
   /** Known PR for the chip; null hides it (no PR store yet). */
   pr?: WorktreeCardPrDisplay | null;
   onSelect: (workspaceId: string) => void;
@@ -82,15 +84,13 @@ export function WorktreeCard({
   ) => void;
   /** Capture-phase click guard that swallows the select click after a drag. */
   onCardClickCapture?: (event: React.MouseEvent<HTMLElement>) => void;
-  /** Null for implicit folder worktrees, which have nothing to remove. */
+  /** Null only while the worktree bridge is unavailable. */
   onRemove: (() => void) | null;
   /**
    * Submits an inline-rename title; resolves an error message or null.
    * Null for implicit folder worktrees, whose title is the folder.
    */
   onRename: ((name: string) => Promise<string | null>) | null;
-  /** Opens the new-workspace composer for this project, or null. */
-  onCreateWorktree: (() => void) | null;
 }) {
   const [beginEditing, setBeginEditing] = useState(false);
   const attached = sessions.filter(
@@ -136,9 +136,9 @@ export function WorktreeCard({
       displayName={name}
       projectKind={projectKind}
       implicitFolderWorktree={implicitFolderWorktree}
+      primaryCheckout={primaryCheckout}
       disabled={disabled}
       onRename={onRename ? () => setBeginEditing(true) : null}
-      onCreateWorktree={onCreateWorktree}
       onDelete={onRemove}
     >
       <div

@@ -10,10 +10,8 @@ import { Button } from "../../components/ui/button";
 import { cn } from "./panel-class-names";
 import { getCommitSubmitModifierLabel } from "./commit-shortcut";
 
-export type CommitPrimaryActionKind = "commit" | "amend";
-
 export type CommitPrimaryAction = {
-  kind: CommitPrimaryActionKind;
+  kind: "commit";
   label: string;
   title: string;
   disabled: boolean;
@@ -79,14 +77,12 @@ export function CommitActionMenu({
               className="tooltip flex max-w-72 items-center gap-2"
             >
               <span>{primaryAction.title}</span>
-              {primaryAction.kind === "commit" ? (
-                <span className="flex items-center gap-0.5" aria-hidden="true">
-                  <kbd className="rounded border border-current px-1 text-[10px]">
-                    {getCommitSubmitModifierLabel()}
-                  </kbd>
-                  <kbd className="rounded border border-current px-1 text-[10px]">Enter</kbd>
-                </span>
-              ) : null}
+              <span className="flex items-center gap-0.5" aria-hidden="true">
+                <kbd className="rounded border border-current px-1 text-[10px]">
+                  {getCommitSubmitModifierLabel()}
+                </kbd>
+                <kbd className="rounded border border-current px-1 text-[10px]">Enter</kbd>
+              </span>
             </Tooltip.Content>
           </Tooltip.Portal>
         </Tooltip.Root>

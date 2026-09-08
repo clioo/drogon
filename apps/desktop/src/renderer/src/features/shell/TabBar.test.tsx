@@ -219,14 +219,16 @@ describe("TabBar context menu", () => {
     const first = screen.getAllByRole("tab")[0];
     fireEvent.contextMenu(first);
     const items = await screen.findAllByRole("menuitem");
+    // Fork order (SortableTabContextMenu): pin, the close group (Close
+    // carries the tab.close chord), then Change Title (tab.rename is
+    // darwin-only, so no hint in jsdom). No copy row on session tabs.
     expect(items.map((item) => item.textContent)).toEqual([
       "Pin Tab",
-      "Close",
+      "CloseCtrl+W",
       "Close Others",
       "Close Tabs To The Right",
       "Close Tabs To The Left",
       "Change Title",
-      "Copy Session ID",
     ]);
   });
 

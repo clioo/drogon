@@ -3782,6 +3782,10 @@ export function App() {
                 onCloseToLeft={(id) => closeStripTabs(id, "to-left")}
                 onCommitTitle={commitTabTitle}
                 onCopyText={copyStripText}
+                workspacePath={current?.path ?? null}
+                onDuplicateBrowserTab={(url) => void openPortBrowserTab(url)}
+                terminalSplits={tabStrip.splits ?? {}}
+                onSplitTerminal={(id) => void splitTerminalRight(id)}
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
                 onSelectEditorTab={selectEditorTab}

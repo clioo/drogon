@@ -452,6 +452,19 @@ export function FileExplorer({
   );
 
   const collapseAll = useCallback(() => setExpanded(new Set()), []);
+  // Fork useFileExplorerNodeCommands.handleCollapseFolderSubtree: the row
+  // menu's Collapse Folder closes the directory and every open descendant.
+  const collapseSubtree = useCallback((dir: string) => {
+    setExpanded((prev) => {
+      if (!prev.has(dir)) return prev;
+      const next = new Set(prev);
+      next.delete(dir);
+      for (const open of [...next]) {
+        if (isPathOrDescendant(open, dir)) next.delete(open);
+      }
+      return next;
+    });
+  }, []);
 
   // Filtered projection loads the whole tree once per query (bounded):
   // MVP workspaces are small and the daemon pages each dir at 1000. It
@@ -1044,6 +1057,9 @@ export function FileExplorer({
             onOpenTerminal(primary.isDirectory ? primary.path : parentDirOf(primary.path));
           }
           break;
+        case "collapse-folder":
+          collapseSubtree(primary.path);
+          break;
         case "reveal-in-finder": {
           // Fork file-explorer-row-context-menu.tsx: shell.openPath(node.path),
           // whose main handler reveals (showItemInFolder) — call the explicit
@@ -1066,7 +1082,7 @@ export function FileExplorer({
           break;
       }
     },
-    [nodesForPaths, rowsByPath, startNew, copyPaths, onOpenTerminal, startRename, requestDelete],
+    [nodesForPaths, rowsByPath, startNew, copyPaths, onOpenTerminal, collapseSubtree, startRename, requestDelete],
   );
 
   const findFocusedIndex = useCallback((): number | null => {
@@ -1336,6 +1352,7 @@ export function FileExplorer({
           node={rowMenuNode}
           selectionSize={menu.paths.length}
           caps={caps}
+          isExpanded={expanded.has(rowMenuNode.path)}
           point={menu.point}
           onAction={(id) => handleRowAction(id, rowMenuNode, menu.paths)}
           onClose={() => setMenu(null)}

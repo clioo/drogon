@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /* MIT Copyright (c) 2026 Lovecast Inc.
-   #220: clicking "Delete Worktree" in the worktree card context menu must
+   #220: clicking "Delete" in the worktree card context menu must
    open the DeleteWorktreeDialog confirm (a centered modal, like the fork),
    and confirming must submit the removal. Radix portals menu and dialog
    content to document.body, so these mount under jsdom (the repo's
@@ -105,16 +105,83 @@ function clickDeleteMenuItem(): void {
     document.querySelectorAll<HTMLElement>(
       ".shell-worktree-context-menu-item-destructive",
     ),
-  ).find((el) => el.textContent?.includes("Delete Worktree"));
-  expect(item?.textContent).toContain("Delete Worktree");
+  ).find((el) => el.textContent?.includes("Delete"));
+  expect(item?.textContent).toContain("Delete");
+  // Fork copy: the destructive row shows the workspace.delete chord chip.
+  expect(item?.querySelector(".shell-worktree-context-menu-shortcut")).toBeTruthy();
   // Radix selects on the full pointer gesture, not a bare click.
   fireEvent.pointerDown(item!, { pointerType: "mouse", button: 0 });
   fireEvent.pointerUp(item!, { pointerType: "mouse", button: 0 });
   fireEvent.click(item!);
 }
 
+describe("worktree card menu: primary checkout pair (fork parity)", () => {
+  test("primary checkout renders disabled Delete Worktree + Remove Project from Drogon", () => {
+    const onOpenAction = vi.fn();
+    const primaryProject = { ...project, path: "/work/drogon-wt1" };
+    render(
+      <Tooltip.Provider>
+        <ProjectList
+          groups={[{ project: primaryProject, worktrees: [worktree] }]}
+          workspaces={[workspace]}
+          sessions={[]}
+          selectedWorkspaceId="ws1"
+          activeSessionId=""
+          tabStrip={EMPTY_TAB_STRIP_STATE}
+          onSelectSession={() => {}}
+          disabled={false}
+          addDisabled={false}
+          sidebarWidth={280}
+          worktreesAvailable
+          action={null}
+          onSelectWorkspace={() => {}}
+          onAddProject={() => {}}
+          onCreateWorkspace={() => {}}
+          onOpenAction={onOpenAction}
+          onCloseAction={() => {}}
+          onBrowse={async () => null}
+          onSubmitAdd={async () => null}
+          onSubmitRemove={async () => null}
+          onSubmitRemoveProject={async () => null}
+          onOpenProjectSettings={() => {}}
+          onSubmitRename={async () => null}
+        />
+      </Tooltip.Provider>,
+    );
+    const scope = document.querySelector(
+      '[data-worktree-context-menu-scope="worktree"]',
+    ) as HTMLElement;
+    fireEvent.contextMenu(scope, { clientX: 50, clientY: 50 });
+    const destructive = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".shell-worktree-context-menu-item-destructive",
+      ),
+    );
+    const disabledDelete = destructive.find((el) =>
+      el.textContent?.includes("Delete Worktree"),
+    );
+    expect(disabledDelete).toBeTruthy();
+    expect(disabledDelete?.getAttribute("data-disabled")).not.toBeNull();
+    const removeProject = destructive.find((el) =>
+      el.textContent?.includes("Remove Project from Drogon"),
+    );
+    expect(removeProject).toBeTruthy();
+    // No chord chip on the primary-checkout pair (source rule).
+    expect(
+      removeProject?.querySelector(".shell-worktree-context-menu-shortcut"),
+    ).toBeNull();
+    fireEvent.pointerDown(removeProject!, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(removeProject!, { pointerType: "mouse", button: 0 });
+    fireEvent.click(removeProject!);
+    expect(onOpenAction).toHaveBeenCalledWith({
+      kind: "remove-project",
+      projectId: "p1",
+    });
+  });
+});
+
 describe("worktree Delete menu (#220)", () => {
-  test("clicking Delete Worktree opens the remove action", () => {
+  test("clicking Delete opens the remove action", () => {
     const onOpenAction = vi.fn();
     mount({ onOpenAction });
     clickDeleteMenuItem();

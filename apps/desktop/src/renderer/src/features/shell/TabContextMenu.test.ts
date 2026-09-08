@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildTabMenuPolicy } from "./TabContextMenu";
 
 describe("buildTabMenuPolicy", () => {
-  it("guards Close on pinned tabs and exposes rename for sessions only", () => {
+  it("guards Close on pinned tabs and keeps bulk closes count-gated", () => {
     const session = buildTabMenuPolicy({
       kind: "session",
       isPinned: true,
@@ -11,7 +11,6 @@ describe("buildTabMenuPolicy", () => {
       hasTabsToLeft: false,
     });
     expect(session.closeDisabled).toBe(true);
-    expect(session.renameVisible).toBe(true);
     expect(session.closeOthersDisabled).toBe(false);
     expect(session.closeToRightDisabled).toBe(false);
     expect(session.closeToLeftDisabled).toBe(true);
@@ -24,7 +23,6 @@ describe("buildTabMenuPolicy", () => {
       hasTabsToLeft: false,
     });
     expect(browser.closeDisabled).toBe(false);
-    expect(browser.renameVisible).toBe(false);
     expect(browser.closeOthersDisabled).toBe(true);
   });
 

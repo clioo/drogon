@@ -1,10 +1,14 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/sidebar/worktree-context-menu-policy.ts
-   (adapter: MVP subset — the reference gates a large menu with store
-   state for lineage, pins, sleep and multi-select; this repo's card menu
-   holds Open in editor / Reveal in Finder / Copy path, Rename, Create
-   worktree from here and Delete worktree, so only the enabled/disabled
-   policy for those items is ported. Pure functions, unit-tested.) */
+   src/renderer/src/components/sidebar/worktree-context-menu-policy.ts and
+   the delete-row copy rules in WorktreeContextMenuView.tsx (the
+   destructive row reads "Delete" with the workspace.delete chord for git
+   worktrees and "Remove Workspace" for folder workspaces; the primary
+   checkout never appears as a card in this repo, so its disabled
+   "Delete Worktree" + "Remove Project from Orca" pair has no case to
+   render). Adapter: MVP subset — pins, read state, statuses, groups,
+   lineage, sleep and developer items route through zustand stores this
+   repo does not have and are not ported (listed in the PR). Pure
+   functions, unit-tested. */
 
 /** Milliseconds after a right-click during which a follow-up click is swallowed. */
 export const CONTEXT_MENU_CLICK_SUPPRESSION_MS = 500;
@@ -20,17 +24,51 @@ export function shouldSuppressContextMenuFollowUpClick(
 }
 
 /**
- * Whether the card offers worktree deletion at all. Mirrors the source's
- * `isContextWorktreeDeletable` (repo-owned, non-primary worktree): folder
- * projects expose one implicit worktree — the folder itself — with
- * nothing to delete, so the menu hides Delete for them.
+ * The destructive row the card's context menu ends with, mirroring the
+ * source's label ladder: git worktrees delete ("Delete"), the primary
+ * checkout cannot be git-worktree-removed so the row pair becomes a
+ * disabled "Delete Worktree" plus "Remove Project from Drogon", and
+ * folder projects expose one implicit worktree — the folder itself —
+ * which the source removes from the app instead ("Remove Workspace").
  */
-export function isWorktreeDeletable(args: {
+export type WorktreeDeleteRowKind = "delete" | "remove-workspace" | "primary-checkout";
+
+/** The primary checkout is the worktree sitting at the project path. */
+export function isPrimaryCheckoutWorktree(args: {
+  projectKind: "git" | "folder";
+  projectPath: string;
+  worktreePath: string;
+}): boolean {
+  return args.projectKind === "git" && args.projectPath === args.worktreePath;
+}
+
+export function worktreeDeleteRowKind(args: {
   projectKind: "git" | "folder";
   implicitFolderWorktree: boolean;
-}): boolean {
-  return args.projectKind === "git" && !args.implicitFolderWorktree;
+  primaryCheckout: boolean;
+}): WorktreeDeleteRowKind {
+  if (args.projectKind === "folder" || args.implicitFolderWorktree) {
+    return "remove-workspace";
+  }
+  return args.primaryCheckout ? "primary-checkout" : "delete";
 }
+
+/**
+ * Destructive row label (source copy: 'Delete' / 'Remove Workspace' /
+ * 'Remove Project from Orca', rebranded to Drogon here).
+ */
+export function getWorktreeDeleteLabel(kind: WorktreeDeleteRowKind): string {
+  if (kind === "remove-workspace") return "Remove Workspace";
+  if (kind === "primary-checkout") return "Remove Project from Drogon";
+  return "Delete";
+}
+
+/**
+ * Source tooltip copy on the primary checkout's disabled Delete Worktree
+ * row ('Primary worktree — can't be deleted. Remove the project instead.').
+ */
+export const PRIMARY_CHECKOUT_DELETE_DISABLED_HINT =
+  "Primary worktree — can't be deleted. Remove the project instead.";
 
 /**
  * Whether the card offers renaming. The implicit folder worktree's title
@@ -40,18 +78,6 @@ export function isWorktreeRenamable(args: {
   implicitFolderWorktree: boolean;
 }): boolean {
   return !args.implicitFolderWorktree;
-}
-
-/** Whether the card can be the source of a new worktree. */
-export function isWorktreeCreatable(args: {
-  projectKind: "git" | "folder";
-}): boolean {
-  return args.projectKind === "git";
-}
-
-/** Delete item label: the source's destructive row reads "Delete Worktree". */
-export function getWorktreeDeleteLabel(): string {
-  return "Delete Worktree";
 }
 
 /**
@@ -66,9 +92,12 @@ export function getWorktreeDeleteShortcutLabel(platform: string): string {
 }
 
 /**
- * File-manager item label, mirroring the source's platform label.
- * Takes the raw `navigator.platform` value.
+ * File-manager entry label inside the "Open in" submenu, mirroring the
+ * source's getLocalFileManagerLabel (the app name, not an action phrase).
+ * Takes the raw `navigator.userAgent` value.
  */
-export function getFileManagerLabel(platform: string): string {
-  return /mac/i.test(platform) ? "Reveal in Finder" : "Show in folder";
+export function getFileManagerLabel(userAgent: string): string {
+  if (userAgent.includes("Mac")) return "Finder";
+  if (userAgent.includes("Windows")) return "File Explorer";
+  return "File Manager";
 }

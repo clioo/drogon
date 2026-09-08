@@ -12,7 +12,16 @@
    panel through session.start. */
 
 import { useEffect, useRef } from "react";
-import { Copy, ExternalLink, FilePlus, FolderPlus, Pencil, SquareTerminal, Trash2 } from "lucide-react";
+import {
+  Copy,
+  ExternalLink,
+  FilePlus,
+  FolderPlus,
+  ListCollapse,
+  Pencil,
+  SquareTerminal,
+  Trash2,
+} from "lucide-react";
 import { Button } from "../../components/ui/button";
 import {
   buildBackgroundMenuItems,
@@ -29,6 +38,7 @@ const ITEM_ICONS: Record<RowMenuItemId, React.ReactNode> = {
   "copy-path": <Copy className="size-3.5 shrink-0" aria-hidden />,
   "copy-relative-path": <Copy className="size-3.5 shrink-0" aria-hidden />,
   "open-in-terminal": <SquareTerminal className="size-3.5 shrink-0" aria-hidden />,
+  "collapse-folder": <ListCollapse className="size-3.5 shrink-0" aria-hidden />,
   "reveal-in-finder": <ExternalLink className="size-3.5 shrink-0" aria-hidden />,
   rename: <Pencil className="size-3.5 shrink-0" aria-hidden />,
   delete: <Trash2 className="size-3.5 shrink-0" aria-hidden />,
@@ -123,6 +133,7 @@ export function FileExplorerRowMenu({
   node,
   selectionSize,
   caps,
+  isExpanded = false,
   point,
   onAction,
   onClose,
@@ -130,11 +141,13 @@ export function FileExplorerRowMenu({
   node: ExplorerNode;
   selectionSize: number;
   caps: ExplorerCapabilities;
+  /** Source gate for the Collapse Folder row (expanded dirs only). */
+  isExpanded?: boolean;
   point: { x: number; y: number };
   onAction: (id: RowMenuItemId) => void;
   onClose: () => void;
 }) {
-  const items = buildRowMenuItems(node, selectionSize, caps);
+  const items = buildRowMenuItems(node, selectionSize, caps, isExpanded);
   return (
     <MenuLayer point={point} label={`Actions for ${node.name}`} onClose={onClose}>
       {items.map((item) => (

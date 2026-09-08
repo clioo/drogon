@@ -800,6 +800,9 @@ function ProjectRow({
           <WorktreeCard
             key={worktree.id}
             worktree={worktree}
+            primaryCheckout={
+              project.kind === "git" && worktree.path === project.path
+            }
             workspaces={workspaces}
             sessions={sessions}
             selected={worktree.workspaceId === selectedWorkspaceId}
@@ -816,16 +819,22 @@ function ProjectRow({
             activeSessionId={activeSessionId}
             tabStrip={tabStrip}
             onRemove={
-              worktreesAvailable && !isImplicitFolderWorktree(worktree)
-                ? () => onRemoveWorktree(worktree)
-                : null
+              !worktreesAvailable
+                ? null
+                : isImplicitFolderWorktree(worktree) ||
+                    (project.kind === "git" && worktree.path === project.path)
+                  ? // Folder implicit worktrees and the primary checkout
+                    // route to the remove-project confirm dialog (the fork's
+                    // "Remove Workspace" / "Remove Project from Drogon"
+                    // never touch the folder on disk).
+                    () => onRemoveProject(project)
+                  : () => onRemoveWorktree(worktree)
             }
             onRename={
               worktreesAvailable && !isImplicitFolderWorktree(worktree)
                 ? (name) => onRenameWorktree(worktree, name)
                 : null
             }
-            onCreateWorktree={canCreate ? () => onNewWorktree() : null}
           />
         ))}
       </div>
@@ -833,7 +842,7 @@ function ProjectRow({
   );
 }
 
-/** Folder projects expose one implicit worktree (the folder itself): nothing to remove. */
+/** Folder projects expose one implicit worktree (the folder itself). */
 function isImplicitFolderWorktree(worktree: Worktree): boolean {
   return worktree.id.startsWith("implicit:") || worktree.projectId.startsWith("folder:");
 }
