@@ -96,6 +96,32 @@ export type MentuRun = {
   retryOf: string | null;
 };
 
+/** One captured stdio stream for a step, mirroring the daemon wire shape
+ *  (`crates/drogon-protocol/src/mentu.rs`, ported from the fork's
+ *  `MentuReferencedOutput`): `reference` is the file name the run record
+ *  carries, `path` the absolute path resolved inside the run directory,
+ *  `content` the head of its UTF-8 text. `error` is `content_truncated`
+ *  when the stream was cut at the daemon cap, or a read failure reason. */
+export type MentuReferencedOutput = {
+  reference: string;
+  path: string | null;
+  content: string | null;
+  error: string | null;
+};
+
+/** One step label's captured streams; the newest attempt record wins. */
+export type MentuStepEvidence = {
+  label: string;
+  stdout: MentuReferencedOutput;
+  stderr: MentuReferencedOutput;
+};
+
+export type MentuRunEvidenceResult = {
+  runId: string;
+  mentuRunId: string | null;
+  evidence: MentuStepEvidence[];
+};
+
 export type MentuRecipesResult = { recipes: MentuRecipeSummary[] };
 export type MentuRecipeResult = { recipe: MentuRecipeDetail };
 export type MentuRecipeSaveResult = { recipe: MentuRecipeDetail };
@@ -133,6 +159,12 @@ export interface MentuBridge {
     limit?: number;
   }): Promise<Result<MentuRunsResult>>;
   mentuRunStatus(input: { runId: string }): Promise<Result<MentuRunResult>>;
+  // Optional so older preload builds still satisfy the interface; the
+  // evidence view falls back to path-only rows when it is absent (the same
+  // precedent as `mentuRecipeSave` above).
+  mentuRunEvidence?: (input: {
+    runId: string;
+  }) => Promise<Result<MentuRunEvidenceResult>>;
   mentuRetry(input: { runId: string }): Promise<Result<MentuRunResult>>;
   mentuCancel(input: { runId: string }): Promise<Result<MentuRunResult>>;
 }
@@ -159,6 +191,7 @@ export const mentuBridgeSchemas = {
   mentuRun: workspaceId.extend({ recipeId: id, approvalId: id }),
   mentuRuns: workspaceId.extend({ limit: z.number().int().positive().max(200).optional() }),
   mentuRunStatus: z.object({ runId: id }),
+  mentuRunEvidence: z.object({ runId: id }),
   mentuRetry: z.object({ runId: id }),
   mentuCancel: z.object({ runId: id }),
 };
@@ -240,6 +273,22 @@ const run = z.object({
   error: z.string().nullable().optional().default(null),
   retryOf: z.string().nullable().optional().default(null),
 });
+const referencedOutput = z.object({
+  reference: z.string(),
+  path: z.string().nullable().optional().default(null),
+  content: z.string().nullable().optional().default(null),
+  error: z.string().nullable().optional().default(null),
+});
+const stepEvidence = z.object({
+  label: z.string().min(1),
+  stdout: referencedOutput,
+  stderr: referencedOutput,
+});
+const runEvidence = z.object({
+  runId: z.string().min(1),
+  mentuRunId: z.string().nullable().optional().default(null),
+  evidence: z.array(stepEvidence),
+});
 
 export const mentuResultSchemas = {
   "mentu.recipes": z.object({ recipes: z.array(recipeSummary) }),
@@ -250,6 +299,7 @@ export const mentuResultSchemas = {
   "mentu.run": z.object({ run }),
   "mentu.runs": z.object({ runs: z.array(run) }),
   "mentu.run_status": z.object({ run }),
+  "mentu.run_evidence": runEvidence,
   "mentu.retry": z.object({ run }),
   "mentu.cancel": z.object({ run }),
 };

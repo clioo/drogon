@@ -65,6 +65,12 @@ export function createGatedMentuBridge(
     mentuRun: gate(source.mentuRun),
     mentuRuns: gate(source.mentuRuns),
     mentuRunStatus: gate(source.mentuRunStatus),
+    // Additive and optional like the contract: older preload builds have
+    // no evidence method, and the gated bridge forwards it only when the
+    // source provides it (R14-D run evidence content).
+    ...(source.mentuRunEvidence
+      ? { mentuRunEvidence: gate(source.mentuRunEvidence) }
+      : {}),
     mentuRetry: gate(source.mentuRetry),
     mentuCancel: gate(source.mentuCancel),
   };

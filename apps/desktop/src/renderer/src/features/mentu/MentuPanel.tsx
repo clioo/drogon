@@ -167,7 +167,13 @@ function MentuPanelBody({
               <div className="h-16 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
             </div>
           ) : showingEvidence ? (
-            <EvidenceView run={controller.run} recipe={controller.recipe} />
+            <EvidenceView
+              run={controller.run}
+              recipe={controller.recipe}
+              evidence={controller.evidence}
+              evidenceLoading={controller.evidenceLoading}
+              evidenceError={controller.evidenceError}
+            />
           ) : controller.graph?.valid ? (
             <div data-testid="mentu-panel-plan">
               <GraphView

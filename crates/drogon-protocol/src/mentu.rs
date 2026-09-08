@@ -350,6 +350,79 @@ pub struct MentuRecipeSaveResult {
     pub recipe: MentuRecipeDetail,
 }
 
+/// One captured stdio stream for a step, ported from the fork's
+/// `MentuReferencedOutput` (`src/shared/mentu-run-contract.ts`):
+/// `reference` is the file name the run record carries (`output_file` /
+/// `error_file`), `path` the absolute path resolved inside the run
+/// directory, and `content` the head of its UTF-8 text (lossy). `error`
+/// carries the fork's machine-readable reasons verbatim:
+/// `reference_outside_run_directory` (bad reference, or a record the OS
+/// will not resolve) and `content_truncated` (content present but cut at
+/// [`MAX_MENTU_EVIDENCE_BYTES`]); any other value is the OS read error.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuReferencedOutput {
+    pub reference: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// The fork's per-output size cap (`MAX_OUTPUT_BYTES` in
+/// `src/main/mentu/mentu-run-evidence-files.ts`): evidence reads never
+/// pull more than the first 512 KiB of a stream into an RPC response.
+pub const MAX_MENTU_EVIDENCE_BYTES: usize = 512 * 1024;
+
+/// The `reference_outside_run_directory` reason: the record's file name is
+/// empty, absolute, escapes the run directory, or names a path the OS
+/// will not resolve to a file inside it.
+pub const MENTU_EVIDENCE_OUTSIDE_RUN_DIR: &str = "reference_outside_run_directory";
+
+/// The `content_truncated` reason: the stream is longer than
+/// [`MAX_MENTU_EVIDENCE_BYTES`]; `content` still carries the head bytes.
+pub const MENTU_EVIDENCE_CONTENT_TRUNCATED: &str = "content_truncated";
+
+/// One step label's captured streams. Labels repeat across attempts in a
+/// resumed record; the newest record wins, the same overwrite order the
+/// fork's `readMentuRunEvidence` uses for `outputs[label]`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuStepEvidence {
+    pub label: String,
+    pub stdout: MentuReferencedOutput,
+    pub stderr: MentuReferencedOutput,
+}
+
+/// Params for `mentu.run_evidence` (journey J9, run evidence content):
+/// `run_id` is this daemon's own run row id (not the `run_...` id
+/// `mentu-recipes` minted). A separate read-only call — not fields on
+/// `mentu.run_status` — mirroring the fork's separate `mentu.run.read`:
+/// evidence payloads are up to 512 KiB per stream and must not ride the
+/// 750 ms status poll.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunEvidenceParams {
+    pub run_id: String,
+}
+
+impl MentuRunEvidenceParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_run_id(&self.run_id)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunEvidenceResult {
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mentu_run_id: Option<String>,
+    pub evidence: Vec<MentuStepEvidence>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,6 +610,57 @@ mod tests {
                 bad.validate().is_err(),
                 "recipe id {bad_id:?} must be refused"
             );
+        }
+    }
+
+    #[test]
+    fn run_evidence_result_carries_referenced_outputs_with_exact_wire_keys() {
+        let result = MentuRunEvidenceResult {
+            run_id: "internal-1".into(),
+            mentu_run_id: Some("run_20260907202509_15F1772D".into()),
+            evidence: vec![MentuStepEvidence {
+                label: "say-hello".into(),
+                stdout: MentuReferencedOutput {
+                    reference: "say-hello.stdout".into(),
+                    path: Some("/ws/.mentu/runs/run_1/say-hello.stdout".into()),
+                    content: Some("hello\n".into()),
+                    error: None,
+                },
+                stderr: MentuReferencedOutput {
+                    reference: "say-hello.stderr".into(),
+                    path: None,
+                    content: None,
+                    error: Some(MENTU_EVIDENCE_OUTSIDE_RUN_DIR.into()),
+                },
+            }],
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value["runId"], json!("internal-1"));
+        assert_eq!(
+            value["evidence"][0]["stdout"],
+            json!({
+                "reference": "say-hello.stdout",
+                "path": "/ws/.mentu/runs/run_1/say-hello.stdout",
+                "content": "hello\n",
+            })
+        );
+        assert_eq!(
+            value["evidence"][0]["stderr"]["error"],
+            json!("reference_outside_run_directory")
+        );
+        let back: MentuRunEvidenceResult = serde_json::from_value(value).unwrap();
+        assert_eq!(back, result);
+    }
+
+    #[test]
+    fn run_evidence_params_validate_the_daemon_run_id() {
+        let params = MentuRunEvidenceParams {
+            run_id: "internal-1".into(),
+        };
+        params.validate().unwrap();
+        for bad in ["", "has space", "has\nnewline"] {
+            let params = MentuRunEvidenceParams { run_id: bad.into() };
+            assert!(params.validate().is_err());
         }
     }
 

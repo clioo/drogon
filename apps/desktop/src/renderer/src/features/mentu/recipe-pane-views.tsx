@@ -4,14 +4,25 @@
 // EvidenceView, MetricsView and EmptyRecipeState with the reference's DOM,
 // Tailwind classes, copy, icons and ARIA. Adapted only in the data layer:
 // evidence projects this repo's `MentuRun` (per-step status, exit code,
-// duration, attempts, output/error paths, error text) and the loaded
-// `MentuRecipeDetail` (declared verify commands). Metrics the daemon run
-// record does not carry (token counts, cost, models, invocation counts)
-// render the reference's honest "unavailable" states; Drogon estimates
-// nothing.
+// duration, attempts, output/error paths, error text) plus the loaded
+// `MentuStepEvidence` (per-step stdout/stderr `{reference, path, content}`
+// with the fork's 512 KiB cap and `content_truncated` /
+// `reference_outside_run_directory` reasons) and the loaded
+// `MentuRecipeDetail` (declared verify commands). The fork's view stops at
+// "captured/unavailable" per stream; this view additionally renders the
+// loaded content in scrollable blocks (the only way to show evidence
+// CONTENT the daemon went to read), spelling truncation with the full
+// path. Metrics the daemon run record does not carry (token counts, cost,
+// models, invocation counts) render the reference's honest "unavailable"
+// states; Drogon estimates nothing.
 
 import { Activity, ArrowRight, Clock3, FileJson, Gauge } from "lucide-react";
-import type { MentuRecipeDetail, MentuRun } from "../../../../shared/mentu-contract";
+import type {
+  MentuRecipeDetail,
+  MentuReferencedOutput,
+  MentuRun,
+  MentuStepEvidence,
+} from "../../../../shared/mentu-contract";
 import { Badge } from "../../components/ui/badge";
 import {
   groupStepAttempts,
@@ -35,6 +46,60 @@ function MetricValue({ value, exact }: { value: string; exact: boolean }): React
 function formatAttempts(attempts: number | null): string {
   if (attempts === null) return "unknown lifetime attempts";
   return `${attempts} lifetime attempt${attempts === 1 ? "" : "s"}`;
+}
+
+/** Whether a stream counts as captured: loaded evidence decides by its
+ *  content (the fork's `outputs[label].stdout.content !== null` rule);
+ *  before evidence arrives, a recorded path is the honest fallback. */
+function streamCaptured(
+  output: MentuReferencedOutput | undefined,
+  outputPath: string | null | undefined,
+): boolean {
+  if (output) return output.content !== null && output.content !== undefined;
+  return outputPath !== null && outputPath !== undefined;
+}
+
+/** One loaded stdio stream: its content in a scrollable block, the
+ *  daemon's truncation reason spelled out with the full path, other read
+ *  failures as muted error text. Nothing renders for a stream with no
+ *  content and no error — the availability line above already says
+ *  "unavailable". */
+function EvidenceStream({
+  label,
+  output,
+}: {
+  label: string;
+  output: MentuReferencedOutput;
+}): React.JSX.Element | null {
+  if ((output.content === null || output.content === undefined) && !output.error) return null;
+  if (output.content !== null && output.content !== undefined && output.content.length > 0) {
+    const truncated = output.error === "content_truncated";
+    return (
+      <div className="mt-2 min-w-0">
+        <p className="text-muted-foreground">
+          {label}
+          {truncated ? " (truncated to the first 512 KiB)" : ""}
+        </p>
+        <pre
+          aria-label={`${label} output`}
+          className="mt-1 max-h-48 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono whitespace-pre-wrap break-words text-foreground"
+        >
+          {output.content}
+        </pre>
+        {truncated && output.path ? (
+          <p className="mt-1 text-muted-foreground">Full output at {output.path}</p>
+        ) : null}
+      </div>
+    );
+  }
+  if (output.error && output.error !== "content_truncated" && output.reference) {
+    return (
+      <p className="mt-1 text-muted-foreground">
+        {label} unavailable: {output.error}
+      </p>
+    );
+  }
+  return null;
 }
 
 export function GraphView({
@@ -108,15 +173,24 @@ export function GraphView({
 export function EvidenceView({
   run,
   recipe,
+  evidence,
+  evidenceLoading,
+  evidenceError,
 }: {
   run: MentuRun | null;
   recipe: MentuRecipeDetail | null;
+  /** Loaded stdio evidence for the run; null until `mentu.run_evidence`
+   *  answers (or when the bridge has no evidence method). */
+  evidence?: MentuStepEvidence[] | null;
+  evidenceLoading?: boolean;
+  evidenceError?: string | null;
 }): React.JSX.Element {
   if (!run) {
     return (
       <p className="text-sm text-muted-foreground">No run evidence is loaded for this recipe.</p>
     );
   }
+  const evidenceByLabel = new Map((evidence ?? []).map((entry) => [entry.label, entry]));
   return (
     <div
       className="@container/mentu-evidence min-w-0 space-y-3 [overflow-wrap:anywhere]"
@@ -142,9 +216,15 @@ export function EvidenceView({
           {run.error}
         </p>
       ) : null}
+      {evidenceError ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          Evidence content unavailable: {evidenceError}
+        </p>
+      ) : null}
       <div className="space-y-2">
         {groupStepAttempts(run.steps).map(({ label, attempts }) => {
           const latest = attempts.at(-1)!;
+          const streams = evidenceByLabel.get(label);
           return (
             <div
               key={`step:${label}`}
@@ -168,9 +248,17 @@ export function EvidenceView({
               </p>
               <RecipeVerification verification={latest.verification} />
               <p className="mt-1 text-muted-foreground">
-                stdout {latest.outputPath ? "captured" : "unavailable"} · stderr{" "}
-                {latest.errorPath ? "captured" : "unavailable"}
+                stdout {streamCaptured(streams?.stdout, latest.outputPath) ? "captured" : "unavailable"} · stderr{" "}
+                {streamCaptured(streams?.stderr, latest.errorPath) ? "captured" : "unavailable"}
               </p>
+              {streams ? (
+                <>
+                  <EvidenceStream label="stdout" output={streams.stdout} />
+                  <EvidenceStream label="stderr" output={streams.stderr} />
+                </>
+              ) : evidenceLoading ? (
+                <p className="mt-1 text-muted-foreground">Loading stdout and stderr…</p>
+              ) : null}
               {latest.outputPath ? (
                 <p className="mt-1 font-mono text-muted-foreground">stdout: {latest.outputPath}</p>
               ) : null}

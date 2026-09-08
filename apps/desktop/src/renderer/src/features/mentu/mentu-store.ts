@@ -5,6 +5,7 @@
 // dependency: this module is the one place both mounts read/write.
 
 import { useSyncExternalStore } from "react";
+import type { MentuStepEvidence } from "../../../../shared/mentu-contract";
 import type { MentuPaneMode } from "../../../../shared/persistence-contracts/mentu-pane-types";
 
 export type MentuState = {
@@ -13,6 +14,9 @@ export type MentuState = {
   activeRunId: string | null;
   mode: MentuPaneMode;
   selectedNodeId: string | null;
+  /** Loaded stdio evidence per daemon run id, shared by the panel and tab
+   *  mounts so selecting the same run twice never re-reads its files. */
+  evidenceByRunId: Record<string, MentuStepEvidence[]>;
 };
 
 const EMPTY_STATE: MentuState = {
@@ -21,6 +25,7 @@ const EMPTY_STATE: MentuState = {
   activeRunId: null,
   mode: "graph",
   selectedNodeId: null,
+  evidenceByRunId: {},
 };
 
 type Listener = () => void;

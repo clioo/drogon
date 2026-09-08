@@ -88,6 +88,29 @@ describe("mentu mount", () => {
     expect(called).toEqual(["mentuRecipes"]);
   });
 
+  test("gated bridge forwards the optional evidence method when present", async () => {
+    const payload = { runId: "run-1", mentuRunId: "run_x", evidence: [] };
+    const source: MentuBridge = {
+      ...passthrough,
+      mentuRunEvidence: async () => ({ ok: true, result: payload }),
+    };
+    const allowed = createGatedMentuBridge(source, () => true);
+    expect(await allowed.mentuRunEvidence?.({ runId: "run-1" })).toEqual({
+      ok: true,
+      result: payload,
+    });
+    const refused = createGatedMentuBridge(source, () => false);
+    expect(await refused.mentuRunEvidence?.({ runId: "run-1" })).toMatchObject({
+      ok: false,
+      error: { code: "unsupported_capability", retryable: true },
+    });
+  });
+
+  test("gated bridge omits the evidence method when the source lacks it", () => {
+    const gated = createGatedMentuBridge(passthrough, () => true);
+    expect(gated.mentuRunEvidence).toBeUndefined();
+  });
+
   test("registers the Mentu route gated on mentu.v1", () => {
     const registry = registerMentuRoute(
       createRouteRegistry({

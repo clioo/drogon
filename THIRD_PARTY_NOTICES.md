@@ -289,6 +289,14 @@ and the Project Settings section port the Drogon fork's
 `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
 MIT notice.
 
+The Mentu run evidence rows in
+`apps/desktop/src/renderer/src/features/mentu/recipe-pane-views.tsx` and the
+capped evidence reader in `crates/drogon-core/src/mentu/run_record.rs` port the
+Drogon fork's `src/renderer/src/components/mentu/recipe-pane-views.tsx` and
+`src/main/mentu/{mentu-run-evidence,mentu-run-evidence-files}.ts` (fork
+revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
+keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

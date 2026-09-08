@@ -226,7 +226,13 @@ export function RecipePaneContent({
         </TabsContent>
         <TabsContent value="evidence" className="min-h-0 flex-1 pt-3">
           <ScrollArea className="h-full">
-            <EvidenceView run={controller.run} recipe={controller.recipe} />
+            <EvidenceView
+              run={controller.run}
+              recipe={controller.recipe}
+              evidence={controller.evidence}
+              evidenceLoading={controller.evidenceLoading}
+              evidenceError={controller.evidenceError}
+            />
           </ScrollArea>
         </TabsContent>
         <TabsContent value="metrics" className="min-h-0 flex-1 pt-3">

@@ -8,13 +8,14 @@ use std::path::PathBuf;
 use drogon_protocol::mentu::{
     MentuApproval, MentuApproveParams, MentuApproveResult, MentuCancelResult, MentuRecipeParams,
     MentuRecipeResult, MentuRecipeSaveParams, MentuRecipeSaveResult, MentuRecipesResult,
-    MentuRunIdParams, MentuRunParams, MentuRunResult, MentuRunStatus, MentuRunsParams,
-    MentuRunsResult, MentuRuntimeResult, MentuWorkspaceScopeParams,
+    MentuRunEvidenceParams, MentuRunEvidenceResult, MentuRunIdParams, MentuRunParams,
+    MentuRunResult, MentuRunStatus, MentuRunsParams, MentuRunsResult, MentuRuntimeResult,
+    MentuWorkspaceScopeParams,
 };
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
 
-use crate::mentu::{execution, recipe, runtime, storage};
+use crate::mentu::{execution, recipe, run_record, runtime, storage};
 use crate::{Engine, error, workspace};
 
 fn parse<T: serde::de::DeserializeOwned>(params: &Value, what: &str) -> Result<T, RpcError> {
@@ -173,6 +174,34 @@ impl Engine {
         let run = storage::get_run(&conn, &parsed.run_id)?
             .ok_or_else(|| error::not_found("Mentu run not found."))?;
         to_value(MentuRunResult { run })
+    }
+
+    pub(crate) fn mentu_run_evidence(&self, params: &Value) -> Result<Value, RpcError> {
+        let parsed: MentuRunEvidenceParams = parse(params, "mentu.run_evidence")?;
+        parsed.validate()?;
+        let (workspace_id, mentu_run_id) = {
+            let conn = self.db.lock().unwrap();
+            let run = storage::get_run(&conn, &parsed.run_id)?
+                .ok_or_else(|| error::not_found("Mentu run not found."))?;
+            (run.workspace_id, run.mentu_run_id)
+        };
+        let workspace_path = {
+            let conn = self.db.lock().unwrap();
+            workspace::get_path(&conn, &workspace_id)?
+        };
+        let Some(mentu_run_id) = mentu_run_id else {
+            return Err(error::invalid_argument(
+                "This run never produced a Mentu run id to retry.",
+            ));
+        };
+        let workspace_root = PathBuf::from(workspace_path);
+        let evidence =
+            run_record::read_run_evidence(&workspace_root, &mentu_run_id)?.unwrap_or_default();
+        to_value(MentuRunEvidenceResult {
+            run_id: parsed.run_id,
+            mentu_run_id: Some(mentu_run_id),
+            evidence,
+        })
     }
 
     pub(crate) fn mentu_retry(&self, request: &Request) -> Result<Value, RpcError> {
