@@ -201,23 +201,32 @@ fn runs_all_status_filter_only_returns_matching_runs() {
     let observed = result["status"].as_str().unwrap().to_string();
     assert!(observed == "dispatched" || observed == "completed");
 
-    let matching = ok(engine.dispatch(request(
-        "filter-match",
-        "automation.runs_all",
-        json!({"page": 1, "perPage": 10, "status": observed}),
-    )));
-    assert_eq!(matching["total"], json!(1));
+    // Why the wait: the fixture harness exits within milliseconds, so the
+    // background headless-completion advance can move the row
+    // dispatched -> completed between two filter queries on a slow runner
+    // (seen on the ubuntu CI job). Filter only once the row is terminal.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let matching = loop {
+        let page = ok(engine.dispatch(request(
+            "filter-match",
+            "automation.runs_all",
+            json!({"page": 1, "perPage": 10, "status": "completed"}),
+        )));
+        if page["total"] == json!(1) {
+            break page;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "run never reached completed: {page:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
     assert_eq!(matching["runs"].as_array().unwrap().len(), 1);
 
-    let other = if observed == "completed" {
-        "dispatched"
-    } else {
-        "completed"
-    };
     let empty = ok(engine.dispatch(request(
         "filter-miss",
         "automation.runs_all",
-        json!({"page": 1, "perPage": 10, "status": other}),
+        json!({"page": 1, "perPage": 10, "status": "dispatched"}),
     )));
     assert_eq!(empty["total"], json!(0));
     assert!(empty["runs"].as_array().unwrap().is_empty());
