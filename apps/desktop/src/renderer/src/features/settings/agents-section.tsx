@@ -72,11 +72,11 @@ export function AgentsSection({
     <SettingsSection
       id="agents"
       title="Agents"
-      description="The default harness pre-fills the “+” launch form; per-harness values are used unless you override them there. Empty model or effort means the harness default."
+      description="The “+” menu launches a harness at once with its values below — there is no per-launch form. Empty model or effort means the harness default."
     >
       <SettingsRow
         label="Default harness"
-        description="Marked in the launch menu; blank fields there fall back to the values below."
+        description="Badged in the launch menu and preselected by the workspace composer."
         alignTop
         control={
           <SettingsSegmentedControl<string>

@@ -50,6 +50,10 @@ import {
   composerAgentLaunchInput,
   type ComposerAgentSelection,
 } from "./features/new-workspace/composer-submit";
+// R16-AO (#231): every launch path resolves the Settings → Agents default
+// permission mode (yolo/unattended for Claude Code, like the fork) instead
+// of hardcoding one.
+import { resolveHarnessPermissionMode } from "../../shared/agent-defaults";
 import { TabBar } from "./features/shell/TabBar";
 import { editorTabId, type EditorTabState } from "./features/shell/editor-tab";
 import { EditorHost, planEditorRehydrate } from "./features/editor";
@@ -1797,7 +1801,9 @@ export function App() {
   // Starts the composer's picked agent in a workspace (journey J1): the
   // composer chains `worktree.create` + `harness.start` so a worktree can
   // open straight into a Pi session with the free local provider/model.
-  // Resolves a verbatim daemon error, or null when the agent tab is live.
+  // The Settings → Agents defaults drive the launch (R16-AO #231), like
+  // the "+" menu. Resolves a verbatim daemon error, or null when the
+  // agent tab is live.
   const launchComposerAgent = async (
     workspaceId: string,
     agent: ComposerAgentSelection,
@@ -1806,6 +1812,7 @@ export function App() {
       workspaceId,
       agent,
       crypto.randomUUID(),
+      harnessDefaults,
     );
     if (!launch) return null;
     let session: Session;
@@ -2798,7 +2805,14 @@ export function App() {
             ? await window.drogon.startHarness({
                 workspaceId: launch.workspaceId,
                 harnessId: launch.harnessId,
-                permissionMode: "inherit",
+                // R16-AO (#231): a restart relaunches the same harness, so
+                // it keeps the stored default permission mode (Claude Code
+                // restarts in yolo, like a fresh menu launch) instead of a
+                // hardcoded manual mode.
+                permissionMode: resolveHarnessPermissionMode(
+                  launch.harnessId,
+                  harnessDefaults,
+                ),
                 requestId: crypto.randomUUID(),
               })
             : await window.drogon.start(
@@ -3856,6 +3870,7 @@ export function App() {
           disabled={busy}
           harnesses={harnesses}
           defaultHarnessId={defaultHarnessId}
+          harnessDefaults={harnessDefaults}
           onSubmitWorktree={submitWorktree}
           onLaunchAgent={async (launch) => {
             let session: Session;

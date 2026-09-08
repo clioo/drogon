@@ -517,6 +517,112 @@ mod tests {
         );
     }
 
+    /// Interactive (menu-row) launches carry no prompt: the argv is just
+    /// the stored model/effort plus the permission-mode flag. Covers #231:
+    /// every harness row launches with its Settings → Agents defaults.
+    fn interactive(harness_id: HarnessId) -> HarnessLaunchRequest {
+        HarnessLaunchRequest {
+            harness_id,
+            model: None,
+            effort: None,
+            provider: None,
+            prompt: None,
+            permission_mode: PermissionMode::Inherit,
+            headless: false,
+        }
+    }
+
+    fn unattended(harness_id: HarnessId) -> HarnessLaunchRequest {
+        HarnessLaunchRequest {
+            permission_mode: PermissionMode::Unattended,
+            ..interactive(harness_id)
+        }
+    }
+
+    #[test]
+    fn interactive_unattended_flags_match_the_fork_yolo_defaults() {
+        // Claude Code and Antigravity: `--dangerously-skip-permissions`
+        // (the fork's YOLO_TUI_AGENT_ARGS).
+        assert_eq!(
+            plan(&unattended(HarnessId::Claude)),
+            ["--dangerously-skip-permissions"]
+        );
+        assert_eq!(
+            plan(&unattended(HarnessId::Antigravity)),
+            ["--dangerously-skip-permissions"]
+        );
+        // Pi trusts this run's project files; OpenCode takes `--auto`.
+        assert_eq!(plan(&unattended(HarnessId::Pi)), ["--approve"]);
+        assert_eq!(plan(&unattended(HarnessId::Opencode)), ["--auto"]);
+    }
+
+    #[test]
+    fn interactive_inherit_mode_passes_no_permission_flag() {
+        for harness_id in HarnessId::ALL {
+            assert_eq!(
+                plan(&interactive(harness_id)),
+                Vec::<String>::new(),
+                "{harness_id:?} must launch bare in inherit mode"
+            );
+        }
+    }
+
+    #[test]
+    fn interactive_model_and_provider_flags() {
+        let mut pi = interactive(HarnessId::Pi);
+        pi.provider = Some("dgx-spark".to_string());
+        pi.model = Some("qwen3.8-flash-next-nvidia-nvfp4".to_string());
+        assert_eq!(
+            plan(&pi),
+            [
+                "--provider",
+                "dgx-spark",
+                "--model",
+                "qwen3.8-flash-next-nvidia-nvfp4"
+            ]
+        );
+        // `pi --model` also accepts the combined `provider/id` pattern the
+        // Settings Model field stores (verified against `pi --help`).
+        let mut combined = interactive(HarnessId::Pi);
+        combined.model = Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4".to_string());
+        assert_eq!(
+            plan(&combined),
+            ["--model", "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"]
+        );
+        let mut claude = interactive(HarnessId::Claude);
+        claude.model = Some("sonnet".to_string());
+        assert_eq!(plan(&claude), ["--model", "sonnet"]);
+    }
+
+    #[test]
+    fn interactive_effort_flags_per_harness() {
+        let mut claude = interactive(HarnessId::Claude);
+        claude.effort = Some("high".to_string());
+        assert_eq!(plan(&claude), ["--effort", "high"]);
+        let mut pi = interactive(HarnessId::Pi);
+        pi.effort = Some("max".to_string());
+        assert_eq!(plan(&pi), ["--thinking", "max"]);
+        let mut agy = interactive(HarnessId::Antigravity);
+        agy.effort = Some("low".to_string());
+        assert_eq!(plan(&agy), ["--effort", "low"]);
+    }
+
+    #[test]
+    fn interactive_rejections() {
+        // OpenCode advertises no effort flag on its interactive entrypoint.
+        let mut opencode = interactive(HarnessId::Opencode);
+        opencode.effort = Some("high".to_string());
+        assert!(plan_launch(&opencode, Path::new("/usr/local/bin/opencode")).is_err());
+        // Provider selection is Pi-only.
+        let mut claude = interactive(HarnessId::Claude);
+        claude.provider = Some("dgx-spark".to_string());
+        assert!(plan_launch(&claude, Path::new("/usr/local/bin/claude")).is_err());
+        // Unknown effort values never reach the harness.
+        let mut pi = interactive(HarnessId::Pi);
+        pi.effort = Some("turbo".to_string());
+        assert!(plan_launch(&pi, Path::new("/usr/local/bin/pi")).is_err());
+    }
+
     #[test]
     fn windows_batch_adapter_refuses_unsafe_command_or_arguments() {
         assert!(windows_batch_adapter(r"C:\tools\pi & calc.cmd", vec![]).is_err());

@@ -6,6 +6,11 @@ import type {
   Workspace,
 } from "../../../../shared/session-contract";
 import {
+  resolveHarnessAgentDefault,
+  splitPiProviderModel,
+  type HarnessAgentDefaultFields,
+} from "../../../../shared/agent-defaults";
+import {
   normalizeHarnessLaunchInput,
   type HarnessLaunchFormValues,
 } from "../../harness-launch-form";
@@ -40,9 +45,9 @@ export type ComposerSubmitTarget =
  * fork's `NewWorkspaceComposerAgentSection` quick-agent picker, adapted to
  * this repo's harness ids. `null` creates the workspace without a session
  * (today's behavior); a harness id chains `harness.start` after the
- * worktree exists, carrying the free-local-model provider/model the "+"
- * launch form already supports (`normalizeHarnessLaunchInput` keeps the
- * provider Pi-only, so a stale value can never leak to another harness).
+ * worktree exists, carrying the free-local-model provider/model
+ * (`normalizeHarnessLaunchInput` keeps the provider Pi-only, so a stale
+ * value can never leak to another harness).
  */
 export type ComposerAgentSelection = {
   harnessId: HarnessId | null;
@@ -78,19 +83,33 @@ export function initialComposerAgentId(
  * Builds the `harness.start` input for a composer selection, or null when
  * the composer creates the workspace without a session. `requestId` is
  * attempt-tracking metadata the caller attaches (see `TabCreateMenu`).
+ * The Settings → Agents defaults drive the launch like every other path:
+ * the stored (or fork-default) permission mode and effort always apply,
+ * and a blank composer Model falls back to the stored default model. An
+ * explicitly picked model/provider always wins over the stored default.
  */
 export function composerAgentLaunchInput(
   workspaceId: string,
   selection: ComposerAgentSelection,
   requestId: string,
+  defaults: Record<string, HarnessAgentDefaultFields> = {},
 ): HarnessLaunchInput | null {
   if (!selection.harnessId) return null;
+  const stored = resolveHarnessAgentDefault(selection.harnessId, defaults);
+  const pickedModel =
+    selection.model.trim() !== "" ? selection.model : stored.model;
+  // A Pi `provider/model-id` shorthand (typed or from the stored default)
+  // splits when no explicit provider wins — Pi rejects the combined flag.
+  const split =
+    selection.harnessId === "pi" && selection.provider.trim() === ""
+      ? splitPiProviderModel(pickedModel)
+      : null;
   const values: HarnessLaunchFormValues = {
-    model: selection.model,
-    provider: selection.provider,
-    effort: "",
+    model: split ? (split.model ?? "") : pickedModel,
+    provider: split?.provider ?? selection.provider,
+    effort: stored.effort,
     prompt: "",
-    unattended: false,
+    unattended: stored.permissionMode === "unattended",
   };
   return {
     ...normalizeHarnessLaunchInput(

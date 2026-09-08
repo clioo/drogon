@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
-import { rename } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 
 export function renderedPiIsReady(root = document) {
@@ -58,6 +59,66 @@ export async function waitForSessionStripTab(page, sessionId, verdict) {
   });
 }
 
+// Local-only model fixture for every agent launch in acceptance: never a
+// paid model.
+const PI_MODEL = "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4";
+const PI_PROVIDER = "dgx-spark";
+const PI_MODEL_ID = "qwen3.8-flash-next-nvidia-nvfp4";
+
+/**
+ * Seeds the isolated `PI_CODING_AGENT_DIR` (a bare temp dir in acceptance)
+ * with the team-local provider route so Pi can boot the local model: the
+ * repo's QA doctrine runs in-app sessions only on this model, and the key
+ * is the `"local"` placeholder, never a credential. Without it Pi reports
+ * `Unknown provider` and exits before rendering.
+ */
+async function seedLocalPiProvider(dataDir) {
+  const piDir = path.join(path.dirname(dataDir), "pi");
+  await mkdir(piDir, { recursive: true });
+  await writeFile(
+    path.join(piDir, "models.json"),
+    JSON.stringify({
+      providers: {
+        [PI_PROVIDER]: {
+          baseUrl: "http://100.85.64.21:9292/v1",
+          api: "openai-completions",
+          apiKey: "local",
+          models: [
+            {
+              id: PI_MODEL_ID,
+              name: PI_MODEL_ID,
+              reasoning: false,
+              input: ["text"],
+              contextWindow: 131072,
+              maxTokens: 4096,
+            },
+          ],
+        },
+      },
+    }),
+  );
+}
+
+async function openAgentsSettings(page) {
+  await page
+    .locator(".session-header")
+    .getByRole("button", { name: "Settings", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Agents", exact: true })
+    .click();
+  await page
+    .getByRole("radiogroup", { name: "Default harness" })
+    .waitFor();
+}
+
+async function readAgentDefaults(page) {
+  return page.evaluate(() => {
+    const raw = window.localStorage.getItem("drogon:settings:ui");
+    return raw ? JSON.parse(raw).settings : null;
+  });
+}
+
 export async function probeRenderedHarness({
   page,
   workspaceId,
@@ -65,79 +126,103 @@ export async function probeRenderedHarness({
   dataDir,
 }) {
   await page.setViewportSize({ width: 1280, height: 850 });
+  // R16-AO (#231): the "+" menu launches a harness row immediately with
+  // the Settings → Agents defaults — no per-launch dialog, exactly like
+  // the fork. Set Pi as the default with the local model and Unattended
+  // through the real Settings pane first.
+  await openAgentsSettings(page);
   await page
-    .getByRole("button", { name: "New tab", exact: true })
-    .first()
+    .getByRole("radiogroup", { name: "Default harness" })
+    .getByRole("radio", { name: "Pi", exact: true })
     .click();
-  await page.getByRole("menuitem", { name: "Pi", exact: true }).click();
-  await page.getByRole("heading", { name: "Pi", exact: true }).waitFor();
-  const trigger = await page
-    .getByRole("button", { name: "New tab", exact: true })
-    .first()
-    .boundingBox();
-  const form = await page.locator(".harness-launch-form").boundingBox();
-  // The form opens under the "+" trigger inside the main pane (#189: since
-  // R16-D/R16-E the 28px trigger sits 8px inside the strip while the form
-  // starts at the strip's content edge, measured trigger.x 289 vs form.x
-  // 281 at 1280px). The check is "same column as the trigger" — a form
-  // starting within the trigger's inset cannot overlap the sidebar, which
-  // ends where the strip begins.
-  assert.ok(
-    trigger && form && form.x >= trigger.x - 12 && form.x - trigger.x <= 24,
-    `Launch form stays aligned with its trigger, not over the sidebar (trigger ${JSON.stringify(trigger)} form ${JSON.stringify(form)})`,
-  );
-  assert.equal(
-    await page.getByRole("textbox", { name: /^Model\b/ }).inputValue(),
-    "",
-  );
-  assert.equal(
-    await page.getByLabel("Initial prompt (optional)").inputValue(),
-    "",
-  );
+  await page.getByRole("textbox", { name: "Pi model" }).fill(PI_MODEL);
+  await page
+    .getByRole("radiogroup", { name: "Pi permission mode" })
+    .getByRole("radio", { name: "Unattended", exact: true })
+    .click();
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });
     await page.screenshot({
-      path: path.join(output, `harness-form-${colorScheme}.png`),
+      path: path.join(output, `agents-settings-${colorScheme}.png`),
       animations: "disabled",
     });
   }
-  await page.getByText("Advanced", { exact: true }).click();
-  await page.setViewportSize({ width: 760, height: 600 });
-  const narrow = await page.locator(".harness-launch-form").boundingBox();
-  assert.ok(
-    narrow &&
-      narrow.x >= 0 &&
-      narrow.y >= 0 &&
-      narrow.x + narrow.width <= 760 &&
-      narrow.y + narrow.height <= 600,
-  );
-  await page.screenshot({
-    path: path.join(output, "harness-form-narrow.png"),
-    animations: "disabled",
-  });
-  await page.keyboard.press("Escape");
+  // The store debounces saves by 1s: wait it out, then prove the persisted
+  // defaults survive a renderer restart through the pane itself.
+  await delay(2000);
+  const stored = await readAgentDefaults(page);
+  assert.equal(stored?.defaultHarnessId, "pi");
+  assert.equal(stored?.harnessDefaults?.pi?.model, PI_MODEL);
+  assert.equal(stored?.harnessDefaults?.pi?.permissionMode, "unattended");
+  await page.reload();
   await page
-    .getByRole("heading", { name: "Pi", exact: true })
-    .waitFor({ state: "hidden" });
-  await page.setViewportSize({ width: 1280, height: 850 });
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor();
+  await openAgentsSettings(page);
+  assert.equal(
+    await page.getByRole("textbox", { name: "Pi model" }).inputValue(),
+    PI_MODEL,
+  );
+  assert.equal(
+    await page
+      .getByRole("radiogroup", { name: "Pi permission mode" })
+      .getByRole("radio", { name: "Unattended", exact: true })
+      .getAttribute("aria-checked"),
+    "true",
+  );
+  assert.equal(
+    await page
+      .getByRole("radiogroup", { name: "Default harness" })
+      .getByRole("radio", { name: "Pi", exact: true })
+      .getAttribute("aria-checked"),
+    "true",
+  );
+  await page
+    .getByRole("button", { name: "Back to app", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "Start a session" }).waitFor();
+  await seedLocalPiProvider(dataDir);
+  // A click on the Pi row launches at once: no launch dialog may appear.
   await page
     .getByRole("button", { name: "New tab", exact: true })
     .first()
     .click();
   await page.getByRole("menuitem", { name: "Pi", exact: true }).click();
-  await page.getByText("Advanced", { exact: true }).click();
-  await page.getByRole("checkbox", { name: "Trust project files" }).check();
-  await page.getByRole("button", { name: "Launch", exact: true }).click();
-  await page
-    .getByRole("heading", { name: "Pi", exact: true })
-    .waitFor({ state: "hidden" });
+  assert.equal(await page.locator(".harness-launch-form").count(), 0);
+  assert.equal(
+    await page.getByRole("button", { name: "Launch", exact: true }).count(),
+    0,
+  );
+  // The session starts with the Settings defaults in argv: Unattended is
+  // Pi's `--approve`, and the stored `provider/model-id` shorthand splits
+  // into the separate flags this Pi build requires (it rejects the
+  // combined `--model provider/id` pattern).
   const launched = await page.evaluate(async (id) => {
-    const result = await window.drogon.sessions(id);
-    if (!result.ok) throw new Error(result.error.message);
-    return result.result.sessions.find((session) => session.verdict === "live");
+    const deadline = Date.now() + 15000;
+    for (;;) {
+      const result = await window.drogon.sessions(id);
+      if (!result.ok) throw new Error(result.error.message);
+      const live = result.result.sessions.find(
+        (session) => session.verdict === "live",
+      );
+      if (live) return live;
+      if (Date.now() > deadline)
+        throw new Error("no live session after the Pi row launch");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }, workspaceId);
   assert.ok(launched?.incarnation);
-  assert.ok(launched.args.includes("--approve"));
+  assert.ok(
+    launched.args.includes("--approve"),
+    `Pi row launch must carry --approve, got ${JSON.stringify(launched.args)}`,
+  );
+  assert.ok(
+    launched.args.includes("--provider") &&
+      launched.args.includes("dgx-spark") &&
+      launched.args.includes("--model") &&
+      launched.args.includes("qwen3.8-flash-next-nvidia-nvfp4"),
+    `Pi row launch must carry the stored provider/model, got ${JSON.stringify(launched.args)}`,
+  );
   const identity = {
     sessionId: launched.id,
     incarnation: launched.incarnation,
@@ -214,8 +299,9 @@ export async function probeRenderedHarness({
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   assert.equal(await page.getByRole("tab").count(), 0);
   return [
+    "agents-settings-defaults-drive-immediate-pi-launch",
+    "agent-defaults-survive-reload",
     "rendered-native-pi-launch-without-inference",
-    "harness-form-anchor-light-dark-narrow-escape-and-reload-exact-identity",
     "exact-pi-stop-through-ui",
     "transport-loss-is-unverifiable-and-reconnects-the-same-pi-session",
   ];

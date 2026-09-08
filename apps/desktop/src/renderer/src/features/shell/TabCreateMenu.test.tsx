@@ -266,75 +266,141 @@ describe("TabCreateMenu order and copy", () => {
   });
 });
 
-describe("TabCreateMenu harness launch form (#192)", () => {
-  function openPiForm() {
-    mount();
-    openMenu();
-    const item = screen.getByRole("menuitem", { name: "Pi" });
+describe("TabCreateMenu immediate harness launch (#231)", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  function clickMenuItem(name: string | RegExp) {
+    const item = screen.getByRole("menuitem", { name });
     fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
     fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
     fireEvent.click(item);
-    return screen.getByPlaceholderText("Harness default");
   }
 
-  it("carries a pasted flags string to the launch as provider+model", async () => {
+  it("launches a harness row at once with the stored defaults, no dialog", async () => {
     let launched: unknown;
     const onLaunch = vi.fn(async (input: unknown) => {
       launched = input;
       return true;
     });
-    mount({ onLaunch });
-    openMenu();
-    const item = screen.getByRole("menuitem", { name: "Pi" });
-    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
-    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
-    fireEvent.click(item);
-    fireEvent.change(screen.getByPlaceholderText("Harness default"), {
-      target: {
-        value: "--provider dgx-spark --model qwen3.8-flash-next-nvidia-nvfp4",
+    mount({
+      onLaunch,
+      launchDefaults: {
+        pi: {
+          model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+          effort: "",
+          permissionMode: "unattended",
+        },
       },
     });
-    fireEvent.change(
-      screen.getByLabelText("Initial prompt (optional)", {
-        selector: "input",
-      }),
-      { target: { value: "Say the single word: PONG" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+    openMenu();
+    clickMenuItem("Pi");
     await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(1));
     expect(launched).toMatchObject({
       workspaceId: "ws",
       harnessId: "pi",
       provider: "dgx-spark",
       model: "qwen3.8-flash-next-nvidia-nvfp4",
-      prompt: "Say the single word: PONG",
+      permissionMode: "unattended",
+    });
+    expect(typeof (launched as { requestId: unknown }).requestId).toBe(
+      "string",
+    );
+    // No per-launch dialog may appear: the fork launches from the row.
+    expect(document.querySelector(".harness-launch-form")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: /^Model\b/ }),
+    ).toBeNull();
+  });
+
+  it("falls back to the fork defaults: Claude Code launches yolo/unattended", async () => {
+    let launched: unknown;
+    const onLaunch = vi.fn(async (input: unknown) => {
+      launched = input;
+      return true;
+    });
+    mount({ onLaunch, launchDefaults: {} });
+    openMenu();
+    clickMenuItem("Claude");
+    await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(1));
+    expect(launched).toMatchObject({
+      workspaceId: "ws",
+      harnessId: "claude",
+      permissionMode: "unattended",
+    });
+  });
+
+  it("keeps permission prompts for Pi by fork default until stored otherwise", async () => {
+    let launched: unknown;
+    const onLaunch = vi.fn(async (input: unknown) => {
+      launched = input;
+      return true;
+    });
+    mount({ onLaunch, launchDefaults: {} });
+    openMenu();
+    clickMenuItem("Pi");
+    await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(1));
+    expect(launched).toMatchObject({
+      harnessId: "pi",
       permissionMode: "inherit",
     });
   });
 
-  it("blocks an invalid model with the fork error and never launches", async () => {
-    const onLaunch = vi.fn(() => Promise.resolve(true));
+  it("reuses the admission id for an unchanged retry instead of spawning twice", async () => {
+    const seen: string[] = [];
+    const onLaunch = vi.fn(async (input: { requestId: string }) => {
+      seen.push(input.requestId);
+      return true;
+    });
     mount({ onLaunch });
     openMenu();
-    const item = screen.getByRole("menuitem", { name: "Pi" });
-    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
-    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
-    fireEvent.click(item);
-    fireEvent.change(screen.getByPlaceholderText("Harness default"), {
-      target: { value: "--bogus x" },
+    clickMenuItem("Pi");
+    await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(1));
+    openMenu();
+    clickMenuItem("Pi");
+    await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(2));
+    expect(seen[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(seen[1]).toBe(seen[0]);
+  });
+
+  it("never launches an unavailable harness row, even by keyboard", () => {
+    const onLaunch = vi.fn(() => Promise.resolve(true));
+    mount({
+      onLaunch,
+      harnesses: [{ ...harness("pi", "Pi"), availability: "missing" }],
+      mentuAvailable: false,
     });
-    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/Unsupported flag/);
+    openMenu();
+    // The row names the missing binary instead of offering a launch.
+    expect(menuItemNames()).toContain("Pinot found on this host");
+    fireEvent.change(
+      screen.getByRole("combobox", { name: TAB_CREATE_SEARCH_PLACEHOLDER }),
+      { target: { value: "pi" } },
+    );
+    expect(menuItemNames()).toEqual(["Pinot found on this host"]);
+    fireEvent.keyDown(
+      screen.getByRole("combobox", { name: TAB_CREATE_SEARCH_PLACEHOLDER }),
+      { key: "Enter" },
+    );
     expect(onLaunch).not.toHaveBeenCalled();
   });
 
-  it("shows the fork hint under the Pi model field", () => {
-    openPiForm();
-    expect(
-      screen.getByText(
-        "Use an exact Pi provider/model ID. Blank uses Pi settings.",
-      ),
-    ).not.toBeNull();
+  it("keeps the interrupted-launch retry row for an unconfirmed attempt", async () => {
+    const onLaunch = vi.fn(() => Promise.resolve(false));
+    mount({ onLaunch });
+    openMenu();
+    clickMenuItem("Pi");
+    await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(1));
+    // An unconfirmed attempt stays recoverable: reopening the menu offers
+    // the exact retry instead of losing the intent.
+    openMenu();
+    const retry = screen.getByRole("menuitem", {
+      name: "Retry interrupted Pi launch",
+    });
+    expect(retry).not.toBeNull();
+    fireEvent.pointerDown(retry, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(retry, { pointerType: "mouse", button: 0 });
+    fireEvent.click(retry);
+    await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(2));
   });
 });
