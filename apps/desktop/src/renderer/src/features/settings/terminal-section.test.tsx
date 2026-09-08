@@ -148,3 +148,157 @@ describe("terminal manage sessions", () => {
     expect(await screen.findByText("(2)")).toBeDefined();
   });
 });
+
+describe("terminal restart daemon (R16-AD2)", () => {
+  function baseBridge() {
+    return {
+      workspaces: async () => ({
+        ok: true,
+        result: { workspaces: [workspace()] },
+      }),
+      sessions: async () => ({ ok: true, result: { sessions: [session()] } }),
+      stop: vi.fn(async () => ({ ok: true, result: session() })),
+    };
+  }
+
+  function managedRestart(
+    result: {
+      restarted: boolean;
+      managed: boolean;
+      reason: string | null;
+      stoppedSessions: number;
+    } = { restarted: true, managed: true, reason: null, stoppedSessions: 1 },
+  ) {
+    return vi.fn(async (input?: { probe?: boolean }) =>
+      input?.probe
+        ? { restarted: false, managed: true, reason: null, stoppedSessions: 0 }
+        : result,
+    );
+  }
+
+  async function enabledRestartButton() {
+    const button = (await screen.findByRole("button", {
+      name: "Restart daemon",
+    })) as HTMLButtonElement;
+    await waitFor(() => {
+      if (
+        (screen.getByRole("button", {
+          name: "Restart daemon",
+        }) as HTMLButtonElement).disabled
+      )
+        throw new Error("restart still disabled");
+    });
+    return button;
+  }
+
+  test("the manage-sessions description keeps the restart clause", () => {
+    (window as { drogon?: unknown }).drogon = baseBridge();
+    render(<TerminalSection />);
+    expect(
+      screen.getByText(
+        "Recover from a frozen or misbehaving terminal by killing sessions or restarting the underlying daemon.",
+      ),
+    ).toBeDefined();
+  });
+
+  test("without a daemon channel the button is disabled with the reason", async () => {
+    (window as { drogon?: unknown }).drogon = baseBridge();
+    render(<TerminalSection />);
+    const button = (await screen.findByRole("button", {
+      name: "Restart daemon",
+    })) as HTMLButtonElement;
+    await waitFor(() => {
+      if (!button.disabled) throw new Error("restart became enabled");
+      if (button.title !== "the desktop bridge is missing")
+        throw new Error(`unexpected title: ${button.title}`);
+    });
+    expect(button.getAttribute("aria-label")).toBe("Restart daemon");
+  });
+
+  test("an external daemon disables the button with the fork-style reason", async () => {
+    (window as { drogon?: unknown }).drogon = {
+      ...baseBridge(),
+      daemon: {
+        restart: async (input?: { probe?: boolean }) =>
+          input?.probe
+            ? {
+                restarted: false,
+                managed: false,
+                reason:
+                  "The daemon was started outside Drogon, so it can't be restarted from here.",
+                stoppedSessions: 0,
+              }
+            : {
+                restarted: false,
+                managed: false,
+                reason: "external",
+                stoppedSessions: 0,
+              },
+      },
+    };
+    render(<TerminalSection />);
+    const button = (await screen.findByRole("button", {
+      name: "Restart daemon",
+    })) as HTMLButtonElement;
+    await waitFor(() => {
+      if (!button.disabled) throw new Error("restart became enabled");
+    });
+    expect(button.title).toBe(
+      "The daemon was started outside Drogon, so it can't be restarted from here.",
+    );
+  });
+
+  test("restart arms first, then restarts and reports", async () => {
+    const restart = managedRestart();
+    (window as { drogon?: unknown }).drogon = {
+      ...baseBridge(),
+      daemon: { restart },
+    };
+    render(<TerminalSection />);
+    await enabledRestartButton();
+    fireEvent.click(screen.getByRole("button", { name: "Restart daemon" }));
+    // Armed: the confirm wording appears, nothing restarted yet.
+    expect(restart).toHaveBeenCalledTimes(1); // the probe
+    expect(
+      await screen.findByRole("button", { name: "Confirm restart daemon" }),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        "Press Restart daemon again to stop every session and restart the daemon.",
+      ),
+    ).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm restart daemon" }),
+    );
+    await waitFor(() =>
+      // Probe plus the confirmed restart.
+      expect(restart).toHaveBeenCalledTimes(2),
+    );
+    expect(await screen.findByText("Daemon restarted.")).toBeDefined();
+    // The sessions list re-renders after the restart.
+    expect(await screen.findByText("(1)")).toBeDefined();
+  });
+
+  test("a refused restart reports its reason honestly", async () => {
+    (window as { drogon?: unknown }).drogon = {
+      ...baseBridge(),
+      daemon: {
+        restart: managedRestart({
+          restarted: false,
+          managed: true,
+          reason: "The daemon refused to stop (runtime_busy): live.",
+          stoppedSessions: 0,
+        }),
+      },
+    };
+    render(<TerminalSection />);
+    await enabledRestartButton();
+    fireEvent.click(screen.getByRole("button", { name: "Restart daemon" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm restart daemon" }),
+    );
+    expect(
+      await screen.findByText("The daemon refused to stop (runtime_busy): live."),
+    ).toBeDefined();
+  });
+});

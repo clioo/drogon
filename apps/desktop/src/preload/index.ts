@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge } from "../shared/session-contract";
+import { daemon } from "./daemon";
 import type {
   FilesChangedTick,
   FilesWatchBridge,
@@ -51,6 +52,7 @@ const bridge: DesktopBridge = {
   harnesses: () => ipcRenderer.invoke("drogon:harnesses"),
   startHarness: (value) => ipcRenderer.invoke("drogon:startHarness", value),
   buildInfo: () => ipcRenderer.invoke("drogon:buildInfo"),
+  daemon,
   usage: usageBridge,
   // R13-B Ports panel (additive); rows are read by main/usage's
   // listWorkspacePorts behind the drogon:workspacePorts channel.
