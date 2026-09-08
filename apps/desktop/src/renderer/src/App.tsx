@@ -54,13 +54,7 @@ import {
   SIDEBAR_PORTS_TOGGLE_CHORD,
 } from "./features/right-sidebar/activity-bar-items";
 import { PortsPanel } from "./features/ports/PortsPanel";
-import {
-  loadRightSidebarTab,
-  normalizeRightSidebarTab,
-  resolveRightSidebarEffectiveTab,
-  saveRightSidebarTab,
-  type RightSidebarTab,
-} from "./features/right-sidebar/right-sidebar-route";
+import { loadRightSidebarTab, normalizeRightSidebarTab, resolveRightSidebarEffectiveTab, saveRightSidebarTab, type RightSidebarTab, resolveInitialRightSidebarTab } from "./features/right-sidebar/right-sidebar-route";
 import {
   clampRightSidebarPanelWidth,
   loadRightSidebarOpen,
@@ -571,7 +565,7 @@ export function App() {
   // palette, or chord); a persisted tab counts as prior routing for that
   // panel. Never auto-mounts unopened panels.
   const filesRoutedRef = useRef(
-    loadRightSidebarTab(window.localStorage) === "explorer",
+    resolveInitialRightSidebarTab(window.localStorage) === "explorer",
   );
   const changesRoutedRef = useRef(
     loadRightSidebarTab(window.localStorage) === "source-control",
