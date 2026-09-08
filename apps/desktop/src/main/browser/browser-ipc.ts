@@ -188,5 +188,13 @@ export function registerBrowserIpc(
     if ("blocked" in snapshot) return missingTab(snapshot.blocked);
     return { ok: true, result: snapshot };
   });
+  // Additive (R16-Y): current-state pull backing the preload's
+  // subscribe-time replay. Takes no input; the main-frame gate is the
+  // whole authentication, like the other read-only handlers.
+  ipcMain.handle(browserIpcChannels.getState, async (event) => {
+    const window = getWindow();
+    if (!window || !mainFrameOnly(event, window)) return invalid;
+    return { ok: true, result: host.list() };
+  });
   return host;
 }

@@ -129,6 +129,14 @@ export interface BrowserBridge {
   setBounds(input: BrowserSetBoundsInput): Promise<Result<null>>;
   snapshot(input: BrowserTabRef): Promise<Result<BrowserSnapshot>>;
   onState(listener: (event: BrowserStateEvent) => void): () => void;
+  /**
+   * Additive (R16-Y): pulls the host's current tab list. `onState` replays
+   * it on subscribe so a fresh subscriber (renderer reload, workspace
+   * reselect) sees open tabs immediately instead of waiting for the next
+   * host event — the fork keeps its webviews alive across the same
+   * transitions, so the strip must too.
+   */
+  getState(): Promise<Result<BrowserStateEvent>>;
   /** Additive (R11-B chrome): reload ignoring the cache (right-click menu). */
   hardReload(input: BrowserTabRef): Promise<Result<BrowserTabState>>;
   /** Additive (R11-B chrome): page zoom steps around the 100 default. */
@@ -240,6 +248,7 @@ export const browserIpcChannels = {
   setBounds: "drogon:browserSetBounds",
   snapshot: "drogon:browserSnapshot",
   state: "drogon:browserState",
+  getState: "drogon:browserGetState",
   hardReload: "drogon:browserHardReload",
   zoomIn: "drogon:browserZoomIn",
   zoomOut: "drogon:browserZoomOut",

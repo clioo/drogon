@@ -31,6 +31,10 @@ function fakeBridge(
     setBounds: () => Promise.resolve({ ok: true, result: null }),
     snapshot: nope as BrowserBridge["snapshot"],
     onState: () => () => {},
+    getState: () =>
+      Promise.resolve({ ok: true, result: { tabs: [], activeTabId: null } }) as ReturnType<
+        BrowserBridge["getState"]
+      >,
     hardReload: nope as BrowserBridge["hardReload"],
     zoomIn: nope as BrowserBridge["zoomIn"],
     zoomOut: nope as BrowserBridge["zoomOut"],
