@@ -9,12 +9,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../components/ui/tooltip";
 import { ChangesPanel } from "./ChangesPanel";
 import { NO_REMOTE_SYNC_TITLE } from "./sync-row";
-import type {
-  GitBridge,
-  GitStatusEntry,
-  Result,
-} from "../../shared/git-contract";
-import type { Status, Workspace } from "../../shared/session-contract";
+import type { GitBridge, GitStatusEntry } from "../../../../shared/git-contract";
+import type { Result, Status, Workspace } from "../../../../shared/session-contract";
 
 afterEach(cleanup);
 
@@ -69,18 +65,21 @@ function stubBridge(remotes: string[] | undefined, calls: {
       }) as Result<never> as never,
     gitDiff: async () =>
       ({ ok: true, result: { ...SCOPE, path: "", staged: false, diff: "", truncated: false } }) as never,
-    gitStage: async (input) => {
+    gitStage: async (input: { paths: string[] }) => {
       calls.staged.push([...input.paths]);
       return { ok: true, result: { ...SCOPE, paths: input.paths } };
     },
-    gitUnstage: async (input) => ({ ok: true, result: { ...SCOPE, paths: input.paths } }),
+    gitUnstage: async (input: { paths: string[] }) => ({
+      ok: true,
+      result: { ...SCOPE, paths: input.paths },
+    }),
     gitCommit: async () => ({ ok: false, error: { code: "unsupported", message: "no" } }),
     gitPush: async () => ({ ok: false, error: { code: "unsupported", message: "no" } }),
     gitPrCreate: async () => {
       calls.prCreates += 1;
       return { ok: false, error: { code: "io_error", message: "no git remotes found" } };
     },
-  } as GitBridge;
+  } as unknown as GitBridge;
 }
 
 function renderPanel(remotes: string[] | undefined, calls: { staged: string[][]; prCreates: number }) {
