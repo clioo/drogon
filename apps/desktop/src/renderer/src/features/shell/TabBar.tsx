@@ -85,6 +85,8 @@ export function TabBar({
   onCloseToLeft,
   onCommitTitle,
   onCopyText,
+  workspacePath,
+  onDuplicateBrowserTab,
   onSelectSession,
   onSelectBrowserTab,
   onSelectEditorTab,
@@ -127,6 +129,10 @@ export function TabBar({
   onCloseToLeft: (id: string) => void;
   onCommitTitle: (id: string, title: string | null) => void;
   onCopyText: (text: string) => void;
+  /** Absolute path of the workspace root (editor Copy Relative Path). */
+  workspacePath?: string | null;
+  /** Opens a second browser tab at the given URL (Duplicate Tab). */
+  onDuplicateBrowserTab?: (url: string) => void;
   onSelectSession: (id: string) => void;
   onSelectBrowserTab: (tabId: string) => void;
   onSelectEditorTab: (tabId: string) => void;
@@ -396,7 +402,11 @@ export function TabBar({
                       onCloseToRight={() => onCloseToRight(tab.tabId)}
                       onCloseToLeft={() => onCloseToLeft(tab.tabId)}
                       onTogglePin={() => onTogglePin(tab.tabId)}
-                      onCopyUrl={() => onCopyText(tab.url)}
+                      onDuplicate={
+                        onDuplicateBrowserTab
+                          ? () => onDuplicateBrowserTab(tab.url)
+                          : null
+                      }
                       onStripKeyDown={(event) =>
                         stripKeyDown(event, tab.tabId)
                       }
@@ -423,6 +433,16 @@ export function TabBar({
                       onCloseToLeft={() => onCloseToLeft(tab.tabId)}
                       onTogglePin={() => onTogglePin(tab.tabId)}
                       onCopyPath={() => onCopyText(tab.path)}
+                      onCopyRelativePath={() =>
+                        onCopyText(
+                          workspacePath && tab.path.startsWith(`${workspacePath}/`)
+                            ? tab.path.slice(workspacePath.length + 1)
+                            : tab.path,
+                        )
+                      }
+                      onCloseAllEditorTabs={() => {
+                        for (const open of editorTabs) onCloseEditorTab(open.tabId);
+                      }}
                       onStripKeyDown={(event) =>
                         stripKeyDown(event, tab.tabId)
                       }
@@ -494,7 +514,6 @@ export function TabBar({
                     onCloseToLeft={onCloseToLeft}
                     onTogglePin={onTogglePin}
                     onCommitTitle={onCommitTitle}
-                    onCopyId={onCopyText}
                     onStripKeyDown={stripKeyDown}
                   />
                 );

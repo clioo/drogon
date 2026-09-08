@@ -3,52 +3,48 @@ import {
   getFileManagerLabel,
   getWorktreeDeleteLabel,
   getWorktreeDeleteShortcutLabel,
-  isWorktreeCreatable,
-  isWorktreeDeletable,
   isWorktreeRenamable,
   shouldSuppressContextMenuFollowUpClick,
+  worktreeDeleteRowKind,
 } from "./worktree-context-menu-policy";
 
 describe("worktree context menu policy", () => {
-  test("git worktrees are deletable, renamable and creatable", () => {
+  test("git worktrees delete; folder implicit worktrees remove the workspace", () => {
     expect(
-      isWorktreeDeletable({
+      worktreeDeleteRowKind({
         projectKind: "git",
         implicitFolderWorktree: false,
       }),
-    ).toBe(true);
-    expect(isWorktreeRenamable({ implicitFolderWorktree: false })).toBe(true);
-    expect(isWorktreeCreatable({ projectKind: "git" })).toBe(true);
-  });
-
-  test("implicit folder worktrees offer no delete or rename", () => {
+    ).toBe("delete");
     expect(
-      isWorktreeDeletable({
+      worktreeDeleteRowKind({
         projectKind: "folder",
         implicitFolderWorktree: true,
       }),
-    ).toBe(false);
+    ).toBe("remove-workspace");
     expect(
-      isWorktreeDeletable({ projectKind: "git", implicitFolderWorktree: true }),
-    ).toBe(false);
+      worktreeDeleteRowKind({ projectKind: "git", implicitFolderWorktree: true }),
+    ).toBe("remove-workspace");
+  });
+
+  test("implicit folder worktrees offer no rename", () => {
+    expect(isWorktreeRenamable({ implicitFolderWorktree: false })).toBe(true);
     expect(isWorktreeRenamable({ implicitFolderWorktree: true })).toBe(false);
   });
 
-  test("folder projects cannot source new worktrees", () => {
-    expect(isWorktreeCreatable({ projectKind: "folder" })).toBe(false);
-  });
-
-  test("delete row keeps the source label and shortcut chip", () => {
-    expect(getWorktreeDeleteLabel()).toBe("Delete Worktree");
+  test("delete row keeps the source labels and shortcut chip", () => {
+    expect(getWorktreeDeleteLabel("delete")).toBe("Delete");
+    expect(getWorktreeDeleteLabel("remove-workspace")).toBe("Remove Workspace");
     expect(getWorktreeDeleteShortcutLabel("MacIntel")).toBe("⌘⇧⌫");
     expect(getWorktreeDeleteShortcutLabel("Win32")).toBe(
       "Ctrl+Shift+Backspace",
     );
   });
 
-  test("file-manager label follows the platform", () => {
-    expect(getFileManagerLabel("MacIntel")).toBe("Reveal in Finder");
-    expect(getFileManagerLabel("Win32")).toBe("Show in folder");
+  test("file-manager label follows the platform (source app-name copy)", () => {
+    expect(getFileManagerLabel("MacIntel")).toBe("Finder");
+    expect(getFileManagerLabel("Windows")).toBe("File Explorer");
+    expect(getFileManagerLabel("Linux")).toBe("File Manager");
   });
 
   test("follow-up clicks are suppressed briefly after opening", () => {

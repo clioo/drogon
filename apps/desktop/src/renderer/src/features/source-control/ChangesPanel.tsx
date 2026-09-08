@@ -157,7 +157,6 @@ export function ChangesPanel({
   const [counts, setCounts] = useState<Map<string, GitLineCount>>(new Map());
   const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set());
   const [commitMessage, setCommitMessage] = useState("");
-  const [amend, setAmend] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [syncBusy, setSyncBusy] = useState<SyncBusyKind>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -498,8 +497,7 @@ export function ChangesPanel({
 
   const stagedCount = grouped.staged.length;
   const hasMessage = commitMessage.trim().length > 0;
-  const canAmend = branch.oid != null;
-  const commitReady = hasMessage && (amend ? canAmend : canCommitEntries(rows));
+  const commitReady = hasMessage && canCommitEntries(rows);
   const isBusy = busy !== null || syncBusy !== null;
 
   const doCommit = useCallback(async () => {
@@ -511,19 +509,17 @@ export function ChangesPanel({
       const result = await bridge.gitCommit({
         ...scope,
         message: commitMessage.trim(),
-        ...(amend ? { amend: true } : null),
       });
       if (!result.ok) {
         setCommitError(errorMessage(result, "Commit failed."));
         return;
       }
       setCommitMessage("");
-      setAmend(false);
     } finally {
       setBusy(null);
       setRevision((value) => value + 1);
     }
-  }, [amend, bridge, busy, commitMessage, commitReady, scope]);
+  }, [bridge, busy, commitMessage, commitReady, scope]);
 
   const doCommitAndPush = useCallback(async () => {
     if (!commitReady || busy !== null || syncBusy !== null) return;
@@ -534,14 +530,12 @@ export function ChangesPanel({
       const result = await bridge.gitCommit({
         ...scope,
         message: commitMessage.trim(),
-        ...(amend ? { amend: true } : null),
       });
       if (!result.ok) {
         setCommitError(errorMessage(result, "Commit failed."));
         return;
       }
       setCommitMessage("");
-      setAmend(false);
       setSyncBusy("push");
       try {
         const push = await bridge.gitPush(scope);
@@ -553,7 +547,7 @@ export function ChangesPanel({
       setBusy(null);
       setRevision((value) => value + 1);
     }
-  }, [amend, bridge, busy, commitMessage, commitReady, scope, syncBusy]);
+  }, [bridge, busy, commitMessage, commitReady, scope, syncBusy]);
 
   const doPush = useCallback(async () => {
     setSyncBusy("push");
@@ -624,6 +618,67 @@ export function ChangesPanel({
     }
   }, [bridge, commitMessage, hasRemote, scope]);
 
+  // Fork dropdown rows: Sync = pull (this repo's pull is ff-only) then
+  // push; Commit & Sync commits first. "Push before PR" pushes, then runs
+  // the same gh pr create flow as the Create PR action.
+  const doSync = useCallback(async () => {
+    if (!bridge.gitPull || syncBusy !== null || busy !== null) return;
+    setSyncBusy("pull");
+    setRemoteError(null);
+    try {
+      const pulled = await bridge.gitPull(scope);
+      if (!pulled.ok) {
+        setRemoteError(errorMessage(pulled, "Pull failed."));
+        return;
+      }
+      setSyncBusy("push");
+      const pushed = await bridge.gitPush(scope);
+      if (!pushed.ok) setRemoteError(errorMessage(pushed, "Push failed."));
+    } finally {
+      setSyncBusy(null);
+      setRevision((value) => value + 1);
+    }
+  }, [bridge, busy, scope, syncBusy]);
+
+  const doCommitAndSync = useCallback(async () => {
+    if (!commitReady || busy !== null || syncBusy !== null) return;
+    setBusy("commit");
+    setCommitError(null);
+    setRemoteError(null);
+    try {
+      const result = await bridge.gitCommit({
+        ...scope,
+        message: commitMessage.trim(),
+      });
+      if (!result.ok) {
+        setCommitError(errorMessage(result, "Commit failed."));
+        return;
+      }
+      setCommitMessage("");
+      await doSync();
+    } finally {
+      setBusy(null);
+      setRevision((value) => value + 1);
+    }
+  }, [bridge, busy, commitMessage, commitReady, doSync, scope, syncBusy]);
+
+  const doPushBeforePr = useCallback(async () => {
+    if (busy !== null || syncBusy !== null) return;
+    setSyncBusy("push");
+    setRemoteError(null);
+    try {
+      const pushed = await bridge.gitPush(scope);
+      if (!pushed.ok) {
+        setRemoteError(errorMessage(pushed, "Push failed."));
+        return;
+      }
+    } finally {
+      setSyncBusy(null);
+      setRevision((value) => value + 1);
+    }
+    await doPrCreate();
+  }, [bridge, busy, doPrCreate, scope, syncBusy]);
+
   const requestDiscardAllInArea = useCallback(
     (area: "staged" | "unstaged" | "untracked", paths?: readonly string[]) => {
       if (!discardAvailable) {
@@ -687,7 +742,7 @@ export function ChangesPanel({
           event,
           {
             disabled: !commitReady || busy !== null,
-            kind: amend ? "amend" : "commit",
+            kind: "commit",
           },
           () => void doCommit(),
         )
@@ -797,12 +852,21 @@ export function ChangesPanel({
             stagedCount={stagedCount}
             hasPartiallyStagedChanges={grouped.unstaged.length > 0 && stagedCount > 0}
             isBusy={isBusy}
-            amend={amend}
-            canAmend={canAmend}
+            upstream={branch.upstream}
+            ahead={branch.ahead}
+            behind={branch.behind}
+            createPrDisabled={createPrAction.disabled}
+            createPrReason={createPrAction.disabled ? createPrAction.title : null}
             onCommitMessageChange={setCommitMessage}
             onCommit={() => void doCommit()}
             onCommitAndPush={() => void doCommitAndPush()}
-            onToggleAmend={() => setAmend((value) => !value)}
+            onCommitAndSync={() => void doCommitAndSync()}
+            onPush={() => void doPush()}
+            onPushBeforePr={() => void doPushBeforePr()}
+            onFastForward={() => void doPull()}
+            onSync={() => void doSync()}
+            onFetch={() => void doFetch()}
+            onCreatePr={() => void doPrCreate()}
           />
         )}
         {notice && (

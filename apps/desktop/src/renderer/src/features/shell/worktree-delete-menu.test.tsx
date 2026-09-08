@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /* MIT Copyright (c) 2026 Lovecast Inc.
-   #220: clicking "Delete Worktree" in the worktree card context menu must
+   #220: clicking "Delete" in the worktree card context menu must
    open the DeleteWorktreeDialog confirm (a centered modal, like the fork),
    and confirming must submit the removal. Radix portals menu and dialog
    content to document.body, so these mount under jsdom (the repo's
@@ -105,8 +105,10 @@ function clickDeleteMenuItem(): void {
     document.querySelectorAll<HTMLElement>(
       ".shell-worktree-context-menu-item-destructive",
     ),
-  ).find((el) => el.textContent?.includes("Delete Worktree"));
-  expect(item?.textContent).toContain("Delete Worktree");
+  ).find((el) => el.textContent?.includes("Delete"));
+  expect(item?.textContent).toContain("Delete");
+  // Fork copy: the destructive row shows the workspace.delete chord chip.
+  expect(item?.querySelector(".shell-worktree-context-menu-shortcut")).toBeTruthy();
   // Radix selects on the full pointer gesture, not a bare click.
   fireEvent.pointerDown(item!, { pointerType: "mouse", button: 0 });
   fireEvent.pointerUp(item!, { pointerType: "mouse", button: 0 });
@@ -114,7 +116,7 @@ function clickDeleteMenuItem(): void {
 }
 
 describe("worktree Delete menu (#220)", () => {
-  test("clicking Delete Worktree opens the remove action", () => {
+  test("clicking Delete opens the remove action", () => {
     const onOpenAction = vi.fn();
     mount({ onOpenAction });
     clickDeleteMenuItem();

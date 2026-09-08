@@ -1,19 +1,21 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/sidebar/WorktreeContextMenu.tsx and
-   WorktreeContextMenuView.tsx (adapter: MVP subset — the reference menu
-   routes pins, read state, groups, lineage, sleep, status and developer
-   items through zustand stores; this repo's menu holds Open in editor,
-   Reveal in Finder, Copy path, Rename, Create worktree from here and
-   Delete worktree over props. The Radix DropdownMenu primitive, the
-   hidden click-point trigger, the Workspace section label, the
-   destructive Delete row with its shortcut chip, and the ARIA names are
-   the source's. Plain fallback copy replaces the clipboard IPC.) */
+   src/renderer/src/components/sidebar/WorktreeContextMenu.tsx,
+   WorktreeContextMenuView.tsx (item order, the "Workspace" label, the
+   destructive delete row with its shortcut chip) and WorktreeOpenInMenu.tsx
+   (the "Open in" submenu). Adapter: MVP subset — the reference menu routes
+   pins, read state, statuses, groups, lineage, sleep and developer items
+   through zustand stores this repo does not have, so the menu holds Update
+   (inline rename), the Open in submenu, Copy Path and the delete row over
+   props; the submenu lists only the file-manager entry because this repo's
+   shell bridge has no open-in-external-editor IPC and no open-in-apps
+   settings section (both listed as not-ported). The Radix DropdownMenu
+   primitive, the hidden click-point trigger and the ARIA names are the
+   source's. Plain fallback copy replaces the clipboard IPC. */
 import { useRef, useState } from "react";
 import {
+  ChevronRight,
   Copy,
-  ExternalLink,
   FolderOpen,
-  FolderPlus,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -23,9 +25,8 @@ import {
   getFileManagerLabel,
   getWorktreeDeleteLabel,
   getWorktreeDeleteShortcutLabel,
-  isWorktreeCreatable,
-  isWorktreeDeletable,
   isWorktreeRenamable,
+  worktreeDeleteRowKind,
 } from "./worktree-context-menu-policy";
 import { windowShellBridge } from "./worktree-bridges";
 
@@ -57,7 +58,6 @@ export function WorktreeContextMenu({
   implicitFolderWorktree,
   disabled,
   onRename,
-  onCreateWorktree,
   onDelete,
   children,
 }: {
@@ -68,9 +68,11 @@ export function WorktreeContextMenu({
   disabled: boolean;
   /** Opens the inline title editor. Absent when the card cannot rename. */
   onRename: (() => void) | null;
-  /** Opens the new-workspace composer for this project. */
-  onCreateWorktree: (() => void) | null;
-  /** Opens the delete confirm dialog. Null for implicit folder worktrees. */
+  /**
+   * Git worktrees: opens the delete confirm dialog. Folder projects:
+   * opens the remove-project dialog (the source's "Remove Workspace"
+   * removes the workspace entry from the app, never the folder on disk).
+   */
   onDelete: (() => void) | null;
   children: React.ReactNode;
 }) {
@@ -81,14 +83,12 @@ export function WorktreeContextMenu({
 
   const renamable =
     onRename !== null && isWorktreeRenamable({ implicitFolderWorktree });
-  const creatable =
-    onCreateWorktree !== null && isWorktreeCreatable({ projectKind });
-  const deletable =
-    onDelete !== null &&
-    isWorktreeDeletable({ projectKind, implicitFolderWorktree });
+  const deleteKind = worktreeDeleteRowKind({ projectKind, implicitFolderWorktree });
   const deleteShortcut = getWorktreeDeleteShortcutLabel(
     typeof navigator === "undefined" ? "" : navigator.platform,
   );
+  const userAgent =
+    typeof navigator === "undefined" ? "" : navigator.userAgent;
 
   const openAt = (x: number, y: number) => {
     const bounds = scopeRef.current?.getBoundingClientRect();
@@ -101,10 +101,7 @@ export function WorktreeContextMenu({
   };
 
   const shell = windowShellBridge();
-  const handleOpenInEditor = () => {
-    void shell?.openPath({ path: worktree.path });
-  };
-  const handleRevealInFinder = () => {
+  const handleRevealInFileManager = () => {
     void shell?.showItemInFolder({ path: worktree.path });
   };
   const handleCopyPath = () => {
@@ -162,49 +159,45 @@ export function WorktreeContextMenu({
                 onSelect={() => onRename?.()}
               >
                 <Pencil className="size-3.5" />
-                Rename
+                Update
               </DropdownMenu.Item>
             )}
-            <DropdownMenu.Item
-              className="shell-worktree-context-menu-item"
-              disabled={disabled}
-              onSelect={handleOpenInEditor}
-            >
-              <ExternalLink className="size-3.5" />
-              Open in editor
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              className="shell-worktree-context-menu-item"
-              disabled={disabled}
-              onSelect={handleRevealInFinder}
-            >
-              <FolderOpen className="size-3.5" />
-              {getFileManagerLabel(
-                typeof navigator === "undefined" ? "" : navigator.platform,
-              )}
-            </DropdownMenu.Item>
+            <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
+            <DropdownMenu.Sub>
+              <DropdownMenu.SubTrigger
+                className="shell-worktree-context-menu-item"
+                disabled={disabled}
+              >
+                <FolderOpen className="size-3.5" />
+                Open in
+                <ChevronRight className="shell-worktree-context-menu-subtrigger-chevron" />
+              </DropdownMenu.SubTrigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.SubContent
+                  className="shell-worktree-context-menu"
+                  sideOffset={2}
+                  alignOffset={-5}
+                >
+                  <DropdownMenu.Item
+                    className="shell-worktree-context-menu-item"
+                    disabled={disabled}
+                    onSelect={handleRevealInFileManager}
+                  >
+                    <FolderOpen className="size-3.5" />
+                    {getFileManagerLabel(userAgent)}
+                  </DropdownMenu.Item>
+                </DropdownMenu.SubContent>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Sub>
             <DropdownMenu.Item
               className="shell-worktree-context-menu-item"
               disabled={disabled}
               onSelect={handleCopyPath}
             >
               <Copy className="size-3.5" />
-              Copy path
+              Copy Path
             </DropdownMenu.Item>
-            {creatable && (
-              <>
-                <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
-                <DropdownMenu.Item
-                  className="shell-worktree-context-menu-item"
-                  disabled={disabled}
-                  onSelect={() => onCreateWorktree?.()}
-                >
-                  <FolderPlus className="size-3.5" />
-                  Create worktree from here
-                </DropdownMenu.Item>
-              </>
-            )}
-            {deletable && (
+            {onDelete !== null && (
               <>
                 <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
                 <DropdownMenu.Item
@@ -213,10 +206,12 @@ export function WorktreeContextMenu({
                   onSelect={() => onDelete?.()}
                 >
                   <Trash2 className="size-3.5" />
-                  {getWorktreeDeleteLabel()}
-                  <span className="shell-worktree-context-menu-shortcut">
-                    {deleteShortcut}
-                  </span>
+                  {getWorktreeDeleteLabel(deleteKind)}
+                  {deleteKind === "delete" ? (
+                    <span className="shell-worktree-context-menu-shortcut">
+                      {deleteShortcut}
+                    </span>
+                  ) : null}
                 </DropdownMenu.Item>
               </>
             )}

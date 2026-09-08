@@ -3782,6 +3782,8 @@ export function App() {
                 onCloseToLeft={(id) => closeStripTabs(id, "to-left")}
                 onCommitTitle={commitTabTitle}
                 onCopyText={copyStripText}
+                workspacePath={current?.path ?? null}
+                onDuplicateBrowserTab={(url) => void openPortBrowserTab(url)}
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
                 onSelectEditorTab={selectEditorTab}

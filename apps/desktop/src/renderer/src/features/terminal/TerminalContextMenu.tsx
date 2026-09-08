@@ -1,12 +1,14 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from
 // src/renderer/src/components/terminal-pane/TerminalContextMenu.tsx.
 // Adapted to the Split Terminal Right subset of issue #129 (no split-down,
-// no parking, no titles, no quick commands, no native chat): the menu keeps
-// the source's copy strings and item order for Copy, Select All, Paste,
-// Split Terminal Right (with its own separator section like the source),
-// Copy Terminal ID, Clear Screen and Close Pane. Radix is replaced by a
-// lightweight fixed-position menu (role="menu") so no new component
-// dependency is needed.
+// no parking, no pane titles, no quick commands, no native chat, no pane-leaf
+// ids): the menu keeps the source's copy strings, hints and item order for
+// Copy, Select All, Paste, Split Terminal Right (its own separator section
+// like the source), Copy Session ID (agent sessions only, like the source's
+// canCopyAgentSessionId gate), Copy Terminal ID, the destructive Close Pane
+// with its chord, and Clear Screen LAST with no hint, exactly like the
+// source. Radix is replaced by a lightweight fixed-position menu
+// (role="menu") so no new component dependency is needed.
 
 import { useEffect, useRef } from "react";
 import {
@@ -17,6 +19,10 @@ import {
   TextSelect,
   X,
 } from "lucide-react";
+import {
+  menuShortcutLabel,
+  resolveMenuShortcutPlatform,
+} from "../shell/tab-menu-shortcuts";
 
 export type TerminalContextMenuPoint = { x: number; y: number };
 
@@ -31,6 +37,9 @@ type TerminalContextMenuProps = {
   canSplit: boolean;
   splitShortcut: string;
   onSplitRight: () => void;
+  /** Source gate: the pane runs an agent session (harnessId set). */
+  canCopySessionId: boolean;
+  onCopySessionId: () => void;
   onCopyTerminalId: () => void;
   onClearScreen: () => void;
   onClosePane: () => void;
@@ -76,6 +85,8 @@ export default function TerminalContextMenu({
   canSplit,
   splitShortcut,
   onSplitRight,
+  canCopySessionId,
+  onCopySessionId,
   onCopyTerminalId,
   onClearScreen,
   onClosePane,
@@ -111,7 +122,15 @@ export default function TerminalContextMenu({
 
   const isMac =
     typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
-  const mod = isMac ? "⌘" : "Ctrl";
+  const platform = resolveMenuShortcutPlatform(
+    typeof navigator === "undefined" ? "" : navigator.userAgent,
+  );
+  // Hints resolve from the shared keybinding table (persisted overrides
+  // win), like the source's formatPrimaryShortcutLabel.
+  const copyHint = menuShortcutLabel("terminal.copySelection", platform);
+  const selectAllHint = menuShortcutLabel("terminal.selectAll", platform);
+  const pasteHint = menuShortcutLabel("terminal.paste", platform);
+  const closeHint = menuShortcutLabel("terminal.closePane", platform);
   const width = 240;
   // renderToString (and any non-DOM host) has no viewport: fall back to the
   // raw point so the menu still renders for tests.
@@ -131,15 +150,15 @@ export default function TerminalContextMenu({
       className="fixed z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--shadow-floating)]"
       style={{ left: x, top: y, width }}
     >
-      <MenuItem onSelect={onCopy} shortcut={`${mod}C`}>
+      <MenuItem onSelect={onCopy} shortcut={copyHint}>
         <Copy size={14} />
         Copy
       </MenuItem>
-      <MenuItem onSelect={onSelectAll} shortcut={`${mod}A`}>
+      <MenuItem onSelect={onSelectAll} shortcut={selectAllHint}>
         <TextSelect size={14} />
         Select All
       </MenuItem>
-      <MenuItem onSelect={onPaste} shortcut={`${mod}V`}>
+      <MenuItem onSelect={onPaste} shortcut={pasteHint}>
         <Clipboard size={14} />
         Paste
       </MenuItem>
@@ -153,19 +172,26 @@ export default function TerminalContextMenu({
         </>
       ) : null}
       <div className="mx-1 my-1 h-px bg-border" role="separator" />
+      {canCopySessionId ? (
+        <MenuItem onSelect={onCopySessionId}>
+          <Copy size={14} />
+          Copy Session ID
+        </MenuItem>
+      ) : null}
       <MenuItem onSelect={onCopyTerminalId}>
         <Copy size={14} />
         Copy Terminal ID
       </MenuItem>
       <div className="mx-1 my-1 h-px bg-border" role="separator" />
-      <MenuItem onSelect={onClearScreen} shortcut={`${mod}K`}>
-        <Eraser size={14} />
-        Clear Screen
-      </MenuItem>
-      <div className="mx-1 my-1 h-px bg-border" role="separator" />
-      <MenuItem onSelect={onClosePane} shortcut={`${mod}W`} destructive>
+      <MenuItem onSelect={onClosePane} shortcut={closeHint} destructive>
         <X size={14} />
         Close Pane
+      </MenuItem>
+      <div className="mx-1 my-1 h-px bg-border" role="separator" />
+      {/* The source's Clear Screen carries no shortcut hint. */}
+      <MenuItem onSelect={onClearScreen}>
+        <Eraser size={14} />
+        Clear Screen
       </MenuItem>
     </div>
   );

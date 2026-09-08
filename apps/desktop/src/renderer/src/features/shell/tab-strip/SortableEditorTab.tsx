@@ -1,10 +1,12 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/tab-bar/BrowserTab.tsx (menu items and
-   order: pin, close variants) and SortableTab.tsx (menu open/close
-   discipline). Adapter: the row chrome stays in EditorStripTab (this
-   wrapper only owns useSortable and the shared TabContextMenu); no
-   rename row (editor tabs are always titled by their file name); "Copy
-   Path" replaces the session menu's "Copy Session ID". */
+   src/renderer/src/components/tab-bar/EditorFileTabContextMenu.tsx (menu
+   items and order: pin, close variants with Close All Editor Tabs, Copy
+   Path / Copy Relative Path, Reveal in Finder) and SortableTab.tsx (menu
+   open/close discipline). Adapter: the row chrome stays in EditorStripTab
+   (this wrapper only owns useSortable and the shared TabContextMenu); no
+   workspace-layout section (no pane splits), no Rename row (no tab-driven
+   file rename wiring) and no Open Markdown Preview row (no markdown
+   preview surface) — listed as not-ported. */
 
 import { useEffect, useRef, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
@@ -17,6 +19,7 @@ import {
   TAB_STRIP_CLOSE_MENUS_EVENT,
 } from "../TabContextMenu";
 import { TAB_STRIP_DRAG_ACTIVATION_PX } from "../SortableTab";
+import { windowShellBridge } from "../worktree-bridges";
 
 /**
  * One open file as a draggable tab-strip tab. Activation still runs on
@@ -38,6 +41,8 @@ export function SortableEditorTab({
   onCloseToLeft,
   onTogglePin,
   onCopyPath,
+  onCopyRelativePath,
+  onCloseAllEditorTabs,
   onStripKeyDown,
 }: {
   tab: EditorTabState;
@@ -54,6 +59,10 @@ export function SortableEditorTab({
   onCloseToLeft: () => void;
   onTogglePin: () => void;
   onCopyPath: () => void;
+  /** Copies the workspace-relative path; null disables the row's wiring. */
+  onCopyRelativePath: () => void;
+  /** Closes every editor tab of the workspace (Close All Editor Tabs). */
+  onCloseAllEditorTabs: () => void;
   /** Strip-level arrows/Home/End plus reorder, owned by the tab strip. */
   onStripKeyDown: (event: React.KeyboardEvent) => void;
 }): React.JSX.Element {
@@ -126,14 +135,17 @@ export function SortableEditorTab({
           hasTabsToRight,
           hasTabsToLeft,
         })}
-        copyLabel="Copy Path"
         onTogglePin={onTogglePin}
         onClose={onClose}
         onCloseOthers={onCloseOthers}
         onCloseToRight={onCloseToRight}
         onCloseToLeft={onCloseToLeft}
-        onRenameOpen={() => {}}
-        onCopy={onCopyPath}
+        onCloseAllEditorTabs={onCloseAllEditorTabs}
+        onCopyPath={onCopyPath}
+        onCopyRelativePath={onCopyRelativePath}
+        onRevealInFinder={() => {
+          void windowShellBridge()?.showItemInFolder({ path: tab.path });
+        }}
       />
     </div>
   );

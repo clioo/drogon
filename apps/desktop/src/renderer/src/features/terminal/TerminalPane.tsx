@@ -1255,6 +1255,25 @@ export function TerminalPane({
         void toast.error("Unable to copy terminal ID");
       });
   };
+  // The source gates Copy Session ID on an agent session (harnessId).
+  const copySessionId = () => {
+    setMenu(null);
+    const id = sessionRef.current.id;
+    try {
+      void navigator.clipboard
+        .writeText(id)
+        .then(() => {
+          void toast.success("Session ID copied");
+        })
+        .catch(() => {
+          callbacks.current.onError("Copy failed: clipboard unavailable.");
+          void toast.error("Unable to copy session ID");
+        });
+    } catch {
+      callbacks.current.onError("Copy failed: clipboard unavailable.");
+      void toast.error("Unable to copy session ID");
+    }
+  };
   const clearScreen = () => {
     setMenu(null);
     current?.terminal.clear();
@@ -1364,6 +1383,8 @@ export function TerminalPane({
         canSplit={canSplit ?? false}
         splitShortcut={splitRightShortcutLabel(isMac)}
         onSplitRight={splitRight}
+        canCopySessionId={session.harnessId !== null}
+        onCopySessionId={copySessionId}
         onCopyTerminalId={copyTerminalId}
         onClearScreen={clearScreen}
         onClosePane={closePane}

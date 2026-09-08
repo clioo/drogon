@@ -816,16 +816,20 @@ function ProjectRow({
             activeSessionId={activeSessionId}
             tabStrip={tabStrip}
             onRemove={
-              worktreesAvailable && !isImplicitFolderWorktree(worktree)
-                ? () => onRemoveWorktree(worktree)
-                : null
+              !worktreesAvailable
+                ? null
+                : isImplicitFolderWorktree(worktree)
+                  ? // Folder projects have one implicit worktree — the folder
+                    // itself; the fork's destructive row is "Remove Workspace"
+                    // and routes to the remove-project confirm dialog.
+                    () => onRemoveProject(project)
+                  : () => onRemoveWorktree(worktree)
             }
             onRename={
               worktreesAvailable && !isImplicitFolderWorktree(worktree)
                 ? (name) => onRenameWorktree(worktree, name)
                 : null
             }
-            onCreateWorktree={canCreate ? () => onNewWorktree() : null}
           />
         ))}
       </div>
@@ -833,7 +837,7 @@ function ProjectRow({
   );
 }
 
-/** Folder projects expose one implicit worktree (the folder itself): nothing to remove. */
+/** Folder projects expose one implicit worktree (the folder itself). */
 function isImplicitFolderWorktree(worktree: Worktree): boolean {
   return worktree.id.startsWith("implicit:") || worktree.projectId.startsWith("folder:");
 }
