@@ -1,4 +1,5 @@
-// Suggestions from the workspace's recent URLs only (no remote sources).
+// Suggestions from the workspace's recent URLs plus the fork's search top
+// action (ported behavior: bare words search, URL-like input navigates).
 import { describe, expect, test } from "vitest";
 import {
   buildBrowserAddressBarSuggestions,
@@ -30,6 +31,46 @@ describe("browser address-bar suggestions", () => {
     expect(suggestions[0].subtitle).toBe("https://example.test/11");
   });
 
+  test("a bare word becomes a search top action, never https://<word> (#234)", () => {
+    const suggestions = buildBrowserAddressBarSuggestions({
+      recentUrls: [],
+      value: "asdfghghj",
+    });
+    expect(suggestions[0]).toMatchObject({
+      url: "https://www.google.com/search?q=asdfghghj",
+      title: "asdfghghj",
+      isSearch: true,
+    });
+    expect(suggestions[0].subtitle).toContain("Google");
+    expect(
+      suggestions.every((row) => row.url !== "https://asdfghghj/"),
+    ).toBe(true);
+  });
+
+  test("multi-word input searches on the configured engine", () => {
+    const suggestions = buildBrowserAddressBarSuggestions({
+      recentUrls: [],
+      value: "react hooks",
+      searchEngine: "duckduckgo",
+    });
+    expect(suggestions[0]).toMatchObject({
+      url: "https://duckduckgo.com/?q=react%20hooks",
+      isSearch: true,
+    });
+  });
+
+  test("local-dev addresses resolve to http (#234)", () => {
+    expect(
+      buildBrowserAddressBarSuggestions({ recentUrls: [], value: "localhost:8931" })[0],
+    ).toMatchObject({ url: "http://localhost:8931/", isSearch: false });
+  });
+
+  test("domain-like input with a path navigates (#234)", () => {
+    expect(
+      buildBrowserAddressBarSuggestions({ recentUrls: [], value: "example.com/x" })[0],
+    ).toMatchObject({ url: "https://example.com/x", isSearch: false });
+  });
+
   test("a query matches recents by substring with prefix first", () => {
     const recents = [
       recent({ url: "https://other.test/review", title: "Other review" }),
@@ -39,8 +80,8 @@ describe("browser address-bar suggestions", () => {
       recentUrls: recents,
       value: "review",
     });
-    // Top action first (the typed destination), then the matching recents.
-    expect(suggestions[0].url).toBe("https://review/");
+    // Top action first (the search), then the matching recents.
+    expect(suggestions[0].isSearch).toBe(true);
     expect(suggestions.map((row) => row.url)).toContain("https://example.test/review-one");
     expect(suggestions.map((row) => row.url)).toContain("https://other.test/review");
   });
@@ -69,6 +110,11 @@ describe("browser address-bar suggestions", () => {
   test("input normalization mirrors the host policy", () => {
     expect(normalizeAddressBarInput("  example.test/a  ")).toBe("https://example.test/a");
     expect(normalizeAddressBarInput("http://localhost:3000/x")).toBe("http://localhost:3000/x");
+    expect(normalizeAddressBarInput("asdfghghj")).toBe(
+      "https://www.google.com/search?q=asdfghghj",
+    );
+    expect(normalizeAddressBarInput("localhost:8931")).toBe("http://localhost:8931/");
+    expect(normalizeAddressBarInput("example.com/x")).toBe("https://example.com/x");
     expect(normalizeAddressBarInput("")).toBeNull();
     expect(normalizeAddressBarInput("file:///etc/passwd")).toBeNull();
     expect(normalizeAddressBarInput("javascript:alert(1)")).toBeNull();

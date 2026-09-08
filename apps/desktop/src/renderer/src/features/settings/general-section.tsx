@@ -33,6 +33,7 @@ import {
   writeSkipDeleteWorktreeConfirm,
 } from "../shell/DeleteWorktreeSkipConfirmOption";
 import { CliSection } from "./cli-section";
+import { BrowserSearchEngineSetting } from "./browser-search-engine-setting";
 import {
   SettingsRow,
   SettingsSection,
@@ -116,6 +117,13 @@ export function GeneralSection(): React.JSX.Element {
         </div>
         <div className="space-y-2 py-4">
           <CliSection />
+        </div>
+        <div className="space-y-2 py-4">
+          <SettingsSubsectionHeader
+            title="Browser"
+            description="How the browser tab resolves what you type."
+          />
+          <BrowserSearchEngineSetting />
         </div>
         <div className="space-y-2 pt-4">
           <SettingsSubsectionHeader title="Support Drogon" />
