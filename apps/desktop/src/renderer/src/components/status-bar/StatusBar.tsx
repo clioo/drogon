@@ -25,6 +25,10 @@ import {
 } from "lucide-react";
 import type { AwakeMode, UsageSnapshot } from "../../../../shared/usage-contract";
 import { ClaudeIcon, OpenAIIcon } from "./provider-icons";
+// R16-M (coordinator-approved option A): the daemon connection segment owns
+// its own monitor subscription; the bar only mounts it, leading the right
+// group like the fork's host segment.
+import { DaemonConnectionSegment } from "../../features/status-bar/DaemonConnectionSegment";
 import {
   awakeStatusLabel,
   hasVisibleUsage,
@@ -250,6 +254,7 @@ export function StatusBar({
       <div className="status-bar-spacer" />
 
       <div className="status-bar-group">
+        <DaemonConnectionSegment />
         <button
           type="button"
           className="status-bar-toggle"

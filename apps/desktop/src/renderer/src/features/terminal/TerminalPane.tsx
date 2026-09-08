@@ -59,6 +59,9 @@ import { splitRightShortcutLabel } from "./terminal-split";
 import {
   TerminalProcessExitOverlay,
 } from "./TerminalProcessExitOverlay";
+import { DaemonReconnectBanner } from "./DaemonReconnectBanner";
+import { useDaemonConnection } from "../shell/daemon-connection-store";
+import { isRecoverableAfterReconnect } from "../../session-recovery";
 import {
   projectTerminalProcessExit,
   type TerminalProcessExit,
@@ -269,6 +272,7 @@ export function TerminalPane({
     caseSensitive: false,
     regex: false,
   });
+  const daemonConnection = useDaemonConnection();
   const [menu, setMenu] = useState<TerminalContextMenuPoint | null>(null);
   const [processExit, setProcessExit] = useState<TerminalProcessExit | null>(
     () => projectTerminalProcessExit(session),
@@ -677,6 +681,9 @@ export function TerminalPane({
       sessionId: session.id,
       incarnation: session.incarnation,
     };
+    // Wait between read retries while the daemon is unreachable: long enough
+    // to stay quiet, short enough that a returning service resumes promptly.
+    const TERMINAL_READ_RETRY_MS = 2000;
     const queue = new TerminalInputQueue(
       (text) => window.drogon.write({ ...inputIdentity, text }),
       () => !disposed && canWrite,
@@ -753,8 +760,21 @@ export function TerminalPane({
     // hiccup does not un-exit a session that already reported its real end.
     const projectUnverifiable = () => {
       if (lastObserved.verdict === "exited") return;
+      // Already projected: keep polling quietly instead of re-emitting the
+      // same verdict (and re-rendering the shell) on every retry.
+      if (lastObserved.verdict === "unverifiable") return;
       lastObserved = { ...lastObserved, verdict: "unverifiable" };
       callbacks.current.onSession(lastObserved);
+    };
+    // A failed read never freezes the pane and never raises an app-level
+    // error: the verdict projection already flips the tab to unverifiable
+    // (with its own retry affordance), and while the daemon is down the
+    // connection banner covers the outage. The loop keeps polling so a
+    // returning service resumes on its own; scrollback stays untouched.
+    const scheduleReadRetry = () => {
+      canWrite = false;
+      projectUnverifiable();
+      if (!disposed) timeout = setTimeout(read, TERMINAL_READ_RETRY_MS);
     };
     const subscription = terminal.onData((text) => {
       // Source parity: Ctrl+C can leave xterm's bracketed-paste bit stale;
@@ -876,9 +896,7 @@ export function TerminalPane({
         });
         if (disposed) return;
         if (!response.ok) {
-          canWrite = false;
-          projectUnverifiable();
-          report(response.error.message);
+          scheduleReadRetry();
           return;
         }
         const value = response.result;
@@ -905,11 +923,7 @@ export function TerminalPane({
         if (value.session.verdict === "exited" && bytes.length === 0) return;
         timeout = setTimeout(read, bytes.length === 65536 ? 0 : 120);
       } catch {
-        canWrite = false;
-        projectUnverifiable();
-        report(
-          "Terminal connection lost. Refresh to reconnect; process state is unverified.",
-        );
+        scheduleReadRetry();
       }
     }
     void read();
@@ -1100,6 +1114,14 @@ export function TerminalPane({
           onRestart={restartExits}
           onClose={dismissExit}
         />
+      ) : null}
+      {/* Daemon loss keeps the tab and its scrollback: the banner covers
+          the stalled pane while live/unverifiable sessions wait to
+          re-attach. Exited sessions keep the exit overlay above instead —
+          a confirmed exit never re-attaches. */}
+      {daemonConnection.state !== "connected" &&
+      isRecoverableAfterReconnect(session.verdict) ? (
+        <DaemonReconnectBanner />
       ) : null}
       <TerminalContextMenu
         open={menu !== null}

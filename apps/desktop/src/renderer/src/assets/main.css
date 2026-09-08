@@ -2772,3 +2772,23 @@
   outline: 1px solid var(--ring);
   outline-offset: -1px;
 }
+
+
+/* ── Daemon connection (R16-M) ─────────────────────────────────────── */
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
+   src/renderer/src/components/terminal-pane/TerminalRemoteRuntimeReconnectBanner.tsx
+   (retrying/disconnected card) and
+   src/renderer/src/components/status-bar/SshStatusSegment.tsx
+   (segment trigger). The cards themselves are Tailwind recipes, like the
+   other ports; only the app-level slot geometry and the reduced-motion
+   guard for the retry spinners live here. */
+.daemon-connection-banner {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daemon-connection-spinner {
+    animation: none;
+  }
+}
