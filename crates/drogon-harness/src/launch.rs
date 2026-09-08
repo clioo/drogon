@@ -72,6 +72,12 @@ pub fn plan_launch(
     if request.headless && request.harness_id == HarnessId::Opencode {
         args.push("run".into());
     }
+    // Codex's non-interactive entrypoint is a subcommand too. Keep it ahead
+    // of model/approval options just like OpenCode's `run`; the interactive
+    // TUI remains the bare `codex` command.
+    if request.headless && request.harness_id == HarnessId::Codex {
+        args.push("exec".into());
+    }
     if let Some(provider) = &request.provider {
         if request.harness_id != HarnessId::Pi {
             return Err(invalid("Provider selection is available only for Pi"));
@@ -79,7 +85,12 @@ pub fn plan_launch(
         args.extend(["--provider".into(), provider.clone()]);
     }
     if let Some(model) = &request.model {
-        args.extend(["--model".into(), model.clone()]);
+        let flag = if request.harness_id == HarnessId::Codex {
+            "-m"
+        } else {
+            "--model"
+        };
+        args.extend([flag.into(), model.clone()]);
     }
     if let Some(effort) = &request.effort {
         let (flag, allowed): (&str, &[&str]) = match request.harness_id {
@@ -89,6 +100,10 @@ pub fn plan_launch(
                 &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
             ),
             HarnessId::Antigravity => ("--effort", &["low", "medium", "high"]),
+            HarnessId::Codex => (
+                "-c",
+                &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+            ),
             HarnessId::Opencode => {
                 return Err(invalid(
                     "OpenCode effort selection is not advertised by this adapter",
@@ -98,13 +113,18 @@ pub fn plan_launch(
         if !allowed.contains(&effort.as_str()) {
             return Err(invalid("Unsupported effort for this harness"));
         }
-        args.extend([flag.into(), effort.clone()]);
+        if request.harness_id == HarnessId::Codex {
+            args.extend([flag.into(), format!("model_reasoning_effort={effort}")]);
+        } else {
+            args.extend([flag.into(), effort.clone()]);
+        }
     }
     if request.permission_mode == PermissionMode::Unattended {
         match request.harness_id {
             HarnessId::Claude | HarnessId::Antigravity => {
                 args.push("--dangerously-skip-permissions".into())
             }
+            HarnessId::Codex => args.push("--dangerously-bypass-approvals-and-sandbox".into()),
             HarnessId::Opencode => args.push("--auto".into()),
             // Pi has no per-tool approval flag; trust only this invocation's project files.
             HarnessId::Pi => args.push("--approve".into()),
@@ -144,7 +164,7 @@ pub fn plan_launch(
         // `claude -p`/`--print`, `agy -p`/`--print`.)
         if request.headless {
             match request.harness_id {
-                HarnessId::Opencode => args.push(prompt.clone()),
+                HarnessId::Opencode | HarnessId::Codex => args.push(prompt.clone()),
                 HarnessId::Antigravity => args.extend(["-p".into(), prompt.clone()]),
                 HarnessId::Claude => args.extend(["-p".into(), "--".into(), prompt.clone()]),
                 // Pi interprets @file and command-shaped positional arguments before messages.
@@ -160,6 +180,7 @@ pub fn plan_launch(
                     args.extend(["--prompt-interactive".into(), prompt.clone()])
                 }
                 HarnessId::Claude => args.extend(["--".into(), prompt.clone()]),
+                HarnessId::Codex => args.push(prompt.clone()),
                 // Pi interprets @file and command-shaped positional arguments before messages.
                 HarnessId::Pi => args.push(format!("Drogon task:\n{prompt}")),
             }
@@ -422,6 +443,7 @@ mod tests {
             HarnessId::Pi => "/usr/local/bin/pi",
             HarnessId::Opencode => "/usr/local/bin/opencode",
             HarnessId::Antigravity => "/usr/local/bin/agy",
+            HarnessId::Codex => "/usr/local/bin/codex",
         });
         plan_launch(request, exe).unwrap().args
     }

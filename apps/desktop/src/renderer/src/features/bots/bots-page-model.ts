@@ -2,7 +2,7 @@
    src/renderer/src/components/bots/use-bots-page-controller.ts (`createBot`'s
    field-mapping logic) and src/shared/drogon-bot-characters.ts's
    `drogonBotDisplayName` default fallback. Adapter: harness policy is
-   restricted to the 4 real HarnessId values this repo's harness.start
+   restricted to the 5 real HarnessId values this repo's harness.start
    admits (no free-text harness id, no explicitModel at creation -- native's
    born-empty contract requires it null); responsibilities are never part of
    the create payload (native creates a Bot with zero responsibilities by
@@ -27,15 +27,17 @@ export const BOT_HARNESS_IDS = [
   "pi",
   "opencode",
   "antigravity",
+  "codex",
 ] as const;
 export type BotHarnessId = (typeof BOT_HARNESS_IDS)[number];
 
-/** Source `getAgentLabel`, restricted to this repo's 4 admitted harness ids. */
+/** Source `getAgentLabel`, restricted to this repo's 5 admitted harness ids. */
 const HARNESS_LABELS: Record<BotHarnessId, string> = {
   claude: "Claude",
   pi: "Pi",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  codex: "Codex",
 };
 
 export function botHarnessLabel(harnessId: string): string {
@@ -113,11 +115,12 @@ export function isBotCreateFormReady(form: BotCreateFormValues): boolean {
 /** Splits the stored `explicitModel` (`provider/model`, the create form's
  *  Model field shape) into `bot.run` harness overrides. No slash (or an
  *  empty side) means a bare model id, which Pi also accepts; null/blank
- *  means no overrides. `permissionMode` is `unattended` for Pi only: a bot
- *  run is headless with no approval-answer affordance (an inherited prompt
- *  would stall it at `needs_input` forever, as the daemon probe showed),
- *  and Pi's flag trusts only the run's project files -- other harnesses
- *  keep inherited prompts rather than silently escalating theirs. */
+ *  means no overrides. `permissionMode` is `unattended` for Pi and Codex: a
+ *  bot run is headless with no approval-answer affordance (an inherited
+ *  prompt would stall it at `needs_input` forever), and these are the
+ *  harnesses whose explicit flags are part of the native headless contract.
+ *  Other harnesses keep inherited prompts rather than silently escalating
+ *  theirs. */
 export function buildBotRunHarness(
   harnessId: string,
   explicitModel: string | null,
@@ -133,7 +136,7 @@ export function buildBotRunHarness(
       overrides.model = model;
     }
   }
-  if (harnessId === "pi") {
+  if (harnessId === "pi" || harnessId === "codex") {
     overrides.permissionMode = "unattended";
   }
   return overrides;

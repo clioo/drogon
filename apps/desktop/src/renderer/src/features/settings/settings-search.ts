@@ -24,7 +24,17 @@ export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
     id: "agents",
     title: "Agents",
     description: "Default harness and per-harness launch defaults.",
-    keywords: ["harness", "model", "agent", "default", "launch", "claude", "pi", "opencode"],
+    keywords: [
+      "harness",
+      "model",
+      "agent",
+      "default",
+      "launch",
+      "claude",
+      "pi",
+      "opencode",
+      "codex",
+    ],
   },
   {
     id: "general",

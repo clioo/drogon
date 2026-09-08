@@ -41,7 +41,7 @@
 //!
 //! Harness-ID recognition (36 known IDs) is `drogon_harness::is_known_tui_agent`,
 //! a shared, recognition-only catalog -- deliberately not
-//! `drogon_harness::HarnessId` (4 launchable harnesses) and not the 14
+//! `drogon_harness::HarnessId` (5 launchable harnesses) and not the 14
 //! resumable identities. Recognizing an ID here never authorizes or
 //! proves a launch.
 

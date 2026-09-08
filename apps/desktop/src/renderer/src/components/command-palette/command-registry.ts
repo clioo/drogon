@@ -68,7 +68,14 @@ export const COMMAND_DEFS: readonly CommandDef[] = [
   {
     id: "harness.launch",
     label: "Launch harness…",
-    keywords: ["launch harness", "new agent session", "claude", "opencode", "pi"],
+    keywords: [
+      "launch harness",
+      "new agent session",
+      "claude",
+      "opencode",
+      "pi",
+      "codex",
+    ],
     isEnabled: (context) =>
       context.connected &&
       !context.busy &&

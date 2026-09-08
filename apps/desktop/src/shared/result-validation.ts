@@ -59,6 +59,7 @@ const supportedHarnessIds = new Set([
   "pi",
   "opencode",
   "antigravity",
+  "codex",
 ]);
 export const resultSchemas: Record<string, z.ZodType> = {
   ...automationResultSchemas,

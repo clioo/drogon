@@ -33,6 +33,12 @@ describe("harness.list result validation", () => {
           availability: "missing",
           executable: null,
         },
+        {
+          harnessId: "codex",
+          displayName: "Codex",
+          availability: "available",
+          executable: "/usr/local/bin/codex",
+        },
       ],
     });
     expect(result.success).toBe(true);
@@ -147,6 +153,16 @@ describe("startHarness bridge input validation (renderer -> main trust boundary)
         prompt: "Drogon task: fix the bug",
         permissionMode: "unattended",
         requestId: "22222222-2222-2222-2222-222222222222",
+      }).success,
+    ).toBe(true);
+  });
+  test("accepts Codex launch input", () => {
+    expect(
+      bridgeSchemas.startHarness.safeParse({
+        ...base,
+        harnessId: "codex",
+        permissionMode: "unattended",
+        prompt: "Inspect the fixture",
       }).success,
     ).toBe(true);
   });

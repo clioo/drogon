@@ -20,10 +20,19 @@ pub enum HarnessId {
     Opencode,
     #[serde(alias = "agy")]
     Antigravity,
+    Codex,
 }
 
 impl HarnessId {
-    pub const ALL: [Self; 4] = [Self::Claude, Self::Pi, Self::Opencode, Self::Antigravity];
+    // Keep the original four entries in their existing order: a few clients
+    // use the catalog order for stable rendering. Codex is additive.
+    pub const ALL: [Self; 5] = [
+        Self::Claude,
+        Self::Pi,
+        Self::Opencode,
+        Self::Antigravity,
+        Self::Codex,
+    ];
 
     pub fn executable(self) -> &'static str {
         match self {
@@ -31,6 +40,7 @@ impl HarnessId {
             Self::Pi => "pi",
             Self::Opencode => "opencode",
             Self::Antigravity => "agy",
+            Self::Codex => "codex",
         }
     }
 
@@ -40,6 +50,7 @@ impl HarnessId {
             Self::Pi => "Pi",
             Self::Opencode => "OpenCode",
             Self::Antigravity => "Antigravity",
+            Self::Codex => "Codex",
         }
     }
 }

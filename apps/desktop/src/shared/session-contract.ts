@@ -75,7 +75,12 @@ export type Status = {
   version: string;
 };
 export type Identity = { sessionId: string; incarnation: string };
-export type HarnessId = "claude" | "pi" | "opencode" | "antigravity";
+export type HarnessId =
+  | "claude"
+  | "pi"
+  | "opencode"
+  | "antigravity"
+  | "codex";
 export type HarnessAvailability =
   "available" | "missing" | "unsupported_launcher";
 export type PermissionMode = "inherit" | "unattended";

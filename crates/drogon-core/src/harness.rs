@@ -28,6 +28,11 @@ enum PendingHookInstall {
     Pi {
         path: PathBuf,
     },
+    Codex {
+        home: PathBuf,
+        source_home: PathBuf,
+        install_hooks: bool,
+    },
 }
 
 /// The install once admission minted real identity: every artifact to
@@ -62,37 +67,43 @@ impl Engine {
         // path now, the file/overlay gains the real identity after
         // admission and before spawn.
         let mut args = plan.args;
-        // Headless daemon runs (`pi -p`, `claude -p`, `opencode run`,
-        // `agy -p`) consume the prompt and exit: no TUI to report wait
-        // signals from, so no hook install either — installing one would
-        // only risk pinning the run at `needs_input` with nobody able to
-        // answer (issue #186).
-        let pending = if request.headless {
-            PendingHookInstall::None
-        } else {
-            match request.harness_id {
-                HarnessId::Claude => {
-                    let nonce = uuid::Uuid::new_v4().to_string();
-                    let path = crate::hooks::nonce_settings_path(&self.data_dir, &nonce);
-                    args.push("--settings".to_string());
-                    args.push(path.to_string_lossy().into_owned());
-                    PendingHookInstall::Claude { path }
+        // Headless daemon runs consume their prompt and exit, so their
+        // completion signal is the process verdict. Codex still gets a
+        // managed home in headless mode: config/resources must never be read
+        // from or written to the user's real `~/.codex`.
+        let pending = match request.harness_id {
+            HarnessId::Codex => {
+                let nonce = uuid::Uuid::new_v4().to_string();
+                PendingHookInstall::Codex {
+                    home: harness_hooks::codex::nonce_home_path(&self.data_dir, &nonce),
+                    source_home: harness_hooks::codex::source_home_path(),
+                    install_hooks: !request.headless,
                 }
-                HarnessId::Opencode => PendingHookInstall::Opencode {
-                    nonce: uuid::Uuid::new_v4().to_string(),
-                    // Why: mirrors the reference's `buildPtyHostEnv`, which
-                    // resolves the user's existing config dir from its own
-                    // process env rather than guessing OpenCode's default path.
-                    existing_config_dir: std::env::var("OPENCODE_CONFIG_DIR").ok(),
-                },
-                HarnessId::Pi => {
-                    let nonce = uuid::Uuid::new_v4().to_string();
-                    let path = harness_hooks::pi::nonce_extension_path(&self.data_dir, &nonce);
-                    args.push("--extension".to_string());
-                    args.push(path.to_string_lossy().into_owned());
-                    PendingHookInstall::Pi { path }
-                }
-                HarnessId::Antigravity => PendingHookInstall::None,
+            }
+            HarnessId::Claude if request.headless => PendingHookInstall::None,
+            HarnessId::Opencode if request.headless => PendingHookInstall::None,
+            HarnessId::Pi if request.headless => PendingHookInstall::None,
+            HarnessId::Antigravity => PendingHookInstall::None,
+            HarnessId::Claude => {
+                let nonce = uuid::Uuid::new_v4().to_string();
+                let path = crate::hooks::nonce_settings_path(&self.data_dir, &nonce);
+                args.push("--settings".to_string());
+                args.push(path.to_string_lossy().into_owned());
+                PendingHookInstall::Claude { path }
+            }
+            HarnessId::Opencode => PendingHookInstall::Opencode {
+                nonce: uuid::Uuid::new_v4().to_string(),
+                // Why: mirrors the reference's `buildPtyHostEnv`, which
+                // resolves the user's existing config dir from its own
+                // process env rather than guessing OpenCode's default path.
+                existing_config_dir: std::env::var("OPENCODE_CONFIG_DIR").ok(),
+            },
+            HarnessId::Pi => {
+                let nonce = uuid::Uuid::new_v4().to_string();
+                let path = harness_hooks::pi::nonce_extension_path(&self.data_dir, &nonce);
+                args.push("--extension".to_string());
+                args.push(path.to_string_lossy().into_owned());
+                PendingHookInstall::Pi { path }
             }
         };
         let cols = require_dimension(params, "cols", 80)?;
@@ -211,32 +222,30 @@ impl Engine {
                 cleanup_paths.push(plan.dir);
             }
         }
-        let (session_id, handle, session_json) = match session_admission::launch_reserved(
-            self.db.clone(),
-            &self.data_dir,
-            prepared,
-            None,
-            &extra_env,
-        ) {
-            Ok(launched) => launched,
-            Err(err) => {
-                for path in &cleanup_paths {
-                    crate::hooks::remove_settings_file(path);
+        let (session_id, handle, session_json) =
+            match session_admission::launch_reserved_with_cleanup(
+                self.db.clone(),
+                &self.data_dir,
+                prepared,
+                None,
+                &extra_env,
+                session_admission::LaunchOptions {
+                    cleanup_paths: cleanup_paths.clone(),
+                    headless: request.headless,
+                    explicit_wait_clear: ready
+                        .as_ref()
+                        .is_some_and(|install| install.explicit_wait_clear),
+                },
+            ) {
+                Ok(launched) => launched,
+                Err(err) => {
+                    for path in &cleanup_paths {
+                        crate::hooks::remove_settings_file(path);
+                    }
+                    return Err(err);
                 }
-                return Err(err);
-            }
-        };
-        if request.headless {
-            handle.set_headless();
-        }
-        for path in cleanup_paths {
-            handle.add_hook_cleanup_path(path);
-        }
-        if let Some(ready) = ready
-            && ready.explicit_wait_clear
-        {
-            handle.set_explicit_wait_clear();
-        }
+            };
+
         self.sessions
             .lock()
             .unwrap()
@@ -317,6 +326,40 @@ impl Engine {
                     explicit_wait_clear: true,
                 }))
             }
+            PendingHookInstall::Codex {
+                home,
+                source_home,
+                install_hooks,
+            } => {
+                if let Err(err) = harness_hooks::codex::install(
+                    &home,
+                    &source_home,
+                    cli,
+                    prepared.session_id(),
+                    prepared.incarnation(),
+                    install_hooks,
+                ) {
+                    // The install can fail after copying one or more resources
+                    // (for example, a malformed source hooks.json). The
+                    // reservation is retired by the caller, and this failed
+                    // attempt must not strand its private home on disk.
+                    crate::hooks::remove_settings_file(&home);
+                    return Err(err);
+                }
+                let mut extra_env = Vec::with_capacity(2);
+                extra_env.push((
+                    "CODEX_HOME".to_string(),
+                    home.to_string_lossy().into_owned(),
+                ));
+                // Interactive Codex hooks report wait/clear signals. A
+                // headless `codex exec` has no client that can answer a hook
+                // wait, so keep the ordinary PTY/activity policy there.
+                Ok(Some(ReadyHookInstall {
+                    cleanup_paths: vec![home],
+                    extra_env,
+                    explicit_wait_clear: install_hooks,
+                }))
+            }
         }
     }
 }
@@ -343,13 +386,15 @@ pub(crate) fn resolve_launch(
 
 /// The wire spelling of the harness id, matching the shared session
 /// contract's `HarnessId` union ("claude" | "pi" | "opencode" |
-/// "antigravity") so a session record round-trips into `harness.start`.
+/// "antigravity" | "codex") so a session record round-trips into
+/// `harness.start`.
 fn harness_id_wire(harness_id: HarnessId) -> &'static str {
     match harness_id {
         HarnessId::Claude => "claude",
         HarnessId::Pi => "pi",
         HarnessId::Opencode => "opencode",
         HarnessId::Antigravity => "antigravity",
+        HarnessId::Codex => "codex",
     }
 }
 

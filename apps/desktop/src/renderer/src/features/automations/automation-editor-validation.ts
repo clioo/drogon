@@ -126,7 +126,7 @@ export type AutomationDraftErrors = {
   graceMinutes?: string;
 };
 
-const HARNESSES = new Set(["claude", "pi", "opencode", "antigravity"]);
+const HARNESSES = new Set(["claude", "pi", "opencode", "antigravity", "codex"]);
 
 export function validateAutomationDraft(
   draft: AutomationEditorDraft,

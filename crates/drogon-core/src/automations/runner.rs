@@ -52,7 +52,7 @@ pub struct HarnessLaunchParams {
     pub provider: Option<String>,
     pub permission_mode: Option<String>,
     /// Every run through this seam is a headless daemon run (`pi -p`,
-    /// `claude -p`, `opencode run`, `agy -p`): no TUI, no approval-answer
+    /// `claude -p`, `opencode run`, `codex exec`, `agy -p`): no TUI, no approval-answer
     /// surface. Always `true` on run paths; user-facing tabs never build
     /// this struct (they call `harness.start` directly, headless absent).
     pub headless: bool,

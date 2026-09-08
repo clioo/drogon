@@ -91,6 +91,7 @@ const HARNESS_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   pi: "Pi",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  codex: "Codex",
 };
 
 /**
@@ -116,6 +117,8 @@ export function sessionLabelFor(
       return "OpenCode";
     case "agy":
       return "Antigravity";
+    case "codex":
+      return "Codex";
     default:
       return base || "Terminal";
   }

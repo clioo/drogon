@@ -166,6 +166,7 @@ describe("row copy", () => {
     expect(formatRowHarnessLabel("claude")).toBe("Claude");
     expect(formatRowHarnessLabel("opencode")).toBe("OpenCode");
     expect(formatRowHarnessLabel("antigravity")).toBe("Antigravity");
+    expect(formatRowHarnessLabel("codex")).toBe("Codex");
   });
 
   it("reports silence with the fork's freshness copy", () => {

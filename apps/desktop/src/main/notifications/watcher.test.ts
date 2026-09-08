@@ -148,6 +148,7 @@ describe("sessionLabelFor", () => {
     expect(sessionLabelFor("/bundle/cli.js", "antigravity")).toBe(
       "Antigravity",
     );
+    expect(sessionLabelFor("/bundle/cli.js", "codex")).toBe("Codex");
   });
 
   it("maps known harness executables to display names", () => {
@@ -155,6 +156,7 @@ describe("sessionLabelFor", () => {
     expect(sessionLabelFor("pi")).toBe("Pi");
     expect(sessionLabelFor("opencode")).toBe("OpenCode");
     expect(sessionLabelFor("agy")).toBe("Antigravity");
+    expect(sessionLabelFor("codex")).toBe("Codex");
   });
 
   it("falls back to the command basename, then Terminal", () => {

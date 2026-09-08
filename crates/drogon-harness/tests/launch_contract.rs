@@ -28,6 +28,10 @@ fn permission_bypass_is_explicit_per_invocation() {
         (HarnessId::Antigravity, "--dangerously-skip-permissions"),
         (HarnessId::Opencode, "--auto"),
         (HarnessId::Pi, "--approve"),
+        (
+            HarnessId::Codex,
+            "--dangerously-bypass-approvals-and-sandbox",
+        ),
     ] {
         let mut req = request(id);
         assert!(plan_launch(&req, executable()).unwrap().args.is_empty());
@@ -79,6 +83,17 @@ fn pi_preserves_exact_provider_model_and_prevents_file_expansion() {
 }
 
 #[test]
+fn codex_interactive_prompt_and_model_stay_separate_argv() {
+    let mut req = request(HarnessId::Codex);
+    req.model = Some("gpt-5.4".into());
+    req.prompt = Some("--help $(touch forbidden)".into());
+    assert_eq!(
+        plan_launch(&req, executable()).unwrap().args,
+        ["-m", "gpt-5.4", "--help $(touch forbidden)"]
+    );
+}
+
+#[test]
 fn opencode_prompt_that_looks_like_a_flag_is_one_option_value() {
     let mut req = request(HarnessId::Opencode);
     req.prompt = Some("--model another-model".into());
@@ -120,6 +135,25 @@ fn headless_runs_use_each_harness_noninteractive_entrypoint() {
     assert_eq!(
         plan_launch(&agy, executable()).unwrap().args,
         ["-p", "do the thing"]
+    );
+
+    let mut codex = request(HarnessId::Codex);
+    codex.model = Some("gpt-5.4".into());
+    codex.effort = Some("high".into());
+    codex.permission_mode = PermissionMode::Unattended;
+    codex.prompt = Some("do the thing".into());
+    codex.headless = true;
+    assert_eq!(
+        plan_launch(&codex, executable()).unwrap().args,
+        [
+            "exec",
+            "-m",
+            "gpt-5.4",
+            "-c",
+            "model_reasoning_effort=high",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "do the thing"
+        ]
     );
 }
 

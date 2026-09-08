@@ -68,7 +68,7 @@ describe("bots-page-model", () => {
     ).toBeNull();
   });
 
-  it("splits a provider/model string into bot.run overrides, unattended for Pi only", () => {
+  it("splits a provider/model string into bot.run overrides, unattended for Pi and Codex", () => {
     expect(
       buildBotRunHarness("pi", "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
     ).toEqual({
@@ -86,6 +86,10 @@ describe("bots-page-model", () => {
     // Null/blank: no model overrides, but Pi runs still go unattended.
     expect(buildBotRunHarness("pi", null)).toEqual({
       harnessId: "pi",
+      permissionMode: "unattended",
+    });
+    expect(buildBotRunHarness("codex", null)).toEqual({
+      harnessId: "codex",
       permissionMode: "unattended",
     });
     // Other harnesses keep inherited prompts (no silent escalation).

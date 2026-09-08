@@ -20,7 +20,7 @@ const cron = z
   .min(1)
   .max(256)
   .regex(/^[^\x00-\x1f\x7f]+$/);
-const harnessId = z.enum(["claude", "pi", "opencode", "antigravity"]);
+const harnessId = z.enum(["claude", "pi", "opencode", "antigravity", "codex"]);
 // Pinned harness model/provider override (additive): the daemon stores and
 // launches with these when present; absent means the harness default.
 const harnessOption = z
@@ -36,7 +36,7 @@ export type AutomationCreateInput = {
   name: string;
   cron: string;
   workspaceId: string;
-  harness: "claude" | "pi" | "opencode" | "antigravity";
+  harness: "claude" | "pi" | "opencode" | "antigravity" | "codex";
   prompt: string;
   enabled?: boolean;
   graceMinutes?: number;
@@ -49,7 +49,7 @@ export type AutomationUpdateInput = {
   name?: string;
   cron?: string;
   workspaceId?: string;
-  harness?: "claude" | "pi" | "opencode" | "antigravity";
+  harness?: "claude" | "pi" | "opencode" | "antigravity" | "codex";
   prompt?: string;
   enabled?: boolean;
   graceMinutes?: number;

@@ -2,8 +2,8 @@
 // immediate launch path. Empty model/effort means "no preference" (sent as
 // absent); unattended maps to the harness bridge's `unattended` permission
 // mode. An absent stored entry falls back to the fork defaults shared with
-// the menu (yolo/unattended for Claude Code and Antigravity, prompts kept
-// for Pi and OpenCode) — see shared/agent-defaults.ts.
+// the menu (yolo/unattended for Claude Code, Antigravity, and Codex; prompts
+// kept for Pi and OpenCode) — see shared/agent-defaults.ts.
 import type { HarnessId } from "../../../../shared/session-contract";
 import {
   resolveHarnessAgentDefault,

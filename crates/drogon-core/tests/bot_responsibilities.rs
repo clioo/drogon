@@ -319,15 +319,15 @@ fn create_rejects_bad_input_unknown_bot_and_unknown_workspace() {
 
 #[test]
 fn create_refuses_a_bot_whose_harness_is_not_launchable() {
-    // `codex` is a known TUI agent at `bot.create` but not a launchable
+    // `gemini` is a known TUI agent at `bot.create` but not a launchable
     // `HarnessId`: the owned automation would strand a live cron with no
     // runner, so creation is refused rather than stranding it.
     let fx = Fixture::new();
-    let bot = fx.create_bot("bot-1", "codex");
+    let bot = fx.create_bot("bot-1", "gemini");
     let bot_id = bot["id"].as_str().unwrap().to_string();
     assert_eq!(
         err(fx.engine.dispatch(request(
-            "resp-codex",
+            "resp-gemini",
             "bot.responsibility_create",
             json!({
                 "workspaceId": fx.workspace_id,

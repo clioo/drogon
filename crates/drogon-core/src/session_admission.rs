@@ -263,15 +263,41 @@ pub(crate) fn reserve(
 ///
 /// `extra_env` is an additional environment overlay applied after the base
 /// session environment and any `WorkerEnvironment` — today only
-/// `harness.rs`'s OpenCode/Pi hook install populates it
-/// (`OPENCODE_CONFIG_DIR`, the hook CLI path, the incarnation); every other
-/// caller passes `&[]`.
+/// `harness.rs`'s OpenCode/Pi/Codex hook installs populate it
+/// (`OPENCODE_CONFIG_DIR`, `CODEX_HOME`, the hook CLI path, the incarnation);
+/// every other caller passes `&[]`. The cleanup and state-policy arguments on
+/// [`launch_reserved_with_cleanup`] are installed before reader/poller
+/// threads start.
 pub(crate) fn launch_reserved(
     db: Arc<Mutex<Connection>>,
     data_dir: &std::path::Path,
     plan: PreparedSession,
     env: Option<WorkerEnvironment>,
     extra_env: &[(String, String)],
+) -> Result<LaunchedSession, RpcError> {
+    launch_reserved_with_cleanup(db, data_dir, plan, env, extra_env, LaunchOptions::default())
+}
+
+/// Cleanup ownership and state policy installed before reader/poller
+/// threads start. The harness adapters populate this for artifacts and state
+/// created before spawn; ordinary sessions use the default.
+#[derive(Default)]
+pub(crate) struct LaunchOptions {
+    pub(crate) cleanup_paths: Vec<std::path::PathBuf>,
+    pub(crate) headless: bool,
+    pub(crate) explicit_wait_clear: bool,
+}
+
+/// Variant of [`launch_reserved`] that registers cleanup ownership and
+/// session-state policy before any reader/poller thread can observe a fast
+/// child exit.
+pub(crate) fn launch_reserved_with_cleanup(
+    db: Arc<Mutex<Connection>>,
+    data_dir: &std::path::Path,
+    plan: PreparedSession,
+    env: Option<WorkerEnvironment>,
+    extra_env: &[(String, String)],
+    options: LaunchOptions,
 ) -> Result<LaunchedSession, RpcError> {
     if let Some(context) = &env {
         context.agrees_with(&plan)?;
@@ -317,6 +343,15 @@ pub(crate) fn launch_reserved(
                 child,
                 db.clone(),
             );
+            if options.headless {
+                handle.set_headless();
+            }
+            if options.explicit_wait_clear {
+                handle.set_explicit_wait_clear();
+            }
+            for path in options.cleanup_paths {
+                handle.add_hook_cleanup_path(path);
+            }
             spawn_reader_thread(handle.clone(), reader);
             finish_spawn(&handle, &plan.session_id)
         }

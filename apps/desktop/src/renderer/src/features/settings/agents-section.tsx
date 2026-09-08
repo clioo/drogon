@@ -24,6 +24,7 @@ export const KNOWN_HARNESS_IDS = [
   "pi",
   "opencode",
   "antigravity",
+  "codex",
 ] as const;
 
 const KNOWN_DISPLAY_NAMES: Record<string, string> = {
@@ -31,6 +32,7 @@ const KNOWN_DISPLAY_NAMES: Record<string, string> = {
   pi: "Pi",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  codex: "Codex",
 };
 
 export function harnessDisplayName(

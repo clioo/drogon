@@ -242,7 +242,7 @@ fn require_launchable_harness(harness: &str) -> Result<String, RpcError> {
     let trimmed = harness.trim();
     if serde_json::from_value::<drogon_harness::HarnessId>(json!(trimmed)).is_err() {
         return Err(invalid_argument(
-            "harness must be one of claude|pi|opencode|antigravity",
+            "harness must be one of claude|pi|opencode|antigravity|codex",
         ));
     }
     Ok(trimmed.to_string())

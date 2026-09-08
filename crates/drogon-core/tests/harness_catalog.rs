@@ -19,8 +19,10 @@ fn catalog_has_real_host_identity_and_no_claim_of_model_readiness() {
     let status = call(&engine, "status", json!({})).result.unwrap();
     let catalog = call(&engine, "harness.list", json!({})).result.unwrap();
     assert_eq!(catalog["hostId"], status["hostId"]);
-    assert_eq!(catalog["harnesses"].as_array().unwrap().len(), 4);
-    for item in catalog["harnesses"].as_array().unwrap() {
+    let harnesses = catalog["harnesses"].as_array().unwrap();
+    assert_eq!(harnesses.len(), 5);
+    assert!(harnesses.iter().any(|item| item["harnessId"] == "codex"));
+    for item in harnesses {
         assert!(item.get("models").is_none());
         assert!(item.get("auth").is_none());
         assert!(item.get("ready").is_none());
