@@ -61,6 +61,7 @@ import { getDiscardFailureToastCopy } from "./discard-failure-toast";
 import { toGitDisplayError, toPrCreateDisplayError } from "./git-error-copy";
 import { resolveCreatePrToolbarAction } from "./create-pr-action";
 import { parseUnifiedDiff } from "./unified-diff";
+import { cn } from "../../lib/utils";
 import { reconstructDiffContent } from "./diff/diff-hunk-reconstruction";
 import { DiffNavigationProvider, useDiffNavigation } from "./diff/diff-navigation-context";
 import { useEditorScheme } from "../editor/editor-theme";
@@ -134,6 +135,12 @@ function errorMessage(value: Result<unknown>, fallback: string): string {
 }
 
 const mono: React.CSSProperties = { fontFamily: "var(--font-mono)" };
+// Why a hoisted constant: a fresh `[]` per render re-armed the line-counts
+// effect every pass — its `setCounts(new Map())` then re-rendered with a
+// new Map, looping forever while the status load is not ready (or the
+// bridge lacks gitLineCounts). A module-level empty array keeps the effect
+// deps stable.
+const EMPTY_STATUS_ENTRIES: GitStatusEntry[] = [];
 
 function errorNotice(message: string): string {
   return message.startsWith("Error") ? message : `Error: ${message}`;
@@ -266,11 +273,14 @@ export function ChangesPanel({
     };
   }, [bridge, scope, revision]);
 
-  const protocolEntries = load.phase === "ready" ? load.entries : [];
+  const protocolEntries = load.phase === "ready" ? load.entries : EMPTY_STATUS_ENTRIES;
 
   useEffect(() => {
     if (!lineCountsAvailable || protocolEntries.length === 0) {
-      setCounts(new Map());
+      // Why the size guard: setting a fresh Map on every pass changed state
+      // identity each render and re-armed this effect — an infinite loop
+      // (seen as a wedged panel with a daemon that has no line counts).
+      setCounts((current) => (current.size === 0 ? current : new Map()));
       return;
     }
     let cancelled = false;
@@ -794,6 +804,23 @@ export function ChangesPanel({
             heading="No changes on this branch"
             supportingText={`This workspace is clean and this branch has no changes ahead of ${branch.upstream ?? "base"}`}
           />
+        )}
+        {showEmpty && prNotice && (
+          // Why here: the commit area (which owns prNotice) only renders with
+          // uncommitted changes, so a failed Create PR from a clean branch —
+          // the normal state for a fresh push — would fail silently (#176).
+          <div
+            role={prNotice.tone === "destructive" ? "alert" : "status"}
+            aria-live="polite"
+            className={cn(
+              "px-3 pb-2 text-[11px]",
+              prNotice.tone === "destructive" ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            <span className="block break-words leading-4 [overflow-wrap:anywhere]">
+              {prNotice.message}
+            </span>
+          </div>
         )}
         {filterState.tooLarge && (
           <EmptyState heading="Search text is too large" supportingText="Use a shorter file filter." />

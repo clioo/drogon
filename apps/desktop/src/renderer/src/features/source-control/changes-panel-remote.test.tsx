@@ -41,10 +41,21 @@ function entries(): GitStatusEntry[] {
   ];
 }
 
-function stubBridge(remotes: string[] | undefined, calls: {
-  staged: string[][];
-  prCreates: number;
-}): GitBridge {
+function stubBridge(
+  remotes: string[] | undefined,
+  calls: {
+    staged: string[][];
+    prCreates: number;
+  },
+  branch: {
+    head: string | null;
+    oid: string | null;
+    upstream: string | null;
+    ahead: number | null;
+    behind: number | null;
+  } = { head: "wt1", oid: "abc123", upstream: null, ahead: null, behind: null },
+  entriesList: GitStatusEntry[] = entries(),
+): GitBridge {
   return {
     gitStatus: async () =>
       ({
@@ -52,14 +63,10 @@ function stubBridge(remotes: string[] | undefined, calls: {
         result: {
           ...SCOPE,
           branch: {
-            head: "wt1",
-            oid: "abc123",
-            upstream: null,
-            ahead: null,
-            behind: null,
+            ...branch,
             ...(remotes === undefined ? {} : { remotes }),
           },
-          entries: entries(),
+          entries: entriesList,
           truncated: false,
         },
       }) as Result<never> as never,
@@ -135,5 +142,45 @@ describe("changes panel remote wiring (#175/#176)", () => {
     fireEvent.click(stageAll[0]);
     await vi.waitFor(() => expect(calls.staged).toHaveLength(1));
     expect(calls.staged[0]).toEqual(["index.html"]);
+  });
+
+  test("#176: a failed Create PR on a clean branch still shows the mapped error", async () => {
+    // The empty state hides the commit area (which owns prNotice); the
+    // panel must still surface the gh failure, mapped — never raw stderr.
+    const calls = { staged: [] as string[][], prCreates: 0 };
+    render(
+      <TooltipProvider>
+        <ChangesPanel
+          routeId="changes"
+          session={null}
+          workspace={WORKSPACE}
+          status={STATUS}
+          focusTarget={null}
+          bridge={stubBridge(
+            ["origin"],
+            calls,
+            {
+              head: "wt1",
+              oid: "abc123",
+              upstream: "origin/wt1",
+              ahead: 1,
+              behind: 0,
+            },
+            [],
+          )}
+        />
+      </TooltipProvider>,
+    );
+
+    const createPr = await screen.findByRole("button", { name: "Create PR" });
+    await vi.waitFor(() => expect(createPr.getAttribute("disabled")).toBeNull());
+    fireEvent.click(createPr);
+
+    const alert = await screen.findByRole("alert");
+    // The mapped copy: short, with the recovery step — no gh argv, no exit status.
+    expect(alert.textContent).toContain("This repository has no remote");
+    expect(alert.textContent).toContain("git remote add");
+    expect(alert.textContent).not.toMatch(/gh pr create|exit status/);
+    expect(calls.prCreates).toBe(1);
   });
 });
