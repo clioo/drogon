@@ -7,3 +7,4 @@ export * from "./scopes";
 export * from "./registry";
 export * from "./dispatcher";
 export * from "./effective";
+export * from "./overrides";

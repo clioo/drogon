@@ -456,6 +456,21 @@ export function App() {
   const [terminalGpuAcceleration, setTerminalGpuAcceleration] = useState(
     () => settings.get("terminalGpuAcceleration"),
   );
+  // J10 typography (R14-E): App mirrors the store so the Settings controls
+  // write through the single store path — direct envelope writes would be
+  // clobbered by the store's next debounced whole-envelope flush.
+  const [terminalFontFamily, setTerminalFontFamily] = useState(
+    () => settings.get("terminalFontFamily"),
+  );
+  const [terminalFontWeight, setTerminalFontWeight] = useState(
+    () => settings.get("terminalFontWeight"),
+  );
+  const [terminalFontWeightBold, setTerminalFontWeightBold] = useState(
+    () => settings.get("terminalFontWeightBold"),
+  );
+  const [editorFontFamily, setEditorFontFamily] = useState(
+    () => settings.get("editorFontFamily"),
+  );
   const [defaultHarnessId, setDefaultHarnessId] = useState(
     () => settings.get("defaultHarnessId"),
   );
@@ -2164,6 +2179,22 @@ export function App() {
     setTerminalGpuAcceleration(next);
     settings.set("terminalGpuAcceleration", next);
   };
+  const changeTerminalFontFamily = (next: string) => {
+    setTerminalFontFamily(next);
+    settings.set("terminalFontFamily", next);
+  };
+  const changeTerminalFontWeight = (next: number) => {
+    setTerminalFontWeight(next);
+    settings.set("terminalFontWeight", next);
+  };
+  const changeTerminalFontWeightBold = (next: number) => {
+    setTerminalFontWeightBold(next);
+    settings.set("terminalFontWeightBold", next);
+  };
+  const changeEditorFontFamily = (next: string) => {
+    setEditorFontFamily(next);
+    settings.set("editorFontFamily", next);
+  };
   const changeDefaultHarness = (next: string) => {
     setDefaultHarnessId(next);
     settings.set("defaultHarnessId", next);
@@ -2881,6 +2912,14 @@ export function App() {
                   onTerminalFontSizeChange={changeTerminalFontSize}
                   terminalGpuAcceleration={terminalGpuAcceleration}
                   onTerminalGpuAccelerationChange={changeTerminalGpuAcceleration}
+                  terminalFontFamily={terminalFontFamily}
+                  onTerminalFontFamilyChange={changeTerminalFontFamily}
+                  terminalFontWeight={terminalFontWeight}
+                  onTerminalFontWeightChange={changeTerminalFontWeight}
+                  terminalFontWeightBold={terminalFontWeightBold}
+                  onTerminalFontWeightBoldChange={changeTerminalFontWeightBold}
+                  editorFontFamily={editorFontFamily}
+                  onEditorFontFamilyChange={changeEditorFontFamily}
                   inspectorVisible={inspector}
                   onInspectorChange={changeInspector}
                   statusBarVisible={appearanceFlags.statusBarVisible}

@@ -140,8 +140,10 @@ export function AppearanceSection({
   terminalGpuAcceleration: TerminalGpuAcceleration;
   onTerminalGpuAccelerationChange: (mode: TerminalGpuAcceleration) => void;
   /** Source typography knobs. Optional: when omitted the rows read/write
-   *  the persisted envelope directly (GPU-reader pattern), so App.tsx
-   *  needs no new prop thread. */
+   *  the persisted envelope directly (GPU-reader pattern). App passes them
+   *  from its single settings store so every write shares one path — the
+   *  direct writes would otherwise be clobbered by the store's next
+   *  debounced whole-envelope flush. */
   terminalFontFamily?: string;
   onTerminalFontFamilyChange?: (family: string) => void;
   terminalFontWeight?: number;

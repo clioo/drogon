@@ -13,6 +13,10 @@ import {
   type KeybindingDefinition,
   type KeybindingPlatform,
 } from "./definitions";
+import {
+  getEffectiveBindings,
+  type KeybindingOverrides,
+} from "./overrides";
 
 export function getDefaultBindings(
   definition: KeybindingDefinition,
@@ -21,13 +25,19 @@ export function getDefaultBindings(
   return [...bindingsForPlatform(definition, platform)];
 }
 
-/** Effective chords for one action id on a platform (defaults only today). */
+/**
+ * Effective chords for one action id on a platform: the persisted override
+ * wins when present (J10 rebinding). The native menu keeps calling without
+ * overrides — main has no renderer storage to read, so its hints stay on
+ * defaults while the window dispatches the effective table.
+ */
 export function getEffectiveKeybindingsForAction(
   actionId: string,
   platform: KeybindingPlatform,
+  overrides?: KeybindingOverrides | null,
 ): string[] {
   const definition = KEYBINDING_DEFINITIONS.find(
     (entry) => entry.id === actionId,
   );
-  return definition ? getDefaultBindings(definition, platform) : [];
+  return definition ? getEffectiveBindings(definition, platform, overrides) : [];
 }
