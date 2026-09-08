@@ -230,16 +230,15 @@ describe("revealRestoredWindow flag guards", () => {
     };
   }
 
-  it("reveals inactive under DROGON_BACKGROUND_WINDOW=1 and never steals focus", () => {
+  it("keeps a saved maximized window hidden during background validation", () => {
     const win = makeRevealWindow();
     revealRestoredWindow({
       window: win,
       savedMaximized: true,
       backgroundWindow: true,
     });
-    // Maximize is a bounds op that precedes the reveal in both paths.
-    expect(win.maximize).toHaveBeenCalledTimes(1);
-    expect(win.showInactive).toHaveBeenCalledTimes(1);
+    expect(win.maximize).not.toHaveBeenCalled();
+    expect(win.showInactive).not.toHaveBeenCalled();
     expect(win.show).not.toHaveBeenCalled();
     expect(win.focus).not.toHaveBeenCalled();
     expect(win.moveTop).not.toHaveBeenCalled();
@@ -265,7 +264,8 @@ describe("revealRestoredWindow flag guards", () => {
       backgroundWindow: true,
     });
     expect(win.maximize).not.toHaveBeenCalled();
-    expect(win.showInactive).toHaveBeenCalledTimes(1);
+    expect(win.showInactive).not.toHaveBeenCalled();
+    expect(win.show).not.toHaveBeenCalled();
   });
 });
 
