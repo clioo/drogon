@@ -195,11 +195,11 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J10 R16-Q: pane Terminal, copy de Notifications, filas de Agents y Git (#150 #152 #168 #169, parcial: filas sin backend quedan listadas en el PR) | R16 | Muse | fusionada | #178 |
 | QA fix R16-R: #136 #167 #175 #176 copy y acciones de Source Control, chords del menú New tab | R16 | Muse | fusionada #136 #167 (#182); #175 #176 continúan en R16-R2 (lanzada) | #182 |
 | J8 R16-S: Bots de extremo a extremo con el modelo local (crear, responsabilidades, run visible, historial) | R16 | Muse | fusionada (#191: modelo del formulario y Run cableados); #186 #187 (lanzamiento headless de Pi) en R16-S2 (lanzada) | #191 |
-| J7 R16-T: Automations de extremo a extremo (cron real de un minuto, run now, dashboard, run de agente local) | R16 | Muse | lanzada | |
+| J7 R16-T: Automations de extremo a extremo (cron real de un minuto, run now, dashboard, run de agente local) | R16 | Muse | PR #211 en integración (pliega #188); falta la línea de aceptación en el PR | #211 |
 | J9 R16-U: Mentu de extremo a extremo con el runtime fijado (aprobar, ejecutar, evidencia, retry, cancelar) | R16 | Muse | fusionada: guardado de recetas, cancelación de nietos, run compartido panel↔tab | #193 |
 | J1 R16-V: bucle J1 de extremo a extremo con el modelo local (composer → harness → estados → persistencia → reinicio) | R16 | Muse | fusionada (#190); #185 corregido en R16-V2 (#204, fusionada) | #190 #204 |
 | J6 R16-W: Tasks de extremo a extremo contra GitHub real (`gh`, start desde issue) | R16 | Muse | fusionada: listas filtradas completas, consulta gh honesta, start desde issue y PR | #183 |
-| QA fix R16-X: #144 el editor no recibe teclado; J2 editar/guardar de extremo a extremo con check sellado que teclea | R16 | Muse | lanzada | |
+| QA fix R16-X: #144 el editor no recibe teclado; J2 editar/guardar de extremo a extremo con check sellado que teclea | R16 | Muse | fusionada (#210: el teclado llega a Monaco, marcas de conflicto/escritura externa, check sellado por teclado; cierra #144); #207 #195 #196 siguen en el mismo worker | #210 |
 | J4 R16-Y: browser de extremo a extremo (barra, navegación, buscar, zoom, menús, CLI, persistencia) y #179 chords del menú | R16 | Muse | fusionada: menú del browser con glifos (#179), replay de estado del browser tras reload | #203 |
 | QA de UI ronda 3 sobre main f0ce137 | QA | Muse | hecha: verificados #125 #127 #132 (parcial) #128 #130; nuevos #167 #168 #169; estados automation-runs, bot-responsibilities, toasts, settings-notifications/git | #170 |
 | QA de UI ronda 4 sobre main 11c1bbb | QA | Muse | hecha: 34 estados, verificados #128 #130 #146 #153 y remanentes de #150 #152 #168 #169; nuevos #195 #196 #197; incidente: cerró una pestaña Terminal 1 de la referencia (regla endurecida) | #199 |
@@ -212,13 +212,16 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | Infra: tests Rust robustos (fixtures git aislados de la config global, deadline de arranque del daemon bajo carga); ventana de fondo sin activación ni banners nativos; #198 nueva terminal activa sobre pestaña de editor | R16 | Coordinador | fusionada; además #198 | #202 |
 | QA ronda 1 (continuación) | QA | Pi local | issues nuevos: #144 (R16-X), #163 (verificar), #175 #176 (R16-R2), #179 (R16-Y), #192 #194 (R16-AE) | |
 | J10 R16-AD: Settings persisten y surten efecto de extremo a extremo (tema, harness por defecto, atajos, notificaciones, Git) | R16 | Muse | lanzada | |
-| QA fix R16-AF: #126 chrome de filtros de Tasks y verificación de #163 | R16 | Muse | lanzada | |
-| J1 R16-AG: menú nativo, badge del Dock, notificaciones y estado de ventana de extremo a extremo | R16 | Muse | lanzada | |
+| QA fix R16-AF: #126 chrome de filtros de Tasks y verificación de #163 | R16 | Muse | fusionada: chrome de filtros de Tasks del fuente; #163 verificado y cerrado | #212 |
+| J1 R16-AG: menú nativo, badge del Dock, notificaciones y estado de ventana de extremo a extremo | R16 | Muse | fusionada (#214); #209 desborde de la barra de estado a 760 px en R16-AG2 (lanzada, bloquea la instalación sellada) | #214 |
 | J1 R16-AH: superficie del terminal de extremo a extremo (salida larga, buscar, links, pegar, zoom, overlay de salida, restauración) | R16 | Muse | lanzada | |
 | QA fix R16-Z (plegado): #201 icono propio de Drogon en el paquete (arte original, generador reproducible) | R16 | Muse | en R16-Z | |
 | Regla (Carlos, 2026-09-08): el PR en verde y MERGEABLE es responsabilidad del worker antes de worker_done; el coordinador solo fusiona y corre una cadena consolidada sobre main | R16 | Coordinador | vigente en spec-r-common | |
 | QA ronda 2 sobre main 224ce7d: QA en Muse Spark, sesiones dentro de la app solo con el modelo local | QA | Muse | en curso | |
 | QA de UI ronda 5 sobre main ≥ 91d01c0 (antes rebase de #199; fixture git para Source Control) | QA | Muse | en curso | |
+| Infra R16-AI: sondas de aceptación al día con la UI de R16 (formulario de lanzamiento, superficies empaquetadas) — paso sellado bloqueado por #209 | R16 | Muse | lanzada | |
+| Infra: plan + sondas (#189 alineación del formulario, cierre de pestañas de editor en la sonda sellada, campo Model por rol) | R16 | Coordinador | fusionada | #208 |
+| Instalación: el bundle de main 66a772a falló la aceptación sellada (#209); /Applications conserva f0ce137 (sellado en verde) hasta que pase el nuevo sellado | R16 | Coordinador | bloqueada por #209 y R16-AI | |
 
 ## 7. QA continuo
 
