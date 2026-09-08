@@ -1,5 +1,10 @@
 # R16-BL debug scaffolding — temporary, removed once the ubuntu desktop-test
 # SIGTERM (clioo/drogon#312) is root-caused. Not part of the required checks.
+#
+# Key trick: the runner abandons the whole job (skipping even if:always steps)
+# when a step dies by signal. The wrapper below traps TERM so the step itself
+# survives, lets the traced vitest tree die with default dispositions, then
+# dumps the kill-attribution evidence inline.
 name: Debug ubuntu desktop test (R16-BL)
 
 on:
@@ -28,81 +33,82 @@ jobs:
       - name: Install pinned tools
         run: npm install --global pnpm@11.19.0
       - run: pnpm install --frozen-lockfile
-      - name: Environment facts
-        run: |
-          echo "== nproc =="; nproc || true
-          echo "== free -m =="; free -m || true
-          echo "== ulimit -a =="; ulimit -a || true
-          echo "== cgroup version =="
-          stat -fc %T /sys/fs/cgroup/ || true
-          echo "== cgroup memory files =="
-          (cat /sys/fs/cgroup/memory.max 2>/dev/null || true)
-          (cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true)
-          (cat /sys/fs/cgroup/memory.events 2>/dev/null || true)
-          (cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null || true)
-          echo "== systemd-oomd =="
-          (systemctl is-active systemd-oomd || true)
-          (systemctl is-enabled systemd-oomd || true)
-          (systemctl status systemd-oomd --no-pager -l 2>/dev/null | head -8 || true)
-          echo "== earlyoom =="; (pgrep -a earlyoom || echo "not running")
-          echo "== strace present =="; (command -v strace || echo MISSING)
-      - name: Start detached memory sampler (setsid, survives process-group signals)
+      - name: Start detached memory sampler
         run: |
           setsid bash -c '
             echo $$ > /tmp/sampler.pid
-            for i in $(seq 1 900); do
+            for i in $(seq 1 1200); do
               echo "=== $(date -u +%T) ==="
               (free -m | sed -n "2p" || true)
-              (ps -eo pid,ppid,rss,vsz,nlwp,comm --sort=-rss | head -8 || true)
+              (ps -eo pid,ppid,nlwp,rss,comm --sort=-rss | head -14 || true)
               sleep 1
             done
           ' > /tmp/memsample.log 2>&1 &
           sleep 1
-          ls -la /tmp/sampler.pid /tmp/memsample.log || true
-      - name: vitest run under strace (default pool, verbose)
+      - name: vitest under strace (TERM-proof wrapper, inline forensics)
         working-directory: apps/desktop
-        continue-on-error: true
         run: |
-          set -o pipefail
-          strace -f -e trace=kill,tkill,tgkill,rt_sigqueueinfo -o /tmp/kills.log \
-            pnpm exec vitest run --reporter=verbose --sequence.shuffle=false 2>&1 | tee /tmp/vitest-parallel.log
-          echo "vitest pipeline exit: $?" || true
-      - name: Forensics
-        if: always()
-        run: |
-          echo "== sampler alive? =="
-          SAMPLER=""
-          if [ -f /tmp/sampler.pid ]; then SAMPLER="$(cat /tmp/sampler.pid 2>/dev/null || true)"; fi
-          if [ -n "$SAMPLER" ] && kill -0 "$SAMPLER" 2>/dev/null; then
-            echo "ALIVE — the signal was scoped to the step process tree, not the cgroup"
-            kill "$SAMPLER" 2>/dev/null || true
-          else
-            echo "DEAD or PID file missing — see sampler log tail for how far it got"
-          fi
-          echo "== sampler log tail =="
-          (tail -30 /tmp/memsample.log || true)
-          echo "== strace kill calls (who signaled whom) =="
-          (cat /tmp/kills.log || echo "no kills.log")
-          echo "== vitest log tail =="
-          (tail -30 /tmp/vitest-parallel.log || true)
-          echo "== kernel log =="
-          (sudo dmesg 2>/dev/null | grep -iE "oom|killed process|out of memory" | tail -20 || echo "dmesg unavailable")
-          (sudo journalctl -q -k --no-pager --since "15 minutes ago" 2>/dev/null | grep -iE "oom|killed" | tail -20 || true)
-          (sudo journalctl -q -u systemd-oomd --no-pager --since "15 minutes ago" 2>/dev/null | tail -20 || true)
-          echo "== cgroup memory events after =="
-          (cat /sys/fs/cgroup/memory.events 2>/dev/null || true)
-          (cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null || true)
-          true
+          cat > /tmp/wrapper.sh <<'EOF'
+          #!/usr/bin/env bash
+          trap 'echo "== WRAPPER GOT TERM/SIGINT at $(date -u +%T) ==" >> /tmp/forensics.txt' TERM INT
+          {
+            echo "== vitest start $(date -u +%T) =="
+            strace -f -e trace=kill,tkill,tgkill,rt_sigqueueinfo -o /tmp/kills.log \
+              pnpm exec vitest run --reporter=verbose --sequence.shuffle=false
+            echo "== vitest pipeline exit: $? at $(date -u +%T) =="
+            echo "== strace kill log (pid: syscall) =="
+            cat /tmp/kills.log 2>/dev/null || echo "kills.log missing"
+            echo "== sampler tail =="
+            tail -45 /tmp/memsample.log 2>/dev/null || true
+            echo "== kernel log =="
+            (sudo dmesg 2>/dev/null | grep -iE "oom|killed process|out of memory" | tail -20) || true
+            echo "== cgroup memory.events =="
+            (cat /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          } > /tmp/forensics.txt 2>&1
+          EOF
+          bash /tmp/wrapper.sh || true
+          echo "===== FORENSICS REPORT ====="
+          cat /tmp/forensics.txt || true
+          echo "===== kills.log raw ====="
+          cat /tmp/kills.log 2>/dev/null || echo "missing"
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: diag-parallel-${{ github.run_id }}
+          name: diag-strace-${{ github.run_id }}
           path: |
-            /tmp/memsample.log
+            /tmp/forensics.txt
             /tmp/kills.log
-            /tmp/vitest-parallel.log
+            /tmp/memsample.log
           if-no-files-found: ignore
+
+  repro-sequential:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install pinned tools
+        run: npm install --global pnpm@11.19.0
+      - run: pnpm install --frozen-lockfile
+      - name: vitest one file at a time (--no-file-parallelism)
+        working-directory: apps/desktop
+        run: |
+          cat > /tmp/wrapper-seq.sh <<'EOF'
+          #!/usr/bin/env bash
+          trap 'echo "== WRAPPER GOT TERM/SIGINT at $(date -u +%T) ==" >> /tmp/forensics-seq.txt' TERM INT
+          {
+            echo "== vitest (sequential) start $(date -u +%T) =="
+            pnpm exec vitest run --reporter=verbose --sequence.shuffle=false --no-file-parallelism
+            echo "== vitest pipeline exit: $? at $(date -u +%T) =="
+          } > /tmp/forensics-seq.txt 2>&1
+          EOF
+          bash /tmp/wrapper-seq.sh || true
+          echo "===== SEQUENTIAL REPORT (tail) ====="
+          tail -60 /tmp/forensics-seq.txt || true
 
   repro-2workers:
     runs-on: ubuntu-22.04
@@ -116,25 +122,18 @@ jobs:
       - name: Install pinned tools
         run: npm install --global pnpm@11.19.0
       - run: pnpm install --frozen-lockfile
-      - name: vitest run (2 fork workers, verbose)
+      - name: vitest with exactly 2 fork workers
         working-directory: apps/desktop
-        continue-on-error: true
         run: |
-          set -o pipefail
-          pnpm exec vitest run --reporter=verbose --sequence.shuffle=false \
-            --pool=forks --maxWorkers 2 2>&1 | tee /tmp/vitest-w2.log
-          echo "vitest pipeline exit: $?" || true
-      - name: Boundary
-        if: always()
-        run: |
-          echo "== vitest log tail =="
-          (tail -30 /tmp/vitest-w2.log || true)
-          echo "== last completed files =="
-          (grep -oE "✓ src/[^ ]+\.test\.(ts|tsx)" /tmp/vitest-w2.log | sort -u | tail -8 || true)
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: diag-w2-${{ github.run_id }}
-          path: /tmp/vitest-w2.log
-          if-no-files-found: ignore
+          cat > /tmp/wrapper-w2.sh <<'EOF'
+          #!/usr/bin/env bash
+          trap 'echo "== WRAPPER GOT TERM/SIGINT at $(date -u +%T) ==" >> /tmp/forensics-w2.txt' TERM INT
+          {
+            echo "== vitest (2 workers) start $(date -u +%T) =="
+            pnpm exec vitest run --reporter=default --sequence.shuffle=false --pool=forks --maxWorkers 2
+            echo "== vitest pipeline exit: $? at $(date -u +%T) =="
+          } > /tmp/forensics-w2.txt 2>&1
+          EOF
+          bash /tmp/wrapper-w2.sh || true
+          echo "===== 2-WORKER REPORT (tail) ====="
+          tail -60 /tmp/forensics-w2.txt || true
