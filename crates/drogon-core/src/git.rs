@@ -364,6 +364,10 @@ pub enum StatusEntry {
 pub struct ParsedStatus {
     pub header: StatusHeader,
     pub entries: Vec<StatusEntry>,
+    /// Names from `git remote` (never URLs: those can carry credentials).
+    /// Empty when the repo has no remote configured. Filled by the status
+    /// runner, not the porcelain parser (porcelain carries no remote list).
+    pub remotes: Vec<String>,
 }
 
 fn parse_ab(field: &str) -> Result<(Option<i64>, Option<i64>), RpcError> {
@@ -638,7 +642,13 @@ pub fn parse_status_porcelain_v2(input: &str) -> Result<ParsedStatus, RpcError> 
         }
     }
 
-    Ok(ParsedStatus { header, entries })
+    Ok(ParsedStatus {
+        header,
+        entries,
+        // The porcelain carries no remote list; the status runner fills
+        // this from `git remote` after parsing.
+        remotes: Vec::new(),
+    })
 }
 
 fn parse_rename_or_copy_z(
@@ -743,7 +753,13 @@ pub fn parse_status_porcelain_v2_z(input: &str) -> Result<ParsedStatus, RpcError
         }
     }
 
-    Ok(ParsedStatus { header, entries })
+    Ok(ParsedStatus {
+        header,
+        entries,
+        // The porcelain carries no remote list; the status runner fills
+        // this from `git remote` after parsing.
+        remotes: Vec::new(),
+    })
 }
 
 #[allow(dead_code)]

@@ -11,7 +11,7 @@ import { SourceControlBranchLineTotalChip } from "./branch-line-total-chip";
 import { SourceControlBranchContextRow } from "./branch-context-row";
 import { SourceControlHeaderToolbar } from "./header-toolbar";
 import { resolveCreatePrToolbarAction } from "./create-pr-action";
-import { SyncRow } from "./sync-row";
+import { NO_REMOTE_SYNC_TITLE, SyncRow } from "./sync-row";
 import { EmptyState } from "./empty-state";
 import { DiffLineCounts } from "./diff-line-counts";
 import type { SourceControlEntry } from "./source-control-entry";
@@ -210,6 +210,56 @@ describe("source control render", () => {
       createElement(SyncRow, { ...props, upstream: null, ahead: null, behind: null }),
     );
     expect(withoutUpstream).toContain("No upstream");
+    // #176, fork parity (source-control-dropdown-remote-items.ts): pull is
+    // disabled with the publish-first title, fetch is never gated on the
+    // upstream — only push/pull render disabled without one.
+    expect(withoutUpstream).toContain('title="Publish the branch first to pull commits"');
+    expect(withoutUpstream).toContain('title="Fetch from remote without merging"');
+    expect(withoutUpstream.match(/disabled=""/g)).toHaveLength(2);
+  });
+
+  test("#176: a repo with no remote shows No remote and disables push/pull/fetch", () => {
+    const props = {
+      busyKind: null as null,
+      actionsAvailable: { pull: true, fetch: true },
+      onPush: () => {},
+      onPull: () => {},
+      onFetch: () => {},
+    };
+    const noRemote = html(
+      createElement(SyncRow, { ...props, upstream: null, ahead: null, behind: null, hasRemote: false }),
+    );
+    // Never the misleading "No upstream" when there is no remote at all.
+    expect(noRemote).toContain("No remote");
+    expect(noRemote).not.toContain("No upstream");
+    // Push, pull and fetch all disabled with the shared reason (Create PR
+    // lives in the header toolbar and resolves the same reason there).
+    expect(noRemote.match(/disabled=""/g)).toHaveLength(3);
+    expect(noRemote.split(`title="${NO_REMOTE_SYNC_TITLE}"`).length - 1).toBe(3);
+  });
+
+  test("#176: a remote without an upstream keeps No upstream and an enabled fetch", () => {
+    const props = {
+      busyKind: null as null,
+      actionsAvailable: { pull: true, fetch: true },
+      onPush: () => {},
+      onPull: () => {},
+      onFetch: () => {},
+    };
+    const remoteNoUpstream = html(
+      createElement(SyncRow, { ...props, upstream: null, ahead: null, behind: null, hasRemote: true }),
+    );
+    expect(remoteNoUpstream).toContain("No upstream");
+    expect(remoteNoUpstream).not.toContain("No remote");
+    // Only push/pull gated on the missing upstream; fetch stays available.
+    expect(remoteNoUpstream.match(/disabled=""/g)).toHaveLength(2);
+    expect(remoteNoUpstream).toContain('title="Fetch from remote without merging"');
+    const unknown = html(
+      createElement(SyncRow, { ...props, upstream: null, ahead: null, behind: null }),
+    );
+    // Unknown (older daemon) never claims "No remote" it cannot prove.
+    expect(unknown).toContain("No upstream");
+    expect(unknown).not.toContain("No remote");
   });
 
   test("header toolbar keeps the fork slots: Create PR, filter, overflow", () => {

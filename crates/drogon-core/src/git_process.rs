@@ -220,12 +220,36 @@ fn run_status(
     let argv = status_argv();
     let outcome = spawn_git_and_capture(workspace_root, &argv, budget, git_bin)?;
     let stdout = require_success(&outcome, &argv)?;
-    let parsed = if stdout.contains('\0') {
+    let mut parsed = if stdout.contains('\0') {
         parse_status_porcelain_v2_z(stdout)?
     } else {
         parse_status_porcelain_v2(stdout)?
     };
+    // Remote names ride along with every status read so the panel can tell
+    // "no remote configured" apart from "no upstream on an existing
+    // remote" without a second RPC (see #176). `git remote` is config-only
+    // (no network) and prints names, never URLs.
+    parsed.remotes = run_remote_names(workspace_root, budget, git_bin)?;
     Ok(ParsedGitOutput::Status(parsed))
+}
+
+/// Names from `git remote`, one per line. Empty when the repo has no remote
+/// configured. Plain `git remote` (never `-v`): URLs can carry credentials
+/// and must never reach the renderer.
+fn run_remote_names(
+    workspace_root: &Path,
+    budget: &GitProbeBudget,
+    git_bin: &Path,
+) -> Result<Vec<String>, RpcError> {
+    let argv = remote_argv();
+    let outcome = spawn_git_and_capture(workspace_root, &argv, budget, git_bin)?;
+    let stdout = require_success(&outcome, &argv)?;
+    Ok(stdout
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect())
 }
 
 /// Bounded wait for a Follower: how long to poll `CapabilityCache::is_in_flight`
@@ -424,6 +448,15 @@ pub(crate) fn status_argv() -> Vec<String> {
             .iter()
             .map(|s| s.to_string()),
     );
+    argv
+}
+
+/// Fixed `git remote` argv: names only, never `-v` — URLs can carry
+/// credentials and must never reach the renderer. Read-only, config-local,
+/// no network.
+pub(crate) fn remote_argv() -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.push("remote".to_string());
     argv
 }
 
@@ -1429,7 +1462,11 @@ pub(crate) fn numstat_argv(paths: &[String], staged: bool) -> Vec<String> {
 
 /// Fixed `gh pr create` argv: title/body ride as values, never a shell, and
 /// no `--head`/`--base` is ever invented — the PR targets whatever the
-/// current branch already tracks.
+/// current branch already tracks. `--body` always rides along (even empty:
+/// gh ≥2.89 rejects a body-less non-interactive create, verified live),
+/// so a missing body can never surface as a usage error; the UI mapper
+/// (`toPrCreateDisplayError`) strips the echoed argv from failures instead
+/// of the argv pretending the call was never half-built (see #176).
 pub(crate) fn gh_pr_create_argv(title: &str, body: Option<&str>) -> Vec<String> {
     let mut argv = vec![
         "pr".to_string(),
@@ -1770,6 +1807,51 @@ pub fn run_gh_pr_create_with_bin(
             )))
         }
         other => Err(require_mutation_success(&other, "gh", &argv).unwrap_err()),
+    }
+}
+
+/// #175/#176 argv-shape pins: bulk stage is always an explicit path list
+/// (`git add -- <paths>`, never `-A`/`-u`), remote detection is names-only
+/// (`git remote`, never `-v`), and `gh pr create` always carries `--body`.
+#[cfg(test)]
+mod scoped_argv_tests {
+    use super::{gh_pr_create_argv, remote_argv, stage_argv};
+
+    #[test]
+    fn stage_argv_is_an_explicit_scoped_add() {
+        let argv = stage_argv(&["a.txt".to_string(), "<!-- odd -->.html".to_string()]);
+        assert!(argv.contains(&"add".to_string()));
+        assert!(
+            !argv
+                .iter()
+                .any(|arg| arg == "-A" || arg == "--all" || arg == "-u" || arg == "--update")
+        );
+        let dashdash = argv.iter().position(|arg| arg == "--").unwrap();
+        assert_eq!(
+            &argv[dashdash + 1..],
+            &["a.txt".to_string(), "<!-- odd -->.html".to_string()]
+        );
+    }
+
+    #[test]
+    fn remote_argv_lists_names_without_urls() {
+        let argv = remote_argv();
+        assert_eq!(argv.last().unwrap(), "remote");
+        assert!(!argv.iter().any(|arg| arg == "-v" || arg == "--verbose"));
+    }
+
+    #[test]
+    fn pr_create_argv_always_carries_a_body_flag() {
+        // gh ≥2.89 rejects a body-less non-interactive create (verified
+        // live against gh 2.89.0), so even a missing body rides as `--body
+        // ""`; the UI mapper strips the echoed argv from failures.
+        let bare = gh_pr_create_argv("Update index.html", None);
+        assert_eq!(
+            bare.join(" "),
+            "pr create --title Update index.html --body "
+        );
+        let with_body = gh_pr_create_argv("T", Some("notes"));
+        assert!(with_body.join(" ").ends_with("--body notes"));
     }
 }
 
