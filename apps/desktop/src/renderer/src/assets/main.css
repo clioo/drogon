@@ -1500,40 +1500,9 @@
   font-size: 11px;
   color: var(--muted-foreground);
 }
-/* Agent-state glyphs: working spins on the compositor; the question
-   badge borrows amber; idle is emerald; exited/unknown stay quiet. */
-.shell-agent-spinner {
-  display: block;
-  flex-shrink: 0;
-  border-radius: 999px;
-  border: 2px solid #eab308;
-  border-top-color: transparent;
-  animation: shell-agent-spin 1s steps(12, end) infinite;
-}
-@keyframes shell-agent-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .shell-agent-spinner {
-    animation: none;
-    border-top-color: #eab308;
-  }
-}
-.shell-agent-needs-input {
-  flex-shrink: 0;
-  color: #eab308;
-}
-.shell-agent-idle {
-  flex-shrink: 0;
-  color: #10b981;
-}
-.shell-agent-exited,
-.shell-agent-unknown {
-  flex-shrink: 0;
-  color: var(--muted-foreground);
-}
+/* Agent-state glyphs moved to the fork-literal `.agent-working-spinner`
+   section appended at the end of this file (R16-I); the retired
+   `.shell-agent-*` classes above are gone with it. */
 .shell-footer .shell-footer-row {
   display: flex;
   align-items: center;
@@ -2737,4 +2706,25 @@
   white-space: nowrap;
   font-size: 11px;
   color: var(--muted-foreground);
+}
+
+/* ── Agent-state visuals (R16-I) ─────────────────────────────────────── */
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
+   src/renderer/src/assets/main.css (.agent-working-spinner): the working
+   ring animates on the compositor so rotation never touches the input
+   thread; steps(12) preserves the retired cadence. */
+@keyframes agent-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.agent-working-spinner {
+  animation: agent-spinner-rotate 1s steps(12, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-working-spinner {
+    animation: none;
+  }
 }

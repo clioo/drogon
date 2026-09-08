@@ -33,7 +33,7 @@ test("labels stay human-readable for tabs and card dots", () => {
   expect(agentStateLabel("idle")).toBe("Idle");
   expect(agentStateLabel("needs_input")).toBe("Waiting for input");
   expect(agentStateLabel("exited")).toBe("Exited");
-  expect(agentStateLabel("unknown")).toBe("No agent update");
+  expect(agentStateLabel("unknown")).toBe("No recent update");
 });
 
 test("missing agentState renders unknown, never a guess", () => {

@@ -109,6 +109,17 @@ describe("diffAgentStates", () => {
 });
 
 describe("sessionLabelFor", () => {
+  it("prefers the harnessId display name over the process basename", () => {
+    // The R15-C wart: a Pi session launched through a bundle path must not
+    // read as "cli.js needs your input".
+    expect(sessionLabelFor("/bundle/cli.js", "pi")).toBe("Pi");
+    expect(sessionLabelFor("/bundle/cli.js", "claude")).toBe("Claude Code");
+    expect(sessionLabelFor("/bundle/cli.js", "opencode")).toBe("OpenCode");
+    expect(sessionLabelFor("/bundle/cli.js", "antigravity")).toBe(
+      "Antigravity",
+    );
+  });
+
   it("maps known harness executables to display names", () => {
     expect(sessionLabelFor("/usr/local/bin/claude")).toBe("Claude Code");
     expect(sessionLabelFor("pi")).toBe("Pi");
@@ -119,23 +130,46 @@ describe("sessionLabelFor", () => {
   it("falls back to the command basename, then Terminal", () => {
     expect(sessionLabelFor("/bin/sh")).toBe("sh");
     expect(sessionLabelFor("")).toBe("Terminal");
+    expect(sessionLabelFor("/bundle/cli.js", "unknown-harness")).toBe(
+      "cli.js",
+    );
+    expect(sessionLabelFor("/bundle/cli.js", null)).toBe("cli.js");
   });
 });
 
 describe("formatNeedsInput", () => {
-  it("reads as '<label> needs your input in <worktree>'", () => {
+  it("reads as the fork's '<workspace> - <label> needs input'", () => {
     const { title, body } = formatNeedsInput(
       session("a", "needs_input"),
-      "/repos/shop/wt-1",
+      "wt-1",
     );
-    expect(`${title} ${body}`).toBe(
-      "Claude Code needs your input in wt-1",
-    );
+    expect(title).toBe("wt-1 - Claude Code needs input");
+    expect(body).toBe("Claude Code needs input.");
   });
 
-  it("falls back to the workspace wording without a path", () => {
-    const { body } = formatNeedsInput(session("a", "needs_input"), null);
-    expect(body).toBe("in the workspace");
+  it("labels by harnessId even when the command is a bundle path", () => {
+    const { title, body } = formatNeedsInput(
+      {
+        id: "a",
+        workspaceId: "ws-1",
+        command: "/bundle/cli.js",
+        harnessId: "pi",
+        agentState: "needs_input",
+        agentStateAt: "2026-09-07T12:00:00Z",
+      },
+      "wt-1",
+    );
+    expect(title).toBe("wt-1 - Pi needs input");
+    expect(body).toBe("Pi needs input.");
+  });
+
+  it("falls back to the workspace wording without a name", () => {
+    const { title, body } = formatNeedsInput(
+      session("a", "needs_input"),
+      null,
+    );
+    expect(title).toBe("workspace - Claude Code needs input");
+    expect(body).toBe("Claude Code needs input.");
   });
 
   it("uses the last path segment for the worktree name", () => {

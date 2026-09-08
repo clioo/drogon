@@ -36,6 +36,7 @@ const waiting = (id: string): WatchedSession => ({
   id,
   workspaceId: "ws-1",
   command: "/usr/local/bin/claude",
+  harnessId: "claude",
   agentState: "needs_input",
   agentStateAt: "2026-09-07T12:00:00Z",
 });
@@ -55,7 +56,7 @@ function depsFor(
     getWindow: () => window as never,
     listSessions: async () => ({
       sessions: snapshots[Math.min(calls++, snapshots.length - 1)].sessions,
-      workspacePaths: new Map([["ws-1", "/repos/shop/wt-1"]]),
+      workspaceNames: new Map([["ws-1", "wt-1"]]),
     }),
     isEnabled: () => true,
     show: (title, body, onClick) => {
@@ -86,8 +87,8 @@ describe("createNeedsInputWatcher", () => {
     await watcher.tick();
     await watcher.tick();
     expect(deps.shown).toHaveLength(1);
-    expect(deps.shown[0].title).toBe("Claude Code needs your input");
-    expect(deps.shown[0].body).toBe("in wt-1");
+    expect(deps.shown[0].title).toBe("wt-1 - Claude Code needs input");
+    expect(deps.shown[0].body).toBe("Claude Code needs input.");
     expect(deps.logs).toHaveLength(1);
     expect(deps.logs[0]).toContain("needs_input notification shown");
     const states = window.sent.filter((item) => item.channel === "ui:session-state-changed");
@@ -179,7 +180,7 @@ describe("createNeedsInputWatcher", () => {
         }
         return {
           sessions: [waiting("a")],
-          workspacePaths: new Map([["ws-1", "/repos/shop/wt-1"]]),
+          workspaceNames: new Map([["ws-1", "wt-1"]]),
         };
       },
     });
@@ -188,5 +189,21 @@ describe("createNeedsInputWatcher", () => {
     await watcher.tick();
     await watcher.tick();
     expect(deps.shown).toHaveLength(1);
+  });
+
+  it("labels a bundle-path harness session by harnessId (never cli.js)", async () => {
+    const window = fakeWindow();
+    const bundleWaiting: WatchedSession = {
+      ...waiting("a"),
+      command: "/bundle/cli.js",
+      harnessId: "pi",
+    };
+    const deps = depsFor(window, [{ sessions: [bundleWaiting] }]);
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(1);
+    expect(deps.shown[0].title).toBe("wt-1 - Pi needs input");
+    expect(deps.shown[0].body).toBe("Pi needs input.");
   });
 });
