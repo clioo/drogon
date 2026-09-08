@@ -119,6 +119,25 @@ const SURFACES = [
     ],
   },
   {
+    // R6: the "+" create menu's agent rows and the harness launch form
+    // (Model / Initial prompt / Advanced / Launch). The fork launches
+    // agents straight from QuickLaunchButton menu rows (no form); the
+    // candidate opens a Pi form whose Model error is fork-exact.
+    id: "launch-dialog",
+    label: "Agent launch dialog (+ menu Pi form)",
+    refDir: "src/renderer/src/components/tab-bar",
+    refFiles: [
+      "src/renderer/src/components/tab-bar/QuickLaunchButton.tsx",
+      "src/renderer/src/components/tab-bar/tab-agent-launch-options.ts",
+      "src/renderer/src/lib/launch-drogon-bot-session.ts",
+    ],
+    probes: ["Launch", "provider/model", "Model", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx",
+      "apps/desktop/src/renderer/src/features/shell/pi-model-mapping.ts",
+    ],
+  },
+  {
     id: "settings",
     label: "Settings (Appearance)",
     refDir: "src/renderer/src/components/settings",
@@ -994,7 +1013,12 @@ async function ensureHome(page, notes) {
 // Installed only when the run includes `tasks-rows`; every other state
 // keeps the real PATH. Shapes mirror the Rust test fixtures.
 // ---------------------------------------------------------------------------
-const TASKS_ROWS_WANTED = !STATES_FILTER || STATES_FILTER.includes("tasks-rows");
+// R6: tasks-filters reuses the same deterministic gh fixture (PR-mode
+// chrome over the fixture pulls).
+const TASKS_ROWS_WANTED =
+  !STATES_FILTER ||
+  STATES_FILTER.includes("tasks-rows") ||
+  STATES_FILTER.includes("tasks-filters");
 
 const TASKS_ROWS_FIXTURE_GH = `#!/usr/bin/env node
 // R16-P fidelity fixture: deterministic \`gh issue/pr list|view\` answers.
@@ -1272,6 +1296,28 @@ async function refSetup(page, state, ctx) {
     notes.push(`${label} chord ${chord}: no overlay appeared`);
     return false;
   };
+  // R6: filter-only query for palette result rows. Types into the open
+  // palette's filter field and never presses Enter (that would jump the
+  // selection and, on the reference, navigate away). Teardown Escape
+  // dismisses the palette on both sides.
+  const typePaletteQuery = async (query) => {
+    try {
+      let field = page.getByRole("combobox").first();
+      if ((await field.count()) === 0) {
+        field = page.getByPlaceholder(/jump|go to file/i).first();
+      }
+      if ((await field.count()) === 0) {
+        return "query field not found (captured unfiltered)";
+      }
+      await field.fill(query);
+      await delay(900);
+      const rows = await page.getByRole("option").count().catch(() => -1);
+      const items = await page.getByRole("menuitem").count().catch(() => -1);
+      return `query "${query}" typed (filter-only): options=${rows} menuitems=${items}`;
+    } catch (error) {
+      return `query typing best-effort only: ${error.message.split("\n")[0]}`;
+    }
+  };
   switch (state) {
     case "empty":
       notes.push(`ref as-is: title=${await page.title().catch(() => "?")}`);
@@ -1292,13 +1338,143 @@ async function refSetup(page, state, ctx) {
         }
       }
       break;
-    case "quick-open":
-      // Source: worktree.quickOpen "Go to File" defaults to Mod+P
-      // (definitions-core-1.ts) — same chord as the spec here.
+    case "quick-open": {
+      // R6: type a one-char filter for results (filter-only: Enter would
+      // jump the selection, so it is never pressed; teardown Escape
+      // dismisses the palette). Source: worktree.quickOpen "Go to File"
+      // defaults to Mod+P (definitions-core-1.ts) — same chord as spec.
       if (!(await chordOverlay(`${MOD}+P`, "Cmd+P"))) {
         missing.push("Cmd+P (worktree.quickOpen) opened no overlay in the empty ref");
+        break;
       }
+      notes.push(await typePaletteQuery("e"));
       break;
+    }
+    case "command-palette": {
+      // R6: the coordinator asked for ⌘K, but the fork binds no command
+      // palette to Cmd+K (terminal.clear, definitions-core-3.ts) — press
+      // it and record the (non-)effect honestly, then the source chord
+      // Mod+J (worktree.palette, commands mode) plus a typed query for
+      // results. Filter-only typing, never Enter; teardown Escape closes.
+      await tryKeys(page, `${MOD}+K`);
+      await delay(1200);
+      const kSeen = await overlayState(page);
+      notes.push(
+        overlayCount(kSeen) > 0
+          ? `spec Cmd+K unexpectedly opened an overlay (dialogs=${kSeen.dialogs} menus=${kSeen.menus} palettes=${kSeen.palettes})`
+          : "spec Cmd+K opened no palette (source: terminal.clear)",
+      );
+      if (!(await chordOverlay(`${MOD}+J`, "source Mod+J"))) {
+        missing.push("no commands palette via source chord Mod+J");
+        break;
+      }
+      notes.push(await typePaletteQuery("a"));
+      break;
+    }
+    case "launch-dialog": {
+      // R6: "+" opens the create menu (creates nothing). Selecting an
+      // agent row would launch a terminal tab in the reference, which
+      // the read-only rule forbids — so the open menu is the capture and
+      // the candidate's Pi form compares against QuickLaunchButton.tsx
+      // (direct-launch rows, no form) instead.
+      const tabsBefore = await page.getByRole("tab").count().catch(() => -1);
+      if (await tryClick(page, "button", "New tab")) {
+        await delay(600);
+        const seen = await overlayState(page);
+        if ((seen.menus || 0) > 0) {
+          notes.push(`launch menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
+          const items = await menuItemNames(page);
+          if (items.length) notes.push(`launch menu items: ${items.join(" | ")}`);
+        } else {
+          const tabsAfter = await page.getByRole("tab").count().catch(() => -1);
+          if (tabsBefore >= 0 && tabsAfter > tabsBefore) {
+            missing.push(`New tab click created a tab instead of a menu (tabs ${tabsBefore} -> ${tabsAfter}); left for the human, ref otherwise untouched`);
+          } else missing.push("New tab click opened no menu");
+        }
+        const tabsEnd = await page.getByRole("tab").count().catch(() => -1);
+        if (tabsBefore >= 0 && tabsEnd !== tabsBefore) {
+          missing.push(`tab count changed during launch-dialog setup (${tabsBefore} -> ${tabsEnd}); recorded, ref otherwise untouched`);
+        }
+      } else missing.push("no New tab affordance reachable (page view has no strip)");
+      break;
+    }
+    case "settings-shortcuts-rebind": {
+      // R6: open Shortcuts and start recording on the first recorder
+      // (click only — pressing any chord here would rebind reference
+      // settings). The "Press shortcut keys" hint is the capture;
+      // teardown Escape cancels recording. Conflict copy compares from
+      // the fork's shortcut-binding-list-mutations source instead.
+      if (await tryClick(page, "button", "Settings")) {
+        if (!(await waitForAria(page, "textbox", "Search settings"))) {
+          missing.push("Settings click acted but the settings marker never appeared");
+          break;
+        }
+        notes.push("Settings opened via Settings button (marker visible)");
+        let opened = await tryClick(page, "button", "Shortcuts", 1500);
+        if (!opened) {
+          try {
+            await page.getByRole("tab", { name: "Shortcuts" }).first().click({ timeout: 1500 });
+            await delay(350);
+            opened = true;
+          } catch {
+            opened = false;
+          }
+        }
+        if (!opened) {
+          missing.push("no Shortcuts nav reachable");
+          break;
+        }
+        notes.push("Shortcuts pane opened");
+        try {
+          const recorder = page.getByRole("button", { name: /^Change shortcut for/ }).first();
+          if ((await recorder.count()) > 0) {
+            // Read the label BEFORE clicking: once recording starts the
+            // button's name becomes the hint, so this same locator would
+            // re-resolve to the next recorder.
+            const label = await recorder.getAttribute("aria-label").catch(() => "?");
+            await recorder.click({ timeout: 2500 });
+            await delay(600);
+            const active = await page
+              .getByRole("button", { name: /Press shortcut keys/ })
+              .count()
+              .catch(() => 0);
+            notes.push(
+              active > 0
+                ? `recording started on "${(label ?? "?").slice(0, 60)}" (hint visible, no chord pressed)`
+                : "recorder clicked but no recording hint appeared",
+            );
+          } else missing.push("no shortcut recorder button reachable");
+        } catch {
+          missing.push("recorder click best-effort only");
+        }
+      } else missing.push("no Settings button reachable");
+      break;
+    }
+    case "tasks-filters": {
+      // R6: same navigate-only Tasks walk as tasks-rows, then the PRs
+      // mode tab (a view switch, no data change) for the PR chrome
+      // (Mine preset, Reviewers/Checks/Merge cells, New-issue affordance).
+      if ((await tryClick(page, "button", "Tasks")) || (await tryClick(page, "button", "Open GitHub tasks", 1200))) {
+        // Either mode marker counts: the page persists its last mode, so
+        // it can open directly in PRs.
+        const issuesMarker = await waitForAria(page, "textbox", "Search GitHub issues...", 6000);
+        const prsMarker = issuesMarker
+          ? false
+          : await waitForAria(page, "textbox", "Search GitHub PRs...", 4000);
+        if (!issuesMarker && !prsMarker) {
+          missing.push("Tasks click acted but no list marker appeared");
+          break;
+        }
+        notes.push("Tasks opened (marker visible)");
+        if (prsMarker) {
+          notes.push("Tasks already in PRs mode (persisted view, no switch needed)");
+        } else if (await tryClick(page, "button", "PRs", 2000)) {
+          await delay(1200);
+          notes.push("PRs mode selected (view switch only)");
+        } else missing.push("no PRs mode tab reachable");
+      } else missing.push("no Tasks nav reachable");
+      break;
+    }
     case "settings-appearance":
       if (await tryClick(page, "button", "Settings")) {
         await tryClick(page, "button", "Appearance", 1200).catch(() => {});
@@ -2038,6 +2214,23 @@ async function refTeardown(page, state) {
       notes.push(`teardown editor-tab close best-effort only: ${error.message.split("\n")[0]}`);
     }
   }
+  if (
+    state === "command-palette" ||
+    state === "quick-open" ||
+    state === "launch-dialog" ||
+    state === "settings-shortcuts-rebind"
+  ) {
+    // R6: the palette / create menu / shortcut recorder are not all
+    // visible to the overlay census on the reference side, so Escape
+    // unconditionally (closes palettes and menus, cancels shortcut
+    // recording). Escape never closes tabs; no chord is ever pressed
+    // while recording, so reference settings cannot change.
+    for (let i = 0; i < 2; i++) {
+      await page.keyboard.press("Escape").catch(() => {});
+      await delay(200);
+    }
+    notes.push("teardown: Escape x2 for palette/menu/recorder overlay");
+  }
   await ensureHome(page, notes);
   for (const [i, n] of notes.entries()) notes[i] = n.replace(/^home:/, "teardown:");
   void state;
@@ -2057,6 +2250,115 @@ async function ensureCandidateViewport(page, notes = []) {
   await page.setViewportSize(VIEWPORT);
 }
 
+// R6 shared fixture: deterministic Tasks rows without GitHub (also used
+// by tasks-filters for the PR-mode chrome). A scratch git repo with a
+// GitHub-shaped remote, registered as a project with one worktree. The
+// daemon's `gh` is the fixture bin (see launchCandidate), so no network
+// or account is touched and no issue/PR is created or mutated.
+// Registration and the worktree go through drogon-cli (same RPCs as the
+// dialogs); the reload lets App.refresh pick both up, because the main
+// column — Tasks included — only renders with at least one workspace.
+// Runs once per oracle invocation (ctx.tasksFixtureReady skips repeats so
+// a second state cannot register the repo twice). Returns true when the
+// Issues-mode rows rendered.
+async function setupTasksRowsFixture(page, ctx, notes, missing) {
+  if (!ctx.dataDir) {
+    missing.push("tasks fixture needs the owned candidate (dataDir unavailable)");
+    return false;
+  }
+  if (process.platform === "win32") {
+    missing.push("tasks fixture gh is unix-only");
+    return false;
+  }
+  const cliBin = path.join(
+    root, "target", "debug", "drogon-cli",
+  );
+  const tasksRepo = path.join(path.dirname(ctx.workspace), "tasks-repo");
+  try {
+    await mkdir(tasksRepo, { recursive: true });
+    await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: tasksRepo }).catch(() => {});
+    await execFileAsync("git", ["config", "user.email", "fixture@example.com"], { cwd: tasksRepo }).catch(() => {});
+    await execFileAsync("git", ["config", "user.name", "fixture"], { cwd: tasksRepo }).catch(() => {});
+    await writeFile(path.join(tasksRepo, "README.md"), "tasks fixture\n");
+    await execFileAsync("git", ["add", "README.md"], { cwd: tasksRepo }).catch(() => {});
+    await execFileAsync("git", ["commit", "-q", "-m", "initial"], { cwd: tasksRepo }).catch(() => {});
+    await execFileAsync("git", ["remote", "remove", "origin"], { cwd: tasksRepo }).catch(() => {});
+    await execFileAsync("git", ["remote", "add", "origin", "https://github.com/example/repo.git"], { cwd: tasksRepo }).catch(() => {});
+    notes.push("fixture: tasks-repo git repo with a GitHub-shaped remote");
+  } catch {
+    missing.push("tasks-repo git fixture failed");
+    return false;
+  }
+  let projectId = null;
+  try {
+    const out = await execFileAsync(cliBin, [
+      "--data-dir", ctx.dataDir, "--json", "project", "add", tasksRepo,
+    ]);
+    projectId = JSON.parse(out.stdout).result?.id ?? null;
+    notes.push("fixture: tasks-repo registered as a project");
+  } catch (error) {
+    missing.push(`tasks-repo registration failed: ${error.message.split("\n")[0]}`);
+    return false;
+  }
+  try {
+    await execFileAsync(cliBin, [
+      "--data-dir", ctx.dataDir, "--json",
+      "worktree", "create", "--project", projectId, "--name", "fixture-wt",
+    ]);
+    notes.push("fixture: one worktree created (main column needs a workspace)");
+  } catch (error) {
+    missing.push(`tasks-repo worktree failed: ${error.message.split("\n")[0]}`);
+    return false;
+  }
+  try {
+    await page.reload();
+    await emulatePageFocus(page).catch(() => {});
+    await page
+      .getByRole("button", { name: "Reveal active workspace", exact: true })
+      .waitFor({ timeout: 25000 });
+    await ensureCandidateViewport(page, notes);
+    notes.push("candidate reloaded around the fixture");
+  } catch (error) {
+    missing.push(`candidate reload failed: ${error.message.split("\n")[0]}`);
+    return false;
+  }
+  if (await tryClick(page, "button", "Tasks")) notes.push("Tasks nav opened");
+  else missing.push("no Tasks nav reachable");
+  let tasksOpen = false;
+  for (let i = 0; i < 3 && !tasksOpen; i++) {
+    try {
+      await page
+        .getByPlaceholder("Search GitHub issues...")
+        .first()
+        .waitFor({ timeout: 8000 });
+      tasksOpen = true;
+    } catch {
+      await tryClick(page, "button", "Tasks");
+    }
+  }
+  if (!tasksOpen) {
+    missing.push("Tasks page chrome never appeared");
+    return false;
+  }
+  try {
+      await page
+        .getByRole("button", { name: "Fixture sidebar issue 137" })
+        .first()
+        .waitFor({ timeout: 25000 });
+      notes.push("fixture rows rendered (Fixture sidebar issue 137 visible)");
+    } catch {
+      missing.push("fixture rows did not render within 25s");
+    }
+  try {
+    const pager = await page.getByRole("navigation", { name: "Pagination" }).count();
+    notes.push(pager > 0 ? "pagination strip rendered (37-issue probe)" : "pagination strip absent (single page)");
+  } catch {
+    notes.push("pagination probe best-effort only");
+  }
+  ctx.tasksFixtureReady = true;
+  return true;
+}
+
 async function candSetup(page, state, ctx) {
   const notes = [];
   const missing = [];
@@ -2074,6 +2376,26 @@ async function candSetup(page, state, ctx) {
     }
     notes.push(`${label} chord ${chord}: no overlay appeared`);
     return false;
+  };
+  // R6: filter-only query for palette result rows (never Enter: that
+  // would jump the selection; teardown Escape dismisses the palette).
+  const typePaletteQuery = async (query) => {
+    try {
+      let field = page.getByRole("combobox").first();
+      if ((await field.count()) === 0) {
+        field = page.getByPlaceholder(/jump|go to file/i).first();
+      }
+      if ((await field.count()) === 0) {
+        return "query field not found (captured unfiltered)";
+      }
+      await field.fill(query);
+      await delay(900);
+      const rows = await page.getByRole("option").count().catch(() => -1);
+      const items = await page.getByRole("menuitem").count().catch(() => -1);
+      return `query "${query}" typed (filter-only): options=${rows} menuitems=${items}`;
+    } catch (error) {
+      return `query typing best-effort only: ${error.message.split("\n")[0]}`;
+    }
   };
   const ensureProject = async () => {
     if (ctx.candProjectId) return true;
@@ -2336,12 +2658,162 @@ async function candSetup(page, state, ctx) {
         missing.push("Mod+J (worktree.palette) opened no overlay");
       }
       break;
-    case "quick-open":
+    case "quick-open": {
+      // R6: one-char filter for results (filter-only, never Enter). Two
+      // fixture files so the file rows (type icons, N-files-found live
+      // region) render instead of the empty-workspace notice.
       await ensureProject().catch(() => {});
+      try {
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "quick-open fixture\n");
+        await writeFile(path.join(ctx.workspace, "guide.md"), "quick-open fixture\n");
+        notes.push("fixture: two files written for result rows");
+      } catch {
+        notes.push("fixture write best-effort only");
+      }
       if (!(await chordOverlay(`${MOD}+P`, "palette.worktree.quickOpen"))) {
         missing.push("Mod+P (worktree.quickOpen) opened no overlay");
+        break;
+      }
+      notes.push(await typePaletteQuery("e"));
+      break;
+    }
+    case "command-palette": {
+      // R6: commands mode with results. Mod+K is terminal.clear, never
+      // the palette (parity with the fork) — record that it opens
+      // nothing — then Mod+J (worktree.palette) plus a typed query.
+      await ensureProject().catch(() => {});
+      await tryKeys(page, `${MOD}+K`);
+      await delay(1200);
+      const kSeen = await overlayState(page);
+      notes.push(
+        overlayCount(kSeen) > 0
+          ? `Mod+K unexpectedly opened an overlay (dialogs=${kSeen.dialogs} menus=${kSeen.menus} palettes=${kSeen.palettes})`
+          : "Mod+K opened no palette (terminal.clear parity)",
+      );
+      if (!(await chordOverlay(`${MOD}+J`, "palette.worktree.palette"))) {
+        missing.push("Mod+J (worktree.palette) opened no overlay");
+        break;
+      }
+      notes.push(await typePaletteQuery("a"));
+      break;
+    }
+    case "launch-dialog": {
+      // R6: "+" menu, then the Pi harness row opens the launch form
+      // (owned fixture: no launch fires). An unmappable Model value
+      // ("not a model" has spaces, so resolvePiModelField rejects it)
+      // surfaces the fork-exact error alert with zero side effects;
+      // helper copy and error are both in the capture.
+      await ensureProject().catch(() => {});
+      await ensureTerminal().catch(() => {});
+      if (!(await tryClick(page, "button", "New tab"))) {
+        missing.push("no New tab affordance reachable");
+        break;
+      }
+      await delay(600);
+      let formOpen = false;
+      try {
+        const pi = page.getByRole("menuitem", { name: "Pi", exact: true }).first();
+        if ((await pi.count()) > 0) {
+          await pi.click({ timeout: 3000 });
+          await delay(600);
+          notes.push("Pi harness row selected (form expected, no launch)");
+        } else notes.push("no Pi menu entry reachable");
+      } catch {
+        notes.push("Pi menu selection best-effort only");
+      }
+      try {
+        const model = page.getByPlaceholder("Harness default").first();
+        if ((await model.count()) > 0) {
+          await model.fill("not a model");
+          await delay(300);
+          await page.keyboard.press("Enter");
+          await delay(600);
+          formOpen = true;
+          notes.push("Model probe value submitted (unmappable by design)");
+        } else notes.push("no Model field (form did not open)");
+      } catch {
+        notes.push("Model probe best-effort only");
+      }
+      if (formOpen) {
+        try {
+          const alert = await page.getByRole("alert").count();
+          const helper = await page
+            .getByText("Use an exact Pi provider/model ID", { exact: false })
+            .count()
+            .catch(() => 0);
+          notes.push(
+            alert > 0
+              ? "form error alert visible (launch never fired)"
+              : "form open but no error alert appeared",
+          );
+          notes.push(helper > 0 ? "Pi helper copy visible" : "Pi helper copy not found");
+        } catch {
+          notes.push("form census best-effort only");
+        }
+      }
+      if (!formOpen) missing.push("launch form never opened for capture");
+      break;
+    }
+    case "settings-shortcuts-rebind": {
+      // R6: open Keyboard shortcuts, start recording on the first
+      // recorder, then press a claimed chord (Mod+J = Switch worktree)
+      // so the save blocks on the standing-conflict error — nothing is
+      // persisted, and the conflict copy is in the capture. Owned
+      // fixture only; the reference side never presses chords.
+      const opened =
+        (await tryClick(page, "button", "Settings")) ||
+        (await tryClick(page, "button", "Settings", 2500));
+      if (!opened) {
+        missing.push("no Settings affordance reachable");
+        break;
+      }
+      if (!(await waitForAria(page, "textbox", "Search settings"))) {
+        missing.push("Settings click acted but the settings marker never appeared");
+        break;
+      }
+      notes.push("Settings opened (marker visible)");
+      let done = await tryClick(page, "button", "Keyboard shortcuts", 1500);
+      if (!done) {
+        try {
+          await page.getByRole("tab", { name: "Keyboard shortcuts" }).first().click({ timeout: 1500 });
+          await delay(350);
+          done = true;
+        } catch {
+          done = false;
+        }
+      }
+      if (!done) {
+        missing.push("no Keyboard shortcuts section reachable");
+        break;
+      }
+      notes.push("Keyboard shortcuts pane opened");
+      try {
+        const recorder = page.getByRole("button", { name: /^Change shortcut for/ }).first();
+        if ((await recorder.count()) === 0) {
+          missing.push("no shortcut recorder button reachable");
+          break;
+        }
+        await recorder.click({ timeout: 3000 });
+        await delay(500);
+        const hint = await page
+          .getByText(/Press a shortcut|Press Escape to cancel/, { exact: false })
+          .first()
+          .count()
+          .catch(() => 0);
+        notes.push(hint > 0 ? "recording started (hint visible)" : "recorder clicked but no hint appeared");
+        await page.keyboard.press(`${MOD}+J`);
+        await delay(600);
+        const alert = await page.getByRole("alert").count().catch(() => 0);
+        notes.push(
+          alert > 0
+            ? "conflict error shown for the claimed chord (save blocked, nothing persisted)"
+            : "no conflict alert after the claimed chord",
+        );
+      } catch {
+        notes.push("rebind probe best-effort only");
       }
       break;
+    }
     case "settings-appearance": {
       const opened =
         (await tryClick(page, "button", "Settings")) ||
@@ -2426,104 +2898,50 @@ async function candSetup(page, state, ctx) {
         else missing.push("Tasks click acted but the page marker never appeared");
       } else missing.push("no Tasks nav reachable");
       break;
-    case "tasks-rows": {
-      // Deterministic rows without GitHub: a scratch git repo with a
-      // GitHub-shaped remote, registered as a project with one
-      // worktree. The daemon's `gh` is the fixture bin (see
-      // launchCandidate), so no network or account is touched and no
-      // issue/PR is created or mutated. Registration and the worktree
-      // go through drogon-cli (same RPCs as the dialogs); the reload
-      // lets App.refresh pick both up, because the main column —
-      // Tasks included — only renders with at least one workspace.
-      if (!ctx.dataDir) {
-        missing.push("tasks-rows needs the owned candidate (dataDir unavailable)");
-        break;
+    case "tasks-rows":
+      await setupTasksRowsFixture(page, ctx, notes, missing);
+      break;
+    case "tasks-filters": {
+      // R6: PR-mode chrome over the same deterministic fixture (Mine
+      // preset, Reviewers/Checks/Merge cells, New-issue affordance).
+      // Issues-mode chrome stays covered by tasks-rows.
+      if (!ctx.tasksFixtureReady) {
+        if (!(await setupTasksRowsFixture(page, ctx, notes, missing))) break;
+      } else {
+        notes.push("fixture: tasks-repo already registered (shared with tasks-rows)");
+        if (await tryClick(page, "button", "Tasks")) notes.push("Tasks nav opened");
       }
-      if (process.platform === "win32") {
-        missing.push("tasks-rows fixture gh is unix-only");
-        break;
-      }
-      const cliBin = path.join(
-        root, "target", "debug", "drogon-cli",
-      );
-      const tasksRepo = path.join(path.dirname(ctx.workspace), "tasks-repo");
-      try {
-        await mkdir(tasksRepo, { recursive: true });
-        await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: tasksRepo }).catch(() => {});
-        await execFileAsync("git", ["config", "user.email", "fixture@example.com"], { cwd: tasksRepo }).catch(() => {});
-        await execFileAsync("git", ["config", "user.name", "fixture"], { cwd: tasksRepo }).catch(() => {});
-        await writeFile(path.join(tasksRepo, "README.md"), "tasks fixture\n");
-        await execFileAsync("git", ["add", "README.md"], { cwd: tasksRepo }).catch(() => {});
-        await execFileAsync("git", ["commit", "-q", "-m", "initial"], { cwd: tasksRepo }).catch(() => {});
-        await execFileAsync("git", ["remote", "remove", "origin"], { cwd: tasksRepo }).catch(() => {});
-        await execFileAsync("git", ["remote", "add", "origin", "https://github.com/example/repo.git"], { cwd: tasksRepo }).catch(() => {});
-        notes.push("fixture: tasks-repo git repo with a GitHub-shaped remote");
-      } catch {
-        missing.push("tasks-repo git fixture failed");
-        break;
-      }
-      let projectId = null;
-      try {
-        const out = await execFileAsync(cliBin, [
-          "--data-dir", ctx.dataDir, "--json", "project", "add", tasksRepo,
-        ]);
-        projectId = JSON.parse(out.stdout).result?.id ?? null;
-        notes.push("fixture: tasks-repo registered as a project");
-      } catch (error) {
-        missing.push(`tasks-repo registration failed: ${error.message.split("\n")[0]}`);
-        break;
-      }
-      try {
-        await execFileAsync(cliBin, [
-          "--data-dir", ctx.dataDir, "--json",
-          "worktree", "create", "--project", projectId, "--name", "fixture-wt",
-        ]);
-        notes.push("fixture: one worktree created (main column needs a workspace)");
-      } catch (error) {
-        missing.push(`tasks-repo worktree failed: ${error.message.split("\n")[0]}`);
-        break;
-      }
-      try {
-        await page.reload();
-        await emulatePageFocus(page).catch(() => {});
-        await page
-          .getByRole("button", { name: "Reveal active workspace", exact: true })
-          .waitFor({ timeout: 25000 });
-        await ensureCandidateViewport(page, notes);
-        notes.push("candidate reloaded around the fixture");
-      } catch (error) {
-        missing.push(`candidate reload failed: ${error.message.split("\n")[0]}`);
-        break;
-      }
-      if (await tryClick(page, "button", "Tasks")) notes.push("Tasks nav opened");
-      else missing.push("no Tasks nav reachable");
-      let tasksOpen = false;
-      for (let i = 0; i < 3 && !tasksOpen; i++) {
+      let prsOpen = false;
+      for (let i = 0; i < 3 && !prsOpen; i++) {
         try {
           await page
-            .getByPlaceholder("Search GitHub issues...")
+            .getByPlaceholder("Search GitHub PRs...")
             .first()
             .waitFor({ timeout: 8000 });
-          tasksOpen = true;
+          prsOpen = true;
         } catch {
-          await tryClick(page, "button", "Tasks");
+          await tryClick(page, "button", "PRs");
         }
       }
-      if (!tasksOpen) {
-        missing.push("Tasks page chrome never appeared");
-      } else {
-        try {
-          await page
-            .getByRole("button", { name: "Fixture sidebar issue 137" })
-            .first()
-            .waitFor({ timeout: 25000 });
-          notes.push("fixture rows rendered (Fixture sidebar issue 137 visible)");
-        } catch {
-          missing.push("fixture rows did not render within 25s");
-        }
+      if (!prsOpen) {
+        if (await tryClick(page, "button", "PRs", 3000)) {
+          await delay(1200);
+          try {
+            await page
+              .getByPlaceholder("Search GitHub PRs...")
+              .first()
+              .waitFor({ timeout: 8000 });
+            prsOpen = true;
+          } catch {
+            missing.push("PRs mode chrome never appeared");
+          }
+        } else missing.push("no PRs mode tab reachable");
+      }
+      if (prsOpen) {
+        notes.push("PRs mode opened (fixture pulls)");
         try {
           const pager = await page.getByRole("navigation", { name: "Pagination" }).count();
-          notes.push(pager > 0 ? "pagination strip rendered (37-issue probe)" : "pagination strip absent (single page)");
+          notes.push(pager > 0 ? "pagination strip rendered in PRs mode" : "pagination strip absent in PRs mode (single page)");
         } catch {
           notes.push("pagination probe best-effort only");
         }
@@ -3455,6 +3873,17 @@ function execFileAsync(file, args2, opts) {
 
 async function candTeardown(page, state) {
   const notes = [];
+  if (state === "launch-dialog" || state === "settings-shortcuts-rebind") {
+    // R6: the harness launch Popover and the shortcut recorder are
+    // invisible to the overlay census, so Escape unconditionally first
+    // (closes the form, cancels recording); the generic path below
+    // then closes the settings dialog and returns home.
+    for (let i = 0; i < 2; i++) {
+      await page.keyboard.press("Escape").catch(() => {});
+      await delay(200);
+    }
+    notes.push("teardown: Escape x2 for launch form / recorder");
+  }
   if (state === "editor-tab" || state === "split-terminal" || state === "agent-state") {
     // Close tabs these states opened (editor file tab, split tab, extra
     // agent-state terminals), highest index first; the first strip tab stays
@@ -3537,12 +3966,16 @@ const ALL_STATES = [
   "project-terminal",
   "palette",
   "quick-open",
+  "command-palette",
+  "launch-dialog",
+  "settings-shortcuts-rebind",
   "settings-appearance",
   "changes",
   "automations",
   "browser",
   "tasks",
   "tasks-rows",
+  "tasks-filters",
   "bots",
   "statusbar-strip",
   "explorer",
@@ -3582,6 +4015,10 @@ const CAND_OWNER = {
   browser: "apps/desktop/src/renderer/src/features/browser/",
   tasks: "apps/desktop/src/renderer/src/features/shell/SidebarNav.tsx (placeholder; J6 owner builds the page)",
   "tasks-rows": "apps/desktop/src/renderer/src/features/tasks/task-page/github/Rows.tsx, List.tsx, ../PaginationBar.tsx",
+  "tasks-filters": "apps/desktop/src/renderer/src/features/tasks/task-page/github/Filters.tsx, ModeControls.tsx, IssueSelectors.tsx",
+  "command-palette": "apps/desktop/src/renderer/src/components/command-palette/CommandPalette.tsx + features/jump-palette/",
+  "launch-dialog": "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx, pi-model-mapping.ts",
+  "settings-shortcuts-rebind": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, keybinding-overrides.ts",
   bots: "apps/desktop/src/renderer/src/features/bots/",
   explorer: "apps/desktop/src/renderer/src/features/file-explorer/",
   "source-control-dirty": "apps/desktop/src/renderer/src/features/source-control/ChangesPanel.tsx, uncommitted-sections.tsx, section-header.tsx",
@@ -3619,6 +4056,10 @@ const STATE_SURFACE = {
   browser: "browser",
   tasks: "tasks",
   "tasks-rows": "tasks",
+  "tasks-filters": "tasks",
+  "command-palette": "palette",
+  "launch-dialog": "launch-dialog",
+  "settings-shortcuts-rebind": "settings-shortcuts",
   bots: "bots",
   "statusbar-strip": "status-bar",
   explorer: "explorer",
@@ -3660,6 +4101,7 @@ const SOURCE_PREFERENCE = {
   browser: ["address", "url", "classname"],
   tasks: ["issue", "filter", "classname"],
   "tasks-rows": ["github-task-row", "start workspace", "pagination", "classname"],
+  "launch-dialog": ["launch", "provider/model", "model", "classname"],
   bots: ["preset", "chat", "classname"],
   explorer: ["find files", "collapse", "explorer", "classname"],
   "sidebar-menus": ["workspace options", "project actions", "delete", "classname"],
