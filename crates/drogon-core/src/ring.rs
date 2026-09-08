@@ -145,7 +145,13 @@ mod tests {
         // push/drain sequences to wrap it several different ways.
         let sequences: Vec<Vec<&[u8]>> = vec![
             vec![b"abc", b"de", b"fghij", b"kl", b"mnopqrst"],
-            vec![b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", b"b", b"c", b"ddddd", b"eeeeeeeeeeee"],
+            vec![
+                b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                b"b",
+                b"c",
+                b"ddddd",
+                b"eeeeeeeeeeee",
+            ],
             vec![b"x", b"y", b"z"],
             vec![b"0123456789"; 12],
         ];
@@ -170,13 +176,13 @@ mod tests {
                 for limit in [1usize, 3, 16, 64] {
                     let outcome = ring.read(cursor, limit).expect("cursor in range");
                     let from = (cursor - start) as usize;
-                    let expected = &retained_bytes[from..(from + limit.min(retained_bytes.len() - from)).min(retained_bytes.len())];
+                    let expected = &retained_bytes[from..(from
+                        + limit.min(retained_bytes.len() - from))
+                    .min(retained_bytes.len())];
                     assert_eq!(
-                        outcome.bytes,
-                        expected,
+                        outcome.bytes, expected,
                         "cursor {cursor} limit {limit}: ring {:?} model {:?}",
-                        outcome.bytes,
-                        expected,
+                        outcome.bytes, expected,
                     );
                     assert_eq!(outcome.truncated, cursor < start);
                 }
@@ -238,4 +244,3 @@ mod tests {
         assert_eq!(outcome.next_cursor, 5);
     }
 }
-

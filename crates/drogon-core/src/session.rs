@@ -350,8 +350,7 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                         .unwrap_or(true)
                     {
                         last_activity_marked = Some(now);
-                        *handle.last_activity.lock().unwrap() =
-                            Some((now, crate::now_rfc3339()));
+                        *handle.last_activity.lock().unwrap() = Some((now, crate::now_rfc3339()));
                     }
                     // Output resumes: the wait signal is spent, back to
                     // activity-based derivation. Skipped for sessions that
