@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 import type { BrowserWindow } from "electron";
 import {
+  PROJECTS_CHANGED_CHANNEL,
   projectBridgeSchemas,
   projectResultSchemas,
 } from "../shared/project-contract";
@@ -82,6 +83,71 @@ const channelFor: Record<ProjectMethod, string> = {
 };
 
 /**
+ * How often main re-reads the daemon's `project.changes` digest. One
+ * second keeps a `drogon-cli project add` visibly live (issue #146's
+ * "within 2 s" proof) for one tiny indexed query per tick; the digest
+ * itself is a single sha256 over the small registry tables.
+ */
+export const PROJECT_REGISTRY_POLL_INTERVAL_MS = 1_000;
+
+export type ProjectRegistryWatcherDeps = {
+  getWindow: () => BrowserWindow | null;
+  /** The current registry revision, or null when unreadable (daemon down, contract violation). */
+  readRevision: () => Promise<string | null>;
+  pollIntervalMs?: number;
+};
+
+/**
+ * Polls the registry revision and pushes `drogon:projectsChanged` to the
+ * renderer exactly when the registry moved (issue #146). Same posture as
+ * the notifications watcher: the first sighting is the baseline rather
+ * than a change, a failed read keeps the previous baseline so no move is
+ * lost or double-reported, and the interval never keeps the app alive.
+ */
+export function startProjectRegistryWatcher(
+  deps: ProjectRegistryWatcherDeps,
+): { tick: () => Promise<void>; stop: () => void } {
+  let baseline: string | null = null;
+  let inFlight = false;
+
+  async function tick(): Promise<void> {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const revision = await deps.readRevision();
+      // Unreadable keeps the baseline: the next tick diffs against it.
+      if (revision === null) return;
+      if (baseline === null) {
+        baseline = revision;
+        return;
+      }
+      if (revision === baseline) return;
+      baseline = revision;
+      const window = deps.getWindow();
+      if (window && !window.isDestroyed())
+        window.webContents.send(PROJECTS_CHANGED_CHANNEL, revision);
+    } catch {
+      // A throwing reader is an unreadable one: keep the baseline.
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  const timer = setInterval(
+    () => void tick(),
+    deps.pollIntervalMs ?? PROJECT_REGISTRY_POLL_INTERVAL_MS,
+  );
+  // An interval alone must never keep the app alive past its windows.
+  (timer as unknown as { unref?: () => void }).unref?.();
+  return {
+    tick,
+    stop: () => {
+      clearInterval(timer);
+    },
+  };
+}
+
+/**
  * Registers one `ipcMain.handle` per project/worktree channel with the
  * same sender/frame gate main/index.ts applies to its own bridge. Own
  * registration (rather than bridgeSchemas entries) because that map is
@@ -102,4 +168,19 @@ export function registerProjectBridge(
       return dispatchProjectRequest(method, input);
     });
   }
+  // Issue #146: out-of-band registry moves (another process's
+  // `drogon-cli project add`) reach the renderer as a push. `callNative`
+  // already validates `project.changes` against the granted
+  // projectResultSchemas entry above; a non-string here only means the
+  // contract moved under us, which reads as "unreadable" rather than a
+  // push.
+  startProjectRegistryWatcher({
+    getWindow,
+    readRevision: async () => {
+      const result = await callNative("project.changes", {});
+      if (!result.ok) return null;
+      const revision = (result.result as { revision?: unknown }).revision;
+      return typeof revision === "string" ? revision : null;
+    },
+  });
 }

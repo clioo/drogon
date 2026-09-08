@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type {
   AgentState,
   Project,
@@ -64,6 +65,48 @@ export interface ProjectRpcBridge {
     worktreeId: string;
     name: string;
   }) => Promise<Result<Worktree>>;
+  /**
+   * Push subscription for out-of-band registry moves (issue #146): main
+   * sends `drogon:projectsChanged` whenever its `project.changes` poller
+   * observes a new revision. Optional like every other method, so a
+   * preload without the channel simply never pushes.
+   */
+  onProjectsChanged?: (listener: (revision: string) => void) => () => void;
+}
+
+/**
+ * Subscribes to registry pushes and reports each new revision to
+ * `onChanged`; returns the unsubscribe function, or null when this
+ * bridge offers no push channel (older preload: the caller keeps its
+ * current load-on-local-change behavior). Split from the React hook
+ * below so the refresh path is unit-testable without a DOM.
+ */
+export function subscribeProjectRegistryRefresh(
+  bridge: ProjectRpcBridge,
+  onChanged: (revision: string) => void,
+): (() => void) | null {
+  if (typeof bridge.onProjectsChanged !== "function") return null;
+  return bridge.onProjectsChanged(onChanged);
+}
+
+/**
+ * Live registry refresh (issue #146): subscribes once to main's
+ * `drogon:projectsChanged` push and bumps the project-reload tick on
+ * every new revision, so the existing `loadProjectView` effect re-reads
+ * `project.list` with no restart and no local mutation. `bump` is the
+ * stable `setProjectReloadTick` dispatcher, which keeps the App call
+ * site to one subscription line.
+ */
+export function useProjectRegistryRefresh(
+  bump: (update: (tick: number) => number) => void,
+): void {
+  useEffect(() => {
+    const stop = subscribeProjectRegistryRefresh(
+      windowProjectBridge(window.drogon),
+      () => bump((tick) => tick + 1),
+    );
+    return stop ?? undefined;
+  }, [bump]);
 }
 
 /** Reads the live `project` namespace off `window.drogon` (absent → {}). */

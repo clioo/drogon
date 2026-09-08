@@ -53,6 +53,17 @@ pub struct ProjectListResult {
     pub projects: Vec<Project>,
 }
 
+/// Revision digest over the project registry (`project.changes`, additive
+/// for #146): an opaque string that moves on every project/worktree
+/// mutation and rests otherwise, so a second client can poll one cheap
+/// digest instead of the full `project.list` fan-out to learn the registry
+/// moved out from under it.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectChangesResult {
+    pub revision: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +120,17 @@ mod tests {
         let params: ProjectAddParams = serde_json::from_value(json!({"path": "/repo"})).unwrap();
         assert_eq!(params.path, "/repo");
         assert_eq!(params.name, None);
+    }
+
+    #[test]
+    fn changes_result_carries_an_opaque_revision_string() {
+        let result = ProjectChangesResult {
+            revision: "abc123".into(),
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value, json!({ "revision": "abc123" }));
+        let back: ProjectChangesResult = serde_json::from_value(value).unwrap();
+        assert_eq!(back.revision, "abc123");
     }
 
     #[test]

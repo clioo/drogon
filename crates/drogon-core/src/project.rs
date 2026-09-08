@@ -241,6 +241,75 @@ pub(crate) fn add(
     }
 }
 
+/// Stable revision digest over the whole project registry (projects plus
+/// their worktrees), for clients that must notice out-of-band changes: a
+/// `drogon-cli project add` from another process writes the same tables the
+/// desktop reads through `project.list`, but nothing told the desktop to
+/// re-read. Polling this cheap digest (instead of the full fan-out behind
+/// `project.list` + one `worktree.list` per project) lets main forward a
+/// `drogon:projectsChanged` push to the renderer exactly when the registry
+/// moved. Any recorded mutation — project add/remove, worktree
+/// create/remove/rename — changes the digest, because every column the
+/// sidebar renders feeds it; row order is fixed (`ORDER BY id`) so an
+/// unchanged registry always digests identically, including across daemon
+/// restarts (no sequence state to lose).
+pub(crate) fn changes(conn: &Connection) -> Result<Value, drogon_protocol::RpcError> {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    let mut projects = conn
+        .prepare(
+            "SELECT id, host_id, path, name, kind, \
+             COALESCE(default_base_ref, ''), created_at \
+             FROM projects ORDER BY id",
+        )
+        .map_err(error::from_sqlite)?;
+    let project_rows = projects
+        .query_map([], |r| {
+            Ok(format!(
+                "p\0{}\0{}\0{}\0{}\0{}\0{}\0{}\n",
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+            ))
+        })
+        .map_err(error::from_sqlite)?;
+    for row in project_rows {
+        digest.update(row.map_err(error::from_sqlite)?.as_bytes());
+    }
+    drop(projects);
+    let mut worktrees = conn
+        .prepare(
+            "SELECT id, project_id, workspace_id, path, branch, head, \
+             COALESCE(base_ref, ''), COALESCE(title, ''), created_at \
+             FROM worktrees ORDER BY id",
+        )
+        .map_err(error::from_sqlite)?;
+    let worktree_rows = worktrees
+        .query_map([], |r| {
+            Ok(format!(
+                "w\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\n",
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+                r.get::<_, String>(8)?,
+            ))
+        })
+        .map_err(error::from_sqlite)?;
+    for row in worktree_rows {
+        digest.update(row.map_err(error::from_sqlite)?.as_bytes());
+    }
+    Ok(json!({ "revision": format!("{:x}", digest.finalize()) }))
+}
+
 pub(crate) fn list(conn: &Connection) -> Result<Value, drogon_protocol::RpcError> {
     let mut stmt = conn
         .prepare(
@@ -302,6 +371,14 @@ impl Engine {
         let id = require_str(params, "id")?;
         let conn = self.db.lock().unwrap();
         remove(&conn, id)
+    }
+
+    pub(super) fn do_project_changes(
+        &self,
+        _params: &Value,
+    ) -> Result<Value, drogon_protocol::RpcError> {
+        let conn = self.db.lock().unwrap();
+        changes(&conn)
     }
 }
 
@@ -376,5 +453,65 @@ mod tests {
     fn add_rejects_a_missing_path() {
         let conn = open_conn();
         assert!(add(&conn, "host-1", "/does/not/exist-xyz", None).is_err());
+    }
+
+    fn revision(conn: &Connection) -> String {
+        changes(conn).unwrap()["revision"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn changes_revision_moves_on_every_registry_mutation_and_rests_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_conn();
+        let empty = revision(&conn);
+        assert_eq!(revision(&conn), empty, "re-reading rests at one revision");
+
+        let project = add(&conn, "host-1", dir.path().to_str().unwrap(), None).unwrap();
+        let added = revision(&conn);
+        assert_ne!(added, empty, "project.add moves the revision");
+        assert_eq!(revision(&conn), added, "re-reading rests again");
+
+        // A direct worktree row exercises the same digest a
+        // `worktree.create`/`rename`/`remove` mutation feeds: the daemon
+        // records all of them in this one table, and `changes` reads the
+        // table rather than any single RPC's inputs.
+        let project_id = project["id"].as_str().unwrap();
+        conn.execute(
+            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, created_at) VALUES (?1,?2,?3,?4,?5,?6,NULL,?7)",
+            rusqlite::params![
+                "wt-1",
+                project_id,
+                "ws-1",
+                "/tmp/wt-1",
+                "feature",
+                "abc",
+                "2026-09-08T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        let with_worktree = revision(&conn);
+        assert_ne!(with_worktree, added, "a worktree row moves the revision");
+
+        conn.execute(
+            "UPDATE worktrees SET title = ?1 WHERE id = ?2",
+            ["Title", "wt-1"],
+        )
+        .unwrap();
+        let renamed = revision(&conn);
+        assert_ne!(renamed, with_worktree, "a rename moves the revision");
+
+        conn.execute("DELETE FROM worktrees WHERE id = ?1", ["wt-1"])
+            .unwrap();
+        assert_ne!(revision(&conn), renamed, "a worktree removal moves it");
+
+        remove(&conn, project_id).unwrap();
+        assert_eq!(
+            revision(&conn),
+            empty,
+            "removing the only project restores the empty revision"
+        );
     }
 }
