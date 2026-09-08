@@ -16,6 +16,7 @@ export {
   type EditorState,
 } from "./EditorPane";
 export { EditorHost, type EditorHostProps } from "./EditorHost";
+export { planEditorRehydrate } from "./editor-rehydrate";
 export {
   FilesRequestIdCapError,
   MAX_RETAINED_REQUEST_IDS,

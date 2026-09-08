@@ -6,6 +6,7 @@ import {
   parseTabStripState,
   partitionPinnedOrder,
   reconcileTabOrder,
+  remapTabOrder,
   resolveTabTitle,
   saveTabStripState,
   shiftTabOrder,
@@ -144,18 +145,24 @@ describe("tab-strip persistence", () => {
       pinned: ["a"],
       titles: { b: "Custom" },
       splits: {},
+      editors: [],
+      browsers: [],
     });
     expect(loadTabStripState(storage, "ws-1")).toEqual({
       order: ["a", "b"],
       pinned: ["a"],
       titles: { b: "Custom" },
       splits: {},
+      editors: [],
+      browsers: [],
     });
     expect(loadTabStripState(storage, "ws-2")).toEqual({
       order: [],
       pinned: [],
       titles: {},
       splits: {},
+      editors: [],
+      browsers: [],
     });
   });
 
@@ -169,12 +176,21 @@ describe("tab-strip persistence", () => {
       pinned: [],
       titles: {},
       splits: {},
+      editors: [],
+      browsers: [],
     });
     expect(
       parseTabStripState(
         JSON.stringify({ state: { order: ["a"], pinned: ["ghost"], titles: { a: 7 } } }),
       ),
-    ).toEqual({ order: ["a"], pinned: [], titles: {}, splits: {} });
+    ).toEqual({
+      order: ["a"],
+      pinned: [],
+      titles: {},
+      splits: {},
+      editors: [],
+      browsers: [],
+    });
   });
 
   it("round-trips splits additively and reads pre-split envelopes", () => {
@@ -186,6 +202,8 @@ describe("tab-strip persistence", () => {
       splits: {
         a: { panes: ["a", "b"], active: "b", sizes: [0.6, 0.4] },
       },
+      editors: [],
+      browsers: [],
     });
     expect(loadTabStripState(storage, "ws-1").splits).toEqual({
       a: { panes: ["a", "b"], active: "b", sizes: [0.6, 0.4] },
@@ -204,6 +222,103 @@ describe("tab-strip persistence", () => {
         }),
       ).splits,
     ).toEqual({});
+  });
+});
+
+describe("tab-strip membership (R16-AJ, fixes #215)", () => {
+  it("round-trips editor paths and browser id+url records", () => {
+    const storage = memStorage();
+    saveTabStripState(storage, "ws-1", {
+      order: ["ws-1::notes.txt", "browser-tab-1"],
+      pinned: [],
+      titles: {},
+      splits: {},
+      editors: ["notes.txt", "src/a.ts"],
+      browsers: [{ tabId: "browser-tab-1", url: "https://example.com/" }],
+    });
+    expect(loadTabStripState(storage, "ws-1")).toEqual({
+      order: ["ws-1::notes.txt", "browser-tab-1"],
+      pinned: [],
+      titles: {},
+      splits: {},
+      editors: ["notes.txt", "src/a.ts"],
+      browsers: [{ tabId: "browser-tab-1", url: "https://example.com/" }],
+    });
+  });
+
+  it("reads pre-membership envelopes as no restored tabs", () => {
+    expect(
+      parseTabStripState(
+        JSON.stringify({ state: { order: ["a"], pinned: [], titles: {} } }),
+      ),
+    ).toEqual({
+      order: ["a"],
+      pinned: [],
+      titles: {},
+      splits: {},
+      editors: [],
+      browsers: [],
+    });
+  });
+
+  it("sanitizes membership: drops empties, overlong entries, dupes and caps the lists", () => {
+    const longPath = `p/${"x".repeat(2048)}`;
+    const longUrl = `https://example.com/${"y".repeat(4096)}`;
+    const editors = ["a.txt", "", longPath, "a.txt", 7, null];
+    const browsers = [
+      { tabId: "b1", url: "https://example.com/" },
+      { tabId: "", url: "https://example.com/" },
+      { tabId: "b2", url: "" },
+      { tabId: "b3", url: longUrl },
+      { tabId: "b1", url: "https://other.example/" },
+      { tabId: "b4" },
+      null,
+      "b5",
+    ];
+    const parsed = parseTabStripState(
+      JSON.stringify({ state: { order: [], editors, browsers } }),
+    );
+    expect(parsed.editors).toEqual(["a.txt"]);
+    expect(parsed.browsers).toEqual([
+      { tabId: "b1", url: "https://example.com/" },
+    ]);
+  });
+
+  it("caps editor and browser lists instead of growing the envelope", () => {
+    const editors = Array.from({ length: 200 }, (_, i) => `file-${i}.txt`);
+    const browsers = Array.from({ length: 30 }, (_, i) => ({
+      tabId: `b${i}`,
+      url: "https://example.com/",
+    }));
+    const parsed = parseTabStripState(
+      JSON.stringify({ state: { order: [], editors, browsers } }),
+    );
+    expect(parsed.editors).toHaveLength(128);
+    expect(parsed.browsers).toHaveLength(16);
+  });
+
+  it("drops non-array membership keys", () => {
+    expect(
+      parseTabStripState(
+        JSON.stringify({
+          state: { order: [], editors: "notes.txt", browsers: { b1: "x" } },
+        }),
+      ),
+    ).toMatchObject({ editors: [], browsers: [] });
+  });
+});
+
+describe("remapTabOrder", () => {
+  it("rewrites mapped ids in place and passes the rest through", () => {
+    expect(
+      remapTabOrder(["s1", "browser-tab-1", "ws::a.txt"], {
+        "browser-tab-1": "browser-tab-9",
+      }),
+    ).toEqual(["s1", "browser-tab-9", "ws::a.txt"]);
+  });
+
+  it("is an identity for an empty mapping", () => {
+    expect(remapTabOrder(["a", "b"], {})).toEqual(["a", "b"]);
   });
 });
 

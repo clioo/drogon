@@ -119,3 +119,33 @@ export function createBrowserAuthoritySource(input: {
 }
 
 export type { BrowserBridge, BrowserStateEvent, BrowserTabState };
+
+export type { PersistedBrowserTab } from "../shell/tab-order";
+import type { PersistedBrowserTab } from "../shell/tab-order";
+
+/**
+ * Stored browser tabs worth recreating (R16-AJ, fixes #215): stored strip
+ * order, deduped, excluding ids the host still lists. The host owns tab
+ * ids per launch (`browser-tab-N`), so after a full desktop restart the
+ * live list is empty and every stored entry recreates via
+ * `createTab({ workspaceId, url })`; after a mere renderer reload the live
+ * list already holds them and nothing recreates (no duplicates). Pure so
+ * the workspace-load path in App stays unit-tested without mounting.
+ */
+export function planBrowserRehydrate(input: {
+  stored: readonly PersistedBrowserTab[];
+  liveTabIds: readonly string[] | ReadonlySet<string>;
+}): PersistedBrowserTab[] {
+  const live =
+    input.liveTabIds instanceof Set
+      ? input.liveTabIds
+      : new Set(input.liveTabIds);
+  const out: PersistedBrowserTab[] = [];
+  const seen = new Set<string>();
+  for (const entry of input.stored) {
+    if (live.has(entry.tabId) || seen.has(entry.tabId)) continue;
+    seen.add(entry.tabId);
+    out.push(entry);
+  }
+  return out;
+}

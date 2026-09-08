@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import type { Session, Workspace } from "../../../../shared/session-contract";
 import {
+  createRegistryRevisionHandler,
   filterProjectGroups,
   findWorkspaceForPath,
   gitProjectForWorkspace,
@@ -10,6 +11,7 @@ import {
   loadProjectView,
   projectWorkspacesAsFolderProjects,
   relativeActivityTime,
+  reloadWorkspacesSnapshot,
   subscribeProjectRegistryRefresh,
   summarizeCardSessions,
   windowProjectBridge,
@@ -383,4 +385,91 @@ test("card summary never invents a state and flags needs_input as unread", () =>
   expect(summary.state).toBe("needs_input");
   expect(summary.unread).toBe(true);
   expect(summary.activeRelative).toBe("30m ago");
+});
+
+test("registry revision fans out to projects and workspaces exactly once per change (issue #218)", () => {
+  let bumps = 0;
+  const revisions: string[] = [];
+  const handle = createRegistryRevisionHandler({
+    bumpProjects: () => {
+      bumps += 1;
+    },
+    refreshWorkspaces: (revision) => {
+      revisions.push(revision);
+    },
+  });
+  handle("rev-1");
+  handle("rev-2");
+  expect(bumps).toBe(2);
+  expect(revisions).toEqual(["rev-1", "rev-2"]);
+});
+
+test("CLI-created worktree arriving via the digest refreshes workspaces exactly once per change (issue #218)", async () => {
+  // Simulates `drogon-cli worktree create --name qa2` landing in another
+  // process: main's project.changes poller observes one new revision per
+  // change and pushes it over drogon:projectsChanged. Each push must
+  // re-read workspaces() exactly once, so the session area (not just the
+  // sidebar) sees the new worktree with no restart.
+  const cliWorktree: Workspace = {
+    id: "w-qa2",
+    path: "/repo/qa2",
+    name: "qa2",
+    kind: "git",
+    hostId: "h",
+  };
+  const snapshots: Workspace[][] = [[workspace], [workspace, cliWorktree]];
+  let loads = 0;
+  const load = async () => {
+    const index = Math.min(loads, snapshots.length - 1);
+    loads += 1;
+    return { ok: true as const, result: { workspaces: snapshots[index]! } };
+  };
+  const delivered: Workspace[][] = [];
+  const pending: Promise<unknown>[] = [];
+  let bumps = 0;
+  let emit!: (revision: string) => void;
+  const stop = subscribeProjectRegistryRefresh(
+    {
+      onProjectsChanged: (listener) => {
+        emit = listener;
+        return () => {};
+      },
+    },
+    createRegistryRevisionHandler({
+      bumpProjects: () => {
+        bumps += 1;
+      },
+      refreshWorkspaces: () => {
+        pending.push(
+          reloadWorkspacesSnapshot(load).then((next) => {
+            if (next) delivered.push(next);
+          }),
+        );
+      },
+    }),
+  );
+  expect(typeof stop).toBe("function");
+  emit("rev-1");
+  emit("rev-2");
+  await Promise.all(pending);
+  expect(bumps).toBe(2);
+  expect(loads).toBe(2);
+  expect(delivered).toHaveLength(2);
+  expect(delivered[0]).toEqual([workspace]);
+  expect(delivered[1]).toEqual([workspace, cliWorktree]);
+  stop!();
+});
+
+test("failed workspaces reload keeps the prior list (issue #218)", async () => {
+  expect(
+    await reloadWorkspacesSnapshot(async () => ({
+      ok: false as const,
+      error: { code: "gone", message: "daemon unreachable", retryable: true },
+    })),
+  ).toBeNull();
+  expect(
+    await reloadWorkspacesSnapshot(async () => {
+      throw new Error("boom");
+    }),
+  ).toBeNull();
 });

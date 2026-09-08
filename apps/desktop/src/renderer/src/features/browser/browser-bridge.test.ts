@@ -3,6 +3,7 @@ import type { BrowserBridge } from "../../../../shared/browser-contract";
 import type { Result } from "../../../../shared/session-contract";
 import {
   createBrowserAuthoritySource,
+  planBrowserRehydrate,
   readCaptureWindowOpen,
 } from "./browser-bridge";
 
@@ -160,5 +161,36 @@ describe("browser authority source", () => {
         reason: expect.stringMatching(/system browser/),
       },
     });
+  });
+});
+
+describe("planBrowserRehydrate (R16-AJ, fixes #215)", () => {
+  const stored = [
+    { tabId: "browser-tab-1", url: "https://example.test/a" },
+    { tabId: "browser-tab-2", url: "about:blank" },
+  ];
+  test("recreates stored tabs missing from the host list, in stored order", () => {
+    expect(
+      planBrowserRehydrate({ stored, liveTabIds: ["browser-tab-1"] }),
+    ).toEqual([{ tabId: "browser-tab-2", url: "about:blank" }]);
+  });
+  test("recreates everything after a full restart empties the host list", () => {
+    expect(planBrowserRehydrate({ stored, liveTabIds: [] })).toEqual(stored);
+  });
+  test("recreates nothing when the host still lists every tab (renderer reload)", () => {
+    expect(
+      planBrowserRehydrate({
+        stored,
+        liveTabIds: new Set(["browser-tab-1", "browser-tab-2"]),
+      }),
+    ).toEqual([]);
+  });
+  test("dedupes stored doubles", () => {
+    expect(
+      planBrowserRehydrate({
+        stored: [...stored, { tabId: "browser-tab-1", url: "https://example.test/a" }],
+        liveTabIds: [],
+      }),
+    ).toEqual(stored);
   });
 });

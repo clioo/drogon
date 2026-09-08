@@ -16,6 +16,7 @@ import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
+import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
 import {
   probeGhUnavailable,
   probePackagedSurfaces,
@@ -440,6 +441,11 @@ try {
     // suspend autosave instead of silently overwriting disk.
     report.checks.push(
       ...(await probeEditorKeyboardInput({ page, workspace, output })),
+    );
+    // R16-AJ (fixes #215): sealed tab-restore check — editor + browser
+    // tabs persist per workspace and come back in order after a reload.
+    report.checks.push(
+      ...(await probeRenderedTabs({ page, workspace, output })),
     );
   }
   if (withHarness) {
