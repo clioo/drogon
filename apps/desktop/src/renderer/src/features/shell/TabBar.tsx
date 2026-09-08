@@ -91,7 +91,7 @@ export function TabBar({
   onCloseSession,
   onCloseBrowserTab,
   onCloseEditorTab,
-  onRetry,
+  onRetrySession,
   onCreateTerminal,
   onLaunchHarness,
   onNewBrowserTab,
@@ -133,7 +133,8 @@ export function TabBar({
   onCloseSession: (session: Session) => void;
   onCloseBrowserTab: (tabId: string) => void;
   onCloseEditorTab: (tabId: string) => void;
-  onRetry: () => void;
+  /** Per-tab retry: the clicked session decides relaunch vs refresh. */
+  onRetrySession: (session: Session) => void;
   onCreateTerminal: () => void;
   onLaunchHarness: (input: HarnessLaunchInput) => Promise<boolean>;
   onNewBrowserTab: () => void;
@@ -464,7 +465,7 @@ export function TabBar({
                         <ShellIconButton
                           label="Retry connection"
                           disabled={retryDisabled}
-                          onClick={onRetry}
+                          onClick={() => onRetrySession(item)}
                         >
                           <RefreshCw />
                         </ShellIconButton>
