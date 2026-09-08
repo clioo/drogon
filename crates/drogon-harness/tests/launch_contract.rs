@@ -9,6 +9,7 @@ fn request(id: HarnessId) -> HarnessLaunchRequest {
         provider: None,
         prompt: None,
         permission_mode: PermissionMode::Inherit,
+        headless: false,
     }
 }
 
@@ -84,6 +85,41 @@ fn opencode_prompt_that_looks_like_a_flag_is_one_option_value() {
     assert_eq!(
         plan_launch(&req, executable()).unwrap().args,
         ["--prompt=--model another-model"]
+    );
+}
+
+#[test]
+fn headless_runs_use_each_harness_noninteractive_entrypoint() {
+    let mut pi = request(HarnessId::Pi);
+    pi.prompt = Some("do the thing".into());
+    pi.headless = true;
+    assert_eq!(
+        plan_launch(&pi, executable()).unwrap().args,
+        ["-p", "Drogon task:\ndo the thing"]
+    );
+
+    let mut claude = request(HarnessId::Claude);
+    claude.prompt = Some("do the thing".into());
+    claude.headless = true;
+    assert_eq!(
+        plan_launch(&claude, executable()).unwrap().args,
+        ["-p", "--", "do the thing"]
+    );
+
+    let mut opencode = request(HarnessId::Opencode);
+    opencode.prompt = Some("do the thing".into());
+    opencode.headless = true;
+    assert_eq!(
+        plan_launch(&opencode, executable()).unwrap().args,
+        ["run", "do the thing"]
+    );
+
+    let mut agy = request(HarnessId::Antigravity);
+    agy.prompt = Some("do the thing".into());
+    agy.headless = true;
+    assert_eq!(
+        plan_launch(&agy, executable()).unwrap().args,
+        ["-p", "do the thing"]
     );
 }
 

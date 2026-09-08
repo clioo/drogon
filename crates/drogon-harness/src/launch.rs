@@ -23,6 +23,11 @@ pub struct HarnessLaunchRequest {
     pub prompt: Option<String>,
     #[serde(default)]
     pub permission_mode: PermissionMode,
+    /// Daemon-run mode (bot/automation runs): consume the prompt
+    /// non-interactively and exit, instead of opening the interactive TUI
+    /// a user-facing tab gets. Absent (user tabs) means interactive.
+    #[serde(default)]
+    pub headless: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -61,6 +66,11 @@ pub fn plan_launch(
         {
             return Err(invalid(format!("Invalid {name}")));
         }
+    }
+    // `opencode run` is a subcommand: it must lead the argv line, ahead of
+    // the shared `--model`/`--auto` flags below (both exist on `run` too).
+    if request.headless && request.harness_id == HarnessId::Opencode {
+        args.push("run".into());
     }
     if let Some(provider) = &request.provider {
         if request.harness_id != HarnessId::Pi {
@@ -126,12 +136,33 @@ pub fn plan_launch(
         {
             return Err(err);
         }
-        match request.harness_id {
-            HarnessId::Opencode => args.push(format!("--prompt={prompt}")),
-            HarnessId::Antigravity => args.extend(["--prompt-interactive".into(), prompt.clone()]),
-            HarnessId::Claude => args.extend(["--".into(), prompt.clone()]),
-            // Pi interprets @file and command-shaped positional arguments before messages.
-            HarnessId::Pi => args.push(format!("Drogon task:\n{prompt}")),
+        // Headless (daemon-run) delivery: each harness's own
+        // non-interactive entrypoint, which consumes the prompt and exits
+        // so the session's exit is the run's completion signal. The
+        // interactive TUI entrypoints below stay for user-facing tabs.
+        // (`-p` is the short alias every harness documents: `pi -p`,
+        // `claude -p`/`--print`, `agy -p`/`--print`.)
+        if request.headless {
+            match request.harness_id {
+                HarnessId::Opencode => args.push(prompt.clone()),
+                HarnessId::Antigravity => args.extend(["-p".into(), prompt.clone()]),
+                HarnessId::Claude => args.extend(["-p".into(), "--".into(), prompt.clone()]),
+                // Pi interprets @file and command-shaped positional arguments before messages.
+                HarnessId::Pi => {
+                    args.push("-p".into());
+                    args.push(format!("Drogon task:\n{prompt}"));
+                }
+            }
+        } else {
+            match request.harness_id {
+                HarnessId::Opencode => args.push(format!("--prompt={prompt}")),
+                HarnessId::Antigravity => {
+                    args.extend(["--prompt-interactive".into(), prompt.clone()])
+                }
+                HarnessId::Claude => args.extend(["--".into(), prompt.clone()]),
+                // Pi interprets @file and command-shaped positional arguments before messages.
+                HarnessId::Pi => args.push(format!("Drogon task:\n{prompt}")),
+            }
         }
     }
     let (command, args) = if is_batch_launcher {
@@ -371,6 +402,117 @@ mod tests {
                 "served/model:variant",
             ]
         );
+    }
+
+    fn request(
+        harness_id: HarnessId,
+        prompt: &str,
+        headless: bool,
+    ) -> HarnessLaunchRequest {
+        HarnessLaunchRequest {
+            harness_id,
+            model: None,
+            effort: None,
+            provider: None,
+            prompt: Some(prompt.to_string()),
+            permission_mode: PermissionMode::Inherit,
+            headless,
+        }
+    }
+
+    fn plan(request: &HarnessLaunchRequest) -> Vec<String> {
+        let exe = Path::new(match request.harness_id {
+            HarnessId::Claude => "/usr/local/bin/claude",
+            HarnessId::Pi => "/usr/local/bin/pi",
+            HarnessId::Opencode => "/usr/local/bin/opencode",
+            HarnessId::Antigravity => "/usr/local/bin/agy",
+        });
+        plan_launch(request, exe).unwrap().args
+    }
+
+    #[test]
+    fn headless_defaults_to_false_when_absent() {
+        let request: HarnessLaunchRequest = serde_json::from_value(serde_json::json!({
+            "harnessId": "pi",
+            "prompt": "hello",
+        }))
+        .unwrap();
+        assert!(!request.headless);
+    }
+
+    #[test]
+    fn pi_interactive_keeps_the_tui_positional_prompt() {
+        let args = plan(&request(HarnessId::Pi, "do the thing", false));
+        assert_eq!(args, ["Drogon task:\ndo the thing"]);
+    }
+
+    #[test]
+    fn pi_headless_answers_through_print_mode() {
+        let mut base = request(HarnessId::Pi, "do the thing", true);
+        base.provider = Some("dgx-spark".to_string());
+        base.model = Some("qwen3.8-flash-next-nvidia-nvfp4".to_string());
+        base.permission_mode = PermissionMode::Unattended;
+        let args = plan(&base);
+        assert_eq!(
+            args,
+            [
+                "--provider",
+                "dgx-spark",
+                "--model",
+                "qwen3.8-flash-next-nvidia-nvfp4",
+                "--approve",
+                "-p",
+                "Drogon task:\ndo the thing",
+            ]
+        );
+    }
+
+    #[test]
+    fn claude_interactive_and_headless_prompt_delivery() {
+        assert_eq!(plan(&request(HarnessId::Claude, "hi", false)), ["--", "hi"]);
+        assert_eq!(
+            plan(&request(HarnessId::Claude, "hi", true)),
+            ["-p", "--", "hi"]
+        );
+    }
+
+    #[test]
+    fn claude_headless_keeps_unattended_permissions() {
+        let mut base = request(HarnessId::Claude, "hi", true);
+        base.permission_mode = PermissionMode::Unattended;
+        assert_eq!(
+            plan(&base),
+            ["--dangerously-skip-permissions", "-p", "--", "hi"]
+        );
+    }
+
+    #[test]
+    fn opencode_interactive_uses_the_prompt_flag_headless_uses_run() {
+        assert_eq!(
+            plan(&request(HarnessId::Opencode, "hi", false)),
+            ["--prompt=hi"]
+        );
+        assert_eq!(plan(&request(HarnessId::Opencode, "hi", true)), ["run", "hi"]);
+    }
+
+    #[test]
+    fn opencode_headless_run_leads_with_model_and_auto() {
+        let mut base = request(HarnessId::Opencode, "hi", true);
+        base.model = Some("provider/model".to_string());
+        base.permission_mode = PermissionMode::Unattended;
+        assert_eq!(
+            plan(&base),
+            ["run", "--model", "provider/model", "--auto", "hi"]
+        );
+    }
+
+    #[test]
+    fn antigravity_interactive_and_headless_prompt_delivery() {
+        assert_eq!(
+            plan(&request(HarnessId::Antigravity, "hi", false)),
+            ["--prompt-interactive", "hi"]
+        );
+        assert_eq!(plan(&request(HarnessId::Antigravity, "hi", true)), ["-p", "hi"]);
     }
 
     #[test]
