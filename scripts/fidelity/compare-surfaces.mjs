@@ -343,9 +343,14 @@ const SURFACES = [
     refDir: "src/renderer/src/components/browser-pane/assemble-chrome",
     refFiles: [
       "src/renderer/src/components/browser-pane/assemble-chrome/BrowserFind.tsx",
+      "src/renderer/src/components/browser-pane/assemble-chrome/browser-page-context-menu.tsx",
     ],
-    probes: ["find", "match", "aria-label"],
-    candFiles: ["apps/desktop/src/renderer/src/features/browser/browser-find-bar.tsx"],
+    probes: ["find", "match", "menu", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/browser/browser-find-bar.tsx",
+      "apps/desktop/src/renderer/src/features/browser/browser-find-state.ts",
+      "apps/desktop/src/renderer/src/features/browser/browser-page-context-menu.tsx",
+    ],
   },
   {
     id: "mentu",
@@ -1431,7 +1436,8 @@ async function refSetup(page, state, ctx) {
     }
     case "browser-find": {
       // R2 browser find: open a browser tab when reachable, focus its guest
-      // and press Mod+F (BrowserFind). Best-effort; capture as-is.
+      // and press Mod+F (BrowserFind), then right-click the guest for the
+      // page context menu; Escape closes the menu, find bar left open.
       if (await tryClick(page, "button", "Browser", 1200)) notes.push("Browser opened");
       else notes.push("no Browser nav button in ref sidebar");
       try {
@@ -1448,6 +1454,22 @@ async function refSetup(page, state, ctx) {
       const bars = await page.locator('[role="search"]').count().catch(() => -1);
       if (bars > 0) notes.push(`find bar open (role=search count=${bars})`);
       else missing.push("Mod+F opened no find bar");
+      try {
+        await page.getByRole("tabpanel").first().click({ button: "right", timeout: 3000 });
+        await delay(600);
+        const seen = await overlayState(page);
+        notes.push(seen.menus > 0 ? `page context menu open (menus=${seen.menus})` : "guest right-click opened no menu");
+      } catch {
+        notes.push("guest right-click best-effort only");
+      }
+      try {
+        await page.keyboard.press("Escape");
+        await delay(400);
+        const seen = await overlayState(page);
+        notes.push(seen.menus === 0 ? "Escape closed the context menu" : "Escape left a menu open");
+      } catch {
+        notes.push("Escape check best-effort only");
+      }
       break;
     }
     case "mentu": {
@@ -2295,6 +2317,25 @@ async function candSetup(page, state, ctx) {
           if (bars > 0) notes.push(`browser find bar open (role=search count=${bars})`);
           else missing.push("Mod+F nor toolbar menu opened the browser find bar");
         }
+        // Page context menu via guest right-click (bridge onContextMenu on a
+        // live page, DOM placeholder handler on blank/error states); Escape
+        // closes it, find bar left open for capture.
+        try {
+          await page.getByRole("tabpanel").first().click({ button: "right", timeout: 3000 });
+          await delay(600);
+          const seen = await overlayState(page);
+          notes.push(seen.menus > 0 ? `page context menu open (menus=${seen.menus})` : "guest right-click opened no menu");
+        } catch {
+          notes.push("guest right-click best-effort only");
+        }
+        try {
+          await page.keyboard.press("Escape");
+          await delay(400);
+          const seen = await overlayState(page);
+          notes.push(seen.menus === 0 ? "Escape closed the context menu" : "Escape left a menu open");
+        } catch {
+          notes.push("Escape check best-effort only");
+        }
       } else missing.push("no New tab affordance reachable");
       break;
     }
@@ -2526,7 +2567,7 @@ const CAND_OWNER = {
   "settings-agents": "apps/desktop/src/renderer/src/features/settings/agents-section.tsx, agent-defaults.ts",
   "settings-shortcuts": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, keybindings/definitions.ts",
   "terminal-find": "apps/desktop/src/renderer/src/features/terminal/TerminalSearch.tsx, find-query-bounds.ts",
-  "browser-find": "apps/desktop/src/renderer/src/features/browser/browser-find-bar.tsx, browser-find-state.ts",
+  "browser-find": "apps/desktop/src/renderer/src/features/browser/browser-find-bar.tsx, browser-find-state.ts, browser-page-context-menu.tsx, browser-menu-policy.ts, browser-notices.ts",
   mentu: "apps/desktop/src/renderer/src/features/mentu/MentuPanel.tsx, RecipePane*.tsx",
   "session-details": "apps/desktop/src/renderer/src/features/right-sidebar/SessionDetailsPanel.tsx",
   "automation-runs": "apps/desktop/src/renderer/src/features/automations/AutomationRunsDashboard.tsx, AutomationRunsTable.tsx, AutomationRunDetailsPage.tsx",

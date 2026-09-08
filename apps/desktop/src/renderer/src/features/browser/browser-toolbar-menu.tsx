@@ -18,26 +18,13 @@ import {
 } from "../tasks/ui/dropdown-menu";
 import type { OpenExternal } from "../landing/github-star";
 import { windowShellOpenExternal } from "../landing/github-star";
+import {
+  resolveBrowserToolbarMenuPolicy,
+  type BrowserToolbarMenuPolicy,
+} from "./browser-menu-policy";
 
-export type BrowserToolbarMenuPolicy = {
-  /** Current page URL; empty or non-https disables system-browser/copy rows. */
-  pageUrl: string;
-  /** Null unless the page opened externally (https only, shell policy). */
-  externalUrl: string | null;
-  zoomPercent: number;
-};
-
-export function resolveBrowserToolbarMenuPolicy(input: {
-  pageUrl: string;
-  externalUrl: string | null;
-  zoomPercent: number;
-}): BrowserToolbarMenuPolicy {
-  return {
-    pageUrl: input.pageUrl,
-    externalUrl: input.externalUrl,
-    zoomPercent: input.zoomPercent,
-  };
-}
+export { resolveBrowserToolbarMenuPolicy };
+export type { BrowserToolbarMenuPolicy };
 
 export function BrowserToolbarMenu({
   pageUrl,

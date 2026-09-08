@@ -1,6 +1,6 @@
 // Find-bar state: session flags over the guest findInPage and the query bound.
 import { describe, expect, test } from "vitest";
-import { nextFindRequest } from "./browser-find-bar";
+import { nextFindRequest } from "./browser-find-state";
 import { getFindRequestQuery } from "../terminal/find-query-bounds";
 
 describe("browser find state", () => {
