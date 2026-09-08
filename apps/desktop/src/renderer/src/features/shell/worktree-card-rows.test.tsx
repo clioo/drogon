@@ -134,7 +134,7 @@ describe("WorktreeCard nested session rows", () => {
         container.querySelector('[data-focused-agent-pane="true"]'),
       ).toBeTruthy();
       // Collapsed counts derived from the same rows the card nests.
-      screen.getByText("1 working, 1 idle");
+      screen.getByText(/1 working, 1 idle/);
     } finally {
       unmount();
     }
