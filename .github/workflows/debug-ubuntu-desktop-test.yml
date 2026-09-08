@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  repro-parallel:
+  repro-parallel-strace:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -30,65 +30,81 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Environment facts
         run: |
-          echo "== nproc =="; nproc
-          echo "== free -m =="; free -m
-          echo "== ulimit -a =="; ulimit -a
-          echo "== cgroup memory limit =="
-          cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null
-          echo "== cgroup memory.events (oom counters) =="
-          cat /sys/fs/cgroup/memory.events 2>/dev/null || cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null
+          echo "== nproc =="; nproc || true
+          echo "== free -m =="; free -m || true
+          echo "== ulimit -a =="; ulimit -a || true
+          echo "== cgroup version =="
+          stat -fc %T /sys/fs/cgroup/ || true
+          echo "== cgroup memory files =="
+          (cat /sys/fs/cgroup/memory.max 2>/dev/null || true)
+          (cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true)
+          (cat /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          (cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null || true)
           echo "== systemd-oomd =="
-          systemctl is-active systemd-oomd 2>/dev/null || true
-          systemctl is-enabled systemd-oomd 2>/dev/null || true
-          echo "== earlyoom =="; pgrep -a earlyoom || echo "not running"
-          echo "== kernel threads-max =="; cat /proc/sys/kernel/threads-max
+          (systemctl is-active systemd-oomd || true)
+          (systemctl is-enabled systemd-oomd || true)
+          (systemctl status systemd-oomd --no-pager -l 2>/dev/null | head -8 || true)
+          echo "== earlyoom =="; (pgrep -a earlyoom || echo "not running")
+          echo "== strace present =="; (command -v strace || echo MISSING)
       - name: Start detached memory sampler (setsid, survives process-group signals)
         run: |
           setsid bash -c '
             echo $$ > /tmp/sampler.pid
             for i in $(seq 1 900); do
               echo "=== $(date -u +%T) ==="
-              free -m | sed -n "2p"
-              ps -eo pid,ppid,rss,vsz,nlwp,comm --sort=-rss | head -8
+              (free -m | sed -n "2p" || true)
+              (ps -eo pid,ppid,rss,vsz,nlwp,comm --sort=-rss | head -8 || true)
               sleep 1
             done
           ' > /tmp/memsample.log 2>&1 &
-      - name: vitest run (default pool, verbose)
+          sleep 1
+          ls -la /tmp/sampler.pid /tmp/memsample.log || true
+      - name: vitest run under strace (default pool, verbose)
         working-directory: apps/desktop
         continue-on-error: true
         run: |
           set -o pipefail
-          pnpm exec vitest run --reporter=verbose --sequence.shuffle=false 2>&1 | tee /tmp/vitest-parallel.log
-          echo "vitest pipeline exit: $?"
+          strace -f -e trace=kill,tkill,tgkill,rt_sigqueueinfo -o /tmp/kills.log \
+            pnpm exec vitest run --reporter=verbose --sequence.shuffle=false 2>&1 | tee /tmp/vitest-parallel.log
+          echo "vitest pipeline exit: $?" || true
       - name: Forensics
         if: always()
         run: |
           echo "== sampler alive? =="
-          if [ -f /tmp/sampler.pid ] && kill -0 "$(cat /tmp/sampler.pid)" 2>/dev/null; then
+          SAMPLER=""
+          if [ -f /tmp/sampler.pid ]; then SAMPLER="$(cat /tmp/sampler.pid 2>/dev/null || true)"; fi
+          if [ -n "$SAMPLER" ] && kill -0 "$SAMPLER" 2>/dev/null; then
             echo "ALIVE — the signal was scoped to the step process tree, not the cgroup"
-            kill "$(cat /tmp/sampler.pid)" 2>/dev/null || true
+            kill "$SAMPLER" 2>/dev/null || true
           else
-            echo "DEAD — the signal hit the whole cgroup (systemd-oomd style kill)"
+            echo "DEAD or PID file missing — see sampler log tail for how far it got"
           fi
-          echo "== memory curve tail =="
-          tail -24 /tmp/memsample.log || true
+          echo "== sampler log tail =="
+          (tail -30 /tmp/memsample.log || true)
+          echo "== strace kill calls (who signaled whom) =="
+          (cat /tmp/kills.log || echo "no kills.log")
           echo "== vitest log tail =="
-          tail -40 /tmp/vitest-parallel.log || true
-          echo "== completed files =="
-          grep -cE "✓" /tmp/vitest-parallel.log || true
-          echo "== kernel log (sudo dmesg) =="
-          sudo dmesg 2>/dev/null | grep -iE "oom|killed process|out of memory" | tail -20 || echo "dmesg unavailable"
-          echo "== cgroup memory.events after =="
-          cat /sys/fs/cgroup/memory.events 2>/dev/null || cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null
+          (tail -30 /tmp/vitest-parallel.log || true)
+          echo "== kernel log =="
+          (sudo dmesg 2>/dev/null | grep -iE "oom|killed process|out of memory" | tail -20 || echo "dmesg unavailable")
+          (sudo journalctl -q -k --no-pager --since "15 minutes ago" 2>/dev/null | grep -iE "oom|killed" | tail -20 || true)
+          (sudo journalctl -q -u systemd-oomd --no-pager --since "15 minutes ago" 2>/dev/null | tail -20 || true)
+          echo "== cgroup memory events after =="
+          (cat /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          (cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null || true)
+          true
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: diag-parallel-${{ github.run_id }}
-          path: /tmp/*.log
+          path: |
+            /tmp/memsample.log
+            /tmp/kills.log
+            /tmp/vitest-parallel.log
           if-no-files-found: ignore
 
-  repro-single-worker:
+  repro-2workers:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -100,57 +116,25 @@ jobs:
       - name: Install pinned tools
         run: npm install --global pnpm@11.19.0
       - run: pnpm install --frozen-lockfile
-      - name: vitest run (single fork worker, verbose)
+      - name: vitest run (2 fork workers, verbose)
         working-directory: apps/desktop
         continue-on-error: true
         run: |
           set -o pipefail
           pnpm exec vitest run --reporter=verbose --sequence.shuffle=false \
-            --pool=forks --minWorkers=1 --maxWorkers=1 2>&1 | tee /tmp/vitest-single.log
-          echo "vitest pipeline exit: $?"
+            --pool=forks --minWorkers=2 --maxWorkers=2 2>&1 | tee /tmp/vitest-w2.log
+          echo "vitest pipeline exit: $?" || true
       - name: Boundary
         if: always()
         run: |
-          echo "== vitest log tail (last completed file marks the boundary) =="
-          tail -40 /tmp/vitest-single.log || true
+          echo "== vitest log tail =="
+          (tail -30 /tmp/vitest-w2.log || true)
+          echo "== last completed files =="
+          (grep -oE "✓ src/[^ ]+\.test\.(ts|tsx)" /tmp/vitest-w2.log | sort -u | tail -8 || true)
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: diag-single-${{ github.run_id }}
-          path: /tmp/vitest-single.log
-          if-no-files-found: ignore
-
-  repro-heap-capped:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Install pinned tools
-        run: npm install --global pnpm@11.19.0
-      - run: pnpm install --frozen-lockfile
-      - name: vitest run (2.5 GB heap cap per worker exposes the allocating file)
-        working-directory: apps/desktop
-        continue-on-error: true
-        env:
-          NODE_OPTIONS: --max-old-space-size=2560
-        run: |
-          set -o pipefail
-          pnpm exec vitest run --reporter=verbose --sequence.shuffle=false 2>&1 | tee /tmp/vitest-heap.log
-          echo "vitest pipeline exit: $?"
-      - name: Boundary
-        if: always()
-        run: |
-          echo "== vitest log tail (heap-OOM file names the allocator) =="
-          tail -40 /tmp/vitest-heap.log || true
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: diag-heap-${{ github.run_id }}
-          path: /tmp/vitest-heap.log
+          name: diag-w2-${{ github.run_id }}
+          path: /tmp/vitest-w2.log
           if-no-files-found: ignore
