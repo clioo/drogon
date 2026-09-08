@@ -51,7 +51,7 @@ export async function probeRenderedHarness({
   // right of it cannot overlap the sidebar.
   assert.ok(
     trigger && form && form.x >= trigger.x - 4 && form.x - trigger.x <= 24,
-    "Launch form stays aligned with its trigger, not over the sidebar",
+    `Launch form stays aligned with its trigger, not over the sidebar (trigger ${JSON.stringify(trigger)} form ${JSON.stringify(form)})`,
   );
   assert.equal(
     await page.getByLabel("Model", { exact: true }).inputValue(),
