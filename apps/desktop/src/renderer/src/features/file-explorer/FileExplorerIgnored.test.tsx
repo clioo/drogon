@@ -5,7 +5,7 @@
    "Ignored by .gitignore" badge assertions prove the component classified
    through the daemon query — never a local guess. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FileExplorer, type FileExplorerDataSource } from "./FileExplorer";
 import type { ExplorerNode } from "./tree-model";
 import type { Result } from "../../../../shared/session-contract";
@@ -122,5 +122,113 @@ describe("explorer git-ignored dimming", () => {
       await new Promise((resolve) => setTimeout(resolve, 400));
     });
     expect(screen.queryByLabelText("Ignored by .gitignore")).toBeNull();
+  });
+});
+
+describe("Show Git Ignored Files toggle (fork settings.showGitIgnoredFiles)", () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("git workspaces get the toggle, folder workspaces do not", async () => {
+    const { source } = makeSource([node("a.txt", "a.txt")], []);
+    const { unmount } = render(
+      <FileExplorer workspaceId="ws" workspaceName="ws" source={source} activePath={null} isGitWorkspace />,
+    );
+    await waitFor(() => expect(screen.getByText("a.txt")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "More Explorer Actions" }));
+    const toggle = screen.getByRole("menuitemcheckbox", { name: "Show Git Ignored Files" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    unmount();
+
+    render(
+      <FileExplorer workspaceId="ws" workspaceName="ws" source={source} activePath={null} />,
+    );
+    await waitFor(() => expect(screen.getByText("a.txt")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "More Explorer Actions" }));
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Show Git Ignored Files" })).toBeNull();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Show Dotfiles" })).toBeDefined();
+  });
+
+  it("hides ignored rows and their descendants while off, persisted across remounts", async () => {
+    const source: FileExplorerDataSource = {
+      listDir: async (dir) => ({
+        ok: true,
+        result:
+          dir === ""
+            ? [node("dist", "dist", true), node("app.ts", "app.ts")]
+            : dir === "dist"
+              ? [node("bundle.js", "dist/bundle.js")]
+              : [],
+      }),
+      // Only the directory is reported ignored; its child still hides.
+      ignored: async (paths) => ({ ok: true, result: paths.filter((p) => p === "dist") }),
+    };
+    const { unmount } = render(
+      <FileExplorer workspaceId="ws" workspaceName="ws" source={source} activePath={null} isGitWorkspace />,
+    );
+    await waitFor(() => expect(screen.getByText("dist")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: /^dist/ }));
+    await waitFor(() => expect(screen.getByText("bundle.js")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: "More Explorer Actions" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Show Git Ignored Files" }));
+
+    await waitFor(() => expect(screen.queryByText("dist")).toBeNull());
+    expect(screen.queryByText("bundle.js")).toBeNull();
+    expect(screen.getByText("app.ts")).toBeDefined();
+    unmount();
+
+    // Global preference (fork: app settings, not per-worktree): a remount
+    // of ANY workspace keeps ignored rows hidden.
+    render(
+      <FileExplorer workspaceId="other" workspaceName="other" source={source} activePath={null} isGitWorkspace />,
+    );
+    await waitFor(() => expect(screen.getByText("app.ts")).toBeDefined());
+    await waitFor(() => expect(screen.queryByLabelText("Ignored by .gitignore")).toBeNull());
+    expect(screen.queryByText("dist")).toBeNull();
+  });
+});
+
+describe("Show Dotfiles persistence (fork showDotfilesByWorktree)", () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  const dotfileSource = (): FileExplorerDataSource => ({
+    listDir: async (_dir, includeHidden) => ({
+      ok: true,
+      result: includeHidden
+        ? [node(".env", ".env"), node("a.txt", "a.txt")]
+        : [node("a.txt", "a.txt")],
+    }),
+  });
+
+  it("remembers the toggle per workspace across remounts", async () => {
+    const { unmount } = render(
+      <FileExplorer workspaceId="ws" workspaceName="ws" source={dotfileSource()} activePath={null} />,
+    );
+    await waitFor(() => expect(screen.getByText(".env")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "More Explorer Actions" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Show Dotfiles" }));
+    await waitFor(() => expect(screen.queryByText(".env")).toBeNull());
+    unmount();
+
+    // Same workspace: hidden stays hidden.
+    const second = render(
+      <FileExplorer workspaceId="ws" workspaceName="ws" source={dotfileSource()} activePath={null} />,
+    );
+    await waitFor(() => expect(screen.getByText("a.txt")).toBeDefined());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(screen.queryByText(".env")).toBeNull();
+    second.unmount();
+
+    // Another workspace keeps the source default (dotfiles shown).
+    render(
+      <FileExplorer workspaceId="other" workspaceName="other" source={dotfileSource()} activePath={null} />,
+    );
+    await waitFor(() => expect(screen.getByText(".env")).toBeDefined());
   });
 });

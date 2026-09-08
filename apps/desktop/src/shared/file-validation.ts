@@ -31,6 +31,9 @@ const size = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const fileBridgeSchemas = {
   fileList: scope.extend({
     limitEntries: z.number().int().min(1).max(MAX_DIRECTORY_ENTRIES).optional(),
+    // Dotfile filter (explorer Show Dotfiles): the wire flag is camelCase
+    // (protocol FileListParams serde); omitted means show-everything.
+    includeHidden: z.boolean().optional(),
   }),
   fileRead: scope.extend({
     maxBytes: z.number().int().min(1).max(MAX_FILE_BYTES).optional(),

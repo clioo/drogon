@@ -483,6 +483,7 @@ function FilesPanel({
       <FileExplorer
         workspaceId={workspaceId}
         workspaceName={workspace.name}
+        isGitWorkspace={workspace.kind === "git"}
         source={explorerSource}
         activePath={effectiveOpenPath}
         onSelect={openEntry}

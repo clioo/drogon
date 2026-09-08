@@ -428,17 +428,6 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     status: IMPLEMENTED,
   },
   {
-    // R16-AM: ported verbatim from the source (definitions-core-1.ts
-    // sidebar.ports.toggle): the chord exists on macOS only; other
-    // platforms show no shortcut and route through the rail button.
-    id: "sidebar.ports.toggle",
-    title: "Show Ports",
-    group: "Global",
-    scope: "global",
-    defaultBindings: { darwin: ["Mod+Shift+I"], linux: [], win32: [] },
-    status: IMPLEMENTED,
-  },
-  {
     id: "zoom.in",
     title: "Zoom In",
     group: "Global",

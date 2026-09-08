@@ -203,13 +203,10 @@ export async function dispatchFileRequest(
     params = fileBridgeSchemas.fileRead.parse(value);
   } else {
     nativeMethod = "files.list";
-    // `includeHidden` is newer than the frozen validation schemas: admit it
-    // with a local extension (zod strips unknown keys, so the base schema
-    // alone would swallow it) and pass it to the wire as the protocol's
-    // `include_hidden` flag; omitted means show-everything, as before.
-    const listInput = fileBridgeSchemas.fileList
-      .extend({ includeHidden: z.boolean().optional() })
-      .parse(input);
+    // includeHidden rides the base schema (file-validation.ts); zod strips
+    // unknown keys, so a schema that lacks it would swallow the flag at the
+    // generic drogon:* IPC gate before this dispatcher ever ran.
+    const listInput = fileBridgeSchemas.fileList.parse(input);
     params = {
       ...fileBridgeSchemas.fileList.parse(value),
       ...(typeof listInput.includeHidden === "boolean"

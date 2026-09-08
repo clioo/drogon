@@ -11,7 +11,7 @@ import { FileExplorerRow } from "./FileExplorerRow";
 import { FileExplorerTreeStatus } from "./FileExplorerTreeStatus";
 import { InlineInputRow, type InlineInput } from "./InlineInputRow";
 import type { SelectionMode } from "./keyboard-navigation";
-import type { ExplorerNode } from "./tree-model";
+import { isPathIgnored, type ExplorerNode } from "./tree-model";
 
 export interface FileExplorerTreePaneProps {
   rows: readonly ExplorerNode[];
@@ -151,7 +151,11 @@ export function FileExplorerTreePane(props: FileExplorerTreePaneProps) {
             isExpanded={expanded.has(node.path)}
             isLoading={node.isDirectory && pendingDirs.has(node.path)}
             isSelected={selectedPaths.has(node.path)}
-            isIgnored={ignoredPaths?.has(node.path) ?? false}
+            // Fork status-display.ts: a row under an ignored directory
+            // decorates (and hides) with its ancestor.
+            isIgnored={
+              ignoredPaths !== undefined && isPathIgnored(ignoredPaths, node.path)
+            }
             rowIndex={slot.rowIndex}
             onClick={(event) => {
               if (event.shiftKey) {

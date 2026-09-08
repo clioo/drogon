@@ -9,6 +9,7 @@ import {
   watchedWorkspaceCount,
 } from "./file-bridge";
 import { resultSchemas } from "../shared/result-validation";
+import { bridgeSchemas } from "../shared/bridge-validation";
 
 const scope = { hostId: "host", workspaceId: "workspace", path: "hello.txt" };
 const file = { ...scope, content: "é", size: 2, mtime: "2026-09-07T00:00:00Z" };
@@ -119,6 +120,15 @@ describe("file bridge admission", () => {
       // the fake answers no workspaces, so nothing is watched.
       ["workspace.list", {}],
     ]);
+  });
+
+  it("the generic drogon:* IPC gate preserves includeHidden (no zod strip)", () => {
+    // Regression: main/index.ts validates with bridgeSchemas before
+    // dispatchFileRequest runs; a schema without the key silently dropped
+    // the explorer's Show Dotfiles flag on the way to the daemon.
+    const parsed = bridgeSchemas.fileList.safeParse({ ...scope, includeHidden: false });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.includeHidden).toBe(false);
   });
 
   it("omits includeHidden from the wire params when not requested", async () => {
