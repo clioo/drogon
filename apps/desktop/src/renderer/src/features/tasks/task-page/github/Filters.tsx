@@ -25,6 +25,7 @@ export function TaskPageGitHubFilters({
     handleResetGithubTaskSearch,
     handleRefreshGithubTasks,
     githubTasksBusy,
+    githubTaskKind,
   } = model;
   return (
     // Why: top of the joined GitHub list card — pairs with the
@@ -63,7 +64,11 @@ export function TaskPageGitHubFilters({
               setTaskSearchInput(event.target.value);
               handleTaskSearchChange(event.target.value);
             }}
-            placeholder="Search GitHub issues..."
+            placeholder={
+              githubTaskKind === "pulls"
+                ? "Search GitHub pull requests..."
+                : "Search GitHub issues..."
+            }
             className="h-8 rounded-md border-border/60 bg-background pl-8 pr-8 text-xs text-foreground shadow-xs"
           />
           {taskSearchInput || appliedTaskSearch ? (

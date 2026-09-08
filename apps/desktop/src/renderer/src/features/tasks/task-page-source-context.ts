@@ -45,6 +45,10 @@ export const TASK_SEARCH_DEBOUNCE_MS = 300;
 import { cn } from "./cn";
 export const GITHUB_TASK_GRID_CLASS =
   "min-w-[790px] grid-cols-[72px_minmax(320px,1fr)_84px_100px_92px_122px]";
+// Why: the PR row carries three management columns (Reviewers/Checks/Merge)
+// instead of Assignees/Status, so it needs the source's wider PR grid.
+export const GITHUB_PR_TASK_GRID_CLASS =
+  "min-w-[1020px] grid-cols-[72px_minmax(360px,2fr)_132px_128px_132px_92px_158px]";
 // Why: sticky cells need the row's opaque, animated surface to prevent bleed and hover flashes.
 export const GITHUB_TASK_ROW_SURFACE_CLASS = "bg-background transition-colors";
 export const GITHUB_TASK_ROW_HOVER_SURFACE_CLASS =

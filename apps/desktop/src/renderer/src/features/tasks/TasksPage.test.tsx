@@ -47,6 +47,13 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     selectedGitHubRepoExternalLink: { url: "https://github.com/example/repo", label: "example/repo" },
     githubMode: "items",
     stateFilter: "open",
+    githubTaskKind: "issues",
+    onSelectGithubTaskKind: () => {},
+    githubModeButtons: [
+      { id: "issues", label: "Issues" },
+      { id: "pulls", label: "Pull requests" },
+    ],
+    showPRManagementColumns: false,
     onStateFilter: () => {},
     taskSearchInput: "",
     setTaskSearchInput: () => {},

@@ -3,26 +3,49 @@
 // this repo keeps the same field names but only the GitHub-only subset the
 // components actually read, assembled by TasksPage.tsx from the bridge.
 import type { Dispatch, JSX, RefObject, SetStateAction } from "react";
-import type { TaskIssue, TaskLink, TasksProjectRef } from "../../../../shared/tasks-contract";
+import type {
+  CheckState,
+  PRMergeableState,
+  PRReviewDecision,
+  TaskIssue,
+  TaskLink,
+  TaskPullRequest,
+  TasksProjectRef,
+} from "../../../../shared/tasks-contract";
 import type { GitHubWorkItemLike } from "./task-page-github-work-item-status";
 import type {
   GitHubStateFilterId,
+  GitHubTaskKind,
   SourceOption,
 } from "./task-page-localized-options";
 import type { RepoBackedTaskEmptyState } from "./task-page-empty-state";
 
-/** One row of the GitHub list: a TaskIssue projected into the source's work-item shape. */
+/** One row of the GitHub list: a TaskIssue/TaskPullRequest projected into the source's work-item shape. */
 export type TaskPageWorkItem = GitHubWorkItemLike & {
   id: string;
   type: "issue" | "pr";
   number: number;
   title: string;
+  state: "open" | "closed" | "merged" | "draft";
   url: string;
   labels: string[];
   updatedAt: string;
   author: string | null;
   assignees: { login: string; name?: string | null; avatarUrl?: string | null }[];
   repoId: string;
+  /** PR-only: the daemon's `gh` fields; absent on issue rows. */
+  reviewDecision?: PRReviewDecision | null;
+  checks?: {
+    state: CheckState;
+    total: number;
+    passed: number;
+    failed: number;
+    pending: number;
+    neutral: number;
+  } | null;
+  mergeable?: PRMergeableState | null;
+  headRefName?: string | null;
+  baseRefName?: string | null;
 };
 
 export function toWorkItem(issue: TaskIssue, repoId: string): TaskPageWorkItem {
@@ -38,6 +61,28 @@ export function toWorkItem(issue: TaskIssue, repoId: string): TaskPageWorkItem {
     author: issue.author ?? null,
     assignees: issue.assignees.map((login) => ({ login })),
     repoId,
+  };
+}
+
+/** Projects a TaskPullRequest into the source's PR row shape (`pr:<n>` id, draft state from `isDraft`). */
+export function toPullWorkItem(pull: TaskPullRequest, repoId: string): TaskPageWorkItem {
+  return {
+    id: `pr:${pull.number}`,
+    type: "pr",
+    number: pull.number,
+    title: pull.title,
+    state: pull.state,
+    url: pull.url,
+    labels: pull.labels.map((label) => label.name),
+    updatedAt: pull.updatedAt,
+    author: pull.author ?? null,
+    assignees: pull.assignees.map((login) => ({ login })),
+    repoId,
+    reviewDecision: pull.reviewDecision ?? null,
+    checks: pull.checks ?? null,
+    mergeable: pull.mergeable ?? null,
+    headRefName: pull.headRefName ?? null,
+    baseRefName: pull.baseRefName ?? null,
   };
 }
 
@@ -61,11 +106,16 @@ export type TaskPageModel = {
   taskSourceAvailabilityNotice: { label: string; title: string } | null;
   taskPageListChromeHidden: boolean;
 
-  // Mode controls (repo combobox + external link; Projects/PRs modes do not exist here).
+  // Mode controls (repo combobox + external link, Issues/Pull requests kind switch).
   taskPickerRepos: TaskPickerRepo[];
   repoSelection: Set<string>;
   setRepoSelection: (next: Set<string>) => void;
   selectedGitHubRepoExternalLink: { url: string; label: string } | null;
+  githubTaskKind: GitHubTaskKind;
+  onSelectGithubTaskKind: (kind: GitHubTaskKind) => void;
+  githubModeButtons: { id: GitHubTaskKind; label: string }[];
+  /** True in pulls mode: rows render Reviewers/Checks/Merge instead of Assignees/Status. */
+  showPRManagementColumns: boolean;
 
   // Filters.
   githubMode: "items";
