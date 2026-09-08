@@ -258,11 +258,31 @@ const SURFACES = [
       "src/renderer/src/components/NewWorkspaceComposerModal.tsx",
       "src/renderer/src/components/new-workspace/NewWorkspaceComposerProjectSection.tsx",
       "src/renderer/src/components/new-workspace/NewWorkspaceComposerAdvancedSection.tsx",
+      "src/renderer/src/components/new-workspace/ComposerParentWorktreePicker.tsx",
+      "src/renderer/src/components/new-workspace/DrogonQuickSession.tsx",
     ],
-    probes: ["New workspace", "Project", "Agent", "Run target", "Advanced", "aria-label"],
+    probes: [
+      "New workspace",
+      "Project",
+      "Agent",
+      "Run target",
+      "Advanced",
+      "Branch name",
+      "Parent worktree",
+      "Nests this workspace under another in the sidebar",
+      "Note",
+      "Setup script",
+      "Sparse checkout",
+      "Quick Session",
+      "aria-label",
+    ],
     candFiles: [
       "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposer.tsx",
       "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposerModal.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/composer-advanced-section.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/composer-parent-worktree-picker.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/composer-sparse-checkout.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/DrogonQuickSession.tsx",
       "apps/desktop/src/renderer/src/features/new-workspace/composer-submit.ts",
     ],
   },
@@ -837,11 +857,31 @@ const SURFACES = [
       "src/renderer/src/components/NewWorkspaceComposerModal.tsx",
       "src/renderer/src/components/new-workspace/NewWorkspaceComposerProjectSection.tsx",
       "src/renderer/src/components/new-workspace/NewWorkspaceComposerAdvancedSection.tsx",
+      "src/renderer/src/components/new-workspace/ComposerParentWorktreePicker.tsx",
+      "src/renderer/src/components/new-workspace/DrogonQuickSession.tsx",
     ],
-    probes: ["New workspace", "Project", "Agent", "Run target", "Advanced", "aria-label"],
+    probes: [
+      "New workspace",
+      "Project",
+      "Agent",
+      "Run target",
+      "Advanced",
+      "Branch name",
+      "Parent worktree",
+      "Nests this workspace under another in the sidebar",
+      "Note",
+      "Setup script",
+      "Sparse checkout",
+      "Quick Session",
+      "aria-label",
+    ],
     candFiles: [
       "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposer.tsx",
       "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposerModal.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/composer-advanced-section.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/composer-parent-worktree-picker.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/composer-sparse-checkout.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/DrogonQuickSession.tsx",
       "apps/desktop/src/renderer/src/features/new-workspace/composer-submit.ts",
     ],
   },
@@ -4196,6 +4236,18 @@ async function candSetup(page, state, ctx) {
       // with the reference, whose selected project is a git repo (title
       // "Create worktree", git Advanced rows).
       await ensureGitProject("workspace-composer");
+      // Seed the project-scoped setup row without submitting the composer;
+      // the fixture is disposable and the reference state has local setup
+      // configured, so both Advanced captures expose the same source row.
+      if (ctx.scProjectId) {
+        await page.evaluate(async (projectId) => {
+          await window.drogon.project?.projectUpdate?.({
+            id: projectId,
+            setupScript: "pnpm install",
+          });
+        }, ctx.scProjectId);
+        await reloadCandidate("composer setup fixture");
+      }
       let opened = await tryClick(page, "button", "Create workspace", 3000);
       if (!opened) opened = await tryClick(page, "button", "New workspace", 3000);
       if (opened) {
@@ -4217,6 +4269,22 @@ async function candSetup(page, state, ctx) {
           await advanced.click({ timeout: 3000 });
           await delay(300);
           notes.push("Advanced section expanded");
+          const composerText = await page
+            .getByRole("dialog")
+            .first()
+            .innerText()
+            .catch(() => "");
+          for (const label of [
+            "Branch name",
+            "Parent worktree",
+            "Note",
+            "Setup script",
+            "Sparse checkout",
+            "Quick Session",
+          ]) {
+            if (composerText.includes(label)) notes.push(`composer field: ${label}`);
+            else missing.push(`composer field missing: ${label}`);
+          }
         }
       } else missing.push("no Create workspace/New workspace affordance reachable");
       break;
@@ -5438,6 +5506,22 @@ async function candSetup(page, state, ctx) {
           await advanced.click({ timeout: 3000 });
           await delay(300);
           notes.push("Advanced section expanded");
+          const composerText = await page
+            .getByRole("dialog")
+            .first()
+            .innerText()
+            .catch(() => "");
+          for (const label of [
+            "Branch name",
+            "Parent worktree",
+            "Note",
+            "Setup script",
+            "Sparse checkout",
+            "Quick Session",
+          ]) {
+            if (composerText.includes(label)) notes.push(`composer field: ${label}`);
+            else missing.push(`composer field missing: ${label}`);
+          }
         }
       } else missing.push("no Create workspace/New workspace affordance reachable");
       break;

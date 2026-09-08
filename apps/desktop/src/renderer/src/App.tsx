@@ -24,6 +24,7 @@ import type {
   Result,
   Session,
   Status,
+  Worktree,
   Workspace,
 } from "../../shared/session-contract";
 import { Button } from "./components/ui/button";
@@ -1983,23 +1984,83 @@ export function App() {
     projectId: string;
     name: string;
     baseRef?: string;
+    branch?: string;
+    note?: string;
+    parentWorktreeId?: string;
+    sparse?: string[];
+    setupScript?: string;
+    waitForSetup?: boolean;
     agent: ComposerAgentSelection;
   }): Promise<string | null> => {
     const bridge = windowProjectBridge(window.drogon);
     if (typeof bridge.worktreeCreate !== "function")
       return "Worktrees unavailable: service does not advertise worktree.v1";
-    let workspaceId: string;
+    const { setupScript, waitForSetup, agent, ...createInput } = input;
+    let created: Worktree;
     try {
-      const result = await bridge.worktreeCreate(input);
+      const result = await bridge.worktreeCreate(createInput);
       if (!result.ok) return result.error.message;
-      workspaceId = result.result.workspaceId;
+      created = result.result;
     } catch {
       return "Could not create the worktree. Retry the connection.";
     }
+    const workspaceId = created.workspaceId;
+    selectWorkspaceId(workspaceId);
+
+    // The fork's setup terminal is a real terminal titled "Setup". Drogon
+    // has no daemon-side terminal title field, so persist the same title in
+    // the existing per-workspace tab-strip metadata after starting a real
+    // shell session in the new worktree.
+    if (setupScript?.trim()) {
+      const project = projectGroups.find(
+        (group) => group.project.id === input.projectId,
+      )?.project;
+      const setupResult = await window.drogon.start(workspaceId, {
+        command: "/usr/bin/env",
+        args: [
+          `DROGON_ROOT_PATH=${project?.path ?? ""}`,
+          `DROGON_WORKTREE_PATH=${created.path}`,
+          `DROGON_WORKSPACE_NAME=${input.name}`,
+          "/bin/sh",
+          "-lc",
+          setupScript,
+        ],
+        cwd: created.path,
+      });
+      if (!setupResult.ok) return setupResult.error.message;
+      setSessions((items) => appendOrReplaceSession(items, setupResult.result));
+      setActive(setupResult.result.id);
+      const setupTabs = loadTabStripState(window.localStorage, workspaceId);
+      saveTabStripState(window.localStorage, workspaceId, {
+        ...setupTabs,
+        titles: { ...setupTabs.titles, [setupResult.result.id]: "Setup" },
+      });
+      if (waitForSetup) {
+        // Loss of contact is not exit: only a confirmed `exited` verdict
+        // releases the agent launch. Keep the composer in its creating state
+        // while the setup command installs dependencies or writes config.
+        const deadline = Date.now() + 10 * 60 * 1000;
+        let settled = false;
+        while (Date.now() < deadline) {
+          const listed = await window.drogon.sessions(workspaceId);
+          if (!listed.ok) return listed.error.message;
+          const current = listed.result.sessions.find(
+            (item) => item.id === setupResult.result.id,
+          );
+          if (current?.verdict === "exited") {
+            settled = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        if (!settled) return "Setup did not finish within 10 minutes.";
+      }
+    }
+
     // The worktree exists from here on: a failed agent launch keeps the
     // composer open on the error instead of closing over it, with the new
     // workspace already selected behind.
-    const agentFailure = await launchComposerAgent(workspaceId, input.agent);
+    const agentFailure = await launchComposerAgent(workspaceId, agent);
     await refresh();
     selectWorkspaceId(workspaceId);
     if (agentFailure) return agentFailure;
@@ -2042,6 +2103,59 @@ export function App() {
   // (the source's dialog promises exactly that, with no counts and no
   // refusal, so no gating here). Same submit contract as the worktree
   // submit above: verbatim daemon error, or null on success.
+  const createComposerQuickSession = async (input: {
+    name: string;
+    agent: ComposerAgentSelection;
+  }): Promise<string | null> => {
+    const bridge = windowProjectBridge(window.drogon);
+    if (typeof bridge.quickSessionCreate !== "function")
+      return "Quick Session unavailable: service does not advertise project.v1";
+    if (!input.agent.harnessId) return "Choose an agent to start Quick Session.";
+    let created: { project: Project; workspaceId: string };
+    try {
+      const result = await bridge.quickSessionCreate(
+        input.name.trim() ? { name: input.name.trim() } : undefined,
+      );
+      if (!result.ok) return result.error.message;
+      created = result.result;
+    } catch {
+      return "Could not create Quick Session. Retry the connection.";
+    }
+    const launch = composerAgentLaunchInput(
+      created.workspaceId,
+      input.agent,
+      crypto.randomUUID(),
+      harnessDefaults,
+    );
+    if (!launch) return "Choose an agent to start Quick Session.";
+    let failure: string | null = null;
+    try {
+      const result = await startHarnessTracked(launch);
+      if (!result.ok) failure = result.error.message;
+      else {
+        setSessions((items) => appendOrReplaceSession(items, result.result));
+        setActive(result.result.id);
+      }
+    } catch {
+      failure = "Could not start the Quick Session harness. Retry the connection.";
+    }
+    if (failure) {
+      // Match the fork's cleanup on a failed quick launch: the scratch
+      // project is app-owned, so remove it instead of leaving a dead row.
+      if (typeof bridge.projectRemove === "function") {
+        try {
+          await bridge.projectRemove({ id: created.project.id });
+        } catch {
+          // Preserve the launch failure; cleanup is best effort.
+        }
+      }
+      return failure;
+    }
+    await refresh();
+    selectWorkspaceId(created.workspaceId);
+    setProjectAction(null);
+    return null;
+  };
   const submitRemoveProject = async (project: {
     id: string;
   }): Promise<string | null> => {
@@ -2072,6 +2186,25 @@ export function App() {
       // Selection stays: the refreshed lists already dropped the project.
     }
     return null;
+  };
+  const submitUpdateProjectSetupScript = async (
+    projectId: string,
+    setupScript: string | null,
+  ): Promise<string | null> => {
+    const bridge = windowProjectBridge(window.drogon);
+    if (typeof bridge.projectUpdate !== "function")
+      return "Projects unavailable: service does not advertise project.v1";
+    try {
+      const result = await bridge.projectUpdate({ id: projectId, setupScript });
+      if (!result.ok) return result.error.message;
+      setSettingsProject((current) =>
+        current?.id === projectId ? result.result : current,
+      );
+      await refresh();
+      return null;
+    } catch {
+      return "Could not save the setup script. Retry the connection.";
+    }
   };
   // Worktree display-title rename (task R9-A): renames the card title
   // only, never the branch or directory; refresh re-reads the title.
@@ -3652,6 +3785,7 @@ export function App() {
                   initialSection={settingsInitialSection}
                   project={settingsProject}
                   onRemoveProject={removeProjectFromSettings}
+                  onUpdateSetupScript={submitUpdateProjectSetupScript}
                   onBack={closeSettings}
                 />
               </section>
@@ -4303,6 +4437,7 @@ export function App() {
           defaultHarnessId={defaultHarnessId}
           harnessDefaults={harnessDefaults}
           onSubmitWorktree={submitWorktree}
+          onCreateQuickSession={createComposerQuickSession}
           onLaunchAgent={async (launch) => {
             let session: Session;
             try {

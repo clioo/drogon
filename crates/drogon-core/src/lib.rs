@@ -458,10 +458,20 @@ impl Engine {
             }
             "project.changes" => self.do_project_changes(&request.params),
             "project.remove" => self.mutating(request, Self::do_project_remove),
+            // R16-BM2 (additive): composer Advanced rows + Quick Session.
+            "project.update" => self.mutating(request, Self::do_project_update),
+            "project.quickSessionCreate" => {
+                self.mutating(request, Self::do_project_quick_session_create)
+            }
+            "project.sparsePresets" => self.do_project_sparse_presets(&request.params),
+            "project.saveSparsePreset" => {
+                self.mutating(request, Self::do_project_save_sparse_preset)
+            }
             "worktree.create" => self.mutating(request, Self::do_worktree_create),
             "worktree.list" => self.do_worktree_list(&request.params),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "worktree.rename" => self.mutating(request, Self::do_worktree_rename),
+            "worktree.update" => self.mutating(request, Self::do_worktree_update),
             "tasks.list" => self.do_tasks_list(&request.params),
             "tasks.show" => self.do_tasks_show(&request.params),
             "tasks.start" => self.mutating(request, Self::do_tasks_start),
