@@ -83,6 +83,18 @@ const backgroundWindow = process.env.DROGON_BACKGROUND_WINDOW === "1";
 if (backgroundWindow) {
   app.commandLine.appendSwitch("disable-renderer-backgrounding");
   app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+  // macOS activates a regular app the moment it finishes launching (menu bar
+  // switches, Dock bounces) — long before whenReady/createWindow. Becoming an
+  // accessory with no Dock tile BEFORE launch completes is the only way a
+  // test instance never takes the user's focus.
+  if (process.platform === "darwin") {
+    try {
+      app.setActivationPolicy("accessory");
+      app.dock?.hide();
+    } catch (error) {
+      console.warn("[window] background activation policy:", error);
+    }
+  }
 }
 if (process.env.DROGON_ELECTRON_PROFILE)
   app.setPath("userData", path.resolve(process.env.DROGON_ELECTRON_PROFILE));
@@ -476,7 +488,9 @@ if (!holdsSingleInstanceLock) {
 } else {
   if (!isolatedProfile) {
     app.on("second-instance", () => {
-      if (window) {
+      // A test instance never raises itself, even when a duplicate launch
+      // hands it the single-instance lock.
+      if (window && !backgroundWindow) {
         if (window.isMinimized()) window.restore();
         window.focus();
       }
