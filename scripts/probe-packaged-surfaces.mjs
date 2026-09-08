@@ -334,12 +334,24 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const guestUrl = `http://127.0.0.1:${server.address().port}/`;
   try {
-    await pane.getByLabel("Address", { exact: true }).fill(guestUrl);
+    // The accept flow leaves a 760px viewport where the toolbar squeezes
+    // the address slot to its 44px globe (the fork overlays the bar on
+    // focus below 220px; this build keeps it collapsed): widen like a user
+    // would before typing a URL.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // The fork's BrowserPane expects a user flow: click the address bar,
+    // then type and press Enter (fill() bypasses the focus handlers that
+    // open the suggestions and arm Enter-to-navigate).
+    const address = pane.getByLabel("Address", { exact: true });
+    await address.click({ timeout: 15000 });
+    await address.pressSequentially(guestUrl, { timeout: 15000 });
     await page.keyboard.press("Enter");
     // Browser tabs mirror into the shared strip (the pane mounts with
     // hideTabStrip): the strip names the loaded host once navigation
-    // commits.
+    // commits. Scoped to the Sessions tablist: the right sidebar renders
+    // its own tabs (Mentu Plan/Evidence) with overlapping roles.
     await page
+      .locator('[role="tablist"][aria-label="Sessions"]')
       .getByRole("tab", { name: /127\.0\.0\.1/ })
       .first()
       .waitFor({ timeout: 30000 });
