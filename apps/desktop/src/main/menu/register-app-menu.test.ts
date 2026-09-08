@@ -377,6 +377,9 @@ describe("registerAppMenu", () => {
   );
 
   it("keeps the macOS app-named menu with Settings and quit roles", () => {
+    // Why: this asserts macOS-only chrome, so it pins darwin instead of
+    // assuming the runner OS (it failed on ubuntu/windows runners).
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
     registerAppMenu(buildMenuOptions());
 
     const template = getTemplate();
@@ -402,6 +405,9 @@ describe("registerAppMenu", () => {
   });
 
   it("opens the Drogon repo and README through the Help menu", () => {
+    // Why: on non-mac the About role is redistributed under Help (with
+    // separators), so this pins darwin to assert exactly the two link items.
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
     const options = buildMenuOptions();
     registerAppMenu(options);
 

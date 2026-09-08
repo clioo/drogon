@@ -247,10 +247,15 @@ try {
 
   const hello = await control.waitForHello(8000);
   fixtureInstanceId = hello.instanceId;
+  // R7-C sets four session-safe DROGON_* vars fresh on every session child
+  // (DROGON_DATA_DIR/WORKSPACE_ID/SESSION_ID/TERMINAL -- see
+  // session_env_assignments in crates/drogon-core/src/session_env.rs), so a
+  // stripped grandchild still reports 4. The strip proof is that nothing
+  // ELSE control-plane remains: no ORCA_* and not ORCA_ACCEPTANCE_SENTINEL.
   assert.equal(
     hello.envLeaked,
-    0,
-    "Daemon must strip control-plane env from the real grandchild",
+    4,
+    "Daemon must strip control-plane env from the real grandchild (only the four session-safe DROGON_* may remain)",
   );
   assert.equal(
     control.children.size,

@@ -1292,7 +1292,7 @@ pub fn history_for_bot(
 ) -> Result<Vec<HistoryEntry>> {
     let bot = get_bot(conn, host_id, folder, bot_id)?;
     let mut stmt = conn.prepare(
-        "SELECT payload_json FROM bot_responsibility_runs WHERE bot_id = ?1 ORDER BY started_at DESC",
+        "SELECT payload_json FROM bot_responsibility_runs WHERE bot_id = ?1 ORDER BY started_at DESC, rowid DESC",
     )?;
     let rows: Vec<String> = stmt
         .query_map(params![bot_id], |r| r.get::<_, String>(0))?
@@ -1354,6 +1354,9 @@ pub(crate) fn record_bot_message_in_tx(conn: &Connection, message: &BotMessage) 
 /// enforced by requiring the bot itself to resolve in `(host_id, folder)`
 /// first -- a message row names no scope of its own (chat turns are never
 /// re-owned across hosts the way a scheduled automation can be).
+/// `started_at` has millisecond resolution, so two rapid turns can share a
+/// timestamp; `rowid DESC` breaks the tie by insertion order (later insert
+/// is the newer turn) instead of leaving it to SQLite's undefined order.
 pub fn history_for_bot_messages(
     conn: &Connection,
     host_id: &str,
@@ -1363,7 +1366,7 @@ pub fn history_for_bot_messages(
 ) -> Result<Vec<BotMessage>> {
     get_bot(conn, host_id, folder, bot_id)?.ok_or(StorageError::NotFound("bot"))?;
     let mut stmt = conn.prepare(
-        "SELECT payload_json FROM bot_messages WHERE bot_id = ?1 ORDER BY started_at DESC LIMIT ?2",
+        "SELECT payload_json FROM bot_messages WHERE bot_id = ?1 ORDER BY started_at DESC, rowid DESC LIMIT ?2",
     )?;
     let rows: Vec<String> = stmt
         .query_map(params![bot_id, limit], |r| r.get::<_, String>(0))?
@@ -1518,4 +1521,73 @@ pub fn migrate_ownership(conn: &Connection, host_id: &str, folder: &str) -> Resu
     }
     tx.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::{create_bot, history_for_bot_messages, migrate};
+    use crate::bots::records::{
+        Bot, BotMessage, DEFAULT_DROGON_BOT_HARNESS, DisplayIdentity, HarnessModelPolicy,
+    };
+    use rusqlite::Connection;
+
+    fn message(id: &str, prompt: &str, started_at: f64) -> BotMessage {
+        BotMessage {
+            id: id.to_string(),
+            bot_id: "bot-1".to_string(),
+            request_id: format!("bot-chat:{id}"),
+            prompt: prompt.to_string(),
+            session_id: None,
+            incarnation: None,
+            host_observation: None,
+            error: None,
+            started_at,
+            ended_at: None,
+        }
+    }
+
+    #[test]
+    fn tied_timestamps_read_back_newest_insert_first() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::automations::storage::migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        create_bot(
+            &conn,
+            "host-1",
+            "/repo",
+            &Bot {
+                id: "bot-1".to_string(),
+                character_preset: "none".to_string(),
+                display_identity: DisplayIdentity {
+                    display_name: "Bot".to_string(),
+                    handle: None,
+                    title: None,
+                },
+                harness_policy: HarnessModelPolicy {
+                    default_harness: DEFAULT_DROGON_BOT_HARNESS.to_string(),
+                    explicit_model: None,
+                },
+                instructions: String::new(),
+                memories: Vec::new(),
+                responsibilities: Vec::new(),
+                current_session: None,
+                created_at: 0.0,
+                updated_at: 0.0,
+            },
+        )
+        .unwrap();
+        // Same millisecond clock sample for both turns: without the rowid
+        // tiebreak SQLite returns them oldest-first (rowid order).
+        super::record_bot_message_in_tx(&conn, &message("m1", "first message", 1.0)).unwrap();
+        super::record_bot_message_in_tx(&conn, &message("m2", "second message", 1.0)).unwrap();
+
+        let history = history_for_bot_messages(&conn, "host-1", "/repo", "bot-1", 50).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].prompt, "second message");
+        assert_eq!(history[1].prompt, "first message");
+
+        let limited = history_for_bot_messages(&conn, "host-1", "/repo", "bot-1", 1).unwrap();
+        assert_eq!(limited.len(), 1);
+        assert_eq!(limited[0].prompt, "second message");
+    }
 }
