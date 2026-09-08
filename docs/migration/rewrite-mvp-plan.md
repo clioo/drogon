@@ -156,3 +156,6 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J6 R12-G: Tasks en modo pull requests con celdas de revisión/checks/merge y start desde PR | R12 | OpenCode Go + Muse 1.3 | lanzada (relanzada en el plan Go a petición de Carlos) | |
 | J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode Go + Muse 1.3 | lanzada (relanzada en el plan Go a petición de Carlos) | |
 | J10 R12-I: paneles de Settings del fuente (Appearance, General, Agents, Notifications, Git y GitHub) | R12 | Muse | fusionada: orden de secciones del fuente, sección CLI en Agents con sonda real | #89 |
+| J8 R13-A: exactitud de la página Bots frente al fork (estados, formulario, avatar, controlador) sobre las primitivas | R13 | Muse | lanzada | |
+| J4 R13-B: panel Ports de la barra derecha con puertos del workspace y abrir en pestaña de browser | R13 | GLM 5.3 Flash | lanzada | |
+| Fidelidad R13-C: toasts del fuente (sonner) y sus llamadas en las superficies del MVP | R13 | Muse | lanzada | |
