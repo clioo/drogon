@@ -34,10 +34,12 @@ function ShortcutRow({ action, shortcut }: ShortcutItem): React.JSX.Element {
 
 export function Landing({
   hasProjects,
+  hasWorkspaces = true,
   onAddProject,
   onCreateWorkspace,
 }: {
   hasProjects: boolean;
+  hasWorkspaces?: boolean;
   onAddProject: () => void;
   onCreateWorkspace: () => void;
 }): React.JSX.Element {
@@ -67,7 +69,9 @@ export function Landing({
 
           <p className="text-sm text-muted-foreground text-center">
             {hasProjects
-              ? "Select a workspace from the sidebar to begin."
+              ? hasWorkspaces
+                ? "Select a workspace from the sidebar to begin."
+                : "Create a workspace in one of your projects to get started."
               : "Add a project to get started."}
           </p>
 
