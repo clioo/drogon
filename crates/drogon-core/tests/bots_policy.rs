@@ -59,6 +59,8 @@ fn sample_automation(id: &str, bot_id: &str) -> Automation {
         prompt: "p".to_string(),
         precheck: None,
         agent_id: "codex".to_string(),
+        model: None,
+        provider: None,
         run_context: None,
         source_context: None,
         project_id: "proj".to_string(),

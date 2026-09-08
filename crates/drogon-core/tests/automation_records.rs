@@ -32,6 +32,8 @@ fn sample_automation(id: &str, bot_id: Option<&str>) -> Automation {
         prompt: "do the thing".to_string(),
         precheck: None,
         agent_id: "codex".to_string(),
+        model: None,
+        provider: None,
         run_context: None,
         source_context: None,
         project_id: "proj-1".to_string(),

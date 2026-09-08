@@ -10,13 +10,14 @@ use std::time::Duration;
 
 use drogon_core::Engine;
 use drogon_core::automations::direct::{
-    DirectLookupError, DirectPlan, DirectPrepareOutcome, Reschedule, prepare_direct,
-    record_direct_outcome, record_skip,
+    DirectLookupError, DirectPlan, DirectPrepareOutcome, ReconcileOutcome, Reschedule,
+    SessionEvidence, apply_reconcile, prepare_direct, reconcile_decision, record_direct_outcome,
+    record_skip,
 };
 use drogon_core::automations::execution::InvocationReason;
 use drogon_core::automations::records::{
-    Automation, AutomationRunStatus, AutomationRunTrigger, ExecutionTargetType, MissedRunPolicy,
-    SchedulerOwner, WorkspaceMode,
+    Automation, AutomationRun, AutomationRunStatus, AutomationRunTrigger, ExecutionTargetType,
+    MissedRunPolicy, SchedulerOwner, SessionKind, WorkspaceMode,
 };
 use drogon_core::automations::runner::{
     DispatchSeamError, HarnessLaunchParams, RunRefusal, RunnerOutcome,
@@ -64,6 +65,8 @@ fn sample_automation(id: &str) -> Automation {
         prompt: "do the thing".to_string(),
         precheck: None,
         agent_id: "pi".to_string(),
+        model: None,
+        provider: None,
         run_context: None,
         source_context: None,
         project_id: "w1".to_string(),
@@ -537,7 +540,14 @@ fn ensure_fixture_harness_on_path() {
             std::env::temp_dir().join(format!("drogon-automation-fixture-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pi = dir.join("pi");
-        std::fs::write(&pi, "#!/bin/sh\necho automation-fixture-output\nexit 0\n").unwrap();
+        // The argv echo proves which launcher flags a dispatch really
+        // carried (e.g. pinned `--model`/`--provider`); no test asserts
+        // the bare marker alone, so extending the line is safe.
+        std::fs::write(
+            &pi,
+            "#!/bin/sh\necho \"automation-fixture-output ARGS:$@\"\nexit 0\n",
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -898,6 +908,591 @@ fn history_orders_newest_first_and_respects_limit() {
     let runs = limited["runs"].as_array().unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0]["createdAt"].as_f64().unwrap(), times[0]);
+}
+
+/// Polls `automation.run` until the honest output snapshot contains the
+/// needle (or the deadline passes): proves the run's session really
+/// produced the fixture output the daemon reports.
+fn poll_run_snapshot(engine: &Engine, run_id: &str, needle: &str) -> bool {
+    for _ in 0..100 {
+        let detail = ok(engine.dispatch(request(
+            &uuid::Uuid::new_v4().to_string(),
+            "automation.run",
+            json!({"runId": run_id}),
+        )));
+        if detail["outputSnapshot"]
+            .as_object()
+            .is_some_and(|snapshot| {
+                snapshot["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains(needle))
+            })
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    false
+}
+
+#[test]
+fn create_update_pin_model_provider_and_surface_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+
+    let created = ok(engine.dispatch(request(
+        "pin-1",
+        "automation.create",
+        json!({"name": "pinned", "cron": "* * * * *", "workspaceId": workspace_id,
+               "harness": "pi", "prompt": "p",
+               "model": "fixture-model", "provider": "dgx-spark"}),
+    )));
+    let automation_id = created["id"].as_str().unwrap().to_string();
+    assert_eq!(created["model"], json!("fixture-model"));
+    assert_eq!(created["provider"], json!("dgx-spark"));
+    let listed = ok(engine.dispatch(request("pin-list", "automation.list", json!({}))));
+    let item = &listed["automations"].as_array().unwrap()[0];
+    assert_eq!(item["model"], json!("fixture-model"));
+    assert_eq!(item["provider"], json!("dgx-spark"));
+
+    // No pin: the summary omits both keys rather than nulling them.
+    let bare = create_automation(&engine, "pin-bare", &workspace_id, "* * * * *");
+    assert!(bare.get("model").is_none());
+    assert!(bare.get("provider").is_none());
+
+    // Update pins both onto an existing automation.
+    let bare_id = bare["id"].as_str().unwrap();
+    let updated = ok(engine.dispatch(request(
+        "pin-2",
+        "automation.update",
+        json!({"id": bare_id, "model": "late-model", "provider": "dgx-spark"}),
+    )));
+    assert_eq!(updated["model"], json!("late-model"));
+    assert_eq!(updated["provider"], json!("dgx-spark"));
+
+    // Moving a provider-pinned automation off pi is refused: the stored
+    // provider could only DispatchFailed there.
+    assert_eq!(
+        err_code(engine.dispatch(request(
+            "pin-3",
+            "automation.update",
+            json!({"id": automation_id, "harness": "claude"}),
+        ))),
+        "invalid_argument"
+    );
+}
+
+#[test]
+fn create_update_reject_bad_model_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+    let bad = vec![
+        ("empty-model", json!({"model": ""})),
+        ("flag-model", json!({"model": "--model=x"})),
+        ("long-model", json!({"model": "m".repeat(513)})),
+        (
+            "provider-on-claude",
+            json!({"harness": "claude", "provider": "dgx-spark"}),
+        ),
+    ];
+    for (tag, extra) in bad {
+        let mut params = json!({"name": format!("bad-{tag}"), "cron": "* * * * *",
+                                "workspaceId": workspace_id, "harness": "pi", "prompt": "p"});
+        for (key, value) in extra.as_object().unwrap() {
+            params
+                .as_object_mut()
+                .unwrap()
+                .insert(key.clone(), value.clone());
+        }
+        assert_eq!(
+            err_code(engine.dispatch(request(tag, "automation.create", params))),
+            "invalid_argument",
+            "{tag} must be refused"
+        );
+    }
+    // Provider on update against a non-pi automation is refused too.
+    let created = create_automation(&engine, "pin-claude", &workspace_id, "* * * * *");
+    let claude_id = created["id"].as_str().unwrap();
+    ok(engine.dispatch(request(
+        "pin-harness",
+        "automation.update",
+        json!({"id": claude_id, "harness": "claude"}),
+    )));
+    assert_eq!(
+        err_code(engine.dispatch(request(
+            "pin-bad-upd",
+            "automation.update",
+            json!({"id": claude_id, "provider": "dgx-spark"}),
+        ))),
+        "invalid_argument"
+    );
+}
+
+#[test]
+fn run_now_launches_with_the_pinned_model_provider() {
+    ensure_fixture_harness_on_path();
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+    let created = ok(engine.dispatch(request(
+        "pin-run-create",
+        "automation.create",
+        json!({"name": "pinned-run", "cron": "* * * * *", "workspaceId": workspace_id,
+               "harness": "pi", "prompt": "p",
+               "model": "fixture-model", "provider": "dgx-spark"}),
+    )));
+    let automation_id = created["id"].as_str().unwrap().to_string();
+
+    let result = ok(engine.dispatch(request(
+        "pin-run-now",
+        "automation.run_now",
+        json!({"id": automation_id}),
+    )));
+    assert_eq!(result["outcome"], json!("dispatched"));
+    let run_id = result["runId"].as_str().unwrap().to_string();
+    let history = ok(engine.dispatch(request(
+        "pin-run-hist",
+        "automation.history",
+        json!({"automationId": automation_id}),
+    )));
+    let session_id = history["runs"][0]["terminalSessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(poll_session_exited(&engine, &workspace_id, &session_id));
+    // The fixture echoed its real argv: the pinned flags reached the
+    // launcher, and the run detail honestly reports that output.
+    assert!(
+        poll_run_snapshot(&engine, &run_id, "--model fixture-model"),
+        "run snapshot never showed the pinned model flag"
+    );
+    assert!(
+        poll_run_snapshot(&engine, &run_id, "--provider dgx-spark"),
+        "run snapshot never showed the pinned provider flag"
+    );
+}
+
+#[test]
+fn tick_fires_with_the_pinned_model_provider() {
+    ensure_fixture_harness_on_path();
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+    let created = ok(engine.dispatch(request(
+        "pin-tick-create",
+        "automation.create",
+        json!({"name": "pinned-tick", "cron": "* * * * *", "workspaceId": workspace_id,
+               "harness": "pi", "prompt": "p",
+               "model": "fixture-model", "provider": "dgx-spark"}),
+    )));
+    let automation_id = created["id"].as_str().unwrap().to_string();
+    let slot = created["nextRunAt"].as_f64().unwrap();
+
+    let summary = scheduler::tick_once(&engine, slot + 30_000.0);
+    assert_eq!(summary.fired, 1);
+    assert_eq!(summary.failed, 0);
+    let history = ok(engine.dispatch(request(
+        "pin-tick-hist",
+        "automation.history",
+        json!({"automationId": automation_id}),
+    )));
+    let run_id = history["runs"][0]["id"].as_str().unwrap().to_string();
+    assert!(
+        poll_run_snapshot(&engine, &run_id, "--model fixture-model"),
+        "scheduled run snapshot never showed the pinned model flag"
+    );
+}
+
+fn sample_run(id: &str, automation_id: &str) -> AutomationRun {
+    AutomationRun {
+        id: id.to_string(),
+        automation_id: automation_id.to_string(),
+        run_context: None,
+        source_context: None,
+        title: String::new(),
+        scheduled_for: 1_000.0,
+        status: AutomationRunStatus::Dispatched,
+        trigger: AutomationRunTrigger::Manual,
+        workspace_id: Some("w1".to_string()),
+        workspace_display_name: None,
+        session_kind: SessionKind::Terminal,
+        chat_session_id: None,
+        terminal_session_id: Some("s1".to_string()),
+        terminal_pane_key: None,
+        terminal_pty_id: None,
+        output_snapshot: None,
+        precheck_result: None,
+        usage: None,
+        error: None,
+        started_at: Some(1_000.0),
+        dispatched_at: Some(1_000.0),
+        created_at: 1_000.0,
+        run_number: None,
+        occurrence_count: None,
+        last_occurrence_at: None,
+        session_incarnation: Some("inc-1".to_string()),
+        exit_code: None,
+        observed_at: Some(1_000.0),
+    }
+}
+
+fn live_evidence(agent_state: &str, agent_state_at: Option<&str>) -> SessionEvidence {
+    SessionEvidence {
+        verdict: "live".to_string(),
+        exit_code: None,
+        agent_state: agent_state.to_string(),
+        agent_state_at: agent_state_at.map(str::to_string),
+        incarnation: "inc-1".to_string(),
+    }
+}
+
+/// 1970-01-01T00:00:01Z: one second after the sample run's dispatch, so a
+/// wait-signal stamped then provably postdates it.
+const SIGNAL_AFTER_DISPATCH: &str = "1970-01-01T00:00:01Z";
+
+#[test]
+fn reconcile_decision_finalizes_only_on_proven_terminal_evidence() {
+    let run = sample_run("ar:1", "a1");
+    // Exited sessions finalize with the reaped code (or none).
+    assert_eq!(
+        reconcile_decision(
+            &run,
+            Some(&SessionEvidence {
+                verdict: "exited".to_string(),
+                exit_code: Some(0),
+                agent_state: "exited".to_string(),
+                agent_state_at: None,
+                incarnation: "inc-1".to_string(),
+            })
+        ),
+        ReconcileOutcome::Exited { exit_code: Some(0) }
+    );
+    // A live working agent is still running.
+    assert_eq!(
+        reconcile_decision(&run, Some(&live_evidence("working", None))),
+        ReconcileOutcome::Running
+    );
+    // A live agent whose wait-signal postdates dispatch ended its turn.
+    assert_eq!(
+        reconcile_decision(
+            &run,
+            Some(&live_evidence("needs_input", Some(SIGNAL_AFTER_DISPATCH)))
+        ),
+        ReconcileOutcome::TurnEnded
+    );
+    // Same-second truncation edge: a dispatch 500 ms into a second and a
+    // signal stamped that same second are indistinguishable at this
+    // resolution, so the edge is (conservatively) accepted.
+    let mut same_second = run.clone();
+    same_second.dispatched_at = Some(500.0);
+    assert_eq!(
+        reconcile_decision(
+            &same_second,
+            Some(&live_evidence("needs_input", Some("1970-01-01T00:00:00Z")))
+        ),
+        ReconcileOutcome::TurnEnded
+    );
+    // A wait-signal from before dispatch proves nothing about this run.
+    let mut stale = run.clone();
+    stale.dispatched_at = Some(2_000.0);
+    assert_eq!(
+        reconcile_decision(
+            &stale,
+            Some(&live_evidence("needs_input", Some(SIGNAL_AFTER_DISPATCH)))
+        ),
+        ReconcileOutcome::Running
+    );
+    // Malformed stamps, missing stamps, and missing dispatch times never
+    // finalize: the edge stays unproven.
+    assert_eq!(
+        reconcile_decision(
+            &run,
+            Some(&live_evidence("needs_input", Some("not-a-time")))
+        ),
+        ReconcileOutcome::Running
+    );
+    assert_eq!(
+        reconcile_decision(&run, Some(&live_evidence("needs_input", None))),
+        ReconcileOutcome::Running
+    );
+    let mut dateless = run.clone();
+    dateless.dispatched_at = None;
+    assert_eq!(
+        reconcile_decision(
+            &dateless,
+            Some(&live_evidence("needs_input", Some(SIGNAL_AFTER_DISPATCH)))
+        ),
+        ReconcileOutcome::Running
+    );
+    // A live handle of another incarnation is not this run's session.
+    assert_eq!(
+        reconcile_decision(
+            &run,
+            Some(&SessionEvidence {
+                incarnation: "inc-2".to_string(),
+                ..live_evidence("needs_input", Some(SIGNAL_AFTER_DISPATCH))
+            })
+        ),
+        ReconcileOutcome::Running
+    );
+    // No handle in this process: stranded, never completed.
+    assert_eq!(reconcile_decision(&run, None), ReconcileOutcome::Stranded);
+}
+
+#[test]
+fn apply_reconcile_finalizes_dispatched_rows_only() {
+    let conn = mem_conn();
+    insert_workspace(&conn, "w1", HOST);
+    let run = sample_run("ar:apply-1", "a1");
+    storage::upsert_automation_run(&conn, &run).unwrap();
+
+    assert!(!apply_reconcile(&conn, "ar:apply-1", ReconcileOutcome::Running, 2_000.0).unwrap());
+    let unchanged = storage::get_automation_run(&conn, "ar:apply-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(unchanged.status, AutomationRunStatus::Dispatched);
+
+    assert!(
+        apply_reconcile(
+            &conn,
+            "ar:apply-1",
+            ReconcileOutcome::Exited { exit_code: Some(3) },
+            2_000.0
+        )
+        .unwrap()
+    );
+    let done = storage::get_automation_run(&conn, "ar:apply-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(done.status, AutomationRunStatus::Completed);
+    assert_eq!(done.exit_code, Some(3));
+    assert_eq!(done.observed_at, Some(2_000.0));
+
+    // A Completed row is never regressed, not even by a strand.
+    assert!(!apply_reconcile(&conn, "ar:apply-1", ReconcileOutcome::Stranded, 3_000.0).unwrap());
+    let kept = storage::get_automation_run(&conn, "ar:apply-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.status, AutomationRunStatus::Completed);
+    assert!(kept.error.is_none());
+
+    // Stranded close-out claims dispatch failure, never completion.
+    let mut ghost = sample_run("ar:apply-2", "a1");
+    ghost.terminal_session_id = Some("ghost-session".to_string());
+    storage::upsert_automation_run(&conn, &ghost).unwrap();
+    assert!(apply_reconcile(&conn, "ar:apply-2", ReconcileOutcome::Stranded, 4_000.0).unwrap());
+    let stranded = storage::get_automation_run(&conn, "ar:apply-2")
+        .unwrap()
+        .unwrap();
+    assert_eq!(stranded.status, AutomationRunStatus::DispatchFailed);
+    assert!(stranded.error.unwrap().contains("lost the terminal"));
+
+    // Missing rows are a silent no-op.
+    assert!(
+        !apply_reconcile(
+            &conn,
+            "ar:missing",
+            ReconcileOutcome::Exited { exit_code: None },
+            5_000.0
+        )
+        .unwrap()
+    );
+}
+
+fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64
+}
+
+/// Opens the engine's own SQLite file alongside the live engine (the
+/// engine is idle at these points; a busy timeout covers any stray
+/// lock): lets tests re-link a run row to a chosen session, which no
+/// public RPC spells.
+fn open_engine_db(dir: &tempfile::TempDir) -> rusqlite::Connection {
+    let conn = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    conn
+}
+
+fn read_run_payload(conn: &rusqlite::Connection, run_id: &str) -> Value {
+    let text: String = conn
+        .query_row(
+            "SELECT payload_json FROM automation_runs WHERE id = ?1",
+            [run_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+fn write_run_payload(conn: &rusqlite::Connection, run_id: &str, payload: &Value) {
+    let changed = conn
+        .execute(
+            "UPDATE automation_runs SET payload_json = ?1 WHERE id = ?2",
+            rusqlite::params![payload.to_string(), run_id],
+        )
+        .unwrap();
+    assert_eq!(changed, 1);
+}
+
+#[test]
+fn tick_finalizes_an_exited_fixture_run_as_completed() {
+    ensure_fixture_harness_on_path();
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+    let created = create_automation(&engine, "fin-1", &workspace_id, "0 0 1 1 *");
+    let automation_id = created["id"].as_str().unwrap().to_string();
+
+    let result = ok(engine.dispatch(request(
+        "fin-run",
+        "automation.run_now",
+        json!({"id": automation_id}),
+    )));
+    let run_id = result["runId"].as_str().unwrap().to_string();
+    let history = ok(engine.dispatch(request(
+        "fin-hist",
+        "automation.history",
+        json!({"automationId": automation_id}),
+    )));
+    let session_id = history["runs"][0]["terminalSessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(poll_session_exited(&engine, &workspace_id, &session_id));
+
+    // The record-time poll may already have caught the exit (Completed);
+    // force the row back to Dispatched so the tick path is always
+    // exercised deterministically.
+    let db = open_engine_db(&dir);
+    let mut payload = read_run_payload(&db, &run_id);
+    payload["status"] = json!("dispatched");
+    payload["exitCode"] = Value::Null;
+    write_run_payload(&db, &run_id, &payload);
+    drop(db);
+
+    let summary = scheduler::tick_once(&engine, now_ms());
+    assert_eq!(summary.completed, 1);
+    assert_eq!(summary.stranded, 0);
+    let history = ok(engine.dispatch(request(
+        "fin-hist-2",
+        "automation.history",
+        json!({"automationId": automation_id}),
+    )));
+    assert_eq!(history["runs"][0]["id"], json!(run_id));
+    assert_eq!(history["runs"][0]["status"], json!("completed"));
+    assert_eq!(history["runs"][0]["exitCode"], json!(0));
+
+    // A second tick leaves the terminal row alone.
+    let again = scheduler::tick_once(&engine, now_ms());
+    assert_eq!(again.completed, 0);
+    assert_eq!(again.stranded, 0);
+}
+
+#[test]
+fn tick_finalizes_a_turn_ended_live_session_as_completed() {
+    ensure_fixture_harness_on_path();
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+    let created = create_automation(&engine, "fin-2", &workspace_id, "0 0 1 1 *");
+    let automation_id = created["id"].as_str().unwrap().to_string();
+    let result = ok(engine.dispatch(request(
+        "fin2-run",
+        "automation.run_now",
+        json!({"id": automation_id}),
+    )));
+    let run_id = result["runId"].as_str().unwrap().to_string();
+
+    // A live sleeper stands in for the agent's session: re-link the run
+    // row to it (no public RPC re-links runs), then report the harness
+    // turn-end hook the pi extension would send on AgentEnd.
+    let sleeper = ok(engine.dispatch(request(
+        "fin2-sleep",
+        "session.start",
+        json!({"workspaceId": workspace_id, "command": "sleep",
+               "args": ["120"], "cols": 80, "rows": 24}),
+    )));
+    let sleeper_id = sleeper["id"].as_str().unwrap().to_string();
+    let sleeper_inc = sleeper["incarnation"].as_str().unwrap().to_string();
+    let db = open_engine_db(&dir);
+    let mut payload = read_run_payload(&db, &run_id);
+    payload["status"] = json!("dispatched");
+    payload["terminalSessionId"] = json!(sleeper_id);
+    payload["sessionIncarnation"] = json!(sleeper_inc);
+    write_run_payload(&db, &run_id, &payload);
+    drop(db);
+
+    // Before the turn-end signal the tick must leave the run alone.
+    let idle = scheduler::tick_once(&engine, now_ms());
+    assert_eq!(idle.completed, 0);
+    assert_eq!(idle.stranded, 0);
+
+    ok(engine.dispatch(request(
+        "fin2-hook",
+        "session.hook_event",
+        json!({"sessionId": sleeper_id, "incarnation": sleeper_inc, "event": "AgentEnd"}),
+    )));
+    let summary = scheduler::tick_once(&engine, now_ms());
+    assert_eq!(summary.completed, 1);
+    assert_eq!(summary.stranded, 0);
+    let history = ok(engine.dispatch(request(
+        "fin2-hist",
+        "automation.history",
+        json!({"automationId": automation_id}),
+    )));
+    assert_eq!(history["runs"][0]["id"], json!(run_id));
+    assert_eq!(history["runs"][0]["status"], json!("completed"));
+
+    ok(engine.dispatch(request(
+        "fin2-stop",
+        "session.stop",
+        json!({"sessionId": sleeper_id, "incarnation": sleeper_inc}),
+    )));
+}
+
+#[test]
+fn tick_strands_a_dispatched_run_whose_session_is_gone() {
+    ensure_fixture_harness_on_path();
+    let dir = tempfile::tempdir().unwrap();
+    // Reopen: a new process state with no session handles (the daemon-
+    // restart shape the fork's retained-run reconciler covers). A ghost
+    // Dispatched row (run_now would attach a live handle instead) is
+    // planted straight into the database file after the reopen, so crash
+    // recovery can never see it first.
+    let (engine, workspace_id) = {
+        let (engine, workspace_id) = engine_with_workspace(&dir);
+        drop(engine);
+        let engine = Engine::open(dir.path()).unwrap();
+        (engine, workspace_id)
+    };
+    let created = create_automation(&engine, "strand-1", &workspace_id, "0 0 1 1 *");
+    let automation_id = created["id"].as_str().unwrap().to_string();
+    let db = open_engine_db(&dir);
+    let run = serde_json::json!({
+        "id": "ar:ghost-1", "automationId": automation_id,
+        "title": "", "scheduledFor": 1_000.0, "status": "dispatched",
+        "trigger": "manual", "workspaceId": workspace_id,
+        "sessionKind": "terminal", "terminalSessionId": "ghost-session",
+        "sessionIncarnation": "inc-1",
+        "startedAt": 1_000.0, "dispatchedAt": 1_000.0, "createdAt": 1_000.0,
+        "observedAt": 1_000.0,
+    });
+    db.execute(
+        "INSERT INTO automation_runs (id, automation_id, payload_json) VALUES (?1, ?2, ?3)",
+        rusqlite::params!["ar:ghost-1", automation_id, run.to_string()],
+    )
+    .unwrap();
+    drop(db);
+    let summary = scheduler::tick_once(&engine, 2_000.0);
+    assert_eq!(summary.stranded, 1);
+    assert_eq!(summary.completed, 0);
+    let history = ok(engine.dispatch(request(
+        "strand-hist",
+        "automation.history",
+        json!({"automationId": automation_id}),
+    )));
+    assert_eq!(history["runs"][0]["id"], json!("ar:ghost-1"));
+    assert_eq!(history["runs"][0]["status"], json!("dispatch_failed"));
 }
 
 #[test]

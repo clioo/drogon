@@ -43,6 +43,14 @@ pub struct AutomationCreateParams {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub grace_minutes: Option<f64>,
+    /// Harness model override (e.g. a free local model for Pi). Absent
+    /// means the harness default. Additive: older callers omit it.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Harness provider override (Pi only). Absent means the harness
+    /// default. Additive: older callers omit it.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -63,6 +71,14 @@ pub struct AutomationUpdateParams {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub grace_minutes: Option<f64>,
+    /// Present string replaces the stored model override; absent/null
+    /// leaves it unchanged (there is no explicit-clear spelling).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Present string replaces the stored provider override; absent/null
+    /// leaves it unchanged (there is no explicit-clear spelling).
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -126,6 +142,14 @@ pub struct AutomationSummary {
     #[serde(default)]
     pub workspace_id: Option<String>,
     pub harness: String,
+    /// Pinned harness model override, when one was stored at create/update.
+    /// Additive: absent means the harness default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Pinned harness provider override (Pi only), when one was stored.
+    /// Additive: absent means the harness default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     pub prompt: String,
     pub enabled: bool,
     pub next_run_at: f64,
@@ -275,6 +299,8 @@ mod tests {
             cron: "* * * * *".into(),
             workspace_id: Some("w1".into()),
             harness: "pi".into(),
+            model: None,
+            provider: None,
             prompt: "sweep".into(),
             enabled: true,
             next_run_at: 1000.0,
@@ -416,6 +442,72 @@ mod tests {
         assert_eq!(value["terminalSessionId"], json!("s1"));
         let back: AutomationRunDetail = serde_json::from_value(value).unwrap();
         assert_eq!(back, detail);
+    }
+
+    #[test]
+    fn create_and_update_params_carry_optional_model_provider() {
+        let create: AutomationCreateParams = serde_json::from_value(json!({
+            "name": "nightly", "cron": "* * * * *",
+            "workspaceId": "w1", "harness": "pi", "prompt": "sweep",
+            "model": "qwen3.8-flash-next-nvidia-nvfp4", "provider": "dgx-spark",
+        }))
+        .unwrap();
+        assert_eq!(
+            create.model.as_deref(),
+            Some("qwen3.8-flash-next-nvidia-nvfp4")
+        );
+        assert_eq!(create.provider.as_deref(), Some("dgx-spark"));
+        let bare: AutomationCreateParams = serde_json::from_value(json!({
+            "name": "nightly", "cron": "* * * * *",
+            "workspaceId": "w1", "harness": "pi", "prompt": "sweep",
+        }))
+        .unwrap();
+        assert_eq!(bare.model, None);
+        assert_eq!(bare.provider, None);
+        let update: AutomationUpdateParams = serde_json::from_value(json!({
+            "id": "a1", "model": "m", "provider": "dgx-spark",
+        }))
+        .unwrap();
+        assert_eq!(update.model.as_deref(), Some("m"));
+        assert_eq!(update.provider.as_deref(), Some("dgx-spark"));
+        // Unknown fields are still rejected.
+        assert!(
+            serde_json::from_value::<AutomationCreateParams>(
+                json!({"name": "x", "cron": "* * * * *", "workspaceId": "w1",
+                   "harness": "pi", "prompt": "s", "bogus": 1}),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn summary_omits_unset_model_provider_but_round_trips_them() {
+        let mut summary = AutomationSummary {
+            id: "a1".into(),
+            name: "nightly".into(),
+            cron: "* * * * *".into(),
+            workspace_id: Some("w1".into()),
+            harness: "pi".into(),
+            model: Some("qwen3.8-flash-next-nvidia-nvfp4".into()),
+            provider: Some("dgx-spark".into()),
+            prompt: "sweep".into(),
+            enabled: true,
+            next_run_at: 1000.0,
+            last_run_at: None,
+            last_run: None,
+        };
+        let value = serde_json::to_value(&summary).unwrap();
+        assert_eq!(value["model"], json!("qwen3.8-flash-next-nvidia-nvfp4"));
+        assert_eq!(value["provider"], json!("dgx-spark"));
+        let back: AutomationSummary = serde_json::from_value(value).unwrap();
+        assert_eq!(back, summary);
+        summary.model = None;
+        summary.provider = None;
+        let bare = serde_json::to_value(&summary).unwrap();
+        assert!(bare.get("model").is_none());
+        assert!(bare.get("provider").is_none());
+        let back: AutomationSummary = serde_json::from_value(bare).unwrap();
+        assert_eq!(back, summary);
     }
 
     #[test]

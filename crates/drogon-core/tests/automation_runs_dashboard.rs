@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use drogon_core::automations::direct::plain_text_snapshot_tail;
 use drogon_core::automations::records::*;
 use drogon_core::automations::scheduler;
 use drogon_core::{DB_FILE_NAME, Engine};
@@ -56,7 +57,13 @@ fn ensure_fixture_harness_on_path() {
             std::env::temp_dir().join(format!("drogon-automation-fixture-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pi = dir.join("pi");
-        std::fs::write(&pi, "#!/bin/sh\necho automation-fixture-output\nexit 0\n").unwrap();
+        // Bold + underline markup around the marker proves the detail's
+        // snapshot serves plain text: markup is reduced, the words stay.
+        std::fs::write(
+            &pi,
+            "#!/bin/sh\nprintf '\\033[1mbold\\033[0m automation-fixture-output\\033[4m\\n'\nexit 0\n",
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -286,9 +293,37 @@ fn run_detail_serves_the_session_tail_while_the_session_is_known() {
         content.contains("automation-fixture-output"),
         "snapshot should carry the fixture's real output, got {content:?}"
     );
+    assert!(
+        content.contains("bold"),
+        "snapshot should keep the words while reducing markup, got {content:?}"
+    );
+    assert!(
+        !content.contains('\x1b'),
+        "plain_text snapshot must not leak terminal escapes, got {content:?}"
+    );
     assert_eq!(snapshot["truncated"], json!(false));
     assert_eq!(detail["sessionExists"], json!(true));
     assert!(snapshot["capturedAt"].as_f64().is_some());
+}
+
+#[test]
+fn snapshot_tail_reduces_terminal_markup_to_plain_text() {
+    let raw = concat!(
+        "\x1b[1;32mok\x1b[0m\r\n",
+        "\x1b[2K\x1b[1Arepaint",
+        "\x1b]0;title C:\\path\\file\x07",
+        "\x1b]8;;https://example.com\x07link\x1b]8;;\x07",
+        "\x1b]0;st-title\x1b\\",
+        "\x1b(Bplain",
+        "caf\u{e9} \u{1f980}",
+        "a\rb",
+        "c\x00d\x7fe",
+        "\x1b",
+    );
+    assert_eq!(
+        plain_text_snapshot_tail(raw),
+        "ok\nrepaintlinkplaincaf\u{e9} \u{1f980}a\nbcde"
+    );
 }
 
 #[test]
@@ -386,6 +421,8 @@ fn run_detail_honestly_reports_a_session_the_process_never_held() {
             prompt: "fixture sweep".to_string(),
             precheck: None,
             agent_id: "pi".to_string(),
+            model: None,
+            provider: None,
             run_context: None,
             source_context: None,
             project_id: workspace_id.clone(),

@@ -3,6 +3,7 @@
 // automation-cron-preview helper (the daemon's croner stays authoritative);
 // grace bounds mirror the shared automation-contract schema (0..10080).
 import { previewCronFires } from "./automation-cron-preview";
+import { localPresetToUtcCronParts, localToUtcOffsetMinutes } from "./automation-local-cron";
 import { describeAutomationSchedule } from "./automation-schedule-label";
 
 export type AutomationSchedulePreset =
@@ -44,7 +45,7 @@ export function blankAutomationDraft(workspaceId: string): AutomationEditorDraft
   };
 }
 
-/** Preset pickers build the stored 5-field cron (local wall-clock time). */
+/** Preset pickers build the stored 5-field cron from wall-clock parts. */
 export function buildAutomationCronSchedule(args: {
   preset: Exclude<AutomationSchedulePreset, "custom">;
   hour: number;
@@ -78,14 +79,34 @@ export function parseAutomationDraftTime(value: string): {
   };
 }
 
-export function draftCron(draft: AutomationEditorDraft): string {
+/**
+ * Builds the stored cron for a draft. Preset times are entered as local
+ * wall-clock values and converted to the UTC the daemon evaluates (custom
+ * cron stays verbatim UTC). `offsetMinutes` defaults to the live local
+ * offset; tests pass explicit values.
+ */
+export function draftCron(
+  draft: AutomationEditorDraft,
+  offsetMinutes: number = localToUtcOffsetMinutes(),
+): string {
   if (draft.preset === "custom") return draft.customSchedule.trim();
   const { hour, minute } = parseAutomationDraftTime(draft.time);
-  return buildAutomationCronSchedule({
-    preset: draft.preset,
+  if (draft.preset === "hourly") {
+    // Minute-only crons need no conversion.
+    return buildAutomationCronSchedule({ preset: "hourly", hour, minute });
+  }
+  const utc = localPresetToUtcCronParts(
+    draft.preset,
     hour,
     minute,
-    dayOfWeek: Number(draft.dayOfWeek),
+    Number(draft.dayOfWeek),
+    offsetMinutes,
+  );
+  return buildAutomationCronSchedule({
+    preset: draft.preset,
+    hour: utc.hour,
+    minute: utc.minute,
+    dayOfWeek: utc.dayOfWeek,
   });
 }
 

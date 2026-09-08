@@ -237,6 +237,16 @@ pub struct Automation {
     #[serde(default)]
     pub precheck: Option<AutomationPrecheck>,
     pub agent_id: String,
+    /// Native-glue additions (not source `automations-types.ts` fields):
+    /// harness model/provider overrides pinned at create/update and used
+    /// for every dispatch of this automation (scheduler and `run_now`).
+    /// `None` means the harness default. `Option` (not double-option):
+    /// absent and explicit-null both read as unset, matching the wire
+    /// params where absent/null both mean "leave unchanged".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     /// Deprecated in the source; preserved as an opaque JSON blob rather
     /// than a typed `WorkspaceRunContext` (not needed by the ownership/
     /// history behavior this build ports). Absent/null/value are still
