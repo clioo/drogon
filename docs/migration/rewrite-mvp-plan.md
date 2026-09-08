@@ -221,16 +221,18 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | QA de UI ronda 5 sobre main ≥ 91d01c0 (antes rebase de #199; fixture git para Source Control) | QA | Muse | en curso | |
 | Infra R16-AI: sondas de aceptación al día con la UI de R16 (formulario de lanzamiento, superficies empaquetadas) — paso sellado bloqueado por #209 | R16 | Muse | fusionada: --files 19, --harness pi 23 y sellado 49 checks en verde | #224 |
 | Infra: plan + sondas (#189 alineación del formulario, cierre de pestañas de editor en la sonda sellada, campo Model por rol) | R16 | Coordinador | fusionada | #208 |
-| Instalación: el bundle de main 66a772a falló la aceptación sellada (#209); /Applications conserva f0ce137 (sellado en verde) hasta que pase el nuevo sellado | R16 | Coordinador | instalado bundle 6f6951a (sellado 40/40) en /Applications y ~/Applications; siguiente reinstalación cuando aterricen R16-AO/AP |  |
+| Instalación: el bundle de main 66a772a falló la aceptación sellada (#209); /Applications conserva f0ce137 (sellado en verde) hasta que pase el nuevo sellado | R16 | Coordinador | instalado bundle aa7d386 (sellado 40/40) en /Applications y ~/Applications el 2026-09-08 01:5x; incluye barra de direcciones segura, barra de estado, restauración de pestañas, runs headless, Restart daemon |  |
 | QA fix R16-S2: #186 lanzamiento headless de Pi/Claude/OpenCode/Antigravity para bots y automations, finalización al salir | R16 | Muse | fusionada (#227); #187 pendiente de verificar | #227 |
 | QA fix R16-AJ: #215 pestañas de editor/browser restauradas tras reinicio, #218 refresco de workspaces con el digest | R16 | Muse | fusionada (#240); #220 #221 en R16-AJ2 (lanzada) | #240 |
-| QA fix R16-AL: #222 lista de sesiones sobrevive al reinicio del daemon (bloqueante) | R16 | Muse | lanzada | |
+| QA fix R16-AL: #222 lista de sesiones sobrevive al reinicio del daemon (bloqueante) | R16 | Muse | fusionada (#250: el daemon limpia el sello de espera al salir, validación por registro); #228 en cola como R16-AL2 | #250 |
 | J2/J4 R16-AM: barra derecha de extremo a extremo (Explorer, Ports, Session details, rail) | R16 | Muse | lanzada | |
-| Infra R16-AK: CI Foundation en verde en ubuntu/macos/windows (#232) | R16 | Muse | fusionada | #233 |
+| Infra R16-AK: CI Foundation en verde en ubuntu/macos/windows (#232) | R16 | Muse | fusionada (#233 tests; #247 heap de Node para el build en macOS) | #233 #247 |
 | Infra: en modo prueba la app no abre browser externo, Finder ni selector nativo (#225); monitor de foco con PID en el coordinador | R16 | Coordinador | fusionada | #225 |
-| Hallazgos de Carlos en la app instalada (2026-09-08): #229 filas de sesión en la tarjeta → R16-AN; #230 colores de Claude Code → R16-AH; #231 lanzar agentes directo con defaults yolo de Orca → R16-AO; #234 barra de direcciones con búsqueda del fork (scareware) y #235 pestaña de browser → R16-AP; #237 Bots no abre / lento y #238 Tasks lento con filtros duplicados → R16-AQ | R16 | Muse | lanzadas | |
+| Hallazgos de Carlos en la app instalada (2026-09-08): #229 filas de sesión en la tarjeta → R16-AN; #230 colores de Claude Code → R16-AH; #231 lanzar agentes directo con defaults yolo de Orca → R16-AO; #234 barra de direcciones con búsqueda del fork (scareware) y #235 pestaña de browser → R16-AP; #237 Bots no abre / lento y #238 Tasks lento con filtros duplicados → R16-AQ | R16 | Muse | R16-AN #229 fusionada (#251, filas anidadas); R16-AP #234 #235 fusionada (#249, barra con búsqueda del fork); R16-AO (#231), R16-AQ (#237 #238), R16-AH (#230) en curso; #201 icono reabierto (raster blanco) → R16-Z3 en cola | #249 #251 |
 | Regla (Carlos): si Muse llega a su límite de uso de noche, los workers se relanzan con `pi --provider openai-codex --model gpt-5.6-luna --thinking max` | R16 | Coordinador | vigente | |
 | QA ronda 3 sobre main ≥ 883239f y QA de UI ronda 6 sobre main 5c69fa6 | QA | Muse | en curso | |
+| Tope de concurrencia (Carlos, noche del 2026-09-08): 9 workers (incluidos seguimientos) + 2 QA; nada nuevo hasta bajar de 9; specs en cola: R16-Z3 (icono), R16-AL2 (#228) | R16 | Coordinador | vigente | |
+| QA de UI ronda 6: estados command-palette, launch-dialog, shortcuts-rebind, tasks-filters | QA | Muse | fusionada (#248); ronda en curso | #248 |
 
 ## 7. QA continuo
 
