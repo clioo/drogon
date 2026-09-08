@@ -1,8 +1,28 @@
-import { useEffect, useReducer, useRef } from "react";
+import { lazy, Suspense, useEffect, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
-import { FileWarning, RefreshCw, Save } from "lucide-react";
+import { AlertTriangle, FileWarning, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { Result } from "../../../../shared/session-contract";
+import { CsvViewer } from "./CsvViewer";
+import { isCsvPath } from "./editor-language-by-extension";
+import { useEditorScheme } from "./editor-theme";
+import { getEditorHeaderState } from "./editor-header";
+import { getEditorCmdSaveTarget } from "./editor-cmd-save-target";
+import { shouldUseLargeFileFallback } from "./editor-large-file-guard";
+import { flushPendingEditorChange } from "./editor-pending-flush";
+import { createEditorSaveQueue, type EditorSaveQueue } from "./editor-save-queue";
+import { useEditorAutosaveController } from "./editor-autosave-controller";
+
+// Why lazy: `monaco-editor` assumes a browser global environment (it is not
+// safe to import under plain Node), and EditorPane.test.ts renders this
+// component via `react-dom/server` under vitest's default "node" test
+// environment (no jsdom). Lazy-loading means that import only happens once
+// a real renderer mounts the Suspense boundary — `renderToString` renders
+// the fallback synchronously and never evaluates the module. This also
+// splits Monaco (large) out of the main bundle.
+const MonacoFileEditor = lazy(() =>
+  import("./MonacoFileEditor").then((mod) => ({ default: mod.MonacoFileEditor })),
+);
 
 /**
  * The editor touches the backend only through the injected `onSave`/`onReload`
@@ -47,6 +67,13 @@ export interface EditorPaneProps {
    * immediately — typing without saving must survive unmount/remount.
    */
   onDraftChange?: (draft: string) => void;
+  /**
+   * Close action in the header: clears the open file back to the empty
+   * state. Never destructive — the retained draft stays in the descriptor-
+   * owned store keyed by scope+path and reopening the same file restores
+   * it, dirty, exactly like an unmount/remount does today.
+   */
+  onClose?: () => void;
 }
 
 /** Per-file retained editing state; survives switching between files. */
@@ -87,6 +114,14 @@ export interface EditorState {
   saveGeneration: number;
   /** Failure of the most recent fenced save attempt, with its own key+path. */
   saveError: { key: string; path: string; message: string } | null;
+  /**
+   * True when a read confirmed content for the open file that differs from
+   * the draft's baseline (`lastSaved`) while the draft was dirty — the
+   * reducer kept the draft (never silently dropped), but the header shows
+   * this so the user knows disk moved out from under their edit. Reset on
+   * every file/scope switch and on a successful save.
+   */
+  changedOnDisk: boolean;
 }
 
 export type EditorAction =
@@ -127,12 +162,18 @@ export function initialEditorState(): EditorState {
     savingDraft: null,
     saveGeneration: 0,
     saveError: null,
+    changedOnDisk: false,
   };
 }
 
 /** The draft differs from the last service-confirmed content. */
 export function isDirty(state: EditorState): boolean {
   return state.draft !== state.lastSaved;
+}
+
+/** A confirmed read disagreed with the dirty draft's baseline (see `changedOnDisk`). */
+export function hasChangedOnDisk(state: EditorState): boolean {
+  return state.changedOnDisk;
 }
 
 /** The generation the next save request will carry. */
@@ -219,8 +260,16 @@ export function applyEditorAction(
       if (sameSpot) {
         const hasRead = state.lastSaved !== null;
         // Same file, read confirmed, unsaved edits: keep the draft — an
-        // external refresh must never silently drop the user's work.
-        if (hasRead && state.draft !== state.lastSaved) return state;
+        // external refresh must never silently drop the user's work. The
+        // fresh read still surfaces as a changed-on-disk mark when it
+        // disagrees with the draft's baseline, so the conflict is visible
+        // even though the draft itself is untouched.
+        if (hasRead && state.draft !== state.lastSaved) {
+          return {
+            ...state,
+            changedOnDisk: action.content !== null && action.content !== state.lastSaved,
+          };
+        }
         // Same file, read confirmed, clean: adopt the refreshed content.
         if (hasRead) {
           const entry = { draft: action.content ?? "", lastSaved: action.content };
@@ -229,6 +278,7 @@ export function applyEditorAction(
             draft: entry.draft,
             lastSaved: entry.lastSaved,
             files: withFile(state, key as string, entry),
+            changedOnDisk: false,
           };
         }
         // Same file, unread: adopt only while the draft is still the empty
@@ -240,6 +290,7 @@ export function applyEditorAction(
           draft: entry.draft,
           lastSaved: entry.lastSaved,
           files: withFile(state, key as string, entry),
+          changedOnDisk: false,
         };
       }
       // Switching (file or scope): retain the current file's editing state
@@ -262,6 +313,7 @@ export function applyEditorAction(
           lastSaved: null,
           files,
           saveError: null,
+          changedOnDisk: false,
         };
       }
       const retained = files[key as string];
@@ -281,6 +333,7 @@ export function applyEditorAction(
           lastSaved: retained.lastSaved,
           files,
           saveError: null,
+          changedOnDisk: false,
         };
       }
       const entry = { draft: action.content ?? "", lastSaved: action.content };
@@ -292,6 +345,7 @@ export function applyEditorAction(
         lastSaved: entry.lastSaved,
         files: { ...files, [key as string]: entry },
         saveError: null,
+        changedOnDisk: false,
       };
     }
     case "draft-restored": {
@@ -367,6 +421,7 @@ export function applyEditorAction(
           savingKey: null,
           savingDraft: null,
           saveError: null,
+          changedOnDisk: false,
         };
       }
       // Switched away: RETIRE the exact completed operation so no future
@@ -482,6 +537,39 @@ export function shouldSeedRestore(
   return state.files[scopedFileKey(scope, path)] === undefined;
 }
 
+/**
+ * The first-paint seeding rule, factored out of the `useReducer` lazy
+ * initializer so it is directly unit-testable without rendering: a restored
+ * draft presents TRUTHFULLY dirty (draft from the store, lastSaved from the
+ * store's confirmed content, never the draft masquerading as saved).
+ */
+export function initializeEditorPaneState(initial: {
+  scope: EditorScope;
+  path: string | null;
+  content: string | null;
+  restoredDraft?: { draft: string; lastSaved: string | null } | null;
+}): EditorState {
+  const restored = initial.path !== null && initial.restoredDraft ? initial.restoredDraft : null;
+  return {
+    ...initialEditorState(),
+    openScope: initial.scope,
+    openPath: initial.path,
+    draft: restored ? restored.draft : (initial.content ?? ""),
+    lastSaved: restored ? restored.lastSaved : initial.content,
+    files:
+      initial.path !== null
+        ? {
+            [scopedFileKey(initial.scope, initial.path)]: restored
+              ? { draft: restored.draft, lastSaved: restored.lastSaved }
+              : {
+                  draft: initial.content ?? "",
+                  lastSaved: initial.content,
+                },
+          }
+        : {},
+  };
+}
+
 export function EditorPane({
   scope,
   path,
@@ -492,40 +580,20 @@ export function EditorPane({
   allowEmptySave = false,
   restoredDraft = null,
   onDraftChange,
+  onClose,
 }: EditorPaneProps) {
+  const [csvSourceMode, setCsvSourceMode] = useState(false);
+  const queueRef = useRef<EditorSaveQueue | null>(null);
+  if (queueRef.current === null) queueRef.current = createEditorSaveQueue();
+  useEffect(() => () => queueRef.current?.dispose(), []);
   const restoredRef = useRef(restoredDraft);
   restoredRef.current = restoredDraft;
   const [state, dispatch] = useReducer(
     applyEditorAction,
     { scope, path, content, restoredDraft },
     // Initialize from props so the first paint (and SSR snapshot) already
-    // shows the opened file — and a restored draft presents TRUTHFULLY
-    // dirty: draft from the store, lastSaved from the store's confirmed
-    // content, never the draft masquerading as saved.
-    (initial) => {
-      const restored =
-        initial.path !== null && initial.restoredDraft
-          ? initial.restoredDraft
-          : null;
-      return {
-        ...initialEditorState(),
-        openScope: initial.scope,
-        openPath: initial.path,
-        draft: restored ? restored.draft : (initial.content ?? ""),
-        lastSaved: restored ? restored.lastSaved : initial.content,
-        files:
-          initial.path !== null
-            ? {
-                [scopedFileKey(initial.scope, initial.path)]: restored
-                  ? { draft: restored.draft, lastSaved: restored.lastSaved }
-                  : {
-                      draft: initial.content ?? "",
-                      lastSaved: initial.content,
-                    },
-              }
-            : {},
-      };
-    },
+    // shows the opened file.
+    initializeEditorPaneState,
   );
   useEffect(() => {
     // Restore seeding is per-file and idempotent: seed only when the editor
@@ -560,20 +628,62 @@ export function EditorPane({
     state.openScope.workspaceId === scope.workspaceId &&
     state.openPath === path;
   const canSave = saveAdmission(state, scope, path, allowEmptySave);
+  const dirty = isDirty(state);
+  const currentKey = path !== null ? scopedFileKey(scope, path) : null;
+
+  // Read through a ref (not the render-scoped `state`) so a save that had
+  // to wait in the queue reads the LATEST draft/generation at execution
+  // time, never a snapshot captured back when it was merely triggered.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const performSave = (): Promise<void> => {
+    if (path === null || currentKey === null) return Promise.resolve();
+    const savePath = path;
+    const saveScope = scope;
+    const key = currentKey;
+    return queueRef.current!.queueSave(key, async () => {
+      // Extension point for a future debounced content pipeline (e.g. a
+      // rich view that serializes on a timer); nothing registers one
+      // today, so this is a no-op, but every save — manual, Cmd+S, or
+      // autosave — flushes it before reading the draft.
+      flushPendingEditorChange(key);
+      const latest = stateRef.current;
+      if (!saveAdmission(latest, saveScope, savePath, allowEmptySave)) return;
+      await runSave({
+        draft: latest.draft,
+        scope: saveScope,
+        path: savePath,
+        generation: nextSaveGeneration(latest),
+        allowEmpty: allowEmptySave,
+        onSave,
+        dispatch,
+      });
+    });
+  };
   const startSave = () => {
     // Admission is checked again here: reducer rejection alone would not
     // stop onSave from hitting the bridge.
     if (path === null || !canSave) return;
-    void runSave({
-      draft: state.draft,
-      scope,
-      path,
-      generation: nextSaveGeneration(state),
-      allowEmpty: allowEmptySave,
-      onSave,
-      dispatch,
-    });
+    void performSave();
   };
+  const onRequestSave = () => {
+    if (getEditorCmdSaveTarget(path, canSave) === null) return;
+    startSave();
+  };
+
+  useEditorAutosaveController({
+    queue: queueRef.current,
+    key: currentKey,
+    draft: state.draft,
+    dirty,
+    saveInFlight: state.saveInFlight,
+    readConfirmedOrAllowEmpty: readConfirmed || allowEmptySave,
+    run: performSave,
+  });
+  // Called unconditionally (before any early return) per the rules of
+  // hooks; its own SSR/no-DOM guard lives inside `useEditorScheme`.
+  const scheme = useEditorScheme();
 
   if (readError) {
     return (
@@ -616,20 +726,46 @@ export function EditorPane({
           >
             Waiting for file content…
           </span>
+          {onClose && (
+            <Button variant="ghost" size="sm" aria-label="Close" onClick={onClose}>
+              <X aria-hidden />
+            </Button>
+          )}
         </header>
       </section>
     );
   }
-  const dirty = isDirty(state);
-  const currentKey = scopedFileKey(scope, path);
   const activeSaveError =
     state.saveError !== null && state.saveError.key === currentKey
       ? state.saveError.message
       : "";
+  const header = getEditorHeaderState({
+    path,
+    dirty,
+    changedOnDisk: state.changedOnDisk,
+    saveInFlight: state.saveInFlight,
+    hasSaveError: activeSaveError !== "",
+    canSave,
+  });
+  const hasDom = typeof document !== "undefined";
+  const large = shouldUseLargeFileFallback(state.draft.length);
+  const showCsvTable = isCsvPath(path) && !csvSourceMode;
   return (
     <section className="editor-pane" aria-label={`Editor: ${path}`}>
       <header className="editor-pane-header">
-        <span className="path">{path}</span>
+        <span className="path" title={header.pathTitle}>
+          {header.pathLabel}
+        </span>
+        {header.changedOnDisk && (
+          <span
+            className="editor-pane-changed-on-disk"
+            role="status"
+            aria-label="Changed on disk"
+            title="The file on disk changed since this draft was based on it."
+          >
+            <AlertTriangle aria-hidden size={14} /> Changed on disk
+          </span>
+        )}
         {dirty && (
           <span
             className="editor-pane-dirty"
@@ -639,18 +775,28 @@ export function EditorPane({
             ● Unsaved changes
           </span>
         )}
+        {isCsvPath(path) && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCsvSourceMode((value) => !value)}
+          >
+            {csvSourceMode ? "Table" : "Source"}
+          </Button>
+        )}
         <Button
           size="sm"
-          disabled={!dirty || !canSave}
+          disabled={header.saveDisabled}
           onClick={startSave}
         >
           <Save aria-hidden />
-          {state.saveInFlight
-            ? "Saving…"
-            : activeSaveError
-              ? "Retry save"
-              : "Save"}
+          {header.saveLabel}
         </Button>
+        {onClose && (
+          <Button variant="ghost" size="sm" aria-label="Close" onClick={onClose}>
+            <X aria-hidden />
+          </Button>
+        )}
       </header>
       {activeSaveError && (
         <div className="error-banner" role="alert">
@@ -665,19 +811,50 @@ export function EditorPane({
           </Button>
         </div>
       )}
-      <textarea
-        className="editor-pane-surface"
-        aria-label={`Contents of ${path}`}
-        spellCheck={false}
-        value={state.draft}
-        onChange={(event) => {
-          const value = event.target.value;
-          dispatch({ type: "edited", value });
-          // Per-edit recording: every keystroke reaches the descriptor-
-          // owned store so typing without saving survives unmount.
-          onDraftChange?.(value);
-        }}
-      />
+      <div className="editor-pane-surface" aria-label={`Contents of ${path}`}>
+        {showCsvTable ? (
+          <CsvViewer content={state.draft} path={path} />
+        ) : large ? (
+          <textarea
+            className="editor-pane-large-file-fallback"
+            readOnly
+            aria-label={`Read-only preview of ${path} (too large for the code editor)`}
+            value={state.draft}
+          />
+        ) : !hasDom ? (
+          // Why not lazy+Suspense here: `React.lazy`'s loader is invoked
+          // (the dynamic `import()` fires) the moment this branch is
+          // rendered, even under `renderToString`, which only renders the
+          // Suspense fallback for an already-suspended render — it does not
+          // skip calling the loader. Guarding on `hasDom` keeps
+          // EditorPane.test.ts's plain-Node `renderToString` specs from
+          // ever triggering a `monaco-editor` module load in the first
+          // place (that package assumes browser globals exist).
+          <div className="editor-pane-loading">Loading editor…</div>
+        ) : (
+          <Suspense fallback={<div className="editor-pane-loading">Loading editor…</div>}>
+            <MonacoFileEditor
+              // Why a key: forces a full remount per path so `onMount`
+              // fires again and re-registers `window.__drogonEditors`
+              // under the NEW path — @monaco-editor/react otherwise only
+              // swaps the model in place on a `path` prop change without
+              // remounting (and thus without re-invoking `onMount`).
+              key={path}
+              path={path}
+              content={state.draft}
+              scheme={scheme}
+              onChange={(value) => {
+                dispatch({ type: "edited", value });
+                // Per-edit recording: every keystroke reaches the
+                // descriptor-owned store so typing without saving survives
+                // unmount.
+                onDraftChange?.(value);
+              }}
+              onRequestSave={onRequestSave}
+            />
+          </Suspense>
+        )}
+      </div>
     </section>
   );
 }

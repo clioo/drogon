@@ -696,6 +696,15 @@ function FilesPanel({
       .catch(() => undefined);
   };
   const reload = () => setReloadTick((tick) => tick + 1);
+  // Close is never destructive: the retained draft stays in the descriptor-
+  // owned store keyed by scope+path (drafts.recordDraft below already wrote
+  // it on every edit), so reselecting the same file restores it, dirty.
+  const closeOpenFile = () => {
+    setOpen((current) => (current !== null && current.scopeKey === scopeKey ? null : current));
+    setSelection((current) =>
+      current !== null && current.scopeKey === scopeKey ? null : current,
+    );
+  };
   // Frame-safe derived values: a selection/open path from another scope is
   // inert in this scope, so it can never render or be written here.
   const effectiveOpenPath = activeOpenPath(open, scopeKey);
@@ -774,6 +783,7 @@ function FilesPanel({
         readError={readErrorFor(read, scope, effectiveOpenPath)}
         onReload={reload}
         onSave={onSave}
+        onClose={effectiveOpenPath !== null ? closeOpenFile : undefined}
         onDraftChange={(draft) => {
           // Per-edit recording: every keystroke lands in the descriptor-
           // owned store for the open scope+path, so type-without-save

@@ -4,7 +4,9 @@ import { renderToString } from "react-dom/server";
 import {
   EditorPane,
   applyEditorAction,
+  hasChangedOnDisk,
   initialEditorState,
+  initializeEditorPaneState,
   isDirty,
   isReadConfirmed,
   nextSaveGeneration,
@@ -749,9 +751,20 @@ describe("restoredDraft truthfulness", () => {
     );
     // Truthfully dirty at first paint:
     expect(markup).toContain("Unsaved changes");
-    // The textarea carries the retained draft, not the saved baseline:
-    expect(markup).toContain("my retained draft");
     expect(markup).not.toContain("Waiting for file content");
+    // The content surface (Monaco in a real renderer) is fed `state.draft`,
+    // not rendered as raw text by `renderToString` itself, so the actual
+    // draft VALUE is verified directly against the same first-paint seeding
+    // rule the component's useReducer initializer calls.
+    const seeded = initializeEditorPaneState({
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "saved body",
+      restoredDraft: { draft: "my retained draft", lastSaved: "saved body" },
+    });
+    expect(seeded.draft).toBe("my retained draft");
+    expect(seeded.lastSaved).toBe("saved body");
+    expect(isDirty(seeded)).toBe(true);
   });
 
   test("without a restored draft the pane stays clean for the same content", () => {
@@ -791,6 +804,113 @@ describe("restoredDraft truthfulness", () => {
     expect(state.draft).toBe("my retained draft");
     expect(state.lastSaved).toBe("saved body");
     expect(isDirty(state)).toBe(true);
+  });
+});
+
+describe("changed-on-disk mark", () => {
+  test("a refresh that disagrees with the dirty draft's baseline sets the mark", () => {
+    let state = opened("saved body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "my edits" });
+    expect(hasChangedOnDisk(state)).toBe(false);
+    // Reload while dirty: the reducer keeps the draft, but the disk content
+    // it just saw no longer matches the draft's baseline.
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "someone else's edit",
+    });
+    expect(state.draft).toBe("my edits");
+    expect(state.lastSaved).toBe("saved body");
+    expect(hasChangedOnDisk(state)).toBe(true);
+  });
+
+  test("a refresh that still matches the baseline does not set the mark", () => {
+    let state = opened("saved body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "my edits" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "saved body",
+    });
+    expect(hasChangedOnDisk(state)).toBe(false);
+  });
+
+  test("clears once the file becomes clean again", () => {
+    let state = opened("saved body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "my edits" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "someone else's edit",
+    });
+    expect(hasChangedOnDisk(state)).toBe(true);
+    // Undo back to the (stale) baseline: still same-spot, but no longer dirty.
+    state = applyEditorAction(state, { type: "edited", value: "saved body" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "someone else's edit",
+    });
+    expect(hasChangedOnDisk(state)).toBe(false);
+  });
+
+  test("clears on switching to another file and does not leak back", () => {
+    let state = opened("saved body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "my edits" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "someone else's edit",
+    });
+    expect(hasChangedOnDisk(state)).toBe(true);
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_B,
+      content: "b body",
+    });
+    expect(hasChangedOnDisk(state)).toBe(false);
+    // Switching back to FILE_A restores its retained (still dirty) entry —
+    // the mark itself is a live-view signal, not part of retained state.
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: null,
+    });
+    expect(state.draft).toBe("my edits");
+    expect(hasChangedOnDisk(state)).toBe(false);
+  });
+
+  test("clears on a successful save of the open file", () => {
+    let state = opened("saved body", FILE_A, SCOPE_A);
+    state = applyEditorAction(state, { type: "edited", value: "my edits" });
+    state = applyEditorAction(state, {
+      type: "file-opened",
+      scope: SCOPE_A,
+      path: FILE_A,
+      content: "someone else's edit",
+    });
+    expect(hasChangedOnDisk(state)).toBe(true);
+    state = applyEditorAction(state, {
+      type: "save-started",
+      key: KEY_A,
+      path: FILE_A,
+      draft: "my edits",
+      generation: 1,
+      allowEmpty: false,
+    });
+    state = applyEditorAction(state, {
+      type: "save-succeeded",
+      key: KEY_A,
+      generation: 1,
+    });
+    expect(hasChangedOnDisk(state)).toBe(false);
   });
 });
 

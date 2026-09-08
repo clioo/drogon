@@ -6,12 +6,15 @@
 // sync/use-upstream-status-fetch.
 // Adapter: Orca's zustand store becomes local state over the existing
 // git.* bridge; review/AI/notes/submodules/history-graph have no MVP
-// backend and are not ported. Selecting a file keeps this repo's existing
-// unified-diff viewer (see unified-diff.ts).
-import { useCallback, useEffect, useMemo, useState } from "react";
+// backend and are not ported. R12-A: selecting a file now opens the
+// source's Monaco DiffViewer (see diff/DiffViewer.tsx) instead of the
+// plain-text unified-diff viewer; unified-diff.ts's parser stays as the
+// SSR/Node-safe fallback (see `hasDom` below) since Monaco cannot run
+// there.
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { X } from "lucide-react";
+import { X, ChevronDown, ChevronUp, Columns2, Rows2 } from "lucide-react";
 import {
   GIT_CAPABILITY,
   type GitBridge,
@@ -56,6 +59,17 @@ import { handleSourceControlCommitShortcut } from "./commit-shortcut";
 import { getDiscardAllPaths, runDiscardAllForArea } from "./discard-sequence";
 import { getDiscardFailureToastCopy } from "./discard-failure-toast";
 import { parseUnifiedDiff } from "./unified-diff";
+import { reconstructDiffContent } from "./diff/diff-hunk-reconstruction";
+import { DiffNavigationProvider, useDiffNavigation } from "./diff/diff-navigation-context";
+import { useEditorScheme } from "../editor/editor-theme";
+
+// Why lazy: `monaco-editor` assumes a browser global environment; ChangesPanel
+// has no test today that renders it via `renderToString`, but this mirrors
+// the same guard EditorPane.tsx uses so neither surface can accidentally
+// evaluate Monaco under a non-browser test environment.
+const DiffViewer = lazy(() =>
+  import("./diff/DiffViewer").then((mod) => ({ default: mod.DiffViewer })),
+);
 
 export const CHANGES_ROUTE_ID = "changes";
 export const CHANGES_TITLE = "Changes";
@@ -114,6 +128,58 @@ function errorNotice(message: string): string {
   return message.startsWith("Error") ? message : `Error: ${message}`;
 }
 
+/** Diff header controls: change count + prev/next (Monaco's own diff nav) and the side-by-side toggle. Renders inside DiffNavigationProvider. */
+function DiffNavToolbar({
+  sideBySide,
+  onToggleSideBySide,
+}: {
+  sideBySide: boolean;
+  onToggleSideBySide: () => void;
+}) {
+  const { goToPreviousDiff, goToNextDiff, changeCount } = useDiffNavigation();
+  return (
+    <span className="shrink-0 flex items-center gap-1">
+      {changeCount > 0 && (
+        <>
+          <span className="tabular-nums text-[10px] text-muted-foreground">
+            {changeCount} {changeCount === 1 ? "change" : "changes"}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label="Previous change"
+            onClick={goToPreviousDiff}
+          >
+            <ChevronUp className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label="Next change"
+            onClick={goToNextDiff}
+          >
+            <ChevronDown className="size-3.5" />
+          </Button>
+        </>
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6"
+        aria-label={sideBySide ? "Switch to inline diff" : "Switch to side-by-side diff"}
+        onClick={onToggleSideBySide}
+      >
+        {sideBySide ? <Rows2 className="size-3.5" /> : <Columns2 className="size-3.5" />}
+      </Button>
+    </span>
+  );
+}
+
 /** Effectful container: loads status/counts/diff through the injected GitBridge. */
 export function ChangesPanel({
   workspace,
@@ -134,6 +200,7 @@ export function ChangesPanel({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set());
   const [diff, setDiff] = useState<DiffLoad>({ phase: "idle" });
+  const [sideBySide, setSideBySide] = useState(true);
   const [commitMessage, setCommitMessage] = useState("");
   const [amend, setAmend] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -582,6 +649,12 @@ export function ChangesPanel({
     displaySections.length === 0;
 
   const parsed = diff.phase === "ready" ? parseUnifiedDiff(diff.diff) : { hunks: [], truncated: false };
+  const reconstructed =
+    diff.phase === "ready"
+      ? reconstructDiffContent(diff.diff)
+      : { original: "", modified: "", hasContent: false, truncated: false };
+  const hasDom = typeof document !== "undefined";
+  const scheme = useEditorScheme();
 
   return (
     <div
@@ -727,14 +800,15 @@ export function ChangesPanel({
           }}
         />
         <div aria-label="Diff and commit" className="border-t border-border">
+          <DiffNavigationProvider>
           <div
             aria-label="Unified diff"
-            className="overflow-auto p-3 text-xs"
-            style={{ ...mono, maxHeight: 320 }}
+            className="flex flex-col p-3 text-xs"
+            style={{ ...mono, height: selection ? 420 : "auto" }}
           >
             {!selection && <p className="text-muted-foreground">Select a file to view its diff.</p>}
             {selection && (
-              <div className="mb-2 flex items-center gap-2">
+              <div className="mb-2 flex shrink-0 items-center gap-2">
                 <span className="min-w-0 flex-1 truncate font-medium">{selection.path}</span>
                 <span className="shrink-0 text-[10px] uppercase text-muted-foreground">
                   {selection.area}
@@ -755,6 +829,12 @@ export function ChangesPanel({
                     />
                   </span>
                 )}
+                {diff.phase === "ready" && reconstructed.hasContent && hasDom && (
+                  <DiffNavToolbar
+                    sideBySide={sideBySide}
+                    onToggleSideBySide={() => setSideBySide((value) => !value)}
+                  />
+                )}
                 <Button
                   type="button"
                   variant="ghost"
@@ -769,13 +849,33 @@ export function ChangesPanel({
             )}
             {diff.phase === "loading" && <p className="text-muted-foreground">Loading diff…</p>}
             {diff.phase === "error" && <p role="alert">{diff.message}</p>}
-            {diff.phase === "ready" && parsed.hunks.length === 0 && (
+            {diff.phase === "ready" && !reconstructed.hasContent && (
               <p className="text-muted-foreground">
                 No diff for this file (untracked files show no diff).
               </p>
             )}
-            {diff.phase === "ready" &&
-              parsed.hunks.map((hunk, index) => (
+            {diff.phase === "ready" && reconstructed.hasContent && (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {hasDom ? (
+                  <Suspense
+                    fallback={<div className="text-muted-foreground">Loading diff editor…</div>}
+                  >
+                    <DiffViewer
+                      // Why a key: forces a remount per selected file so
+                      // `onMount` re-registers with diff-navigation-context
+                      // under the new file, mirroring EditorPane's Monaco
+                      // remount-per-path (see MonacoFileEditor.tsx).
+                      key={`${selection?.path}:${selection?.area}`}
+                      path={selection?.path ?? ""}
+                      original={reconstructed.original}
+                      modified={reconstructed.modified}
+                      scheme={scheme}
+                      sideBySide={sideBySide}
+                    />
+                  </Suspense>
+                ) : (
+                  <div className="h-full overflow-auto">
+                    {parsed.hunks.map((hunk, index) => (
                 <div key={index} className="mb-2">
                   {hunk.header && <div className="text-muted-foreground">{hunk.header}</div>}
                   {hunk.lines.map((line, lineIndex) => (
@@ -804,13 +904,18 @@ export function ChangesPanel({
                     </div>
                   ))}
                 </div>
-              ))}
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {diff.phase === "ready" && (parsed.truncated || diff.truncated) && (
-              <p role="status" className="text-muted-foreground">
+              <p role="status" className="shrink-0 text-muted-foreground">
                 Diff truncated to the display budget.
               </p>
             )}
           </div>
+          </DiffNavigationProvider>
         </div>
       </div>
       <SourceControlDiscardDialog

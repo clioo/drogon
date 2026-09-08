@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  readEditorValue,
+  setEditorValue,
+  waitForEditorRegistered,
+} from "./acceptance-editor-text.mjs";
 
 export async function probeRenderedFiles({ page, workspace, output }) {
   const first = "acceptance-first.txt";
@@ -44,31 +49,27 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   };
   await ensureFilesVisible();
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
-  const editor = page.getByLabel(`Contents of ${first}`, { exact: true });
-  await editor.waitFor();
-  assert.equal(await editor.inputValue(), "first baseline\n");
-  await editor.fill("unsaved first draft\n");
+  await waitForEditorRegistered(page, first);
+  assert.equal(await readEditorValue(page, first), "first baseline\n");
+  await setEditorValue(page, first, "unsaved first draft\n");
   await page.getByLabel("Unsaved changes", { exact: true }).waitFor();
   assert.equal(
     await readFile(path.join(workspace, first), "utf8"),
     "first baseline\n",
   );
   await panel.getByRole("treeitem", { name: second, exact: true }).click();
-  const secondEditor = page.getByLabel(`Contents of ${second}`, {
-    exact: true,
-  });
-  await secondEditor.waitFor();
-  assert.equal(await secondEditor.inputValue(), "second baseline\n");
+  await waitForEditorRegistered(page, second);
+  assert.equal(await readEditorValue(page, second), "second baseline\n");
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
-  await editor.waitFor();
-  assert.equal(await editor.inputValue(), "unsaved first draft\n");
+  await waitForEditorRegistered(page, first);
+  assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
   // R6-B: switching the activity bar to Source Control hides the mounted
   // Files panel (keep-alive) without unmounting it; switching back must
   // retain the unsaved draft, mirroring the old Terminals-route round-trip.
   await page.getByRole("button", { name: "Source Control" }).click();
   await files.click();
-  await editor.waitFor();
-  assert.equal(await editor.inputValue(), "unsaved first draft\n");
+  await waitForEditorRegistered(page, first);
+  assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
   await panel.getByRole("button", { name: "Save", exact: true }).click();
   await page
     .getByLabel("Unsaved changes", { exact: true })
@@ -134,8 +135,8 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await ensureFilesVisible();
   await files.click();
   await panel.getByRole("treeitem", { name: first, exact: true }).click();
-  await editor.waitFor();
-  assert.equal(await editor.inputValue(), "unsaved first draft\n");
+  await waitForEditorRegistered(page, first);
+  assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
   // Back to the terminal view through the strip when a tab exists (the
   // flow closed every session before this probe ran, so the strip is
   // usually just the "+" menu over the empty state — already stable).
