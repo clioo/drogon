@@ -205,4 +205,75 @@ impl Engine {
         let users = super::ops::search_users(&self.jira, query.as_deref(), site_id)?;
         to_value(&users)
     }
+
+    // --- R17-C: issue detail, mutations, start-from-issue ------------------
+
+    pub(crate) fn jira_get_issue(&self, params: &Value) -> Result<Value, RpcError> {
+        let key = require_string(params, "key")?;
+        let site_id = params
+            .get("siteId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let issue = super::issues::get_issue(&self.jira, &key, site_id)?;
+        to_value(&issue)
+    }
+
+    pub(crate) fn jira_comments(&self, params: &Value) -> Result<Value, RpcError> {
+        let key = require_string(params, "key")?;
+        let site_id = params
+            .get("siteId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let comments = super::issues::list_comments(&self.jira, &key, site_id)?;
+        to_value(&comments)
+    }
+
+    pub(crate) fn jira_list_transitions(&self, params: &Value) -> Result<Value, RpcError> {
+        let key = require_string(params, "key")?;
+        let site_id = params
+            .get("siteId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let transitions = super::issues::list_transitions(&self.jira, &key, site_id)?;
+        to_value(&transitions)
+    }
+
+    pub(crate) fn jira_create_issue(&self, params: &Value) -> Result<Value, RpcError> {
+        let typed: JiraCreateIssueParams = parse(params, "jira.createIssue params")?;
+        if typed.project_id.trim().is_empty() {
+            return Err(RpcError::new("invalid_argument", "Project is required"));
+        }
+        if typed.issue_type_id.trim().is_empty() {
+            return Err(RpcError::new("invalid_argument", "Issue type is required"));
+        }
+        let result = super::issues::create_issue(&self.jira, &typed)?;
+        to_value(&result)
+    }
+
+    pub(crate) fn jira_update_issue(&self, params: &Value) -> Result<Value, RpcError> {
+        let key = require_string(params, "key")?;
+        let updates: JiraIssueUpdate = parse(params, "jira.updateIssue updates")?;
+        let site_id = params
+            .get("siteId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let result = super::issues::update_issue(&self.jira, &key, &updates, site_id)?;
+        to_value(&result)
+    }
+
+    pub(crate) fn jira_add_comment(&self, params: &Value) -> Result<Value, RpcError> {
+        let key = require_string(params, "key")?;
+        let body = require_string(params, "body")?;
+        let site_id = params
+            .get("siteId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let result = super::issues::add_comment(&self.jira, &key, &body, site_id)?;
+        to_value(&result)
+    }
 }

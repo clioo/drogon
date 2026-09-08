@@ -311,8 +311,13 @@ fn clamp_limit(limit: Option<u32>) -> u32 {
     limit.clamp(1, 100)
 }
 
+/// Same-site visibility for the R17-C read/mutation module.
+pub(crate) fn clear_token_for(state: &JiraState, site_id: &str) {
+    clear_token(state, site_id);
+}
+
 /// The fork's `shouldFetchNextPage` for `isLast`-style paged responses.
-fn should_fetch_next_page(
+pub(crate) fn should_fetch_next_page(
     response: &serde_json::Value,
     start_at: u64,
     items: usize,
@@ -897,7 +902,7 @@ pub fn search_users(
     }
 }
 
-fn first_client(
+pub(crate) fn first_client(
     state: &JiraState,
     site_id: Option<&str>,
 ) -> Result<Option<ClientForSite>, RpcError> {
@@ -914,7 +919,7 @@ fn first_client(
     Ok(clients.into_iter().next())
 }
 
-fn encode_path_segment(value: &str) -> String {
+pub(crate) fn encode_path_segment(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {

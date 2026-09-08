@@ -213,6 +213,63 @@
               "value": "Desktop"
             }
           ]
+        },
+        {
+          "key": "custom_10002",
+          "name": "Team",
+          "required": true,
+          "schema": {
+            "type": "option",
+            "custom": "com.atlassian.jira.plugin.system.customfieldtypes:select"
+          },
+          "allowedValues": [
+            {
+              "id": "1",
+              "value": "core"
+            },
+            {
+              "id": "2",
+              "value": "desktop"
+            },
+            {
+              "id": "3",
+              "value": "runtime"
+            }
+          ]
+        },
+        {
+          "key": "custom_10003",
+          "name": "Product Owner",
+          "required": true,
+          "schema": {
+            "type": "user"
+          }
+        },
+        {
+          "key": "custom_10004",
+          "name": "Components",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": "string"
+          }
+        },
+        {
+          "key": "custom_10005",
+          "name": "Risk notes",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "custom": "com.atlassian.jira.plugin.system.customfieldtypes:textarea"
+          }
+        },
+        {
+          "key": "custom_10006",
+          "name": "Story points",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
         }
       ]
     }
@@ -259,7 +316,128 @@
           "setup"
         ],
         "created": "2026-08-01T09:00:00.000+0000",
-        "updated": "2026-09-01T09:00:00.000+0000"
+        "updated": "2026-09-01T09:00:00.000+0000",
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Bootstrap the repository so the rewrite can start."
+                }
+              ]
+            },
+            {
+              "type": "heading",
+              "attrs": {
+                "level": 2
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Plan"
+                }
+              ]
+            },
+            {
+              "type": "bulletList",
+              "content": [
+                {
+                  "type": "listItem",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "cargo workspace layout"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "listItem",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "CI on Foundation"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "bulletList",
+                      "content": [
+                        {
+                          "type": "listItem",
+                          "content": [
+                            {
+                              "type": "paragraph",
+                              "content": [
+                                {
+                                  "type": "text",
+                                  "text": "fmt + clippy gates"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "codeBlock",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "cargo build --workspace --locked\n"
+                }
+              ]
+            },
+            {
+              "type": "mediaSingle",
+              "content": [
+                {
+                  "type": "media",
+                  "attrs": {
+                    "id": "attach-100",
+                    "alt": "Terminal screenshot"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "See "
+                },
+                {
+                  "type": "text",
+                  "text": "the wiki",
+                  "marks": [
+                    {
+                      "type": "link",
+                      "attrs": {
+                        "href": "https://fixture.local/wiki"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
       }
     },
     {
@@ -300,7 +478,22 @@
           "core"
         ],
         "created": "2026-08-02T09:00:00.000+0000",
-        "updated": "2026-09-02T09:00:00.000+0000"
+        "updated": "2026-09-02T09:00:00.000+0000",
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Second issue body."
+                }
+              ]
+            }
+          ]
+        }
       }
     },
     {
@@ -984,6 +1177,116 @@
         },
         "created": "2026-08-19T09:00:00.000+0000",
         "updated": "2026-09-19T09:00:00.000+0000"
+      }
+    }
+  ],
+  "comments": {
+    "DROG-1": [
+      {
+        "id": "20001",
+        "created": "2026-08-02T09:00:00.000+0000",
+        "updated": "2026-08-02T09:00:00.000+0000",
+        "author": {
+          "accountId": "fixture-user-2",
+          "displayName": "Ana Garcia",
+          "avatarUrls": {
+            "48x48": "https://www.gravatar.com/avatar/fixture2?d=mm&s=48"
+          }
+        },
+        "body": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Repo skeleton looks good."
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "20002",
+        "created": "2026-08-03T09:00:00.000+0000",
+        "author": {
+          "accountId": "fixture-user-1",
+          "displayName": "Carlos Fixture"
+        },
+        "body": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "One question:"
+                }
+              ]
+            },
+            {
+              "type": "orderedList",
+              "content": [
+                {
+                  "type": "listItem",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "which Rust version?"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "DROG-2": [
+      {
+        "id": "20010",
+        "created": "2026-08-05T09:00:00.000+0000",
+        "author": {
+          "accountId": "fixture-user-1",
+          "displayName": "Carlos Fixture"
+        },
+        "body": "Plain string body (Server/DC wiki shape)."
+      }
+    ]
+  },
+  "transitions": [
+    {
+      "id": "11",
+      "name": "Start Progress",
+      "to": {
+        "id": "4",
+        "name": "In Progress",
+        "statusCategory": {
+          "key": "indeterminate",
+          "name": "In Progress"
+        }
+      }
+    },
+    {
+      "id": "21",
+      "name": "Done",
+      "to": {
+        "id": "5",
+        "name": "Done",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
       }
     }
   ]
