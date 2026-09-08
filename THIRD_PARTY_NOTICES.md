@@ -280,6 +280,15 @@ right-sidebar activity item port the Drogon fork's
 revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
 keeps the MIT notice.
 
+The project header actions in `apps/desktop/src/renderer/src/features/shell/`
+(project-actions-menu, remove-project-dialog and its copy, sidebar-options-show)
+and the Project Settings section port the Drogon fork's
+`src/renderer/src/components/sidebar/worktree-list/rows/repo-header-project-actions.tsx`,
+`ProjectHeaderActions.tsx`, `SidebarWorkspaceOptionsMenu.tsx` and
+`settings-project-section-renderer.tsx` (fork revision
+`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
+MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
