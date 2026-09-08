@@ -174,7 +174,10 @@ fn write_preserves_exact_bytes_across_the_save_matrix() {
     for (name, content) in [
         ("whole-no-eol", "<!DOCTYPE html>\n<html>\n</html>"),
         ("whole-eol", "<!DOCTYPE html>\n<html>\n</html>\n"),
-        ("mid-edit", "const a = 1;\nconst replaced = true;\nexport {}\n"),
+        (
+            "mid-edit",
+            "const a = 1;\nconst replaced = true;\nexport {}\n",
+        ),
         ("crlf", "line1\r\nline2\r\n"),
         ("single", "no trailing newline"),
         ("empty", ""),
