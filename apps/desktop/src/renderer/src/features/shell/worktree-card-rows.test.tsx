@@ -4,21 +4,19 @@
    summary line, the focused row follows the active tab, and the summary
    counts come from the same rows. */
 import React from "react";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { Session, Workspace, Worktree } from "../../../../shared/session-contract";
 import { WorktreeCard } from "./WorktreeCard";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
+import { TooltipProvider } from "../../components/ui/tooltip";
 
-vi.mock("../../components/ui/tooltip", async () => {
-  const { createElement } = await import("react");
-  return {
-    Tooltip: ({ children }: { children: React.ReactNode }) =>
-      createElement(React.Fragment, null, children),
-    TooltipTrigger: ({ children }: { children: React.ReactElement }) => children,
-    TooltipContent: () => createElement(React.Fragment, null, null),
-  };
-});
+// No vi.mock here: with CI worker reuse (test.isolate false, see
+// docs/reference/desktop-test-isolation.md) per-file vi.mock factories of
+// the shared tooltip module can be shadowed by other files' registrations,
+// which surfaced as "`Tooltip` must be used within `TooltipProvider`".
+// Rendering under the real provider keeps the tooltips inert and the file
+// self-sufficient.
 
 function session(overrides: Partial<Session> = {}): Session {
   return {
@@ -59,7 +57,8 @@ function renderCard(sessions: Session[], activeSessionId: string) {
   // The card's context menu reads the (absent, here) shell bridge.
   (window as unknown as { drogon?: unknown }).drogon ??= {};
   return render(
-    <WorktreeCard
+    <TooltipProvider>
+      <WorktreeCard
       worktree={worktree}
       workspaces={workspaces}
       sessions={sessions}
@@ -74,7 +73,8 @@ function renderCard(sessions: Session[], activeSessionId: string) {
       onRemove={null}
       onRename={null}
       onCreateWorktree={null}
-    />,
+      />
+    </TooltipProvider>,
   );
 }
 
