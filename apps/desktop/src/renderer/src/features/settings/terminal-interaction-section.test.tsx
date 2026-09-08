@@ -2,7 +2,12 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { terminalSettingsDefaults } from "../terminal/terminal-settings";
+import {
+  DEFAULT_TERMINAL_FAST_SCROLL_SENSITIVITY,
+  DEFAULT_TERMINAL_SCROLL_SENSITIVITY,
+  DEFAULT_TERMINAL_TUI_SCROLL_SENSITIVITY,
+  terminalSettingsDefaults,
+} from "../terminal/terminal-settings";
 import { TerminalInteractionSection } from "./terminal-interaction-section";
 import type { TerminalSettings } from "../terminal/terminal-settings";
 
@@ -15,8 +20,12 @@ function settings(overrides: Partial<TerminalSettings> = {}): TerminalSettings {
 describe("Terminal Interaction settings", () => {
   test("renders and updates all mouse/clipboard controls", () => {
     const onChange = vi.fn();
+    const initialSettings = settings();
     render(
-      <TerminalInteractionSection settings={settings()} onChange={onChange} />,
+      <TerminalInteractionSection
+        settings={initialSettings}
+        onChange={onChange}
+      />,
     );
 
     expect(
@@ -40,7 +49,7 @@ describe("Terminal Interaction settings", () => {
       }),
     );
     expect(onChange).toHaveBeenNthCalledWith(2, {
-      terminalRightClickToPaste: true,
+      terminalRightClickToPaste: !initialSettings.terminalRightClickToPaste,
     });
     expect(onChange).toHaveBeenNthCalledWith(5, {
       terminalAllowOsc52Clipboard: false,
@@ -61,9 +70,9 @@ describe("Terminal Interaction settings", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(onChange).toHaveBeenCalledWith({
-      terminalScrollSensitivity: 1.15,
-      terminalFastScrollSensitivity: 5,
-      terminalTuiScrollSensitivity: 1,
+      terminalScrollSensitivity: DEFAULT_TERMINAL_SCROLL_SENSITIVITY,
+      terminalFastScrollSensitivity: DEFAULT_TERMINAL_FAST_SCROLL_SENSITIVITY,
+      terminalTuiScrollSensitivity: DEFAULT_TERMINAL_TUI_SCROLL_SENSITIVITY,
     });
   });
 });

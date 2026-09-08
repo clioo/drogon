@@ -36,9 +36,12 @@ export type TerminalSettings = Pick<
 export const TERMINAL_SETTINGS_CHANGED_EVENT =
   "drogon:terminal-settings-changed";
 
-export const DEFAULT_TERMINAL_SCROLL_SENSITIVITY = 1.15;
-export const DEFAULT_TERMINAL_FAST_SCROLL_SENSITIVITY = 5;
-export const DEFAULT_TERMINAL_TUI_SCROLL_SENSITIVITY = 1;
+export const DEFAULT_TERMINAL_SCROLL_SENSITIVITY =
+  SETTINGS_DEFAULTS.terminalScrollSensitivity;
+export const DEFAULT_TERMINAL_FAST_SCROLL_SENSITIVITY =
+  SETTINGS_DEFAULTS.terminalFastScrollSensitivity;
+export const DEFAULT_TERMINAL_TUI_SCROLL_SENSITIVITY =
+  SETTINGS_DEFAULTS.terminalTuiScrollSensitivity;
 
 export function normalizeTerminalScrollSensitivity(value: number): number {
   return Number.isFinite(value)

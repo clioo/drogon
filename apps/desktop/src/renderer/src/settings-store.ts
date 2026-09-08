@@ -129,7 +129,7 @@ export type StorageLike = {
   setItem(key: string, value: string): void;
 };
 
-function defaultTerminalRightClickToPaste(): boolean {
+export function defaultTerminalRightClickToPaste(): boolean {
   if (
     typeof navigator !== "undefined" &&
     /Windows/i.test(navigator.userAgent)
