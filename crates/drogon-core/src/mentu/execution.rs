@@ -1,10 +1,13 @@
 //! Bounded, cancellable execution of the `mentu-recipes` child process. A
 //! run is launched asynchronously: [`launch_run`] validates, records a
-//! `running` row and spawns the child, then returns immediately with that
-//! row — the actual wait happens on a detached background thread, which
-//! writes the final result back through the same `Arc<Mutex<Connection>>`
-//! `Engine` already holds. [`cancel`] kills a still-registered child by the
-//! same internal run id `launch_run` minted.
+//! `running` row and spawns the child in its own process group, then
+//! returns immediately with that row — the actual wait happens on a
+//! detached background thread, which writes the final result back through
+//! the same `Arc<Mutex<Connection>>` `Engine` already holds. [`cancel`]
+//! stops a still-registered run by the same internal run id `launch_run`
+//! minted, cooperatively first (SIGTERM so the supervisor reaps its
+//! separately-grouped step shells) with a SIGKILL escalation when the tree
+//! refuses to die.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -58,9 +61,10 @@ impl ChildRegistry {
         self.inner.lock().unwrap().remove(id);
     }
 
-    /// Marks the run cancelled and kills its child if still registered.
-    /// Returns `false` if the run is not (or no longer) tracked here —
-    /// either it already finished, or `id` never named a live run.
+    /// Marks the run cancelled and kills its whole step tree if still
+    /// registered. Returns `false` if the run is not (or no longer)
+    /// tracked here — either it already finished, or `id` never named a
+    /// live run.
     fn cancel(&self, id: &str) -> bool {
         let Some(entry) = self
             .inner
@@ -72,6 +76,12 @@ impl ChildRegistry {
             return false;
         };
         entry.1.store(true, Ordering::SeqCst);
+        // Cooperative first: SIGTERM lets the supervisor reap its steps;
+        // the watcher escalates to SIGKILL if the tree refuses to die.
+        // Non-Unix has no groups, so it keeps the old immediate kill.
+        #[cfg(unix)]
+        term_tree(&entry.0);
+        #[cfg(not(unix))]
         let _ = entry.0.lock().unwrap().kill();
         true
     }
@@ -80,6 +90,77 @@ impl ChildRegistry {
 fn registry() -> &'static ChildRegistry {
     static REGISTRY: OnceLock<ChildRegistry> = OnceLock::new();
     REGISTRY.get_or_init(ChildRegistry::new)
+}
+
+/// Detaches a run child into its own process group (Unix only), so one
+/// signal reaches the `mentu-recipes` supervisor without ever touching the
+/// daemon's own group. The supervisor keeps each step in a further,
+/// separate group, so the stop itself is two-phase ([`term_tree`] for the
+/// cooperative forward, [`kill_tree`] for escalation) — never a bare
+/// `Child::kill`, which would orphan the step tree. A forked child is
+/// never its group leader, so `setsid` cannot fail here; its return is
+/// intentionally unchecked.
+#[cfg(unix)]
+fn detach_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt as _;
+    // `pre_exec` is `unsafe` (its closure runs between fork and exec, where
+    // only async-signal-safe code is sound): this one calls nothing but
+    // `setsid`, which is.
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+}
+
+/// Asks a run tree to stop cooperatively (Unix): SIGTERM to the run's
+/// group reaches the `mentu-recipes` supervisor, which forwards
+/// termination to its step shells. The steps live in their own groups, so
+/// a group SIGKILL alone cannot reach them — but the supervisor's TERM
+/// handler reaps them, as a live probe against 0.4.0 confirmed.
+#[cfg(unix)]
+fn term_tree(child: &Arc<Mutex<Child>>) {
+    let pid = child.lock().unwrap().id();
+    unsafe {
+        libc::killpg(pid as libc::pid_t, libc::SIGTERM);
+    }
+}
+
+/// No-op where groups do not exist; [`kill_tree`] is the only stop there.
+#[cfg(not(unix))]
+fn term_tree(child: &Arc<Mutex<Child>>) {
+    let _ = child;
+}
+
+/// Escalation when cooperation fails: SIGKILLs the run's group, then the
+/// direct child as a fallback. ESRCH from a group that already exited is
+/// ordinary and ignored.
+fn kill_tree(child: &Arc<Mutex<Child>>) {
+    #[cfg(unix)]
+    {
+        let pid = child.lock().unwrap().id();
+        unsafe {
+            libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+    let _ = child.lock().unwrap().kill();
+}
+
+/// True once the child has exited (and been reaped via `try_wait`) within
+/// `grace`.
+fn exited_within(child: &Arc<Mutex<Child>>, grace: Duration) -> bool {
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        {
+            let mut guard = child.lock().unwrap();
+            if let Ok(Some(_)) = guard.try_wait() {
+                return true;
+            }
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    false
 }
 
 fn spawn_capture_thread(mut stream: impl std::io::Read + Send + 'static) -> Arc<Mutex<Vec<u8>>> {
@@ -110,6 +191,9 @@ enum WaitOutcome {
 }
 
 fn wait_bounded(child: &Arc<Mutex<Child>>, cancelled: &Arc<AtomicBool>) -> WaitOutcome {
+    const COOPERATIVE_GRACE: Duration = Duration::from_secs(2);
+    const REAP_GRACE: Duration = Duration::from_secs(2);
+    const TIMEOUT_GRACE: Duration = Duration::from_secs(5);
     let start = Instant::now();
     loop {
         {
@@ -119,21 +203,25 @@ fn wait_bounded(child: &Arc<Mutex<Child>>, cancelled: &Arc<AtomicBool>) -> WaitO
             }
         }
         if cancelled.load(Ordering::SeqCst) {
-            // `cancel()` already called kill(); wait a little longer for the
-            // OS to actually reap it, but never block this thread forever.
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline {
-                let mut guard = child.lock().unwrap();
-                if let Ok(Some(_)) = guard.try_wait() {
-                    return WaitOutcome::Exited;
-                }
-                drop(guard);
-                std::thread::sleep(POLL_INTERVAL);
+            // `cancel()` already asked for cooperative shutdown; wait a
+            // beat for the supervisor to forward it to its steps, then
+            // escalate so a hung tree cannot linger past this point.
+            if exited_within(child, COOPERATIVE_GRACE) {
+                return WaitOutcome::Exited;
             }
+            kill_tree(child);
+            exited_within(child, REAP_GRACE);
             return WaitOutcome::Cancelled;
         }
         if start.elapsed() >= RUN_TIMEOUT {
-            let _ = child.lock().unwrap().kill();
+            // Same two-phase stop as cancel: TERM first so the supervisor
+            // reaps its steps, KILL only on refusal.
+            term_tree(child);
+            if exited_within(child, TIMEOUT_GRACE) {
+                return WaitOutcome::TimedOut;
+            }
+            kill_tree(child);
+            exited_within(child, REAP_GRACE);
             return WaitOutcome::TimedOut;
         }
         std::thread::sleep(POLL_INTERVAL);
@@ -184,6 +272,8 @@ pub fn launch_run(
     let started_at = crate::now_rfc3339();
 
     let mut command = Command::new(&runtime_path);
+    #[cfg(unix)]
+    detach_process_group(&mut command);
     let before_run_ids = match &invocation {
         Invocation::Run { recipe_path } => {
             command.arg("run").arg(recipe_path);
@@ -388,4 +478,62 @@ fn first_step_error(
 /// when nothing was tracked under `id` (already finished, or unknown).
 pub fn cancel(id: &str) -> bool {
     registry().cancel(id)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::io::BufRead as _;
+    use std::time::Duration;
+
+    /// A step-shaped process tree: a group-detached `sh` supervisor with one
+    /// backgrounded `sleep` grandchild, whose pid is reported on the
+    /// supervisor's stdout. Mirrors what a shell recipe step leaves behind
+    /// when cancelled mid-step.
+    fn spawn_step_like_tree() -> (Child, i32) {
+        let mut command = Command::new("sh");
+        detach_process_group(&mut command);
+        command
+            .arg("-c")
+            .arg("sleep 60 & echo $!; wait")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = command.spawn().expect("sh supervisor spawns");
+        // One line, not `read_to_string`: the backgrounded sleep inherits
+        // the pipe, so EOF never arrives while it lives.
+        let mut pid_text = String::new();
+        std::io::BufReader::new(child.stdout.take().expect("piped stdout"))
+            .read_line(&mut pid_text)
+            .expect("supervisor reports its grandchild pid");
+        let grandchild: i32 = pid_text.trim().parse().expect("a numeric grandchild pid");
+        (child, grandchild)
+    }
+
+    fn process_exists(pid: i32) -> bool {
+        // Signal 0 probes existence without delivering anything; ESRCH
+        // means the pid is gone (a zombie adopted by init reads as gone
+        // only once reaped, so callers poll).
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[test]
+    fn cancel_kills_grandchildren_a_step_backgrounded() {
+        let (child, grandchild) = spawn_step_like_tree();
+        assert!(process_exists(grandchild));
+        let tree = Arc::new(Mutex::new(child));
+        kill_tree(&tree);
+        tree.lock().unwrap().wait().expect("reap the supervisor");
+
+        // The SIGKILLed grandchild lingers as a zombie until init reaps
+        // it; poll briefly rather than asserting on the first sample.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while process_exists(grandchild) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            !process_exists(grandchild),
+            "backgrounded sleep {grandchild} survived the group kill"
+        );
+    }
 }

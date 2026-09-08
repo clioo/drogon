@@ -135,6 +135,18 @@ export function useMentuPaneController(
   const [conflict, setConflict] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Publishes a newly learned run row to the shared store as well as this
+  // mount's local state, so the panel and the tab never disagree about run
+  // status (see the adoption effect below). A null reset stays local: it
+  // only means this mount has not loaded a row yet, never that no run
+  // exists for the recipe.
+  const updateRun = useCallback(
+    (next: MentuRun | null) => {
+      setRun(next);
+      if (next) setState({ activeRunId: next.id, activeRun: next });
+    },
+    [setState],
+  );
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   // Per-path text drafts, distinct from the saved recipe bytes (the fork's
@@ -204,12 +216,12 @@ export function useMentuPaneController(
       const active = state.activeRunId
         ? history.find((entry) => entry.id === state.activeRunId) ?? null
         : null;
-      setRun(active ?? history[0] ?? null);
+      updateRun(active ?? history[0] ?? null);
     });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- setState is stable per workspace
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setState/updateRun only publish what the load learned
   }, [bridge, workspaceId, state.selectedRecipeId]);
 
   useEffect(() => {
@@ -218,14 +230,26 @@ export function useMentuPaneController(
     const timer = setInterval(() => {
       void bridge.mentuRunStatus({ runId: run.id }).then((result) => {
         if (cancelled || result.ok === false) return;
-        setRun(result.result.run);
+        updateRun(result.result.run);
       });
     }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateRun only publishes what the poll learned
   }, [bridge, run]);
+
+  // Cross-mount run adoption: whichever mount (panel or tab) published
+  // `state.activeRun` last wins, provided it names the recipe this mount
+  // selected. `setRun` with the identical object is a React no-op, so a
+  // mount adopting its own publish converges without loops.
+  useEffect(() => {
+    const shared = state.activeRun;
+    if (shared && shared.recipeId === state.selectedRecipeId) {
+      setRun(shared);
+    }
+  }, [state.activeRun, state.selectedRecipeId]);
 
   // Stdio evidence for the current run, loaded once per run id (and again
   // on every status transition, so a finished run's files replace the
@@ -441,12 +465,11 @@ export function useMentuPaneController(
     });
     setBusy(false);
     if (started.ok) {
-      setRun(started.result.run);
-      setState({ activeRunId: started.result.run.id });
+      updateRun(started.result.run);
     } else {
       setError(started.error.message);
     }
-  }, [bridge, workspaceId, recipe, review, draftSource, state.selectedRecipeId, setState]);
+  }, [bridge, workspaceId, recipe, review, draftSource, state.selectedRecipeId, updateRun]);
 
   const setDraftText = useCallback(
     (source: string) => {
@@ -588,18 +611,17 @@ export function useMentuPaneController(
     const result = await bridge.mentuRetry({ runId: run.id });
     setBusy(false);
     if (result.ok) {
-      setRun(result.result.run);
-      setState({ activeRunId: result.result.run.id });
+      updateRun(result.result.run);
     } else setError(result.error.message);
-  }, [bridge, run, setState]);
+  }, [bridge, run, updateRun]);
 
   const cancelRun = useCallback(async () => {
     if (!run) return;
     setBusy(true);
     const result = await bridge.mentuCancel({ runId: run.id });
     setBusy(false);
-    if (result.ok) setRun(result.result.run);
-  }, [bridge, run]);
+    if (result.ok) updateRun(result.result.run);
+  }, [bridge, run, updateRun]);
 
   return {
     workspaceId,

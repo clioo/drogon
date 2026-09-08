@@ -111,6 +111,48 @@ describe("mentu mount", () => {
     expect(gated.mentuRunEvidence).toBeUndefined();
   });
 
+  test("gated bridge forwards the optional recipe-save method when present", async () => {
+    const payload = {
+      recipe: {
+        id: "hello",
+        path: ".mentu/recipes/hello.json",
+        name: "hello",
+        description: null,
+        contentHash: "b".repeat(64),
+        steps: [],
+        source: "{}",
+      },
+    };
+    const source: MentuBridge = {
+      ...passthrough,
+      mentuRecipeSave: async () => ({ ok: true, result: payload }),
+    };
+    const allowed = createGatedMentuBridge(source, () => true);
+    expect(
+      await allowed.mentuRecipeSave?.({
+        workspaceId: "ws1",
+        recipeId: "hello",
+        content: "{}",
+      }),
+    ).toEqual({ ok: true, result: payload });
+    const refused = createGatedMentuBridge(source, () => false);
+    expect(
+      await refused.mentuRecipeSave?.({
+        workspaceId: "ws1",
+        recipeId: "hello",
+        content: "{}",
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "unsupported_capability", retryable: true },
+    });
+  });
+
+  test("gated bridge omits the recipe-save method when the source lacks it", () => {
+    const gated = createGatedMentuBridge(passthrough, () => true);
+    expect(gated.mentuRecipeSave).toBeUndefined();
+  });
+
   test("registers the Mentu route gated on mentu.v1", () => {
     const registry = registerMentuRoute(
       createRouteRegistry({

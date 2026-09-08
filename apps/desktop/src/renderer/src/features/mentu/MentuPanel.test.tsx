@@ -7,7 +7,7 @@
 // tab's Graph/Run/Evidence/Metrics tabs.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type {
   MentuBridge,
   MentuRecipeDetail,
@@ -155,6 +155,38 @@ describe("MentuPanel", () => {
     await waitFor(() => expect(screen.getByTestId("recipe-evidence")).toBeTruthy());
     // The failure surfaces both in the runtime message and the evidence.
     expect(screen.getAllByText("test failed")).toHaveLength(2);
+  });
+
+  it("shares the running execution between the panel and the full tab", async () => {
+    const ws = `ws-sync-${Math.random()}`;
+    const bridge = fakeBridge();
+    render(<MentuPanel bridge={bridge} workspaceId={ws} />);
+    render(<MentuPanel bridge={bridge} workspaceId={ws} variant="tab" />);
+    // The tab's run controls live on its Run tab; the panel keeps its
+    // default Plan view.
+    mentuStore.set(ws, { selectedRecipeId: "demo", mode: "run" });
+    const tab = await waitFor(() => screen.getByTestId("recipe-pane"));
+    await waitFor(() =>
+      expect(
+        within(tab).getByTestId("mentu-run"),
+      ).toBeTruthy(),
+    );
+
+    // Review and approve in the tab only: the panel adopts the published
+    // run instead of keeping its earlier (empty) row.
+    fireEvent.click(within(tab).getByTestId("mentu-run"));
+    await waitFor(() => expect(within(tab).getByText("Approve & run")).toBeTruthy());
+    fireEvent.click(within(tab).getByText("Approve & run"));
+
+    // Both mounts show the same running execution with a Cancel control.
+    await waitFor(() => expect(screen.getAllByTestId("mentu-cancel")).toHaveLength(2));
+    const panel = screen.getByTestId("mentu-panel");
+    expect(
+      within(panel).getByTestId("mentu-run-status").textContent,
+    ).toContain("Running…");
+    expect(
+      within(tab).getByTestId("mentu-run-status").textContent,
+    ).toContain("Running…");
   });
 
   it("renders the wide tab with the reference tab order", async () => {
