@@ -9,7 +9,7 @@
 // is down the raw error text stays hidden — the banner covers it, like the
 // fork's TerminalErrorToast suppression — and any unrelated error keeps the
 // exact legacy error-banner markup below.
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import {
@@ -28,15 +28,16 @@ export function DaemonConnectionBanner({
   error,
   retryDisabled,
   onRetry,
-  onReconnected,
 }: {
   /** Raw action error; shown only while connected (unrelated failure). */
   error: string;
   retryDisabled: boolean;
   /** Manual refresh path (App `refresh`: status + workspaces + sessions). */
   onRetry: () => void;
-  /** Runs once per down→up transition so sessions re-attach on return. */
-  onReconnected: () => void;
+  // Issue #185: ready-transition reloads live in useConnectionReadyReload
+  // at App root, not here — this banner unmounts exactly when the
+  // workspace list is empty (Landing branch), the state that needs the
+  // retry. It stays a nested monitor owner (display + toast + Reconnect).
 }): React.JSX.Element | null {
   useEffect(() => ensureDaemonConnectionMonitor(), []);
   const connection = useDaemonConnection();
@@ -45,16 +46,6 @@ export function DaemonConnectionBanner({
     onRetry();
   };
   useDaemonDisconnectToast(connection, handleRetry);
-  const previousState = useRef(connection.state);
-  useEffect(() => {
-    const previous = previousState.current;
-    previousState.current = connection.state;
-    // The initial checking→connected pass already loaded through the App
-    // mount refresh; only a real down→up transition reloads.
-    if (connection.state === "connected" && previous === "reconnecting") {
-      onReconnected();
-    }
-  }, [connection.state, onReconnected]);
 
   if (connection.state === "connected") {
     if (!error) return null;
