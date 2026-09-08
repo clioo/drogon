@@ -603,17 +603,28 @@ async function probeComposerAndAddProject({ page, output }) {
   await page.getByRole("button", { name: "New workspace", exact: true }).click();
   const composer = page.getByRole("dialog", { name: "Create workspace" });
   await composer.waitFor();
-  const options = await composer
-    .locator("#composer-project option")
-    .allTextContents();
-  assert.ok(
-    options.some((text) => text.includes("folder")),
-    "The composer must offer the folder project",
-  );
+  // The fork's composer anatomy (#316): Project type-ahead combobox with
+  // "Browse projects", the Run on field with "Browse run targets", the
+  // Agent combobox and the Advanced disclosure.
+  await composer.getByRole("combobox", { name: "Project" }).waitFor();
+  await composer.getByRole("button", { name: "Browse projects" }).waitFor();
+  await composer.getByRole("combobox", { name: "Run on" }).waitFor();
+  await composer.getByRole("button", { name: "Browse run targets" }).waitFor();
+  await composer
+    .locator('[data-agent-combobox-root="true"][role="combobox"]')
+    .waitFor();
+  await composer.getByRole("button", { name: "Advanced", exact: true }).waitFor();
+  // Opening the picker lists the folder project as an option row.
+  await composer.getByRole("combobox", { name: "Project" }).click();
+  const folderOption = page.getByRole("option", { name: /^folder/ });
+  await folderOption.waitFor();
   await page.screenshot({
     path: path.join(output, "composer.png"),
     animations: "disabled",
   });
+  // Escape backs out of the open listbox first, then closes the dialog.
+  await page.keyboard.press("Escape");
+  await folderOption.waitFor({ state: "hidden" });
   await page.keyboard.press("Escape");
   await composer.waitFor({ state: "hidden" });
   const checks = ["new-workspace-composer-lists-folder-project-and-cancels"];

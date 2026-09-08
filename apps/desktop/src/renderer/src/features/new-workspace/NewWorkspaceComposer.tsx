@@ -1,52 +1,55 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/NewWorkspaceComposerCard.tsx with
    components/new-workspace/{NewWorkspaceComposerProjectSection,
-   NewWorkspaceComposerNameSection,NewWorkspaceComposerFooter,
-   NewWorkspaceComposerAgentSection}.tsx
-   (adapter: MVP subset — project selector, name, base ref, agent picker
-   with model/provider, create — over this repo's Project/Worktree RPC
-   contract and `harness.start`; no remote hosts, smart-name sources,
-   setup, sparse-checkout, effort/prompt/unattended sections — effort and
-   permission mode come from Settings → Agents). */
-import { useEffect, useRef, useState } from "react";
-import { CornerDownLeft, FolderPlus } from "lucide-react";
+   NewWorkspaceComposerNameSection,NewWorkspaceComposerAgentSection,
+   NewWorkspaceComposerAdvancedSection,NewWorkspaceComposerFooter}.tsx
+   (adapter: project list from the daemon's projects RPC, Run on = the
+   source's control over the single local run target (no remote hosts exist
+   in Drogon), the Agent combobox lists the daemon's harnesses with the
+   fork's auto-pick/default semantics, and the Advanced section carries the
+   one advanced control the daemon contract has — the base ref. The fork's
+   model/provider text fields do not exist: agent model, effort and
+   permission mode come from Settings → Agents, exactly as the fork's agent
+   settings drive its quick create. Submit still routes through this repo's
+   Project/Worktree RPC contract and `harness.start`; no remote hosts,
+   smart-name sources, setup, sparse-checkout, parent-worktree nesting or
+   note — those data layers do not exist here). */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Harness,
+  HarnessId,
   HarnessLaunchInput,
   Project,
   Workspace,
 } from "../../../../shared/session-contract";
 import type { HarnessAgentDefault } from "../../settings-store";
-import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
+import { cn } from "../../lib/utils";
 import type { ProjectGroup } from "../shell/project-adapter";
 import {
   composerAgentLaunchInput,
   composerPrimaryActionLabel,
-  emptyComposerAgentSelection,
   initialComposerAgentId,
-  resolveComposerAgentModel,
   resolveComposerSubmit,
   type ComposerAgentSelection,
 } from "./composer-submit";
-import { PI_MODEL_HELPER } from "../shell/pi-model-mapping";
-
-function submitModifierLabel(): string {
-  return typeof navigator !== "undefined" &&
-    navigator.userAgent.includes("Mac")
-    ? "\u2318"
-    : "Ctrl";
-}
+import { getScreenSubmitModifierLabel } from "./composer-submit-shortcut";
+import { buildComposerProjectOptions } from "./project-combobox-options";
+import { buildLocalRunTargetOption, type ReadyRunTargetOption } from "./run-target-options";
+import { NewWorkspaceComposerProjectSection } from "./composer-project-section";
+import { NewWorkspaceComposerNameSection } from "./composer-name-section";
+import { NewWorkspaceComposerAgentSection } from "./composer-agent-section";
+import { NewWorkspaceComposerAdvancedSection } from "./composer-advanced-section";
+import { NewWorkspaceComposerFooter } from "./composer-footer";
 
 /**
- * New-workspace composer card (MVP): project selector with the source's
- * "Add project" affordance, name, base ref for git projects, an agent
- * picker with model/provider, and a primary action that creates a
- * worktree (`worktree.create`) or opens a folder project's implicit
- * workspace, then starts the picked agent (`harness.start`) in it.
- * Daemon errors surface verbatim; client pre-checks come from the shared
- * project form rules. Mod+Enter submits, matching the source's
- * screen-submit shortcut.
+ * New-workspace composer card: the fork's Create-worktree composer over
+ * Drogon's data layer. Project combobox (type-ahead, "Browse projects",
+ * pinned "Add a new project"), the Run on target field, the name field, the
+ * agent combobox ("Blank Terminal" creates without a session), the Advanced
+ * disclosure, and the footer with the source's ⌘↵ primary action.
+ * A git project creates a worktree (`worktree.create`); a folder project
+ * opens its implicit workspace, then starts the picked agent
+ * (`harness.start`). Daemon errors surface verbatim in the footer's alert.
  */
 export function NewWorkspaceComposer({
   groups,
@@ -54,6 +57,9 @@ export function NewWorkspaceComposer({
   projectId,
   disabled,
   nameInputRef,
+  composerRef,
+  containerClassName,
+  submitHandleRef,
   harnesses,
   defaultHarnessId,
   harnessDefaults,
@@ -62,6 +68,8 @@ export function NewWorkspaceComposer({
   onLaunchAgent,
   onSelectWorkspace,
   onAddProject,
+  onOpenAgentSettings,
+  onSetDefaultAgent,
   onClose,
 }: {
   groups: ProjectGroup[];
@@ -69,14 +77,24 @@ export function NewWorkspaceComposer({
   projectId: string | null;
   disabled: boolean;
   nameInputRef: React.RefObject<HTMLInputElement | null>;
-  /** Listed harnesses for the Agent picker; empty hides the section. */
+  /** Root node handle for the modal's screen-submit Enter guard. */
+  composerRef: React.RefObject<HTMLDivElement | null>;
+  /** Extra classes on the card root (the modal passes its scroll recipe). */
+  containerClassName?: string;
+  /** The card publishes its submit + createDisabled for the modal's
+   *  Cmd/Ctrl+Enter chord (the fork keeps both in one hook). */
+  submitHandleRef?: React.MutableRefObject<{
+    submit: () => void;
+    createDisabled: boolean;
+  } | null>;
+  /** Listed harnesses for the Agent combobox; empty hides the picker rows. */
   harnesses: Harness[];
   /** Stored default harness, preselected when actually available. */
   defaultHarnessId: string;
   /** Stored per-harness defaults driving the chained agent launch. */
   harnessDefaults: Record<string, HarnessAgentDefault>;
   onProjectChange: (projectId: string | null) => void;
-  /** Resolves a verbatim daemon error, or null on success (then closes). */
+  /** Resolves a verbatim daemon error, or null on success. */
   onSubmitWorktree: (input: {
     projectId: string;
     name: string;
@@ -91,31 +109,89 @@ export function NewWorkspaceComposer({
   onSelectWorkspace: (workspaceId: string) => void;
   /** Closes the composer and opens the add-project dialog. */
   onAddProject: () => void;
+  /** The fork's gear/"Manage agents": closes the composer for Settings → Agents. */
+  onOpenAgentSettings: () => void;
+  /** Right-click "Set as default" on the agent picker; "blank" clears it. */
+  onSetDefaultAgent: (next: HarnessId | "blank") => void;
   onClose: () => void;
 }) {
   const project: Project | null =
     groups.find((group) => group.project.id === projectId)?.project ?? null;
   const [name, setName] = useState("");
   const [baseRef, setBaseRef] = useState(project?.defaultBaseRef ?? "");
-  const [agent, setAgent] = useState<ComposerAgentSelection>(() => ({
-    ...emptyComposerAgentSelection(),
-    harnessId: initialComposerAgentId(harnesses, defaultHarnessId),
-  }));
-  const [error, setError] = useState("");
+  const [quickAgent, setQuickAgent] = useState<HarnessId | null>(() =>
+    initialComposerAgentId(harnesses, defaultHarnessId),
+  );
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [createMultiple, setCreateMultiple] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const busy = disabled || sending;
-  // A newly picked project brings its own default base ref; the typed
-  // name survives the switch (the source preserves the name field too).
+  const baseRefInputId = React.useId();
+  const projectDescriptionId = React.useId();
+  const nameInputFocusFrameRef = useRef<number | null>(null);
+
+  const projectOptions = useMemo(() => buildComposerProjectOptions(groups), [groups]);
+  const runTargetOptions = useMemo<readonly ReadyRunTargetOption[]>(
+    () => (project ? [buildLocalRunTargetOption(project)] : []),
+    [project],
+  );
+  // The fork shows the Run on picker whenever the selected project has at
+  // least one ready target; local-only Drogon always has exactly one.
+  const shouldShowRunTargetPicker = runTargetOptions.length > 0;
+  const visibleQuickAgents = useMemo(
+    () =>
+      harnesses
+        .filter((harness) => harness.availability === "available")
+        .map((harness) => ({
+          id: harness.harnessId,
+          label: harness.displayName,
+          cmd: harness.executable ?? harness.harnessId,
+        })),
+    [harnesses],
+  );
+  const isGit = project?.kind === "git";
+  const createDisabled = disabled || sending || project === null;
+
+  // A newly picked project brings its own default base ref and local run
+  // target; the typed name survives the switch (the source preserves the
+  // name field too).
   const prevProjectId = useRef(project?.id ?? "");
   useEffect(() => {
     const nextId = project?.id ?? "";
     if (prevProjectId.current !== nextId) {
       prevProjectId.current = nextId;
       setBaseRef(project?.defaultBaseRef ?? "");
+      setError(null);
     }
   });
+
+  const cancelNameInputFocusFrame = useCallback((): void => {
+    if (nameInputFocusFrameRef.current !== null) {
+      cancelAnimationFrame(nameInputFocusFrameRef.current);
+      nameInputFocusFrameRef.current = null;
+    }
+  }, []);
+  const focusNameInput = useCallback((): void => {
+    cancelNameInputFocusFrame();
+    nameInputFocusFrameRef.current = requestAnimationFrame(() => {
+      nameInputFocusFrameRef.current = null;
+      nameInputRef.current?.focus();
+    });
+  }, [cancelNameInputFocusFrame, nameInputRef]);
+  const handleNamePlainEnter = useCallback((): void => {
+    const agentTrigger = composerRef.current?.querySelector<HTMLElement>(
+      '[data-agent-combobox-root="true"][role="combobox"]',
+    );
+    agentTrigger?.focus();
+  }, [composerRef]);
+
   const submit = async () => {
-    if (busy) return;
+    if (createDisabled) return;
+    const agent: ComposerAgentSelection = {
+      harnessId: quickAgent,
+      model: "",
+      provider: "",
+    };
     const resolved = resolveComposerSubmit(groups, workspaces, {
       projectId,
       name,
@@ -126,33 +202,18 @@ export function NewWorkspaceComposer({
       setError(resolved.error);
       return;
     }
-    // #221: the model maps through the fork's Pi semantics before any RPC,
-    // so a flags string or a bare id can never reach the daemon as an
-    // "Invalid model" refusal after the worktree already exists. A failure
-    // keeps every field, so the primary action retries with the same
-    // inputs.
-    const mapped = resolveComposerAgentModel(agent);
-    if ("error" in mapped) {
-      setError(mapped.error);
-      return;
-    }
-    const mappedAgent: ComposerAgentSelection = {
-      ...agent,
-      model: mapped.model ?? "",
-      provider: mapped.provider ?? "",
-    };
     setSending(true);
-    setError("");
+    setError(null);
     try {
       if (resolved.target.kind === "implicit") {
         onSelectWorkspace(resolved.target.workspaceId);
-        if (!mappedAgent.harnessId) {
+        if (!agent.harnessId) {
           onClose();
           return;
         }
         const launch = composerAgentLaunchInput(
           resolved.target.workspaceId,
-          mappedAgent,
+          agent,
           crypto.randomUUID(),
           harnessDefaults,
         );
@@ -169,207 +230,93 @@ export function NewWorkspaceComposer({
         projectId: resolved.target.project.id,
         name: resolved.target.name,
         baseRef: resolved.target.baseRef,
-        agent: mappedAgent,
+        agent,
       });
-      if (failure) setError(failure);
+      if (failure) {
+        setError(failure);
+        return;
+      }
+      // The source's "Create more": keep the composer open on a fresh draft
+      // instead of closing after a successful create.
+      if (createMultiple) {
+        setName("");
+        setBaseRef(resolved.target.project.defaultBaseRef ?? "");
+        focusNameInput();
+        return;
+      }
+      onClose();
     } finally {
       setSending(false);
     }
   };
+
+  const mod = getScreenSubmitModifierLabel();
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key === "Enter" &&
-        !event.defaultPrevented
-      ) {
-        event.preventDefault();
-        void submit();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+    if (!submitHandleRef) return;
+    submitHandleRef.current = { submit: () => void submit(), createDisabled };
   });
-  const mod = submitModifierLabel();
-  const isGit = project?.kind === "git";
-  const descriptionId = "composer-project-description";
   return (
-    <div data-workspace-composer-root="true" className="composer-card">
-      <form
-        className="composer-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <div className="composer-section">
-          <div className="composer-label-row">
-            <label
-              className="composer-label"
-              htmlFor="composer-project"
-            >
-              Project
-            </label>
-            <button
-              type="button"
-              className="shell-icon-button composer-add-project"
-              aria-label="Add project"
-              title="Add project"
-              disabled={busy}
-              onClick={onAddProject}
-            >
-              <FolderPlus size={12} />
-            </button>
-          </div>
-          <select
-            id="composer-project"
-            className="composer-select"
-            aria-describedby={descriptionId}
-            value={projectId ?? ""}
-            disabled={busy}
-            onChange={(event) =>
-              onProjectChange(event.target.value || null)
-            }
-          >
-            <option value="">Choose project</option>
-            {groups.map((group) => (
-              <option key={group.project.id} value={group.project.id}>
-                {group.project.name}
-              </option>
-            ))}
-          </select>
-          {project === null && (
-            <p id={descriptionId} className="composer-hint">
-              Add a project before creating a workspace.
-            </p>
-          )}
-        </div>
-        <div className="composer-section">
-          <label className="composer-label" htmlFor="composer-name">
-            {isGit ? "Branch name" : "Workspace name"}{" "}
-            {!isGit && (
-              <span className="shell-optional">[Optional]</span>
-            )}
-          </label>
-          <Input
-            id="composer-name"
-            ref={nameInputRef}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            disabled={busy}
-            placeholder={isGit ? "demo-a" : "Derived from the project when blank"}
-          />
-        </div>
-        {isGit && (
-          <div className="composer-section">
-            <label className="composer-label" htmlFor="composer-base-ref">
-              Base ref <span className="shell-optional">(optional)</span>
-            </label>
-            <Input
-              id="composer-base-ref"
-              value={baseRef}
-              onChange={(event) => setBaseRef(event.target.value)}
-              disabled={busy}
-              placeholder={project?.defaultBaseRef ?? "repo default"}
-            />
-          </div>
-        )}
-        {harnesses.length > 0 && (
-          <div className="composer-section">
-            <label className="composer-label" htmlFor="composer-agent">
-              Agent
-            </label>
-            <select
-              id="composer-agent"
-              className="composer-select"
-              value={agent.harnessId ?? ""}
-              disabled={busy}
-              onChange={(event) =>
-                setAgent((prev) => ({
-                  ...prev,
-                  harnessId:
-                    (event.target.value || null) as ComposerAgentSelection["harnessId"],
-                }))
-              }
-            >
-              <option value="">None</option>
-              {harnesses.map((harness) => (
-                <option
-                  key={harness.harnessId}
-                  value={harness.harnessId}
-                  disabled={harness.availability !== "available"}
-                >
-                  {harness.displayName}
-                  {harness.availability !== "available"
-                    ? " (unavailable)"
-                    : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        {agent.harnessId && (
-          <div className="composer-section">
-            <label className="composer-label" htmlFor="composer-model">
-              Model <span className="shell-optional">(optional)</span>
-            </label>
-            <Input
-              id="composer-model"
-              value={agent.model}
-              onChange={(event) =>
-                setAgent((prev) => ({ ...prev, model: event.target.value }))
-              }
-              disabled={busy}
-              placeholder="Harness default"
-            />
-            {agent.harnessId === "pi" && (
-              <p className="composer-hint">{PI_MODEL_HELPER}</p>
-            )}
-          </div>
-        )}
-        {agent.harnessId === "pi" && (
-          <div className="composer-section">
-            <label className="composer-label" htmlFor="composer-provider">
-              Provider <span className="shell-optional">(optional)</span>
-            </label>
-            <Input
-              id="composer-provider"
-              value={agent.provider}
-              onChange={(event) =>
-                setAgent((prev) => ({
-                  ...prev,
-                  provider: event.target.value,
-                }))
-              }
-              disabled={busy}
-              placeholder="Pi default"
-            />
-          </div>
-        )}
-        {error && (
-          <div
-            role="alert"
-            className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          >
-            {error}
-          </div>
-        )}
-        <div className="composer-footer">
-          <Button
-            type="submit"
-            size="sm"
-            className="text-xs"
-            disabled={busy || project === null}
-            data-primary-action="workspace-session"
-          >
-            {composerPrimaryActionLabel(project)}
-            <span className="ml-1 inline-flex items-center gap-0.5 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium leading-none text-current/80">
-              <span>{mod}</span>
-              <CornerDownLeft size={12} />
-            </span>
-          </Button>
-        </div>
-      </form>
+    <div
+      ref={composerRef}
+      data-workspace-composer-root="true"
+      className={cn("grid min-w-0 gap-1 rounded-md transition", containerClassName)}
+    >
+      <div className="min-w-0 space-y-4 pt-3">
+        <NewWorkspaceComposerProjectSection
+          projectOptions={projectOptions}
+          groups={groups}
+          selectedProjectId={projectId}
+          onProjectChange={(next) => onProjectChange(next)}
+          showAddProjectButton
+          projectDescriptionId={projectDescriptionId}
+          onAddProject={onAddProject}
+          focusNameInput={focusNameInput}
+          shouldShowRunTargetPicker={shouldShowRunTargetPicker}
+          runTargetOptions={runTargetOptions}
+          selectedRunTargetId={runTargetOptions[0]?.id ?? null}
+          onRunTargetChange={() => {}}
+        />
+        <NewWorkspaceComposerNameSection
+          nameInputRef={nameInputRef}
+          name={name}
+          onNameValueChange={setName}
+          selectedRepoIsGit={isGit}
+          onNamePlainEnter={handleNamePlainEnter}
+        />
+        <NewWorkspaceComposerAgentSection
+          quickAgent={quickAgent}
+          onQuickAgentChange={setQuickAgent}
+          onOpenAgentSettings={onOpenAgentSettings}
+          createDisabled={createDisabled}
+          onCreate={() => void submit()}
+          advancedOpen={advancedOpen}
+          onToggleAdvanced={() => setAdvancedOpen((open) => !open)}
+          visibleQuickAgents={visibleQuickAgents}
+          defaultTuiAgent={defaultHarnessId === "" ? null : (defaultHarnessId as HarnessId)}
+          handleSetDefaultAgent={(next) => {
+            if (next !== null) onSetDefaultAgent(next);
+          }}
+        />
+        <NewWorkspaceComposerAdvancedSection
+          advancedOpen={advancedOpen}
+          selectedRepoIsGit={isGit}
+          baseRefInputId={baseRefInputId}
+          baseRef={baseRef}
+          onBaseRefChange={setBaseRef}
+          defaultBaseRef={project?.defaultBaseRef ?? null}
+        />
+      </div>
+      <NewWorkspaceComposerFooter
+        createError={error}
+        showCreateMultiple={isGit}
+        createMultiple={createMultiple}
+        onCreateMultipleChange={setCreateMultiple}
+        onCreate={() => void submit()}
+        createDisabled={createDisabled}
+        creating={sending}
+        primaryActionLabel={composerPrimaryActionLabel(project)}
+        submitShortcutModifierLabel={mod}
+      />
     </div>
   );
 }

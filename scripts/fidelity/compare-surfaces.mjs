@@ -250,6 +250,23 @@ const SURFACES = [
     ],
   },
   {
+    id: "workspace-composer",
+    label: "New workspace composer",
+    refDir: "src/renderer/src/components/new-workspace",
+    refFiles: [
+      "src/renderer/src/components/NewWorkspaceComposerCard.tsx",
+      "src/renderer/src/components/NewWorkspaceComposerModal.tsx",
+      "src/renderer/src/components/new-workspace/NewWorkspaceComposerProjectSection.tsx",
+      "src/renderer/src/components/new-workspace/NewWorkspaceComposerAdvancedSection.tsx",
+    ],
+    probes: ["New workspace", "Project", "Agent", "Run target", "Advanced", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposer.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposerModal.tsx",
+      "apps/desktop/src/renderer/src/features/new-workspace/composer-submit.ts",
+    ],
+  },
+  {
     id: "settings",
     label: "Settings (Appearance)",
     refDir: "src/renderer/src/components/settings",
@@ -2091,6 +2108,25 @@ async function refSetup(page, state, ctx) {
       } else missing.push("no New tab affordance reachable (page view has no strip)");
       break;
     }
+    case "workspace-composer": {
+      // The composer is a view-only draft surface here. Opening it does not
+      // create a workspace; no field is filled and no submit is pressed.
+      let opened = await tryClick(page, "button", "Create workspace", 2500);
+      if (!opened) opened = await tryClick(page, "button", "New workspace", 2500);
+      if (opened) {
+        await delay(500);
+        notes.push("workspace composer opened without submitting");
+        const advanced = page.getByRole("button", { name: "Advanced", exact: true }).first();
+        if ((await advanced.count()) > 0) {
+          await advanced.click({ timeout: 2500 });
+          await delay(300);
+          notes.push("Advanced section expanded (view-only)");
+        }
+      } else {
+        missing.push("no Create workspace/New workspace affordance reachable");
+      }
+      break;
+    }
     case "settings-shortcuts-rebind": {
       // R6: open Shortcuts and start recording on the first recorder
       // (click only — pressing any chord here would rebind reference
@@ -3784,6 +3820,38 @@ async function candSetup(page, state, ctx) {
       notes.push(`launch menu open (dialogs=${seen.dialogs} menus=${seen.menus} palettes=${seen.palettes})`);
       const items = await menuItemNames(page);
       if (items.length) notes.push(`launch menu items: ${items.join(" | ")}`);
+      break;
+    }
+    case "workspace-composer": {
+      // Open the owned composer only. The fixture is intentionally not
+      // submitted, so this state cannot create a workspace or session.
+      // The git fixture project (sc-repo) makes the capture like-for-like
+      // with the reference, whose selected project is a git repo (title
+      // "Create worktree", git Advanced rows).
+      await ensureGitProject("workspace-composer");
+      let opened = await tryClick(page, "button", "Create workspace", 3000);
+      if (!opened) opened = await tryClick(page, "button", "New workspace", 3000);
+      if (opened) {
+        await delay(500);
+        notes.push("workspace composer opened without submitting");
+        try {
+          const picker = page.getByRole("combobox", { name: "Project" });
+          await picker.click({ timeout: 3000 });
+          const gitRow = page.getByRole("option", { name: /^sc-repo/ }).first();
+          if ((await gitRow.count()) > 0) {
+            await gitRow.click({ timeout: 3000 });
+            notes.push("git project selected in the composer (view-only)");
+          }
+        } catch {
+          notes.push("git project preselection best-effort only");
+        }
+        const advanced = page.getByRole("button", { name: "Advanced", exact: true }).first();
+        if ((await advanced.count()) > 0) {
+          await advanced.click({ timeout: 3000 });
+          await delay(300);
+          notes.push("Advanced section expanded");
+        }
+      } else missing.push("no Create workspace/New workspace affordance reachable");
       break;
     }
     case "settings-shortcuts-rebind": {
@@ -5694,6 +5762,7 @@ const ALL_STATES = [
   "quick-open",
   "command-palette",
   "launch-dialog",
+  "workspace-composer",
   "settings-shortcuts-rebind",
   "settings-appearance",
   "settings-appearance-system",
@@ -5764,6 +5833,7 @@ const CAND_OWNER = {
   "tasks-filters": "apps/desktop/src/renderer/src/features/tasks/task-page/github/Filters.tsx, ModeControls.tsx, IssueSelectors.tsx",
   "command-palette": "apps/desktop/src/renderer/src/components/command-palette/CommandPalette.tsx + features/jump-palette/",
   "launch-dialog": "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx, pi-model-mapping.ts",
+  "workspace-composer": "apps/desktop/src/renderer/src/features/new-workspace/NewWorkspaceComposer.tsx, NewWorkspaceComposerModal.tsx, composer-submit.ts",
   "settings-shortcuts-rebind": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, keybinding-overrides.ts",
   "settings-appearance-system": "apps/desktop/src/renderer/src/features/settings/appearance-section.tsx, native-theme-sync.ts, apps/desktop/src/renderer/src/theme.ts",
   "shortcuts-status-rail": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, shortcut-status-rail.tsx",
@@ -5823,6 +5893,7 @@ const STATE_SURFACE = {
   "tasks-filters": "tasks",
   "command-palette": "palette",
   "launch-dialog": "launch-dialog",
+  "workspace-composer": "workspace-composer",
   "settings-shortcuts-rebind": "settings-shortcuts",
   bots: "bots",
   "bots-empty-and-list": "bots-empty-and-list",
@@ -5880,6 +5951,7 @@ const SOURCE_PREFERENCE = {
   tasks: ["issue", "filter", "classname"],
   "tasks-rows": ["github-task-row", "start workspace", "pagination", "classname"],
   "launch-dialog": ["launch", "provider/model", "model", "classname"],
+  "workspace-composer": ["new workspace", "project", "agent", "advanced", "classname"],
   bots: ["preset", "chat", "classname"],
   explorer: ["find files", "collapse", "explorer", "classname"],
   "sidebar-menus": ["workspace options", "project actions", "delete", "classname"],

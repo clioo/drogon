@@ -1995,7 +1995,8 @@ export function App() {
     selectWorkspaceId(workspaceId);
     if (agentFailure) return agentFailure;
     setProjectAction(null);
-    setComposer(null);
+    // The composer closes itself on success (or stays open for the fork's
+    // "Create more"); it owns the close decision now.
     return null;
   };
   const submitRemoveWorktree = async (
@@ -4289,6 +4290,13 @@ export function App() {
             setComposer(null);
             requestAddProject();
           }}
+          onOpenAgentSettings={() => {
+            setComposer(null);
+            openSettings("agents");
+          }}
+          onSetDefaultAgent={(next) =>
+            changeDefaultHarness(next === "blank" ? "" : next)
+          }
           onClose={() => setComposer(null)}
         />
       )}
