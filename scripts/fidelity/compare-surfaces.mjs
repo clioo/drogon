@@ -47,8 +47,15 @@ const args = process.argv.slice(2);
 // The normal oracle remains the 1440×900 desktop comparison. Narrow sweeps
 // opt into the same state drivers with a real viewport override, allowing the
 // source's responsive tiers to be compared without duplicating the drivers.
-const requestedWidth = Number(flag("--width", 1440));
-const requestedHeight = Number(flag("--height", 900));
+const viewportFlag = flag("--viewport", null);
+const viewportMatch =
+  typeof viewportFlag === "string" ? viewportFlag.match(/^(\d+)x(\d+)$/) : null;
+assert.ok(
+  viewportFlag === null || viewportMatch,
+  `Invalid --viewport: ${String(viewportFlag)} (expected WIDTHxHEIGHT)`,
+);
+const requestedWidth = Number(flag("--width", viewportMatch ? viewportMatch[1] : 1440));
+const requestedHeight = Number(flag("--height", viewportMatch ? viewportMatch[2] : 900));
 assert.ok(
   Number.isFinite(requestedWidth) && requestedWidth > 0,
   `Invalid --width: ${requestedWidth}`,
@@ -1316,6 +1323,82 @@ const TASKS_ROWS_WANTED =
   STATES_FILTER.includes("tasks-rows") ||
   STATES_FILTER.includes("tasks-filters");
 
+// R9 status-bar fixture: the usage store accepts an env-gated JSON snapshot
+// (DROGON_USAGE_FIXTURE). Keep the default candidate capture on the data
+// variant, while status-bar-usage-states cycles loading and signed-out files
+// before capturing the data variant as the comparable state.
+const STATUS_USAGE_FIXTURE_WANTED =
+  !STATES_FILTER ||
+  STATES_FILTER.includes("statusbar-strip") ||
+  STATES_FILTER.includes("status-bar-usage-states");
+
+function usageWindow(usedPercent, windowMinutes, resetDescription) {
+  return {
+    usedPercent,
+    windowMinutes,
+    resetsAt: Date.now() + windowMinutes * 60_000,
+    resetDescription,
+  };
+}
+
+function usageProvider(provider, status, session = null, weekly = null, fableWeekly = null, error = null) {
+  return {
+    provider,
+    session,
+    weekly,
+    fableWeekly,
+    updatedAt: Date.now(),
+    error,
+    status,
+  };
+}
+
+function statusUsageFixture(variant) {
+  const memory = { rssBytes: 888 * 1024 * 1024, processCount: 4, unavailableReason: null };
+  const ports = {
+    listening: [{ port: 43123, process: "fidelity-fixture" }],
+    unavailableReason: null,
+  };
+  if (variant === "loading") {
+    return {
+      claude: usageProvider("claude", "fetching"),
+      codex: usageProvider("codex", "unavailable", null, null, null, "Codex is not signed in."),
+      memory,
+      ports,
+    };
+  }
+  if (variant === "signed-out") {
+    return {
+      claude: usageProvider("claude", "unavailable", null, null, null, "Claude is not signed in."),
+      codex: usageProvider("codex", "unavailable", null, null, null, "Codex is not signed in."),
+      memory,
+      ports,
+    };
+  }
+  return {
+    claude: usageProvider(
+      "claude",
+      "ok",
+      usageWindow(38, 300, "2h 6m"),
+      usageWindow(67, 10080, "3d 22h"),
+      usageWindow(58, 10080, "Fable"),
+    ),
+    codex: usageProvider(
+      "codex",
+      "ok",
+      usageWindow(24, 300, "2h 44m"),
+      usageWindow(53, 10080, "4d 1h"),
+    ),
+    memory,
+    ports,
+  };
+}
+
+async function writeStatusUsageFixture(file, variant = "data") {
+  assert.ok(file, "status-bar fixture path is required");
+  await writeFile(file, JSON.stringify(statusUsageFixture(variant), null, 2) + "\n");
+}
+
 const TASKS_ROWS_FIXTURE_GH = `#!/usr/bin/env node
 // R16-P fidelity fixture: deterministic \`gh issue/pr list|view\` answers.
 const args = process.argv.slice(2);
@@ -1535,6 +1618,13 @@ async function launchCandidate() {
       PATH: `${fixtureBin}${path.delimiter}${process.env.PATH ?? ""}`,
     };
   }
+  let usageFixturePath = null;
+  if (STATUS_USAGE_FIXTURE_WANTED) {
+    usageFixturePath = path.join(fixture, "usage-fixture.json");
+    await writeStatusUsageFixture(usageFixturePath, "data");
+    daemonEnv = daemonEnv ?? { ...process.env };
+    daemonEnv.DROGON_USAGE_FIXTURE = usageFixturePath;
+  }
   const browserFixture = BROWSER_FIXTURE_WANTED ? await startBrowserFixtureServer() : null;
   const daemon = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], {
     stdio: "ignore",
@@ -1565,6 +1655,7 @@ async function launchCandidate() {
       DROGON_DATA_DIR: dataDir,
       DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
       DROGON_BACKGROUND_WINDOW: "1",
+      ...(usageFixturePath ? { DROGON_USAGE_FIXTURE: usageFixturePath } : {}),
       // Real window sized for a 1440x900 content area, parked off the user's
       // work area: viewport emulation made xterm render at the wrong scale.
       DROGON_WINDOW_BOUNDS: `${VIEWPORT.width}x${VIEWPORT.height + 28}+4000+4000`,
@@ -1609,7 +1700,17 @@ async function launchCandidate() {
     .getByRole("button", { name: "Reveal active workspace", exact: true })
     .waitFor({ timeout: 25000 });
   await ensureCandidateViewport(page);
-  return { browser, page, desktop, daemon, fixture, dataDir, workspace, browserFixture };
+  return {
+    browser,
+    page,
+    desktop,
+    daemon,
+    fixture,
+    dataDir,
+    workspace,
+    browserFixture,
+    usageFixturePath,
+  };
 }
 
 async function stopCandidate(owned) {
@@ -2072,6 +2173,22 @@ async function refSetup(page, state, ctx) {
       }
       break;
     }
+    case "source-control-no-remote": {
+      const open = await page.getByRole("region", { name: "Changes" }).count().catch(() => 0);
+      if (open > 0) notes.push("Source Control panel already open; captured as-is (candidate owns no-remote fixture)");
+      else if (await tryClick(page, "button", "Source Control (⌘⇧G)", 2500)) notes.push("Source Control opened via activity bar (candidate owns no-remote fixture)");
+      else {
+        try {
+          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Source Control opened via fallback match (candidate owns no-remote fixture)");
+        } catch {
+          missing.push("no Source Control activity button reachable");
+        }
+      }
+      missing.push("ref non-coverage: creating a fixture repository without remotes is forbidden on the reference");
+      break;
+    }
     case "source-control-dirty": {
       // Navigate-only like source-control: dirty content is ref-owned
       // (nothing created or modified here). When the ref panel shows
@@ -2525,6 +2642,9 @@ async function refSetup(page, state, ctx) {
       notes.push("fork anchors: components/AgentStateDot.tsx, AgentWorkingSpinner.tsx, tab-bar/TerminalTabLeadingIcon.tsx, sidebar/worktree-card-compact-agents.tsx");
       break;
     }
+    case "status-bar-usage-states":
+      notes.push("usage loading/signed-out/data variants are candidate-only fixture captures; reference strip remains read-only");
+      break;
     case "statusbar-strip":
       notes.push("full-page capture; strip cropped in post");
       break;
@@ -2577,6 +2697,16 @@ async function ensureCandidateViewport(page, notes = []) {
   if (size.w === VIEWPORT.width && size.h === VIEWPORT.height) return;
   notes.push(`candidate window is ${size.w}x${size.h}; emulating ${VIEWPORT.width}x${VIEWPORT.height}`);
   await page.setViewportSize(VIEWPORT);
+}
+
+async function reloadCandidateForUsageFixture(page, notes) {
+  await page.reload({ waitUntil: "domcontentloaded", timeout: 15000 });
+  await emulatePageFocus(page).catch(() => {});
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor({ timeout: 25000 });
+  await ensureCandidateViewport(page, notes);
+  await delay(500);
 }
 
 // R6 shared fixture: deterministic Tasks rows without GitHub (also used
@@ -3822,6 +3952,39 @@ async function candSetup(page, state, ctx) {
       await openSourceControl();
       break;
     }
+    case "source-control-no-remote": {
+      const scope = await ensureGitProject("source-control-no-remote");
+      if (!scope) break;
+      try {
+        await execFileAsync("git", ["checkout", "-q", "--", "notes.txt"], { cwd: scope }).catch(() => {});
+        await rm(path.join(scope, "scratch.txt"), { force: true });
+        await execFileAsync("git", ["remote", "remove", "origin"], { cwd: scope }).catch(() => {});
+        await execFileAsync("git", ["remote", "remove", "upstream"], { cwd: scope }).catch(() => {});
+        const remotes = (await execFileAsync("git", ["remote"], { cwd: scope })).stdout.trim();
+        notes.push(remotes ? `fixture remotes unexpectedly present: ${remotes}` : "fixture: sc-wt has no git remotes");
+      } catch (error) {
+        missing.push(`no-remote fixture failed: ${error.message.split("\n")[0]}`);
+        break;
+      }
+      if (!(await reloadCandidate("no-remote"))) break;
+      try {
+        const select = page.getByRole("button", { name: /^Select sc-wt/ }).first();
+        await select.waitFor({ timeout: 15000 });
+        await select.click({ timeout: 3000 });
+        await delay(500);
+        notes.push("sc-wt reselected after no-remote reload");
+      } catch {
+        notes.push("sc-wt reselect best-effort only");
+      }
+      await openSourceControl();
+      try {
+        await page.getByRole("region", { name: "Changes" }).getByText("No remote").waitFor({ timeout: 15000 });
+        notes.push("Source Control rendered No remote copy");
+      } catch {
+        missing.push("Source Control did not render No remote copy");
+      }
+      break;
+    }
     case "source-control-dirty": {
       // One modified tracked file plus one untracked file in sc-wt, so
       // the Unstaged/Untracked sections render. Staging is untouched
@@ -4681,6 +4844,14 @@ async function candSetup(page, state, ctx) {
       }
       break;
     }
+    case "status-bar-usage-states":
+      await ensureProject().catch(() => {});
+      if (!ctx.usageFixturePath) {
+        missing.push("status-bar usage fixture path unavailable");
+      } else {
+        notes.push("fixture seam ready: loading, signed-out and data variants captured per state");
+      }
+      break;
     case "statusbar-strip":
       await ensureTerminal().catch(() => {});
       notes.push("full-page capture; strip cropped in post");
@@ -4864,9 +5035,11 @@ const ALL_STATES = [
   "bots",
   "bots-empty-and-list",
   "statusbar-strip",
+  "status-bar-usage-states",
   "explorer",
   "source-control",
   "source-control-dirty",
+  "source-control-no-remote",
   "create-menu",
   "sidebar-menus",
   "tab-menus",
@@ -4898,6 +5071,7 @@ const CAND_OWNER = {
   "address-bar-suggestions": "apps/desktop/src/renderer/src/features/browser/browser-address-bar.tsx, browser-address-bar-suggestions.ts, browser-recent-urls.ts",
   "tab-bar": "apps/desktop/src/renderer/src/features/shell/TabBar.tsx, TabCreateMenu.tsx, tab-chrome.ts + features/browser/BrowserStripTab.tsx",
   "status-bar": "apps/desktop/src/renderer/src/components/status-bar/StatusBar.tsx",
+  "source-control-no-remote": "apps/desktop/src/renderer/src/features/source-control/ChangesPanel.tsx, branch-context-row.tsx, commit-area.tsx",
   palette: "apps/desktop/src/renderer/src/components/command-palette/CommandPalette.tsx + shortcuts.ts",
   settings: "apps/desktop/src/renderer/src/settings-panel.tsx",
   changes: "apps/desktop/src/renderer/src/features/source-control/",
@@ -4964,6 +5138,7 @@ const STATE_SURFACE = {
   bots: "bots",
   "bots-empty-and-list": "bots-empty-and-list",
   "statusbar-strip": "status-bar",
+  "status-bar-usage-states": "status-bar",
   explorer: "explorer",
   "source-control": "changes",
   "source-control-dirty": "changes",
@@ -5108,16 +5283,43 @@ async function runState(side, page, state, outDir, ctx, setup, teardown) {
   const { notes, missing } = await setup(page, state, ctx);
   const schemes = NO_DARK ? ["light"] : ["light", "dark"];
   const caps = {};
-  for (const scheme of schemes) {
-    try {
-      caps[scheme] = await captureTriple(page, base, scheme);
-    } catch (error) {
-      missing.push(`${side} ${scheme} capture failed: ${error.message.split("\n")[0]}`);
+  // The usage fixture is intentionally exercised as three separate candidate
+  // captures. The normal state files are the data variant, while loading and
+  // signed-out retain their own PNG/ARIA/DOM artifacts for review.
+  const usageVariants = state === "status-bar-usage-states"
+    ? ["loading", "signed-out", "data"]
+    : [null];
+  for (const variant of usageVariants) {
+    if (variant) {
+      if (side === "cand" && ctx.usageFixturePath) {
+        try {
+          await writeStatusUsageFixture(ctx.usageFixturePath, variant);
+          await reloadCandidateForUsageFixture(page, notes);
+          notes.push(`usage fixture variant captured: ${variant}`);
+        } catch (error) {
+          missing.push(`${side} usage ${variant} fixture failed: ${error.message.split("\n")[0]}`);
+        }
+      } else if (side === "cand") {
+        missing.push("status-bar usage fixture path unavailable");
+      } else {
+        // The reference is read-only and cannot consume the candidate seam;
+        // capture the stable reference strip alongside each candidate variant.
+        notes.push(`ref baseline captured for usage variant: ${variant}`);
+      }
+    }
+    const captureBase = variant && variant !== "data" ? `${base}.${variant}` : base;
+    for (const scheme of schemes) {
+      try {
+        const captured = await captureTriple(page, captureBase, scheme);
+        // Keep the data variant as the comparable state pair in report.md.
+        if (!variant || variant === "data") caps[scheme] = captured;
+      } catch (error) {
+        missing.push(`${side} ${variant ? `${variant} ` : ""}${scheme} capture failed: ${error.message.split("\n")[0]}`);
+      }
     }
   }
   if (state === "statusbar-strip" && caps.light) {
     try {
-      const full = caps.light.png;
       const strip = `${base}.strip.png`;
       const box = await page.locator("body").boundingBox();
       const h = box?.height ?? VIEWPORT.height;
@@ -5363,6 +5565,7 @@ async function main() {
       // against the owned daemon; external candidates skip that state.
       dataDir: owned?.dataDir ?? null,
       browserFixture: owned?.browserFixture ?? null,
+      usageFixturePath: owned?.usageFixturePath ?? null,
     };
     const reacquire = async (browser, label) => {
       const page = browser.contexts()[0]?.pages()[0];
@@ -5501,9 +5704,10 @@ async function main() {
 
 function renderReport({ runId, states, inventory, stateResults, ranked, refMeta, candVersions, outDir }) {
   const lines = [];
-  lines.push(`# QA UI Round 8 fidelity report — ${runId}`);
+  lines.push(`# QA UI Round 9 fidelity report — ${runId}`);
   lines.push("");
   lines.push(`Viewport ${VIEWPORT.width}x${VIEWPORT.height}, schemes: ${NO_DARK ? "light" : "light + dark"}.`);
+  lines.push(`Viewport options: --viewport WIDTHxHEIGHT (or --width/--height); this run was captured at the requested native size.`);
   lines.push(`Reference (read-only, confirmation only): CDP ${REF_CDP} — title "${refMeta.title}", url ${refMeta.url}.`);
   lines.push(`Candidate: ${CAND_CDP ? `external CDP ${CAND_CDP}` : "owned production bundle (apps/desktop/out) + real drogond in a temp data dir, --remote-debugging-port=0"}.`);
   lines.push(`Candidate versions: ${JSON.stringify(candVersions).slice(0, 400)}`);
