@@ -1,9 +1,9 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/task-page/github/ModeControls.tsx. GitHub-only
 // adaptation: the source's Projects sub-mode has no daemon counterpart (no
-// Projects board is served), so the kind switch is Issues/Pull requests with
-// the source's button classes; the project selector and the open-in-GitHub
-// link keep the source's trigger classes.
+// Projects board is served), so the kind switch is Issues/PRs with the
+// source's labels and button classes; the project selector and the
+// open-in-GitHub link keep the source's trigger classes.
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../ui/tooltip";
 import { Button } from "../../../../components/ui/button";
 import { ExternalLink } from "lucide-react";

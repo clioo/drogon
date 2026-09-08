@@ -73,7 +73,7 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     onSelectGithubTaskKind: () => {},
     githubModeButtons: [
       { id: "issues", label: "Issues" },
-      { id: "pulls", label: "Pull requests" },
+      { id: "pulls", label: "PRs" },
     ],
     showPRManagementColumns,
     stateFilter: "open",
@@ -301,12 +301,12 @@ describe("PR list chrome", () => {
 });
 
 describe("mode controls", () => {
-  test("switches between Issues and Pull requests with the active kind painted", () => {
+  test("switches between Issues and PRs with the active kind painted", () => {
     const html = render(
       createElement(TaskPageGitHubModeControls, { model: baseModel({ githubTaskKind: "pulls" }) }),
     );
     expect(html).toContain(">Issues<");
-    expect(html).toContain(">Pull requests<");
+    expect(html).toContain(">PRs<");
     expect(html).toContain('aria-pressed="true"');
     // Issues stays mounted with the same switch (kind-aware search copy lives in Filters).
     expect(baseModel({ githubTaskKind: "issues" }).githubTaskGridClass).toBe(

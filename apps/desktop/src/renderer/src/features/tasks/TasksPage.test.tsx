@@ -12,6 +12,7 @@ import { TaskPageGitHubRows } from "./task-page/github/Rows";
 import { TaskPageGitHubList } from "./task-page/github/List";
 import { PaginationBar } from "./task-page/PaginationBar";
 import { TaskPageGitHubFilters } from "./task-page/github/Filters";
+import { getGitHubDefaultQuery, projectTasksDaemonQuery } from "./task-page-localized-options";
 import { toWorkItem, type TaskPageModel } from "./task-page-model";
 import { GITHUB_TASK_GRID_CLASS } from "./task-page-source-context";
 import { TooltipProvider } from "./ui/tooltip";
@@ -51,7 +52,7 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     onSelectGithubTaskKind: () => {},
     githubModeButtons: [
       { id: "issues", label: "Issues" },
-      { id: "pulls", label: "Pull requests" },
+      { id: "pulls", label: "PRs" },
     ],
     showPRManagementColumns: false,
     onStateFilter: () => {},
@@ -290,6 +291,40 @@ describe("filters row", () => {
       createElement(TaskPageGitHubFilters, { model: baseModel({}) }),
     );
     expect(withoutDraft).not.toContain('aria-label="Clear search"');
+  });
+
+  test("renders the source's disabled new-issue button before refresh", () => {
+    const html = render(
+      createElement(TaskPageGitHubFilters, { model: baseModel({}) }),
+    );
+    expect(html).toContain('aria-label="New GitHub issue"');
+    expect(html).toContain("disabled");
+  });
+
+  test("uses the source's PR search placeholder in pulls mode", () => {
+    const html = render(
+      createElement(TaskPageGitHubFilters, {
+        model: baseModel({ githubTaskKind: "pulls" }),
+      }),
+    );
+    expect(html).toContain("Search GitHub PRs...");
+  });
+});
+
+describe("github default query (source presetToQuery)", () => {
+  test("prefills the kind qualifier query", () => {
+    expect(getGitHubDefaultQuery("issues")).toBe("is:issue is:open");
+    expect(getGitHubDefaultQuery("pulls")).toBe("is:pr is:open");
+  });
+
+  test("strips daemon-implied qualifiers before the title/number query", () => {
+    expect(projectTasksDaemonQuery("is:issue is:open")).toBeUndefined();
+    expect(projectTasksDaemonQuery("is:pr is:open")).toBeUndefined();
+    expect(projectTasksDaemonQuery("is:issue is:open crash on start")).toBe(
+      "crash on start",
+    );
+    expect(projectTasksDaemonQuery("  crash  ")).toBe("crash");
+    expect(projectTasksDaemonQuery("")).toBeUndefined();
   });
 });
 

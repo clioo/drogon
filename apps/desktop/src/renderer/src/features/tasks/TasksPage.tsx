@@ -26,7 +26,12 @@ import type {
 } from "./task-page-model";
 import { GITHUB_PR_TASK_GRID_CLASS, GITHUB_TASK_GRID_CLASS, TASK_SEARCH_DEBOUNCE_MS } from "./task-page-source-context";
 import type { GitHubStateFilterId, GitHubTaskKind } from "./task-page-localized-options";
-import { getGitHubModeButtons, getSourceOptions } from "./task-page-localized-options";
+import {
+  getGitHubDefaultQuery,
+  getGitHubModeButtons,
+  getSourceOptions,
+  projectTasksDaemonQuery,
+} from "./task-page-localized-options";
 
 export const TASKS_ROUTE_ID = "tasks";
 export const TASKS_TITLE = "Tasks";
@@ -87,8 +92,14 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   );
   const [githubTaskKind, setGithubTaskKind] = useState<GitHubTaskKind>("issues");
   const [stateFilter, setStateFilter] = useState<GitHubStateFilterId>("open");
-  const [taskSearchInput, setTaskSearchInput] = useState("");
-  const [appliedTaskSearch, setAppliedTaskSearch] = useState("");
+  // Source default (presetToQuery): the box opens prefilled with the kind's
+  // qualifier query; the daemon projection below strips the implied parts.
+  const [taskSearchInput, setTaskSearchInput] = useState(() =>
+    getGitHubDefaultQuery("issues"),
+  );
+  const [appliedTaskSearch, setAppliedTaskSearch] = useState(() =>
+    getGitHubDefaultQuery("issues"),
+  );
   const [workItems, setWorkItems] = useState<TaskPageWorkItem[]>([]);
   const [repo, setRepo] = useState<string | null>(null);
   const [listPhase, setListPhase] = useState<ListPhase>("loading");
@@ -200,7 +211,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
       .tasksList({
         projectId,
         state,
-        query: appliedTaskSearch.trim() || undefined,
+        query: projectTasksDaemonQuery(appliedTaskSearch),
         page,
         perPage: TASKS_PAGE_SIZE,
         mode: kind,
@@ -262,10 +273,12 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   }, []);
 
   const handleResetGithubTaskSearch = useCallback(() => {
-    setTaskSearchInput("");
-    setAppliedTaskSearch("");
+    // Why: Clear restores the kind default like the source's preset row,
+    // never a bare box — the daemon projection maps it back to no query.
+    setTaskSearchInput(getGitHubDefaultQuery(githubTaskKind));
+    setAppliedTaskSearch(getGitHubDefaultQuery(githubTaskKind));
     setPage(1);
-  }, []);
+  }, [githubTaskKind]);
 
   // Selecting a row keeps the journey-J6 behavior: start a worktree for
   // the issue or PR (idempotent on the daemon), refresh the #n badge, then
@@ -338,6 +351,19 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
       setPage(1);
       setFurthestPage(1);
       setGithubTaskKind(kind);
+      // Why: a pristine/default box follows the kind (source presetToQuery);
+      // user-typed text survives the switch.
+      const nextDefault = getGitHubDefaultQuery(kind);
+      setTaskSearchInput((current) =>
+        current.trim() === "" || current === getGitHubDefaultQuery(githubTaskKind)
+          ? nextDefault
+          : current,
+      );
+      setAppliedTaskSearch((current) =>
+        current.trim() === "" || current === getGitHubDefaultQuery(githubTaskKind)
+          ? nextDefault
+          : current,
+      );
     },
     githubModeButtons: getGitHubModeButtons(),
     showPRManagementColumns: githubTaskKind === "pulls",
