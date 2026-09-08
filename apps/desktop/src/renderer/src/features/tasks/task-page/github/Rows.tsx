@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ExternalLink,
   EllipsisVertical,
+  FolderKanban,
   Plus,
 } from "lucide-react";
 import { cn } from "../../cn";
@@ -179,6 +180,7 @@ export function TaskPageGitHubRows({
                   ) : null}
                   {attachedWorkspaceLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-1">
+                      <FolderKanban className="size-3 shrink-0" />
                       <span className="truncate">{attachedWorkspaceLabel}</span>
                     </span>
                   ) : null}
@@ -283,13 +285,16 @@ export function TaskPageGitHubRows({
                     type="button"
                     // Why: Open resumes an existing workspace — solid primary reads stronger than outline Start (new workspace).
                     variant={attachedWorkspace ? "default" : "outline"}
-                    size="sm"
+                    size="xs"
                     data-contextual-tour-target="tasks-start-workspace"
                     onClick={(event) => {
                       event.stopPropagation()
                       handleStartWorkItem(item);
                     }}
-                    className="min-w-[72px] gap-1 font-semibold bg-background/80 shadow-xs"
+                    className={cn(
+                      "min-w-[72px] gap-1 font-semibold",
+                      attachedWorkspace ? "shadow-xs" : "bg-background/80",
+                    )}
                     aria-label={startLabel}
                   >
                     {attachedWorkspace ? "Open" : "Start"}

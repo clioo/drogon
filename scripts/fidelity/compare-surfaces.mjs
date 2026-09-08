@@ -191,6 +191,23 @@ const SURFACES = [
     candFiles: ["apps/desktop/src/renderer/src/features/shell/SidebarNav.tsx"],
   },
   {
+    // R16-P: the only state with deterministic rows. The candidate
+    // daemon resolves `gh` from a fixture bin dir (see
+    // ensureTasksRowsFixtureBin) that answers `issue/pr list` from
+    // canned JSON, so no GitHub account or network is touched; the
+    // reference side only navigates and lists its real rows.
+    id: "tasks-rows",
+    label: "Tasks page with rows (fixture GitHub data)",
+    refDir: "src/renderer/src/components/task-page",
+    refFiles: [
+      "src/renderer/src/components/task-page/github/Rows.tsx",
+      "src/renderer/src/components/task-page/github/List.tsx",
+      "src/renderer/src/components/task-page/PaginationBar.tsx",
+    ],
+    probes: ["github-task-row", "Start workspace", "Pagination", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/tasks/task-page/github/Rows.tsx"],
+  },
+  {
     id: "bots",
     label: "Bots page",
     refDir: "src/renderer/src/components/bots",
@@ -903,6 +920,131 @@ async function ensureHome(page, notes) {
 }
 
 // ---------------------------------------------------------------------------
+// tasks-rows fixture (R16-P): a deterministic `gh` for the owned candidate
+// daemon. Precedent: crates/drogon-core/tests/tasks.rs fakes `gh` by
+// binary path through `tasks_rpc::set_gh_bin_override`; here the whole
+// daemon process resolves `gh` from a fixture bin dir prepended to its
+// PATH, so no product code changes, no GitHub account and no network.
+// Installed only when the run includes `tasks-rows`; every other state
+// keeps the real PATH. Shapes mirror the Rust test fixtures.
+// ---------------------------------------------------------------------------
+const TASKS_ROWS_WANTED = !STATES_FILTER || STATES_FILTER.includes("tasks-rows");
+
+const TASKS_ROWS_FIXTURE_GH = `#!/usr/bin/env node
+// R16-P fidelity fixture: deterministic \`gh issue/pr list|view\` answers.
+const args = process.argv.slice(2);
+const opt = (name) => {
+  const i = args.indexOf(name);
+  return i === -1 || i + 1 >= args.length ? null : args[i + 1];
+};
+const fail = (message) => {
+  console.error("fixture gh: " + message);
+  process.exit(1);
+};
+const LABELS = [
+  [{ name: "bug", color: "d73a4a" }],
+  [{ name: "enhancement", color: "a2eeef" }],
+  [],
+  [{ name: "docs", color: "0075ca" }],
+];
+const ASSIGNEES = [[{ login: "octocat" }], [], [{ login: "helix" }]];
+const AUTHORS = [{ login: "helix" }, { login: "octocat" }, null];
+const UPDATED = ["2026-09-06T12:00:00Z", "2026-09-05T09:30:00Z", "2026-09-04T16:45:00Z"];
+const AREAS = ["sidebar", "terminal", "browser", "tasks", "settings", "worktree"];
+// One row past TASKS_PAGE_SIZE=36: the daemon's fetch-one-extra probe sets
+// hasNextPage, so the pagination strip renders on page one.
+const OPEN_ISSUES = Array.from({ length: 37 }, (_, i) => {
+  const number = 137 - i;
+  return {
+    number,
+    title: "Fixture " + AREAS[i % AREAS.length] + " issue " + number,
+    state: "OPEN",
+    labels: LABELS[i % LABELS.length],
+    assignees: ASSIGNEES[i % ASSIGNEES.length],
+    author: AUTHORS[i % AUTHORS.length],
+    updatedAt: UPDATED[i % UPDATED.length],
+    url: "https://github.com/example/repo/issues/" + number,
+  };
+});
+const CLOSED_ISSUES = [201, 202].map((number) => ({
+  number,
+  title: "Fixture closed issue " + number,
+  state: "CLOSED",
+  labels: [],
+  assignees: [],
+  author: { login: "helix" },
+  updatedAt: "2026-08-20T10:00:00Z",
+  url: "https://github.com/example/repo/issues/" + number,
+}));
+const PULLS = [
+  { number: 12, title: "Fixture PR adds the review flow", state: "OPEN", isDraft: false,
+    labels: [{ name: "enhancement", color: "a2eeef" }], assignees: [{ login: "octocat" }],
+    author: { login: "helix" }, reviewDecision: "APPROVED",
+    statusCheckRollup: [
+      { name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+      { name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+      { name: "e2e", status: "IN_PROGRESS", conclusion: "" },
+    ],
+    mergeable: "MERGEABLE", headRefName: "add-pr-flow", baseRefName: "main",
+    updatedAt: "2026-09-06T14:00:00Z", url: "https://github.com/example/repo/pull/12" },
+  { number: 13, title: "Fixture draft release notes", state: "OPEN", isDraft: true,
+    labels: [], assignees: [], author: { login: "helix" }, reviewDecision: "",
+    statusCheckRollup: [], mergeable: "UNKNOWN",
+    headRefName: "draft-work", baseRefName: "main",
+    updatedAt: "2026-09-05T10:00:00Z", url: "https://github.com/example/repo/pull/13" },
+  { number: 14, title: "Fixture PR needs rework", state: "OPEN", isDraft: false,
+    labels: [{ name: "bug", color: "d73a4a" }], assignees: [{ login: "helix" }],
+    author: { login: "octocat" }, reviewDecision: "CHANGES_REQUESTED",
+    statusCheckRollup: [
+      { name: "build", status: "COMPLETED", conclusion: "FAILURE" },
+      { name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+    ],
+    mergeable: "CONFLICTING", headRefName: "rework-flow", baseRefName: "main",
+    updatedAt: "2026-09-04T11:20:00Z", url: "https://github.com/example/repo/pull/14" },
+  { number: 15, title: "Fixture PR shipped the palette", state: "MERGED", isDraft: false,
+    labels: [], assignees: [], author: { login: "helix" }, reviewDecision: "APPROVED",
+    statusCheckRollup: [{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }],
+    mergeable: "MERGEABLE", headRefName: "palette-ship", baseRefName: "main",
+    updatedAt: "2026-09-03T08:00:00Z", url: "https://github.com/example/repo/pull/15" },
+];
+const limit = () => {
+  const raw = parseInt(opt("--limit") ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 100) : 30;
+};
+const stateFilter = () => String(opt("--state") ?? "open").toLowerCase();
+if (args[0] === "issue" && args[1] === "list") {
+  const pool = stateFilter() === "closed" ? CLOSED_ISSUES
+    : stateFilter() === "all" ? [...OPEN_ISSUES, ...CLOSED_ISSUES] : OPEN_ISSUES;
+  console.log(JSON.stringify(pool.slice(0, limit())));
+} else if (args[0] === "pr" && args[1] === "list") {
+  console.log(JSON.stringify(PULLS.slice(0, limit())));
+} else if (args[0] === "issue" && args[1] === "view") {
+  const found = [...OPEN_ISSUES, ...CLOSED_ISSUES].find((i) => String(i.number) === String(args[2]));
+  if (!found) fail("could not resolve to an Issue");
+  else console.log(JSON.stringify({ ...found, body: "Fixture body for issue " + found.number + "." }));
+} else if (args[0] === "pr" && args[1] === "view") {
+  const found = PULLS.find((p) => String(p.number) === String(args[2]));
+  if (!found) fail("could not resolve to a Pull Request");
+  else console.log(JSON.stringify(found));
+} else {
+  fail("unsupported argv: " + args.join(" "));
+}
+`;
+
+async function ensureTasksRowsFixtureBin(fixture) {
+  const binDir = path.join(fixture, "tasks-fixture-bin");
+  await mkdir(binDir, { recursive: true });
+  const ghPath = path.join(binDir, "gh");
+  await writeFile(ghPath, TASKS_ROWS_FIXTURE_GH, { mode: 0o755 });
+  try {
+    await execFileAsync("chmod", ["+x", ghPath]);
+  } catch {
+    /* the writeFile mode already covers unix */
+  }
+  return binDir;
+}
+
+// ---------------------------------------------------------------------------
 // Candidate lifecycle (owned processes): real drogond + production Electron.
 // ---------------------------------------------------------------------------
 async function launchCandidate() {
@@ -926,8 +1068,19 @@ async function launchCandidate() {
   const workspace = path.join(fixture, "folder");
   await mkdir(workspace, { recursive: true });
 
+  // tasks-rows only: the daemon resolves `gh` from the fixture bin dir
+  // (deterministic rows, no network); every other run keeps the real PATH.
+  let daemonEnv = null;
+  if (TASKS_ROWS_WANTED && process.platform !== "win32") {
+    const fixtureBin = await ensureTasksRowsFixtureBin(fixture);
+    daemonEnv = {
+      ...process.env,
+      PATH: `${fixtureBin}${path.delimiter}${process.env.PATH ?? ""}`,
+    };
+  }
   const daemon = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], {
     stdio: "ignore",
+    ...(daemonEnv ? { env: daemonEnv } : {}),
   });
   let daemonError = null;
   daemon.on("error", (error) => {
@@ -1107,6 +1260,13 @@ async function refSetup(page, state, ctx) {
         if (await waitForAria(page, "textbox", "Search GitHub issues...")) notes.push("Tasks opened (marker visible)");
         else missing.push("Tasks click acted but the list marker never appeared");
       } else missing.push("no Tasks nav reachable");
+      break;
+    case "tasks-rows":
+      // Navigate only: the reference lists its real rows; nothing is
+      // created, typed, filtered, or changed there.
+      if ((await tryClick(page, "button", "Tasks")) || (await tryClick(page, "button", "Open GitHub tasks", 1200)))
+        notes.push("Tasks opened (real rows listed, navigate-only)");
+      else missing.push("no Tasks nav reachable");
       break;
     case "bots":
       if (await tryClick(page, "button", "Bots")) {
@@ -1873,6 +2033,110 @@ async function candSetup(page, state, ctx) {
         else missing.push("Tasks click acted but the page marker never appeared");
       } else missing.push("no Tasks nav reachable");
       break;
+    case "tasks-rows": {
+      // Deterministic rows without GitHub: a scratch git repo with a
+      // GitHub-shaped remote, registered as a project with one
+      // worktree. The daemon's `gh` is the fixture bin (see
+      // launchCandidate), so no network or account is touched and no
+      // issue/PR is created or mutated. Registration and the worktree
+      // go through drogon-cli (same RPCs as the dialogs); the reload
+      // lets App.refresh pick both up, because the main column —
+      // Tasks included — only renders with at least one workspace.
+      if (!ctx.dataDir) {
+        missing.push("tasks-rows needs the owned candidate (dataDir unavailable)");
+        break;
+      }
+      if (process.platform === "win32") {
+        missing.push("tasks-rows fixture gh is unix-only");
+        break;
+      }
+      const cliBin = path.join(
+        root, "target", "debug", "drogon-cli",
+      );
+      const tasksRepo = path.join(path.dirname(ctx.workspace), "tasks-repo");
+      try {
+        await mkdir(tasksRepo, { recursive: true });
+        await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: tasksRepo }).catch(() => {});
+        await execFileAsync("git", ["config", "user.email", "fixture@example.com"], { cwd: tasksRepo }).catch(() => {});
+        await execFileAsync("git", ["config", "user.name", "fixture"], { cwd: tasksRepo }).catch(() => {});
+        await writeFile(path.join(tasksRepo, "README.md"), "tasks fixture\n");
+        await execFileAsync("git", ["add", "README.md"], { cwd: tasksRepo }).catch(() => {});
+        await execFileAsync("git", ["commit", "-q", "-m", "initial"], { cwd: tasksRepo }).catch(() => {});
+        await execFileAsync("git", ["remote", "remove", "origin"], { cwd: tasksRepo }).catch(() => {});
+        await execFileAsync("git", ["remote", "add", "origin", "https://github.com/example/repo.git"], { cwd: tasksRepo }).catch(() => {});
+        notes.push("fixture: tasks-repo git repo with a GitHub-shaped remote");
+      } catch {
+        missing.push("tasks-repo git fixture failed");
+        break;
+      }
+      let projectId = null;
+      try {
+        const out = await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json", "project", "add", tasksRepo,
+        ]);
+        projectId = JSON.parse(out.stdout).result?.id ?? null;
+        notes.push("fixture: tasks-repo registered as a project");
+      } catch (error) {
+        missing.push(`tasks-repo registration failed: ${error.message.split("\n")[0]}`);
+        break;
+      }
+      try {
+        await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json",
+          "worktree", "create", "--project", projectId, "--name", "fixture-wt",
+        ]);
+        notes.push("fixture: one worktree created (main column needs a workspace)");
+      } catch (error) {
+        missing.push(`tasks-repo worktree failed: ${error.message.split("\n")[0]}`);
+        break;
+      }
+      try {
+        await page.reload();
+        await emulatePageFocus(page).catch(() => {});
+        await page
+          .getByRole("button", { name: "Reveal active workspace", exact: true })
+          .waitFor({ timeout: 25000 });
+        await ensureCandidateViewport(page, notes);
+        notes.push("candidate reloaded around the fixture");
+      } catch (error) {
+        missing.push(`candidate reload failed: ${error.message.split("\n")[0]}`);
+        break;
+      }
+      if (await tryClick(page, "button", "Tasks")) notes.push("Tasks nav opened");
+      else missing.push("no Tasks nav reachable");
+      let tasksOpen = false;
+      for (let i = 0; i < 3 && !tasksOpen; i++) {
+        try {
+          await page
+            .getByPlaceholder("Search GitHub issues...")
+            .first()
+            .waitFor({ timeout: 8000 });
+          tasksOpen = true;
+        } catch {
+          await tryClick(page, "button", "Tasks");
+        }
+      }
+      if (!tasksOpen) {
+        missing.push("Tasks page chrome never appeared");
+      } else {
+        try {
+          await page
+            .getByRole("button", { name: "Fixture sidebar issue 137" })
+            .first()
+            .waitFor({ timeout: 25000 });
+          notes.push("fixture rows rendered (Fixture sidebar issue 137 visible)");
+        } catch {
+          missing.push("fixture rows did not render within 25s");
+        }
+        try {
+          const pager = await page.getByRole("navigation", { name: "Pagination" }).count();
+          notes.push(pager > 0 ? "pagination strip rendered (37-issue probe)" : "pagination strip absent (single page)");
+        } catch {
+          notes.push("pagination probe best-effort only");
+        }
+      }
+      break;
+    }
     case "bots":
       await ensureProject().catch(() => {});
       if (await tryClick(page, "button", "Bots")) {
@@ -2524,6 +2788,7 @@ const ALL_STATES = [
   "automations",
   "browser",
   "tasks",
+  "tasks-rows",
   "bots",
   "statusbar-strip",
   "explorer",
@@ -2558,6 +2823,7 @@ const CAND_OWNER = {
   automations: "apps/desktop/src/renderer/src/features/automations/",
   browser: "apps/desktop/src/renderer/src/features/browser/",
   tasks: "apps/desktop/src/renderer/src/features/shell/SidebarNav.tsx (placeholder; J6 owner builds the page)",
+  "tasks-rows": "apps/desktop/src/renderer/src/features/tasks/task-page/github/Rows.tsx, List.tsx, ../PaginationBar.tsx",
   bots: "apps/desktop/src/renderer/src/features/bots/",
   explorer: "apps/desktop/src/renderer/src/features/file-explorer/",
   "sidebar-menus": "apps/desktop/src/renderer/src/features/shell/ProjectList.tsx, project-actions-menu.tsx, WorktreeContextMenu.tsx",
@@ -2590,6 +2856,7 @@ const STATE_SURFACE = {
   automations: "automations",
   browser: "browser",
   tasks: "tasks",
+  "tasks-rows": "tasks",
   bots: "bots",
   "statusbar-strip": "status-bar",
   explorer: "explorer",
@@ -2626,6 +2893,7 @@ const SOURCE_PREFERENCE = {
   automations: ["schedule", "cron", "classname"],
   browser: ["address", "url", "classname"],
   tasks: ["issue", "filter", "classname"],
+  "tasks-rows": ["github-task-row", "start workspace", "pagination", "classname"],
   bots: ["preset", "chat", "classname"],
   explorer: ["find files", "collapse", "explorer", "classname"],
   "sidebar-menus": ["workspace options", "project actions", "delete", "classname"],
@@ -2967,7 +3235,12 @@ async function main() {
       }
     }).catch((error) => ({ error: error.message }));
 
-    const ctx = { workspace: owned?.workspace ?? "<external-candidate>" };
+    const ctx = {
+      workspace: owned?.workspace ?? "<external-candidate>",
+      // tasks-rows drives project/worktree setup through drogon-cli
+      // against the owned daemon; external candidates skip that state.
+      dataDir: owned?.dataDir ?? null,
+    };
     const reacquire = async (browser, label) => {
       const page = browser.contexts()[0]?.pages()[0];
       assert.ok(page, `${label} CDP has no open page (reacquire)`);

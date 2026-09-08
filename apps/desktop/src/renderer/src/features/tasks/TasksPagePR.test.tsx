@@ -282,6 +282,18 @@ describe("PR rows", () => {
 });
 
 describe("PR list chrome", () => {
+  test("pulls skeletons mirror the Reviewers/Checks/Merge columns", () => {
+    const html = render(
+      createElement(TaskPageGitHubList, {
+        model: baseModel({ tasksLoading: true, showGitHubTaskSkeletons: true }),
+      }),
+    );
+    // Source List.tsx: three management pill shimmers, no status pill.
+    expect(html.match(/h-5 w-20 animate-pulse/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(html).not.toContain("h-5 w-14 animate-pulse");
+    expect(html).not.toContain("h-3 w-24 animate-pulse");
+  });
+
   test("renders Reviewers/Checks/Merge headers on the PR grid", () => {
     const model = baseModel({
       filteredWorkItems: [toPullWorkItem(pull(12), "p1")],
