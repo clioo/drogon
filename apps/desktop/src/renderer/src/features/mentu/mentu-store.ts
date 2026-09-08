@@ -5,13 +5,17 @@
 // dependency: this module is the one place both mounts read/write.
 
 import { useSyncExternalStore } from "react";
-import type { MentuStepEvidence } from "../../../../shared/mentu-contract";
+import type { MentuRun, MentuStepEvidence } from "../../../../shared/mentu-contract";
 import type { MentuPaneMode } from "../../../../shared/persistence-contracts/mentu-pane-types";
 
 export type MentuState = {
   selectedRecipeId: string | null;
   draftSource: string;
   activeRunId: string | null;
+  /** The newest known run row, published by whichever mount (panel or tab)
+   *  started, retried, cancelled or polled it last; every mount showing the
+   *  same recipe adopts it so the two never disagree about run status. */
+  activeRun: MentuRun | null;
   mode: MentuPaneMode;
   selectedNodeId: string | null;
   /** Loaded stdio evidence per daemon run id, shared by the panel and tab
@@ -23,6 +27,7 @@ const EMPTY_STATE: MentuState = {
   selectedRecipeId: null,
   draftSource: "",
   activeRunId: null,
+  activeRun: null,
   mode: "graph",
   selectedNodeId: null,
   evidenceByRunId: {},

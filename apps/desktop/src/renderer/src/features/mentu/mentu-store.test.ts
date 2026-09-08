@@ -7,6 +7,7 @@ describe("mentuStore", () => {
       selectedRecipeId: null,
       draftSource: "",
       activeRunId: null,
+      activeRun: null,
       mode: "graph",
       selectedNodeId: null,
       evidenceByRunId: {},
@@ -21,10 +22,33 @@ describe("mentuStore", () => {
       selectedRecipeId: "hello",
       draftSource: "{}",
       activeRunId: null,
+      activeRun: null,
       mode: "graph",
       selectedNodeId: null,
       evidenceByRunId: {},
     });
+  });
+
+  it("carries the newest published run row for cross-mount adoption", () => {
+    const ws = `ws-${Math.random()}`;
+    const run = {
+      id: "run-1",
+      workspaceId: ws,
+      recipeId: "hello",
+      approvalId: "approval-1",
+      mentuRunId: "run_fixture_1",
+      status: "running" as const,
+      startedAt: "t",
+      endedAt: null,
+      steps: [],
+      error: null,
+      retryOf: null,
+    };
+    mentuStore.set(ws, { activeRunId: run.id, activeRun: run });
+    expect(mentuStore.get(ws).activeRun).toEqual(run);
+    const finished = { ...run, status: "succeeded" as const };
+    mentuStore.set(ws, { activeRunId: finished.id, activeRun: finished });
+    expect(mentuStore.get(ws).activeRun?.status).toBe("succeeded");
   });
 
   it("shares the inspector mode and selected node across mounts", () => {

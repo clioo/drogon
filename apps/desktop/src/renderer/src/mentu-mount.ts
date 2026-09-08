@@ -71,6 +71,12 @@ export function createGatedMentuBridge(
     ...(source.mentuRunEvidence
       ? { mentuRunEvidence: gate(source.mentuRunEvidence) }
       : {}),
+    // Same optional-forwarding shape for recipe saves: without it the
+    // recipe pane's editor reports saving as unavailable even though the
+    // daemon and preload both implement `mentu.recipe_save` (R12-H).
+    ...(source.mentuRecipeSave
+      ? { mentuRecipeSave: gate(source.mentuRecipeSave) }
+      : {}),
     mentuRetry: gate(source.mentuRetry),
     mentuCancel: gate(source.mentuCancel),
   };

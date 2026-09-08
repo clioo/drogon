@@ -7,8 +7,9 @@
 // RPCs this repo's daemon does not expose, so review here stages the
 // loaded recipe (name, content hash, steps, runner) and the second phase
 // approves that exact hash (`mentu.approve`) before executing
-// (`mentu.run`). Cancel targets the running run; Retry re-runs the failed
-// run's recipe through a fresh content-bound approval.
+// (`mentu.run`). Cancel targets the running run; Retry resumes the failed
+// run's recorded Mentu run id (`mentu.retry`), re-running only the steps
+// that did not succeed against the recipe file as currently saved.
 
 import { Play, RefreshCw, X } from "lucide-react";
 import type { MentuApproval, MentuRun } from "../../../../shared/mentu-contract";
