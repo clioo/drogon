@@ -156,4 +156,34 @@ describe("createEditorSaveQueue: autosave scheduling", () => {
     vi.advanceTimersByTime(2_000);
     expect(run).not.toHaveBeenCalled();
   });
+
+  // Regression for clioo/drogon#144: the pane's autosave run IS performSave,
+  // which funnels through queueSave itself. Queueing that invoker behind the
+  // key's chain used to deadlock it — the wrapper's chain assimilated the
+  // inner save's chain while the inner save waited behind the wrapper's
+  // unsettled chain — so the first autosave after any edit silently wedged
+  // every later save for the file (button, Cmd+S and autosave alike).
+  it("an autosave run that performs a queued save completes and leaves no stuck chain", async () => {
+    const queue = createEditorSaveQueue();
+    const work = vi.fn(async () => {});
+    // Mirrors EditorPane: the scheduled run is performSave, which queues
+    // the real work on the same queue+key.
+    const performSave = () => queue.queueSave("a", work);
+    queue.scheduleAutosave("a", 800, () => performSave());
+    await vi.advanceTimersByTimeAsync(800);
+    expect(work).toHaveBeenCalledTimes(1);
+    // The chain must not be stuck: a later save for the same key runs too.
+    const later = vi.fn(async () => {});
+    let laterRan = false;
+    const laterDone = queue
+      .queueSave("a", async () => {
+        laterRan = true;
+        later();
+      })
+      .catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(laterRan).toBe(true);
+    expect(later).toHaveBeenCalledTimes(1);
+    await laterDone;
+  });
 });

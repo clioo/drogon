@@ -15,6 +15,7 @@ import {
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
+import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import {
   probeGhUnavailable,
   probePackagedSurfaces,
@@ -433,6 +434,12 @@ try {
   if (withFiles) {
     report.checks.push(
       ...(await probeRenderedFiles({ page, workspace, output })),
+    );
+    // R16-X (fixes #144): the real keyboard path — CDP keystrokes into
+    // Monaco — plus the dirty/external-write conflict that must mark and
+    // suspend autosave instead of silently overwriting disk.
+    report.checks.push(
+      ...(await probeEditorKeyboardInput({ page, workspace, output })),
     );
   }
   if (withHarness) {

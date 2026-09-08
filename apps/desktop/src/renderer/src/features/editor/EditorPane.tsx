@@ -122,6 +122,14 @@ export interface EditorState {
    * every file/scope switch and on a successful save.
    */
   changedOnDisk: boolean;
+  /**
+   * The disagreeing read itself, retained while `changedOnDisk` is set so
+   * the host can hand the pane the fresh disk content as its `content`
+   * prop. Same lifecycle as the flag: set together, cleared together, and
+   * never touched by `edited` (the banner survives continued typing).
+   * Open-file-scoped, like the flag — a file/scope switch drops it.
+   */
+  externalContent: string | null;
 }
 
 export type EditorAction =
@@ -163,6 +171,7 @@ export function initialEditorState(): EditorState {
     saveGeneration: 0,
     saveError: null,
     changedOnDisk: false,
+    externalContent: null,
   };
 }
 
@@ -174,6 +183,17 @@ export function isDirty(state: EditorState): boolean {
 /** A confirmed read disagreed with the dirty draft's baseline (see `changedOnDisk`). */
 export function hasChangedOnDisk(state: EditorState): boolean {
   return state.changedOnDisk;
+}
+
+/**
+ * The disagreeing read retained while `changedOnDisk` is set, or null.
+ * The host prefers this over the confirmed baseline for the pane's
+ * `content` prop so the conflict reaches the pane's own same-spot rules
+ * (which raise the banner) instead of being shadowed by the unchanged
+ * baseline — while the model keeps following the untouched draft.
+ */
+export function externalContentFor(state: EditorState): string | null {
+  return state.changedOnDisk ? state.externalContent : null;
 }
 
 /** The generation the next save request will carry. */
@@ -265,9 +285,12 @@ export function applyEditorAction(
         // disagrees with the draft's baseline, so the conflict is visible
         // even though the draft itself is untouched.
         if (hasRead && state.draft !== state.lastSaved) {
+          const disagrees =
+            action.content !== null && action.content !== state.lastSaved;
           return {
             ...state,
-            changedOnDisk: action.content !== null && action.content !== state.lastSaved,
+            changedOnDisk: disagrees,
+            externalContent: disagrees ? action.content : null,
           };
         }
         // Same file, read confirmed, clean: adopt the refreshed content.
@@ -279,6 +302,7 @@ export function applyEditorAction(
             lastSaved: entry.lastSaved,
             files: withFile(state, key as string, entry),
             changedOnDisk: false,
+            externalContent: null,
           };
         }
         // Same file, unread: adopt only while the draft is still the empty
@@ -291,6 +315,7 @@ export function applyEditorAction(
           lastSaved: entry.lastSaved,
           files: withFile(state, key as string, entry),
           changedOnDisk: false,
+          externalContent: null,
         };
       }
       // Switching (file or scope): retain the current file's editing state
@@ -314,6 +339,7 @@ export function applyEditorAction(
           files,
           saveError: null,
           changedOnDisk: false,
+          externalContent: null,
         };
       }
       const retained = files[key as string];
@@ -334,6 +360,7 @@ export function applyEditorAction(
           files,
           saveError: null,
           changedOnDisk: false,
+          externalContent: null,
         };
       }
       const entry = { draft: action.content ?? "", lastSaved: action.content };
@@ -346,6 +373,7 @@ export function applyEditorAction(
         files: { ...files, [key as string]: entry },
         saveError: null,
         changedOnDisk: false,
+        externalContent: null,
       };
     }
     case "draft-restored": {
@@ -422,6 +450,7 @@ export function applyEditorAction(
           savingDraft: null,
           saveError: null,
           changedOnDisk: false,
+          externalContent: null,
         };
       }
       // Switched away: RETIRE the exact completed operation so no future
@@ -679,6 +708,9 @@ export function EditorPane({
     dirty,
     saveInFlight: state.saveInFlight,
     readConfirmedOrAllowEmpty: readConfirmed || allowEmptySave,
+    // Fork parity (isAutosaveSuspendedForFile): an explicit Save still
+    // resolves the conflict, but the timer must not overwrite disk alone.
+    suspended: state.changedOnDisk,
     run: performSave,
   });
   // Called unconditionally (before any early return) per the rules of

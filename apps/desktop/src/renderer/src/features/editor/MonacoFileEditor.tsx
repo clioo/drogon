@@ -20,9 +20,11 @@
 // (resolveEditorFontFamily in src/renderer/src/lib/editor-font-zoom.ts:
 // empty editor font follows the terminal font); envelope fallback so no
 // App-level prop thread is needed.
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
+import type { editor } from "monaco-editor";
 import "./monaco-setup";
+import { syncContentUpdate } from "./monaco-content-sync";
 import { monacoLanguageForPath } from "./editor-language-by-extension";
 import { monacoThemeForScheme, type EditorScheme } from "./editor-theme";
 import {
@@ -82,10 +84,36 @@ export function MonacoFileEditor({
   onChangeRef.current = onChange;
   const onRequestSaveRef = useRef(onRequestSave);
   onRequestSaveRef.current = onRequestSave;
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  // Last content the model and the prop agreed on. Initialized from the
+  // mount prop (the model starts at defaultValue); updated on every user
+  // edit and every programmatic sync. The layout effect below reconciles
+  // only when the prop drifted from THIS ref — never model-vs-prop — so a
+  // keystroke that lands between render and effect never gets clobbered
+  // (source: use-monaco-content-sync-bridge.ts lastSyncedContentRef).
+  const lastSyncedContentRef = useRef(content);
+  // Suppresses the onChange echo of our own programmatic sync, which would
+  // otherwise mark a clean adoption dirty (same source). Local (not the
+  // source's path-keyed map): this app never shares one model between two
+  // mounted editors.
+  const isApplyingProgrammaticContentRef = useRef(false);
+
+  // Stable identity, so @monaco-editor/react does not dispose and re-attach
+  // its onDidChangeModelContent listener on every parent render.
+  const handleChange = useCallback((value: string | undefined) => {
+    if (value === undefined) return;
+    if (isApplyingProgrammaticContentRef.current) return;
+    lastSyncedContentRef.current = value;
+    onChangeRef.current(value);
+  }, []);
 
   const handleMount: OnMount = (instance, monacoInstance) => {
+    editorRef.current = instance;
     registerEditorDebugHandle(path, instance);
-    instance.onDidDispose(() => unregisterEditorDebugHandle(path, instance));
+    instance.onDidDispose(() => {
+      unregisterEditorDebugHandle(path, instance);
+      if (editorRef.current === instance) editorRef.current = null;
+    });
     instance.addCommand(
       monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyS,
       () => {
@@ -93,6 +121,24 @@ export function MonacoFileEditor({
       },
     );
   };
+
+  // Prop-driven adoption into the live model (external re-reads while the
+  // editor stays mounted). useLayoutEffect lands it before paint so no
+  // stale text flashes. Skipped when the prop still matches the last
+  // synced content — user keystrokes flow the other way (model -> prop).
+  useLayoutEffect(() => {
+    const editorInstance = editorRef.current;
+    if (!editorInstance || lastSyncedContentRef.current === content) {
+      return;
+    }
+    isApplyingProgrammaticContentRef.current = true;
+    try {
+      syncContentUpdate(editorInstance, content);
+      lastSyncedContentRef.current = content;
+    } finally {
+      isApplyingProgrammaticContentRef.current = false;
+    }
+  }, [content]);
 
   // Belt-and-suspenders unregister: @monaco-editor/react disposes the
   // editor on unmount, which already fires `onDidDispose` above, but a
@@ -113,7 +159,7 @@ export function MonacoFileEditor({
       defaultValue={content}
       theme={monacoThemeForScheme(scheme)}
       onMount={handleMount}
-      onChange={(value) => onChangeRef.current(value ?? "")}
+      onChange={handleChange}
       path={path}
       options={{
         minimap: { enabled: false },

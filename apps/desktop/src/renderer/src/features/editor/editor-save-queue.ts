@@ -17,7 +17,12 @@ export type EditorSaveQueue = {
   queueSave(key: string, run: () => Promise<void>): Promise<void>;
   /** Resolves once any in-flight/queued save for `key` has settled, without scheduling a new one. */
   quiesce(key: string): Promise<void>;
-  /** (Re)schedules a debounced autosave for `key`, cancelling any pending one first. */
+  /**
+   * (Re)schedules a debounced autosave for `key`, cancelling any pending
+   * one first. The timer invokes `run` directly: callers whose run already
+   * funnels through `queueSave` (like the pane's performSave) must NOT be
+   * queued again here — double-queueing deadlocks the key's chain.
+   */
   scheduleAutosave(key: string, delayMs: number, run: () => Promise<void>): void;
   /** Cancels a pending autosave timer for `key`, if any. */
   cancelAutosave(key: string): void;
@@ -57,7 +62,16 @@ export function createEditorSaveQueue(): EditorSaveQueue {
     cancelAutosave(key);
     const timer = setTimeout(() => {
       autosaveTimers.delete(key);
-      void queueSave(key, run);
+      // Why not `queueSave(key, run)` here: our only scheduled `run` is
+      // the pane's performSave, which funnels through `queueSave` itself.
+      // Queueing the invoker deadlocks the key — the wrapper's chain
+      // assimilates the inner save's chain while the inner save waits
+      // behind the wrapper's unsettled chain, so neither ever settles and
+      // every later save for the file starves silently (clioo/drogon#144).
+      // The fork single-queues the same way (its timer calls queueSave
+      // with the real work inside); here the single queueing lives in
+      // performSave, so the timer just invokes the run.
+      void run();
     }, delayMs);
     autosaveTimers.set(key, timer);
   };

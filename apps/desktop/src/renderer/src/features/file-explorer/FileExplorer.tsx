@@ -446,12 +446,17 @@ export function FileExplorer({
   }, [hasFilter, visibleRows, fullCache, filter, showDotfiles]);
   const rowsByPath = useMemo(() => new Map(rows.map((row) => [row.path, row])), [rows]);
 
+  // Why no `.focus()` here: the fork's autoReveal only scrolls the row into
+  // view (useFileExplorerAutoReveal: virtualizer.scrollToIndex + select).
+  // Focusing on every listing refresh yanked focus out of the editor after
+  // every save (the write refreshes the listing), breaking typing and
+  // undo/redo right after Cmd+S (clioo/drogon#144). Callers that genuinely
+  // move keyboard focus (rename cancel) focus explicitly themselves.
   const scrollToPath = useCallback((path: string) => {
     const el = containerRef.current?.querySelector(
       `[data-path="${CSS.escape(path)}"]`,
     );
     el?.scrollIntoView({ block: "nearest" });
-    (el as HTMLElement | null)?.focus?.({ preventScroll: true });
   }, []);
 
   // Cancelling an edit returns focus to the row being renamed (a new-file
@@ -459,7 +464,16 @@ export function FileExplorer({
   const cancelInline = useCallback(() => {
     const existing = inlineRef.current?.input.existingPath ?? null;
     setInline(null);
-    if (existing) requestAnimationFrame(() => scrollToPath(existing));
+    if (existing) {
+      requestAnimationFrame(() => {
+        scrollToPath(existing);
+        // The one reveal path that owns keyboard focus: scrollToPath
+        // deliberately never focuses (see above).
+        containerRef.current
+          ?.querySelector<HTMLElement>(`[data-path="${CSS.escape(existing)}"]`)
+          ?.focus?.({ preventScroll: true });
+      });
+    }
   }, [scrollToPath]);
 
   // Auto-reveal: when the open editor file changes, expand its ancestors
