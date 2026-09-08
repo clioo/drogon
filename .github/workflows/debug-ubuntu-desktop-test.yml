@@ -1,0 +1,156 @@
+# R16-BL debug scaffolding — temporary, removed once the ubuntu desktop-test
+# SIGTERM (clioo/drogon#312) is root-caused. Not part of the required checks.
+name: Debug ubuntu desktop test (R16-BL)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/debug-ubuntu-desktop-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debug-desktop-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repro-parallel:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install pinned tools
+        run: npm install --global pnpm@11.19.0
+      - run: pnpm install --frozen-lockfile
+      - name: Environment facts
+        run: |
+          echo "== nproc =="; nproc
+          echo "== free -m =="; free -m
+          echo "== ulimit -a =="; ulimit -a
+          echo "== cgroup memory limit =="
+          cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null
+          echo "== cgroup memory.events (oom counters) =="
+          cat /sys/fs/cgroup/memory.events 2>/dev/null || cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null
+          echo "== systemd-oomd =="
+          systemctl is-active systemd-oomd 2>/dev/null || true
+          systemctl is-enabled systemd-oomd 2>/dev/null || true
+          echo "== earlyoom =="; pgrep -a earlyoom || echo "not running"
+          echo "== kernel threads-max =="; cat /proc/sys/kernel/threads-max
+      - name: Start detached memory sampler (setsid: survives process-group signals)
+        run: |
+          setsid bash -c '
+            echo $$ > /tmp/sampler.pid
+            for i in $(seq 1 900); do
+              echo "=== $(date -u +%T) ==="
+              free -m | sed -n "2p"
+              ps -eo pid,ppid,rss,vsz,nlwp,comm --sort=-rss | head -8
+              sleep 1
+            done
+          ' > /tmp/memsample.log 2>&1 &
+      - name: vitest run (default pool, verbose)
+        working-directory: apps/desktop
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm exec vitest run --reporter=verbose --sequence.shuffle=false 2>&1 | tee /tmp/vitest-parallel.log
+          echo "vitest pipeline exit: $?"
+      - name: Forensics
+        if: always()
+        run: |
+          echo "== sampler alive? =="
+          if [ -f /tmp/sampler.pid ] && kill -0 "$(cat /tmp/sampler.pid)" 2>/dev/null; then
+            echo "ALIVE — the signal was scoped to the step process tree, not the cgroup"
+            kill "$(cat /tmp/sampler.pid)" 2>/dev/null || true
+          else
+            echo "DEAD — the signal hit the whole cgroup (systemd-oomd style kill)"
+          fi
+          echo "== memory curve tail =="
+          tail -24 /tmp/memsample.log || true
+          echo "== vitest log tail =="
+          tail -40 /tmp/vitest-parallel.log || true
+          echo "== completed files =="
+          grep -cE "✓" /tmp/vitest-parallel.log || true
+          echo "== kernel log (sudo dmesg) =="
+          sudo dmesg 2>/dev/null | grep -iE "oom|killed process|out of memory" | tail -20 || echo "dmesg unavailable"
+          echo "== cgroup memory.events after =="
+          cat /sys/fs/cgroup/memory.events 2>/dev/null || cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: diag-parallel-${{ github.run_id }}
+          path: /tmp/*.log
+          if-no-files-found: ignore
+
+  repro-single-worker:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install pinned tools
+        run: npm install --global pnpm@11.19.0
+      - run: pnpm install --frozen-lockfile
+      - name: vitest run (single fork worker, verbose)
+        working-directory: apps/desktop
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm exec vitest run --reporter=verbose --sequence.shuffle=false \
+            --pool=forks --minWorkers=1 --maxWorkers=1 2>&1 | tee /tmp/vitest-single.log
+          echo "vitest pipeline exit: $?"
+      - name: Boundary
+        if: always()
+        run: |
+          echo "== vitest log tail (last completed file marks the boundary) =="
+          tail -40 /tmp/vitest-single.log || true
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: diag-single-${{ github.run_id }}
+          path: /tmp/vitest-single.log
+          if-no-files-found: ignore
+
+  repro-heap-capped:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install pinned tools
+        run: npm install --global pnpm@11.19.0
+      - run: pnpm install --frozen-lockfile
+      - name: vitest run (2.5 GB heap cap per worker exposes the allocating file)
+        working-directory: apps/desktop
+        continue-on-error: true
+        env:
+          NODE_OPTIONS: --max-old-space-size=2560
+        run: |
+          set -o pipefail
+          pnpm exec vitest run --reporter=verbose --sequence.shuffle=false 2>&1 | tee /tmp/vitest-heap.log
+          echo "vitest pipeline exit: $?"
+      - name: Boundary
+        if: always()
+        run: |
+          echo "== vitest log tail (heap-OOM file names the allocator) =="
+          tail -40 /tmp/vitest-heap.log || true
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: diag-heap-${{ github.run_id }}
+          path: /tmp/vitest-heap.log
+          if-no-files-found: ignore
