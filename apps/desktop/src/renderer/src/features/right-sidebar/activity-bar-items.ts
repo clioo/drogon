@@ -2,10 +2,14 @@
    src/renderer/src/components/right-sidebar/use-right-sidebar-activity-items.ts
    (item order and titles) and right-sidebar-activity-visibility.ts (the
    gitOnly/workspaceOnly filter). Adapter: props in place of the zustand
-   store; vault/worktrees/pr-checks/checks/ports/plugin entries are out of
+   store; vault/worktrees/pr-checks/checks/plugin entries are out of
    MVP scope, and the last entry hosts this repo's session-details
-   inspector content, which has no source equivalent. */
-import { Files, GitBranch, Info, Network } from "lucide-react";
+   inspector content, which has no source equivalent. R13-B adds the
+   source's ports item (Plug icon, ⌘⇧I chord, after source-control in the
+   source order); the source gates it on sshOnly, which this repo's
+   all-local workspaces would never satisfy, so it is always visible and
+   the panel shows the source's "No workspace selected" state instead. */
+import { Files, GitBranch, Info, Network, Plug } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { RightSidebarTab } from "./right-sidebar-route";
 
@@ -25,10 +29,14 @@ export function activityItemAriaLabel(item: ActivityBarItem): string {
   return item.shortcut ? `${item.title} (${item.shortcut})` : item.title;
 }
 
-/** Source order for the MVP-relevant entries: Explorer, Mentu, Source Control. */
+/** Source chords for the right sidebar (definitions-core-1.ts). */
+export const SIDEBAR_PORTS_TOGGLE_CHORD = "CmdOrCtrl+Shift+I";
+
+/** Source order for the MVP-relevant entries: Explorer, Mentu, Source Control, Ports. */
 export function buildRightSidebarActivityItems(input: {
   explorerShortcut: string;
   sourceControlShortcut: string;
+  portsShortcut: string;
 }): ActivityBarItem[] {
   return [
     {
@@ -50,6 +58,12 @@ export function buildRightSidebarActivityItems(input: {
       title: "Source Control",
       shortcut: input.sourceControlShortcut,
       gitOnly: true,
+    },
+    {
+      id: "ports",
+      icon: Plug,
+      title: "Ports",
+      shortcut: input.portsShortcut,
     },
     {
       id: "session",

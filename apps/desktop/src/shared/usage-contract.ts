@@ -112,6 +112,65 @@ declare module "./session-contract" {
   }
 }
 
+// --- Workspace ports (R13-B, additive) -----------------------------------
+// Ported row shape from the read-only reference's
+// src/shared/workspace-ports.ts (WorkspacePort / WorkspacePortScanResult):
+// the rows the right-sidebar Ports panel renders. Adapted: workspace rows
+// carry this repo's owner ({ workspaceId, displayName, confidence });
+// unattributed listeners are plain external rows (no container kind, no
+// advertised-URL enrichment in this repo's reader).
+
+export const workspacePortsInputSchema = z.object({
+  workspaceId: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[^\x00-\x1f\x7f]+$/),
+});
+export type WorkspacePortsInput = z.infer<typeof workspacePortsInputSchema>;
+
+export const workspacePortOwnerSchema = z.object({
+  workspaceId: z.string().min(1).max(128),
+  /** Workspace display name from workspace.list. */
+  displayName: z.string().min(1).max(256),
+  /** Attribution evidence: process cwd vs command line (source parity). */
+  confidence: z.enum(["cwd", "command"]),
+});
+
+export const workspacePortRowSchema = z.object({
+  id: z.string().min(1).max(512),
+  /** Address reported by the OS listener; may be a wildcard bind. */
+  bindHost: z.string().min(1).max(256),
+  /** Address the renderer copies/opens; wildcard binds normalize to localhost. */
+  connectHost: z.string().min(1).max(256),
+  port: z.number().int().min(1).max(65535),
+  pid: z.number().int().positive().nullable(),
+  processName: z.string().max(256).nullable(),
+  protocol: z.enum(["http", "https", "unknown"]),
+  kind: z.enum(["workspace", "external"]),
+  /** Set on workspace rows; null on external rows. */
+  owner: workspacePortOwnerSchema.nullable(),
+});
+export type WorkspacePortRow = z.infer<typeof workspacePortRowSchema>;
+
+export const workspacePortsSnapshotSchema = z.object({
+  platform: z.string().min(1).max(32),
+  scannedAt: z.number().int().nonnegative(),
+  ports: z.array(workspacePortRowSchema).max(4096),
+  unavailableReason: z.string().max(300).nullable(),
+});
+export type WorkspacePortsSnapshot = z.infer<typeof workspacePortsSnapshotSchema>;
+
+export interface WorkspacePortsBridge {
+  list(input: WorkspacePortsInput): Promise<UsageResult<WorkspacePortsSnapshot>>;
+}
+
+declare module "./session-contract" {
+  interface DesktopBridge {
+    workspacePorts: WorkspacePortsBridge;
+  }
+}
+
 /** Single clamp+round for bar width and label so they never disagree. */
 export function clampUsedPercent(usedPercent: number): number {
   if (!Number.isFinite(usedPercent)) return 0;

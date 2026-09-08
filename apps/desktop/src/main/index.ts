@@ -38,6 +38,8 @@ import {
 // R1-A: self-registering usage IPC (snapshot/refresh/awake); the module owns
 // its channels and validation, this line only loads it.
 import { registerUsageIpc } from "./usage/service";
+// R13-B: additive Ports-panel channel (drogon:workspacePorts).
+import { listWorkspacePorts } from "./usage/workspace-port-list";
 
 // Bounds one probe connection attempt within the overall bootstrap budget
 // below; not a substitute for it (the overall budget is what actually
@@ -182,6 +184,10 @@ function registerBridge() {
         }
         case "buildInfo":
           return readBuildInfo(process.resourcesPath);
+        case "workspacePorts":
+          return listWorkspacePorts(
+            (value as { workspaceId: string }).workspaceId,
+          );
         default:
           return invalid;
       }
