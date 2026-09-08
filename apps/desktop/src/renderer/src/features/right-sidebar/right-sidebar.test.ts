@@ -98,15 +98,29 @@ describe("right-sidebar-width", () => {
 });
 
 describe("activity-bar-items", () => {
-  it("orders Explorer, Mentu, Source Control, Ports and labels with the chord", () => {
-    const items = buildRightSidebarActivityItems({
+  // Fork item order (use-right-sidebar-activity-items.ts), minus the
+  // panels Drogon does not serve yet (vault, workspaces, pr-checks,
+  // checks) and with no Session details item (the fork has none).
+  const fullState = {
+    isFolder: false,
+    isFolderWorkspace: false,
+    isSshRepo: false,
+    hasActiveWorktree: true,
+    gitAvailable: true,
+    mentuAvailable: true,
+  };
+  function builtItems() {
+    return buildRightSidebarActivityItems({
       explorerShortcut: "⌘⇧E",
       sourceControlShortcut: "⌘⇧G",
       portsShortcut: "⌘⇧I",
     });
+  }
+  it("orders Explorer, Mentu, Source Control, Ports and labels with the chord", () => {
+    const items = builtItems();
     assert.deepEqual(
       items.map((item) => item.id),
-      ["explorer", "mentu", "source-control", "ports", "session"],
+      ["explorer", "mentu", "source-control", "ports"],
     );
     assert.equal(
       activityItemAriaLabel(items[0]),
@@ -115,11 +129,10 @@ describe("activity-bar-items", () => {
     // The fork's mentu entry carries no toggle chord.
     assert.equal(items[1].title, "Mentu");
     assert.equal(activityItemAriaLabel(items[1]), "Mentu");
-    // R13-B: the source's ports item (Plug icon, ⌘⇧I chord) sits between
-    // Source Control and the session-details entry.
+    // R13-B: the source's ports item (Plug icon, ⌘⇧I chord) sits after
+    // Source Control, in the source's relative order.
     assert.equal(items[3].title, "Ports");
     assert.equal(activityItemAriaLabel(items[3]), "Ports (⌘⇧I)");
-    assert.equal(activityItemAriaLabel(items[4]), "Session details");
   });
   it("formats chords per platform", () => {
     assert.equal(
@@ -133,45 +146,92 @@ describe("activity-bar-items", () => {
     assert.equal(formatSidebarChord("CmdOrCtrl+L", "darwin"), "⌘L");
   });
   it("hides the git-only entry while git.v1 is withheld", () => {
-    const items = buildRightSidebarActivityItems({
-      explorerShortcut: "",
-      sourceControlShortcut: "",
-      portsShortcut: "",
-    });
+    const items = builtItems();
     assert.deepEqual(
       getVisibleRightSidebarActivityItems(items, {
+        ...fullState,
         gitAvailable: false,
-        mentuAvailable: true,
       }).map((item) => item.id),
-      ["explorer", "mentu", "ports", "session"],
+      ["explorer", "mentu", "ports"],
     );
-    assert.equal(
+    assert.deepEqual(
+      getVisibleRightSidebarActivityItems(items, fullState).map(
+        (item) => item.id,
+      ),
+      ["explorer", "mentu", "source-control", "ports"],
+    );
+  });
+  it("hides Source Control on a folder workspace even while git.v1 is advertised", () => {
+    const items = builtItems();
+    assert.deepEqual(
       getVisibleRightSidebarActivityItems(items, {
-        gitAvailable: true,
-        mentuAvailable: true,
-      }).length,
-      5,
+        ...fullState,
+        isFolder: true,
+        isFolderWorkspace: true,
+      }).map((item) => item.id),
+      ["explorer", "mentu", "ports"],
+    );
+  });
+  it("hides the workspace-only entries without a selected workspace", () => {
+    const items = builtItems();
+    assert.deepEqual(
+      getVisibleRightSidebarActivityItems(items, {
+        ...fullState,
+        hasActiveWorktree: false,
+      }).map((item) => item.id),
+      ["explorer", "source-control"],
     );
   });
   it("projects the mentu entry with and without the mentu.v1 capability", () => {
-    const items = buildRightSidebarActivityItems({
-      explorerShortcut: "",
-      sourceControlShortcut: "",
-      portsShortcut: "",
-    });
+    const items = builtItems();
     assert.deepEqual(
-      getVisibleRightSidebarActivityItems(items, {
-        gitAvailable: true,
-        mentuAvailable: true,
-      }).map((item) => item.id),
-      ["explorer", "mentu", "source-control", "ports", "session"],
+      getVisibleRightSidebarActivityItems(items, fullState).map(
+        (item) => item.id,
+      ),
+      ["explorer", "mentu", "source-control", "ports"],
     );
     assert.deepEqual(
       getVisibleRightSidebarActivityItems(items, {
-        gitAvailable: true,
+        ...fullState,
         mentuAvailable: false,
       }).map((item) => item.id),
-      ["explorer", "source-control", "ports", "session"],
+      ["explorer", "source-control", "ports"],
+    );
+  });
+  it("keeps the folderOnly/sshOnly filter branches for the unported items", () => {
+    const items = [
+      ...builtItems(),
+      {
+        id: "source-control" as const,
+        icon: builtItems()[0].icon,
+        title: "Attached worktrees",
+        shortcut: "",
+        folderOnly: true,
+      },
+      {
+        id: "ports" as const,
+        icon: builtItems()[0].icon,
+        title: "Ssh",
+        shortcut: "",
+        sshOnly: true,
+      },
+    ];
+    // Folder workspace without SSH: folderOnly shows, sshOnly hides.
+    assert.deepEqual(
+      getVisibleRightSidebarActivityItems(items, {
+        ...fullState,
+        isFolder: true,
+        isFolderWorkspace: true,
+      }).map((item) => item.title),
+      ["Explorer", "Mentu", "Ports", "Attached worktrees"],
+    );
+    // Git workspace with SSH: folderOnly hides, sshOnly shows.
+    assert.deepEqual(
+      getVisibleRightSidebarActivityItems(items, {
+        ...fullState,
+        isSshRepo: true,
+      }).map((item) => item.title),
+      ["Explorer", "Mentu", "Source Control", "Ports", "Ssh"],
     );
   });
 });

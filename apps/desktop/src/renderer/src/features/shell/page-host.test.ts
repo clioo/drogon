@@ -1,0 +1,58 @@
+/* MIT Copyright (c) 2026 Lovecast Inc. Routing contract for the App page
+   host (features/shell/page-host.ts): which routes replace the session view
+   as standalone pages, and that view-history Back/Close restores the
+   session view. App itself has no unit harness, so these tests pin the
+   model App applies: the route classification plus the history entries
+   Back walks back to. */
+import assert from "node:assert/strict";
+import { describe, it } from "vitest";
+import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
+import { BOTS_ROUTE_ID } from "../../bots-mount";
+import { MENTU_ROUTE_ID } from "../../mentu-mount";
+import { SETTINGS_ROUTE_ID } from "../settings/settings-route";
+import { TASKS_ROUTE_ID } from "../tasks/TasksPage";
+import { isFullPageRoute } from "./page-host";
+import {
+  currentView,
+  goBackView,
+  initialViewHistory,
+  pushView,
+} from "./view-history";
+
+describe("isFullPageRoute", () => {
+  it("treats Bots, Tasks and Automations as standalone pages", () => {
+    assert.equal(isFullPageRoute(BOTS_ROUTE_ID), true);
+    assert.equal(isFullPageRoute(TASKS_ROUTE_ID), true);
+    assert.equal(isFullPageRoute(AUTOMATIONS_ROUTE_ID), true);
+  });
+  it("keeps the session view for landing, settings and session tabs", () => {
+    assert.equal(isFullPageRoute(null), false);
+    assert.equal(isFullPageRoute(SETTINGS_ROUTE_ID), false);
+    assert.equal(isFullPageRoute(MENTU_ROUTE_ID), false);
+    assert.equal(isFullPageRoute("files"), false);
+    assert.equal(isFullPageRoute("changes"), false);
+  });
+});
+
+describe("page Back/Close restores the session view", () => {
+  it("Back from a page returns to the previous session entry", () => {
+    const workspaceId = "workspace-1";
+    let history = initialViewHistory({ route: null, workspaceId });
+    history = pushView(history, { route: TASKS_ROUTE_ID, workspaceId });
+    assert.equal(isFullPageRoute(currentView(history).route), true);
+    history = goBackView(history);
+    const restored = currentView(history);
+    assert.equal(restored.route, null);
+    assert.equal(isFullPageRoute(restored.route), false);
+  });
+  it("Close from each page returns to the entry it was opened from", () => {
+    for (const page of [BOTS_ROUTE_ID, TASKS_ROUTE_ID, AUTOMATIONS_ROUTE_ID]) {
+      const workspaceId = "workspace-1";
+      let history = initialViewHistory({ route: null, workspaceId });
+      history = pushView(history, { route: page, workspaceId });
+      const restored = currentView(goBackView(history));
+      assert.equal(restored.route, null);
+      assert.equal(isFullPageRoute(restored.route), false);
+    }
+  });
+});

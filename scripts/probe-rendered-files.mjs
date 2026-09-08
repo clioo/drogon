@@ -63,10 +63,12 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await panel.getByRole("button", { name: first, exact: true }).click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
-  // R6-B: switching the activity bar to Source Control hides the mounted
+  // R6-B: switching the activity bar away from Explorer hides the mounted
   // Files panel (keep-alive) without unmounting it; switching back must
   // retain the unsaved draft, mirroring the old Terminals-route round-trip.
-  await page.getByRole("button", { name: "Source Control" }).click();
+  // R16-B: Source Control is git-only per the fork's activity gating, so
+  // the round-trip switches to Ports (workspace-gated, served here).
+  await page.getByRole("button", { name: /^Ports/ }).click();
   await files.click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
