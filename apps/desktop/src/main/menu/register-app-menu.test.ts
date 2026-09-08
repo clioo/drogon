@@ -37,6 +37,8 @@ vi.mock("electron", () => ({
 }));
 
 import {
+  getLastMenuTemplate,
+  invokeAppMenuItemByLabel,
   registerAppMenu,
   rebuildAppMenu,
 } from "./register-app-menu";
@@ -584,6 +586,88 @@ describe("registerAppMenu", () => {
       "minimize",
       "zoom",
     ]);
+  });
+
+  it("matches the fork's item set minus documented out-of-MVP omissions", () => {
+    // Fork source: src/main/menu/register-app-menu.ts. Ported labels must
+    // match (modulo Orca->Drogon renames); updater/crash-reporter and the
+    // Mobile appearance row stay out by MVP rule, documented here.
+    registerAppMenu(buildMenuOptions());
+
+    const bareLabels = (items: Electron.MenuItemConstructorOptions[]): string[] =>
+      items.map((item) => item.label?.split("\t")[0] ?? item.role ?? "separator");
+
+    const template = getTemplate();
+    const topLevel = template.map((item) => item.label ?? "");
+    expect(topLevel).toEqual(
+      isMac ? ["Drogon", "Edit", "View", "Window", "Help"] : ["File", "Edit", "View", "Window", "Help"],
+    );
+
+    const editLabels = bareLabels(getSubmenu(template, "Edit"));
+    expect(editLabels).toEqual(["undo", "redo", "separator", "cut", "Copy", "Paste", "Select All"]);
+
+    const viewLabels = bareLabels(getSubmenu(template, "View"));
+    expect(viewLabels).toEqual([
+      "Reload",
+      "Force Reload",
+      "toggleDevTools",
+      "separator",
+      "Reset Size",
+      "Zoom In",
+      "Zoom Out",
+      "separator",
+      "Open Worktree Palette",
+      "separator",
+      "togglefullscreen",
+      "separator",
+      "Appearance",
+    ]);
+
+    // Settings chord follows the shared keybinding table on both platforms.
+    const settingsLabel = isMac ? "Settings\t⌘," : "Settings\tCtrl+,";
+    if (isMac) {
+      expect(bareLabels(getSubmenu(template, "Drogon"))).toContain("Settings");
+      expect(getSubmenu(template, "Drogon").map((item) => item.label)).toContain(settingsLabel);
+    } else {
+      expect(getSubmenu(template, "File").map((item) => item.label)).toContain(settingsLabel);
+    }
+
+    const flat: string[] = [];
+    const walk = (items: Electron.MenuItemConstructorOptions[]): void => {
+      for (const item of items) {
+        if (item.label) flat.push(item.label.split("\t")[0]);
+        if (item.role) flat.push(item.role);
+        walk((item.submenu ?? []) as Electron.MenuItemConstructorOptions[]);
+      }
+    };
+    walk(template);
+    for (const omitted of ["Check for Updates...", "Report Crash...", "Show Orca Mobile Button"]) {
+      expect(flat).not.toContain(omitted);
+    }
+    // New Terminal / New Browser Tab / Close Tab are renderer tab-strip
+    // actions (TabCreateMenu/TabContextMenu, R16-D), not fork native-menu
+    // items — the native menu must not invent them.
+    for (const invented of ["New Terminal", "New Browser Tab", "Close Tab"]) {
+      expect(flat).not.toContain(invented);
+    }
+  });
+
+  it("invokes items by bare label through the dev seam, including nested submenus", () => {
+    const options = buildMenuOptions();
+    registerAppMenu(options);
+
+    expect(getLastMenuTemplate()).not.toBeNull();
+    expect(invokeAppMenuItemByLabel("Settings")).toBe(true);
+    expect(options.onOpenSettings).toHaveBeenCalledTimes(1);
+
+    expect(invokeAppMenuItemByLabel("Show Tasks Button")).toBe(true);
+    expect(options.onToggleAppearance).toHaveBeenCalledWith("tasksButtonVisible");
+
+    expect(invokeAppMenuItemByLabel("Zoom In")).toBe(true);
+    expect(options.onZoomIn).toHaveBeenCalledTimes(1);
+
+    expect(invokeAppMenuItemByLabel("No Such Item")).toBe(false);
+    expect(invokeAppMenuItemByLabel("")).toBe(false);
   });
 
   it("rebuildAppMenu re-applies a fresh template with updated checkbox marks", () => {

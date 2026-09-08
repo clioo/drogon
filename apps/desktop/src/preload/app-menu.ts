@@ -48,4 +48,7 @@ export const appMenu: AppMenuBridge = {
       menuIpcChannels.setUnreadDockBadgeCount,
       setUnreadDockBadgeCountSchema.parse(count),
     ),
+  // Dev-only menu invoke seam (non-packaged builds); absent in packaged apps.
+  invokeMenuItem: (label: string) =>
+    ipcRenderer.invoke(menuIpcChannels.menuInvoke, label),
 };

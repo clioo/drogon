@@ -20,6 +20,7 @@ import {
 import {
   DROGON_README_URL,
   EXPLORE_DROGON_URL,
+  invokeAppMenuItemByLabel,
   rebuildAppMenu,
   registerAppMenu,
   sendAppMenuCommandToWindow,
@@ -33,7 +34,11 @@ import {
   revealRestoredWindow,
   type MainWindowStateLifecycle,
 } from "./window/window-state";
-import { buildMainWindowChromeOptions } from "./window/window-chrome";
+import {
+  buildMainWindowChromeOptions,
+  syncTrafficLightPosition,
+  zoomLevelToFactor,
+} from "./window/window-chrome";
 import { readBuildInfo } from "./build-info";
 import { registerAutomationIpc } from "./automation-bridge";
 import { dispatchFileRequest } from "./file-bridge";
@@ -164,6 +169,27 @@ function registerAppMenuIpc() {
       return true;
     },
   );
+  // Dev-only menu invoke seam (R16-AG): CDP cannot click the OS menu bar,
+  // so non-packaged builds expose item clicks over IPC for QA. Packaged
+  // builds never register it.
+  if (!app.isPackaged) {
+    ipcMain.handle(menuIpcChannels.menuInvoke, (event, label: unknown) => {
+      if (!window || event.sender !== window.webContents) return false;
+      if (typeof label !== "string" || label.length === 0) return false;
+      return invokeAppMenuItemByLabel(label);
+    });
+  }
+}
+
+/** Keep the native traffic lights aligned after a main-side zoom step. */
+function syncZoomTrafficLights(): void {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (!focused || focused.isDestroyed()) return;
+  try {
+    syncTrafficLightPosition(focused, zoomLevelToFactor(focused.webContents.getZoomLevel()));
+  } catch {
+    // Chrome-only affordance; a zoom sync failure must not break zooming.
+  }
 }
 
 function registerAppMenuBar() {
@@ -178,10 +204,20 @@ function registerAppMenuBar() {
       void shell.openExternal(DROGON_README_URL);
     },
     // Why: this repo's keybinding table assigns the zoom chords to the native
-    // menu with no renderer handler, so main zooms the focused window's page.
-    onZoomIn: () => zoomFocusedWindow("in"),
-    onZoomOut: () => zoomFocusedWindow("out"),
-    onZoomReset: () => zoomFocusedWindow("reset"),
+    // menu with no renderer handler, so main zooms the focused window's page
+    // and re-seats the native traffic lights (fork syncTrafficLightPosition).
+    onZoomIn: () => {
+      zoomFocusedWindow("in");
+      syncZoomTrafficLights();
+    },
+    onZoomOut: () => {
+      zoomFocusedWindow("out");
+      syncZoomTrafficLights();
+    },
+    onZoomReset: () => {
+      zoomFocusedWindow("reset");
+      syncZoomTrafficLights();
+    },
     onToggleLeftSidebar: () =>
       sendFromTrustedRenderer({ type: "toggle-left-sidebar" }),
     onToggleRightSidebar: () =>

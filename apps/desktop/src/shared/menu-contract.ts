@@ -24,6 +24,8 @@ export const menuIpcChannels = {
   appearanceState: "ui:appMenuAppearanceState",
   /** Renderer -> main: macOS dock unread badge count. */
   setUnreadDockBadgeCount: "app:setUnreadDockBadgeCount",
+  /** Renderer -> main (dev only, non-packaged): trigger a menu item by label. */
+  menuInvoke: "drogon:menuInvoke",
 } as const;
 
 /** The four appearance flags the View > Appearance submenu checkbox-marks. */
@@ -75,6 +77,8 @@ export interface AppMenuBridge {
   reportAppearanceState(state: AppearanceMenuState): Promise<boolean>;
   /** macOS dock badge; darwin-only in main, a no-op elsewhere. */
   setUnreadDockBadgeCount(count: number): Promise<boolean>;
+  /** Dev only: invoke a native menu item by bare label; false when absent. */
+  invokeMenuItem?(label: string): Promise<boolean>;
 }
 
 // Optional like the granted `git`/`browser`/`notifications` namespaces

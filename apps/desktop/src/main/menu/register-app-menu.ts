@@ -59,7 +59,9 @@ function zoomFocusedWindow(step: "in" | "out" | "reset"): void {
   );
 }
 
-function buildAndApplyMenu(options: RegisterAppMenuOptions): void {
+export function buildAppMenuTemplate(
+  options: RegisterAppMenuOptions,
+): Electron.MenuItemConstructorOptions[] {
   const {
     onOpenSettings,
     onOpenExploreDrogon,
@@ -296,7 +298,7 @@ function buildAndApplyMenu(options: RegisterAppMenuOptions): void {
     ],
   };
 
-  const template: Electron.MenuItemConstructorOptions[] = [
+  return [
     ...(isMac ? [macAppMenu] : []),
     ...(isMac ? [] : [fileMenu]),
     editMenu,
@@ -304,11 +306,17 @@ function buildAndApplyMenu(options: RegisterAppMenuOptions): void {
     windowMenu,
     helpMenu
   ];
+}
 
+function buildAndApplyMenu(options: RegisterAppMenuOptions): Electron.MenuItemConstructorOptions[] {
+  const template = buildAppMenuTemplate(options);
+  lastMenuTemplate = template;
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  return template;
 }
 
 let lastRegisterOptions: RegisterAppMenuOptions | null = null
+let lastMenuTemplate: Electron.MenuItemConstructorOptions[] | null = null
 
 export function registerAppMenu(options: RegisterAppMenuOptions): void {
   lastRegisterOptions = options
@@ -323,6 +331,35 @@ export function rebuildAppMenu(): void {
   if (lastRegisterOptions) {
     buildAndApplyMenu(lastRegisterOptions)
   }
+}
+
+/** Last built template (test seam: lets unit tests and the dev-only
+ *  `drogon:menuInvoke` IPC trigger items without OS menu automation). */
+export function getLastMenuTemplate(): Electron.MenuItemConstructorOptions[] | null {
+  return lastMenuTemplate;
+}
+
+function submenuEntries(
+  item: Electron.MenuItemConstructorOptions,
+): Electron.MenuItemConstructorOptions[] {
+  return (item.submenu ?? []) as Electron.MenuItemConstructorOptions[];
+}
+
+/** Invoke the first item whose label (before the `\t` chord hint) matches,
+ *  searching nested submenus. Returns true when a click handler ran. */
+export function invokeAppMenuItemByLabel(label: string): boolean {
+  if (!lastMenuTemplate || !label) return false;
+  const stack = [...lastMenuTemplate];
+  while (stack.length > 0) {
+    const item = stack.pop() as Electron.MenuItemConstructorOptions;
+    const bare = item.label?.split("\t")[0];
+    if (bare === label && typeof item.click === "function") {
+      item.click({} as never, {} as never, {} as never);
+      return true;
+    }
+    stack.push(...submenuEntries(item));
+  }
+  return false;
 }
 
 /** Convenience wiring used by main/index.ts: forward one shell command to the
