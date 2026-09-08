@@ -21,7 +21,7 @@ report-only, as do the fixture-backed interaction metrics.
 
 ```sh
 node scripts/perf/measure-navigation.mjs \
-  --reference-cdp http://127.0.0.1:9445 --samples 5 \
+  --reference-cdp "$ORCA_REFERENCE_CDP" --samples 5 \
   --out /tmp/reference.json
 ```
 

@@ -430,3 +430,42 @@ Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licen
 ## Packaged dependencies
 
 Dependency versions are fixed in Cargo.lock and pnpm-lock.yaml. Their licenses must accompany redistributed artifacts. Geist is bundled directly as `Geist-Variable.woff2` under the SIL Open Font License (see "Bundled fonts" above). No Game of Thrones artwork is redistributed in this foundation.
+
+## Runtime JavaScript dependencies
+
+Every `dependencies` entry of `apps/desktop/package.json` (verified against
+`pnpm licenses list --prod --json` on 2026-09-08: 97 production packages,
+all MIT/ISC/Apache-2.0/BSD-family), plus the build-time packages whose
+output ships in the production bundle or shell:
+
+| Package | Version | License | Notes |
+|---|---|---|---|
+| @dnd-kit/core | 6.3.1 | MIT | tab strip drag reorder |
+| @dnd-kit/sortable | 10.0.0 | MIT | tab strip drag reorder |
+| @xterm/xterm | 6.0.0 | MIT | terminal rendering |
+| @xterm/addon-fit | 0.11.0 | MIT | terminal fit |
+| @xterm/addon-search | 0.16.0 | MIT | terminal find |
+| @xterm/addon-web-links | 0.12.0 | MIT | terminal link handling |
+| @xterm/addon-webgl | 0.19.0 | MIT | terminal WebGL renderer |
+| class-variance-authority | 0.7.1 | Apache-2.0 | UI primitive variants (shadcn pattern) |
+| clsx | 2.1.1 | MIT | class composition (shadcn pattern) |
+| cmdk | 1.1.1 | MIT | command palette |
+| lucide-react | 1.41.0 | ISC | icons |
+| radix-ui | 1.6.7 | MIT | headless primitives behind components/ui (shadcn pattern) |
+| react | 19.2.8 | MIT | UI runtime |
+| react-dom | 19.2.8 | MIT | UI runtime |
+| sonner | 2.0.8 | MIT | toasts |
+| tailwind-merge | 3.6.0 | MIT | class merging (shadcn pattern) |
+| tw-animate-css | 1.4.0 | MIT | animation recipes |
+| zod | 4.5.4 | MIT | schema validation |
+| monaco-editor | 0.55.1 | MIT | editor/diff viewer (devDependency, bundled into the renderer) |
+| @monaco-editor/react | 4.7.0 | MIT | editor React binding (devDependency, bundled) |
+| electron | 44.2.0 | MIT | app shell (devDependency, redistributed as the runtime) |
+
+`shadcn` is not a package dependency: `components/ui` ports Orca's
+shadcn-style primitives file by file (see the UI primitives section above),
+composed from radix-ui, class-variance-authority, clsx and tailwind-merge.
+The sealed bundle's complete per-file notices are generated at package time
+by `scripts/package-notices.mjs` (`pnpm licenses list --prod --json` plus
+the non-dev Rust closure), which fails the build on any missing license
+text.

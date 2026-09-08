@@ -1,3 +1,6 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// R16-BF2: applies one pushed session-state change to the visible rows —
+// the fork's push-to-card/badge semantics over this build's row projection.
 import type {
   AgentState,
   Session,

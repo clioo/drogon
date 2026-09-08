@@ -38,7 +38,9 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = realpathSync(path.resolve(SCRIPT_DIR, ".."));
-const DEFAULT_SOURCE = "/Users/carlos/Documents/Drogon-mentu-session";
+// No implicit reference checkout: pass --source explicitly or set
+// $DROGON_SOURCE_ROOT (check-frozen-test-ports precedent).
+const DEFAULT_SOURCE = process.env.DROGON_SOURCE_ROOT ?? null;
 const PINNED_SOURCE_SHA = "c97906287bb7a390b25e2025b600d9fb3c25d9c3";
 const DEFAULT_JSON_OUTPUT = path.join(
   REPO_ROOT,
@@ -1209,6 +1211,7 @@ function writeEvidence(evidenceDir, sourceRoot, record) {
 // ---------------------------------------------------------------------------
 async function run(argv) {
   const opts = parseArgv(argv);
+  assert.ok(opts.source, "pass --source <read-only reference checkout> or set $DROGON_SOURCE_ROOT; no implicit checkout");
   // realpathSync itself throws (ENOENT/ELOOP) on a dangling or cyclic
   // --source root; symlinks WITHIN the tree (a spec file, a specs
   // subdirectory) are caught per-read by assertNoSymlinkAncestors below.

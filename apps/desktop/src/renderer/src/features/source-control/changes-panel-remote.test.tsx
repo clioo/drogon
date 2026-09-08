@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// MIT Copyright (c) 2026 Lovecast Inc.
 // #175/#176 panel wiring: the full ChangesPanel against a stub bridge.
 // A no-remote status renders "No remote" (never "No upstream"), disables
 // Create PR with the reason (never running `gh`), and the Untracked Files

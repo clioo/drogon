@@ -10,7 +10,9 @@ const manifestPath = "tests/parity/ports/WP-ENG-RUNTIME/identity-leases/source-b
 assert.equal(hash(manifestPath), "841b12542b4fe2392dee2c7c4aa8c2c014236bff0a3d5d826364525fdb96d963");
 const manifest = JSON.parse(fs.readFileSync(manifestPath));
 for(const f of [...manifest.files, manifest.license]) assert.equal(hash(path.join(sourceStage,f.path)),f.sha256);
-const esbuild = require("/Users/carlos/Documents/Drogon-mentu-session/node_modules/esbuild");
+// No implicit reference checkout: esbuild resolves from $DROGON_SOURCE_ROOT.
+assert.ok(process.env.DROGON_SOURCE_ROOT, "set $DROGON_SOURCE_ROOT to the read-only reference checkout");
+const esbuild = require(path.join(process.env.DROGON_SOURCE_ROOT, "node_modules/esbuild"));
 const compiled=esbuild.buildSync({entryPoints:[path.join(sourceStage,"src/main/runtime/agent-session-claim-identity.ts")],bundle:true,write:false,platform:"node",format:"cjs",packages:"external",metafile:true,logLevel:"silent"});
 const allowed=new Set(manifest.files.map(f=>path.resolve(sourceStage,f.path)));
 for(const input of Object.keys(compiled.metafile.inputs)) assert.ok(allowed.has(path.resolve(input)), "unreviewed input:"+input);

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// MIT Copyright (c) 2026 Lovecast Inc.
 // #270 regression: the Tasks page's Close button and Escape must invoke the
 // host's onClose on the workspace-scoped mount too. The page used to receive
 // `onClose: undefined` through the registered route descriptor, so both

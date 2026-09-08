@@ -11,7 +11,7 @@ import {
 describe("isExternalUrlAllowed", () => {
   it("allows http(s) URLs", () => {
     expect(isExternalUrlAllowed("https://github.com/clioo/drogon")).toBe(true);
-    expect(isExternalUrlAllowed("http://127.0.0.1:9445/")).toBe(true);
+    expect(isExternalUrlAllowed("http://127.0.0.1:8080/")).toBe(true);
     expect(isExternalUrlAllowed("HTTPS://EXAMPLE.COM/x")).toBe(true);
   });
   it("refuses dangerous schemes", () => {

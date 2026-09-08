@@ -9,7 +9,9 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const sourceRoot = '/Users/carlos/Documents/Drogon-mentu-session'
+// No implicit reference checkout: pass $DROGON_SOURCE_ROOT explicitly.
+assert.ok(process.env.DROGON_SOURCE_ROOT, 'set $DROGON_SOURCE_ROOT to the read-only reference checkout')
+const sourceRoot = process.env.DROGON_SOURCE_ROOT
 const pin = 'c97906287bb7a390b25e2025b600d9fb3c25d9c3'
 const directory = resolve(root, 'apps/desktop/src/shared/persistence-contracts')
 const desktopRequire = createRequire(resolve(root, 'apps/desktop/package.json'))

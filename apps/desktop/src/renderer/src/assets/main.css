@@ -1074,7 +1074,7 @@
 
 /* ── Command palette + quick open (Cmd+K / Cmd+P) ─────────────────── */
 /* Selected-row recipe ported from the read-only reference
- * `/Users/carlos/Documents/Drogon-mentu-session/src/renderer/src/assets/main.css`
+ * the read-only Orca reference `src/renderer/src/assets/main.css`
  * (`.jump-palette-item[data-selected='true']`), MIT Copyright (c) 2026
  * Lovecast Inc. Class names adapted to this repo's palette; tokens are the
  * monochrome system already defined above. */

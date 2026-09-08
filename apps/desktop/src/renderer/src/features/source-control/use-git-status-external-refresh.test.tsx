@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// MIT Copyright (c) 2026 Lovecast Inc.
 // R16-AS: the Changes panel must track git state it did not mutate itself —
 // a files-changed tick for its workspace (someone edited or staged from a
 // terminal) and the fork's 60s safety poll (useGitStatusPolling.ts

@@ -1,3 +1,4 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
 // Persisted seed for the Tasks result cache (R16-BF): the module map in
 // TasksPage keeps last rows across tab switches, but a renderer restart
 // drops it and the next cold open replays the full `gh` round trip before

@@ -9,7 +9,10 @@ import { fileURLToPath } from 'node:url'
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 assert.ok(process.argv.length <= 3, 'usage: node scripts/check-parity-settings-properties.mjs [source]')
 const doc = JSON.parse(readFileSync(join(repo, 'docs/migration/parity-settings-properties.json')))
-const source = realpathSync(process.argv[2] ?? '/Users/carlos/Documents/Drogon-mentu-session')
+const source = realpathSync(process.argv[2] ?? process.env.DROGON_SOURCE_ROOT ?? missingSourceRoot())
+function missingSourceRoot() {
+  throw new Error('pass the read-only reference checkout as argv[2] or $DROGON_SOURCE_ROOT; no implicit checkout')
+}
 assert.equal(doc.source.gitHead, 'c97906287bb7a390b25e2025b600d9fb3c25d9c3')
 const git = (...args) => execFileSync('git', args, { cwd: source, encoding: 'utf8' }).trim()
 assert.equal(git('rev-parse', 'HEAD'), doc.source.gitHead)

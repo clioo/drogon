@@ -1,14 +1,14 @@
 # Reference UI surface catalog: orca-drogon → Drogon
 
 Scope: every user-facing surface of the read-only reference
-(`/Users/carlos/Documents/Drogon-mentu-session`, Orca 1.4.197 + Drogon fork)
+(the read-only reference checkout, Orca 1.4.197 + Drogon fork)
 that falls inside the Drogon MVP (journeys J1–J12,
 `docs/migration/rewrite-mvp-plan.md` §2). Out of scope and intentionally
 absent below: voice, computer use, emulator, mobile, AI Vault, plugins,
 cloud, SSH remote, Linear, Jira, GitLab, Meetings, updater.
 
 Method: fork source first (component tree, keybinding definitions), confirmed
-against the live reference over CDP (`http://127.0.0.1:9445`) with read-only
+against the live reference over CDP (loopback endpoint passed as `--ref`, read-only
 navigation only — sidebar nav clicks into Tasks/Automations/Bots/Settings and
 back, `ariaSnapshot()` + screenshots stored under `.preflight/ui-audit/`
 (not committed):

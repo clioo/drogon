@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// MIT Copyright (c) 2026 Lovecast Inc.
 // #175: section bulk stage/unstage resolve their paths from the unfiltered
 // items of their own section, exactly like the fork's grouped actions
 // (listing/uncommitted-sections.tsx). The two headers keep the fork's plain
