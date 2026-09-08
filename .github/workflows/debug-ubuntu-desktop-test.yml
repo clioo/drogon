@@ -1,10 +1,7 @@
-# R16-BL debug scaffolding — temporary, removed once the ubuntu desktop-test
-# SIGTERM (clioo/drogon#312) is root-caused. Not part of the required checks.
-#
-# Decisive experiment: run the desktop vitest suite with a SIGTERM-immune
-# process tree (trap '' → inherited SIG_IGN) while strace records every
-# kill/tkill/tgkill aimed at the tree. If the killer's TERM is ignored the
-# suite finishes and kills.log names the sender pid and the target pid.
+# R16-BL debug scaffolding — temporary, removed once clioo/drogon#312 is
+# root-caused. The immune tree survives the mystery group-TERM long enough to
+# flush the killstack log; the preload attributes every process.kill / child
+# kill to its JS stack.
 name: Debug ubuntu desktop test (R16-BL)
 
 on:
@@ -21,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  immune-strace:
+  immune-killtrace:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -45,12 +42,42 @@ jobs:
             done
           ' > /tmp/memsample.log 2>&1 &
           sleep 1
-      - name: vitest in a TERM-immune tree under strace
+      - name: vitest in a TERM-immune tree with kill() stack attribution
         working-directory: apps/desktop
         run: |
+          cat > /tmp/preload-killtrace.cjs <<'EOF'
+          const fs = require("node:fs");
+          const LOG = "/tmp/killstack.log";
+          const origKill = process.kill.bind(process);
+          process.kill = function (pid, signal) {
+            try {
+              fs.appendFileSync(
+                LOG,
+                `process.kill pid=${pid} sig=${signal} self=${process.pid} ppid=${process.ppid}\n` +
+                  new Error().stack +
+                  "\n---\n",
+              );
+            } catch {}
+            return origKill(pid, signal);
+          };
+          const cp = require("node:child_process");
+          const origCpKill = cp.ChildProcess.prototype.kill;
+          cp.ChildProcess.prototype.kill = function (signal) {
+            try {
+              fs.appendFileSync(
+                LOG,
+                `ChildProcess.kill sig=${signal} targetPid=${this.pid} self=${process.pid}\n` +
+                  new Error().stack +
+                  "\n---\n",
+              );
+            } catch {}
+            return origCpKill.call(this, signal);
+          };
+          EOF
           setsid bash -c '
             trap "" TERM INT HUP
-            strace -f -tt -e trace=kill,tkill,tgkill,rt_sigqueueinfo -o /tmp/kills.log \
+            strace -f -tt -e trace=kill,tkill,tgkill -o /tmp/kills.log \
+              env NODE_OPTIONS="--require /tmp/preload-killtrace.cjs" \
               pnpm exec vitest run --reporter=default --sequence.shuffle=false
             echo $? > /tmp/immune-exit.txt
           ' > /tmp/vitest-immune.log 2>&1 &
@@ -65,20 +92,18 @@ jobs:
           sleep 1
           echo "== immune exit marker =="
           cat /tmp/immune-exit.txt 2>/dev/null || echo "no marker (tree died hard)"
+          echo "== killstack.log (JS attribution of every kill) =="
+          (cat /tmp/killstack.log || echo "no process.kill calls logged")
           echo "== immune vitest log tail =="
-          (tail -40 /tmp/vitest-immune.log || true)
-          echo "== kills.log (who signaled whom) =="
-          (cat /tmp/kills.log || echo "missing")
-          echo "== sampler tail =="
-          (tail -30 /tmp/memsample.log || true)
+          (tail -25 /tmp/vitest-immune.log || true)
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: diag-immune-${{ github.run_id }}
+          name: diag-killtrace-${{ github.run_id }}
           path: |
+            /tmp/killstack.log
             /tmp/kills.log
             /tmp/vitest-immune.log
             /tmp/memsample.log
-            /tmp/immune-exit.txt
           if-no-files-found: ignore
