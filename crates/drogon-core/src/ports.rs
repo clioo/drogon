@@ -206,11 +206,10 @@ fn listener_pids_for_port(port: u16) -> Option<Vec<u32>> {
             if let Some(inode) = link
                 .strip_prefix("socket:[")
                 .and_then(|rest| rest.strip_suffix(']'))
+                && inodes.contains(inode)
             {
-                if inodes.contains(inode) {
-                    matched = true;
-                    break;
-                }
+                matched = true;
+                break;
             }
         }
         if matched {
