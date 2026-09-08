@@ -8,7 +8,10 @@
    the create payload (native creates a Bot with zero responsibilities by
    invariant, enforced independently in crates/drogon-core). */
 
-import type { BotCreateInput } from "../../../../shared/bot-contract";
+import type {
+  BotCreateInput,
+  BotRunHarnessOverrides,
+} from "../../../../shared/bot-contract";
 import type { BotCharacterPreset } from "./bot-characters";
 import { BOT_CHARACTERS, botDisplayName } from "./bot-characters";
 import { previewCronFires } from "../automations/automation-cron-preview";
@@ -76,7 +79,11 @@ export function emptyBotCreateForm(): BotCreateFormValues {
 }
 
 /** Builds the exact `body` shape `botCreateInputSchema` admits: born empty
- *  of responsibilities/session, `explicitModel` forced null at creation. */
+ *  of responsibilities/session. `explicitModel` carries the form's Model
+ *  field verbatim (the fork controller's `model.trim() || null`): the
+ *  create boundary admits `string | null` (R16-S deviation) and native
+ *  bounds it, so a Pi bot keeps its provider/model selection for `bot.run`
+ *  to resolve. */
 export function buildBotCreateBody(
   form: BotCreateFormValues,
 ): BotCreateInput["body"] {
@@ -87,7 +94,10 @@ export function buildBotCreateBody(
       handle: form.handle.trim() || null,
       title: form.title.trim() || null,
     },
-    harnessPolicy: { defaultHarness: form.harnessId, explicitModel: null },
+    harnessPolicy: {
+      defaultHarness: form.harnessId,
+      explicitModel: form.model.trim() || null,
+    },
     instructions: form.instructions,
     memories: form.memories
       .split("\n")
@@ -98,6 +108,35 @@ export function buildBotCreateBody(
 
 export function isBotCreateFormReady(form: BotCreateFormValues): boolean {
   return botDisplayName(form.displayName, form.preset).length > 0;
+}
+
+/** Splits the stored `explicitModel` (`provider/model`, the create form's
+ *  Model field shape) into `bot.run` harness overrides. No slash (or an
+ *  empty side) means a bare model id, which Pi also accepts; null/blank
+ *  means no overrides. `permissionMode` is `unattended` for Pi only: a bot
+ *  run is headless with no approval-answer affordance (an inherited prompt
+ *  would stall it at `needs_input` forever, as the daemon probe showed),
+ *  and Pi's flag trusts only the run's project files -- other harnesses
+ *  keep inherited prompts rather than silently escalating theirs. */
+export function buildBotRunHarness(
+  harnessId: string,
+  explicitModel: string | null,
+): BotRunHarnessOverrides {
+  const overrides: BotRunHarnessOverrides = { harnessId };
+  const model = (explicitModel ?? "").trim();
+  if (model) {
+    const slash = model.indexOf("/");
+    if (slash > 0 && slash < model.length - 1) {
+      overrides.provider = model.slice(0, slash);
+      overrides.model = model.slice(slash + 1);
+    } else {
+      overrides.model = model;
+    }
+  }
+  if (harnessId === "pi") {
+    overrides.permissionMode = "unattended";
+  }
+  return overrides;
 }
 
 /** R7-E add-responsibility form: scheduled-only (name, UTC cron, prompt).

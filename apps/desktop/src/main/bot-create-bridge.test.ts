@@ -81,13 +81,6 @@ describe("Bot creation boundary (not registered)", () => {
       ...input,
       body: {
         ...body,
-        harnessPolicy: { ...body.harnessPolicy, explicitModel: "injected" },
-      },
-    },
-    {
-      ...input,
-      body: {
-        ...body,
         displayIdentity: { ...body.displayIdentity, extra: true },
       },
     },
@@ -120,6 +113,30 @@ describe("Bot creation boundary (not registered)", () => {
       });
     },
   );
+
+  it("passes a Pi provider/model string through to native (R16-S string|null policy)", async () => {
+    const withModel = {
+      ...input,
+      body: {
+        ...body,
+        harnessPolicy: {
+          defaultHarness: "pi",
+          explicitModel: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+        },
+      },
+    };
+    const call = vi.fn(async () => ({ ok: true as const, result: created }));
+    expect(await dispatchBotCreate(withModel, call)).toEqual({
+      ok: true,
+      result: created,
+    });
+    const { requestId, ...params } = withModel;
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.create",
+      params,
+      requestId,
+    );
+  });
 
   it("accepts a server-minted identity when none was requested", async () => {
     const { botId: _, ...withoutId } = input;

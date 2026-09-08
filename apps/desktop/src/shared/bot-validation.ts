@@ -89,9 +89,12 @@ export const botCreateInputSchema = scope
       .omit({ id: true, createdAt: true, updatedAt: true })
       .extend({
         displayIdentity: bot.shape.displayIdentity.strict(),
-        harnessPolicy: bot.shape.harnessPolicy
-          .extend({ explicitModel: z.null() })
-          .strict(),
+        // R16-S (coordinator-approved deviation from the fork's z.null()):
+        // the stored `bot` shape above is already string|null and the
+        // create form collects a provider/model string for Pi, so the
+        // create boundary admits it too (trimmed-empty folds to null in
+        // the renderer body builder; native bounds it).
+        harnessPolicy: bot.shape.harnessPolicy.strict(),
         responsibilities: z.array(z.never()).max(0).optional(),
         currentSession: z.null().optional(),
       })

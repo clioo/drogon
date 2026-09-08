@@ -4,6 +4,7 @@ import {
   PRESETS,
   applyBotCharacterPreset,
   buildBotCreateBody,
+  buildBotRunHarness,
   emptyBotCreateForm,
   emptyResponsibilityForm,
   isBotCreateFormReady,
@@ -27,7 +28,7 @@ describe("bots-page-model", () => {
     ).toBe(false);
   });
 
-  it("builds a born-empty body with explicitModel forced null and trimmed memories", () => {
+  it("builds a born-empty body with trimmed memories and a null model when blank", () => {
     const body = buildBotCreateBody({
       preset: "arya",
       displayName: "",
@@ -48,6 +49,52 @@ describe("bots-page-model", () => {
       harnessPolicy: { defaultHarness: "claude", explicitModel: null },
       instructions: "Guard the realm.",
       memories: ["One fact", "Another fact"],
+    });
+  });
+
+  it("carries the Pi provider/model string into explicitModel (R16-S, fork controller parity)", () => {
+    const body = buildBotCreateBody({
+      ...emptyBotCreateForm(),
+      harnessId: "pi",
+      model: "  dgx-spark/qwen3.8-flash-next-nvidia-nvfp4  ",
+    });
+    expect(body.harnessPolicy).toEqual({
+      defaultHarness: "pi",
+      explicitModel: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+    });
+    expect(
+      buildBotCreateBody({ ...emptyBotCreateForm(), model: "   " })
+        .harnessPolicy.explicitModel,
+    ).toBeNull();
+  });
+
+  it("splits a provider/model string into bot.run overrides, unattended for Pi only", () => {
+    expect(
+      buildBotRunHarness("pi", "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
+    ).toEqual({
+      harnessId: "pi",
+      provider: "dgx-spark",
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+      permissionMode: "unattended",
+    });
+    // Bare model id (no slash): Pi accepts it as --model.
+    expect(buildBotRunHarness("pi", "qwen3.8-flash")).toEqual({
+      harnessId: "pi",
+      model: "qwen3.8-flash",
+      permissionMode: "unattended",
+    });
+    // Null/blank: no model overrides, but Pi runs still go unattended.
+    expect(buildBotRunHarness("pi", null)).toEqual({
+      harnessId: "pi",
+      permissionMode: "unattended",
+    });
+    // Other harnesses keep inherited prompts (no silent escalation).
+    expect(buildBotRunHarness("claude", null)).toEqual({
+      harnessId: "claude",
+    });
+    expect(buildBotRunHarness("claude", "sonnet")).toEqual({
+      harnessId: "claude",
+      model: "sonnet",
     });
   });
 
