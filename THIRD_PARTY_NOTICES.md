@@ -305,6 +305,13 @@ and its browser chord matcher (fork revision
 `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
 MIT notice.
 
+The OpenCode status plugin and Pi agent-status extension sources under
+`crates/drogon-core/src/harness_hooks/` port the Drogon fork's
+`src/main/opencode/status-plugin-*-source.ts`, `src/main/opencode/hook-service.ts`
+and `src/main/pi/agent-status-*-source.ts` (fork revision
+`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT), adapted to report through
+`drogon-cli internal hook-event`. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

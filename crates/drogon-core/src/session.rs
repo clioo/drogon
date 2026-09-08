@@ -71,10 +71,20 @@ pub(crate) struct SessionHandle {
     /// later PTY output has cleared yet. `None` for sessions that never got
     /// one — other harnesses keep purely activity-based states.
     needs_input_at: Mutex<Option<String>>,
-    /// Per-session Claude Code `--settings` file `harness.start` wrote for
-    /// this session (a nonce name under `<data-dir>/hooks/`), removed when
-    /// the session exits. `None` for sessions launched without one.
-    hook_settings_file: Mutex<Option<std::path::PathBuf>>,
+    /// Per-session harness hook install artifacts `harness.start` wrote for
+    /// this session (claude's `--settings` file; OpenCode's
+    /// `OPENCODE_CONFIG_DIR` overlay directory, one path since its load
+    /// marker lives inside it; Pi's `--extension` file *and* its sibling
+    /// load marker, two paths), all removed when the session exits
+    /// (`hooks::remove_settings_file` handles both a file and a directory
+    /// tree). Empty for sessions launched without hook wiring.
+    hook_cleanup_paths: Mutex<Vec<std::path::PathBuf>>,
+    /// OpenCode/Pi opt out of the reader thread's generic activity-based
+    /// clear (set by `harness.rs` via [`Self::set_explicit_wait_clear`]):
+    /// their TUIs can repaint while genuinely still waiting, so any PTY byte
+    /// clearing `needs_input_at` would make "waiting for you" a lie. Claude
+    /// and plain sessions keep the default generic-activity clear.
+    explicit_wait_clear: AtomicBool,
     db: Arc<Mutex<Connection>>,
 }
 
@@ -116,33 +126,45 @@ impl SessionHandle {
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
             needs_input_at: Mutex::new(None),
-            hook_settings_file: Mutex::new(None),
+            hook_cleanup_paths: Mutex::new(Vec::new()),
+            explicit_wait_clear: AtomicBool::new(false),
             db,
         })
     }
 
-    /// Records a hook wait signal; the next PTY output chunk clears it.
+    /// Records a hook wait signal; the next PTY output chunk clears it,
+    /// unless [`Self::set_explicit_wait_clear`] opted this session out of
+    /// that generic clear.
     pub(crate) fn note_hook_event(&self) {
         *self.needs_input_at.lock().unwrap() = Some(crate::now_rfc3339());
     }
 
-    /// Remembers the per-session hooks settings file so the exit paths can
-    /// remove it. Called once by `harness.start` right after launch.
-    pub(crate) fn set_hook_settings_file(&self, path: std::path::PathBuf) {
-        *self.hook_settings_file.lock().unwrap() = Some(path);
+    /// Explicit clear signal from a harness hook's own resumption event
+    /// (`agent_state`'s `HookSignal::Clear` names), independent of PTY
+    /// activity. The only way `needs_input_at` clears for a session that
+    /// opted out of the generic clear.
+    pub(crate) fn clear_hook_event(&self) {
+        *self.needs_input_at.lock().unwrap() = None;
     }
 
-    /// Takes the remembered hooks settings file for deletion, if any.
-    fn take_hook_settings_file(&self) -> Option<std::path::PathBuf> {
-        self.hook_settings_file.lock().unwrap().take()
+    /// Opts this session out of the reader thread's generic activity-based
+    /// clear. Called once by `harness.start` for OpenCode/Pi sessions,
+    /// right after launch — see the field doc for why.
+    pub(crate) fn set_explicit_wait_clear(&self) {
+        self.explicit_wait_clear.store(true, Ordering::Release);
     }
-}
 
-/// Best-effort removal of a session's hooks settings file: failures only
-/// mean a small orphaned JSON (its hook commands fail closed against a dead
-/// session), never a session-state error.
-fn remove_hook_settings_file(path: &std::path::Path) {
-    let _ = std::fs::remove_file(path);
+    /// Remembers one per-session hook install artifact so the exit paths
+    /// can remove it. Called once or twice by `harness.start` right after
+    /// launch (Pi has both its `--extension` file and a sibling marker).
+    pub(crate) fn add_hook_cleanup_path(&self, path: std::path::PathBuf) {
+        self.hook_cleanup_paths.lock().unwrap().push(path);
+    }
+
+    /// Takes every remembered hook install artifact for deletion, if any.
+    fn take_hook_cleanup_paths(&self) -> Vec<std::path::PathBuf> {
+        std::mem::take(&mut self.hook_cleanup_paths.lock().unwrap())
+    }
 }
 
 /// The native PTY master held open while the session can still resize.
@@ -192,7 +214,7 @@ pub(crate) fn spawn(
         tx.commit().map_err(error::from_sqlite)?;
         plan
     };
-    session_admission::launch_reserved(db, data_dir, plan, None)
+    session_admission::launch_reserved(db, data_dir, plan, None, &[])
 }
 
 type SpawnedPty = (
@@ -213,6 +235,7 @@ fn spawn_pty(
     cols: u16,
     rows: u16,
     worker_env: Option<&session_admission::WorkerEnvironment>,
+    extra_env: &[(String, String)],
 ) -> Result<SpawnedPty, RpcError> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -244,10 +267,15 @@ fn spawn_pty(
     // inherited variables), prepend the `<data-dir>/bin` shims to PATH, and
     // export the session identity. A reserved worker launch then applies
     // exactly its service-authored context on top; ordinary sessions keep
-    // only the session environment.
+    // only the session environment. `extra_env` (an OpenCode/Pi hook
+    // overlay from `harness.rs` — `OPENCODE_CONFIG_DIR`, the hook CLI path
+    // and incarnation) applies last and is empty for every other caller.
     crate::session_env::apply_to_command(&mut cmd, data_dir, workspace_id, session_id);
     if let Some(env) = worker_env {
         env.apply_to_command(&mut cmd);
+    }
+    for (key, value) in extra_env {
+        cmd.env(key, value);
     }
     cmd.args(args);
     cmd.cwd(cwd);
@@ -287,8 +315,14 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                     *handle.last_activity.lock().unwrap() =
                         Some((Instant::now(), crate::now_rfc3339()));
                     // Output resumes: the wait signal is spent, back to
-                    // activity-based derivation.
-                    *handle.needs_input_at.lock().unwrap() = None;
+                    // activity-based derivation. Skipped for sessions that
+                    // opted into explicit-only clearing (OpenCode/Pi — see
+                    // the `explicit_wait_clear` field doc): their TUIs can
+                    // repaint while genuinely still waiting, so any byte of
+                    // output clearing the signal here would be wrong.
+                    if !handle.explicit_wait_clear.load(Ordering::Acquire) {
+                        *handle.needs_input_at.lock().unwrap() = None;
+                    }
                 }
                 Err(_) => break,
             }
@@ -330,8 +364,8 @@ fn poll_until_exit(handle: &SessionHandle) {
     loop {
         if let Some(code) = try_reap(handle) {
             if persist_exit(handle, code).is_ok() {
-                if let Some(path) = handle.take_hook_settings_file() {
-                    remove_hook_settings_file(&path);
+                for path in handle.take_hook_cleanup_paths() {
+                    crate::hooks::remove_settings_file(&path);
                 }
                 try_release_native(handle);
                 return;
@@ -507,8 +541,8 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
     use drogon_protocol::orchestration_worker::ProcessAction;
 
     if let Some(code) = try_reap(handle) {
-        if let Some(path) = handle.take_hook_settings_file() {
-            remove_hook_settings_file(&path);
+        for path in handle.take_hook_cleanup_paths() {
+            crate::hooks::remove_settings_file(&path);
         }
         try_release_native(handle);
         return StopObservation {
@@ -526,8 +560,8 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
     let deadline = Instant::now() + STOP_VERIFY_TIMEOUT;
     loop {
         if let Some(code) = try_reap(handle) {
-            if let Some(path) = handle.take_hook_settings_file() {
-                remove_hook_settings_file(&path);
+            for path in handle.take_hook_cleanup_paths() {
+                crate::hooks::remove_settings_file(&path);
             }
             try_release_native(handle);
             return StopObservation {

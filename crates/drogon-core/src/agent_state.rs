@@ -1,16 +1,129 @@
-//! Pure agent-state derivation for a Session's PTY activity plus the Claude
-//! Code hook signal. `docs/migration/rewrite-mvp-plan.md` J1: "estado del
-//! agente (trabajando, inactivo, esperando)". `session.rs` owns observing
-//! the actual facts (PTY output timing, exit, hook events); this module only
+//! Pure agent-state derivation for a Session's PTY activity plus the harness
+//! hook signal. `docs/migration/rewrite-mvp-plan.md` J1: "estado del agente
+//! (trabajando, inactivo, esperando)". `session.rs` owns observing the
+//! actual facts (PTY output timing, exit, hook events); this module only
 //! classifies them, so the 3s window and the exited/needs-input precedence
 //! are unit-testable without a real PTY or clock.
 //!
-//! `NeedsInput` is produced by `session.hook_event` (the `Notification` and
-//! `Stop` hooks in the per-session settings file `hooks.rs` writes for
-//! `harness.start` with the claude harness). Any later PTY output clears it
-//! back to activity-based derivation; exit takes precedence over it.
+//! `NeedsInput` is produced by `session.hook_event`, fed by three
+//! mechanisms, one per harness (installed by `hooks.rs`/`harness_hooks/**`
+//! for `harness.start`):
+//! - claude: the `Notification`/`Stop` hooks in a per-session `--settings`
+//!   file.
+//! - opencode: a status plugin installed into an `OPENCODE_CONFIG_DIR`
+//!   overlay, reporting `session.idle`/`permission.asked`/`question.asked`
+//!   as [`opencode_events::SESSION_IDLE`]/[`opencode_events::PERMISSION_REQUEST`]/
+//!   [`opencode_events::ASK_USER_QUESTION`].
+//! - pi: an agent-status extension loaded with `--extension`, reporting
+//!   `agent_end`/`agent_settled`/`tool_approval_requested` as
+//!   [`pi_events::AGENT_END`]/[`pi_events::TOOL_APPROVAL_REQUESTED`].
+//!
+//! For claude, later PTY output alone clears the signal back to
+//! activity-based derivation (`session.rs`'s reader thread clears it
+//! unconditionally on every chunk) — a plain CLI that only redraws in
+//! response to real input. OpenCode and Pi are full TUIs that can repaint
+//! (spinners, footers) while genuinely still waiting, so generic PTY output
+//! would clear a real wait signal within a frame or two and make "the agent
+//! is waiting for you" a lie. Their sessions opt out of the generic clear
+//! (`SessionHandle::set_explicit_wait_clear`) and are cleared only by their
+//! own hook's resumption events — [`opencode_events::NEW_TURN`]/
+//! [`opencode_events::TOOL_START`]/[`opencode_events::PERMISSION_REPLIED`]/
+//! [`opencode_events::QUESTION_REPLIED`] and [`pi_events::AGENT_START`]/
+//! [`pi_events::TOOL_START`]/[`pi_events::TOOL_APPROVAL_RESOLVED`] — via
+//! [`classify_hook_event`]. Exit takes precedence over either mechanism.
 
 use std::time::Duration;
+
+/// Claude Code `--settings` hook event names (`hooks.rs`'s
+/// `settings_json`/`hook_command`). Unchanged by this task.
+pub(crate) mod claude_events {
+    pub(crate) const STOP: &str = "Stop";
+    pub(crate) const NOTIFICATION: &str = "Notification";
+}
+
+/// OpenCode status-plugin event names, ported from the reference's
+/// `src/main/opencode/status-plugin-factory-source.ts` and
+/// `status-plugin-lifecycle-source.ts` (`event.type` values only — see
+/// `harness_hooks::opencode` for what's deliberately not ported: child
+/// session ownership, busy/retry backoff, message previews).
+pub(crate) mod opencode_events {
+    /// `session.idle`: the agent stopped and is waiting for the user, like
+    /// Claude's `Stop`.
+    pub(crate) const SESSION_IDLE: &str = "SessionIdle";
+    /// `permission.asked`.
+    pub(crate) const PERMISSION_REQUEST: &str = "PermissionRequest";
+    /// `question.asked`.
+    pub(crate) const ASK_USER_QUESTION: &str = "AskUserQuestion";
+    /// `session.created` (new root session) or `message.updated` with a
+    /// user-authored message: a new turn started.
+    pub(crate) const NEW_TURN: &str = "NewTurn";
+    /// `message.part.updated` for a tool part.
+    pub(crate) const TOOL_START: &str = "ToolStart";
+    /// `permission.replied`.
+    pub(crate) const PERMISSION_REPLIED: &str = "PermissionReplied";
+    /// `question.replied` or `question.rejected`.
+    pub(crate) const QUESTION_REPLIED: &str = "QuestionReplied";
+}
+
+/// Pi agent-status extension event names, ported from the reference's
+/// `src/main/pi/agent-status-handler-source.ts` (`pi.on(...)` names only).
+pub(crate) mod pi_events {
+    /// `agent_end` (without `willContinue`) or `agent_settled`: the agent's
+    /// turn concluded and it is waiting for the user, like Claude's `Stop`.
+    pub(crate) const AGENT_END: &str = "AgentEnd";
+    /// `tool_approval_requested`.
+    pub(crate) const TOOL_APPROVAL_REQUESTED: &str = "ToolApprovalRequested";
+    /// `before_agent_start` or `agent_start`: a new turn started.
+    pub(crate) const AGENT_START: &str = "AgentStart";
+    /// `tool_execution_start` or `tool_call`.
+    pub(crate) const TOOL_START: &str = "ToolStart";
+    /// `tool_approval_resolved`.
+    pub(crate) const TOOL_APPROVAL_RESOLVED: &str = "ToolApprovalResolved";
+}
+
+const WAIT_EVENTS: &[&str] = &[
+    claude_events::STOP,
+    claude_events::NOTIFICATION,
+    opencode_events::SESSION_IDLE,
+    opencode_events::PERMISSION_REQUEST,
+    opencode_events::ASK_USER_QUESTION,
+    pi_events::AGENT_END,
+    pi_events::TOOL_APPROVAL_REQUESTED,
+];
+
+const CLEAR_EVENTS: &[&str] = &[
+    opencode_events::NEW_TURN,
+    opencode_events::TOOL_START,
+    opencode_events::PERMISSION_REPLIED,
+    opencode_events::QUESTION_REPLIED,
+    pi_events::AGENT_START,
+    pi_events::TOOL_START,
+    pi_events::TOOL_APPROVAL_RESOLVED,
+];
+
+/// What a `session.hook_event` name means: set the wait signal, or clear it.
+/// `None` (an unrecognized name) is refused by the caller before this is
+/// reached — see `hooks::do_session_hook_event`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HookSignal {
+    Wait,
+    Clear,
+}
+
+/// Classifies a `session.hook_event` event name. A single flat namespace
+/// across all three harnesses is safe: each harness's own hook plumbing is
+/// the only thing that ever names its own events (a claude session's
+/// settings file never embeds `SessionIdle`, for instance), so there is no
+/// cross-harness ambiguity to resolve here.
+pub(crate) fn classify_hook_event(event: &str) -> Option<HookSignal> {
+    if WAIT_EVENTS.contains(&event) {
+        Some(HookSignal::Wait)
+    } else if CLEAR_EVENTS.contains(&event) {
+        Some(HookSignal::Clear)
+    } else {
+        None
+    }
+}
 
 /// Silence-after-activity threshold: sustained output within this window is
 /// `Working`; past it, `Idle`. Chosen by the task's own spec ("idle after 3s
@@ -157,6 +270,47 @@ mod tests {
             ),
             AgentState::Idle
         );
+    }
+
+    #[test]
+    fn classify_hook_event_covers_every_harness_wait_and_clear_name() {
+        for event in [
+            claude_events::STOP,
+            claude_events::NOTIFICATION,
+            opencode_events::SESSION_IDLE,
+            opencode_events::PERMISSION_REQUEST,
+            opencode_events::ASK_USER_QUESTION,
+            pi_events::AGENT_END,
+            pi_events::TOOL_APPROVAL_REQUESTED,
+        ] {
+            assert_eq!(
+                classify_hook_event(event),
+                Some(HookSignal::Wait),
+                "{event} must be a wait signal"
+            );
+        }
+        for event in [
+            opencode_events::NEW_TURN,
+            opencode_events::TOOL_START,
+            opencode_events::PERMISSION_REPLIED,
+            opencode_events::QUESTION_REPLIED,
+            pi_events::AGENT_START,
+            pi_events::TOOL_START,
+            pi_events::TOOL_APPROVAL_RESOLVED,
+        ] {
+            assert_eq!(
+                classify_hook_event(event),
+                Some(HookSignal::Clear),
+                "{event} must be a clear signal"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_hook_event_refuses_unknown_names() {
+        for event in ["UserPromptSubmit", "PreToolUse", "bogus", ""] {
+            assert_eq!(classify_hook_event(event), None, "{event} must be unknown");
+        }
     }
 
     #[test]

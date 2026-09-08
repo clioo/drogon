@@ -260,11 +260,18 @@ pub(crate) fn reserve(
 /// PTY effect with no DB lock held. A missing, recovered, or altered row is
 /// refused before any spawn. The live handle is returned before any
 /// fallible post-spawn persistence, which stays the engine's job.
+///
+/// `extra_env` is an additional environment overlay applied after the base
+/// session environment and any `WorkerEnvironment` — today only
+/// `harness.rs`'s OpenCode/Pi hook install populates it
+/// (`OPENCODE_CONFIG_DIR`, the hook CLI path, the incarnation); every other
+/// caller passes `&[]`.
 pub(crate) fn launch_reserved(
     db: Arc<Mutex<Connection>>,
     data_dir: &std::path::Path,
     plan: PreparedSession,
     env: Option<WorkerEnvironment>,
+    extra_env: &[(String, String)],
 ) -> Result<LaunchedSession, RpcError> {
     if let Some(context) = &env {
         context.agrees_with(&plan)?;
@@ -291,6 +298,7 @@ pub(crate) fn launch_reserved(
         plan.cols,
         plan.rows,
         env.as_ref(),
+        extra_env,
     ) {
         Ok((master, writer, reader, child)) => {
             let handle = SessionHandle::from_spawned(

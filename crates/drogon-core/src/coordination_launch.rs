@@ -284,6 +284,7 @@ impl Engine {
             &self.data_dir,
             prepared.session,
             Some(prepared.environment),
+            &[],
         ) {
             Ok((id, handle, _)) => {
                 self.sessions.lock().unwrap().insert(id, handle.clone());
