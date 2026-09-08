@@ -164,6 +164,45 @@ fn file_bounds_and_invalid_payloads_fail_without_mutating_files() {
 }
 
 #[test]
+fn write_preserves_exact_bytes_across_the_save_matrix() {
+    // clioo/drogon#315: files.write must persist the decoded payload
+    // verbatim — the save transform lives entirely in the renderer, and
+    // this daemon-side pin proves no layer appends a final newline,
+    // rewrites EOLs, trims, or touches empty/unicode content. Fork parity:
+    // the orca-drogon fork writes the editor value byte-for-byte too.
+    let fx = Fixture::new();
+    for (name, content) in [
+        ("whole-no-eol", "<!DOCTYPE html>\n<html>\n</html>"),
+        ("whole-eol", "<!DOCTYPE html>\n<html>\n</html>\n"),
+        ("mid-edit", "const a = 1;\nconst replaced = true;\nexport {}\n"),
+        ("crlf", "line1\r\nline2\r\n"),
+        ("single", "no trailing newline"),
+        ("empty", ""),
+        ("unicode", "héllo ☃\n"),
+    ] {
+        let mut params = fx.params(&format!("{name}.txt"));
+        params["contentBase64"] =
+            json!(base64::engine::general_purpose::STANDARD.encode(content.as_bytes()));
+        let response = call(&fx.engine, name, "files.write", params);
+        assert!(response.ok, "{name}: {response:?}");
+        assert_eq!(
+            fs::read(fx.file(&format!("{name}.txt"))).unwrap(),
+            content.as_bytes(),
+            "{name}: files.write must persist exactly the bytes it was given",
+        );
+        // Round trip through files.read returns the same content.
+        let read = call(
+            &fx.engine,
+            &format!("{name}-read"),
+            "files.read",
+            fx.params(&format!("{name}.txt")),
+        );
+        assert!(read.ok, "{name}: {read:?}");
+        assert_eq!(read.result.unwrap()["content"], content);
+    }
+}
+
+#[test]
 fn response_frame_remains_bounded_for_maximally_escaped_content() {
     let fx = Fixture::new();
     fs::write(fx.file("escaped.txt"), vec![0; 65_536]).unwrap();
