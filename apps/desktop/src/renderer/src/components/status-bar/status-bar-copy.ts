@@ -120,3 +120,27 @@ export function portsTitle(ports: PortsSnapshot): string {
 export function terminalsTitle(terminalCount: number): string {
   return `${terminalCount} ${terminalCount === 1 ? "live terminal" : "live terminals"}`;
 }
+
+/**
+ * Source gate (StatusBarSurface.tsx): the refresh control renders only when
+ * usage is visible and non-empty — never on the loading/empty strip.
+ */
+export function hasVisibleUsage(
+  providers: readonly ProviderUsage[],
+  now: number,
+): boolean {
+  return providers.some((provider) => providerMeterRows(provider, now).length > 0);
+}
+
+/** Source refresh copy: the accessible name names rate limits; the tooltip names the action. */
+export const REFRESH_RATE_LIMITS_LABEL = "Refresh rate limits";
+export const REFRESH_USAGE_DATA_TITLE = "Refresh usage data";
+
+/**
+ * Source awake form (CaffeinateStatusSegment.tsx): mode label plus the
+ * Active/Inactive activity suffix, e.g. "Keep computer awake, Off · Inactive".
+ */
+export function awakeStatusLabel(mode: "on" | "off", active: boolean): string {
+  const modeLabel = mode === "on" ? "On" : "Off";
+  return `Keep computer awake, ${modeLabel} · ${active ? "Active" : "Inactive"}`;
+}
