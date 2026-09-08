@@ -25,8 +25,6 @@ function render(): string {
       onTerminalFontWeightBoldChange={() => {}}
       editorFontFamily="Monaco"
       onEditorFontFamilyChange={() => {}}
-      inspectorVisible
-      onInspectorChange={() => {}}
       statusBarVisible
       onStatusBarVisibleChange={() => {}}
       tasksButtonVisible
