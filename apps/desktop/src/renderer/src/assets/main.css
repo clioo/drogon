@@ -430,7 +430,7 @@
   flex-shrink: 0;
 }
 .titlebar-traffic-light-pad {
-  width: 80px;
+  width: calc(80px / var(--ui-zoom-factor, 1));
   flex-shrink: 0;
 }
 .titlebar-app-name {

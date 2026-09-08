@@ -14,6 +14,39 @@ export const TITLEBAR_CSS_CENTER = 18;
 export const TRAFFIC_LIGHT_RADIUS = 6;
 export const TRAFFIC_LIGHT_X = 16;
 
+/** Electron zoom level -> CSS zoom factor (fork ui-zoom.ts: 1.2 ** level). */
+export function zoomLevelToFactor(level: number): number {
+  return 1.2 ** level;
+}
+
+/** Native traffic-light origin for a zoom factor (fork syncTrafficLightPosition). */
+export function trafficLightPositionForZoomFactor(zoomFactor: number): {
+  x: number;
+  y: number;
+} {
+  return {
+    x: TRAFFIC_LIGHT_X,
+    y: Math.round(TITLEBAR_CSS_CENTER * zoomFactor - TRAFFIC_LIGHT_RADIUS),
+  };
+}
+
+/** Reposition the native macOS traffic lights after a zoom change (fork
+ *  main-window-visual-lifecycle.ts syncTrafficLightPosition). No-op off
+ *  darwin or on a destroyed window. */
+export type TrafficLightWindow = {
+  isDestroyed: () => boolean;
+  setWindowButtonPosition: (position: { x: number; y: number }) => void;
+};
+
+export function syncTrafficLightPosition(
+  window: TrafficLightWindow,
+  zoomFactor: number,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform !== "darwin" || window.isDestroyed()) return;
+  window.setWindowButtonPosition(trafficLightPositionForZoomFactor(zoomFactor));
+}
+
 /**
  * Window chrome options matching the fork's createMainWindow: macOS
  * hiddenInset keeps the native traffic lights inside our custom titlebar,

@@ -94,6 +94,7 @@ import {
   saveSidebarOpen,
   saveSidebarWidth,
 } from "./features/shell/sidebar-width";
+import { unreadDockBadgeCount } from "./features/shell/unread-badge-count";
 import { Landing } from "./features/landing/Landing";
 import {
   findWorkspaceForPath,
@@ -2780,10 +2781,9 @@ export function App() {
     };
   });
   // Dock unread badge (source useUnreadDockBadge): the needs_input count
-  // rides the same session list the sidebar cards use.
-  useUnreadDockBadge(
-    sessions.filter((session) => session.agentState === "needs_input").length,
-  );
+  // rides the same session list the sidebar cards use, minus the viewed
+  // session so the badge clears on view like the fork's unread maps.
+  useUnreadDockBadge(unreadDockBadgeCount(sessions, active));
   useEffect(() => {
     // Terminal font size rides a CSS hook the terminal surface reads, so the
     // stored choice applies without remounting sessions.
