@@ -285,6 +285,12 @@ describe("StatusBar provider states", () => {
     expect(cluster.textContent).toContain("888.3 MB");
     expect(cluster.textContent).toContain("·");
     expect(cluster.textContent).toContain("2");
+    // #303 (fork resource-usage-status-trigger.tsx): the "·" separator is
+    // regular visible content — nothing in the cluster is aria-hidden, so
+    // the accessibility tree keeps "888.3 MB · 1".
+    expect(
+      cluster.querySelector('[aria-hidden="true"]:not(svg)'),
+    ).toBeNull();
     expect(cluster.getAttribute("title")).toContain(
       "Resource Manager - 888.3 MB - 2 terminal sessions",
     );

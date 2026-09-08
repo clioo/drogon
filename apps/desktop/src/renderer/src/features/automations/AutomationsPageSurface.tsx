@@ -41,7 +41,7 @@ import {
   type AutomationEditorDraft,
 } from "./automation-editor-validation";
 import type { AutomationPaneTab } from "./automation-detail-tab-navigation";
-import { shouldHandleAutomationDetailEscapeKey } from "./automation-detail-tab-navigation";
+import { useAutomationsPageEscape } from "./automations-page-escape";
 import {
   canRerunAutomationRun,
   getAutomationRunViewState,
@@ -66,6 +66,8 @@ export type AutomationsPageSurfaceProps = {
   status: Status;
   listWorkspaces: () => Promise<Result<{ workspaces: Workspace[] }>>;
   listHarnesses?: () => Promise<Result<{ hostId: string; harnesses: Harness[] }>>;
+  /** Top-level Escape closes the page (fork closeAutomationsPage). */
+  onClose?: () => void;
 };
 
 type AutomationsPageView = "automations" | "runs" | "run";
@@ -110,6 +112,7 @@ export function AutomationsPageSurface({
   workspace,
   status,
   listWorkspaces,
+  onClose,
 }: AutomationsPageSurfaceProps): React.JSX.Element {
   void status;
   const [automations, setAutomations] = useState<AutomationSummary[]>([]);
@@ -320,38 +323,25 @@ export function AutomationsPageSurface({
       });
   }, [bridge, refresh, refreshRunDetail, runDetail, selected]);
 
-  // Escape precedence for the runs dashboard and the run page (source
-  // use-automations-page-escape): run → back per origin; runs → list.
-  // Dialogs and fields above the page consume Escape first via the shared
-  // guard.
-  useEffect(() => {
-    if (pageView !== "run" && pageView !== "runs") {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (!shouldHandleAutomationDetailEscapeKey(event)) {
-        return;
-      }
-      event.preventDefault();
-      if (pageView === "run") {
-        setRunDetail(null);
-        setRunDetailError(null);
-        if (runPageOrigin === "automation") {
-          setPageView("automations");
-          setIsDetailOpen(true);
-          setActivePaneTab("runs");
-        } else {
-          setPageView("runs");
-          setIsDetailOpen(false);
-          setActivePaneTab("overview");
-        }
-        return;
-      }
-      setPageView("automations");
-    };
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [pageView, runPageOrigin]);
+  // Escape precedence (source use-automations-page-escape, now including
+  // the page-level close): run → back per origin; detail → list;
+  // runs → automations; top level → close the page.
+  const clearRunDetail = useCallback(() => {
+    setRunDetail(null);
+    setRunDetailError(null);
+  }, []);
+  useAutomationsPageEscape({
+    editorOpen,
+    deleteTarget: deleteTarget !== null,
+    isDetailOpen,
+    pageView,
+    runPageOrigin,
+    setPageView,
+    setActivePaneTab,
+    setIsDetailOpen,
+    clearRunDetail,
+    onClose,
+  });
 
   const openCreate = useCallback(
     (template?: AutomationTemplate) => {

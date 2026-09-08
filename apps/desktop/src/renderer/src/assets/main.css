@@ -2772,12 +2772,12 @@ footer[data-testid="status-bar"] {
 /* Why: with titleBarStyle hiddenInset the empty strip area moves the
    window; tabs, buttons and the rename input opt out so they stay
    clickable (Electron drag regions swallow renderer pointer events). */
-.tab-strip-window-drag {
+.tab-row-window-drag {
   -webkit-app-region: drag;
 }
-.tab-strip-window-drag [role="tab"],
-.tab-strip-window-drag button,
-.tab-strip-window-drag input {
+.tab-row-window-drag [role="tab"],
+.tab-row-window-drag button,
+.tab-row-window-drag input {
   -webkit-app-region: no-drag;
 }
 /* Why: the fork's worktree card keeps the agent summary and the relative

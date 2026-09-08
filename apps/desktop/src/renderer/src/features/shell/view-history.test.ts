@@ -7,6 +7,7 @@ import {
   goForwardView,
   initialViewHistory,
   pushView,
+  rewindViewHistoryPastRoute,
 } from "./view-history";
 
 describe("view history", () => {
@@ -79,5 +80,42 @@ describe("view history", () => {
     // w1 removed and w2 is the present entry: nothing live behind it.
     expect(canGoBackView(history, new Set(["w2"]))).toBe(false);
     expect(goBackView(history, new Set(["w2"]))).toBe(history);
+  });
+});
+
+describe("rewindViewHistoryPastRoute (fork rewindHistoryIndexPastView)", () => {
+  test("parks the index on the previous live entry when parked on the page", () => {
+    let history = initialViewHistory({ route: null, workspaceId: "w1" });
+    history = pushView(history, { route: "bots", workspaceId: "w1" });
+    history = pushView(history, { route: null, workspaceId: "w1" });
+    history = pushView(history, { route: "tasks", workspaceId: "w1" });
+    const rewound = rewindViewHistoryPastRoute(history, "tasks");
+    expect(currentView(rewound)).toEqual({ route: null, workspaceId: "w1" });
+    // The entries stay: forward can still reach the page entry.
+    expect(canGoForwardView(rewound)).toBe(true);
+  });
+
+  test("skips dead-workspace entries while rewinding", () => {
+    let history = initialViewHistory({ route: null, workspaceId: "gone" });
+    history = pushView(history, { route: null, workspaceId: "w1" });
+    history = pushView(history, { route: "tasks", workspaceId: "w1" });
+    const rewound = rewindViewHistoryPastRoute(
+      history,
+      "tasks",
+      new Set(["w1"]),
+    );
+    expect(currentView(rewound)).toEqual({ route: null, workspaceId: "w1" });
+  });
+
+  test("is a no-op when the index is not parked on that page", () => {
+    let history = initialViewHistory({ route: null, workspaceId: "w1" });
+    history = pushView(history, { route: "tasks", workspaceId: "w1" });
+    const back = goBackView(history);
+    expect(rewindViewHistoryPastRoute(back, "tasks")).toBe(back);
+  });
+
+  test("is a no-op when no live entry precedes the page", () => {
+    const history = initialViewHistory({ route: "tasks", workspaceId: "w1" });
+    expect(rewindViewHistoryPastRoute(history, "tasks")).toBe(history);
   });
 });

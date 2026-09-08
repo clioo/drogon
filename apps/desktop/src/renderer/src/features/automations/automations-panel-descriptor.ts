@@ -37,6 +37,8 @@ export type AutomationsPanelDescriptorInput = {
   restoreState?: unknown;
   onFocus?: (routeId: string) => void;
   onCleanup?: (routeId: string) => void;
+  /** Top-level Escape closes the page (fork closeAutomationsPage). */
+  onClose?: () => void;
 };
 
 export type AutomationsPanelDescriptor = {
@@ -62,6 +64,7 @@ export function createAutomationsPanelDescriptor(
       status: hostProps.status,
       listWorkspaces: input.listWorkspaces,
       listHarnesses: input.listHarnesses,
+      onClose: input.onClose,
     });
   const descriptor: AutomationsPanelDescriptor = {
     id: input.routeId,

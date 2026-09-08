@@ -25,6 +25,12 @@ import {
   emptyBotCreateForm,
   emptyResponsibilityForm,
 } from "./bots-page-model";
+
+/** The App keep-alive host for the Bots page. Single source of truth
+ *  shared by the host element and the Escape visibility check (same
+ *  adaptation as features/tasks/task-page-global-escape.ts). */
+export const BOTS_PAGE_HOST_TESTID = "bots-page-host";
+export const BOTS_PAGE_HOST_SELECTOR = `[data-testid="${BOTS_PAGE_HOST_TESTID}"]`;
 import type {
   BotCreateFormValues,
   ResponsibilityFormValues,
@@ -262,6 +268,16 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      // Keep-alive host hidden (another route is active): that page owns
+      // Escape. The fork unmounts this page on view switches, so its
+      // listener simply does not exist there; Drogon must gate it.
+      const host = document.querySelector(BOTS_PAGE_HOST_SELECTOR);
+      if (
+        !host ||
+        (typeof host.checkVisibility === "function" && !host.checkVisibility())
+      ) {
+        return;
+      }
       if (
         event.key === "Escape" &&
         !(event.target instanceof HTMLInputElement) &&

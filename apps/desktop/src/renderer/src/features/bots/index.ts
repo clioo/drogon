@@ -43,7 +43,10 @@ export {
 export { DrogonBotAvatar } from "./DrogonBotAvatar";
 export { BotCharacterPicker } from "./BotCharacterPicker";
 export { BotCreationForm } from "./BotCreationForm";
-export { useBotsPageController } from "./use-bots-page-controller";
+export {
+  BOTS_PAGE_HOST_TESTID,
+  useBotsPageController,
+} from "./use-bots-page-controller";
 export type { BotsPageControllerDeps } from "./use-bots-page-controller";
 export {
   PRESETS,

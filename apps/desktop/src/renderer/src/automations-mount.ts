@@ -16,6 +16,10 @@ import type { PanelDescriptor, RouteRegistry } from "./route-panel-contract";
 
 export const AUTOMATIONS_ROUTE_ID = routeId("automations");
 
+/** The keep-alive host section's test id (shared with the page's Escape
+ *  visibility check — see features/automations/automations-page-escape.ts). */
+export { AUTOMATIONS_PAGE_HOST_TESTID } from "./features/automations/automations-page-escape";
+
 export { AUTOMATION_CAPABILITY as AUTOMATIONS_CAPABILITY };
 
 /** True exactly when the live service advertises automation.v1. */
@@ -71,6 +75,8 @@ export type AutomationsRouteInput = {
   listHarnesses: () => Promise<
     Result<{ hostId: string; harnesses: Harness[] }>
   >;
+  /** Top-level Escape closes the page (fork closeAutomationsPage). */
+  onClose?: () => void;
 };
 
 /**
@@ -88,6 +94,7 @@ export function registerAutomationsRoute(
     listWorkspaces: input.listWorkspaces,
     listHarnesses: input.listHarnesses,
     capability: AUTOMATION_CAPABILITY,
+    onClose: input.onClose,
   });
   const { id, ...hooks } = descriptor;
   return registerRoute(registry, {
