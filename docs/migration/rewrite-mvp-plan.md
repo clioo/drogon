@@ -225,7 +225,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | QA fix R16-S2: #186 lanzamiento headless de Pi/Claude/OpenCode/Antigravity para bots y automations, finalización al salir | R16 | Muse | fusionada (#227); #187 pendiente de verificar | #227 |
 | QA fix R16-AJ: #215 pestañas de editor/browser restauradas tras reinicio, #218 refresco de workspaces con el digest | R16 | Muse | fusionada (#240) y R16-AJ2 (#253: menú Delete Worktree como modal, formato provider/modelo con Retry) | #240 #253 |
 | QA fix R16-AL: #222 lista de sesiones sobrevive al reinicio del daemon (bloqueante) | R16 | Muse | fusionada (#250: el daemon limpia el sello de espera al salir, validación por registro); #228 en cola como R16-AL2 | #250 |
-| J2/J4 R16-AM: barra derecha de extremo a extremo (Explorer, Ports, Session details, rail) | R16 | Muse | lanzada | |
+| J2/J4 R16-AM: barra derecha de extremo a extremo (Explorer, Ports, Session details, rail) | R16 | Muse | fusionada (#282); restos en R16-BC (Kimi, lanzada): #275 cwd de Open in terminal, Stop process en Ports | #282 |
 | Infra R16-AK: CI Foundation en verde en ubuntu/macos/windows (#232) | R16 | Muse | fusionada (#233 tests, #247 heap macOS, #258 de-flake hook_event); Foundation verde en los 3 runners | #233 #247 #258 |
 | Infra: en modo prueba la app no abre browser externo, Finder ni selector nativo (#225); monitor de foco con PID en el coordinador | R16 | Coordinador | fusionada | #225 |
 | Hallazgos de Carlos en la app instalada (2026-09-08): #229 filas de sesión en la tarjeta → R16-AN; #230 colores de Claude Code → R16-AH; #231 lanzar agentes directo con defaults yolo de Orca → R16-AO; #234 barra de direcciones con búsqueda del fork (scareware) y #235 pestaña de browser → R16-AP; #237 Bots no abre / lento y #238 Tasks lento con filtros duplicados → R16-AQ | R16 | Muse | todas fusionadas: #229 (#251), #234 #235 (#249), #231 (#260), #237 #238 (#262), #201 (#243 #263); #230 en R16-AR | #249 #251 #260 #262 #263 |
@@ -243,13 +243,16 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | R16-AU: catálogo de atajos del fork, despacho compartido, reenvío a terminal/browser | R16 | luna | fusionada | #266 |
 | R16-AX: #257 paleta ⌘J del fork y Retry del banner de error; pliega #270 #272 | R16 | GLM | #274 fusionada; #270 #272 en curso | #274 |
 | R16-AZ: cabeceras MIT en 23 ports, THIRD_PARTY_NOTICES, catálogo de fidelidad (43 estados) | R16 | Kimi | fusionada | #276 |
-| R16-AV: barrido de tema claro y anchos 760–1440 en todas las páginas | R16 | luna | lanzada | |
+| R16-AV: barrido de tema claro y anchos 760–1440 en todas las páginas | R16 | luna | fusionada (#283: 11 archivos, 1440/1100/900/760 claro+oscuro) | #283 |
 | R16-AW: #264 cuelgue del renderer con Forward en el browser, #259 Restart daemon en el paquete | R16 | luna | lanzada (bloqueantes) | |
-| R16-AY: barra de estado J12 (medidores de uso, awake, contadores, clics) | R16 | GLM | lanzada | |
+| R16-AY: barra de estado J12 (medidores de uso, awake, contadores, clics) | R16 | GLM | fusionada (#281); restos en R16-AY2 (GLM, lanzada): popover de uso, CTA vacío, awake Auto, clics de segmento | #281 |
 | R16-AS: Source Control de extremo a extremo (J2) coordinado con R16-R2 | R16 | Kimi | lanzada | |
-| R16-BA: README, CHANGELOG, guion de demo y metadatos de licencia para el hackathon | R16 | Kimi | lanzada | |
+| R16-BA: README, CHANGELOG, guion de demo y metadatos de licencia para el hackathon | R16 | Kimi | fusionada (#280) | #280 |
 | Instalación: bundle 1d83f98 (sellado 40/40) el 2026-09-08 ~02:1x — icono propio, Bots/Tasks rápidos; siguiente tras R16-AW | R16 | Coordinador | instalado | |
 | QA funcional rondas 4–6 y QA de UI rondas 7–8 (luna); Muse agotado (429) desde ~02:15 | QA | luna | en curso | #268 |
+| R16-AX2: #270 Close de Tasks, #272 tope de 18 sesiones, #278 acción New worktree bloqueada | R16 | GLM | lanzada | |
+| R16-BB: aceptación sellada cubriendo los 12 journeys (bots/automations/tasks/mentu/agent-state con el modelo local) | R16 | Kimi | lanzada | |
+| QA funcional ronda 7 (guion de demo + README sobre el paquete) y QA de UI ronda 8 (48 estados) | QA | luna | en curso | |
 
 ## 7. QA continuo
 
