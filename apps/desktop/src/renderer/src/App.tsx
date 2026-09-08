@@ -1855,7 +1855,9 @@ export function App() {
       // it's already covered by that workspace's next natural reload.
       if (!contextMatches(captured, contextRef.current)) return;
       setSessions((items) => appendOrReplaceSession(items, result));
-      setActive(result.id);
+      // Fixes #198: a new terminal must win over a selected editor/browser
+      // tab, exactly like selecting a session tab does.
+      selectSessionTab(result.id);
     });
   // Browser pages share the tab strip with sessions: selecting a session
   // returns to the terminal pane, selecting a page shows the browser pane
