@@ -201,6 +201,11 @@ and the Settings GPU acceleration row port Orca's `components/ShortcutKeyCombo.t
 `src/main/ports/**` and `components/settings/TerminalRenderingSection.tsx`, all at
 the pinned source revision above. Each ported file keeps the MIT notice.
 
+The Settings panes in `apps/desktop/src/renderer/src/features/settings/`
+(Agents with the CLI section, Git and GitHub, Appearance, Notifications, and
+the source section order) port Orca's `components/settings/{AgentsPane,CliSection,GitPane,AppearancePane,AppearanceSection,AppearanceInterfaceSection,AppearanceWindowSidebarSection,NotificationsPane,NotificationSoundSection,GeneralPane,SettingsSection}.tsx`,
+all at the pinned source revision above. Each ported file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

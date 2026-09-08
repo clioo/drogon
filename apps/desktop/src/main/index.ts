@@ -12,6 +12,7 @@ import { registerGitBridge } from "./git-bridge";
 import { registerProjectBridge } from "./project-bridge";
 import { registerShellBridge } from "./shell-bridge";
 import { registerSettingsProbes } from "./settings-probes";
+import { registerSettingsCliBridge } from "./settings-bridge";
 import { registerTasksBridge } from "./tasks-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
 import { registerNotificationsIpc } from "./notifications/service";
@@ -66,6 +67,7 @@ function registerBridge() {
   registerProjectBridge(() => window);
   registerShellBridge(() => window);
   registerSettingsProbes(() => window);
+  registerSettingsCliBridge(() => window);
   registerTasksBridge(() => window);
   registerBotBridge(() => window);
   registerMentuBridge(() => window);
