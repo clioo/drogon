@@ -1040,4 +1040,20 @@ if (report.status !== "PASSED") process.exitCode = 1;
 // surviving child can hold the runner's stdio long after the report is
 // written, so the harness exits explicitly instead of draining the loop.
 // The default path below keeps the historical drain-and-return behavior.
-if (ranUpgradeCheck) process.exit(process.exitCode ?? 0);
+if (ranUpgradeCheck) {
+  // Self-cleaning sweep: any Electron/drogond this run left attached to its
+  // own fixture dir (exact dgu-* match — never a sibling worktree's) dies
+  // here, so the harness cannot leak an instance past process.exit.
+  const { execFileSync } = await import("node:child_process");
+  try {
+    const out = execFileSync("/usr/bin/pgrep", ["-f", fixture], {
+      encoding: "utf8",
+    }).trim();
+    for (const pid of out ? out.split("\n") : []) {
+      try {
+        execFileSync("/bin/kill", ["-9", pid]);
+      } catch {}
+    }
+  } catch {}
+  process.exit(process.exitCode ?? 0);
+}
