@@ -9,9 +9,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentState } from "../../../../shared/session-contract";
-import { AgentStateIcon } from "./AgentStateIcon";
 import { agentStateLabel } from "./agent-state";
 
 vi.mock("../../components/ui/tooltip", async () => {
@@ -31,6 +30,18 @@ vi.mock("../../components/ui/tooltip", async () => {
         null,
       ),
   };
+});
+
+// The tooltip mock above only reaches this component when the component is
+// imported after it. With `isolate: false` (#312) files share a worker's
+// module registry, so a static import could pick up a copy another file
+// already loaded with the real tooltip and the markup assertions would fail
+// intermittently. Re-import per test instead.
+let AgentStateIcon: typeof import("./AgentStateIcon").AgentStateIcon;
+
+beforeEach(async () => {
+  vi.resetModules();
+  ({ AgentStateIcon } = await import("./AgentStateIcon"));
 });
 
 function renderMarkup(state: AgentState): string {

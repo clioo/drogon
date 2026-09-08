@@ -15,5 +15,17 @@ const isolate = process.env.DROGON_VITEST_ISOLATE === "1";
 export default defineConfig({
   test: {
     isolate,
+    // Windows runners spend ~95 s transforming modules before the first test
+    // of a file runs, which starved plain synchronous SSR assertions past the
+    // 5 s default (source-control-render.test.tsx timed out on PRs #338/#339
+    // while passing on macOS and on main). Give slow CI hosts room; fast hosts
+    // never reach it.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
+    // #312: the ubuntu-22.04 runner kills the whole step tree after ~50
+    // completed files while the forks pool is spawning and reaping worker
+    // PROCESSES. Worker threads do the same work without any process churn,
+    // so there is nothing for the runner's supervisor to react to.
+    pool: "threads",
   },
 });
