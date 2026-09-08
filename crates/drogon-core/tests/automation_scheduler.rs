@@ -23,6 +23,11 @@ use drogon_core::automations::runner::{
     DispatchSeamError, HarnessLaunchParams, RunRefusal, RunnerOutcome,
 };
 use drogon_core::automations::{runner, scheduler, storage};
+use drogon_core::bots::records::{
+    Bot, DisplayIdentity, HarnessModelPolicy, Responsibility, ResponsibilityKind,
+    ResponsibilityTrigger,
+};
+use drogon_core::bots::storage as bots_storage;
 use drogon_protocol::{PROTOCOL_VERSION, Request, Response};
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -102,6 +107,92 @@ fn harness_params() -> HarnessLaunchParams {
         permission_mode: None,
         headless: false,
     }
+}
+
+// --- Bot-owned dispatch harness resolution (issue #188) --------------------
+
+fn mem_conn_with_bots() -> Connection {
+    let conn = mem_conn();
+    bots_storage::migrate(&conn).unwrap();
+    conn
+}
+
+/// A Pi bot whose scheduled responsibility owns `automation_id`, stored
+/// with the workspace path `insert_workspace` uses so the scope matches.
+fn insert_pi_bot(
+    conn: &Connection,
+    bot_id: &str,
+    automation_id: &str,
+    explicit_model: Option<&str>,
+) {
+    let bot = Bot {
+        id: bot_id.to_string(),
+        character_preset: "none".to_string(),
+        display_identity: DisplayIdentity {
+            display_name: "Sparky".to_string(),
+            handle: None,
+            title: None,
+        },
+        harness_policy: HarnessModelPolicy {
+            default_harness: "pi".to_string(),
+            explicit_model: explicit_model.map(str::to_string),
+        },
+        instructions: String::new(),
+        memories: Vec::new(),
+        responsibilities: vec![Responsibility {
+            id: format!("resp-{bot_id}"),
+            name: "sweep".to_string(),
+            instructions: String::new(),
+            kind: ResponsibilityKind::Scheduled,
+            trigger: ResponsibilityTrigger::Scheduled {
+                automation_id: automation_id.to_string(),
+            },
+            enabled: true,
+            recipe: None,
+            created_at: 0.0,
+            updated_at: 0.0,
+        }],
+        current_session: None,
+        created_at: 0.0,
+        updated_at: 0.0,
+    };
+    bots_storage::create_bot(conn, HOST, "/workspaces/w1", &bot).unwrap();
+}
+
+/// The launch params the scheduler tick and `automation.run_now` build
+/// from a stored row (`harness_for`): the row's own pins, nothing else.
+fn row_harness_params(automation: &Automation, headless: bool) -> HarnessLaunchParams {
+    HarnessLaunchParams {
+        harness_id: automation.agent_id.clone(),
+        model: automation.model.clone(),
+        effort: None,
+        provider: automation.provider.clone(),
+        permission_mode: None,
+        headless,
+    }
+}
+
+fn bot_owned_automation(id: &str, bot_id: &str) -> Automation {
+    Automation {
+        bot_id: Some(bot_id.to_string()),
+        ..sample_automation(id)
+    }
+}
+
+fn prepare(conn: &Connection, automation_id: &str, params: &HarnessLaunchParams) -> DirectPlan {
+    ready_direct(
+        prepare_direct(
+            conn,
+            HOST,
+            automation_id,
+            &InvocationReason::ScheduledDue,
+            AutomationRunTrigger::Scheduled,
+            "slot-1",
+            params,
+            2000.0,
+        )
+        .unwrap(),
+    )
 }
 
 // --- Cron validation -----------------------------------------------------
@@ -1549,4 +1640,310 @@ fn quiescent_engine_never_fires_and_scheduler_handle_shuts_down() {
     assert_eq!(shutdown["accepted"], json!(true));
     let summary = scheduler::tick_once(&engine, slot + 30_000.0);
     assert_eq!(summary, scheduler::TickSummary::default());
+}
+
+// --- Bot-owned dispatch harness resolution (issue #188) --------------------
+
+#[test]
+fn bot_owned_dispatch_resolves_the_bots_harness_policy() {
+    let c = mem_conn_with_bots();
+    insert_workspace(&c, "w1", HOST);
+    insert_pi_bot(
+        &c,
+        "b1",
+        "a1",
+        Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
+    );
+    // The row carries no pins, exactly like build_responsibility_automation.
+    let automation = bot_owned_automation("a1", "b1");
+    assert_eq!(automation.model, None);
+    assert_eq!(automation.provider, None);
+    storage::upsert_automation(&c, &automation).unwrap();
+
+    let automation = bot_owned_automation("a1", "b1");
+    let params = row_harness_params(&automation, true);
+    let plan = prepare(&c, "a1", &params);
+    // The bot's current policy reaches the harness.start params at
+    // dispatch time, not just the row's build-time snapshot.
+    assert_eq!(plan.params["harnessId"], json!("pi"));
+    assert_eq!(plan.params["provider"], json!("dgx-spark"));
+    assert_eq!(
+        plan.params["model"],
+        json!("qwen3.8-flash-next-nvidia-nvfp4")
+    );
+    assert_eq!(plan.params["permissionMode"], json!("unattended"));
+    assert_eq!(plan.params["headless"], json!(true));
+}
+
+#[test]
+fn explicit_automation_pins_beat_the_bot_policy() {
+    let c = mem_conn_with_bots();
+    insert_workspace(&c, "w1", HOST);
+    insert_pi_bot(
+        &c,
+        "b1",
+        "a1",
+        Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
+    );
+    let mut automation = bot_owned_automation("a1", "b1");
+    automation.model = Some("pinned-model".to_string());
+    automation.provider = Some("pinned-provider".to_string());
+    storage::upsert_automation(&c, &automation).unwrap();
+
+    let plan = prepare(&c, "a1", &row_harness_params(&automation, false));
+    // Row pins win (#211 precedence); the bot policy only fills the gaps
+    // (permissionMode), and Pi stays Pi.
+    assert_eq!(plan.params["provider"], json!("pinned-provider"));
+    assert_eq!(plan.params["model"], json!("pinned-model"));
+    assert_eq!(plan.params["permissionMode"], json!("unattended"));
+    assert_eq!(plan.params["harnessId"], json!("pi"));
+}
+
+#[test]
+fn editing_the_bot_applies_to_existing_responsibilities() {
+    let c = mem_conn_with_bots();
+    insert_workspace(&c, "w1", HOST);
+    insert_pi_bot(&c, "b1", "a1", Some("dgx-spark/model-a"));
+    storage::upsert_automation(&c, &bot_owned_automation("a1", "b1")).unwrap();
+
+    let plan = prepare(&c, "a1", &harness_params());
+    assert_eq!(plan.params["model"], json!("model-a"));
+
+    // A later bot edit (new model, different harness) must reach the SAME
+    // stored automation's next dispatch -- the fork's dispatch-time
+    // resolution behavior.
+    bots_storage::update_bot(&c, HOST, "/workspaces/w1", "b1", 5_000.0, |bot| {
+        bot.harness_policy.explicit_model = Some("dgx-spark/model-b".to_string());
+        bot.harness_policy.default_harness = "claude".to_string();
+    })
+    .unwrap();
+
+    let plan = prepare(&c, "a1", &harness_params());
+    assert_eq!(plan.params["model"], json!("model-b"));
+    assert_eq!(plan.params["harnessId"], json!("claude"));
+    // Only Pi runs go unattended.
+    assert!(plan.params.get("permissionMode").is_none());
+}
+
+#[test]
+fn bot_free_and_stale_bot_automations_dispatch_with_their_row_params() {
+    let c = mem_conn_with_bots();
+    insert_workspace(&c, "w1", HOST);
+
+    // A bot-free (user) automation: pins pass through untouched.
+    let mut user_row = sample_automation("user-1");
+    user_row.model = Some("row-model".to_string());
+    user_row.provider = Some("row-provider".to_string());
+    storage::upsert_automation(&c, &user_row).unwrap();
+    let plan = prepare(&c, "user-1", &row_harness_params(&user_row, false));
+    assert_eq!(plan.params["harnessId"], json!("pi"));
+    assert_eq!(plan.params["model"], json!("row-model"));
+    assert_eq!(plan.params["provider"], json!("row-provider"));
+    assert!(plan.params.get("permissionMode").is_none());
+
+    // A bot-owned row whose bot no longer resolves: the row's own params
+    // stay the safe fallback, never a new refusal.
+    storage::upsert_automation(&c, &bot_owned_automation("stale-1", "ghost")).unwrap();
+    let plan = prepare(&c, "stale-1", &harness_params());
+    assert_eq!(plan.params["harnessId"], json!("pi"));
+    assert!(plan.params.get("model").is_none());
+    assert!(plan.params.get("provider").is_none());
+}
+
+/// Full-engine journey: a Pi bot with a stored local model + a scheduled
+/// responsibility, dispatched by `automation.run_now` -- the launched
+/// session's argv carries the bot's provider/model/unattended/headless
+/// policy (issue #188), which the bare-default launch used to omit.
+#[test]
+fn bot_owned_run_now_launches_the_bots_model_provider_and_unattended_mode() {
+    ensure_fixture_harness_on_path();
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+    let host_id = {
+        let registered = ok(engine.dispatch(request(
+            "host-q",
+            "workspace.register",
+            json!({"path": dir.path().join("work")}),
+        )));
+        registered["hostId"].as_str().unwrap().to_string()
+    };
+    let bot = ok(engine.dispatch(request(
+        "bot-1",
+        "bot.create",
+        json!({
+            "workspaceId": workspace_id,
+            "hostId": host_id,
+            "body": {
+                "characterPreset": "none",
+                "displayIdentity": {"displayName": "Sparky", "handle": null, "title": null},
+                "harnessPolicy": {
+                    "defaultHarness": "pi",
+                    "explicitModel": "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+                },
+                "instructions": "Sweep the realm.",
+                "memories": [],
+            },
+        }),
+    )));
+    let bot_id = bot["id"].as_str().unwrap().to_string();
+    let created = ok(engine.dispatch(request(
+        "resp-1",
+        "bot.responsibility_create",
+        json!({
+            "workspaceId": workspace_id,
+            "hostId": host_id,
+            "botId": bot_id,
+            "name": "Nightly sweep",
+            "schedule": "* * * * *",
+            "prompt": "do the thing",
+        }),
+    )));
+    let automation_id = created["automationId"].as_str().unwrap().to_string();
+
+    let result = ok(engine.dispatch(request(
+        "run-now-bot",
+        "automation.run_now",
+        json!({"id": automation_id}),
+    )));
+    assert_eq!(result["outcome"], json!("dispatched"));
+
+    let history = ok(engine.dispatch(request(
+        "hist-bot",
+        "automation.history",
+        json!({"automationId": automation_id}),
+    )));
+    let runs = history["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1);
+    let session_id = runs[0]["terminalSessionId"].as_str().unwrap().to_string();
+    assert!(
+        poll_session_exited(&engine, &workspace_id, &session_id),
+        "the fixture harness session never reached exited"
+    );
+    let listed = ok(engine.dispatch(request(
+        "sess-bot",
+        "session.list",
+        json!({"workspaceId": workspace_id}),
+    )));
+    let session = listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == json!(session_id))
+        .unwrap();
+    let args: Vec<String> = session["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap().to_string())
+        .collect();
+    let joined = args.join(" ");
+    assert!(joined.contains("--provider dgx-spark"), "{args:?}");
+    assert!(
+        joined.contains("--model qwen3.8-flash-next-nvidia-nvfp4"),
+        "{args:?}"
+    );
+    assert!(args.contains(&"--approve".to_string()), "{args:?}");
+    assert!(args.contains(&"-p".to_string()), "{args:?}");
+}
+
+/// Same journey through the scheduler tick itself: the cron fire of a
+/// bot-owned automation resolves the bot's CURRENT policy at dispatch.
+#[test]
+fn bot_owned_scheduled_tick_launches_the_bots_harness_policy() {
+    ensure_fixture_harness_on_path();
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+    let host_id = {
+        let registered = ok(engine.dispatch(request(
+            "host-q",
+            "workspace.register",
+            json!({"path": dir.path().join("work")}),
+        )));
+        registered["hostId"].as_str().unwrap().to_string()
+    };
+    let bot = ok(engine.dispatch(request(
+        "bot-1",
+        "bot.create",
+        json!({
+            "workspaceId": workspace_id,
+            "hostId": host_id,
+            "body": {
+                "characterPreset": "none",
+                "displayIdentity": {"displayName": "Sparky", "handle": null, "title": null},
+                "harnessPolicy": {
+                    "defaultHarness": "pi",
+                    "explicitModel": "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+                },
+                "instructions": "Sweep the realm.",
+                "memories": [],
+            },
+        }),
+    )));
+    let bot_id = bot["id"].as_str().unwrap().to_string();
+    let created = ok(engine.dispatch(request(
+        "resp-1",
+        "bot.responsibility_create",
+        json!({
+            "workspaceId": workspace_id,
+            "hostId": host_id,
+            "botId": bot_id,
+            "name": "Nightly sweep",
+            "schedule": "* * * * *",
+            "prompt": "do the thing",
+        }),
+    )));
+    let automation_id = created["automationId"].as_str().unwrap().to_string();
+    let slot = {
+        let listed = ok(engine.dispatch(request("list-1", "automation.list", json!({}))));
+        listed["automations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == json!(automation_id))
+            .unwrap()["nextRunAt"]
+            .as_f64()
+            .unwrap()
+    };
+
+    let summary = scheduler::tick_once(&engine, slot + 30_000.0);
+    assert_eq!(summary.fired, 1);
+    assert_eq!(summary.failed, 0);
+
+    let history = ok(engine.dispatch(request(
+        "hist-tick-bot",
+        "automation.history",
+        json!({"automationId": automation_id}),
+    )));
+    let runs = history["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["trigger"], json!("scheduled"));
+    let session_id = runs[0]["terminalSessionId"].as_str().unwrap().to_string();
+    assert!(
+        poll_session_exited(&engine, &workspace_id, &session_id),
+        "the fixture harness session never reached exited"
+    );
+    let listed = ok(engine.dispatch(request(
+        "sess-tick-bot",
+        "session.list",
+        json!({"workspaceId": workspace_id}),
+    )));
+    let session = listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == json!(session_id))
+        .unwrap();
+    let args: Vec<String> = session["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap().to_string())
+        .collect();
+    let joined = args.join(" ");
+    assert!(joined.contains("--provider dgx-spark"), "{args:?}");
+    assert!(
+        joined.contains("--model qwen3.8-flash-next-nvidia-nvfp4"),
+        "{args:?}"
+    );
+    assert!(args.contains(&"--approve".to_string()), "{args:?}");
 }

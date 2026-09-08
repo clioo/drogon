@@ -612,3 +612,75 @@ fn responsibility_run_history_and_gating_decision_survive_a_real_reopen() {
         "the re-derived reactive refusal must be identical after reopen"
     );
 }
+
+// --- Dispatch-time harness policy resolution (issue #188) -----------------
+
+fn bot_with_policy(default_harness: &str, explicit_model: Option<&str>) -> Bot {
+    let mut bot = sample_bot("b-policy", "Resolver", 0.0);
+    bot.harness_policy = HarnessModelPolicy {
+        default_harness: default_harness.to_string(),
+        explicit_model: explicit_model.map(str::to_string),
+    };
+    bot
+}
+
+#[test]
+fn harness_overrides_split_the_stored_provider_model_string_for_pi() {
+    let resolved = policy::harness_overrides(&bot_with_policy(
+        "pi",
+        Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
+    ));
+    assert_eq!(resolved.harness_id, "pi");
+    assert_eq!(resolved.provider.as_deref(), Some("dgx-spark"));
+    assert_eq!(
+        resolved.model.as_deref(),
+        Some("qwen3.8-flash-next-nvidia-nvfp4")
+    );
+    assert_eq!(resolved.permission_mode.as_deref(), Some("unattended"));
+}
+
+#[test]
+fn harness_overrides_keep_a_bare_model_without_provider() {
+    let resolved = policy::harness_overrides(&bot_with_policy("pi", Some("qwen-local")));
+    assert_eq!(resolved.provider, None);
+    assert_eq!(resolved.model.as_deref(), Some("qwen-local"));
+    assert_eq!(resolved.permission_mode.as_deref(), Some("unattended"));
+}
+
+#[test]
+fn harness_overrides_leave_non_pi_harnesses_inherited() {
+    let resolved = policy::harness_overrides(&bot_with_policy(
+        "claude",
+        Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
+    ));
+    assert_eq!(resolved.harness_id, "claude");
+    assert_eq!(resolved.provider.as_deref(), Some("dgx-spark"));
+    assert_eq!(
+        resolved.model.as_deref(),
+        Some("qwen3.8-flash-next-nvidia-nvfp4")
+    );
+    assert_eq!(resolved.permission_mode, None);
+}
+
+#[test]
+fn harness_overrides_treat_null_and_blank_models_as_no_override() {
+    for stored in [None, Some(""), Some("   ")] {
+        let resolved = policy::harness_overrides(&bot_with_policy("pi", stored));
+        assert_eq!(resolved.model, None, "stored model {stored:?}");
+        assert_eq!(resolved.provider, None, "stored model {stored:?}");
+        // The Pi unattended rule never depends on the model string.
+        assert_eq!(resolved.permission_mode.as_deref(), Some("unattended"));
+    }
+}
+
+#[test]
+fn harness_overrides_keep_edge_slash_strings_as_bare_model_ids() {
+    // The source's `slash > 0`/`slash < len - 1` guard sends these to the
+    // bare-model branch with the whole string intact (Pi also accepts
+    // slash-bearing bare ids); only a mid-string slash splits.
+    for stored in [Some("/model"), Some("provider/")] {
+        let resolved = policy::harness_overrides(&bot_with_policy("pi", stored));
+        assert_eq!(resolved.model, stored.map(str::to_string));
+        assert_eq!(resolved.provider, None);
+    }
+}

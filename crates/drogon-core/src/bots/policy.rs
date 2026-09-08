@@ -37,10 +37,56 @@
 
 use rusqlite::Connection;
 
-use super::records::{Responsibility, ResponsibilityTrigger};
+use super::records::{Bot, Responsibility, ResponsibilityTrigger};
 use super::storage::{self as bots_storage, StorageError};
 use crate::automations::execution::{self, DispatchAttempt, DispatchRefusal, InvocationReason};
 use crate::automations::records::Automation;
+
+/// A Bot's stored [`Bot::harness_policy`] resolved into the harness launch
+/// overrides a daemon dispatch should run with (issue #188).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotHarnessOverrides {
+    pub harness_id: String,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub permission_mode: Option<String>,
+}
+
+/// Pure port of the desktop's `buildBotRunHarness`
+/// (`apps/desktop/src/renderer/src/features/bots/bots-page-model.ts`) so a
+/// scheduler-fired or run-now responsibility dispatch resolves the same
+/// overrides an explicit `bot.run` does. The stored `explicit_model` is
+/// the create form's `provider/model` string: split on the first slash;
+/// no slash (or an empty side) means a bare model id, which Pi also
+/// accepts; null/blank means no model overrides. `permission_mode` is
+/// `unattended` for Pi only: a daemon run is headless with no
+/// approval-answer affordance (an inherited prompt would stall it at
+/// `needs_input` forever), and Pi's flag trusts only the run's project
+/// files -- other harnesses keep inherited prompts rather than silently
+/// escalating theirs.
+pub fn harness_overrides(bot: &Bot) -> BotHarnessOverrides {
+    let stored = bot
+        .harness_policy
+        .explicit_model
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("");
+    let (provider, model) = match stored.find('/') {
+        // `slash` is an ASCII byte index, so both slices are char boundaries.
+        Some(slash) if slash > 0 && slash < stored.len() - 1 => (
+            Some(stored[..slash].to_string()),
+            Some(stored[slash + 1..].to_string()),
+        ),
+        _ => (None, (!stored.is_empty()).then(|| stored.to_string())),
+    };
+    BotHarnessOverrides {
+        harness_id: bot.harness_policy.default_harness.clone(),
+        model,
+        provider,
+        permission_mode: (bot.harness_policy.default_harness == "pi")
+            .then(|| "unattended".to_string()),
+    }
+}
 
 /// Why a *responsibility-level* gate refused, before any automation
 /// eligibility was even considered. Distinct from

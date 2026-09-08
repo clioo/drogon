@@ -29,6 +29,7 @@ use super::records::{
 };
 use super::runner::{self, DispatchPlan, HarnessLaunchParams, RunRefusal, RunUnsupported};
 use super::storage as automations_storage;
+use crate::bots::policy as bots_policy;
 use crate::bots::records::{ResponsibilityRun, ResponsibilityRunInvocation};
 use crate::bots::storage as bots_storage;
 
@@ -129,6 +130,57 @@ fn read_workspace_host_id(
     .optional()
 }
 
+/// Dispatch-time resolution of a Bot-owned automation's harness policy
+/// (issue #188): the fork's `resolveBotAutomationDispatchContext`
+/// (`src/main/bots/bot-automation-dispatch-context.ts`) re-resolves the
+/// owning Bot's CURRENT harness at every dispatch -- not at row-build
+/// time -- so editing the bot later applies to already-scheduled
+/// responsibilities; this composes that with the desktop's
+/// `buildBotRunHarness` split (ported as
+/// [`bots_policy::harness_overrides`]): `explicit_model` carries
+/// `provider/model`, and Pi daemon runs go unattended. Precedence: an
+/// explicit automation-row pin (#211) beats the bot policy, which beats
+/// bare harness defaults. Bot-free automations -- and a Bot row that no
+/// longer resolves (a stale `bot_id`) -- dispatch exactly as before: the
+/// row's own params stay the safe fallback, never a new refusal path
+/// downstream of the eligibility/ownership fences this module already
+/// evaluated.
+fn resolve_dispatch_harness(
+    conn: &Connection,
+    automation: &Automation,
+    row: &HarnessLaunchParams,
+) -> HarnessLaunchParams {
+    if automation.bot_id.is_none() {
+        return row.clone();
+    }
+    let owned = bots_storage::owning_scheduled_responsibility(conn, &automation.id)
+        .ok()
+        .flatten();
+    let bot = owned.and_then(|owned| {
+        bots_storage::get_bot(conn, &owned.host_id, &owned.folder, &owned.bot_id)
+            .ok()
+            .flatten()
+    });
+    let Some(bot) = bot else {
+        return row.clone();
+    };
+    let policy = bots_policy::harness_overrides(&bot);
+    HarnessLaunchParams {
+        // The Bot owns the harness identity (the fork overrides `agentId`
+        // unconditionally); the row's `agent_id` was only its build-time
+        // snapshot.
+        harness_id: policy.harness_id,
+        // The row's own pins win (#211 precedence); the bot policy fills
+        // the gaps. Read straight off the loaded row so the precedence
+        // never depends on the caller forwarding the row values.
+        model: automation.model.clone().or(policy.model),
+        effort: row.effort.clone(),
+        provider: automation.provider.clone().or(policy.provider),
+        permission_mode: row.permission_mode.clone().or(policy.permission_mode),
+        headless: row.headless,
+    }
+}
+
 /// Read-only preparation of a bot-free run: evaluates the existing
 /// execution gate, then the workspace-row ownership beyond the automation's
 /// own fence. Takes `&Connection` and holds no guard across dispatch --
@@ -154,6 +206,7 @@ pub fn prepare_direct(
             refusal,
         )));
     }
+    let harness = resolve_dispatch_harness(conn, &automation, harness);
     let workspace_id = match automation.workspace_mode {
         WorkspaceMode::NewPerRun => {
             return Ok(DirectPrepareOutcome::Unsupported(
@@ -197,7 +250,7 @@ pub fn prepare_direct(
         automation_id: automation.id.clone(),
         workspace_id: workspace_id.clone(),
         request_id,
-        params: harness_start_params(&workspace_id, &automation.prompt, harness),
+        params: harness_start_params(&workspace_id, &automation.prompt, &harness),
         trigger,
         attempt_at,
     }))
