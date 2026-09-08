@@ -29,12 +29,12 @@ describe("normalizeRightSidebarTab", () => {
     assert.equal(normalizeRightSidebarTab("explorer"), "explorer");
     assert.equal(normalizeRightSidebarTab("mentu"), "mentu");
     assert.equal(normalizeRightSidebarTab("source-control"), "source-control");
+    assert.equal(normalizeRightSidebarTab("ports"), "ports");
     assert.equal(normalizeRightSidebarTab("session"), "session");
   });
   it("resets unknown and legacy tabs to Explorer", () => {
     assert.equal(normalizeRightSidebarTab("search"), "explorer");
     assert.equal(normalizeRightSidebarTab("checks"), "explorer");
-    assert.equal(normalizeRightSidebarTab("ports"), "explorer");
     assert.equal(normalizeRightSidebarTab(undefined), "explorer");
     assert.equal(normalizeRightSidebarTab("plugin:other/panel"), "explorer");
   });
@@ -98,14 +98,15 @@ describe("right-sidebar-width", () => {
 });
 
 describe("activity-bar-items", () => {
-  it("orders Explorer, Mentu, Source Control and labels with the chord", () => {
+  it("orders Explorer, Mentu, Source Control, Ports and labels with the chord", () => {
     const items = buildRightSidebarActivityItems({
       explorerShortcut: "⌘⇧E",
       sourceControlShortcut: "⌘⇧G",
+      portsShortcut: "⌘⇧I",
     });
     assert.deepEqual(
       items.map((item) => item.id),
-      ["explorer", "mentu", "source-control", "session"],
+      ["explorer", "mentu", "source-control", "ports", "session"],
     );
     assert.equal(
       activityItemAriaLabel(items[0]),
@@ -114,7 +115,11 @@ describe("activity-bar-items", () => {
     // The fork's mentu entry carries no toggle chord.
     assert.equal(items[1].title, "Mentu");
     assert.equal(activityItemAriaLabel(items[1]), "Mentu");
-    assert.equal(activityItemAriaLabel(items[3]), "Session details");
+    // R13-B: the source's ports item (Plug icon, ⌘⇧I chord) sits between
+    // Source Control and the session-details entry.
+    assert.equal(items[3].title, "Ports");
+    assert.equal(activityItemAriaLabel(items[3]), "Ports (⌘⇧I)");
+    assert.equal(activityItemAriaLabel(items[4]), "Session details");
   });
   it("formats chords per platform", () => {
     assert.equal(
@@ -131,40 +136,42 @@ describe("activity-bar-items", () => {
     const items = buildRightSidebarActivityItems({
       explorerShortcut: "",
       sourceControlShortcut: "",
+      portsShortcut: "",
     });
     assert.deepEqual(
       getVisibleRightSidebarActivityItems(items, {
         gitAvailable: false,
         mentuAvailable: true,
       }).map((item) => item.id),
-      ["explorer", "mentu", "session"],
+      ["explorer", "mentu", "ports", "session"],
     );
     assert.equal(
       getVisibleRightSidebarActivityItems(items, {
         gitAvailable: true,
         mentuAvailable: true,
       }).length,
-      4,
+      5,
     );
   });
   it("projects the mentu entry with and without the mentu.v1 capability", () => {
     const items = buildRightSidebarActivityItems({
       explorerShortcut: "",
       sourceControlShortcut: "",
+      portsShortcut: "",
     });
     assert.deepEqual(
       getVisibleRightSidebarActivityItems(items, {
         gitAvailable: true,
         mentuAvailable: true,
       }).map((item) => item.id),
-      ["explorer", "mentu", "source-control", "session"],
+      ["explorer", "mentu", "source-control", "ports", "session"],
     );
     assert.deepEqual(
       getVisibleRightSidebarActivityItems(items, {
         gitAvailable: true,
         mentuAvailable: false,
       }).map((item) => item.id),
-      ["explorer", "source-control", "session"],
+      ["explorer", "source-control", "ports", "session"],
     );
   });
 });

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { fileBridgeSchemas } from "./file-validation";
 import { botSnapshotInputSchema } from "./bot-validation";
+import { workspacePortsInputSchema } from "./usage-contract";
 
 const id = z
   .string()
@@ -67,4 +68,7 @@ export const bridgeSchemas = {
   harnesses: z.undefined(),
   startHarness: harnessLaunch,
   buildInfo: z.undefined(),
+  // R13-B Ports panel (additive): { workspaceId }; main/usage's
+  // listWorkspacePorts re-checks the id before scanning.
+  workspacePorts: workspacePortsInputSchema,
 } as const;

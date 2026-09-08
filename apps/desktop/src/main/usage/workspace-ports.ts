@@ -16,6 +16,9 @@ import { execFile } from "node:child_process";
 
 export type WorkspacePortProbe = { id: string; path: string };
 
+/** Additive (R13-B): display name for Ports-panel owner rows. */
+export type NamedWorkspacePortProbe = WorkspacePortProbe & { name?: string };
+
 export type RawListeningPort = {
   host: string;
   port: number;

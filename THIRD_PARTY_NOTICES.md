@@ -274,6 +274,12 @@ Drogon fork's `src/renderer/src/components/settings/TerminalAppearanceSection.ts
 `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
 MIT notice.
 
+The Ports panel in `apps/desktop/src/renderer/src/features/ports/` and its
+right-sidebar activity item port the Drogon fork's
+`src/renderer/src/components/ports/**` and `PortsStatusSegment` helpers (fork
+revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
+keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

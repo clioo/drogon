@@ -39,6 +39,11 @@ const bridge: DesktopBridge = {
   startHarness: (value) => ipcRenderer.invoke("drogon:startHarness", value),
   buildInfo: () => ipcRenderer.invoke("drogon:buildInfo"),
   usage: usageBridge,
+  // R13-B Ports panel (additive); rows are read by main/usage's
+  // listWorkspacePorts behind the drogon:workspacePorts channel.
+  workspacePorts: {
+    list: (value) => ipcRenderer.invoke("drogon:workspacePorts", value),
+  },
   settings,
 };
 // Reconciles the granted namespaces (git, browser, notifications, tasks,

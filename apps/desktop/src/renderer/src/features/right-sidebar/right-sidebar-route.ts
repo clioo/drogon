@@ -1,14 +1,15 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/store/right-sidebar-route.ts (adapter: the MVP tab set is
-   explorer/mentu/source-control/session — vault, worktrees, pr-checks,
-   checks, ports and plugin tabs are out of scope; like the source, an
-   unknown persisted value falls back to Explorer). */
+   explorer/mentu/source-control/session plus R13-B's ports item — vault,
+   worktrees, pr-checks, checks and plugin tabs are out of scope; like the
+   source, an unknown persisted value falls back to Explorer). */
 
 /** Activity-bar tabs the right sidebar can show in this build. */
 export type RightSidebarTab =
   | "explorer"
   | "mentu"
   | "source-control"
+  | "ports"
   | "session";
 
 export const RIGHT_SIDEBAR_TAB_STORAGE_KEY = "drogon:right-sidebar:tab";
@@ -38,7 +39,12 @@ export function saveRightSidebarTab(
 
 /** Port of normalizeRightSidebarRoute: unknown persisted tabs reset to Explorer. */
 export function normalizeRightSidebarTab(tab: unknown): RightSidebarTab {
-  if (tab === "mentu" || tab === "source-control" || tab === "session")
+  if (
+    tab === "mentu" ||
+    tab === "source-control" ||
+    tab === "ports" ||
+    tab === "session"
+  )
     return tab;
   return "explorer";
 }

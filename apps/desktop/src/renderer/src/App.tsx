@@ -50,7 +50,9 @@ import { SessionDetailsPanel } from "./features/right-sidebar/SessionDetailsPane
 import {
   buildRightSidebarActivityItems,
   getVisibleRightSidebarActivityItems,
+  SIDEBAR_PORTS_TOGGLE_CHORD,
 } from "./features/right-sidebar/activity-bar-items";
+import { PortsPanel } from "./features/ports/PortsPanel";
 import {
   loadRightSidebarTab,
   normalizeRightSidebarTab,
@@ -821,6 +823,10 @@ export function App() {
             SIDEBAR_SOURCE_CONTROL_TOGGLE_CHORD,
             chordPlatform,
           ),
+          portsShortcut: formatSidebarChord(
+            SIDEBAR_PORTS_TOGGLE_CHORD,
+            chordPlatform,
+          ),
         }),
         { gitAvailable: gitPanelAvailable, mentuAvailable: mentuPanelAvailable },
       ),
@@ -924,6 +930,7 @@ export function App() {
   const changesSectionRef = useRef<HTMLElement>(null);
   const mentuPanelSectionRef = useRef<HTMLElement>(null);
   const sessionSectionRef = useRef<HTMLElement>(null);
+  const portsSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
   const automationsSectionRef = useRef<HTMLElement>(null);
   const mentuSectionRef = useRef<HTMLElement>(null);
@@ -968,7 +975,9 @@ export function App() {
           ? changesSectionRef.current
           : requested === "mentu"
             ? mentuPanelSectionRef.current
-            : sessionSectionRef.current;
+            : requested === "ports"
+              ? portsSectionRef.current
+              : sessionSectionRef.current;
     target?.focus();
     // rightTick re-runs this for same-tab re-routing (state bail-outs).
   }, [rightEffective, rightSidebarOpen, rightTick]);
@@ -1653,6 +1662,24 @@ export function App() {
   const closeBrowserTab = (tabId: string) =>
     action(async () => {
       checked(await browserStaticBridge.closeTab({ tabId }));
+    });
+  // R13-B Ports panel: "Open in Browser" creates the tab at the port URL;
+  // the strip owns it like the "+" menu path above.
+  const openPortBrowserTab = (url: string) =>
+    action(async () => {
+      const workspaceId = contextRef.current.workspaceId;
+      if (!workspaceId) return;
+      expectBrowserTab.current = true;
+      try {
+        const result = checked(
+          await browserStaticBridge.createTab({ workspaceId, url }),
+        );
+        if (selectedRef.current !== workspaceId) return;
+        setActiveBrowserTabId(result.tabId);
+      } catch (failure) {
+        expectBrowserTab.current = false;
+        throw failure;
+      }
     });
   // R12-D tab strip order/pin/rename/close-variant wiring (pure helpers in
   // tab-order.ts; the strip reconciles stored order with live tabs itself).
@@ -2627,6 +2654,26 @@ export function App() {
                             bridge={mentuGatedBridge}
                             workspaceId={filesProps.workspace.id}
                             variant="panel"
+                          />
+                        </section>
+                      ),
+                    }
+                  : null),
+                ...(filesProps
+                  ? {
+                      ports: (
+                        <section
+                          ref={portsSectionRef}
+                          tabIndex={-1}
+                          className="right-sidebar-panel"
+                          aria-label="Ports"
+                        >
+                          <PortsPanel
+                            isVisible={
+                              rightSidebarOpen && rightEffective === "ports"
+                            }
+                            workspace={filesProps.workspace}
+                            onOpenInBrowserTab={openPortBrowserTab}
                           />
                         </section>
                       ),
