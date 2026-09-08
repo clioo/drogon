@@ -75,7 +75,7 @@ describe("FilesPanel row click routes to the tab group, not an embedded editor",
           focusTarget: null,
         }),
       );
-      const row = await screen.findByRole("treeitem", { name: "index.html" });
+      const row = await screen.findByRole("button", { name: "index.html" });
       fireEvent.click(row);
       await waitFor(() => expect(events).toHaveLength(1));
       expect(events[0]).toEqual({
@@ -113,7 +113,7 @@ describe("FilesPanel quick-open reveal seeds the tree highlight only", () => {
         focusTarget: null,
       }),
     );
-    await screen.findByRole("treeitem", { name: "index.html" });
+    await screen.findByRole("button", { name: "index.html" });
     await waitFor(() =>
       expect(
         screen
@@ -134,7 +134,7 @@ describe("FilesPanel quick-open reveal seeds the tree highlight only", () => {
         focusTarget: null,
       }),
     );
-    await screen.findByRole("treeitem", { name: "index.html" });
+    await screen.findByRole("button", { name: "index.html" });
     expect(
       screen.getByRole("button", { name: "Reveal Active File" }).getAttribute("aria-disabled"),
     ).toBe("true");

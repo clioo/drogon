@@ -288,7 +288,7 @@ describe("TabBar editor tabs", () => {
   it("an active editor tab clears the session's active state", () => {
     renderStrip({ editorTabs, activeEditorTabId: "ws::src/a.ts" });
     expect(
-      screen.getByRole("tab", { name: /cmd-a/ }).getAttribute("data-active"),
+      screen.getByRole("tab", { name: /^Terminal 1/ }).getAttribute("data-active"),
     ).toBe("false");
     expect(
       screen.getByRole("tab", { name: "a.ts" }).getAttribute("data-active"),
