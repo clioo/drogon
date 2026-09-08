@@ -447,6 +447,54 @@ const SURFACES = [
     probes: ["toast", "Toaster", "Copy Terminal ID", "aria-label"],
     candFiles: ["apps/desktop/src/renderer/src/components/ui/sonner.tsx"],
   },
+  {
+    id: "editor-tab",
+    label: "Editor file tab",
+    refDir: "src/renderer/src/components/tab-bar",
+    refFiles: [
+      "src/renderer/src/components/tab-bar/EditorFileTab.tsx",
+      "src/renderer/src/components/tab-bar/EditorFileTabCloseButton.tsx",
+      "src/renderer/src/components/tab-group/TabGroupPanel.tsx",
+    ],
+    probes: ["isDirty", "dirty", "Save", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/editor-tab.ts",
+      "apps/desktop/src/renderer/src/features/editor/EditorPane.tsx",
+    ],
+  },
+  {
+    id: "split-terminal",
+    label: "Split terminal right",
+    refDir: "src/renderer/src/components/terminal-pane",
+    refFiles: [
+      "src/renderer/src/components/terminal-pane/TerminalContextMenu.tsx",
+      "src/renderer/src/components/terminal-pane/TerminalPaneHeaderOverlay.tsx",
+      "src/renderer/src/components/tab-group/TabGroupSplitLayout.tsx",
+    ],
+    probes: ["Split Terminal Right", "split", "sash", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/terminal/TerminalSplitHost.tsx",
+      "apps/desktop/src/renderer/src/features/terminal/TerminalSplitHeaderOverlay.tsx",
+      "apps/desktop/src/renderer/src/features/terminal/TerminalContextMenu.tsx",
+    ],
+  },
+  {
+    id: "agent-state",
+    label: "Agent-state visuals",
+    refDir: "src/renderer/src/components",
+    refFiles: [
+      "src/renderer/src/components/AgentStateDot.tsx",
+      "src/renderer/src/components/AgentWorkingSpinner.tsx",
+      "src/renderer/src/components/tab-bar/TerminalTabLeadingIcon.tsx",
+      "src/renderer/src/components/sidebar/worktree-card-compact-agents.tsx",
+    ],
+    probes: ["Working", "Waiting for input", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/shell/agent-state.ts",
+      "apps/desktop/src/renderer/src/features/shell/AgentStateIcon.tsx",
+      "apps/desktop/src/renderer/src/features/shell/worktree-card-agent-summary.ts",
+    ],
+  },
 ];
 
 function scoreProbeLine(line) {
@@ -1183,6 +1231,11 @@ async function stopCandidate(owned) {
 // ---------------------------------------------------------------------------
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
+// Remembers the editor tab the reference-side editor-tab state opened (name
+// + strip size before) so teardown can close exactly that tab. Module scope
+// because refTeardown receives no ctx.
+let refEditorTab = null;
+
 async function refSetup(page, state, ctx) {
   const notes = [];
   const missing = [];
@@ -1741,6 +1794,164 @@ async function refSetup(page, state, ctx) {
       if (!idle.length) notes.push("toast region idle at capture (no toast showing)");
       break;
     }
+    case "editor-tab": {
+      // R16-A: a file row opens as a main tab-group editor tab
+      // (EditorFileTab). View navigation only: the file is never edited; the
+      // opened tab is closed in teardown (best-effort, recorded).
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open > 0) notes.push("Explorer panel already open; captured as-is");
+      else if (await tryClick(page, "button", "Explorer (⌘⇧E)", 2500)) notes.push("Explorer opened via activity bar");
+      else {
+        try {
+          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Explorer opened via fallback match");
+        } catch {
+          missing.push("no Explorer activity button reachable");
+          break;
+        }
+      }
+      try {
+        // The fork strip is buttons ("<name> Close tab ..."), not role=tab:
+        // measure those for before/after.
+        const forkTabs = () => page.evaluate(() =>
+          [...document.querySelectorAll('button')].map((el) =>
+            ((el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60)))
+            .filter((n) => /Close tab/.test(n))).catch(() => null);
+        const tabsBefore = await forkTabs();
+        const name = await page.evaluate(() => {
+          const rows = [...document.querySelectorAll("button[data-file-explorer-row]")];
+          const label = (el) =>
+            ((el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80));
+          // A real file extension (dot NOT first: skips dot-dirs like .husky).
+          const fileish = rows.find((el) => /[^.\s]\.\w{1,5}$/.test(label(el)));
+          const pick = fileish || rows[0];
+          return pick ? label(pick) : null;
+        }).catch(() => null);
+        if (!name) {
+          missing.push("no Explorer file rows to open");
+          break;
+        }
+        notes.push(`opening Explorer row "${name.slice(0, 60)}"`);
+        const openRow = async () => {
+          const row = page.getByRole("button", { name, exact: true }).first();
+          if ((await row.count()) > 0) {
+            await row.click({ timeout: 2500 });
+            return "exact";
+          }
+          await page.locator("button[data-file-explorer-row]").first().click({ timeout: 2500 });
+          return "first-row";
+        };
+        const how = await openRow().catch(() => null);
+        await delay(900);
+        let tabsAfter = await forkTabs();
+        if (how && tabsAfter && tabsBefore && tabsAfter.length === tabsBefore.length) {
+          // Single click may only select: double-click opens in the fork.
+          notes.push("single click opened no tab; trying double-click");
+          const row = page.getByRole("button", { name, exact: true }).first();
+          if ((await row.count()) > 0) await row.dblclick({ timeout: 2500 }).catch(() => {});
+          await delay(1500);
+          tabsAfter = await forkTabs();
+        }
+        if (how === "first-row") notes.push("exact-name click missed; clicked first row instead");
+        notes.push(
+          `fork tabs ${(tabsBefore ?? []).length} -> ${(tabsAfter ?? []).length}${tabsAfter?.length ? `: ${tabsAfter.join(" | ")}` : ""}`,
+        );
+        const fresh = (tabsAfter ?? []).filter((n) => !(tabsBefore ?? []).includes(n));
+        if (fresh.length) {
+          refEditorTab = { rowLabel: name, tabButton: fresh[fresh.length - 1] };
+          notes.push(`opened tab button: "${fresh[fresh.length - 1].slice(0, 60)}"`);
+        } else if (tabsAfter && tabsBefore && tabsAfter.length === tabsBefore.length) {
+          missing.push("row click opened no editor tab");
+        }
+      } catch (error) {
+        missing.push(`editor-tab open best-effort only: ${error.message.split("\n")[0]}`);
+      }
+      break;
+    }
+    case "split-terminal": {
+      // R16-N: Split Terminal Right is offered in the terminal context menu
+      // (fork terminal-pane/TerminalContextMenu.tsx) and as a focused-pane
+      // header button (TerminalPaneHeaderOverlay.tsx). The reference side
+      // never activates either (that would create a pane in the live app):
+      // census the pane menu when a terminal tab exists, Escape, capture.
+      // The fork strip is buttons ("<name> Close tab"), not role=tab.
+      try {
+        const forkTabs = await page.evaluate(() =>
+          [...document.querySelectorAll("button")].map((el) =>
+            ((el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60)))
+            .filter((n) => /Close tab/.test(n))).catch(() => null);
+        if (!forkTabs?.length) {
+          missing.push("no fork tab button to right-click; split render compared from fork source");
+          notes.push("fork anchors: terminal-pane/TerminalContextMenu.tsx (split section), TerminalPaneHeaderOverlay.tsx, tab-group/TabGroupSplitLayout.tsx");
+        } else {
+          notes.push(`fork tab buttons: ${forkTabs.join(" | ")}`);
+          // Right-click the terminal tab button, then the pane header's
+          // Split button container; census each menu, Escape between. No
+          // left-click (never steal the live app's focus) and no activation.
+          for (const target of ["tab-button", "pane-header"]) {
+            try {
+              if (target === "tab-button") {
+                const hit = page.getByRole("button", { name: /Close tab/ }).first();
+                await hit.click({ button: "right", timeout: 2500 });
+              } else {
+                const handle = await page.evaluate(() => {
+                  const split = [...document.querySelectorAll("button")].find((el) =>
+                    ((el.getAttribute("aria-label") || el.textContent || "").trim() === "Split Terminal Right"));
+                  const box = split?.getBoundingClientRect();
+                  return box ? { x: box.x + box.width / 2, y: box.y + box.height + 30 } : null;
+                }).catch(() => null);
+                if (!handle) {
+                  notes.push("pane-header: no Split Terminal Right header button to anchor on");
+                  continue;
+                }
+                await page.mouse.click(handle.x, handle.y, { button: "right" });
+              }
+              await delay(600);
+              const items = await menuItemNames(page);
+              if (items.length) notes.push(`${target} menu items: ${items.join(" | ")}`);
+              else notes.push(`${target}: right-click opened no menu`);
+            } catch (error) {
+              notes.push(`${target} right-click best-effort only: ${error.message.split("\n")[0]}`);
+            }
+            await dismissOverlays(page);
+          }
+          notes.push("split entry never activated on the reference (menu census only)");
+        }
+      } catch {
+        missing.push("split-terminal menu census best-effort only");
+      }
+      break;
+    }
+    case "agent-state": {
+      // J1/R16-I visuals: worktree-card dots + tab badges (fork
+      // AgentStateDot). No clicks anywhere: the live sidebar/cards are
+      // captured as-is and the visible state words are recorded.
+      try {
+        const scan = await page.evaluate(() => {
+          const text = (document.body.innerText || "").replace(/\s+/g, " ");
+          const words = [];
+          for (const w of ["Working", "Idle", "Waiting for input", "No recent update", "Exited", "Active", "Inactive"]) {
+            const n = text.split(w).length - 1;
+            if (n > 0) words.push(`${w}x${n}`);
+          }
+          // Worktree cards live in the sidebar listbox: record their copy
+          // (agent rows, badges) without clicking anything.
+          const cards = [...document.querySelectorAll('[role="listbox"] [role="option"]')]
+            .slice(0, 6)
+            .map((el) => (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 120));
+          return { words, cards };
+        }).catch(() => null);
+        if (scan) {
+          notes.push(scan.words.length ? `visible state words: ${scan.words.join(" ")}` : "no Working/Idle/Waiting/Exited words visible");
+          if (scan.cards.length) notes.push(`worktree cards: ${scan.cards.join(" || ")}`);
+        } else notes.push("sidebar scan best-effort only");
+      } catch {
+        notes.push("state-word scan best-effort only");
+      }
+      notes.push("fork anchors: components/AgentStateDot.tsx, AgentWorkingSpinner.tsx, tab-bar/TerminalTabLeadingIcon.tsx, sidebar/worktree-card-compact-agents.tsx");
+      break;
+    }
     case "statusbar-strip":
       notes.push("full-page capture; strip cropped in post");
       break;
@@ -1756,6 +1967,40 @@ async function refTeardown(page, state) {
   // Sessions nav) so the next setup starts clean. View navigation only —
   // no data is created or changed.
   const notes = [];
+  if (state === "editor-tab" && refEditorTab) {
+    // Close exactly the tab this state opened: the close affordance is the
+    // [data-tab-close-button] inside the tab button whose text holds the
+    // opened row's label; never touch pre-existing tabs.
+    const { rowLabel } = refEditorTab;
+    refEditorTab = null;
+    try {
+      const closed = await page.evaluate((wanted) => {
+        // closest("button") self-matches (nested buttons), so walk up at
+        // most four ancestors for the tab container holding the row label.
+        // The container must hold EXACTLY one close affordance: the strip
+        // level holds all of them and must never match (r4 closed a
+        // neighboring tab through it).
+        const norm = (s) => (s || "").replace(/\s+/g, " ");
+        const closers = [...document.querySelectorAll("button[data-tab-close-button]")];
+        const hit = closers.find((btn) => {
+          let el = btn.parentElement;
+          for (let d = 0; d < 4 && el; d++, el = el.parentElement) {
+            const t = norm(el.textContent);
+            if (t.includes(wanted) && t.length < 200 &&
+              el.querySelectorAll("button[data-tab-close-button]").length === 1) return true;
+          }
+          return false;
+        });
+        if (!hit) return false;
+        hit.click();
+        return true;
+      }, rowLabel).catch(() => false);
+      await delay(400);
+      notes.push(closed ? `teardown: closed editor tab "${rowLabel.slice(0, 40)}"` : "teardown: editor tab close affordance not found (left open, recorded)");
+    } catch (error) {
+      notes.push(`teardown editor-tab close best-effort only: ${error.message.split("\n")[0]}`);
+    }
+  }
   await ensureHome(page, notes);
   for (const [i, n] of notes.entries()) notes[i] = n.replace(/^home:/, "teardown:");
   void state;
@@ -2726,6 +2971,292 @@ async function candSetup(page, state, ctx) {
       }
       break;
     }
+    case "editor-tab": {
+      // R16-A: Explorer single-click opens the file as a main tab-group tab.
+      // Owned notes.txt fixture. The dirty-dot/Save probe types one char,
+      // records the markers, then undoes and saves so the file (and the
+      // teardown tab-close) stays clean.
+      await ensureProject().catch(() => {});
+      try {
+        await writeFile(path.join(ctx.workspace, "notes.txt"), "editor-tab fixture\n");
+        notes.push("fixture: notes.txt written");
+      } catch {
+        notes.push("fixture write best-effort only");
+      }
+      const open = await page.getByRole("textbox", { name: "Find files" }).count().catch(() => 0);
+      if (open > 0) notes.push("Explorer panel already open; captured as-is");
+      else {
+        try {
+          await page.getByRole("button", { name: "Explorer" }).first().click({ timeout: 3000 });
+          await delay(350);
+          notes.push("Explorer opened through the right activity bar");
+        } catch {
+          missing.push("Explorer activity button unavailable");
+          break;
+        }
+      }
+      try {
+        // The tree populates over the files watch: wait for the row instead
+        // of racing it (r4 smoke caught the click firing before the row).
+        const row = page.getByRole("button", { name: "notes.txt", exact: true }).first();
+        try {
+          await row.waitFor({ timeout: 8000 });
+          await row.click({ timeout: 3000 });
+          await delay(900);
+          notes.push("notes.txt row clicked");
+        } catch {
+          missing.push("no notes.txt Explorer row to open");
+          break;
+        }
+        const tab = page.getByRole("tab", { name: /notes/ }).first();
+        if ((await tab.count()) > 0) notes.push("editor tab for notes.txt present in the strip");
+        else missing.push("row click opened no editor tab in the strip");
+        // Dirty-dot + Save probe (candidate fixture only; reverted below).
+        try {
+          await page.locator(".monaco-editor").first().click({ timeout: 5000 });
+          await delay(300);
+          await page.keyboard.type("x");
+          await delay(800);
+          const probe = await page.evaluate(() => ({
+            tabs: [...document.querySelectorAll('[role="tab"]')].map((e) =>
+              ((e.getAttribute("aria-label") || e.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80))),
+          })).catch(() => null);
+          if (probe) notes.push(`dirty probe tabs: ${probe.tabs.join(" || ")}`);
+          const snap = await page.locator("body").ariaSnapshot({ timeout: 8000 }).catch(() => "");
+          const markers = String(snap).split("\n").filter((l) => /unsaved|dirty|•|Save/i.test(l)).slice(0, 6)
+            .map((l) => l.trim().slice(0, 100));
+          if (markers.length) notes.push(`dirty markers: ${markers.join(" | ")}`);
+          else notes.push("dirty probe: no unsaved/dirty/Save marker in aria");
+          // Left dirty for the capture (the fork comparison needs the dirty
+          // anatomy); teardown undoes + saves before closing the tab.
+        } catch (error) {
+          notes.push(`dirty probe best-effort only: ${error.message.split("\n")[0]}`);
+        }
+      } catch (error) {
+        missing.push(`editor-tab fixture failed: ${error.message.split("\n")[0]}`);
+      }
+      break;
+    }
+    case "split-terminal": {
+      // R16-N: pane context menu → Split Terminal Right (Mod+D fallback):
+      // two panes + sash + focused-pane header, compared against the fork's
+      // terminal-pane split sources. The candidate fixture is owned; the
+      // reference side never activates the entry (menu census only).
+      // A tabpanel alone is not a terminal (the empty "Start a session"
+      // view is one too): require live terminal markers, else provision.
+      let terminal = false;
+      try {
+        terminal = (await page.locator("[data-terminal-pane-id], .xterm-helper-textarea").count().catch(() => 0)) > 0 ||
+          (await ensureTerminal());
+      } catch {
+        terminal = false;
+      }
+      if (!terminal) {
+        missing.push("project-terminal fixture unavailable for split");
+        break;
+      }
+      try {
+        const panel = page.getByRole("tabpanel").first();
+        await panel.click({ timeout: 3000 });
+        await delay(350);
+        await panel.click({ button: "right", timeout: 3000 });
+        await delay(600);
+        const items = await menuItemNames(page);
+        if (items.length) notes.push(`terminal context menu items: ${items.join(" | ")}`);
+        const split = page.getByRole("menuitem", { name: "Split Terminal Right" }).first();
+        if ((await split.count()) > 0) {
+          await split.click({ timeout: 3000 });
+          await delay(1200);
+          notes.push("Split Terminal Right activated");
+        } else {
+          notes.push("no Split Terminal Right menu entry; trying Mod+D chord");
+          await panel.click({ timeout: 3000 });
+          await tryKeys(page, `${MOD}+D`);
+          await delay(1200);
+        }
+        const census = await page.evaluate(() => {
+          const ids = [...document.querySelectorAll("[data-terminal-pane-id]")]
+            .map((el) => el.getAttribute("data-terminal-pane-id"));
+          const activeIds = [...document.querySelectorAll("[data-active-pane]")]
+            .map((el) => el.getAttribute("data-terminal-pane-id") || el.tagName);
+          const host = document.querySelector('[data-split="split"]');
+          const kids = host
+            ? [...host.children].map((el) => `${el.tagName}[${(el.getAttribute("role") || el.className || "").toString().slice(0, 40)}]`).join(" ")
+            : null;
+          return {
+            split: document.querySelectorAll('[data-split="split"]').length,
+            paneIds: [...new Set(ids)],
+            activeIds,
+            sash: document.querySelectorAll('[role="separator"], [data-testid="terminal-split-divider"]').length,
+            kids: (kids || "").slice(0, 300),
+          };
+        }).catch(() => null);
+        if (census) notes.push(`split census: container=${census.split} panes=[${census.paneIds.join(",")}] active=[${census.activeIds.join(",")}] sash=${census.sash} kids=${census.kids}`);
+        if (!census || census.paneIds.length < 2) missing.push("fewer than two terminal panes after split");
+      } catch (error) {
+        missing.push(`split-terminal fixture failed: ${error.message.split("\n")[0]}`);
+      }
+      break;
+    }
+    case "agent-state": {
+      // J1/R16-I visuals: three fixture sessions showing working (ticking
+      // PTY output), idle (quiet past the 3s activity window) and needs_input
+      // (a real session.hook_event wait signal via the CLI rpc passthrough —
+      // the documented harness-hook mechanism, no model launched).
+      await ensureProject().catch(() => {});
+      const cliBin = path.join(root, "target", "debug", process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli");
+      const cliJson = async (cliArgs) => {
+        const { stdout } = await execFileAsync(cliBin, ["--data-dir", ctx.dataDir, "--json", ...cliArgs]);
+        return JSON.parse(stdout);
+      };
+      const sessionList = async () => {
+        const walk = (v) => {
+          if (Array.isArray(v)) {
+            if (v.length && typeof v[0] === "object" && v[0] !== null && "id" in v[0]) return v;
+            for (const el of v) {
+              const hit = walk(el);
+              if (hit) return hit;
+            }
+          } else if (v && typeof v === "object") {
+            for (const el of Object.values(v)) {
+              const hit = walk(el);
+              if (hit) return hit;
+            }
+          }
+          return null;
+        };
+        return walk(await cliJson(["terminal", "list"])) ?? [];
+      };
+      const openExtraTerminal = async () => {
+        if (!(await tryClick(page, "button", "New tab"))) return false;
+        await delay(600);
+        try {
+          const item = page.getByRole("menuitem", { name: "New Terminal", exact: true });
+          if ((await item.count()) > 0) await item.first().click({ timeout: 3000 });
+        } catch {
+          /* single-action launcher */
+        }
+        await dismissOverlays(page);
+        try {
+          await page.getByRole("tab").last().waitFor({ timeout: 20000 });
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const focusVisibleTerm = () => page.evaluate(() => {
+        const areas = [...document.querySelectorAll(".xterm-helper-textarea")];
+        const vis = areas.find((el) => el.offsetParent !== null) || areas[0];
+        if (!vis) return false;
+        vis.focus();
+        return true;
+      }).catch(() => false);
+      const typeInTab = async (index, text) => {
+        try {
+          await page.getByRole("tab").nth(index).click({ timeout: 3000 });
+          await delay(400);
+          await focusVisibleTerm();
+          await page.keyboard.press("Control+C");
+          await delay(400);
+          await focusVisibleTerm();
+          await page.keyboard.type(text);
+          await page.keyboard.press("Enter");
+          await delay(600);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      try {
+        if (!(await ensureTerminal())) {
+          missing.push("project-terminal fixture unavailable for agent states");
+          break;
+        }
+        const before = await sessionList().catch(() => []);
+        const beforeIds = new Set(before.map((s) => s.id));
+        notes.push(`fixture sessions before: ${before.length}`);
+        if (!(await openExtraTerminal())) missing.push("second terminal unavailable (working state)");
+        if (!(await openExtraTerminal())) missing.push("third terminal unavailable (needs_input state)");
+        const after = await sessionList().catch(() => []);
+        const fresh = after.filter((s) => !beforeIds.has(s.id));
+        notes.push(`fixture sessions after: ${after.length} (new: ${fresh.length})`);
+        const tabs = await page.getByRole("tab").count().catch(() => 0);
+        // Working: continuous PTY output on the first fresh session's tab
+        // (tab order follows creation order; verified by polling below).
+        if (fresh.length > 0 && tabs >= 2) {
+          if (await typeInTab(tabs - 2, "while true; do echo tick; sleep 1; done")) notes.push("tick loop started for working state");
+          else missing.push("tick loop typing failed");
+        }
+        // needs_input: real hook-event wait signal on the last fresh session.
+        if (fresh.length > 1) {
+          const target = fresh[fresh.length - 1];
+          try {
+            await cliJson(["rpc", "session.hook_event", "--params",
+              JSON.stringify({ sessionId: target.id, incarnation: target.incarnation, event: "Notification" })]);
+            notes.push("hook-event Notification sent for the last fresh session");
+          } catch (error) {
+            missing.push(`hook-event failed: ${error.message.split("\n")[0]}`);
+          }
+        }
+        // Settle: the first tab stays quiet so the daemon reports it idle
+        // (3s activity window); the loop keeps working; the signal holds.
+        const firstId = before.length ? before[0].id : (after[0] && after[0].id);
+        const workId = fresh.length > 0 ? fresh[0].id : null;
+        const waitId = fresh.length > 1 ? fresh[fresh.length - 1].id : null;
+        let states = {};
+        const deadline = Date.now() + 20000;
+        for (;;) {
+          const list = await sessionList().catch(() => []);
+          states = Object.fromEntries(list.map((s) => [s.id, s.agentState]));
+          const okIdle = !firstId || states[firstId] === "idle";
+          const okWork = !workId || states[workId] === "working";
+          const okWait = !waitId || states[waitId] === "needs_input";
+          if (okIdle && okWork && okWait) {
+            notes.push(`agentState settled: first=${states[firstId]} work=${states[workId]} wait=${states[waitId]}`);
+            break;
+          }
+          if (Date.now() >= deadline) {
+            notes.push(`settle gave up: first=${states[firstId]} work=${states[workId]} wait=${states[waitId]}; capturing anyway`);
+            break;
+          }
+          await delay(1000);
+        }
+        const badges = await page.evaluate(() => {
+          const text = (document.body.innerText || "").replace(/\s+/g, " ");
+          const out = [];
+          for (const w of ["Working", "Idle", "Waiting for input", "No recent update", "Exited"]) {
+            const n = text.split(w).length - 1;
+            if (n > 0) out.push(`${w}x${n}`);
+          }
+          return out;
+        }).catch(() => []);
+        if (badges.length) notes.push(`visible state badges: ${badges.join(" ")}`);
+        else notes.push("no Working/Idle/Waiting badges visible in text");
+        // Decisive DOM probe: do the badges render with the fork's
+        // accessible labels? The renderer merges transitions on the main
+        // poll cadence, so wait for the rendered badges to track the daemon
+        // truth (a badge that never tracks is a real finding, not fixture).
+        const wantBadges = () => page.evaluate(() => ({
+          working: document.querySelectorAll('[aria-label="Working"]').length,
+          idle: document.querySelectorAll('[aria-label="Idle"]').length,
+          waiting: document.querySelectorAll('[aria-label="Waiting for input"]').length,
+          stale: document.querySelectorAll('[aria-label="No recent update"]').length,
+          tabHtml: [...document.querySelectorAll('[role="tab"]')].slice(0, 3)
+            .map((t) => (t.innerHTML || "").replace(/\s+/g, " ").slice(0, 260)),
+        })).catch(() => null);
+        let rendered = await wantBadges();
+        const bDeadline = Date.now() + 20000;
+        while (rendered && rendered.waiting < 1 && Date.now() < bDeadline) {
+          await delay(1000);
+          rendered = await wantBadges();
+        }
+        if (rendered) notes.push(`rendered badges: Working=${rendered.working} Waiting=${rendered.waiting} Idle=${rendered.idle} Stale=${rendered.stale}; tab html: ${rendered.tabHtml.join(" || ")}`);
+        else notes.push("badge DOM probe best-effort only");
+      } catch (error) {
+        missing.push(`agent-state fixture failed: ${error.message.split("\n")[0]}`);
+      }
+      break;
+    }
     case "statusbar-strip":
       await ensureTerminal().catch(() => {});
       notes.push("full-page capture; strip cropped in post");
@@ -2747,6 +3278,52 @@ function execFileAsync(file, args2, opts) {
 
 async function candTeardown(page, state) {
   const notes = [];
+  if (state === "editor-tab" || state === "split-terminal" || state === "agent-state") {
+    // Close tabs these states opened (editor file tab, split tab, extra
+    // agent-state terminals), highest index first; the first strip tab stays
+    // so the next state always has a terminal to reuse. A dirty-editor close
+    // prompt is never confirmed: Escape leaves the tab open, recorded.
+    if (state === "editor-tab") {
+      // Revert the dirty probe (undo + save) so the tab closes cleanly and
+      // the fixture file stays pristine for later states.
+      try {
+        await page.locator(".monaco-editor").first().click({ timeout: 5000 });
+        await delay(300);
+        await page.keyboard.press("Control+Z");
+        await delay(300);
+        await page.keyboard.press(`${MOD}+S`);
+        await delay(800);
+        notes.push("teardown: dirty probe reverted (undo + save)");
+      } catch {
+        notes.push("teardown dirty revert best-effort only");
+      }
+    }
+    try {
+      for (let i = 0; i < 3; i++) {
+        const count = await page.getByRole("tab").count().catch(() => 0);
+        if (count <= 1) break;
+        await page.getByRole("tab").last().click({ button: "right", timeout: 3000 });
+        await delay(600);
+        const close = page.getByRole("menuitem", { name: "Close", exact: true }).first();
+        if ((await close.count()) > 0) {
+          await close.click({ timeout: 3000 });
+          await delay(600);
+          notes.push(`teardown: closed one tab (${state})`);
+        } else {
+          await dismissOverlays(page);
+          break;
+        }
+        if ((await page.locator('[role="dialog"]').count().catch(() => 0)) > 0) {
+          await page.keyboard.press("Escape").catch(() => {});
+          await delay(300);
+          notes.push("teardown: close prompt dismissed via Escape (tab left open)");
+          break;
+        }
+      }
+    } catch {
+      notes.push(`teardown tab-close best-effort only (${state})`);
+    }
+  }
   // SettingsPanel is a native <dialog>: Escape does not reliably dismiss it,
   // so use its explicit Close button first (exact match; session closes are
   // labeled "Close <name> session" and never match).
@@ -2811,6 +3388,9 @@ const ALL_STATES = [
   "automation-runs",
   "bot-responsibilities",
   "toasts",
+  "editor-tab",
+  "split-terminal",
+  "agent-state",
 ];
 
 const CAND_OWNER = {
@@ -2843,6 +3423,9 @@ const CAND_OWNER = {
   "automation-runs": "apps/desktop/src/renderer/src/features/automations/AutomationRunsDashboard.tsx, AutomationRunsTable.tsx, AutomationRunDetailsPage.tsx",
   "bot-responsibilities": "apps/desktop/src/renderer/src/features/bots/BotsPanel.tsx, BotResponsibilityCard.tsx",
   toasts: "apps/desktop/src/renderer/src/components/ui/sonner.tsx, App.tsx (Toaster)",
+  "editor-tab": "apps/desktop/src/renderer/src/features/shell/editor-tab.ts, features/editor/EditorPane.tsx",
+  "split-terminal": "apps/desktop/src/renderer/src/features/terminal/TerminalSplitHost.tsx, TerminalSplitHeaderOverlay.tsx",
+  "agent-state": "apps/desktop/src/renderer/src/features/shell/agent-state.ts, AgentStateIcon.tsx",
   tokens: "apps/desktop/src/renderer/src/assets/main.css",
 };
 
@@ -2879,6 +3462,9 @@ const STATE_SURFACE = {
   "automation-runs": "automation-runs",
   "bot-responsibilities": "bot-responsibilities",
   toasts: "toasts",
+  "editor-tab": "editor-tab",
+  "split-terminal": "split-terminal",
+  "agent-state": "agent-state",
 };
 
 // Preferred source-value keywords per surface: the ranked item must cite the
@@ -2915,6 +3501,9 @@ const SOURCE_PREFERENCE = {
   "settings-notifications": ["notifications", "toggle", "classname"],
   "settings-git": ["git", "github", "login", "classname"],
   toasts: ["sonner", "toast", "classname"],
+  "editor-tab": ["dirty", "save", "close", "classname"],
+  "split-terminal": ["split", "sash", "separator", "classname"],
+  "agent-state": ["working", "waiting", "idle", "classname"],
   tokens: ["font", "geist", "text-", "leading", "tracking", "weight"],
 };
 
