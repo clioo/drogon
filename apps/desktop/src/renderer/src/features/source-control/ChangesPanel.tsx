@@ -65,6 +65,7 @@ import { cn } from "../../lib/utils";
 import { reconstructDiffContent } from "./diff/diff-hunk-reconstruction";
 import { DiffNavigationProvider, useDiffNavigation } from "./diff/diff-navigation-context";
 import { useEditorScheme } from "../editor/editor-theme";
+import { useGitStatusExternalRefresh } from "./use-git-status-external-refresh";
 
 // Why lazy: `monaco-editor` assumes a browser global environment; ChangesPanel
 // has no test today that renders it via `renderToString`, but this mirrors
@@ -244,6 +245,12 @@ export function ChangesPanel({
 
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
 
+  // Why: the panel previously re-read only after its own mutations, so
+  // edits, stages or a `push -u` done from a terminal never showed up. The
+  // fork refreshes on filesystem signals plus a slow safety poll
+  // (useGitStatusPolling.ts); see use-git-status-external-refresh.ts.
+  useGitStatusExternalRefresh(workspace.id, refresh);
+
   useEffect(() => {
     let cancelled = false;
     setLoad({ phase: "loading" });
@@ -355,10 +362,10 @@ export function ChangesPanel({
       setDiff({ phase: "idle" });
       return;
     }
-    if (selection.area === "untracked") {
-      setDiff({ phase: "ready", diff: "", truncated: false });
-      return;
-    }
+    // Why no untracked special case: the daemon synthesizes an all-added
+    // `--no-index` diff against /dev/null for untracked paths (the fork
+    // shows the same whole-file-as-added diff), so every area loads the
+    // same way.
     let cancelled = false;
     setDiff({ phase: "loading" });
     void bridge
@@ -717,7 +724,17 @@ export function ChangesPanel({
   }, [prUrl]);
 
   const hasUncommitted = rows.length > 0;
-  const showEmpty = !hasUncommitted && !filterState.normalizedFilter && !filterState.tooLarge;
+  // Fork parity (content-status.tsx): the generic empty state requires the
+  // branch comparison to be empty too (`branchEntries.length === 0`) — a
+  // clean tree with commits the base lacks lists those commits instead of
+  // claiming "no changes ahead". We have no branch-compare section, so the
+  // same gate is `ahead === 0`: a clean branch that is ahead shows just the
+  // sync row's ↑N, never a contradictory empty state.
+  const showEmpty =
+    !hasUncommitted &&
+    (branch.ahead ?? 0) === 0 &&
+    !filterState.normalizedFilter &&
+    !filterState.tooLarge;
   const noFilterMatch =
     hasUncommitted &&
     !filterState.tooLarge &&
@@ -805,10 +822,13 @@ export function ChangesPanel({
             supportingText={`This workspace is clean and this branch has no changes ahead of ${branch.upstream ?? "base"}`}
           />
         )}
-        {showEmpty && prNotice && (
+        {!hasUncommitted && prNotice && (
           // Why here: the commit area (which owns prNotice) only renders with
           // uncommitted changes, so a failed Create PR from a clean branch —
           // the normal state for a fresh push — would fail silently (#176).
+          // Why not gated on showEmpty: a clean branch that is ahead of its
+          // upstream shows no generic empty state, but the gh failure must
+          // still surface.
           <div
             role={prNotice.tone === "destructive" ? "alert" : "status"}
             aria-live="polite"
@@ -948,9 +968,7 @@ export function ChangesPanel({
             {diff.phase === "loading" && <p className="text-muted-foreground">Loading diff…</p>}
             {diff.phase === "error" && <p role="alert">{diff.message}</p>}
             {diff.phase === "ready" && !reconstructed.hasContent && (
-              <p className="text-muted-foreground">
-                No diff for this file (untracked files show no diff).
-              </p>
+              <p className="text-muted-foreground">No diff for this file.</p>
             )}
             {diff.phase === "ready" && reconstructed.hasContent && (
               <div className="min-h-0 flex-1 overflow-hidden">

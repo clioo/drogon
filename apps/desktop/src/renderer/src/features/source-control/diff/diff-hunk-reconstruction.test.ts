@@ -70,3 +70,22 @@ describe("reconstructDiffContent", () => {
     expect(result.modified).toBe("");
   });
 });
+
+describe("untracked new-file diffs (R16-AS)", () => {
+  it("does not leak `new file mode` into the reconstructed content", () => {
+    const diff = [
+      "diff --git a/external.txt b/external.txt",
+      "new file mode 100644",
+      "index 0000000..1c8f7ac",
+      "--- /dev/null",
+      "+++ b/external.txt",
+      "@@ -0,0 +1,2 @@",
+      "+hello",
+      "+world",
+    ].join("\n");
+    const result = reconstructDiffContent(diff);
+    expect(result.hasContent).toBe(true);
+    expect(result.original).toBe("");
+    expect(result.modified).toBe("hello\nworld");
+  });
+});

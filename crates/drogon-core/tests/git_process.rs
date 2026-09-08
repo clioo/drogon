@@ -682,3 +682,141 @@ fn run_read_only_git_maps_a_real_byte_cap_trip_to_io_error() {
     .expect_err("a 64-byte cap must be exceeded by 500 untracked files");
     assert_eq!(err.code, "io_error");
 }
+
+// --- R16-AS: untracked expansion + untracked diffs ---------------------------
+
+#[test]
+fn status_argv_expands_untracked_directories_like_the_fork() {
+    let argv = git_process::status_argv();
+    assert!(
+        argv.contains(&"--untracked-files=all".to_string()),
+        "status argv must expand untracked directories to individual files \
+         (fork parity: src/main/git/source-control/status-read.ts passes \
+         --untracked-files=all): {argv:?}"
+    );
+}
+
+#[test]
+fn status_expands_an_untracked_directory_into_its_files() {
+    let repo = TempRepo::init("status-untracked-dir");
+    std::fs::create_dir_all(repo.dir.join("docs")).expect("create untracked dir");
+    std::fs::write(repo.dir.join("docs/readme.md"), b"doc\n").expect("write file");
+    std::fs::write(repo.dir.join("docs/guide.md"), b"guide\n").expect("write file");
+    let cache = CapabilityCache::new();
+    let scope = HostScope::native();
+
+    let result = run_read_only_git(
+        ReadOnlyGitOperation::Status,
+        &repo.dir,
+        &scope,
+        &cache,
+        generous_budget(),
+    )
+    .expect("status should succeed");
+
+    match result {
+        ParsedGitOutput::Status(parsed) => {
+            let mut paths: Vec<String> = parsed
+                .entries
+                .iter()
+                .map(|entry| match entry {
+                    git::StatusEntry::Untracked { path } => path.clone(),
+                    other => panic!("expected untracked entry, got {other:?}"),
+                })
+                .collect();
+            paths.sort();
+            assert_eq!(
+                paths,
+                vec!["docs/guide.md".to_string(), "docs/readme.md".to_string()],
+                "an untracked directory must list its files individually, never collapsed"
+            );
+        }
+        other => panic!("expected Status output, got {other:?}"),
+    }
+}
+
+#[test]
+fn untracked_file_diff_is_an_all_added_diff_against_dev_null() {
+    let repo = TempRepo::init("diff-untracked");
+    std::fs::write(repo.dir.join("new.txt"), b"hello\nworld\n").expect("write untracked file");
+
+    let diff = git_process::run_git_diff(&repo.dir, "new.txt", false, &generous_budget())
+        .expect("untracked diff should succeed");
+
+    assert!(
+        diff.contains("--- /dev/null"),
+        "left side of a new-file diff is /dev/null: {diff}"
+    );
+    assert!(
+        diff.contains("+++ b/new.txt"),
+        "right label must be repo-relative: {diff}"
+    );
+    assert!(
+        diff.contains("+hello"),
+        "content must appear as added lines: {diff}"
+    );
+    assert!(
+        diff.contains("@@ -0,0 +1,2 @@"),
+        "hunk must start at line 0/0: {diff}"
+    );
+}
+
+#[test]
+fn untracked_diff_is_not_used_for_tracked_files() {
+    let repo = TempRepo::init("diff-tracked");
+    repo.write_file("committed.txt");
+    repo.git(&["add", "committed.txt"]);
+    repo.git(&["commit", "-q", "-m", "init"]);
+
+    // Clean tracked file: plain `git diff` is empty and the untracked
+    // fallback must NOT fire (ls-files proves the path is tracked).
+    let diff = git_process::run_git_diff(&repo.dir, "committed.txt", false, &generous_budget())
+        .expect("tracked diff should succeed");
+    assert!(diff.is_empty(), "clean tracked file has no diff: {diff}");
+}
+
+#[test]
+fn untracked_subdirectory_file_diff_uses_repo_relative_labels() {
+    let repo = TempRepo::init("diff-untracked-subdir");
+    std::fs::create_dir_all(repo.dir.join("src")).expect("create dir");
+    std::fs::write(repo.dir.join("src/index.ts"), b"export const x = 1;\n")
+        .expect("write untracked file");
+
+    let diff = git_process::run_git_diff(&repo.dir, "src/index.ts", false, &generous_budget())
+        .expect("untracked diff should succeed");
+
+    assert!(
+        diff.contains("+++ b/src/index.ts"),
+        "labels must stay repo-relative for nested paths: {diff}"
+    );
+    assert!(
+        diff.contains("+export const x = 1;"),
+        "added line missing: {diff}"
+    );
+}
+
+#[test]
+fn staged_untracked_lookup_is_not_a_no_index_diff() {
+    // A staged NEW file is tracked in the index: `git diff --cached` shows
+    // it against HEAD, and the untracked fallback must not fire either.
+    let repo = TempRepo::init("diff-staged-new");
+    repo.write_file("seed.txt");
+    repo.git(&["add", "seed.txt"]);
+    repo.git(&["commit", "-q", "-m", "init"]);
+    std::fs::write(repo.dir.join("added.txt"), b"added\n").expect("write new file");
+    repo.git(&["add", "added.txt"]);
+
+    let staged = git_process::run_git_diff(&repo.dir, "added.txt", true, &generous_budget())
+        .expect("staged diff should succeed");
+    assert!(
+        staged.contains("+added"),
+        "staged new file diffs against HEAD: {staged}"
+    );
+
+    let unstaged = git_process::run_git_diff(&repo.dir, "added.txt", false, &generous_budget())
+        .expect("unstaged diff should succeed");
+    assert!(
+        unstaged.is_empty(),
+        "a fully staged new file has no unstaged diff: {unstaged}"
+    );
+}

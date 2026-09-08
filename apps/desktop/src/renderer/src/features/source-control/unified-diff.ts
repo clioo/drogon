@@ -45,7 +45,21 @@ export function parseUnifiedDiff(
       raw.startsWith("diff --git") ||
       raw.startsWith("+++") ||
       raw.startsWith("---") ||
-      raw.startsWith("index ")
+      raw.startsWith("index ") ||
+      // Extended-header lines of a patch (new/deleted file, mode changes,
+      // renames/copies): metadata like `index`, never file content. Without
+      // these, an untracked file's `new file mode 100644` was parsed as a
+      // context line and leaked (minus its first char) into the viewer.
+      raw.startsWith("new file mode ") ||
+      raw.startsWith("deleted file mode ") ||
+      raw.startsWith("old mode ") ||
+      raw.startsWith("new mode ") ||
+      raw.startsWith("similarity index ") ||
+      raw.startsWith("dissimilarity index ") ||
+      raw.startsWith("rename from ") ||
+      raw.startsWith("rename to ") ||
+      raw.startsWith("copy from ") ||
+      raw.startsWith("copy to ")
     ) {
       line = { kind: "file", text: raw };
     } else if (raw.startsWith("\\")) {

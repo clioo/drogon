@@ -442,11 +442,21 @@ pub(crate) fn status_argv() -> Vec<String> {
     let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
     // `--branch` is what makes porcelain v2 emit the `# branch.*` header
     // lines at all (verified live: without it a dirty repo prints only the
-    // `1`/`2`/`?` entries, no headers). Still read-only and deterministic.
+    // `1`/`2`/`?` entries, no headers). `--untracked-files=all` matches the
+    // fork's status read (src/main/git/source-control/status-read.ts): an
+    // untracked directory expands to its individual files, so the panel
+    // lists `docs/readme.md`, never a collapsed `docs/` row. Still read-only
+    // and deterministic.
     argv.extend(
-        ["status", "--porcelain=v2", "--branch", "-z"]
-            .iter()
-            .map(|s| s.to_string()),
+        [
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "-z",
+            "--untracked-files=all",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
     );
     argv
 }
@@ -1683,6 +1693,86 @@ pub fn run_git_head_oid(
 
 /// Unified diff for one path: `git diff [--cached] -- <path>`, deterministic
 /// flags only (`--no-color --no-ext-diff`). Untracked paths diff empty.
+/// `git ls-files --error-unmatch -- <path>` exits 1 exactly when the path
+/// has no index entry (untracked); a staged-new file matches, so only a
+/// genuinely untracked path takes the `--no-index` route below.
+fn is_untracked_path(
+    workspace_root: &Path,
+    path: &str,
+    budget: &GitProbeBudget,
+) -> Result<bool, RpcError> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.push("ls-files".to_string());
+    argv.push("--error-unmatch".to_string());
+    argv.push("--".to_string());
+    argv.push(literal_pathspec(path));
+    let outcome = spawn_git_and_capture(workspace_root, &argv, budget, Path::new("git"))?;
+    match outcome {
+        SpawnOutcome::Exited { status, .. } => Ok(!status.success()),
+        // Why: an unverifiable probe must fail the diff, not silently
+        // mislabel a tracked file as untracked (or vice versa).
+        SpawnOutcome::TimedOut => Err(error::unverifiable(format!(
+            "git {} timed out and was killed before completing",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CapExceeded => Err(error::io_error(format!(
+            "git {} exceeded the configured combined output byte cap and was killed",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::UnreapedAfterKill => Err(error::unverifiable(format!(
+            "git {} was killed but could not be confirmed reaped",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureUnfinished => Err(error::unverifiable(format!(
+            "git {} exited but its output capture had not finished draining",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureReadError(e) => Err(error::io_error(format!(
+            "failed to read git {} output: {e}",
+            argv.join(" ")
+        ))),
+        SpawnOutcome::CaptureInvalidUtf8(which) => Err(error::io_error(format!(
+            "git {} produced {which} that is not valid UTF-8",
+            argv.join(" ")
+        ))),
+    }
+}
+
+/// Read-only all-added diff for one untracked file: `/dev/null` against the
+/// working-tree file. `git diff --no-index` already emits the new-file
+/// shape (`diff --git a/<path> b/<path>` / `new file mode` / `--- /dev/null`);
+/// only the `+++` line carries the bare repo-relative path without the `b/`
+/// prefix, which `relocate_untracked_diff_header` rewrites so downstream
+/// hunk reconstruction sees the same shape as a tracked-file diff.
+fn untracked_diff_argv(path: &str) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.push("diff".to_string());
+    argv.push("--no-color".to_string());
+    argv.push("--no-ext-diff".to_string());
+    argv.push("--no-index".to_string());
+    argv.push("--".to_string());
+    argv.push("/dev/null".to_string());
+    argv.push(literal_pathspec(path));
+    argv
+}
+
+/// Rewrites the single `+++ <path>` line of a `--no-index` new-file diff to
+/// `+++ b/<path>`, matching the `b/` prefix every tracked-file diff carries.
+fn relocate_untracked_diff_header(diff: &str, path: &str) -> String {
+    let target = format!("+++ {path}");
+    let replacement = format!("+++ b/{path}");
+    diff.lines()
+        .map(|line| {
+            if line == target {
+                replacement.as_str()
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn run_git_diff(
     workspace_root: &Path,
     path: &str,
@@ -1690,7 +1780,60 @@ pub fn run_git_diff(
     budget: &GitProbeBudget,
 ) -> Result<String, RpcError> {
     let argv = diff_argv(path, staged);
-    Ok(run_git_argv(workspace_root, &argv, budget)?.stdout)
+    let output = run_git_argv(workspace_root, &argv, budget)?;
+    if !output.stdout.is_empty() {
+        return Ok(output.stdout);
+    }
+    // Why the fallback: untracked files have no index/HEAD blob, so plain
+    // `git diff` prints nothing. The fork still shows the file as an
+    // all-added diff (its blob read returns an absent left side for
+    // untracked paths), so mirror that with a read-only `--no-index` diff
+    // against `/dev/null`. Only runs when the probe proves the path is
+    // untracked; exit status 1 is `--no-index`'s documented "differences
+    // found" signal, not an error.
+    if !staged && is_untracked_path(workspace_root, path, budget)? {
+        let no_index_argv = untracked_diff_argv(path);
+        let outcome =
+            spawn_git_and_capture(workspace_root, &no_index_argv, budget, Path::new("git"))?;
+        return match outcome {
+            SpawnOutcome::Exited { status, stdout, .. }
+                if status.success() || status.code() == Some(1) =>
+            {
+                Ok(relocate_untracked_diff_header(&stdout, path))
+            }
+            SpawnOutcome::Exited { status, stderr, .. } => Err(error::io_error(format!(
+                "git {} exited with {}: {}",
+                no_index_argv.join(" "),
+                status,
+                stderr.trim()
+            ))),
+            SpawnOutcome::TimedOut => Err(error::unverifiable(format!(
+                "git {} timed out and was killed before completing",
+                no_index_argv.join(" ")
+            ))),
+            SpawnOutcome::CapExceeded => Err(error::io_error(format!(
+                "git {} exceeded the configured combined output byte cap and was killed",
+                no_index_argv.join(" ")
+            ))),
+            SpawnOutcome::UnreapedAfterKill => Err(error::unverifiable(format!(
+                "git {} was killed but could not be confirmed reaped",
+                no_index_argv.join(" ")
+            ))),
+            SpawnOutcome::CaptureUnfinished => Err(error::unverifiable(format!(
+                "git {} exited but its output capture had not finished draining",
+                no_index_argv.join(" ")
+            ))),
+            SpawnOutcome::CaptureReadError(e) => Err(error::io_error(format!(
+                "failed to read git {} output: {e}",
+                no_index_argv.join(" ")
+            ))),
+            SpawnOutcome::CaptureInvalidUtf8(which) => Err(error::io_error(format!(
+                "git {} produced {which} that is not valid UTF-8",
+                no_index_argv.join(" ")
+            ))),
+        };
+    }
+    Ok(output.stdout)
 }
 
 /// Builds a `gh` child with the same bounded env discipline as git (scrub
