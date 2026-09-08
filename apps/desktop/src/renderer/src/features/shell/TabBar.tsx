@@ -321,14 +321,20 @@ export function TabBar({
 
   return (
     <div
-      // Why: fixed 40px row (the retired .terminal-tabs min-height); flex-1
-      // is NOT set — in this column layout it would stretch the strip to
-      // fill the pane area (the source surface sits in a row parent where
-      // flex-1 only shares horizontal space).
+      // Why: fixed 32px row with a bottom border (fork TabGroupPanel tab
+      // row: `h-[32px] shrink-0 border-b border-border bg-card`), so the
+      // strip inside measures 31px like the reference; flex-1 is NOT set
+      // — in this column layout it would stretch the strip to fill the
+      // pane area (the source surface sits in a row parent where flex-1
+      // only shares horizontal space).
+      // Why tab-row (not tab-strip): the fork's full-width row carries no
+      // tab-strip class — the `tab-strip` token belongs to the
+      // content-sized group/tab-strip inside, and geometry probes match
+      // `[class*="tab-strip"]`.
       // Why: with hiddenInset the empty strip area is a window-drag region
       // (fork TabGroupPanel tab row); tabs and controls opt out via the
-      // tab-strip-window-drag CSS so they stay clickable.
-      className="flex items-stretch h-10 shrink-0 overflow-hidden min-w-0 w-full tab-strip-window-drag"
+      // tab-row-window-drag CSS so they stay clickable.
+      className="flex items-stretch h-8 shrink-0 overflow-hidden min-w-0 w-full border-b border-border bg-card tab-row-window-drag"
       // Why: preload routes native OS drops by this marker — only the tab strip opens files in the editor, not terminal panes.
       data-native-file-drop-target="editor"
     >

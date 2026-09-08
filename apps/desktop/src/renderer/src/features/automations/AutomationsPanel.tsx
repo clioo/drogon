@@ -20,6 +20,8 @@ export type AutomationsPanelProps = {
   listHarnesses: () => Promise<
     Result<{ hostId: string; harnesses: Harness[] }>
   >;
+  /** Top-level Escape closes the page (fork closeAutomationsPage). */
+  onClose?: () => void;
 };
 
 export function AutomationsPanel({
@@ -27,6 +29,7 @@ export function AutomationsPanel({
   workspace,
   status,
   listWorkspaces,
+  onClose,
 }: AutomationsPanelProps) {
   return (
     <AutomationsPageSurface
@@ -34,6 +37,7 @@ export function AutomationsPanel({
       workspace={workspace}
       status={status}
       listWorkspaces={listWorkspaces}
+      onClose={onClose}
     />
   );
 }

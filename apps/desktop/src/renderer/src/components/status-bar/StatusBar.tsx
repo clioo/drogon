@@ -585,9 +585,10 @@ export function StatusBar({
             </span>
           ) : null}
           {collapse.showMemoryLabel ? (
-            <span className="text-muted-foreground/50" aria-hidden>
-              ·
-            </span>
+            // Fork verbatim (resource-usage-status-trigger.tsx): the "·"
+            // separator is regular visible content, NOT aria-hidden — it
+            // belongs to the accessibility tree (#303).
+            <span className="text-muted-foreground/50">·</span>
           ) : null}
           <Terminal size={12} className="text-muted-foreground" />
           {/* Source resource-trigger form: the session count stays while any

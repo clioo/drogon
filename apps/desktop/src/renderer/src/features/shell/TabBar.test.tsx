@@ -97,6 +97,24 @@ function tabIds(): string[] {
 }
 
 describe("TabBar strip order", () => {
+  it("sizes the row like the fork: 32px with a bottom border, strip inside (#301)", () => {
+    const { container } = renderStrip({});
+    // Fork TabGroupPanel tab row: `h-[32px] shrink-0 border-b border-border
+    // bg-card`; the content-sized group/tab-strip inside it measures 31px.
+    const row = container.querySelector(".tab-row-window-drag");
+    expect(row).not.toBeNull();
+    expect(row!.className).toContain("h-8");
+    expect(row!.className).toContain("border-b");
+    expect(row!.className).toContain("bg-card");
+    // The full-width row must not carry the tab-strip token: geometry
+    // probes match `[class*="tab-strip"]` and the fork's matching surface
+    // is the content-sized strip, not the row.
+    expect(row!.className).not.toContain("tab-strip");
+    const strip = container.querySelector('[class*="tab-strip"]');
+    expect(strip?.className).toContain("group/tab-strip");
+    expect(strip?.className).toContain("flex-[0_1_auto]");
+  });
+
   it("renders pinned tabs first in stored relative order", () => {
     renderStrip({ pinnedIds: ["c"] });
     expect(tabIds()).toEqual(["c", "a", "b"]);

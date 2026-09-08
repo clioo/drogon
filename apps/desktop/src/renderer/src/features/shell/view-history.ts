@@ -111,3 +111,19 @@ export function goForwardView(
 export function currentView(history: ViewHistory): ViewEntry {
   return history.entries[history.index];
 }
+
+/** Port of the fork's rewindHistoryIndexPastView
+ *  (store/slices/worktree-nav-history.ts): closing a full page parks the
+ *  history index on the previous live entry so Back/Forward are not
+ *  no-ops; a history that is not parked on the page is left untouched. */
+export function rewindViewHistoryPastRoute(
+  history: ViewHistory,
+  route: string,
+  scope?: LiveViewScope,
+): ViewHistory {
+  const current = history.entries[history.index];
+  if (current === undefined || current.route !== route) return history;
+  const target = findPrevLiveIndex(history, scope);
+  if (target === null) return history;
+  return { entries: history.entries, index: target };
+}

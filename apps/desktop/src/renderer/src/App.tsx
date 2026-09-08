@@ -91,7 +91,9 @@ import {
   goForwardView,
   initialViewHistory,
   pushView,
+  rewindViewHistoryPastRoute,
 } from "./features/shell/view-history";
+import type { ViewEntry } from "./features/shell/view-history";
 import { isFullPageRoute } from "./features/shell/page-host";
 import {
   loadSidebarOpen,
@@ -182,6 +184,7 @@ import {
   isBotsAvailable,
   registerBotsRoute,
 } from "./bots-mount";
+import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
 import {
   planBrowserRehydrate,
   windowBrowserBridge,
@@ -190,6 +193,7 @@ import type { BrowserTabState } from "../../shared/browser-contract";
 import { BrowserPanel } from "./features/browser/browser-panel";
 import {
   AUTOMATIONS_CAPABILITY,
+  AUTOMATIONS_PAGE_HOST_TESTID,
   AUTOMATIONS_ROUTE_ID,
   createGatedAutomationBridge,
   isAutomationsAvailable,
@@ -919,6 +923,9 @@ export function App() {
             bridge: automationsGatedBridge,
             listWorkspaces: () => window.drogon.workspaces(),
             listHarnesses: () => window.drogon.harnesses(),
+            // #270: fork use-automations-page-escape — top-level Escape
+            // closes the page back to the view that opened it.
+            onClose: () => automationsCloseRef.current(),
           },
         ),
         mentuGatedBridge,
@@ -944,6 +951,14 @@ export function App() {
   // descriptor (the workspace-scoped mount) needs a stable onClose that
   // resolves to the view-history handler defined further down.
   const tasksCloseRef = useRef<() => void>(() => {});
+  // #270: same pattern for the Automations page's Esc — the fork's
+  // use-automations-page-escape closes the page from its top level.
+  const automationsCloseRef = useRef<() => void>(() => {});
+  // #270: fork previousViewBefore<Tasks|Bots|Automations> — each full page
+  // remembers the view that was active when it OPENED; Close/Escape return
+  // there (never a history pop, which can land on an unrelated page).
+  const pageReturnViewRef = useRef(new Map<string, ViewEntry>());
+  const lastViewRef = useRef<ViewEntry | null>(null);
   // #237: the Bots page registers the moment its scope exists — over an
   // empty placeholder snapshot with snapshotPending — so the nav switch
   // paints the fork's page chrome (header + loading state) in the same
@@ -1784,6 +1799,24 @@ export function App() {
     }
     setViewHistory((history) => pushView(history, { route, workspaceId: selected }));
   }, [route, selected]);
+  // #270: record the view a full page was opened FROM (fork
+  // previousViewBefore<Page> semantics: sticky while the page stays open,
+  // refreshed when the page is re-entered from another view).
+  useEffect(() => {
+    const previous = lastViewRef.current;
+    const current: ViewEntry = { route, workspaceId: selected };
+    lastViewRef.current = current;
+    if (
+      route !== null &&
+      isFullPageRoute(route) &&
+      (previous === null || previous.route !== route)
+    ) {
+      pageReturnViewRef.current.set(
+        route,
+        previous ?? { route: null, workspaceId: selected },
+      );
+    }
+  }, [route, selected]);
   const applyViewEntry = (entry: { route: string | null; workspaceId: string }) => {
     applyingHistory.current = true;
     if (entry.workspaceId !== selectedRef.current) {
@@ -1819,8 +1852,24 @@ export function App() {
     setViewHistory(next);
     applyViewEntry(currentView(next));
   };
-  botsCloseRef.current = goBackViewHistory;
-  tasksCloseRef.current = goBackViewHistory;
+  // #270: fork close<Page>Page — return to the view the page was opened
+  // from (recorded above) and park the history index before the page
+  // entry (fork rewindHistoryIndexPastView) so Back/Forward stay live.
+  const closePageRoute = (pageRoute: string) => {
+    const target = pageReturnViewRef.current.get(pageRoute) ?? null;
+    pageReturnViewRef.current.delete(pageRoute);
+    if (target !== null && target.route !== pageRoute) {
+      setViewHistory((history) =>
+        rewindViewHistoryPastRoute(history, pageRoute, liveWorkspaceIds),
+      );
+      applyViewEntry(target);
+      return;
+    }
+    goBackViewHistory();
+  };
+  botsCloseRef.current = () => closePageRoute(BOTS_ROUTE_ID);
+  tasksCloseRef.current = () => closePageRoute(TASKS_ROUTE_ID);
+  automationsCloseRef.current = () => closePageRoute(AUTOMATIONS_ROUTE_ID);
   const goForwardViewHistory = () => {
     const next = goForwardView(viewHistory, liveWorkspaceIds);
     if (next === viewHistory) return;
@@ -3805,7 +3854,7 @@ export function App() {
                 ref={botsSectionRef}
                 tabIndex={-1}
                 className="terminal-column"
-                data-testid="bots-page-host"
+                data-testid={BOTS_PAGE_HOST_TESTID}
                 style={{
                   display: route === BOTS_ROUTE_ID ? undefined : "none",
                 }}
@@ -3864,7 +3913,7 @@ export function App() {
                 ref={automationsSectionRef}
                 tabIndex={-1}
                 className="terminal-column"
-                data-testid="automations-page-host"
+                data-testid={AUTOMATIONS_PAGE_HOST_TESTID}
                 style={{
                   display: route === AUTOMATIONS_ROUTE_ID ? undefined : "none",
                 }}

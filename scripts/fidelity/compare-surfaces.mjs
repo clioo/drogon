@@ -878,6 +878,11 @@ async function domOutline(page) {
       // Several selectors can match incidental children (icons, buttons), so
       // score every match and keep the largest by area: the region container.
       let best = null;
+      // The shell sidebar is the LEFT-anchored panel in both apps; scoring
+      // by raw area alone compared the fork's 350px right rail (bg-sidebar)
+      // against the candidate's 280px left sidebar and reported a bogus
+      // 70px width delta (r9, issue #300). Prefer left-edge matches.
+      let bestLeft = null;
       for (const sel of sels) {
         let els = [];
         try {
@@ -900,9 +905,21 @@ async function domOutline(page) {
               background: cs.backgroundColor,
             };
           }
+          if (r.x <= 4 && r.w > 0 && (!bestLeft || area > bestLeft.area)) {
+            const cs = getComputedStyle(el);
+            bestLeft = {
+              sel,
+              rect: r,
+              area,
+              fontSize: cs.fontSize,
+              fontWeight: cs.fontWeight,
+              color: cs.color,
+              background: cs.backgroundColor,
+            };
+          }
         }
       }
-      regions[key] = best;
+      regions[key] = key === "sidebar" && bestLeft ? bestLeft : best;
     }
     // The status strip is a thin full-width bar pinned to the viewport
     // bottom. Segment buttons (usage, ports) also match the selectors but are

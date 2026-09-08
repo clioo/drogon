@@ -303,12 +303,16 @@ describe("use-bots-page-controller", () => {
     const fake = fakeBridge([]);
     const onClose = vi.fn();
     render(
-      <BotsPanel
-        snapshot={{ bots: [], history: [] }}
-        onClose={onClose}
-        bridge={fake.bridge}
-        scope={scope}
-      />,
+      // The keep-alive host wrapper the Escape visibility check gates on
+      // (App.tsx renders BotsPanel inside this section).
+      <div data-testid="bots-page-host">
+        <BotsPanel
+          snapshot={{ bots: [], history: [] }}
+          onClose={onClose}
+          bridge={fake.bridge}
+          scope={scope}
+        />
+      </div>,
     );
     fireEvent.click(screen.getByRole("button", { name: "New Bot" }));
     const form = screen.getByRole("form", { name: "Create a Bot" });
@@ -323,6 +327,37 @@ describe("use-bots-page-controller", () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByTestId("bots-panel"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores Escape while the keep-alive host is hidden (#270)", async () => {
+    // The page stays mounted (display:none) after the user routes away;
+    // without the visibility gate its window listener fired on every
+    // Escape anywhere and popped the view history a second time, landing
+    // on the Bots page instead of the workspace.
+    Object.defineProperty(HTMLElement.prototype, "checkVisibility", {
+      configurable: true,
+      value() {
+        return this.style.display !== "none";
+      },
+    });
+    try {
+      const fake = fakeBridge([]);
+      const onClose = vi.fn();
+      render(
+        <div data-testid="bots-page-host" style={{ display: "none" }}>
+          <BotsPanel
+            snapshot={{ bots: [], history: [] }}
+            onClose={onClose}
+            bridge={fake.bridge}
+            scope={scope}
+          />
+        </div>,
+      );
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "checkVisibility");
+    }
   });
 
   it("renders a recoverable error state when a refresh fails over an empty list", async () => {
