@@ -3,16 +3,20 @@
 //   src/renderer/src/components/settings/ShortcutRowsList.tsx
 //     (group headers with rows underneath, empty-filter state)
 //   src/shared/keybindings/formatting.ts (platform-correct labels)
-// Adapted: read-only rows (no recording/removal), chords/titles/groups from
-// the keybinding core table; disabled rows keep their reason visible.
+// Adapted: chords/titles/groups from the keybinding core table with the
+// persisted override map applied; disabled rows keep their reason visible.
 import {
-  bindingsForPlatform,
   KEYBINDING_DEFINITIONS,
   resolveKeybindingPlatform,
   type KeybindingDefinition,
 } from "../../../../shared/keybindings/definitions";
 import { formatKeybinding } from "../../../../shared/keybindings/labels";
 import type { KeybindingPlatform } from "../../../../shared/keybindings/definitions";
+import {
+  getEffectiveBindings,
+  readPersistedKeybindingOverrides,
+  type KeybindingOverrides,
+} from "../../../../shared/keybindings/overrides";
 
 export type ShortcutGroup = string;
 
@@ -35,17 +39,22 @@ function toKeybindingPlatform(platform: ShortcutPlatform): KeybindingPlatform {
   return resolveKeybindingPlatform(platform);
 }
 
-/** Every shortcut the Shortcuts section lists, in source table order. */
+/**
+ * Every shortcut the Shortcuts section lists, in source table order.
+ * Bindings are the effective table: persisted rebinds win when present.
+ */
 export function buildShortcutList(
   platform: ShortcutPlatform = "other",
+  overrides?: KeybindingOverrides,
 ): ShortcutListEntry[] {
   const resolved = toKeybindingPlatform(platform);
+  const effective = overrides ?? readPersistedKeybindingOverrides();
   return KEYBINDING_DEFINITIONS.map((definition) => ({
     id: definition.id,
     title: definition.title,
     group: definition.group,
     definition,
-    bindings: bindingsForPlatform(definition, resolved),
+    bindings: getEffectiveBindings(definition, resolved, effective),
   }));
 }
 
