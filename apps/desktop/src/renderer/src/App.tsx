@@ -32,6 +32,15 @@ import {
   markSessionDismissed,
 } from "./dismissed-sessions";
 import { Sidebar } from "./features/shell/Sidebar";
+import {
+  bulkCloseTargets,
+  loadTabStripState,
+  partitionPinnedOrder,
+  reconcileTabOrder,
+  saveTabStripState,
+  togglePinnedOrder,
+  type TabStripState,
+} from "./features/shell/tab-order";
 import { NewWorkspaceComposerModal } from "./features/new-workspace/NewWorkspaceComposerModal";
 import { TabBar } from "./features/shell/TabBar";
 import { TitlebarLeftControls } from "./features/shell/TitlebarLeftControls";
@@ -548,6 +557,18 @@ export function App() {
   const [activeBrowserTabId, setActiveBrowserTabId] = useState<string | null>(
     null,
   );
+  // R12-D tab strip: order, pins and renames persist per workspace in the
+  // shell's own localStorage envelope (tab-order.ts), like the sidebar keys.
+  const [tabStrip, setTabStrip] = useState<TabStripState>(() =>
+    loadTabStripState(window.localStorage, selected),
+  );
+  useEffect(() => {
+    setTabStrip(loadTabStripState(window.localStorage, selected));
+  }, [selected]);
+  const updateTabStrip = (next: TabStripState) => {
+    setTabStrip(next);
+    saveTabStripState(window.localStorage, selected, next);
+  };
   const knownBrowserIds = useRef(new Set<string>());
   const expectBrowserTab = useRef(false);
   // Focus follows explicit right-sidebar routing only (never capability
@@ -1632,6 +1653,69 @@ export function App() {
     action(async () => {
       checked(await browserStaticBridge.closeTab({ tabId }));
     });
+  // R12-D tab strip order/pin/rename/close-variant wiring (pure helpers in
+  // tab-order.ts; the strip reconciles stored order with live tabs itself).
+  const liveStripOrder = () =>
+    partitionPinnedOrder(
+      reconcileTabOrder(
+        tabStrip.order,
+        sessions.map((item) => item.id),
+        browserTabs.map((tab) => tab.tabId),
+      ),
+      tabStrip.pinned,
+    );
+  const changeTabOrder = (order: string[]) =>
+    updateTabStrip({ ...tabStrip, order });
+  const toggleTabPin = (id: string) => {
+    const order = reconcileTabOrder(
+      tabStrip.order,
+      sessions.map((item) => item.id),
+      browserTabs.map((tab) => tab.tabId),
+    );
+    const next = togglePinnedOrder(order, tabStrip.pinned, id);
+    updateTabStrip({ ...tabStrip, ...next });
+  };
+  const commitTabTitle = (id: string, title: string | null) => {
+    const titles = { ...tabStrip.titles };
+    if (title === null) delete titles[id];
+    else titles[id] = title;
+    updateTabStrip({ ...tabStrip, titles });
+  };
+  const copyStripText = (text: string) => {
+    try {
+      void navigator.clipboard?.writeText(text)?.catch(() => {});
+    } catch {
+      // Clipboard unavailable: the menu action is a no-op.
+    }
+  };
+  const closeStripTabs = (
+    anchorId: string,
+    mode: "others" | "to-right" | "to-left",
+  ) => {
+    const order = liveStripOrder();
+    const targets = bulkCloseTargets(order, tabStrip.pinned, anchorId, mode);
+    if (targets.length === 0) return;
+    const doomed = new Set(targets);
+    // Move selection off a doomed tab first so each close keeps a survivor.
+    const currentId = activeBrowserTabId ?? active;
+    if (doomed.has(currentId)) {
+      const at = order.indexOf(anchorId);
+      const neighbor = [
+        ...order.slice(at + 1),
+        ...order.slice(0, at).reverse(),
+      ].find((id) => !doomed.has(id));
+      if (neighbor) {
+        if (browserTabs.some((tab) => tab.tabId === neighbor))
+          selectBrowserTab(neighbor);
+        else selectSessionTab(neighbor);
+      }
+    }
+    for (const target of targets) {
+      const session = sessions.find((item) => item.id === target);
+      if (session) void close(session);
+      else void closeBrowserTab(target);
+    }
+  };
   const launchHarness = (input: HarnessLaunchInput) => {
     const captured = {
       hostId: contextRef.current.hostId,
@@ -2214,6 +2298,16 @@ export function App() {
                 createDisabled={
                   !selected || !status || busy || loadingSessions
                 }
+                stripOrder={tabStrip.order}
+                pinnedIds={tabStrip.pinned}
+                customTitles={tabStrip.titles}
+                onOrderChange={changeTabOrder}
+                onTogglePin={toggleTabPin}
+                onCloseOthers={(id) => closeStripTabs(id, "others")}
+                onCloseToRight={(id) => closeStripTabs(id, "to-right")}
+                onCloseToLeft={(id) => closeStripTabs(id, "to-left")}
+                onCommitTitle={commitTabTitle}
+                onCopyText={copyStripText}
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
                 onCloseSession={(item) => void close(item)}
