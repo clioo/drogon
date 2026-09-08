@@ -41,6 +41,9 @@ jobs:
       - run: pnpm test:renderer-contracts
       - run: pnpm test:packaging
       - run: pnpm --filter @drogon/desktop test
+        # Fail fast with a clear message if the desktop suite hangs; the
+        # suite itself takes ~30-90 s on every platform.
+        timeout-minutes: 15
       # The production bundle (Monaco + renderer) exceeds the default Node
       # heap on macos-14 runners: raise it for this step only.
       - run: pnpm --filter @drogon/desktop build
