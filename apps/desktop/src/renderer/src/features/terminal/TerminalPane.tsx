@@ -106,6 +106,15 @@ import {
   observeTerminalBracketedPasteModeOutput,
 } from "./terminal-bracketed-paste";
 import {
+  createReplayTailBuffer,
+  createSessionUpdateCoalescer,
+  shouldKeepSeeking,
+  TERMINAL_HIDDEN_POLL_MS,
+  TERMINAL_LIVE_POLL_MS,
+  TERMINAL_READ_PAGE_BYTES,
+  type SessionSignal,
+} from "./terminal-read-pacing";
+import {
   createTerminalPanePaste,
   registerTerminalPanePasteListeners,
 } from "./terminal-pane-paste";
@@ -836,6 +845,32 @@ export function TerminalPane({
     let timeout: ReturnType<typeof setTimeout>;
     let canWrite = session.verdict === "live";
     let lastObserved = session;
+    // R16-AT replay pacing: a fresh mount seeks to the live edge, discarding
+    // older ring pages without parsing them, and renders only the retained
+    // 512 KiB tail (fork terminal-scrollback-limits). Session observations
+    // fan out to the shell per read otherwise — thousands of full-app
+    // re-render triggers while a big scrollback replays.
+    const replayTail = createReplayTailBuffer();
+    const sessionUpdates = createSessionUpdateCoalescer();
+    const outputDecoder = new TextDecoder();
+    let seeking = true;
+    let seekPages = 0;
+    let readInFlight = false;
+    const emitSessionUpdate = (value: Session) => {
+      const signal: SessionSignal = {
+        verdict: value.verdict,
+        exitCode: value.exitCode,
+        incarnation: value.incarnation,
+        cols: value.cols,
+        rows: value.rows,
+        agentState: value.agentState,
+        agentStateAt: value.agentStateAt,
+        harnessId: value.harnessId,
+      };
+      if (!sessionUpdates.shouldEmit(signal, Date.now())) return;
+      lastObserved = value;
+      callbacks.current.onSession(value);
+    };
     // Loss of contact is never proof of exit: a read failure or transport
     // error must not leave a stale "live" badge showing. Once exited is
     // positively observed, that stays authoritative — a later transport
@@ -884,6 +919,10 @@ export function TerminalPane({
     // the canvas renderer (fork resumeRendering).
     const revealPane = () => {
       if (disposed || !paneVisible.current) return;
+      // A hidden pane polls at TERMINAL_HIDDEN_POLL_MS; a reveal should not
+      // wait out that cadence for fresh output (R16-AT read pacing).
+      clearTimeout(timeout);
+      if (!readInFlight) timeout = setTimeout(read, 0);
       webgl.failedSinceRecovery = false;
       fitAndSyncTerminal();
       // A hidden-time DPR change can strand the glyph atlas at the old scale
@@ -970,7 +1009,8 @@ export function TerminalPane({
     if (document.activeElement?.getAttribute("role") !== "tab")
       terminal.focus();
     async function read() {
-      if (disposed) return;
+      if (disposed || readInFlight) return;
+      readInFlight = true;
       try {
         const response = await window.drogon.read({
           ...inputIdentity,
@@ -982,30 +1022,78 @@ export function TerminalPane({
           return;
         }
         const value = response.result;
-        if (value.truncated)
-          terminal.write("\r\n[Earlier output is no longer retained]\r\n");
         const bytes = Uint8Array.from(atob(value.dataBase64), (char) =>
           char.charCodeAt(0),
         );
+        if (seeking) {
+          // Seek phase: retain the newest tail of the ring without writing
+          // anything, until a short page says the live edge is reached (or
+          // the page guard trips on a session that out-writes the seek).
+          seekPages += 1;
+          replayTail.push(bytes, value.truncated);
+          cursor = value.nextCursor;
+          if (shouldKeepSeeking(bytes.length, seekPages)) {
+            timeout = setTimeout(read, 0);
+            return;
+          }
+          seeking = false;
+          const dropped = replayTail.dropped;
+          const tailChunks = replayTail.drain();
+          if (dropped)
+            terminal.write("\r\n[Earlier output is no longer retained]\r\n");
+          for (const chunk of tailChunks) {
+            // Track DECA 2004 (bracketed paste) transitions in the PTY
+            // output so the paste policy brackets/decrypts exactly when the
+            // app asked.
+            observeTerminalBracketedPasteModeOutput(
+              terminal,
+              outputDecoder.decode(chunk),
+            );
+            await new Promise<void>((resolve) =>
+              terminal.write(chunk, resolve),
+            );
+            if (disposed) return;
+          }
+          caughtUp.current = bytes.length < TERMINAL_READ_PAGE_BYTES;
+          canWrite = value.session.verdict === "live";
+          emitSessionUpdate(value.session);
+          const exit = projectTerminalProcessExit(value.session);
+          if (exit) showExit(exit);
+          timeout = setTimeout(
+            read,
+            paneVisible.current ? TERMINAL_LIVE_POLL_MS : TERMINAL_HIDDEN_POLL_MS,
+          );
+          return;
+        }
+        if (value.truncated)
+          terminal.write("\r\n[Earlier output is no longer retained]\r\n");
         // Track DECA 2004 (bracketed paste) transitions in the PTY output so
         // the paste policy brackets/decrypts exactly when the app asked.
         observeTerminalBracketedPasteModeOutput(
           terminal,
-          new TextDecoder().decode(bytes),
+          outputDecoder.decode(bytes),
         );
         await new Promise<void>((resolve) => terminal.write(bytes, resolve));
         if (disposed) return;
         cursor = value.nextCursor;
         canWrite = value.session.verdict === "live";
-        lastObserved = value.session;
-        callbacks.current.onSession(value.session);
-        if (bytes.length < 65536) caughtUp.current = true;
+        emitSessionUpdate(value.session);
+        if (bytes.length < TERMINAL_READ_PAGE_BYTES) caughtUp.current = true;
         const exit = projectTerminalProcessExit(value.session);
         if (exit) showExit(exit);
         if (value.session.verdict === "exited" && bytes.length === 0) return;
-        timeout = setTimeout(read, bytes.length === 65536 ? 0 : 120);
+        timeout = setTimeout(
+          read,
+          bytes.length === TERMINAL_READ_PAGE_BYTES
+            ? 0
+            : paneVisible.current
+              ? TERMINAL_LIVE_POLL_MS
+              : TERMINAL_HIDDEN_POLL_MS,
+        );
       } catch {
         scheduleReadRetry();
+      } finally {
+        readInFlight = false;
       }
     }
     void read();

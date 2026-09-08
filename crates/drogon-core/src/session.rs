@@ -331,13 +331,28 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
     std::thread::spawn(move || poll_until_exit(&observed_child));
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        // Line discipline delivers output in small chunks (single-digit bytes
+        // per read on macOS), so a flood session can push 100k chunks/s.
+        // Timestamp formatting and mutex churn per chunk burned real CPU;
+        // activity is consumed at whole-second granularity downstream, so
+        // the observation is throttled. `None` (never marked) always marks:
+        // the first activity observation is what lifts a session out of
+        // `unknown` — suppressing it would stick fresh sessions there.
+        let mut last_activity_marked: Option<Instant> = None;
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
                     handle.ring.lock().unwrap().push(&buf[..n]);
-                    *handle.last_activity.lock().unwrap() =
-                        Some((Instant::now(), crate::now_rfc3339()));
+                    let now = Instant::now();
+                    if last_activity_marked
+                        .map(|marked| now.duration_since(marked).as_millis() >= 200)
+                        .unwrap_or(true)
+                    {
+                        last_activity_marked = Some(now);
+                        *handle.last_activity.lock().unwrap() =
+                            Some((now, crate::now_rfc3339()));
+                    }
                     // Output resumes: the wait signal is spent, back to
                     // activity-based derivation. Skipped for sessions that
                     // opted into explicit-only clearing (OpenCode/Pi — see
@@ -345,8 +360,7 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                     // repaint while genuinely still waiting, so any byte of
                     // output clearing the signal here would be wrong.
                     if !handle.explicit_wait_clear.load(Ordering::Acquire) {
-                        *handle.needs_input_at.lock().unwrap() = None;
-                        persist_wait_signal(&handle, None);
+                        clear_wait_signal_on_activity(&handle);
                     }
                 }
                 Err(_) => break,
@@ -590,6 +604,23 @@ fn persist_exit(handle: &SessionHandle, exit_code: i64) -> Result<(), RpcError> 
         return Err(error::io_error("Session exit record is missing"));
     }
     Ok(())
+}
+
+/// Activity-based wait-signal clear. Idempotent: a noisy session can push
+/// thousands of chunks per second, and only the `Some → None` transition may
+/// touch the durable `sessions` row — an unconditional UPDATE per chunk made
+/// a single 2.5 MB/s session burn ~40% of daemon CPU in SQLite writes.
+/// Returns whether a transition actually happened.
+pub(crate) fn clear_wait_signal_on_activity(handle: &SessionHandle) -> bool {
+    {
+        let mut signal = handle.needs_input_at.lock().unwrap();
+        if signal.is_none() {
+            return false;
+        }
+        *signal = None;
+    }
+    persist_wait_signal(handle, None);
+    true
 }
 
 /// Mirrors the in-memory wait signal into the durable `sessions` row so
@@ -1074,5 +1105,69 @@ mod headless_completion_tests {
             read_payload(&engine, "bot_responsibility_runs", "rr:bare")["hostObservation"],
             "live"
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod wait_signal_activity_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn started_handle() -> (tempfile::TempDir, crate::Engine, Arc<SessionHandle>) {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = crate::Engine::open(dir.path()).unwrap();
+        let invoke = |id: &str, method: &str, params: Value| {
+            let response = engine.dispatch(crate::Request {
+                protocol: crate::PROTOCOL_VERSION,
+                request_id: id.into(),
+                auth: None,
+                method: method.into(),
+                params,
+            });
+            assert!(response.ok, "{:?}", response.error);
+            response.result.unwrap()
+        };
+        let workspace = invoke("w", "workspace.register", json!({ "path": dir.path() }));
+        let session = invoke(
+            "s",
+            "session.start",
+            json!({
+                "workspaceId": workspace["id"],
+                "command": "/bin/sh",
+                "args": ["-c", "exec sleep 30"],
+            }),
+        );
+        let handle = engine.sessions.lock().unwrap()[session["id"].as_str().unwrap()].clone();
+        (dir, engine, handle)
+    }
+
+    /// The reader thread calls the activity clear on every PTY chunk. A
+    /// noisy session pushes thousands of chunks per second, so only the
+    /// `Some → None` transition may write the durable row; an unconditional
+    /// UPDATE per chunk made one 2.5 MB/s session burn ~40% of daemon CPU.
+    #[test]
+    fn activity_clear_persists_only_on_transition() {
+        let (_dir, _engine, handle) = started_handle();
+        // No signal set: clearing is a no-op.
+        assert!(!clear_wait_signal_on_activity(&handle));
+        handle.note_hook_event();
+        assert!(handle.needs_input_at.lock().unwrap().is_some());
+        // First activity clear transitions and persists NULL.
+        assert!(clear_wait_signal_on_activity(&handle));
+        assert!(handle.needs_input_at.lock().unwrap().is_none());
+        // Subsequent chunk clears (a noisy session pushes thousands per
+        // second) must be free: no transition, durable row stays NULL.
+        for _ in 0..1000 {
+            assert!(!clear_wait_signal_on_activity(&handle));
+        }
+        let conn = handle.db.lock().unwrap();
+        let stamp: Option<String> = conn
+            .query_row(
+                "SELECT needs_input_at FROM sessions WHERE id = ?1",
+                [&handle.session_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stamp, None);
     }
 }
