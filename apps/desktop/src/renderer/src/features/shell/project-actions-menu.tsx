@@ -27,11 +27,15 @@ import {
   TooltipTrigger,
 } from "../../components/ui/tooltip";
 
-/** Container recipe for the hover-reveal row actions, verbatim from the
-   source's ProjectHeaderActions (components/sidebar/ProjectHeaderActions.tsx):
-   desktop hover reveals absolutely over the title, touch keeps the flow. */
+/** Container recipe for the hover-reveal row actions, from the source's
+   ProjectHeaderActions (components/sidebar/ProjectHeaderActions.tsx):
+   desktop hover reveals absolutely over the title, touch keeps the flow.
+   Why no `pointer-events-none` gating (unlike the source): hidden actions
+   must stay above the row hit area (#278) — hit-testing an a11y or Playwright
+   activation never establishes :hover first, so gating resolved every click
+   to the drag-handle row beneath; the reveal stays opacity-only. */
 export const PROJECT_HEADER_ACTIONS_CLASS_NAME =
-  "flex shrink-0 cursor-pointer items-center gap-0.5 self-stretch can-hover:absolute can-hover:right-1 can-hover:top-1/2 can-hover:z-10 can-hover:-translate-y-1/2 can-hover:rounded-md can-hover:bg-worktree-sidebar can-hover:pl-1 can-hover:pointer-events-none can-hover:opacity-0 can-hover:transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 has-[button[data-state=open]]:pointer-events-auto has-[button[data-state=open]]:opacity-100";
+  "flex shrink-0 cursor-pointer items-center gap-0.5 self-stretch can-hover:absolute can-hover:right-1 can-hover:top-1/2 can-hover:z-10 can-hover:-translate-y-1/2 can-hover:rounded-md can-hover:bg-worktree-sidebar can-hover:pl-1 can-hover:opacity-0 can-hover:transition-opacity group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[button[data-state=open]]:opacity-100";
 
 /** Reveal recipe for one row action, verbatim from the source's
    repo-header-action-button-class.ts. */
