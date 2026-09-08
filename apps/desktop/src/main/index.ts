@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, screen, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, session, shell } from "electron";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -99,20 +99,15 @@ import { createAppActivityGuard } from "./app-activity-guard";
 const LOCAL_ENDPOINT_PROBE_TIMEOUT_MS = 2_000;
 
 app.setName("Drogon");
-// Test harnesses set DROGON_BACKGROUND_WINDOW=1 so the window never steals the
-// user's focus: shown inactive under an accessory activation policy, with
-// occluded-window throttling off so CDP-driven checks keep full speed.
+// Background validation paints for CDP without showing or activating a native window.
 const backgroundWindow = process.env.DROGON_BACKGROUND_WINDOW === "1";
 if (backgroundWindow) {
   app.commandLine.appendSwitch("disable-renderer-backgrounding");
   app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
-  // macOS activates a regular app the moment it finishes launching (menu bar
-  // switches, Dock bounces) — long before whenReady/createWindow. Becoming an
-  // accessory with no Dock tile BEFORE launch completes is the only way a
-  // test instance never takes the user's focus.
+  // Accessory apps can still activate programmatically; prohibited also prevents activation.
   if (process.platform === "darwin") {
     try {
-      app.setActivationPolicy("accessory");
+      app.setActivationPolicy("prohibited");
       app.dock?.hide();
     } catch (error) {
       console.warn("[window] background activation policy:", error);
@@ -127,7 +122,7 @@ if (process.env.DROGON_ELECTRON_PROFILE)
 // builds skip this: their CFBundleIconFile already carries icon.icns.
 // Same resources idiom as mentu-bridge (app path in dev), exists-guarded
 // so a missing PNG can never break boot.
-if (!app.isPackaged && process.platform === "darwin" && app.dock) {
+if (!backgroundWindow && !app.isPackaged && process.platform === "darwin" && app.dock) {
   try {
     const devIcon = path.join(app.getAppPath(), "resources", "icon.png");
     if (existsSync(devIcon)) app.dock.setIcon(nativeImage.createFromPath(devIcon));
@@ -466,6 +461,7 @@ function createWindow() {
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
+    ...(backgroundWindow ? { focusable: false, skipTaskbar: true } : {}),
     title: "Drogon",
     // R16-E window chrome (source createMainWindow.ts:98-115): hiddenInset
     // keeps the native traffic lights inside the sidebar titlebar row on
@@ -478,6 +474,7 @@ function createWindow() {
       nodeIntegration: false,
       webSecurity: true,
       backgroundThrottling: !backgroundWindow,
+      focusOnNavigation: !backgroundWindow,
     },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -485,10 +482,8 @@ function createWindow() {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
-  // Why: maximize before the first show so no un-maximized frame flashes
-  // (source revealInitialWindow maximizes in the same hook); the background
-  // seam reveals inactive so the user keeps keyboard focus.
-  window.on("ready-to-show", () => {
+  // Restore visible launches once; background windows stay hidden across renderer reloads.
+  window.once("ready-to-show", () => {
     if (window) {
       revealRestoredWindow({
         window,
@@ -509,12 +504,6 @@ function createWindow() {
   const seamBounds = parseWindowBoundsEnv(process.env.DROGON_WINDOW_BOUNDS);
   if (!app.isPackaged && seamBounds) {
     window.setBounds(seamBounds);
-  } else if (backgroundWindow) {
-    // Test launches park the window at the bottom-right edge of the work area
-    // so it stays out of the user's way; macOS keeps a corner on screen and
-    // occlusion throttling is off, so CDP captures still render.
-    const area = screen.getPrimaryDisplay().workArea;
-    window.setPosition(area.x + area.width - 120, area.y + area.height - 60);
   }
   console.log("[window] Window bounds at startup:", window.getBounds(),
     "maximized:", window.isMaximized());
@@ -766,7 +755,7 @@ if (!holdsSingleInstanceLock) {
     await bootstrapDaemon();
     void autoInstallBundledMentuRuntime();
     if (backgroundWindow && process.platform === "darwin")
-      app.setActivationPolicy("accessory");
+      app.setActivationPolicy("prohibited");
     createWindow();
     app.on("activate", () => {
       if (!window) createWindow();

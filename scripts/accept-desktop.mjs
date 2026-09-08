@@ -14,6 +14,10 @@ import {
   runAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
+import {
+  startForegroundObservation,
+  verifyForegroundObservation,
+} from "./acceptance-foreground.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
 import { probeRenderedSessionRestart } from "./probe-rendered-session-restart.mjs";
 import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
@@ -103,9 +107,11 @@ const report = {
   startedAt: new Date().toISOString(),
   checks: [],
   cleanup: [],
+  desktopPids: [],
   fixture,
 };
 let daemon, desktop, browser, page, registered;
+let foregroundObservation;
 let lastLivePage = null; // kept for failure evidence after phase-local cleanup
 let ranUpgradeCheck = false; // guards the explicit exit in the upgrade path
 async function stopOwned(child, label) {
@@ -138,6 +144,7 @@ async function launchDesktop(overrideDataDir = null) {
     },
   );
   desktop = child;
+  if (child.pid) report.desktopPids.push(child.pid);
   const endpoint = await new Promise((resolve, reject) => {
     let tail = "";
     const timeout = setTimeout(
@@ -181,6 +188,9 @@ async function launchDesktop(overrideDataDir = null) {
     .waitFor();
 }
 try {
+  if (process.env.DROGON_VERIFY_OS_FOCUS === "1") {
+    foregroundObservation = await startForegroundObservation(output);
+  }
   if (bundle) {
     // R16-BO (#319): prove the sealed bundle carries the Drogon icon
     // before any rendered journey runs, so PASSED implies installable.
@@ -1140,6 +1150,17 @@ try {
     } catch (error) {
       report.status = "FAILED";
       report.cleanup.push(`packaged fixture cleanup: ${error.message}`);
+    }
+  }
+  if (foregroundObservation) {
+    try {
+      report.osForeground = await foregroundObservation.stop();
+      verifyForegroundObservation(report.osForeground, report.desktopPids);
+      report.checks.push("macos-no-desktop-activation-or-visible-windows");
+      report.cleanup.push("OS foreground observer: exited");
+    } catch (error) {
+      report.status = "FAILED";
+      report.error = [report.error, error.message].filter(Boolean).join("; ");
     }
   }
   report.finishedAt = new Date().toISOString();

@@ -50,11 +50,16 @@ and orchestration reference; older files under `docs/migration/` are history.
   not drive the developer's working instance for interactive tests.
 - Never call `page.bringToFront()`, CDP `Page.bringToFront`, `app.focus()`,
   `BrowserWindow.focus()`, or OS activation commands to make a check pass.
-  Use `showInactive()` when revealing a test window. Background mode may
-  display an inactive window; do not claim it is headless or invisible.
+  Background validation windows must stay hidden, including during reloads
+  and saved-window restoration; neither `show()` nor `showInactive()` belongs
+  in that path. Verify OS activation and window visibility, not only DOM focus.
 - Tests specifically exercising native foreground focus require an explicit
   user request and a documented reason. Never disable background mode as a
   generic retry or workaround for a failing test.
+- On macOS, run `DROGON_VERIFY_OS_FOCUS=1 node scripts/accept-desktop.mjs`
+  against a current build to record OS activation events and on-screen window
+  owners from before launch through shutdown. This requires the Swift compiler;
+  functional acceptance alone is not evidence that focus was preserved.
 
 ## Clean up every test-owned process
 
