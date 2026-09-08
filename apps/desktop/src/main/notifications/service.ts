@@ -4,6 +4,7 @@
    has no daemon push channel, so the renderer polls as it does now and
    main polls alongside it for transitions; click focuses the session tab
    via ui:focus-session). */
+import { nativeNotificationsSuppressed } from "./background-suppression";
 import { BrowserWindow, Notification, ipcMain } from "electron";
 import path from "node:path";
 import {
@@ -196,6 +197,9 @@ function showElectronNotification(
   body: string,
   onClick: () => void,
 ): void {
+  // Test instances (background window) keep the delivery log line but never
+  // put a native banner on the user's screen.
+  if (nativeNotificationsSuppressed(process.env)) return;
   const notification = new Notification({
     title,
     body,
