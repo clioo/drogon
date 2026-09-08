@@ -267,15 +267,28 @@ describe("TabBar editor tabs", () => {
     renderStrip({ editorTabs });
     expect(tabIds()).toEqual(["a", "b", "c", "ws::src/a.ts", "ws::src/b.ts"]);
     expect(screen.getByRole("tab", { name: "a.ts" })).not.toBeNull();
-    expect(screen.getByRole("tab", { name: /b\.ts \(unsaved\)/ })).not.toBeNull();
+    // Fork parity (EditorFileTab): no "(unsaved)" name suffix — the dirty
+    // dot in the shared close slot is the only marker.
+    expect(screen.getByRole("tab", { name: "b.ts" })).not.toBeNull();
   });
 
   it("shows the dirty indicator only for a dirty editor tab", () => {
     renderStrip({ editorTabs });
     const clean = screen.getByRole("tab", { name: "a.ts" });
-    const dirty = screen.getByRole("tab", { name: /b\.ts \(unsaved\)/ });
-    expect(clean.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
-    expect(dirty.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
+    const dirty = screen.getByRole("tab", { name: "b.ts" });
+    expect(clean.querySelector('[data-testid="editor-tab-dirty-dot"]')).toBeNull();
+    expect(dirty.querySelector('[data-testid="editor-tab-dirty-dot"]')).not.toBeNull();
+  });
+
+  it("shares one slot between the dirty dot and the close button", () => {
+    renderStrip({ editorTabs });
+    const cleanClose = screen.getByRole("tab", { name: "a.ts" }).querySelector('[data-tab-close-button="true"]');
+    const dirtyClose = screen.getByRole("tab", { name: "b.ts" }).querySelector('[data-tab-close-button="true"]');
+    // Dirty: the close button hides until hover replaces the dot.
+    expect(dirtyClose?.className).toContain("hidden");
+    expect(dirtyClose?.className).toContain("group-hover:flex");
+    // Clean: the close button shows normally, never hidden.
+    expect(cleanClose?.className).not.toContain("hidden");
   });
 
   it("activating an editor tab reports its id and no session is marked active", () => {

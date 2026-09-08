@@ -1,11 +1,18 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/tab-bar/BrowserTab.tsx (tab root chrome,
    tooltip, close affordance, pinned middle-click guard) and the editor
-   tab's dirty-dot affordance in src/renderer/src/components/tab-bar/
-   TabBar.tsx. Adapter: the FileText icon stands in for the source's
-   per-language file icon (no file-type icon pipeline wired to the tab
-   strip in this build); the tooltip shows the full workspace-relative
-   path, matching the source's title attribute. */
+   tab's shared dirty-dot/close slot in
+   src/renderer/src/components/tab-bar/EditorFileTab.tsx:364-378 plus
+   EditorFileTabCloseButton.tsx (the dot and the close button share one
+   slot so tab width never shifts during auto-save; when dirty the dot
+   shows and the close button appears on hover replacing it — no name
+   suffix, no status line). Adapter: the FileText icon stands in for the
+   source's per-language file icon (no file-type icon pipeline wired to
+   the tab strip in this build); the tooltip shows the full
+   workspace-relative path, matching the source's title attribute. The
+   source's close-button tooltip/shortcut label and its rename, preview
+   and git-status tab adornments have no counterpart in this build, so
+   the label row stays a plain base-name span. */
 import { FileText, Pin, X } from "lucide-react";
 import type { DraggableSyntheticListeners } from "@dnd-kit/core";
 import { Tooltip } from "radix-ui";
@@ -66,7 +73,7 @@ export function EditorStripTab({
       id={`editor-tab-${tab.tabId}`}
       aria-selected={isActive}
       aria-controls="editor-tab-panel"
-      aria-label={`${tabLabel}${tab.dirty ? " (unsaved)" : ""}`}
+      aria-label={tabLabel}
       data-tab-id={tab.tabId}
       data-testid="sortable-tab"
       data-pinned={pinned ? "true" : "false"}
@@ -105,31 +112,38 @@ export function EditorStripTab({
         />
       )}
       <span className={`${TAB_LABEL_WIDTH_CLASSES} mr-1`}>{tabLabel}</span>
-      {tab.dirty && (
-        <span
-          className="mr-1 size-1.5 rounded-full bg-foreground/70 shrink-0"
-          role="status"
-          aria-label="Unsaved changes"
-        />
-      )}
-      {!pinned && (
-        <button
-          type="button"
-          aria-label={`Close ${tabLabel}`}
-          className={`flex items-center justify-center w-4 h-4 rounded-sm shrink-0 ${
-            isActive
-              ? "text-muted-foreground hover:text-foreground hover:bg-muted"
-              : "text-transparent group-hover:text-muted-foreground hover:!text-foreground hover:!bg-muted"
-          }`}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onClose();
-          }}
-        >
-          <X className="w-3 h-3" />
-        </button>
-      )}
+      {/* Dirty dot and close button share the same slot to prevent tab width shift during auto-save.
+         When dirty: dot is shown, close button appears on hover (replacing the dot).
+         When clean: close button is shown normally (visible on active tab, on hover for others). */}
+      <div className="relative flex items-center justify-center w-4 h-4 shrink-0">
+        {tab.dirty && (
+          <span
+            data-testid="editor-tab-dirty-dot"
+            className="absolute size-1.5 rounded-full bg-foreground/60 group-hover:hidden group-focus-within:hidden"
+          />
+        )}
+        {!pinned && (
+          <button
+            type="button"
+            data-tab-close-button="true"
+            aria-label={`Close ${tabLabel}`}
+            className={`flex items-center justify-center w-4 h-4 rounded-sm ${
+              tab.dirty
+                ? "hidden group-hover:flex text-muted-foreground hover:text-foreground hover:bg-muted"
+                : isActive
+                  ? "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  : "text-transparent group-hover:text-muted-foreground hover:!text-foreground hover:!bg-muted"
+            }`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
+          >
+            <X className="w-3 h-3" />
+          </button>
+        )}
+      </div>
     </div>
   );
   if (hideTooltip) return <div className={TAB_CONTAINER_WIDTH_CLASSES}>{tabRoot}</div>;

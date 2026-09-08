@@ -50,7 +50,9 @@ export async function probeEditorKeyboardInput({ page, workspace, output }) {
   // keystrokes reached the model at all, alongside the untouched baseline.
   assert.ok(draft.includes("typed-by-keyboard "));
   assert.ok(draft.includes("journey base"));
-  await page.getByLabel("Unsaved changes", { exact: true }).first().waitFor();
+  // R16-X2 (fixes #195): the fork's shared dot/close slot is the only
+  // dirty mark — no "(unsaved)" suffix, no status line.
+  await page.locator('[data-testid="editor-tab-dirty-dot"]').first().waitFor();
   assert.equal(await readFile(path.join(workspace, name), "utf8"), baseline);
 
   // External write while dirty: the mark appears, the model keeps the
@@ -79,7 +81,7 @@ export async function probeEditorKeyboardInput({ page, workspace, output }) {
   // Explicit save resolves the conflict in favor of the draft.
   await page.keyboard.press(`${mod}+s`);
   await page
-    .getByLabel("Unsaved changes", { exact: true })
+    .locator('[data-testid="editor-tab-dirty-dot"]')
     .first()
     .waitFor({ state: "hidden", timeout: 15_000 });
   assert.equal(await readFile(path.join(workspace, name), "utf8"), draft);

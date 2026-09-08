@@ -33,6 +33,14 @@ export interface DiffViewerProps {
   modified: string;
   scheme: EditorScheme;
   sideBySide: boolean;
+  /**
+   * Optional wrap/whitespace overrides for the editor's Changes surface
+   * (R16-X2): absent preserves the historical fixed behavior (wrap off,
+   * trim-only diffs hidden), so the Changes panel renders exactly as
+   * before without passing them.
+   */
+  wordWrap?: boolean;
+  showWhitespace?: boolean;
 }
 
 export function DiffViewer({
@@ -41,6 +49,8 @@ export function DiffViewer({
   modified,
   scheme,
   sideBySide,
+  wordWrap,
+  showWhitespace,
 }: DiffViewerProps) {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
   const lineNumberOptionsSubRef = useRef<{ dispose: () => void } | null>(null);
@@ -96,8 +106,8 @@ export function DiffViewer({
         scrollBeyondLastLine: false,
         fontSize: 13,
         lineNumbers: "on",
-        ...buildDiffEditorWordWrapOptions(undefined),
-        ...buildDiffEditorWhitespaceOptions(undefined),
+        ...buildDiffEditorWordWrapOptions(wordWrap),
+        ...buildDiffEditorWhitespaceOptions(showWhitespace),
         automaticLayout: true,
         renderOverviewRuler: true,
         scrollbar: diffEditorScrollbarOptions,
