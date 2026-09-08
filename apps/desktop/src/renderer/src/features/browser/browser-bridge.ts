@@ -19,20 +19,30 @@ export function windowBrowserBridge(): BrowserBridge {
   return (window.drogon as unknown as { browser: BrowserBridge }).browser;
 }
 
-const CAPTURE_KEY = "drogon.browser.captureWindowOpen";
+const OPEN_LINKS_IN_APP_KEY = "drogon.browser.openLinksInApp";
 
-/** Whether the user chose to route terminal link-opens into the pane. */
-export function readCaptureWindowOpen(): boolean {
+/**
+ * The fork's Link Routing preference (src/shared/global-settings-types.ts
+ * `openLinksInApp`, default false): whether http(s) links — from the
+ * terminal foremost — open in the built-in browser by default. ⇧⌘-click
+ * always uses the system browser. Drogon persists the same semantics in
+ * renderer storage; the terminal link routing reads it, as does the
+ * browser panel footer toggle.
+ */
+export function readOpenLinksInApp(): boolean {
   try {
-    return window.localStorage.getItem(CAPTURE_KEY) === "1";
+    return window.localStorage.getItem(OPEN_LINKS_IN_APP_KEY) === "1";
   } catch {
     return false;
   }
 }
 
-export function writeCaptureWindowOpen(capture: boolean): void {
+export function writeOpenLinksInApp(openLinksInApp: boolean): void {
   try {
-    window.localStorage.setItem(CAPTURE_KEY, capture ? "1" : "0");
+    window.localStorage.setItem(
+      OPEN_LINKS_IN_APP_KEY,
+      openLinksInApp ? "1" : "0",
+    );
   } catch {
     // A denied storage write keeps the default; never blocks navigation.
   }
@@ -41,9 +51,10 @@ export function writeCaptureWindowOpen(capture: boolean): void {
 /**
  * Authority source backed by the local browser host. Navigation proposals
  * go to the host's navigate (which enforces the http(s)-only policy);
- * window-open intents from terminals are routed into a new pane tab only
- * when the user opted in via "Capture links" — otherwise the verdict
- * proposes the system browser and the host decides.
+ * window-open intents are routed into a new pane tab unconditionally —
+ * the fork (browser-client popups and main's window-open handler) never
+ * sends them to the OS, and terminal links reach the pane through the
+ * terminal's own routing, not this seam.
  */
 export function createBrowserAuthoritySource(input: {
   bridge: BrowserBridge;
@@ -78,14 +89,13 @@ export function createBrowserAuthoritySource(input: {
     },
     requestWindowOpen({ url }): Promise<Result<WindowOpenDecision>> {
       const workspaceId = input.workspaceId();
-      if (!readCaptureWindowOpen() || !workspaceId) {
+      if (!workspaceId) {
         return Promise.resolve({
           ok: true,
           result: {
             outcome: "open-in-system",
-            reason: workspaceId
-              ? "Terminal links open in the system browser. Enable “Capture links” in the Browser panel to keep them here."
-              : "No workspace is selected, so the link cannot open in the pane.",
+            reason:
+              "No workspace is selected, so the link cannot open in the pane.",
           },
         });
       }

@@ -118,7 +118,16 @@ import {
   createTerminalPanePaste,
   registerTerminalPanePasteListeners,
 } from "./terminal-pane-paste";
-import { windowBrowserBridge } from "../browser/browser-bridge";
+import {
+  windowBrowserBridge,
+  readOpenLinksInApp,
+} from "../browser/browser-bridge";
+import {
+  terminalHttpLinkActionDestinationsFor,
+  terminalHttpLinkClickDestination,
+  terminalHttpLinkDestinationLabel,
+  type TerminalHttpLinkDestination,
+} from "./terminal-http-link-destinations";
 import type { Session } from "../../../../shared/session-contract";
 import type { TerminalPasteSource } from "./terminal-paste-model";
 
@@ -621,17 +630,16 @@ export function TerminalPane({
         void toast(title, { description: body });
       },
     });
-    // Fork parity (terminal-url-link-hit-testing.ts openTerminalHttpLink):
-    // a modifier-held direct activation states the destination outright —
-    // the in-app browser tab — skipping the routing preference; ⇧ inverts
-    // to the system browser like the fork's alternate destination. The
-    // popover's "Open link" (no gesture event) always opens a tab: terminal
-    // link UI never routes to the system browser unasked.
-    const openHttpUrl = async (
+    // Fork parity (terminal-url-link-hit-testing.ts openTerminalHttpLink +
+    // lib/http-link-routing.ts): the persisted Link Routing preference
+    // picks the destination for a modifier click; ⇧⌘-click states the
+    // system browser outright (the escape hatch). The popover names both
+    // destinations per the preference.
+    const openHttpUrlTo = async (
+      destination: TerminalHttpLinkDestination,
       url: string,
-      event?: Pick<MouseEvent, "shiftKey">,
     ): Promise<{ ok: true } | { ok: false; message: string }> => {
-      if (event?.shiftKey) {
+      if (destination === "system") {
         window.dispatchEvent(
           new CustomEvent("drogon:open-external-url", {
             detail: { url },
@@ -658,23 +666,48 @@ export function TerminalPane({
         return { ok: false, message: "The link could not be opened." };
       }
     };
+    const openHttpUrl = async (
+      url: string,
+      event?: Pick<MouseEvent, "shiftKey">,
+    ): Promise<{ ok: true } | { ok: false; message: string }> =>
+      openHttpUrlTo(
+        terminalHttpLinkClickDestination(event?.shiftKey, readOpenLinksInApp()),
+        url,
+      );
     terminal.loadAddon(
       new WebLinksAddon((event, url) =>
         handleTerminalWebLinkClick(url, event, {
           openUrl: (linkUrl) => openHttpUrl(linkUrl, event ?? undefined),
-          requestAction: (mouse) =>
-            requestTerminalLinkAction(mouse, linkActionContext.current, {
+          requestAction: (mouse) => {
+            // The fork's popover (terminal-url-link-hit-testing.ts
+            // handleTerminalHttpLink): the primary action names the
+            // preference's destination, the alternate the other one.
+            const destinations =
+              terminalHttpLinkActionDestinationsFor(readOpenLinksInApp());
+            const runFor = (destination: TerminalHttpLinkDestination) => () => {
+              void openHttpUrlTo(destination, url).then((result) => {
+                if (!result.ok) report(result.message);
+              });
+            };
+            return requestTerminalLinkAction(mouse, linkActionContext.current, {
               destination: url,
               kind: "url",
               primary: {
-                label: "Open link",
-                run: () => {
-                  void openHttpUrl(url).then((result) => {
-                    if (!result.ok) report(result.message);
-                  });
-                },
+                label: terminalHttpLinkDestinationLabel(destinations.primary),
+                external: destinations.primary === "system",
+                run: runFor(destinations.primary),
               },
-            }),
+              alternate: destinations.alternate
+                ? {
+                    label: terminalHttpLinkDestinationLabel(
+                      destinations.alternate,
+                    ),
+                    external: destinations.alternate === "system",
+                    run: runFor(destinations.alternate),
+                  }
+                : undefined,
+            });
+          },
           clearSelection: () => terminal.clearSelection(),
           report,
         }),
