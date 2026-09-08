@@ -78,7 +78,10 @@ describe("QuickOpen", () => {
     // Fuzzy rank leads; the dir renders dimmed beside the name.
     expect(rows[0].textContent).toContain("bar.ts");
     expect(rows[0].querySelector(".quick-open-dir")?.textContent).toBe("foo/");
-    expect(screen.getByText("2 matching files")).toBeTruthy();
+    expect(screen.getByText("2 files found")).toBeTruthy();
+    // Fork-parity row: per-type file icon, filename, dimmed directory.
+    const firstIcon = rows[0].querySelector("svg");
+    expect(firstIcon).toBeTruthy();
   });
 
   test("recent files lead the empty-query list", async () => {

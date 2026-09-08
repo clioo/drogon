@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, type Ref } from "react";
 import { Command } from "cmdk";
 import {
+  FileText,
   FolderPlus,
   Globe,
   Plus,
@@ -23,6 +24,7 @@ import {
   jumpAgentStatusLabel,
   jumpItemId,
   type JumpBrowserTab,
+  type JumpEditorTab,
   type JumpItem,
   type JumpQuickAction,
   type JumpQuickActionId,
@@ -37,11 +39,14 @@ export interface JumpPaletteProps {
   onQueryChange(query: string): void;
   onClose(): void;
   tabs: JumpTab[];
+  /** Open files in the current workspace (the strip's tabs), like the source's editor workspace-tab rows. */
+  editorTabs: JumpEditorTab[];
   worktrees: JumpWorktree[];
   browserTabs: JumpBrowserTab[];
   quickActions: JumpQuickAction[];
   canCreateWorktree: boolean;
   onSelectSession(id: string): void;
+  onSelectEditorTab(tabId: string): void;
   onSelectWorkspace(id: string): void;
   onSelectBrowserTab(tabId: string): void;
   onQuickAction(id: JumpQuickActionId): void;
@@ -57,6 +62,7 @@ export interface JumpPaletteProps {
  */
 export type JumpSelection =
   | { type: "select-session"; id: string }
+  | { type: "select-editor-tab"; tabId: string }
   | { type: "select-workspace"; id: string }
   | { type: "select-browser-tab"; tabId: string }
   | { type: "quick-action"; id: JumpQuickActionId }
@@ -66,6 +72,8 @@ export function describeJumpSelection(item: JumpItem): JumpSelection {
   switch (item.kind) {
     case "tab":
       return { type: "select-session", id: item.tab.id };
+    case "editor-tab":
+      return { type: "select-editor-tab", tabId: item.tab.tabId };
     case "worktree":
       return { type: "select-workspace", id: item.worktree.workspaceId };
     case "browser-tab":
@@ -90,6 +98,7 @@ export function JumpPalette(props: JumpPaletteProps) {
     () =>
       projectJumpSections({
         tabs: props.tabs,
+        editorTabs: props.editorTabs,
         worktrees: props.worktrees,
         browserTabs: props.browserTabs,
         quickActions: props.quickActions,
@@ -98,6 +107,7 @@ export function JumpPalette(props: JumpPaletteProps) {
       }),
     [
       props.tabs,
+      props.editorTabs,
       props.worktrees,
       props.browserTabs,
       props.quickActions,
@@ -113,6 +123,9 @@ export function JumpPalette(props: JumpPaletteProps) {
     switch (selection.type) {
       case "select-session":
         props.onSelectSession(selection.id);
+        break;
+      case "select-editor-tab":
+        props.onSelectEditorTab(selection.tabId);
         break;
       case "select-workspace":
         props.onSelectWorkspace(selection.id);
@@ -247,6 +260,8 @@ function JumpRow({
   onSelect(item: JumpItem): void;
 }) {
   if (item.kind === "tab") return <JumpTabRow tab={item.tab} onSelect={() => onSelect(item)} />;
+  if (item.kind === "editor-tab")
+    return <JumpEditorTabRow tab={item.tab} onSelect={() => onSelect(item)} />;
   if (item.kind === "worktree")
     return <JumpWorktreeRow worktree={item.worktree} onSelect={() => onSelect(item)} />;
   if (item.kind === "browser-tab")
@@ -283,6 +298,29 @@ function JumpTabRow({ tab, onSelect }: { tab: JumpTab; onSelect(): void }) {
       </span>
       <span className="command-palette-label">{tab.title}</span>
       {tab.isActive && <span className="jump-palette-badge">Current Tab</span>}
+    </Command.Item>
+  );
+}
+
+function JumpEditorTabRow({
+  tab,
+  onSelect,
+}: {
+  tab: JumpEditorTab;
+  onSelect(): void;
+}) {
+  return (
+    <Command.Item
+      value={`editor-tab:${tab.tabId}`}
+      onSelect={onSelect}
+      className="jump-palette-item command-palette-row"
+    >
+      <span className="jump-palette-leading" aria-hidden="true">
+        <FileText className="size-3.5" />
+      </span>
+      <span className="command-palette-label">{tab.name}</span>
+      {tab.isActive && <span className="jump-palette-badge">Current Tab</span>}
+      <span className="command-palette-path">{tab.path}</span>
     </Command.Item>
   );
 }

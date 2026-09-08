@@ -3,12 +3,15 @@ import type { Session } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "../shell/project-adapter";
 import {
   buildJumpBrowserTabs,
+  buildJumpEditorTabs,
   buildJumpQuickActions,
   buildJumpTabs,
   buildJumpWorktrees,
   projectJumpSections,
   rollupAgentState,
 } from "./jump-palette-sections";
+import type { EditorTabState } from "../shell/editor-tab";
+import type { JumpEditorTab } from "./jump-palette-model";
 
 function session(overrides: Partial<Session> & { id: string }): Session {
   return {
@@ -134,6 +137,7 @@ describe("projectJumpSections", () => {
     });
     const { sections, createWorktreeName } = projectJumpSections({
       tabs,
+      editorTabs: [],
       worktrees,
       browserTabs,
       quickActions,
@@ -165,6 +169,7 @@ describe("projectJumpSections", () => {
     );
     const { sections } = projectJumpSections({
       tabs,
+      editorTabs: [],
       worktrees: [],
       browserTabs: [],
       quickActions: [],
@@ -187,6 +192,7 @@ describe("projectJumpSections", () => {
     });
     const { sections, createWorktreeName } = projectJumpSections({
       tabs,
+      editorTabs: [],
       worktrees,
       browserTabs,
       quickActions,
@@ -203,6 +209,7 @@ describe("projectJumpSections", () => {
     const worktrees = buildJumpWorktrees(groups(), [], "ws-1");
     const { createWorktreeName } = projectJumpSections({
       tabs: [],
+      editorTabs: [],
       worktrees,
       browserTabs: [],
       quickActions: [],
@@ -220,5 +227,117 @@ describe("projectJumpSections", () => {
       canAddProject: false,
     });
     expect(quickActions.map((action) => action.id)).toEqual(["settings.open"]);
+  });
+});
+
+function editorState(overrides: Partial<EditorTabState> & { path: string }): EditorTabState {
+  return {
+    tabId: `ws-1::${overrides.path}`,
+    workspaceId: "ws-1",
+    dirty: false,
+    ...overrides,
+  };
+}
+
+describe("buildJumpEditorTabs", () => {
+  test("labels rows with the strip's base name and marks the active tab", () => {
+    const rows = buildJumpEditorTabs(
+      [editorState({ path: "src/app.ts" }), editorState({ path: "README.md" })],
+      "ws-1::README.md",
+    );
+    expect(rows).toEqual([
+      {
+        tabId: "ws-1::src/app.ts",
+        workspaceId: "ws-1",
+        path: "src/app.ts",
+        name: "app.ts",
+        dirty: false,
+        isActive: false,
+      },
+      {
+        tabId: "ws-1::README.md",
+        workspaceId: "ws-1",
+        path: "README.md",
+        name: "README.md",
+        dirty: false,
+        isActive: true,
+      },
+    ]);
+  });
+});
+
+describe("projectJumpSections editor tabs", () => {
+  const editors: JumpEditorTab[] = buildJumpEditorTabs(
+    [editorState({ path: "src/notes.md" }), editorState({ path: "src/app.ts" })],
+    "ws-1::src/app.ts",
+  );
+
+  test("empty query lists open files after sessions, active first", () => {
+    const tabs = buildJumpTabs(
+      [session({ id: "s-1" }), session({ id: "s-2", command: "pi" })],
+      "s-2",
+    );
+    const { sections, resultCount } = projectJumpSections({
+      tabs,
+      editorTabs: editors,
+      worktrees: [],
+      browserTabs: [],
+      quickActions: [],
+      query: "",
+      canCreateWorktree: false,
+    });
+    expect(sections).toHaveLength(1);
+    expect(sections[0].id).toBe("recent-tabs");
+    expect(sections[0].items.map((item) => item.kind)).toEqual([
+      "tab",
+      "tab",
+      "editor-tab",
+      "editor-tab",
+    ]);
+    const kinds = sections[0].items.map((item) =>
+      item.kind === "editor-tab" ? item.tab.tabId : null,
+    );
+    // Active editor tab leads the file rows.
+    expect(kinds.slice(2)).toEqual(["ws-1::src/app.ts", "ws-1::src/notes.md"]);
+    expect(resultCount).toBe(4);
+  });
+
+  test("typed query ranks files with sessions by score", () => {
+    const tabs = buildJumpTabs([session({ id: "s-1", command: "claude" })], "s-1");
+    const { sections } = projectJumpSections({
+      tabs,
+      editorTabs: editors,
+      worktrees: [],
+      browserTabs: [],
+      quickActions: [],
+      query: "notes",
+      canCreateWorktree: false,
+    });
+    const tabSection = sections.find((section) => section.id === "recent-tabs");
+    expect(tabSection?.items).toHaveLength(1);
+    expect(tabSection?.items[0]).toMatchObject({
+      kind: "editor-tab",
+      tab: { path: "src/notes.md" },
+    });
+  });
+
+  test("editor rows share the six-row recent cap", () => {
+    const tabs = buildJumpTabs(
+      Array.from({ length: 5 }, (_, index) =>
+        session({ id: `s-${index}`, command: `cmd-${index}` }),
+      ),
+      "s-0",
+    );
+    const { sections } = projectJumpSections({
+      tabs,
+      editorTabs: editors,
+      worktrees: [],
+      browserTabs: [],
+      quickActions: [],
+      query: "",
+      canCreateWorktree: false,
+    });
+    expect(sections[0].items).toHaveLength(6);
+    expect(sections[0].items[5]).toMatchObject({ kind: "editor-tab" });
   });
 });

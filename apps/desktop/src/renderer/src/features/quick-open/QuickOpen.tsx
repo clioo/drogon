@@ -9,6 +9,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { Command } from "cmdk";
+import { getFileTypeIcon } from "../file-explorer/file-type-icons";
 import type {
   FileBridge,
   FileSearchResult,
@@ -178,7 +179,7 @@ export function QuickOpen(props: QuickOpenProps) {
       }}
     >
       <Command
-        label="Quick open"
+        label="Go to file"
         shouldFilter={false}
         className="command-palette quick-open"
         onKeyDown={(event) => {
@@ -193,14 +194,14 @@ export function QuickOpen(props: QuickOpenProps) {
           autoFocus
           value={query}
           onValueChange={onQueryChange}
-          placeholder="Type a file name…"
+          placeholder="Go to file..."
           className="command-palette-input"
-          aria-label="Quick open"
+          aria-label="Go to file"
         />
-        <Command.List className="command-palette-list" aria-label="Matching files">
+        <Command.List className="command-palette-list" aria-label="Search for a file to open">
           {files === null ? (
             <div className="command-palette-empty" role="status">
-              Searching files…
+              Loading files...
             </div>
           ) : searchError !== "" ? (
             <div className="command-palette-empty" role="alert">
@@ -214,11 +215,12 @@ export function QuickOpen(props: QuickOpenProps) {
             <>
               {searchTruncated && (
                 <div className="command-palette-overflow" role="status">
-                  More files match — keep typing to narrow
+                  More matches may be available. Refine your search to narrow the results.
                 </div>
               )}
               {matches.map((match) => {
                 const { dir, name } = splitQuickOpenPath(match.path);
+                const FileIcon = getFileTypeIcon(match.path);
                 return (
                   <Command.Item
                     key={`file:${match.path}`}
@@ -226,6 +228,7 @@ export function QuickOpen(props: QuickOpenProps) {
                     onSelect={() => openFile(match.path)}
                     className="jump-palette-item command-palette-row quick-open-row"
                   >
+                    <FileIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                     <span className="command-palette-label">{name}</span>
                     {dir !== "" && (
                       <span className="command-palette-path quick-open-dir">{dir}</span>
@@ -249,8 +252,8 @@ export function QuickOpen(props: QuickOpenProps) {
         </div>
         <div aria-live="polite" className="sr-only">
           {files === null
-            ? "Searching files"
-            : `${matches.length} matching files${searchTruncated ? ", more available" : ""}`}
+            ? "Loading files"
+            : `${matches.length} files found${searchTruncated ? ", more available" : ""}`}
         </div>
       </Command>
     </div>

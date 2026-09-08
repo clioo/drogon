@@ -3451,6 +3451,8 @@ export function App() {
         workspaces={workspaces}
         sessions={sessions}
         activeSessionId={active}
+        editorTabs={visibleEditorTabs}
+        activeEditorTabId={activeEditorTabId}
         projectGroups={projectGroups}
         browserTabs={browserTabs}
         activeBrowserTabId={activeBrowserTabId}
@@ -3474,6 +3476,7 @@ export function App() {
           setSessions([]);
         }}
         onSelectSession={selectSessionTab}
+        onSelectEditorTab={selectEditorTab}
         onSelectBrowserTab={selectBrowserTab}
         onOpenFiles={() => showRightExplorer()}
         onOpenBots={() => setRoute(BOTS_ROUTE_ID)}

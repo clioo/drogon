@@ -5,6 +5,7 @@ import * as React from "react";
 import { describeJumpSelection, JumpPalette } from "./JumpPalette";
 import type {
   JumpBrowserTab,
+  JumpEditorTab,
   JumpQuickAction,
   JumpTab,
   JumpWorktree,
@@ -42,6 +43,16 @@ const browserTabs: JumpBrowserTab[] = [
     isActive: false,
   },
 ];
+const editorTabs: JumpEditorTab[] = [
+  {
+    tabId: "ws-1::src/notes.md",
+    workspaceId: "ws-1",
+    path: "src/notes.md",
+    name: "notes.md",
+    dirty: false,
+    isActive: false,
+  },
+];
 const quickActions: JumpQuickAction[] = [
   { id: "settings.open", title: "Open settings", description: "Preferences and shortcuts" },
 ];
@@ -52,11 +63,13 @@ function props(overrides: Partial<React.ComponentProps<typeof JumpPalette>> = {}
     onQueryChange: vi.fn(),
     onClose: vi.fn(),
     tabs,
+    editorTabs,
     worktrees,
     browserTabs,
     quickActions,
     canCreateWorktree: true,
     onSelectSession: vi.fn(),
+    onSelectEditorTab: vi.fn(),
     onSelectWorkspace: vi.fn(),
     onSelectBrowserTab: vi.fn(),
     onQuickAction: vi.fn(),
@@ -117,10 +130,22 @@ describe("JumpPalette", () => {
     expect(p.onClose).toHaveBeenCalled();
   });
 
+  test("open files render beside sessions with their path", () => {
+    render(<JumpPalette {...props()} />);
+    expect(screen.getByText("notes.md")).toBeTruthy();
+    expect(screen.getByText("src/notes.md")).toBeTruthy();
+  });
+
   test("empty query with nothing to show renders the empty state", () => {
     render(
       <JumpPalette
-        {...props({ tabs: [], worktrees: [], browserTabs: [], quickActions: [] })}
+        {...props({
+          tabs: [],
+          editorTabs: [],
+          worktrees: [],
+          browserTabs: [],
+          quickActions: [],
+        })}
       />,
     );
     expect(
@@ -144,7 +169,7 @@ describe("JumpPalette", () => {
 
   test("result count is announced to screen readers", () => {
     render(<JumpPalette {...props()} />);
-    expect(screen.getByText("5 items available")).toBeTruthy();
+    expect(screen.getByText("6 items available")).toBeTruthy();
   });
 });
 
@@ -160,6 +185,9 @@ describe("describeJumpSelection", () => {
     expect(
       describeJumpSelection({ kind: "browser-tab", tab: browserTabs[0] }),
     ).toEqual({ type: "select-browser-tab", tabId: "b-1" });
+    expect(
+      describeJumpSelection({ kind: "editor-tab", tab: editorTabs[0] }),
+    ).toEqual({ type: "select-editor-tab", tabId: "ws-1::src/notes.md" });
     expect(
       describeJumpSelection({ kind: "quick-action", action: quickActions[0] }),
     ).toEqual({ type: "quick-action", id: "settings.open" });
