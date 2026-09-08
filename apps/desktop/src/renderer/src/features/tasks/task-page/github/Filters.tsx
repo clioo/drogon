@@ -1,16 +1,20 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/task-page/github/Filters.tsx. Adaptations for
-// this repo's daemon: the preset row drives the `state` filter
-// (open|closed|all) instead of GitHub search-qualifier presets, the PR
-// filter dropdowns have no daemon counterpart, the new-issue button is the
-// source's disabled state (no create RPC), and the search field commits
-// through the same 300ms debounce.
+// this repo's daemon: the search-qualifier preset row is literal (Open,
+// Assigned to me / Mine); the daemon `state` filter (open|closed|all) keeps
+// its own row below since the fork expresses closed only through query
+// text. The PR filter dropdowns have no daemon counterpart, the new-issue
+// button opens the repo's new-issue page in the system browser (no create
+// RPC exists), and the search field commits through the same 300ms debounce.
 import { cn } from "../../cn";
 import { Search, X, LoaderCircle, RefreshCw, Plus } from "lucide-react";
 import { Input } from "../../../../components/ui/input";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../ui/tooltip";
 import { Button } from "../../../../components/ui/button";
-import { getGitHubStateFilters } from "../../task-page-localized-options";
+import {
+  getGitHubStateFilters,
+  getGitHubTaskKindPresets,
+} from "../../task-page-localized-options";
 import type { TaskPageModelProps } from "../../task-page-model";
 
 export function TaskPageGitHubFilters({
@@ -19,6 +23,8 @@ export function TaskPageGitHubFilters({
   const {
     stateFilter,
     onStateFilter,
+    activeTaskPreset,
+    onSelectTaskPreset,
     taskSearchInput,
     setTaskSearchInput,
     appliedTaskSearch,
@@ -27,6 +33,8 @@ export function TaskPageGitHubFilters({
     handleRefreshGithubTasks,
     githubTasksBusy,
     githubTaskKind,
+    newGitHubIssueUrl,
+    openExternal,
   } = model;
   return (
     // Why: top of the joined GitHub list card — pairs with the
@@ -35,6 +43,26 @@ export function TaskPageGitHubFilters({
       className="flex min-w-0 flex-col gap-2.5 rounded-md rounded-b-none border border-border/50 bg-muted/35 px-3 py-2.5"
       data-contextual-tour-target="tasks-search-presets"
     >
+      <div className="flex flex-wrap gap-1.5">
+        {getGitHubTaskKindPresets(githubTaskKind).map((option) => {
+          const active = activeTaskPreset === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => onSelectTaskPreset(option.id)}
+              className={cn(
+                "rounded-md border px-2.5 py-1 text-xs font-medium transition",
+                active
+                  ? "border-border/50 bg-foreground/90 text-background shadow-xs"
+                  : "border-border/60 bg-background text-foreground shadow-xs hover:bg-muted/60",
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
       <div className="flex flex-wrap gap-1.5">
         {getGitHubStateFilters().map((option) => {
           const active = stateFilter === option.id;
@@ -85,16 +113,24 @@ export function TaskPageGitHubFilters({
         </div>
         <div className="flex shrink-0 items-center gap-2" data-contextual-tour-target="tasks-actions">
           {/* Source copy and placement (Filters.tsx new-issue button): the
-          composer has no daemon counterpart (tasks.* serves no create RPC),
-          so the button stays disabled with the source's label — the same
-          state the source renders when no target repo is selected. */}
+          in-app composer has no daemon counterpart (tasks.* serves no
+          create RPC), so the button opens the repo's new-issue page in
+          the system browser instead — filing stays on GitHub, never a
+          local create. Disabled only with no target repo, like the source. */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="outline"
                 size="icon"
-                disabled
-                title="New GitHub issue is unavailable: this build cannot create GitHub issues"
+                onClick={() => {
+                  if (newGitHubIssueUrl) void openExternal?.(newGitHubIssueUrl);
+                }}
+                disabled={!newGitHubIssueUrl}
+                title={
+                  newGitHubIssueUrl
+                    ? "New GitHub issue"
+                    : "New GitHub issue is unavailable: select a GitHub project first"
+                }
                 aria-label="New GitHub issue"
                 className="size-8 border-border/60 bg-background text-foreground shadow-xs hover:bg-muted/60"
               >

@@ -13,7 +13,7 @@ import type { TaskPageModelProps } from "../../task-page-model";
 export function TaskPageGitHubModeControls({
   model,
 }: TaskPageModelProps): React.JSX.Element | null {
-  const { taskSource, taskPickerRepos, repoSelection, setRepoSelection, selectedGitHubRepoExternalLink, githubModeButtons, githubTaskKind, onSelectGithubTaskKind } =
+  const { taskSource, taskPickerRepos, repoSelection, setRepoSelection, selectedGitHubRepoExternalLink, githubModeButtons, githubTaskKind, onSelectGithubTaskKind, openExternal } =
     model;
   return taskSource === "github" ? (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -64,10 +64,13 @@ export function TaskPageGitHubModeControls({
             variant="outline"
             size="icon"
             onClick={() => {
+              // Why: main denies window.open (setWindowOpenHandler), so the
+              // source's shell.openUrl becomes this repo's shell bridge —
+              // the repo opens in the system browser, like New GitHub issue.
               if (!selectedGitHubRepoExternalLink?.url) {
                 return;
               }
-              window.open(selectedGitHubRepoExternalLink.url, "_blank", "noopener");
+              void openExternal?.(selectedGitHubRepoExternalLink.url);
             }}
             aria-label={
               selectedGitHubRepoExternalLink

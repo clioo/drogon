@@ -16,6 +16,7 @@ import type { GitHubWorkItemLike } from "./task-page-github-work-item-status";
 import type {
   GitHubStateFilterId,
   GitHubTaskKind,
+  GitHubTaskPresetId,
   SourceOption,
 } from "./task-page-localized-options";
 import type { RepoBackedTaskEmptyState } from "./task-page-empty-state";
@@ -121,6 +122,9 @@ export type TaskPageModel = {
   githubMode: "items";
   stateFilter: GitHubStateFilterId;
   onStateFilter: (state: GitHubStateFilterId) => void;
+  /** Source preset pill (fork Filters.tsx row); null once the user types. */
+  activeTaskPreset: GitHubTaskPresetId | null;
+  onSelectTaskPreset: (preset: GitHubTaskPresetId) => void;
   taskSearchInput: string;
   setTaskSearchInput: Dispatch<SetStateAction<string>>;
   appliedTaskSearch: string;
@@ -128,6 +132,10 @@ export type TaskPageModel = {
   handleResetGithubTaskSearch: () => void;
   handleRefreshGithubTasks: () => void;
   githubTasksBusy: boolean;
+  /** `https://github.com/<repo>/issues/new`; null until a repo resolves. */
+  newGitHubIssueUrl: string | null;
+  /** System-browser opener (`window.drogon.shell.openExternal`); null off-app (tests/SSR). */
+  openExternal: TasksOpenExternal | null;
 
   // List state.
   selectedRepos: TaskPickerRepo[];
@@ -156,6 +164,9 @@ export type TaskPageModel = {
 };
 
 export type TaskPageModelProps = { model: TaskPageModel };
+
+/** System-browser opener (the `window.drogon.shell.openExternal` shape). */
+export type TasksOpenExternal = (url: string) => Promise<unknown> | unknown;
 
 /** The page-level container element type shared by the ported frame components. */
 export type TaskPageElement = JSX.Element;

@@ -12,7 +12,14 @@ import { TaskPageGitHubRows } from "./task-page/github/Rows";
 import { TaskPageGitHubList } from "./task-page/github/List";
 import { PaginationBar } from "./task-page/PaginationBar";
 import { TaskPageGitHubFilters } from "./task-page/github/Filters";
-import { getGitHubDefaultQuery, projectTasksDaemonQuery } from "./task-page-localized-options";
+import {
+  buildNewGitHubIssueUrl,
+  getGitHubDefaultPreset,
+  getGitHubDefaultQuery,
+  getGitHubTaskKindPresets,
+  getGitHubTaskPresetQuery,
+  projectTasksDaemonQuery,
+} from "./task-page-localized-options";
 import { toWorkItem, type TaskPageModel } from "./task-page-model";
 import { GITHUB_TASK_GRID_CLASS } from "./task-page-source-context";
 import { TooltipProvider } from "./ui/tooltip";
@@ -56,6 +63,8 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     ],
     showPRManagementColumns: false,
     onStateFilter: () => {},
+    activeTaskPreset: "issues",
+    onSelectTaskPreset: () => {},
     taskSearchInput: "",
     setTaskSearchInput: () => {},
     appliedTaskSearch: "",
@@ -63,6 +72,8 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     handleResetGithubTaskSearch: () => {},
     handleRefreshGithubTasks: () => {},
     githubTasksBusy: false,
+    newGitHubIssueUrl: null,
+    openExternal: () => {},
     selectedRepos: [{ id: "p1", name: "repo", kind: "git" }],
     repoMap: new Map([["p1", { id: "p1", name: "repo", kind: "git", displayName: "repo", badgeColor: "" }]]),
     filteredWorkItems: [],
@@ -328,7 +339,31 @@ describe("pagination bar", () => {
 });
 
 describe("filters row", () => {
-  test("renders the open/closed/all mode controls with the active state", () => {
+  test("renders the source preset pills with the active preset painted", () => {
+    const html = render(
+      createElement(TaskPageGitHubFilters, {
+        model: baseModel({ activeTaskPreset: "my-issues" }),
+      }),
+    );
+    expect(html).toContain(">Open<");
+    expect(html).toContain(">Assigned to me<");
+    expect(html).not.toContain(">Mine<");
+    // the active pill keeps the source's inverted foreground surface
+    expect(html).toContain("bg-foreground/90");
+  });
+
+  test("renders the pulls presets without the issues assignee pill", () => {
+    const html = render(
+      createElement(TaskPageGitHubFilters, {
+        model: baseModel({ githubTaskKind: "pulls", activeTaskPreset: "my-prs" }),
+      }),
+    );
+    expect(html).toContain(">Open<");
+    expect(html).toContain(">Mine<");
+    expect(html).not.toContain(">Assigned to me<");
+  });
+
+  test("renders the open/closed/all state controls with the active state", () => {
     const html = render(
       createElement(TaskPageGitHubFilters, {
         model: baseModel({ stateFilter: "closed" }),
@@ -364,6 +399,20 @@ describe("filters row", () => {
     expect(html).toContain("disabled");
   });
 
+  test("enables the new-issue button once the repo slug resolves", () => {
+    const html = render(
+      createElement(TaskPageGitHubFilters, {
+        model: baseModel({
+          newGitHubIssueUrl: "https://github.com/example/repo/issues/new",
+        }),
+      }),
+    );
+    expect(html).toContain('aria-label="New GitHub issue"');
+    // No `disabled=""` attribute anywhere (the refresh button's
+    // `disabled:` Tailwind variants don't count).
+    expect(html).not.toContain('disabled=""');
+  });
+
   test("uses the source's PR search placeholder in pulls mode", () => {
     const html = render(
       createElement(TaskPageGitHubFilters, {
@@ -371,6 +420,43 @@ describe("filters row", () => {
       }),
     );
     expect(html).toContain("Search GitHub PRs...");
+  });
+});
+
+describe("github preset row (source getGitHubTaskKindPresets)", () => {
+  test("issues presets carry the fork's labels and qualifier queries", () => {
+    expect(getGitHubTaskKindPresets("issues")).toEqual([
+      { id: "issues", label: "Open", query: "is:issue is:open" },
+      { id: "my-issues", label: "Assigned to me", query: "assignee:@me is:issue is:open" },
+    ]);
+  });
+
+  test("pulls presets carry the fork's labels minus Needs review (no daemon data)", () => {
+    expect(getGitHubTaskKindPresets("pulls")).toEqual([
+      { id: "prs", label: "Open", query: "is:pr is:open" },
+      { id: "my-prs", label: "Mine", query: "author:@me is:pr is:open" },
+    ]);
+  });
+
+  test("preset ids resolve back to their queries with kind defaults", () => {
+    expect(getGitHubDefaultPreset("issues")).toBe("issues");
+    expect(getGitHubDefaultPreset("pulls")).toBe("prs");
+    expect(getGitHubTaskPresetQuery("my-issues")).toBe("assignee:@me is:issue is:open");
+    expect(getGitHubTaskPresetQuery("my-prs")).toBe("author:@me is:pr is:open");
+  });
+
+  test("the assignee/author qualifiers survive the daemon projection", () => {
+    // The daemon resolves @me via `gh api user`; the projection must not
+    // strip or rewrite these while implied `is:` qualifiers still strip.
+    expect(projectTasksDaemonQuery(getGitHubTaskPresetQuery("my-issues"))).toBe("assignee:@me");
+    expect(projectTasksDaemonQuery(getGitHubTaskPresetQuery("my-prs"))).toBe("author:@me");
+  });
+
+  test("builds the new-issue URL from the resolved slug", () => {
+    expect(buildNewGitHubIssueUrl("example/repo")).toBe(
+      "https://github.com/example/repo/issues/new",
+    );
+    expect(buildNewGitHubIssueUrl("  ")).toBeNull();
   });
 });
 
