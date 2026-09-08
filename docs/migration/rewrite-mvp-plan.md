@@ -66,7 +66,7 @@ se despachan después. Nada de líderes intermedios ni hojas de hojas.
 
 ## 4. Reglas de orquestación
 
-1. Profundidad 1: un coordinador y hasta diez workers activos con rutas disjuntas (Carlos, 2026-09-08): Sonnet 5 para lo difícil, Pi + Muse Spark 1.3 Contributor para volumen, y dos slots cada uno para Pi + GLM 5.3 Flash (`--provider zai`) y OpenCode + Muse (`-m opencode/muse-spark-1.3-contributor-free`).
+1. Profundidad 1: un coordinador y hasta diez workers activos con rutas disjuntas (Carlos, 2026-09-08): Sonnet 5 para lo difícil, Pi + Muse Spark 1.3 Contributor para volumen, y dos slots cada uno para Pi + GLM 5.3 Flash (`--provider zai`) y OpenCode Go + Muse 1.3 (`-m opencode-go/muse-spark-1.3-contributor`, nunca el Zen gratuito; MCP desactivados vía OPENCODE_CONFIG).
 2. Una tarea es un journey con rutas propias, oráculo y evidencia exigida.
 3. Aceptación por evidencia: tests que fallan antes y pasan después, más
    captura CDP del paquete o del dev real. Un módulo exportado sin consumidor
@@ -137,22 +137,22 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | Fidelidad R8-G2: tokens `:root`/`.dark`, capa base y fuentes Geist + Nerd Symbols del fuente | R8 | GLM 5.3 Flash | fusionada: cabecera del oráculo idéntica (Geist 36px/700), tokens iguales en ambos esquemas, fuentes empaquetadas con OFL | #62 |
 | J7 R8-O1: Automations con lista, editor, detalle e historial del fuente; horarios en hora local | R8 | OpenCode + Muse | fusionada: 43 tests nuevos, oráculo automations PASSED; faltan dashboard de runs y scopes externos | #65 |
 | J1 R8-O2: terminal con terminal.css, tema xterm por esquema, zoom, búsqueda, links, menú contextual y overlay de salida | R8 | OpenCode + Muse | fusionada: 108 tests; la aceptación lee el buffer vía `window.__drogonTerminals` (WebGL); eventos de App pendientes en R10-C | #68 |
-| J1 R9-A: acciones de tarjeta de worktree del fuente (menú contextual, renombrar, borrar con conteos, badges) | R9 | Muse | lanzada | |
+| J1 R9-A: acciones de tarjeta de worktree del fuente (menú contextual, renombrar, borrar con conteos, badges) | R9 | Muse | fusionada: worktree.rename con títulos persistentes, menú, rename inline, diálogo de borrado con conteos, badges | #87 |
 | Fidelidad R9-B: remanente del chrome (Back/Forward en el titlebar, cabecera de Projects, pie del sidebar, Star on GitHub, ⌘J) | R9 | Muse | fusionada: titlebar en la columna del sidebar, Settings sin controles, cabecera/pie/vacío exactos, historial del fuente | #73 |
 | J8 R9-C: bot.delete, ejecuciones programadas en el historial, acciones de cabecera de la tarjeta | R9 | Muse | fusionada; desvío conocido: diálogo de confirmación y etiquetas Scheduled/Manual que el fork no tiene | #67 |
 | Fidelidad R10-A: primitivas UI (shadcn/Radix) del fuente en components/ui | R10 | GLM 5.3 Flash | fusionada: 26 primitivas con recetas idénticas, 43 tests, tw-animate-css importado como el fuente | #77 |
 | J2 R10-B: contenido del panel Source Control del fuente (secciones, filas, commit, sync, Create PR) | R10 | OpenCode + Muse | fusionada: secciones/filas/commit/sync/discard del fuente, git.discard/line_counts/pull/fetch y amend; 1219 tests | #80 |
 | J1/J9 R10-C: eventos del terminal cableados en App, `shell.openExternal`, Mentu como ítem de la barra derecha | R10 | Muse | fusionada: abrir archivo/reiniciar/cerrar desde el terminal, openExternal http(s), Mentu en la barra derecha en el orden del fork | #75 |
 | J2 R10-D: panel Explorer del fuente (árbol, filtro, toolbar, menú contextual, crear/renombrar/borrar) | R10 | Muse | fusionada: FileExplorer del fuente con files.create/rename/delete reales; 1190 tests | #79 |
-| Fidelidad R11-A: remates (glifos de teclas, títulos de paleta, hint de Search, puertos/memoria de la barra, ajuste GPU del terminal) | R11 | GLM 5.3 Flash | lanzada | |
+| Fidelidad R11-A: remates (glifos de teclas, títulos de paleta, hint de Search, puertos/memoria de la barra, ajuste GPU del terminal) | R11 | GLM 5.3 Flash | fusionada; GPU cableado por App con un solo escritor de settings | #88 |
 | J4 R11-B: chrome de la pestaña de browser del fuente (barra de direcciones, navegación, banners, menú, buscar, menú contextual) | R11 | Muse | fusionada: 1278 tests, oráculo browser PASSED; chords con el guest enfocado pendientes | #83 |
 | J11 R11-C: cobertura del paquete sellado para las superficies nuevas (barra derecha, menú +, composer, Automations, Bots, Tasks, Settings, barra) | R11 | OpenCode + Muse | fusionada: bundle sellado 40/40 PASSED sobre main | #82 |
 | J9 R11-D: panel y pestaña de Mentu portados literalmente del fork (Draft, Graph, Metrics, controles de ejecución) sobre las primitivas | R11 | Muse | fusionada: Graph/Run/Evidence/Metrics del fork, verify.commands y step_status corregidos; Open full tab cableado | #84 |
 | J2 R12-A: editor Monaco y visor de diff del fuente (cabecera, autosave, tema, DiffViewer) | R12 | Sonnet | lanzada | |
 | J5 R12-B: jump palette ⌘J y quick open ⌘P del fuente con files.search en el daemon y reveal en Explorer | R12 | Muse | lanzada | |
-| J1 R12-D: interacciones del tab strip (reordenar con dnd-kit, menú contextual, pin, cerrar variantes) | R12 | Muse | lanzada | |
+| J1 R12-D: interacciones del tab strip (reordenar con dnd-kit, menú contextual, pin, cerrar variantes) | R12 | Muse | fusionada: orden persistido por workspace, menú del fuente, pin, renombrar, cierre variantes, chevrons | #90 |
 | J1/J4 R12-E: remates de terminal y browser (política de pegado, popover de enlaces, reinicio con el mismo harness, chords con el guest enfocado) | R12 | GLM 5.3 Flash | lanzada | |
 | J7 R12-F: dashboard de Runs y página de detalle de ejecución de Automations | R12 | GLM 5.3 Flash | lanzada | |
-| J6 R12-G: Tasks en modo pull requests con celdas de revisión/checks/merge y start desde PR | R12 | OpenCode + Muse | lanzada | |
-| J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode + Muse | lanzada | |
-| J10 R12-I: paneles de Settings del fuente (Appearance, General, Agents, Notifications, Git y GitHub) | R12 | Muse | lanzada | |
+| J6 R12-G: Tasks en modo pull requests con celdas de revisión/checks/merge y start desde PR | R12 | OpenCode Go + Muse 1.3 | lanzada (relanzada en el plan Go a petición de Carlos) | |
+| J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode Go + Muse 1.3 | lanzada (relanzada en el plan Go a petición de Carlos) | |
+| J10 R12-I: paneles de Settings del fuente (Appearance, General, Agents, Notifications, Git y GitHub) | R12 | Muse | fusionada: orden de secciones del fuente, sección CLI en Agents con sonda real | #89 |
