@@ -157,10 +157,27 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode Go + Muse 1.3 | fusionada: borrador, inspector en modo edición, familia de validación del fork, mentu.recipe_save; 1448 tests | #94 |
 | J10 R12-I: paneles de Settings del fuente (Appearance, General, Agents, Notifications, Git y GitHub) | R12 | Muse | fusionada: orden de secciones del fuente, sección CLI en Agents con sonda real | #89 |
 | J8 R13-A: exactitud de la página Bots frente al fork (estados, formulario, avatar, controlador) sobre las primitivas | R13 | Muse | fusionada: composición, formulario y controlador del fork; avatar con iniciales (arte no redistribuido) | #97 |
-| J4 R13-B: panel Ports de la barra derecha con puertos del workspace y abrir en pestaña de browser | R13 | GLM 5.3 Flash | lanzada | |
+| J4 R13-B: panel Ports de la barra derecha con puertos del workspace y abrir en pestaña de browser | R13 | GLM 5.3 Flash | fusionada: ítem Ports (⌘⇧I), panel del fuente sobre drogon:workspacePorts, abrir en browser, copiar, diálogo de detalles; 1684 tests | #106 |
 | Fidelidad R13-C: toasts del fuente (sonner) y sus llamadas en las superficies del MVP | R13 | Muse | fusionada: Toaster del fuente y toasts de worktree, source control, terminal, editor y automations con copy exacto | #98 |
-| J1 R14-A: menú de acciones de proyecto del fuente (Project Settings, Remove Project) y filas del menú Options | R14 | Muse | lanzada | |
+| J1 R14-A: menú de acciones de proyecto del fuente (Project Settings, Remove Project) y filas del menú Options | R14 | Muse | fusionada: menú, diálogo de borrado, filas Show y sección Project Settings del fuente; 1701 tests | #107 |
 | Shell R14-B: menú nativo de la app con submenú Appearance, persistencia de bounds de ventana, badge del dock | R14 | GLM 5.3 Flash | lanzada | |
 | J1 R14-C: needs_input y working para OpenCode y Pi con el plugin/extensión de estado del fuente | R14 | Sonnet | lanzada | |
-| J9 R14-D: contenido de evidencia de ejecuciones Mentu en el panel de receta | R14 | OpenCode Go + Muse 1.3 | lanzada | |
-| J10 R14-E: tipografía del terminal del fuente (familia, peso, peso en negrita) | R14 | OpenCode Go + Muse 1.3 | lanzada | |
+| J9 R14-D: contenido de evidencia de ejecuciones Mentu en el panel de receta | R14 | OpenCode Go + Muse 1.3 | fusionada: mentu.run_evidence con lectura acotada, filas de evidencia con stdout/stderr y truncado; 1709 tests | #109 |
+| J10 R14-E: tipografía del terminal del fuente (familia, peso, peso en negrita) | R14 | OpenCode Go + Muse 1.3 | fusionada: familia con búsqueda de fuentes del sistema, pesos 500/700, editor sigue al terminal; 1657 tests | #104 |
+| Infra: ventana en segundo plano para pruebas (`DROGON_BACKGROUND_WINDOW=1`: showInactive, política accessory, sin throttling) y foco emulado por CDP en aceptación/oráculo | R14 | Coordinador | fusionada; comprobado: la app en primer plano nunca cambió durante la aceptación | #105 |
+| QA: manos de accesibilidad para el agente QA (`scripts/qa/drogon-ui.mjs`) y probes sellados al día (paleta "Jump to...", Select de Radix en Mentu, conteo de pestañas por tablist) | R14 | Coordinador | fusionada | #108 |
+| QA ronda 1 sobre main 13d4e38: Pi + dgx-spark (qwen3.8-flash-next) usa la app compilada y reporta issues `qa` | QA | Pi local | lanzada | |
+
+## 7. QA continuo
+
+Un agente QA (Pi con el modelo local `dgx-spark/qwen3.8-flash-next-nvidia-nvfp4`,
+sin costo por token) usa la app compilada desde `origin/main` como un usuario:
+arranca daemon y Electron en ventana de fondo con `scripts/qa/drogon-ui.mjs`,
+lee la pantalla por el árbol de accesibilidad (`snapshot`, `landmarks`) y actúa
+con `click`, `fill`, `type`, `press`, `terminal-text`; nunca escribe scripts de
+Playwright. En cada ronda crea un proyecto web desechable, recorre J1–J12,
+abre un issue por defecto con la etiqueta `qa` en `clioo/drogon` (pasos,
+esperado según el fork, actual, snapshot, captura, sha) y desecha todo lo que
+creó. Se lanza una ronda tras cada uno o dos merges. Los issues `qa` son la
+prioridad: cada uno se convierte en tarea para un worker Pi + Muse 1.3 que
+localiza la experiencia y el código en el fork de referencia y los porta.
