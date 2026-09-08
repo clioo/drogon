@@ -274,10 +274,16 @@ try {
   await page.getByRole("button", { name: "Select folder" }).waitFor();
   report.checks.push("folder-project-renders-row-with-implicit-card");
   // New-workspace composer (Projects header "+"): for a folder project
-  // the composer opens the implicit workspace straight away.
+  // the composer opens the implicit workspace straight away. The project
+  // picker is the fork's type-ahead combobox; "Blank Terminal" keeps the
+  // journey sessionless (the composer auto-picks an available agent, so an
+  // explicit blank pick keeps this fixture from launching a real one).
   await page.getByRole("button", { name: "New workspace", exact: true }).click();
   const composer = page.getByRole("dialog", { name: "Create workspace" });
-  await composer.locator("#composer-project").selectOption({ label: "folder" });
+  await composer.getByRole("combobox", { name: "Project" }).click();
+  await page.getByRole("option", { name: /^folder/ }).click();
+  await composer.locator('[data-agent-combobox-root="true"][role="combobox"]').click();
+  await page.getByRole("option", { name: "Blank Terminal" }).click();
   await composer.getByRole("button", { name: "Create workspace" }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   report.checks.push("composer-opens-folder-implicit-workspace");
@@ -528,9 +534,14 @@ try {
   const worktreeComposer = page.getByRole("dialog", {
     name: "Create workspace",
   });
-  await worktreeComposer.locator("#composer-project").selectOption({ label: "repo" });
+  await worktreeComposer.getByRole("combobox", { name: "Project" }).click();
+  await page.getByRole("option", { name: /^repo/ }).click();
   const gitComposer = page.getByRole("dialog", { name: "Create worktree" });
-  await gitComposer.getByLabel("Branch name").fill("demo-a");
+  await gitComposer.locator('[data-workspace-name-input="true"]').fill("demo-a");
+  await gitComposer
+    .locator('[data-agent-combobox-root="true"][role="combobox"]')
+    .click();
+  await page.getByRole("option", { name: "Blank Terminal" }).click();
   await gitComposer.getByRole("button", { name: "Create worktree" }).click();
   await page.getByRole("button", { name: "Select demo-a" }).waitFor();
   await page.locator(".shell-project-row", { hasText: "repo" }).waitFor();

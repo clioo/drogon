@@ -16,7 +16,6 @@ import {
 } from "../../harness-launch-form";
 import type { ProjectGroup } from "../shell/project-adapter";
 import { normalizeBaseRef, validateWorktreeName } from "../shell/project-forms";
-import { resolvePiModelField } from "../shell/pi-model-mapping";
 
 /**
  * Pure submit decisions for the new-workspace composer (journey J1): a
@@ -55,15 +54,22 @@ export type ComposerAgentSelection = {
   provider: string;
 };
 
-export function emptyComposerAgentSelection(): ComposerAgentSelection {
-  return { harnessId: null, model: "", provider: "" };
-}
-
 /**
- * Preselects the stored default harness when it is actually available;
- * otherwise null (create without a session). Never invents a harness the
+ * The fork's quick-composer agent preselection (`pickQuickWorkspaceAgent`
+ * over TUI_AGENT_AUTO_PICK_ORDER): the stored default harness when it is
+ * actually available; otherwise the first available harness in the source's
+ * auto-pick order (claude, opencode, pi, antigravity — the subset Drogon
+ * ships), then any remaining listed harness; null (the source's "Blank
+ * Terminal") only when nothing is available. Never invents a harness the
  * service did not list.
  */
+const COMPOSER_AGENT_AUTO_PICK_ORDER: HarnessId[] = [
+  "claude",
+  "opencode",
+  "pi",
+  "antigravity",
+];
+
 export function initialComposerAgentId(
   harnesses: Harness[],
   defaultHarnessId: string,
@@ -76,7 +82,11 @@ export function initialComposerAgentId(
     available.some((harness) => harness.harnessId === defaultHarnessId)
   )
     return defaultHarnessId as HarnessId;
-  return null;
+  for (const candidate of COMPOSER_AGENT_AUTO_PICK_ORDER) {
+    if (available.some((harness) => harness.harnessId === candidate))
+      return candidate;
+  }
+  return available[0]?.harnessId ?? null;
 }
 
 /**
@@ -169,25 +179,6 @@ export function resolveComposerSubmit(
       agent: input.agent,
     },
   };
-}
-
-/**
- * Maps the composer's free-text model/provider through the fork's model
- * semantics (#221, same resolver as the "+" launch form): Pi accepts
- * `provider/model`, a bare id, or a pasted `--provider/--model` flags
- * string; other harnesses take a bare model id. Anything else is a
- * fork-copy error for the inline form — never a backend "Invalid model"
- * after the worktree already exists.
- */
-export function resolveComposerAgentModel(
-  agent: ComposerAgentSelection,
-): { model?: string; provider?: string } | { error: string } {
-  if (!agent.harnessId) return {};
-  return resolvePiModelField({
-    harnessId: agent.harnessId,
-    model: agent.model,
-    provider: agent.provider,
-  });
 }
 
 /** Primary action copy: the source's per-kind composer labels. */

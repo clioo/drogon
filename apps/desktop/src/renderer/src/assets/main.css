@@ -2106,11 +2106,6 @@ footer[data-testid="status-bar"] {
   font-size: 12px;
   color: var(--muted-foreground);
 }
-.composer-card {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
 .composer-form {
   display: flex;
   min-width: 0;
@@ -2123,54 +2118,10 @@ footer[data-testid="status-bar"] {
   flex-direction: column;
   gap: 4px;
 }
-.composer-label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
 .composer-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--muted-foreground);
-}
-.composer-add-project {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-}
-.composer-select {
-  height: 36px;
-  width: 100%;
-  min-width: 0;
-  border-radius: calc(var(--radius) * 0.8);
-  border: 1px solid var(--input);
-  background: transparent;
-  padding: 4px 12px;
-  font-size: 14px;
-  color: var(--foreground);
-  outline: none;
-}
-.composer-select:focus-visible {
-  box-shadow: 0 0 0 2px var(--ring);
-}
-.composer-select:disabled {
-  opacity: 0.5;
-}
-.composer-select option {
-  background: var(--background);
-  color: var(--foreground);
-}
-.composer-hint {
-  margin: 0;
-  font-size: 11px;
-  color: var(--muted-foreground);
-}
-.composer-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
 }
 .composer-actions {
   justify-content: flex-end;

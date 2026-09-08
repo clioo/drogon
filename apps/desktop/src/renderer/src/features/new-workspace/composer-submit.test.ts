@@ -9,14 +9,11 @@ import type { ProjectGroup } from "../shell/project-adapter";
 import {
   composerAgentLaunchInput,
   composerPrimaryActionLabel,
-  emptyComposerAgentSelection,
   initialComposerAgentId,
   initialComposerProjectId,
-  resolveComposerAgentModel,
   resolveComposerSubmit,
   type ComposerAgentSelection,
 } from "./composer-submit";
-import { PI_MODEL_ERROR } from "../shell/pi-model-mapping";
 
 function folderProject(): Project {
   return {
@@ -70,7 +67,7 @@ function workspace(): Workspace {
 }
 
 function noAgent(): ComposerAgentSelection {
-  return emptyComposerAgentSelection();
+  return { harnessId: null, model: "", provider: "" };
 }
 
 function piAgent(): ComposerAgentSelection {
@@ -240,8 +237,13 @@ describe("initialComposerAgentId", () => {
     );
   });
 
-  test("falls back to no agent when the default is missing or unavailable", () => {
-    expect(initialComposerAgentId([piHarness()], "claude")).toBeNull();
+  test("the fork's auto-pick order fills in when no default is stored", () => {
+    // pickQuickWorkspaceAgent over TUI_AGENT_AUTO_PICK_ORDER: claude first.
+    expect(initialComposerAgentId([piHarness(), claudeHarness()], "")).toBe(
+      "claude",
+    );
+    expect(initialComposerAgentId([piHarness()], "")).toBe("pi");
+    expect(initialComposerAgentId([piHarness()], "claude")).toBe("pi");
     expect(
       initialComposerAgentId(
         [
@@ -254,7 +256,6 @@ describe("initialComposerAgentId", () => {
       ),
     ).toBeNull();
     expect(initialComposerAgentId([], "")).toBeNull();
-    expect(initialComposerAgentId([piHarness()], "")).toBeNull();
   });
 });
 
@@ -353,71 +354,6 @@ describe("composerAgentLaunchInput", () => {
         "req-1",
       )?.permissionMode,
     ).toBe("unattended");
-  });
-});
-
-describe("resolveComposerAgentModel", () => {
-  test("no harness means no model mapping", () => {
-    expect(resolveComposerAgentModel(noAgent())).toEqual({});
-  });
-
-  test("the issue's flags string maps to provider+model, never raw", () => {
-    expect(
-      resolveComposerAgentModel({
-        harnessId: "pi",
-        model: "--provider dgx-spark --model qwen3.8-flash-next-nvidia-nvfp4",
-        provider: "",
-      }),
-    ).toEqual({
-      provider: "dgx-spark",
-      model: "qwen3.8-flash-next-nvidia-nvfp4",
-    });
-  });
-
-  test("provider/model and bare ids pass through for Pi", () => {
-    expect(
-      resolveComposerAgentModel({
-        harnessId: "pi",
-        model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-        provider: "",
-      }),
-    ).toEqual({ model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4" });
-    expect(
-      resolveComposerAgentModel({
-        harnessId: "pi",
-        model: "qwen3.8-flash",
-        provider: "",
-      }),
-    ).toEqual({ model: "qwen3.8-flash" });
-    expect(
-      resolveComposerAgentModel({ harnessId: "pi", model: "", provider: "" }),
-    ).toEqual({});
-  });
-
-  test("an unmappable Pi model is the fork's error, blocking submit", () => {
-    expect(
-      resolveComposerAgentModel({
-        harnessId: "pi",
-        model: "has spaces",
-        provider: "",
-      }),
-    ).toEqual({ error: PI_MODEL_ERROR });
-  });
-
-  test("non-Pi harnesses take a bare model id; flags are an error", () => {
-    expect(
-      resolveComposerAgentModel({
-        harnessId: "claude",
-        model: "opus",
-        provider: "",
-      }),
-    ).toEqual({ model: "opus" });
-    const flags = resolveComposerAgentModel({
-      harnessId: "claude",
-      model: "--model opus",
-      provider: "",
-    });
-    expect("error" in flags).toBe(true);
   });
 });
 
