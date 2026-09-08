@@ -390,10 +390,22 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
     await page.setViewportSize({ width: 1440, height: 900 });
     // The fork's BrowserPane expects a user flow: click the address bar,
     // then type and press Enter (fill() bypasses the focus handlers that
-    // open the suggestions and arm Enter-to-navigate).
+    // open the suggestions and arm Enter-to-navigate). The focus handlers
+    // can swallow leading keystrokes on a loaded machine (observed:
+    // "p://..." committed and blocked), so verify the value and retype
+    // boundedly — exactly what a user seeing the wrong text would do.
     const address = pane.getByLabel("Address", { exact: true });
-    await address.click({ timeout: 15000 });
-    await address.pressSequentially(guestUrl, { timeout: 15000 });
+    const selectAll = (await page.evaluate(() => navigator.userAgent.includes("Mac")))
+      ? "Meta+A"
+      : "Control+A";
+    let addressValue = "";
+    for (let attempt = 0; attempt < 3 && addressValue !== guestUrl; attempt++) {
+      await address.click({ timeout: 15000 });
+      await page.keyboard.press(selectAll);
+      await address.pressSequentially(guestUrl, { timeout: 15000 });
+      addressValue = await address.inputValue();
+    }
+    assert.equal(addressValue, guestUrl, "the address bar must hold the full guest URL before navigating");
     await page.keyboard.press("Enter");
     // Browser tabs mirror into the shared strip (the pane mounts with
     // hideTabStrip): the strip names the loaded host once navigation
