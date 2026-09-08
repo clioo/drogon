@@ -33,6 +33,7 @@ export function RightSidebar({
   onToggle,
   toggleShortcutLabel,
   panels,
+  hidden,
 }: {
   open: boolean;
   /** Rendered (clamped) panel width. */
@@ -46,6 +47,13 @@ export function RightSidebar({
   toggleShortcutLabel: string;
   /** Keep-alive panel mounts keyed by tab; the host only toggles display. */
   panels: Partial<Record<RightSidebarTab, ReactNode>>;
+  /**
+   * Removes the bar from layout and the accessibility tree without
+   * unmounting it. Full pages (Bots/Tasks/Automations) hide the bar like
+   * the source suppresses it, while every panel mount survives for the
+   * return to the session view.
+   */
+  hidden?: boolean;
 }) {
   const [resizing, setResizing] = useState(false);
   const dragRef = useRef({ startX: 0, startWidth: width });
@@ -82,7 +90,7 @@ export function RightSidebar({
       className={`relative flex-shrink-0 flex flex-row ${
         open ? "overflow-visible" : "overflow-hidden"
       }`}
-      style={open ? { width } : { width: 0 }}
+      style={hidden ? { display: "none" } : open ? { width } : { width: 0 }}
       data-testid="right-sidebar"
     >
       <div
@@ -150,6 +158,15 @@ export function RightSidebar({
                 {panels[item.id] ?? null}
               </div>
             ))}
+            {/* Tabs without an activity-bar button never match an item
+                above. Only the session tab reaches this branch: the fork
+                has no such item, so the panel stays reachable through the
+                session header toggle and the palette instead. */}
+            {!items.some((item) => item.id === effectiveTab) ? (
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {panels[effectiveTab] ?? null}
+              </div>
+            ) : null}
           </div>
         )}
 

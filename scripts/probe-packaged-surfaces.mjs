@@ -84,17 +84,6 @@ async function git(cwd, args) {
   );
 }
 
-/** Turns the registered folder workspace into a dirty git repo. */
-async function prepareChangesRepo(workspace) {
-  const file = "changes-fixture.txt";
-  await git(workspace, ["init"]);
-  await writeFile(path.join(workspace, file), "committed baseline\n");
-  await git(workspace, ["add", file]);
-  await git(workspace, ["commit", "-m", "acceptance baseline"]);
-  await writeFile(path.join(workspace, file), "committed baseline\nunstaged edit\n");
-  return file;
-}
-
 /** A git repo whose origin points at GitHub (never fetched or pushed). */
 async function prepareTasksRepo() {
   const repo = await mkdtemp(path.join(tmpdir(), "drogon-tasks-"));
@@ -192,6 +181,10 @@ async function probeExplorerSurface({ page, workspace, output }) {
   await writeFile(path.join(workspace, file), "sidebar explorer body\n");
   await ensureRightSidebar(page);
   const panel = page.locator('section[aria-label="Files"]');
+  // The tree refreshes off the file watcher; nudge the toolbar's own
+  // Refresh affordance first so a delayed watch event cannot flake this.
+  // (R16-D ported the fork's flat rows: entries are buttons, not treeitems.)
+  await panel.getByRole("button", { name: "Refresh Explorer" }).click();
   await panel.getByRole("button", { name: file, exact: true }).click();
   await waitForEditorRegistered(page, file);
   assert.equal(await readEditorValue(page, file), "sidebar explorer body\n");
@@ -251,14 +244,18 @@ async function probeSourceControlStage({ page, output }) {
 
 /** Session details (right sidebar): empty state or the live session record. */
 async function probeSessionDetails({ page, output, expectSession }) {
-  // Scoped to the activity strip: the terminal toolbar owns a separate
-  // "Toggle session details" control with an overlapping accessible name.
-  await page
-    .locator('[data-testid="right-sidebar"]')
-    .getByRole("button", { name: "Session details" })
-    .click();
+  // R16-B: the activity bar no longer carries a Session details item (the
+  // fork has none); the panel opens from the session header toggle. The
+  // toggle toggles (the old activity button always opened), so only click
+  // when the panel is not already visible from an earlier check.
   const panel = page.locator('aside[aria-label="Session details"]');
-  await panel.waitFor();
+  if (!(await panel.isVisible().catch(() => false))) {
+    await page
+      .locator("header.session-header")
+      .getByRole("button", { name: "Toggle session details", exact: true })
+      .click();
+    await panel.waitFor();
+  }
   if (expectSession) {
     await panel.getByText("Command", { exact: true }).waitFor();
     const text = (await panel.textContent()) ?? "";
@@ -626,7 +623,8 @@ export async function probePackagedSurfaces({
       .click({ timeout: 5000 });
 
   // Palette chord comes from the keybinding registry, never hardcoded:
-  // `worktree.palette`'s darwin binding (Mod+J since R7-I).
+  // `worktree.palette`'s darwin binding (Mod+J since R7-I; the registry
+  // moved to shared/ in R14-B).
   const { chord, key, shift } = paletteOpenChord(
     await readFile(
       path.join(
@@ -685,7 +683,64 @@ export async function probePackagedSurfaces({
   // Changes renders the unstaged edit of the fixture repo. (R6-B hosts it
   // in the right activity bar as "Source Control"; the bare "Changes" name
   // is gone, so the match stays non-exact for the chord suffix.)
-  const changedFile = await prepareChangesRepo(workspace);
+  // R16-B: Source Control is git-only per the fork's activity gating, so
+  // the staging checks run on a git worktree (registered and cut through
+  // the CLI) rather than the folder fixture.
+  const changesRepo = await mkdtemp(path.join(tmpdir(), "drogon-changes-"));
+  await git(changesRepo, ["init"]);
+  await writeFile(path.join(changesRepo, "seed.txt"), "seed\n");
+  await git(changesRepo, ["add", "seed.txt"]);
+  await git(changesRepo, ["commit", "-m", "seed"]);
+  const changesProject = await runCliJson(
+    cli,
+    ["--data-dir", dataDir, "--json", "project", "add", changesRepo, "--name", "changes-git"],
+    { timeout: 30000 },
+  );
+  assert.equal(changesProject.ok, true);
+  const changesProjectId =
+    changesProject.result.project?.id ?? changesProject.result.id;
+  assert.ok(changesProjectId, "project.add must return a project id");
+  const changesWorktree = await runCliJson(
+    cli,
+    ["--data-dir", dataDir, "--json", "worktree", "create", "--project", changesProjectId, "--name", "changes-wt"],
+    { timeout: 60000 },
+  );
+  assert.equal(changesWorktree.ok, true);
+  // The dirty file must live in the worktree checkout (the panel under
+  // test renders the SELECTED workspace's status, not the source repo's).
+  const changesCheckout = changesWorktree.result.path ?? changesWorktree.result.worktree?.path;
+  assert.ok(changesCheckout, "worktree.create must return the checkout path");
+  const changedFile = "changes-fixture.txt";
+  await writeFile(path.join(changesCheckout, changedFile), "committed baseline\n");
+  await git(changesCheckout, ["add", changedFile]);
+  await git(changesCheckout, ["commit", "-m", "acceptance baseline"]);
+  await writeFile(
+    path.join(changesCheckout, changedFile),
+    "committed baseline\nunstaged edit\n",
+  );
+  // The sidebar lists projects from its last load, so pull the
+  // CLI-created project in through Refresh connection, then select its
+  // worktree card so the session view (and its git-gated activity bar)
+  // renders for it.
+  await page.getByRole("button", { name: "Refresh connection", exact: true }).click();
+  await page.waitForFunction(
+    () => document.body.textContent?.includes("changes-wt") ?? false,
+    null,
+    { timeout: 20000 },
+  );
+  if ((await page.getByRole("option", { name: /changes-wt/ }).count()) > 0) {
+    await page.getByRole("option", { name: /changes-wt/ }).first().click();
+  } else {
+    await page.getByRole("button", { name: /changes-wt/ }).first().click();
+  }
+  await page.waitForFunction(
+    () => {
+      const header = document.querySelector("header.session-header strong");
+      return header?.textContent?.includes("changes-wt") ?? false;
+    },
+    null,
+    { timeout: 15000 },
+  );
   const changesNav = page.getByRole("button", { name: /^Source Control( \(.*\))?$/ });
   assert.equal(await changesNav.isEnabled(), true);
   await changesNav.click();
@@ -703,6 +758,9 @@ export async function probePackagedSurfaces({
 
   // Right sidebar: staging the unstaged edit moves it into Staged.
   checks.push(...(await probeSourceControlStage({ page, output })));
+  // Later probes address the folder workspace again.
+  await page.getByRole("button", { name: "Select folder" }).click();
+  await page.getByRole("heading", { name: "Start a session" }).waitFor();
 
   // Right sidebar: with every session closed the details panel is empty.
   checks.push(
@@ -722,9 +780,9 @@ export async function probePackagedSurfaces({
   // Bots renders on a fresh daemon (empty, with the create entry). The
   // panel hydrates from bot.list, so the header resolves late: bound the
   // wait instead of assuming it is instant.
-  // Scope to the inner BotsPanel mount: the route section and the panel
-  // share aria-label="Bots", and the route section stays keep-alive mounted
-  // while hidden, so unscoped locators resolve ambiguously or hidden.
+  // Scope to the inner BotsPanel mount: the page host stays keep-alive
+  // mounted while hidden, so unscoped locators resolve ambiguously or
+  // hidden.
   const gotoBots = async () => {
     await page.getByRole("button", { name: "Bots", exact: true }).click();
     await page.waitForFunction(
@@ -734,9 +792,9 @@ export async function probePackagedSurfaces({
           panel &&
           panel.getBoundingClientRect().width > 0 &&
           getComputedStyle(panel).display !== "none" &&
-          panel.closest("section.terminal-column") !== null &&
+          panel.closest('[data-testid="bots-page-host"]') !== null &&
           getComputedStyle(
-            panel.closest("section.terminal-column"),
+            panel.closest('[data-testid="bots-page-host"]'),
           ).display !== "none"
         );
       },
@@ -842,14 +900,15 @@ export async function probePackagedSurfaces({
     .getByRole("button", { name: "Reveal active workspace", exact: true })
     .waitFor();
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
-  // R8-G1 ported the source task-page: the page lives in the Tasks section,
-  // the project source is the SourceBar select, rows are role=button
-  // "Issue #n", and the list root is the github list scroll container.
-  const tasksList = page.locator('section[aria-label="Tasks"]');
+  // R8-G1 ported the source task-page: the page lives in the Tasks host
+  // (a standalone page, no wrapping region since R16-B), the project
+  // source is the SourceBar select, rows are role=button "Issue #n", and
+  // the list root is the github list scroll container.
+  const tasksList = page.locator('[data-testid="tasks-page-host"]');
   await tasksList.waitFor();
   const repoBase = path.basename(tasksRepo);
   const projectOptionReady = (name) =>
-    [...document.querySelectorAll('section[aria-label="Tasks"] select')].some(
+    [...document.querySelectorAll('[data-testid="tasks-page-host"] select')].some(
       (select) =>
         [...select.options].some((option) =>
           (option.textContent ?? "").includes(name),
@@ -869,7 +928,7 @@ export async function probePackagedSurfaces({
   }
   await page.waitForFunction(
     () => {
-      const root = document.querySelector('section[aria-label="Tasks"]');
+      const root = document.querySelector('[data-testid="tasks-page-host"]');
       if (!root) return false;
       const text = root.textContent ?? "";
       return (

@@ -1,3 +1,9 @@
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
+   src/renderer/src/components/bots/BotsPage.tsx (page composition: header
+   with Back/title/refresh/New Bot, action-error alert, create form, then
+   loading / error / list / empty states). Adaptation below is structural
+   only where noted (detail view, read-only gates); the root is the fork's
+   `<main>`, never wrapped in an outer region. */
 import { ArrowLeft, Plus, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { BotsPanelProps } from "./bots-panel-contracts";
@@ -92,9 +98,10 @@ export function BotsPanel({
   const botRows = projectBotRows(effective.bots);
 
   return (
-    <section
+    // Fork root (BotsPage.tsx): `<main>`, no outer region — the page host
+    // renders this directly, so any wrapper here would double the landmark.
+    <main
       data-testid="bots-panel"
-      aria-label="Bots"
       className="flex h-full min-h-0 flex-col bg-background text-foreground"
     >
       <header className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-3">
@@ -299,7 +306,7 @@ export function BotsPanel({
           )}
         </div>
       </div>
-    </section>
+    </main>
   );
 }
 

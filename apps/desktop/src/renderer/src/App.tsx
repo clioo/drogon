@@ -86,6 +86,7 @@ import {
   initialViewHistory,
   pushView,
 } from "./features/shell/view-history";
+import { isFullPageRoute } from "./features/shell/page-host";
 import {
   loadSidebarOpen,
   loadSidebarWidth,
@@ -827,10 +828,15 @@ export function App() {
     botsScopeWorkspace,
     botsScopeLocale,
   ]);
-  // Right sidebar activity items (source order, MVP set): Explorer always,
-  // Source Control while git.v1 is advertised, Session details always. A
-  // stored tab that is not visible renders the fallback without losing
-  // the stored route.
+  // Right sidebar activity items (source order and gating): Explorer
+  // always; Mentu while a workspace is selected and mentu.v1 is
+  // advertised; Source Control for git workspaces while git.v1 is
+  // advertised; Ports while a workspace is selected (R13-B's local panel —
+  // the source gates its bar item sshOnly, which no local workspace ever
+  // satisfies). No Session details item: the source has none, so that
+  // panel stays reachable only through the session header toggle and the
+  // palette. A stored tab that is not visible renders the fallback
+  // without losing the stored route.
   const chordPlatform = resolveChordPlatform(
     typeof navigator !== "undefined" ? navigator.userAgent : "",
   );
@@ -853,14 +859,37 @@ export function App() {
             chordPlatform,
           ),
         }),
-        { gitAvailable: gitPanelAvailable, mentuAvailable: mentuPanelAvailable },
+        {
+          // Source kind comes from the selected workspace (the fork's
+          // isFolder/isFolderWorkspace); Drogon has no SSH workspaces, so
+          // isSshRepo is reserved for that future and always false.
+          isFolder: current?.kind !== "git",
+          isFolderWorkspace: current?.kind === "folder",
+          isSshRepo: false,
+          hasActiveWorktree: selected !== "",
+          gitAvailable: gitPanelAvailable,
+          mentuAvailable: mentuPanelAvailable,
+        },
       ),
-    [chordPlatform, gitPanelAvailable, mentuPanelAvailable],
+    [
+      chordPlatform,
+      gitPanelAvailable,
+      mentuPanelAvailable,
+      current?.kind,
+      selected,
+    ],
   );
-  const rightEffective = resolveRightSidebarEffectiveTab(
-    normalizeRightSidebarTab(rightSidebarTab),
-    rightItems.map((item) => item.id),
-  );
+  // The session tab has no activity-bar button (the source has no such
+  // item) but stays explicitly routable for the session header toggle and
+  // the palette; every other stored tab resolves against the visible set.
+  const storedRightTab = normalizeRightSidebarTab(rightSidebarTab);
+  const rightEffective =
+    storedRightTab === "session"
+      ? storedRightTab
+      : resolveRightSidebarEffectiveTab(
+          storedRightTab,
+          rightItems.map((item) => item.id),
+        );
   const renderedRightWidth = clampRightSidebarPanelWidth(
     rightSidebarWidth,
     typeof window !== "undefined" ? window.innerWidth : null,
@@ -1134,6 +1163,20 @@ export function App() {
     botsAlive && filesProps && botsScopeMatch
       ? resolveRoute(panelRegistry, BOTS_ROUTE_ID)
       : null;
+  // Full pages replace the session view, like the fork's ActivePage: no
+  // session header above them, no terminal column or right sidebar beside
+  // them — only the page's own chrome. The conditions mirror the mounts
+  // below, so a routed-but-unavailable page falls back to the session
+  // view instead of rendering an empty page. Back/Close return through
+  // the view history, which restores the previous session entry.
+  const botsPageActive =
+    route === BOTS_ROUTE_ID && botsAlive && filesProps !== null;
+  const automationsPageActive =
+    route === AUTOMATIONS_ROUTE_ID && automationsAlive && filesProps !== null;
+  const tasksPageActive = route === TASKS_ROUTE_ID && tasksAlive;
+  const fullPageActive =
+    isFullPageRoute(route) &&
+    (botsPageActive || automationsPageActive || tasksPageActive);
   const checked = <T,>(value: Result<T>): T => {
     if (!value.ok) throw new Error(value.error.message);
     return value.result;
@@ -1405,12 +1448,10 @@ export function App() {
     // Always re-render: the keep-alive flags below are render-computed.
     setRightTick((tick) => tick + 1);
   };
-  const selectRightTab = (tab: RightSidebarTab) => {
-    // The session tab's visible choice persists through the inspector
-    // setting, exactly like the header toggle below.
-    if (tab === "session") changeInspector(true);
-    else openRightSidebarOn(tab);
-  };
+  // Activity-bar tabs route directly; the session tab (no activity
+  // button since the source has none) routes through the session header
+  // toggle and the palette instead, both of which call openRightSidebarOn.
+  const selectRightTab = (tab: RightSidebarTab) => openRightSidebarOn(tab);
   const showRightExplorer = () => openRightSidebarOn("explorer");
   const showRightSourceControl = () => openRightSidebarOn("source-control");
   const toggleRightSidebar = () => {
@@ -2345,7 +2386,10 @@ export function App() {
             onOpenSettings={openSettings}
           />
         ) : null}
-        <main className="session-area" style={{ position: "relative" }}>
+        {/* Plain div, not main: the fork mounts no outer main landmark —
+            full pages bring their own `<main>` (Bots/Automations) or none
+            (Tasks), and the session view has none either. */}
+        <div className="session-area" style={{ position: "relative" }}>
           {route === SETTINGS_ROUTE_ID ? (
             <div className="session-layout">
               <section
@@ -2408,6 +2452,12 @@ export function App() {
             />
           ) : (
             <>
+          {/* Standalone pages (Bots/Tasks/Automations) replace the session
+              view outright — the fork renders no session header above
+              them, so the header and the connection banner unmount here
+              (both stateless) while the layout below only hides. */}
+          {!fullPageActive && (
+            <>
           <header className="session-header" style={{ position: "relative" }}>
             <div className="workspace-heading">
               <strong>{current?.name ?? "Your workspace"}</strong>
@@ -2461,6 +2511,8 @@ export function App() {
                 Retry
               </Button>
             </div>
+          )}
+            </>
           )}
           <div className="session-layout">
             <section
@@ -2639,11 +2691,14 @@ export function App() {
               </div>
             </section>
             {tasksAlive && status ? (
+              // No aria-label: an unnamed section is generic (invisible to
+              // the accessibility tree), so the page owns its landmarks
+              // exactly like the fork — no `region Tasks` wrapper.
               <section
                 ref={tasksSectionRef}
                 tabIndex={-1}
                 className="terminal-column"
-                aria-label="Tasks"
+                data-testid="tasks-page-host"
                 style={{
                   display: route === TASKS_ROUTE_ID ? undefined : "none",
                 }}
@@ -2671,11 +2726,14 @@ export function App() {
               </section>
             ) : null}
             {botsAlive && filesProps ? (
+              // No aria-label (see the Tasks host above): the Bots page
+              // root is already `<main>`, so any label here would nest
+              // `region Bots` around it — the double wrap from #128.
               <section
                 ref={botsSectionRef}
                 tabIndex={-1}
                 className="terminal-column"
-                aria-label="Bots"
+                data-testid="bots-page-host"
                 style={{
                   display: route === BOTS_ROUTE_ID ? undefined : "none",
                 }}
@@ -2728,11 +2786,13 @@ export function App() {
               </section>
             ) : null}
             {automationsAlive && filesProps ? (
+              // No aria-label (see the Tasks host above): the Automations
+              // surface already renders the fork's `<main>`.
               <section
                 ref={automationsSectionRef}
                 tabIndex={-1}
                 className="terminal-column"
-                aria-label="Automations"
+                data-testid="automations-page-host"
                 style={{
                   display: route === AUTOMATIONS_ROUTE_ID ? undefined : "none",
                 }}
@@ -2766,6 +2826,7 @@ export function App() {
             ) : null}
             <RightSidebar
               open={rightSidebarOpen}
+              hidden={fullPageActive}
               width={renderedRightWidth}
               onWidthChange={changeRightSidebarWidth}
               items={rightItems}
@@ -2871,7 +2932,7 @@ export function App() {
           </div>
             </>
           )}
-        </main>
+        </div>
         </div>
       </div>
       <CommandPaletteHost
