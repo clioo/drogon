@@ -212,6 +212,11 @@ and `store/slices/tabs/{tabs-tab-order,tabs-bulk-close-actions}.ts`, all at the
 pinned source revision above. Each ported file keeps the MIT notice. `@dnd-kit/core`
 and `@dnd-kit/sortable` (MIT) are packaged dependencies.
 
+The Tasks pull-request mode in `apps/desktop/src/renderer/src/features/tasks/`
+ports Orca's `components/task-page/github/{ModeControls,Rows,StatusCell,ReviewCell,ChecksCell,MergeCell,ReviewerPicker,AssigneesCell,Avatars}.tsx`
+(read-only variants), all at the pinned source revision above. Each ported file
+keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
