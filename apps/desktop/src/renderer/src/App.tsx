@@ -120,6 +120,12 @@ import type { ProjectAction } from "./features/shell/ProjectList";
 import { createUntitledMarkdown } from "./features/shell/untitled-markdown";
 import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import { openCommandPalette } from "./features/shell/open-palette";
+import {
+  buildHarnessLaunchRetry,
+  harnessLaunchForRetry,
+  rememberHarnessLaunch,
+  type HarnessLaunchMemory,
+} from "./features/shell/harness-launch-retry";
 import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
 import { projectTerminalRestartLaunch } from "./features/terminal/terminal-restart-launch";
@@ -1454,6 +1460,18 @@ export function App() {
   // session — each pane gates on its own verdict and dismissed nonce.
   const [recoveryOfferNonce, setRecoveryOfferNonce] = useState(0);
   const retryOfferPendingRef = useRef<Set<string> | null>(null);
+  // R16-AJ2 follow-up (issue #221): Retry must relaunch a failed harness
+  // launch with the SAME inputs (provider/model/prompt). The session
+  // record carries only harnessId, so every launch App makes remembers
+  // its exact input under the resulting session id; retry and the pane's
+  // Restart overlay replay it through startHarnessTracked/restart below.
+  const harnessLaunchMemoryRef = useRef<HarnessLaunchMemory>(new Map());
+  const startHarnessTracked = async (input: HarnessLaunchInput) => {
+    const result = await window.drogon.startHarness(input);
+    if (result.ok)
+      rememberHarnessLaunch(harnessLaunchMemoryRef.current, result.result, input);
+    return result;
+  };
   const retryConnection = useCallback(() => {
     retryOfferPendingRef.current = new Set(
       sessionsRef.current
@@ -1462,6 +1480,25 @@ export function App() {
     );
     void refresh();
   }, [refresh]);
+  // Per-tab retry (the strip hands over the clicked session): a harness
+  // session with remembered inputs relaunches them — a refresh cannot
+  // revive a launch that failed — by reusing the restart path, which owns
+  // the stub cleanup, split repair and activation. Plain shells and
+  // sessions App never launched keep the refresh/reconnect affordance.
+  const retrySession = useCallback(
+    (item: Session) => {
+      if (harnessLaunchForRetry(harnessLaunchMemoryRef.current, item)) {
+        window.dispatchEvent(
+          new CustomEvent<TerminalRestartDetail>(TERMINAL_RESTART_EVENT, {
+            detail: { sessionId: item.id, workspaceId: item.workspaceId },
+          }),
+        );
+        return;
+      }
+      retryConnection();
+    },
+    [retryConnection],
+  );
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -1874,7 +1911,7 @@ export function App() {
     if (!launch) return null;
     let session: Session;
     try {
-      const result = await window.drogon.startHarness(launch);
+      const result = await startHarnessTracked(launch);
       if (!result.ok) return result.error.message;
       session = result.result;
     } catch {
@@ -2497,7 +2534,7 @@ export function App() {
     };
     let launched = false;
     return action(async () => {
-      const result = checked(await window.drogon.startHarness(input));
+      const result = checked(await startHarnessTracked(input));
       launched = true;
       if (!contextMatches(captured, contextRef.current)) return;
       setSessions((items) => appendOrReplaceSession(items, result));
@@ -2874,6 +2911,11 @@ export function App() {
           .catch(() => {});
       };
       const launch = projectTerminalRestartLaunch(prior, detail.workspaceId);
+      // R16-AJ2 follow-up (issue #221): the record alone carries only the
+      // harness id; a remembered launch input replays provider/model/prompt
+      // verbatim, so Restart/Retry relaunch the same agent command like the
+      // fork's error overlay (it re-runs the pane's recorded startup).
+      const remembered = harnessLaunchMemoryRef.current.get(detail.sessionId);
       void action(async () => {
         const captured = {
           hostId: contextRef.current.hostId,
@@ -2881,19 +2923,23 @@ export function App() {
         };
         const result = checked(
           launch.kind === "harness"
-            ? await window.drogon.startHarness({
-                workspaceId: launch.workspaceId,
-                harnessId: launch.harnessId,
-                // R16-AO (#231): a restart relaunches the same harness, so
-                // it keeps the stored default permission mode (Claude Code
-                // restarts in yolo, like a fresh menu launch) instead of a
-                // hardcoded manual mode.
-                permissionMode: resolveHarnessPermissionMode(
-                  launch.harnessId,
-                  harnessDefaults,
-                ),
-                requestId: crypto.randomUUID(),
-              })
+            ? await startHarnessTracked(
+                remembered
+                  ? buildHarnessLaunchRetry(remembered, crypto.randomUUID())
+                  : {
+                      workspaceId: launch.workspaceId,
+                      harnessId: launch.harnessId,
+                      // R16-AO (#231): a restart relaunches the same harness, so
+                      // it keeps the stored default permission mode (Claude Code
+                      // restarts in yolo, like a fresh menu launch) instead of a
+                      // hardcoded manual mode.
+                      permissionMode: resolveHarnessPermissionMode(
+                        launch.harnessId,
+                        harnessDefaults,
+                      ),
+                      requestId: crypto.randomUUID(),
+                    },
+              )
             : await window.drogon.start(
                 launch.workspaceId,
                 launch.kind === "shell"
@@ -2904,6 +2950,9 @@ export function App() {
         // A late reply for a host/workspace no longer current is skipped,
         // exactly like create() above; then the new tab activates.
         if (!contextMatches(captured, contextRef.current)) return;
+        // The replacement owns the launch memory now; the superseded
+        // session's entry must not grow the map unbounded.
+        harnessLaunchMemoryRef.current.delete(detail.sessionId);
         // R16-N: a split pane restarts in place — the replacement session
         // takes the old pane's slot (and focus) instead of opening a tab,
         // and the exited pane leaves the list so it never resurfaces.
@@ -3534,7 +3583,7 @@ export function App() {
                 onCloseSession={(item) => void closeTabSession(item)}
                 onCloseBrowserTab={(tabId) => void closeBrowserTab(tabId)}
                 onCloseEditorTab={closeEditorTab}
-                onRetry={() => void retryConnection()}
+                onRetrySession={retrySession}
                 onCreateTerminal={() => void create()}
                 onLaunchHarness={launchHarness}
                 onNewBrowserTab={() => void newBrowserTab()}
@@ -4026,7 +4075,7 @@ export function App() {
           onLaunchAgent={async (launch) => {
             let session: Session;
             try {
-              const result = await window.drogon.startHarness(launch);
+              const result = await startHarnessTracked(launch);
               if (!result.ok) return result.error.message;
               session = result.result;
             } catch {

@@ -43,6 +43,7 @@ function renderStrip(overrides: {
   onSelectEditorTab?: (id: string) => void;
   onCloseEditorTab?: (id: string) => void;
   onCopyText?: (text: string) => void;
+  onRetrySession?: (session: Session) => void;
 }) {
   const onOrderChange = overrides.onOrderChange ?? (() => {});
   const onCommitTitle = overrides.onCommitTitle ?? (() => {});
@@ -80,7 +81,7 @@ function renderStrip(overrides: {
       onCloseSession={() => {}}
       onCloseBrowserTab={() => {}}
       onCloseEditorTab={overrides.onCloseEditorTab ?? (() => {})}
-      onRetry={() => {}}
+      onRetrySession={overrides.onRetrySession ?? (() => {})}
       onCreateTerminal={() => {}}
       onLaunchHarness={() => Promise.resolve(false)}
       onNewBrowserTab={() => {}}
@@ -124,8 +125,27 @@ describe("TabBar strip order", () => {
     expect(onOrderChange).toHaveBeenCalledWith(["b", "a", "c"]);
   });
 
+  // R16-AJ2 follow-up (#221): the per-tab retry hands the clicked session
+  // to App so a failed harness launch can relaunch with the same inputs.
+  it("passes the clicked session to the retry affordance", () => {
+    const onRetrySession = vi.fn();
+    const dead: Session = {
+      ...session("b"),
+      harnessId: "pi",
+      verdict: "unverifiable",
+    };
+    renderStrip({
+      sessions: [session("a"), dead],
+      onRetrySession,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry connection" }));
+    expect(onRetrySession).toHaveBeenCalledTimes(1);
+    expect(onRetrySession).toHaveBeenCalledWith(dead);
+  });
+
   it("keeps plain-arrow roving navigation (accept-desktop contract)", () => {
     const onSelect = vi.fn();
+    const onRetry = vi.fn();
     const { unmount } = renderStrip({});
     unmount();
     render(
@@ -161,7 +181,7 @@ describe("TabBar strip order", () => {
         onCloseSession={() => {}}
         onCloseBrowserTab={() => {}}
         onCloseEditorTab={() => {}}
-        onRetry={() => {}}
+        onRetrySession={onRetry}
         onCreateTerminal={() => {}}
         onLaunchHarness={() => Promise.resolve(false)}
         onNewBrowserTab={() => {}}
