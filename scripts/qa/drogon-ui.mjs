@@ -10,6 +10,7 @@
 //   node scripts/qa/drogon-ui.mjs click-text <text> [--exact]
 //   node scripts/qa/drogon-ui.mjs fill <role> <name> <text>
 //   node scripts/qa/drogon-ui.mjs type <text>      # keyboard.type into the focused element
+//   node scripts/qa/drogon-ui.mjs paste <text>     # clipboard paste into the focused element (byte-exact replacement)
 //   node scripts/qa/drogon-ui.mjs press <key>      # keyboard.press, e.g. Meta+J, Enter, Escape, Meta+Shift+E
 //   node scripts/qa/drogon-ui.mjs wait <role> <name> [--timeout ms] [--hidden]
 //   node scripts/qa/drogon-ui.mjs text [--selector <css>]
@@ -441,6 +442,39 @@ const commands = {
     await withPage(async (page) => {
       await page.keyboard.type(text);
       console.log(`typed ${text.length} chars`);
+    });
+  },
+  // clioo/drogon#315: `type` injects real keystrokes, so the editor's
+  // language features transform the input exactly as they would for a
+  // human typist — auto-close pairs (< inserts <>), auto-surround of a
+  // selection (select-all + typing < wraps the document and leaves a
+  // stray auto-closed >), and async auto-indent can each add characters
+  // the caller's string did not contain (verified against vanilla
+  // monaco-editor 0.55.1, the exact version the orca-drogon fork ships).
+  // That is faithful product behavior, not a save bug: the save path
+  // writes the model verbatim. For steps that mean "the document becomes
+  // EXACTLY this text" (whole-document replacement), use `paste`: the
+  // clipboard path inserts bytes verbatim, like a user's paste.
+  async paste() {
+    const [text] = positional;
+    if (text === undefined) die("usage: paste <text>");
+    await withPage(async (page) => {
+      const cdp = await page.context().newCDPSession(page);
+      try {
+        // file:// is an opaque origin: grant without an origin (best
+        // effort; Electron often allows clipboard writes already).
+        await cdp.send("Browser.grantPermissions", {
+          permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+        });
+      } catch {
+        // Fall through: navigator.clipboard may still be writable.
+      }
+      await page.evaluate(async (value) => {
+        await navigator.clipboard.writeText(value);
+      }, text);
+      const mod = process.platform === "darwin" ? "Meta" : "Control";
+      await page.keyboard.press(`${mod}+v`);
+      console.log(`pasted ${text.length} chars`);
     });
   },
   async press() {
