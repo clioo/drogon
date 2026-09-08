@@ -3,10 +3,11 @@
 // src/renderer/src/components/right-sidebar/local-port-row.tsx: same DOM,
 // Tailwind classes, copy, icons, keyboard/blur handling and ARIA.
 // Adapted: clipboard goes through navigator.clipboard (no window.api.ui in
-// this repo); the Stop Process action is omitted — this repo's bridge has
-// no workspacePorts.kill channel yet.
+// this repo); the Stop Process action calls this repo's
+// workspacePorts.kill bridge (R16-BC) instead of the source's
+// workspacePorts.kill IPC.
 import React, { useCallback } from 'react'
-import { Copy, ExternalLink, Info, Server } from 'lucide-react'
+import { Copy, ExternalLink, Info, Server, Trash2 } from 'lucide-react'
 import { getPortOpenBrowserTooltipLabel, shouldOpenPortInAppBrowser } from './workspace-port-open'
 import { addressForPort } from './workspace-port-urls'
 import { Button } from '../../components/ui/button'
@@ -29,10 +30,12 @@ const LOCAL_PORT_MENU_LABEL_CLASS = 'px-2 py-1 text-[11px] font-semibold text-mu
 
 export function LocalPortRow({
   port,
+  onStop,
   onShowDetails,
   onOpenInBrowser
 }: {
   port: WorkspacePortRow
+  onStop: (port: WorkspacePortRow) => void
   onShowDetails: (port: WorkspacePortRow) => void
   onOpenInBrowser: (port: WorkspacePortRow, event?: React.MouseEvent<HTMLButtonElement>) => void
 }): React.JSX.Element {
@@ -73,12 +76,26 @@ export function LocalPortRow({
     [handleOpenBrowser]
   )
 
+  const handleStopButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      onStop(port)
+      if (event.detail > 0) {
+        event.currentTarget.blur()
+      }
+    },
+    [onStop, port]
+  )
+
   const processLabel = port.processName ?? (port.pid ? `PID ${port.pid}` : 'Unknown process')
   const address = addressForPort(port)
   const ownerLabel =
     port.kind === 'workspace' ? (port.owner?.displayName ?? 'Workspace') : 'Unassigned'
   const openBrowserLabel = 'Open in Browser'
   const confidenceLabel = port.kind === 'workspace' ? (port.owner?.confidence === 'cwd' ? 'cwd' : 'command') : null
+  // Source parity: only workspace rows with a known pid are stoppable, and
+  // the app never offers to stop itself.
+  const canStopProcess =
+    port.kind === 'workspace' && Boolean(port.pid) && port.processName !== 'Electron'
 
   return (
     <ContextMenu>
@@ -145,6 +162,25 @@ export function LocalPortRow({
                 {`Copy ${address}`}
               </TooltipContent>
             </Tooltip>
+            {canStopProcess && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={handleStopButtonClick}
+                    aria-label="Stop Process"
+                  >
+                    <Trash2 size={13} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={4}>
+                  Stop Process
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
         </TooltipProvider>
       </div>
@@ -176,6 +212,16 @@ export function LocalPortRow({
         <ContextMenuItem className={LOCAL_PORT_MENU_ITEM_CLASS} onSelect={() => onShowDetails(port)}>
           <Info size={13} />
           Show Details
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          className={LOCAL_PORT_MENU_ITEM_CLASS}
+          variant="destructive"
+          disabled={!canStopProcess}
+          onSelect={() => onStop(port)}
+        >
+          <Trash2 size={13} />
+          Stop Process
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

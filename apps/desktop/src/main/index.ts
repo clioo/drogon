@@ -329,6 +329,9 @@ function registerBridge() {
                   workspaceId: string;
                   command?: string;
                   args?: string[];
+                  // Additive (R16-BC, #275): explorer "Open in Terminal"
+                  // spawn directory; the daemon validates containment.
+                  cwd?: string;
                 });
           return callNative("session.start", {
             workspaceId: launch.workspaceId,
@@ -341,6 +344,7 @@ function registerBridge() {
                       : process.env.SHELL || "/bin/sh",
                 }),
             ...(launch.args !== undefined ? { args: launch.args } : { args: [] }),
+            ...(launch.cwd !== undefined ? { cwd: launch.cwd } : {}),
             cols: 80,
             rows: 24,
           });
@@ -411,6 +415,12 @@ function registerBridge() {
           return listWorkspacePorts(
             (value as { workspaceId: string }).workspaceId,
           );
+        // R16-BC (additive): Ports-panel "Stop Process". The daemon
+        // re-proves ownership (session pid or workspace-attributed
+        // listener) before signalling; refusals come back as a domain
+        // `{ ok: false, reason }` result, not a transport error.
+        case "workspacePortsKill":
+          return callNative("ports.kill", value as object);
         default:
           return invalid;
       }

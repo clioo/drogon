@@ -45,7 +45,13 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke(
       "drogon:start",
       launch
-        ? { workspaceId: value, ...(launch.command !== undefined ? { command: launch.command } : {}), ...(launch.args !== undefined ? { args: launch.args } : {}) }
+        ? {
+            workspaceId: value,
+            ...(launch.command !== undefined ? { command: launch.command } : {}),
+            ...(launch.args !== undefined ? { args: launch.args } : {}),
+            // Additive (R16-BC, #275): explicit spawn directory.
+            ...(launch.cwd !== undefined ? { cwd: launch.cwd } : {}),
+          }
         : value,
     ),
   read: (value) => ipcRenderer.invoke("drogon:read", value),
@@ -63,8 +69,11 @@ const bridge: DesktopBridge = {
   usage: usageBridge,
   // R13-B Ports panel (additive); rows are read by main/usage's
   // listWorkspacePorts behind the drogon:workspacePorts channel.
+  // Additive (R16-BC): "Stop Process" rides its own gated channel to the
+  // daemon's ports.kill.
   workspacePorts: {
     list: (value) => ipcRenderer.invoke("drogon:workspacePorts", value),
+    kill: (value) => ipcRenderer.invoke("drogon:workspacePortsKill", value),
   },
   settings,
   // R16-AD3 (#241): additive nativeTheme relay (optional namespace; main

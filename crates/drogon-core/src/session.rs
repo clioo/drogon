@@ -662,6 +662,14 @@ impl SessionHandle {
     pub(crate) fn is_exited(&self) -> bool {
         self.exit_code.lock().unwrap().is_some()
     }
+
+    /// The retained PTY child's OS pid, when the platform exposes one.
+    /// Used by `ports.kill` to prove a pid belongs to this workspace's
+    /// session before signalling it — the handle, never persisted state,
+    /// is the ownership evidence (same model as `session.stop`).
+    pub(crate) fn child_process_id(&self) -> Option<u32> {
+        self.child.lock().unwrap().process_id()
+    }
 }
 
 pub(crate) fn read(
@@ -1104,6 +1112,175 @@ mod headless_completion_tests {
             read_payload(&engine, "bot_responsibility_runs", "rr:bare")["hostObservation"],
             "live"
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod session_start_cwd_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn open_engine() -> (tempfile::TempDir, crate::Engine) {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = crate::Engine::open(dir.path()).unwrap();
+        (dir, engine)
+    }
+
+    fn invoke(engine: &crate::Engine, id: &str, method: &str, params: Value) -> Value {
+        let response = engine.dispatch(crate::Request {
+            protocol: crate::PROTOCOL_VERSION,
+            request_id: id.into(),
+            auth: None,
+            method: method.into(),
+            params,
+        });
+        assert!(response.ok, "{method} failed: {:?}", response.error);
+        response.result.unwrap()
+    }
+
+    fn workspace_with_subdir() -> (tempfile::TempDir, crate::Engine, String, String) {
+        let (dir, engine) = open_engine();
+        let workspace = invoke(
+            &engine,
+            "w",
+            "workspace.register",
+            json!({ "path": dir.path() }),
+        );
+        let workspace_id = workspace["id"].as_str().unwrap().to_string();
+        let subdir = dir.path().join("src");
+        std::fs::create_dir(&subdir).unwrap();
+        (
+            dir,
+            engine,
+            workspace_id,
+            subdir.to_string_lossy().into_owned(),
+        )
+    }
+
+    fn start(engine: &crate::Engine, params: Value) -> crate::Response {
+        engine.dispatch(crate::Request {
+            protocol: crate::PROTOCOL_VERSION,
+            request_id: "s".into(),
+            auth: None,
+            method: "session.start".into(),
+            params,
+        })
+    }
+
+    /// Reads the retained ring until output appears (bounded), returning
+    /// the decoded text.
+    fn read_output(engine: &crate::Engine, session_id: &str, incarnation: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let response = engine.dispatch(crate::Request {
+                protocol: crate::PROTOCOL_VERSION,
+                request_id: "r".into(),
+                auth: None,
+                method: "session.read".into(),
+                params: json!({
+                    "sessionId": session_id,
+                    "incarnation": incarnation,
+                    "cursor": 0
+                }),
+            });
+            let result = response.result.expect("session.read ok");
+            let data = result["dataBase64"].as_str().unwrap_or("");
+            let text = base64_decode(data).expect("valid base64 from session.read");
+            if !text.is_empty() {
+                return String::from_utf8_lossy(&text).into_owned();
+            }
+            assert!(Instant::now() < deadline, "no PTY output observed");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    #[test]
+    fn explicit_cwd_spawn_the_session_in_the_row_directory() {
+        let (_dir, engine, workspace_id, subdir) = workspace_with_subdir();
+        let session = invoke(
+            &engine,
+            "s",
+            "session.start",
+            json!({
+                "workspaceId": workspace_id,
+                "command": "/bin/pwd",
+                "args": [],
+                "cwd": subdir,
+            }),
+        );
+        let output = read_output(
+            &engine,
+            session["id"].as_str().unwrap(),
+            session["incarnation"].as_str().unwrap(),
+        );
+        // macOS canonicalizes /var -> /private/var; the spawn cwd is the
+        // canonical form, so compare against that.
+        let canonical = std::fs::canonicalize(&subdir).unwrap();
+        assert!(
+            output.trim_end() == canonical.to_string_lossy(),
+            "pwd output {output:?} should be the row directory {canonical:?}"
+        );
+    }
+
+    #[test]
+    fn absent_cwd_keeps_the_workspace_root_spawn() {
+        let (dir, engine, workspace_id, _subdir) = workspace_with_subdir();
+        let session = invoke(
+            &engine,
+            "s",
+            "session.start",
+            json!({
+                "workspaceId": workspace_id,
+                "command": "/bin/pwd",
+                "args": [],
+            }),
+        );
+        let output = read_output(
+            &engine,
+            session["id"].as_str().unwrap(),
+            session["incarnation"].as_str().unwrap(),
+        );
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        assert!(
+            output.trim_end() == root.to_string_lossy(),
+            "pwd output {output:?} should be the workspace root {root:?}"
+        );
+    }
+
+    #[test]
+    fn cwd_outside_the_workspace_root_is_refused() {
+        let (_dir, engine, workspace_id, _subdir) = workspace_with_subdir();
+        let outside = tempfile::tempdir().unwrap();
+        let response = start(
+            &engine,
+            json!({
+                "workspaceId": workspace_id,
+                "command": "/bin/pwd",
+                "args": [],
+                "cwd": outside.path(),
+            }),
+        );
+        assert!(!response.ok, "outside-root cwd must not spawn");
+        let message = response.error.unwrap().message;
+        assert!(message.contains("workspace root"), "{message}");
+    }
+
+    #[test]
+    fn nonexistent_or_relative_cwd_is_refused() {
+        let (_dir, engine, workspace_id, subdir) = workspace_with_subdir();
+        let missing = start(
+            &engine,
+            json!({
+                "workspaceId": workspace_id,
+                "cwd": format!("{subdir}/nope"),
+            }),
+        );
+        assert!(!missing.ok, "nonexistent cwd must not spawn");
+        let relative = start(
+            &engine,
+            json!({ "workspaceId": workspace_id, "cwd": "src" }),
+        );
+        assert!(!relative.ok, "relative cwd must not spawn");
     }
 }
 

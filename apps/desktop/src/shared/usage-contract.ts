@@ -164,8 +164,34 @@ export const workspacePortsSnapshotSchema = z.object({
 });
 export type WorkspacePortsSnapshot = z.infer<typeof workspacePortsSnapshotSchema>;
 
+// Additive (R16-BC), fork `WorkspacePortKillRequest`/`WorkspacePortKillResult`
+// (src/shared/workspace-ports.ts): the row action ships the row's pid+port;
+// the daemon's authorization re-scan is what makes the pid signallable.
+export const workspacePortKillInputSchema = z.object({
+  workspaceId: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[^\x00-\x1f\x7f]+$/),
+  pid: z.number().int().positive().max(4_194_304),
+  port: z.number().int().min(1).max(65535),
+});
+export type WorkspacePortKillInput = z.infer<typeof workspacePortKillInputSchema>;
+
+export const workspacePortKillResultSchema = z.object({
+  ok: z.boolean(),
+  reason: z.string().max(300).optional(),
+});
+export type WorkspacePortKillResult = z.infer<typeof workspacePortKillResultSchema>;
+
 export interface WorkspacePortsBridge {
   list(input: WorkspacePortsInput): Promise<UsageResult<WorkspacePortsSnapshot>>;
+  /**
+   * Additive (R16-BC): "Stop Process". The daemon re-proves ownership
+   * (session pid or workspace-attributed listener) before signalling, so
+   * the result is a domain outcome, not a transport error.
+   */
+  kill(input: WorkspacePortKillInput): Promise<UsageResult<WorkspacePortKillResult>>;
 }
 
 declare module "./session-contract" {

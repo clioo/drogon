@@ -6,8 +6,10 @@
    useFileExplorerKeys.ts (key ownership: explorer-scoped arrows/Enter/F2/
    Delete, editable-target opt-out). Adapted: no zustand store (props and
    local state), no search/Contents view (names filter only), no virtualizer
-   (plain list — MVP workspaces are small), no drag/drop, import, undo/redo
-   or watchers (poll on manual refresh only). */
+   (plain list — MVP workspaces are small), no import, undo/redo or watchers
+   (poll on manual refresh only). Internal drag-and-drop move landed with
+   R16-BC (fork useFileExplorerDragDrop/useFileExplorerMoveDrop parity);
+   native OS file drops (import) and drag edge auto-scroll stay out. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Result } from "../../../../shared/session-contract";
@@ -25,6 +27,14 @@ import {
   projectNameFilter,
   type ExplorerNode,
 } from "./tree-model";
+import {
+  WORKSPACE_FILE_PATH_MIME,
+  WORKSPACE_FILE_PATHS_MIME,
+  encodeWorkspaceFilePaths,
+  getWorkspaceFileDragRejectionMessage,
+  readWorkspaceFileDragPaths,
+} from "./workspace-file-drag";
+import { createMultiSelectDragGhost } from "./file-explorer-multi-drag-image";
 import {
   defaultPrefsStorage,
   loadShowDotfiles,
@@ -214,6 +224,13 @@ export function FileExplorer({
   const [showRefreshSpinner, setShowRefreshSpinner] = useState(false);
   const [revealTick, setRevealTick] = useState(0);
   const [filterReloadTick, setFilterReloadTick] = useState(0);
+  // Internal drag-and-drop (R16-BC, fork useFileExplorerDragDrop): the
+  // source path, the highlighted drop dir, and the root-level drag-over
+  // flag. Native OS file drops (import) stay out of MVP scope.
+  const [dragSourcePath, setDragSourcePath] = useState<string | null>(null);
+  const [dropTargetDir, setDropTargetDir] = useState<string | null>(null);
+  const [isRootDragOver, setIsRootDragOver] = useState(false);
+  const rootDragCounterRef = useRef(0);
 
   const generation = useRef(0);
   const filterGeneration = useRef(0);
@@ -858,6 +875,152 @@ export function FileExplorer({
     [rowsByPath],
   );
 
+  // --- Internal drag-and-drop (R16-BC) -----------------------------------
+
+  const clearDragState = useCallback(() => {
+    rootDragCounterRef.current = 0;
+    setIsRootDragOver(false);
+    setDropTargetDir(null);
+    setDragSourcePath(null);
+  }, []);
+
+  // Why document-level: a drop on a row stops propagation inside the row
+  // handler, and cancelled drags fire no explorer event at all — either
+  // way the visual state must not survive the gesture (fork
+  // useFileExplorerDragDrop's global cleanup, same rationale).
+  useEffect(() => {
+    const finish = () => clearDragState();
+    document.addEventListener("drop", finish, true);
+    document.addEventListener("dragend", finish, true);
+    window.addEventListener("blur", finish);
+    return () => {
+      document.removeEventListener("drop", finish, true);
+      document.removeEventListener("dragend", finish, true);
+      window.removeEventListener("blur", finish);
+    };
+  }, [clearDragState]);
+
+  // Fork useFileExplorerMoveDrop (guard copy verbatim): no-op drops onto
+  // the same directory or into the dragged subtree itself, then move via
+  // the daemon's rename (a move IS a rename across directories); the
+  // optimistic cache swap and expansion-follow mirror the rename flow, and
+  // both parents reload afterwards to reconcile with the daemon's truth.
+  const handleMoveDrop = useCallback(
+    (sourcePath: string, destDir: string) => {
+      const live = sourceRef.current;
+      if (!live?.rename) {
+        setActionError("Moving needs a newer daemon with files.rename support.");
+        return;
+      }
+      const fileName = sourcePath.split("/").pop() ?? sourcePath;
+      const sourceDir = parentDirOf(sourcePath);
+      setDropTargetDir(null);
+      if (sourceDir === destDir) return;
+      if (destDir === sourcePath || destDir.startsWith(`${sourcePath}/`)) return;
+      const newPath = destDir === "" ? fileName : `${destDir}/${fileName}`;
+      const node = rowsByPath.get(sourcePath);
+      const gen = generation.current;
+      void live.rename(sourcePath, newPath).then(
+        (result) => {
+          if (generation.current !== gen) return;
+          if (!result.ok) {
+            setActionError(result.error.message);
+            return;
+          }
+          setChildren((prev) => renamePathInCache(prev, sourcePath, newPath, fileName));
+          setExpanded((prev) => {
+            if (!prev.has(sourcePath)) return prev;
+            const next = new Set(prev);
+            next.delete(sourcePath);
+            next.add(newPath);
+            for (const open of [...next]) {
+              if (open !== newPath && isPathOrDescendant(open, sourcePath)) {
+                next.delete(open);
+                next.add(`${newPath}${open.slice(sourcePath.length)}`);
+              }
+            }
+            return next;
+          });
+          loadDir(sourceDir, gen, showDotfilesRef.current);
+          loadDir(destDir, gen, showDotfilesRef.current);
+          const moved: ExplorerNode = {
+            name: fileName,
+            path: newPath,
+            isDirectory: node?.isDirectory ?? false,
+            depth: node?.depth ?? 0,
+          };
+          selectReplace(newPath);
+          onSelectRef.current?.(moved);
+        },
+        (failure: unknown) => {
+          if (generation.current !== gen) return;
+          setActionError(failure instanceof Error ? failure.message : "The move could not be completed.");
+        },
+      );
+    },
+    [rowsByPath, loadDir, selectReplace],
+  );
+
+  const handleRowDragStart = useCallback(
+    (node: ExplorerNode, event: React.DragEvent<HTMLButtonElement>) => {
+      const paths =
+        selectedPaths.has(node.path) && selectedPaths.size > 1
+          ? [...selectedPaths]
+          : [node.path];
+      event.dataTransfer.setData(WORKSPACE_FILE_PATH_MIME, node.path);
+      if (paths.length > 1) {
+        event.dataTransfer.setData(WORKSPACE_FILE_PATHS_MIME, encodeWorkspaceFilePaths(paths));
+        const rowW = event.currentTarget.getBoundingClientRect().width;
+        const ghost = createMultiSelectDragGhost(paths, rowW);
+        document.body.appendChild(ghost);
+        event.dataTransfer.setDragImage(ghost, 12, 12);
+        window.setTimeout(() => ghost.remove(), 0);
+      }
+      event.dataTransfer.effectAllowed = "copyMove";
+      setDragSourcePath(node.path);
+    },
+    [selectedPaths],
+  );
+
+  // Root container handlers: drops on empty space move to the root dir,
+  // tracked with enter/leave counters (nested children fire pairs).
+  const rootDragHandlers = {
+    onDragOver: useCallback((event: React.DragEvent) => {
+      if (!event.dataTransfer.types.includes(WORKSPACE_FILE_PATH_MIME)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    }, []),
+    onDragEnter: useCallback((event: React.DragEvent) => {
+      if (!event.dataTransfer.types.includes(WORKSPACE_FILE_PATH_MIME)) return;
+      event.preventDefault();
+      rootDragCounterRef.current += 1;
+      setIsRootDragOver(true);
+    }, []),
+    onDragLeave: useCallback(() => {
+      rootDragCounterRef.current -= 1;
+      if (rootDragCounterRef.current <= 0) {
+        rootDragCounterRef.current = 0;
+        setIsRootDragOver(false);
+      }
+    }, []),
+    onDrop: useCallback(
+      (event: React.DragEvent) => {
+        if (!event.dataTransfer.types.includes(WORKSPACE_FILE_PATH_MIME)) return;
+        event.preventDefault();
+        clearDragState();
+        const dragPaths = readWorkspaceFileDragPaths(event.dataTransfer);
+        if (dragPaths.status === "rejected") {
+          setActionError(getWorkspaceFileDragRejectionMessage(dragPaths.reason));
+          return;
+        }
+        for (const sourcePath of dragPaths.paths) {
+          handleMoveDrop(sourcePath, "");
+        }
+      },
+      [clearDragState, handleMoveDrop],
+    ),
+  };
+
   const handleRowAction = useCallback(
     (id: RowMenuItemId, node: ExplorerNode, paths: readonly string[]) => {
       const targets = nodesForPaths(paths);
@@ -1140,6 +1303,17 @@ export function FileExplorer({
             hasFilter={hasFilter}
             filterLoading={filterLoading}
             filterError={filterError}
+            dnd={{
+              dragSourcePath,
+              dropTargetDir,
+              isRootDragOver,
+              onRowDragStart: handleRowDragStart,
+              onRowDragSourceChange: setDragSourcePath,
+              onRowDragTargetChange: setDropTargetDir,
+              onRowDragExpandDir: toggleDir,
+              onRowMoveDrop: handleMoveDrop,
+              rootDrag: rootDragHandlers,
+            }}
             onSelectRow={openNode}
             onToggleDir={toggleDir}
             onMoveSelection={moveSelection}

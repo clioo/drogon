@@ -31,7 +31,7 @@ function row(overrides: Partial<WorkspacePortRow> = {}): WorkspacePortRow {
 
 describe("LocalPortRow actions", () => {
   it("labels the row like the source and shows process and address", () => {
-    render(<LocalPortRow port={row()} onShowDetails={() => {}} onOpenInBrowser={() => {}} />);
+    render(<LocalPortRow port={row()} onStop={() => {}} onShowDetails={() => {}} onOpenInBrowser={() => {}} />);
     expect(screen.getByLabelText("Port 3000 menu")).toBeTruthy();
     expect(screen.getByText(":3000")).toBeTruthy();
     expect(screen.getByText("python3")).toBeTruthy();
@@ -46,23 +46,53 @@ describe("LocalPortRow actions", () => {
       value: { writeText },
       configurable: true,
     });
-    render(<LocalPortRow port={row()} onShowDetails={() => {}} onOpenInBrowser={() => {}} />);
+    render(<LocalPortRow port={row()} onStop={() => {}} onShowDetails={() => {}} onOpenInBrowser={() => {}} />);
     fireEvent.click(screen.getByLabelText("Copy 127.0.0.1:3000"));
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("127.0.0.1:3000"));
   });
 
   it("Open in Browser hands the port to the open action", () => {
     const onOpenInBrowser = vi.fn();
-    render(<LocalPortRow port={row()} onShowDetails={() => {}} onOpenInBrowser={onOpenInBrowser} />);
+    render(<LocalPortRow port={row()} onStop={() => {}} onShowDetails={() => {}} onOpenInBrowser={onOpenInBrowser} />);
     fireEvent.click(screen.getByLabelText("Open in Browser"));
     expect(onOpenInBrowser).toHaveBeenCalledTimes(1);
     expect(onOpenInBrowser.mock.calls[0][0].port).toBe(3000);
+  });
+
+  it("workspace rows with a pid offer Stop Process and hand the port to onStop", () => {
+    const onStop = vi.fn();
+    render(<LocalPortRow port={row()} onStop={onStop} onShowDetails={() => {}} onOpenInBrowser={() => {}} />);
+    fireEvent.click(screen.getByLabelText("Stop Process"));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onStop.mock.calls[0][0].port).toBe(3000);
+  });
+
+  it("no Stop Process affordance for external rows or the app itself", () => {
+    const { rerender } = render(
+      <LocalPortRow
+        port={row({ kind: "external", owner: null })}
+        onStop={() => {}}
+        onShowDetails={() => {}}
+        onOpenInBrowser={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText("Stop Process")).toBeNull();
+    rerender(
+      <LocalPortRow
+        port={row({ processName: "Electron" })}
+        onStop={() => {}}
+        onShowDetails={() => {}}
+        onOpenInBrowser={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText("Stop Process")).toBeNull();
   });
 
   it("external rows show the Unassigned owner without workspace evidence", () => {
     render(
       <LocalPortRow
         port={row({ kind: "external", owner: null, processName: null })}
+        onStop={() => {}}
         onShowDetails={() => {}}
         onOpenInBrowser={() => {}}
       />,
@@ -82,6 +112,7 @@ describe("LocalPortSection", () => {
         ports={[row()]}
         collapsed={false}
         onToggle={() => {}}
+        onStopPort={() => {}}
         onShowDetails={() => {}}
         onOpenInBrowser={() => {}}
       />,
@@ -97,6 +128,7 @@ describe("LocalPortSection", () => {
         ports={[row()]}
         collapsed
         onToggle={() => {}}
+        onStopPort={() => {}}
         onShowDetails={() => {}}
         onOpenInBrowser={() => {}}
       />,
@@ -114,6 +146,7 @@ describe("LocalPortSection", () => {
         emptyText="No ports detected"
         collapsed={false}
         onToggle={() => {}}
+        onStopPort={() => {}}
         onShowDetails={() => {}}
         onOpenInBrowser={() => {}}
       />,
