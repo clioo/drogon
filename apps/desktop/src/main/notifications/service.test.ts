@@ -116,6 +116,30 @@ describe("createNeedsInputWatcher", () => {
     expect(states[1].event).toMatchObject({ sessionId: "a", agentState: "working" });
   });
 
+  it("forwards activity transitions without notifying (idle shell leaves working)", async () => {
+    const window = fakeWindow();
+    const idle: WatchedSession = {
+      ...waiting("a"),
+      agentState: "idle",
+      agentStateAt: "2026-09-07T12:00:00Z",
+    };
+    const working: WatchedSession = { ...waiting("a"), agentState: "working" };
+    const deps = depsFor(window, [
+      { sessions: [working] },
+      { sessions: [idle] },
+      { sessions: [idle] },
+    ]);
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    await watcher.tick();
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(0);
+    const states = window.sent.filter((item) => item.channel === "ui:session-state-changed");
+    expect(states).toHaveLength(1);
+    expect(states[0].event).toMatchObject({ sessionId: "a", agentState: "idle" });
+  });
+
   it("still forwards badge transitions while the toggle is off", async () => {
     const window = fakeWindow();
     const deps = depsFor(window, [{ sessions: [waiting("a")] }], {
