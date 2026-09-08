@@ -246,14 +246,19 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | R16-AV: barrido de tema claro y anchos 760–1440 en todas las páginas | R16 | luna | fusionada (#283: 11 archivos, 1440/1100/900/760 claro+oscuro) | #283 |
 | R16-AW: #264 cuelgue del renderer con Forward en el browser, #259 Restart daemon en el paquete | R16 | luna | fusionada (#288); R16-AW2 #279 guests locales siguen pintando (#291); R16-AW3 (luna, lanzada): regresión CI #290 `accept:core-cli` (segundo daemon debe rechazar el data-dir con prontitud) | #288 #291 |
 | R16-AY: barra de estado J12 (medidores de uso, awake, contadores, clics) | R16 | GLM | fusionada (#281); restos en R16-AY2 (GLM, lanzada): popover de uso, CTA vacío, awake Auto, clics de segmento | #281 |
-| R16-AS: Source Control de extremo a extremo (J2) coordinado con R16-R2 | R16 | Kimi | lanzada | |
+| R16-AS: Source Control de extremo a extremo (J2) coordinado con R16-R2 | R16 | Kimi | fusionada (#295: J2 verificado, 6 divergencias corregidas — grupos, diff, commit, sync, gating de Create PR) | #295 |
 | R16-BA: README, CHANGELOG, guion de demo y metadatos de licencia para el hackathon | R16 | Kimi | fusionada (#280) | #280 |
 | Instalación: bundle 1d83f98 (sellado 40/40) el 2026-09-08 ~02:1x — icono propio, Bots/Tasks rápidos | R16 | Coordinador | reemplazada | |
 | Instalación: bundle f1f690f (sellado 40/40) el 2026-09-08 ~04:5x — Forward del browser sin cuelgue, Restart daemon en el paquete (#288); siguiente tras R16-AR2 (#285) | R16 | Coordinador | instalado | |
 | QA funcional rondas 4–6 y QA de UI rondas 7–8 (luna); Muse agotado (429) desde ~02:15 | QA | luna | en curso | #268 |
-| R16-AX2: #270 Close de Tasks, #272 tope de 18 sesiones, #278 acción New worktree bloqueada | R16 | GLM | fusionada (#287: #270 #272); #278 continúa en R16-AX3 (GLM, lanzada) | #287 |
+| R16-AX2: #270 Close de Tasks, #272 tope de 18 sesiones, #278 acción New worktree bloqueada | R16 | GLM | fusionada (#287: #270 #272; #292 R16-AX3: #278 acción New worktree de la tarjeta de proyecto) | #287 #292 |
 | QA-UI ronda 8: estados de oráculo de fidelidad r8 (`compare-surfaces.mjs`) | QA | luna | fusionada (#289); ronda 9 en curso (luna) | #289 |
+| R16-BD: activos de demo — fixture determinista (`scripts/demo-fixture.mjs`, teardown idempotente, sin modelo), guion `docs/demo-script.md` corregido contra la UI, screenshots claro/oscuro | R16 | luna | fusionada | #296 |
 | R16-BB: aceptación sellada cubriendo los 12 journeys (bots/automations/tasks/mentu/agent-state con el modelo local) | R16 | Kimi | lanzada | |
+| R16-BE: #188 responsabilidades programadas y run-now usan la política de harness del bot (resolución en el despacho; precedencia pin > bot > defaults) | R16 | GLM | lanzada | |
+| R16-BF: paridad de latencia de arranque y apertura de páginas con orca-drogon en el paquete (medición vs CDP 9445, presupuestos, `scripts/perf/measure-navigation.mjs`) | R16 | Muse | lanzada (cuota de Muse recuperada 05:50) | |
+| R16-BG: estado de agente para Codex (working/needs_input/idle) vía CODEX_HOME gestionado por sesión, sin tocar ~/.codex; verificación con binario stub, sin inferencia pagada | R16 | luna | lanzada | |
+| Cierre: #186 cerrado (arreglado en #227), #279 cerrado (#291), #278 cerrado (#292); R16-AV cerrado tras #283 (worker_done nunca llegó; worktree barrido) | R16 | Coordinador | hecho | |
 | QA funcional ronda 7 (guion de demo + README sobre el paquete) y QA de UI ronda 8 (48 estados) | QA | luna | en curso | |
 
 ## 7. QA continuo
