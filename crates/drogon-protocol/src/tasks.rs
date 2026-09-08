@@ -56,6 +56,17 @@ pub enum TasksListMode {
     Pulls,
 }
 
+/// Which git remote supplies the GitHub repo a tasks query reads. Absent
+/// means `auto`: upstream when the project has a GitHub upstream remote,
+/// else origin — the reference client's fork-contribution heuristic
+/// (`resolvePrWorkItemSource`: upstream-first for issues and PRs alike).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TasksRemoteSource {
+    Origin,
+    Upstream,
+}
+
 /// PR lifecycle states. `gh pr list --json` reports `OPEN`/`CLOSED`/`MERGED`
 /// plus the `isDraft` flag; the core maps those onto these.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -207,12 +218,25 @@ pub struct TasksListParams {
     pub per_page: Option<u64>,
     #[serde(default)]
     pub mode: Option<TasksListMode>,
+    /// Which remote's repo the list reads; absent is `auto`
+    /// (upstream-first, see [`TasksRemoteSource`]).
+    #[serde(default)]
+    pub source: Option<TasksRemoteSource>,
+}
+
+/// Validated `tasks.list` inputs, defaults applied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidatedTasksList {
+    pub state: TaskIssueState,
+    pub query: Option<String>,
+    pub page: u64,
+    pub per_page: u64,
+    pub mode: TasksListMode,
+    pub source: Option<TasksRemoteSource>,
 }
 
 impl TasksListParams {
-    pub fn validate(
-        &self,
-    ) -> Result<(TaskIssueState, Option<String>, u64, u64, TasksListMode), RpcError> {
+    pub fn validate(&self) -> Result<ValidatedTasksList, RpcError> {
         validate_project_id(&self.project_id)?;
         let state = self.state.unwrap_or_default();
         let query = match &self.query {
@@ -240,7 +264,14 @@ impl TasksListParams {
                 "Invalid tasks page size.",
             ));
         }
-        Ok((state, query, page, per_page, self.mode.unwrap_or_default()))
+        Ok(ValidatedTasksList {
+            state,
+            query,
+            page,
+            per_page,
+            mode: self.mode.unwrap_or_default(),
+            source: self.source,
+        })
     }
 }
 
@@ -249,12 +280,17 @@ impl TasksListParams {
 pub struct TasksShowParams {
     pub project_id: String,
     pub number: u64,
+    /// Same remote override as `tasks.list` (the row shown came from that
+    /// remote's repo when the user pinned a source).
+    #[serde(default)]
+    pub source: Option<TasksRemoteSource>,
 }
 
 impl TasksShowParams {
-    pub fn validate(&self) -> Result<(), RpcError> {
+    pub fn validate(&self) -> Result<Option<TasksRemoteSource>, RpcError> {
         validate_project_id(&self.project_id)?;
-        validate_issue_number(self.number)
+        validate_issue_number(self.number)?;
+        Ok(self.source)
     }
 }
 
@@ -265,13 +301,17 @@ pub struct TasksStartParams {
     pub number: u64,
     #[serde(default)]
     pub mode: Option<TasksListMode>,
+    /// Same remote override as `tasks.list`: the issue/PR being started was
+    /// listed from that remote's repo.
+    #[serde(default)]
+    pub source: Option<TasksRemoteSource>,
 }
 
 impl TasksStartParams {
-    pub fn validate(&self) -> Result<TasksListMode, RpcError> {
+    pub fn validate(&self) -> Result<(TasksListMode, Option<TasksRemoteSource>), RpcError> {
         validate_project_id(&self.project_id)?;
         validate_issue_number(self.number)?;
-        Ok(self.mode.unwrap_or_default())
+        Ok((self.mode.unwrap_or_default(), self.source))
     }
 }
 
@@ -285,6 +325,32 @@ impl TasksLinksParams {
     pub fn validate(&self) -> Result<(), RpcError> {
         validate_project_id(&self.project_id)
     }
+}
+
+/// `tasks.remotes`: the project's GitHub remote topology, local git config
+/// only — never a network probe. Feeds the renderer's issue-source
+/// selector (Upstream/Origin pills).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TasksRemotesParams {
+    pub project_id: String,
+}
+
+impl TasksRemotesParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_project_id(&self.project_id)
+    }
+}
+
+/// GitHub `owner/repo` slug per remote name; a key is absent (never null)
+/// when that remote is missing or does not point at github.com.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TasksRemotesResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -385,12 +451,13 @@ mod tests {
         assert_eq!(TaskIssueState::All.as_gh_flag(), "all");
         let params: TasksListParams =
             serde_json::from_value(json!({"projectId": "p1", "future": true})).unwrap();
-        let (state, _, page, per_page, mode) = params.validate().unwrap();
-        assert_eq!(state, TaskIssueState::Open);
-        assert_eq!(mode, TasksListMode::Issues);
-        assert_eq!(page, 1, "page defaults to the first page");
+        let validated = params.validate().unwrap();
+        assert_eq!(validated.state, TaskIssueState::Open);
+        assert_eq!(validated.mode, TasksListMode::Issues);
+        assert_eq!(validated.source, None, "source defaults to auto");
+        assert_eq!(validated.page, 1, "page defaults to the first page");
         assert_eq!(
-            per_page, DEFAULT_TASKS_PER_PAGE,
+            validated.per_page, DEFAULT_TASKS_PER_PAGE,
             "perPage defaults to the source page size"
         );
     }
@@ -425,8 +492,8 @@ mod tests {
     fn list_params_bound_page_and_page_size() {
         let parse = |value: Value| -> Result<(u64, u64), RpcError> {
             let params: TasksListParams = serde_json::from_value(value).unwrap();
-            let (_, _, page, per_page, _) = params.validate()?;
-            Ok((page, per_page))
+            let validated = params.validate()?;
+            Ok((validated.page, validated.per_page))
         };
         assert_eq!(
             parse(json!({"projectId": "p1", "page": 3, "perPage": 50})).unwrap(),
@@ -451,6 +518,7 @@ mod tests {
             page: None,
             per_page: None,
             mode: None,
+            source: None,
         };
         assert!(bad.validate().is_err());
         let bad = TasksListParams {
@@ -460,6 +528,7 @@ mod tests {
             page: None,
             per_page: None,
             mode: None,
+            source: None,
         };
         assert!(bad.validate().is_err());
         let blank = TasksListParams {
@@ -469,26 +538,64 @@ mod tests {
             page: None,
             per_page: None,
             mode: None,
+            source: None,
         };
-        let (state, query, _, _, mode) = blank.validate().unwrap();
-        assert_eq!(state, TaskIssueState::Closed);
-        assert_eq!(query, None);
-        assert_eq!(mode, TasksListMode::Issues);
+        let validated = blank.validate().unwrap();
+        assert_eq!(validated.state, TaskIssueState::Closed);
+        assert_eq!(validated.query, None);
+        assert_eq!(validated.mode, TasksListMode::Issues);
     }
 
     #[test]
     fn list_mode_defaults_to_issues_and_parses_pulls() {
         let params: TasksListParams = serde_json::from_value(json!({"projectId": "p1"})).unwrap();
-        let (_, _, _, _, mode) = params.validate().unwrap();
-        assert_eq!(mode, TasksListMode::Issues);
+        assert_eq!(params.validate().unwrap().mode, TasksListMode::Issues);
         let params: TasksListParams =
             serde_json::from_value(json!({"projectId": "p1", "mode": "pulls"})).unwrap();
-        let (_, _, _, _, mode) = params.validate().unwrap();
-        assert_eq!(mode, TasksListMode::Pulls);
+        assert_eq!(params.validate().unwrap().mode, TasksListMode::Pulls);
         let params: TasksListParams =
             serde_json::from_value(json!({"projectId": "p1", "mode": "issues"})).unwrap();
-        let (_, _, _, _, mode) = params.validate().unwrap();
-        assert_eq!(mode, TasksListMode::Issues);
+        assert_eq!(params.validate().unwrap().mode, TasksListMode::Issues);
+    }
+
+    #[test]
+    fn remote_source_parses_and_round_trips() {
+        let params: TasksListParams =
+            serde_json::from_value(json!({"projectId": "p1", "source": "upstream"})).unwrap();
+        assert_eq!(
+            params.validate().unwrap().source,
+            Some(TasksRemoteSource::Upstream)
+        );
+        let params: TasksListParams =
+            serde_json::from_value(json!({"projectId": "p1", "source": "origin"})).unwrap();
+        assert_eq!(
+            params.validate().unwrap().source,
+            Some(TasksRemoteSource::Origin)
+        );
+        // The topology result omits absent remotes entirely (never null),
+        // so the renderer can distinguish "no upstream" from "not asked".
+        let both = serde_json::to_value(TasksRemotesResult {
+            origin: Some("example/repo".into()),
+            upstream: Some("upstream-org/repo".into()),
+        })
+        .unwrap();
+        assert_eq!(
+            both,
+            json!({"origin": "example/repo", "upstream": "upstream-org/repo"})
+        );
+        let sparse = serde_json::to_value(TasksRemotesResult {
+            origin: Some("example/repo".into()),
+            upstream: None,
+        })
+        .unwrap();
+        assert_eq!(sparse, json!({"origin": "example/repo"}));
+        assert!(
+            TasksRemotesParams {
+                project_id: "".into()
+            }
+            .validate()
+            .is_err()
+        );
     }
 
     #[test]
@@ -547,20 +654,23 @@ mod tests {
         let show = TasksShowParams {
             project_id: "p1".into(),
             number: 0,
+            source: None,
         };
         assert!(show.validate().is_err());
         let start = TasksStartParams {
             project_id: "p1".into(),
             number: 12,
             mode: None,
+            source: None,
         };
-        assert_eq!(start.validate().unwrap(), TasksListMode::Issues);
+        assert_eq!(start.validate().unwrap().0, TasksListMode::Issues);
         let start = TasksStartParams {
             project_id: "p1".into(),
             number: 12,
             mode: Some(TasksListMode::Pulls),
+            source: None,
         };
-        assert_eq!(start.validate().unwrap(), TasksListMode::Pulls);
+        assert_eq!(start.validate().unwrap().0, TasksListMode::Pulls);
         assert!(
             TasksLinksParams {
                 project_id: "".into()

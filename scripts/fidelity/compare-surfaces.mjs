@@ -2284,7 +2284,13 @@ async function setupTasksRowsFixture(page, ctx, notes, missing) {
     await execFileAsync("git", ["commit", "-q", "-m", "initial"], { cwd: tasksRepo }).catch(() => {});
     await execFileAsync("git", ["remote", "remove", "origin"], { cwd: tasksRepo }).catch(() => {});
     await execFileAsync("git", ["remote", "add", "origin", "https://github.com/example/repo.git"], { cwd: tasksRepo }).catch(() => {});
-    notes.push("fixture: tasks-repo git repo with a GitHub-shaped remote");
+    // #246: a distinct upstream remote makes the candidate render the
+    // fork's issue-source selector (Upstream/Origin pills), which the
+    // reference shows on tasks-filters; single-remote repos correctly
+    // render nothing.
+    await execFileAsync("git", ["remote", "remove", "upstream"], { cwd: tasksRepo }).catch(() => {});
+    await execFileAsync("git", ["remote", "add", "upstream", "https://github.com/upstream-org/repo.git"], { cwd: tasksRepo }).catch(() => {});
+    notes.push("fixture: tasks-repo git repo with divergent GitHub origin+upstream remotes");
   } catch {
     missing.push("tasks-repo git fixture failed");
     return false;

@@ -39,6 +39,37 @@ describe("previewCronFires", () => {
     ]);
   });
 
+  it("previews a yearly schedule (regression: 366-day window made it unsaveable)", () => {
+    expect(previewCronFires("0 0 1 1 *", MONDAY)).toEqual([
+      Date.UTC(2027, 0, 1, 0, 0),
+      Date.UTC(2028, 0, 1, 0, 0),
+      Date.UTC(2029, 0, 1, 0, 0),
+    ]);
+  });
+
+  it("previews a leap-day schedule across the 4-year gaps", () => {
+    expect(previewCronFires("0 0 29 2 *", MONDAY)).toEqual([
+      Date.UTC(2028, 1, 29, 0, 0),
+      Date.UTC(2032, 1, 29, 0, 0),
+      Date.UTC(2036, 1, 29, 0, 0),
+    ]);
+  });
+
+  it("finds the next leap day across the 8-year hole around 2100", () => {
+    // From 2097 the next Feb 29 is 2104 — the widest gap a valid 5-field
+    // cron can have, inside the per-fire horizon.
+    const from = Date.UTC(2097, 2, 1, 0, 0);
+    expect(previewCronFires("0 0 29 2 *", from, 1)).toEqual([
+      Date.UTC(2104, 1, 29, 0, 0),
+    ]);
+  });
+
+  it("returns null for a valid-shaped schedule that never fires", () => {
+    // Feb 31: parses, but no day ever matches — the daemon's croner check
+    // rejects it at save time too ("no future occurrence").
+    expect(previewCronFires("0 0 31 2 *", MONDAY)).toBeNull();
+  });
+
   it("returns null for non-cron and unsupported shapes", () => {
     expect(previewCronFires("", MONDAY)).toBeNull();
     expect(previewCronFires("FREQ=DAILY", MONDAY)).toBeNull();

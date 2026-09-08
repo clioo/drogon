@@ -988,3 +988,165 @@ fn folder_projects_and_bad_params_fail_honestly() {
         "invalid_argument"
     );
 }
+
+// --- Remote topology and issue-source routing (#246) -------------------------
+//
+// The reference Tasks header renders an Upstream/Origin issue-source
+// selector when a repo has distinct GitHub remotes for both names; `auto`
+// (no explicit source) resolves upstream-first there, exactly like the
+// fork's resolvePrWorkItemSource heuristic.
+
+#[test]
+fn remotes_reports_the_github_topology_from_local_git_config() {
+    let fx = Fixture::new(Some("https://github.com/example/repo.git"), None);
+    git(
+        &fx.repo,
+        &[
+            "remote",
+            "add",
+            "upstream",
+            "git@github.com:upstream-org/repo.git",
+        ],
+    );
+    let remotes = ok(
+        &fx.engine,
+        "tasks.remotes",
+        json!({"projectId": fx.project_id}),
+    );
+    assert_eq!(remotes["origin"], "example/repo");
+    assert_eq!(remotes["upstream"], "upstream-org/repo");
+}
+
+#[test]
+fn remotes_omits_missing_and_non_github_remotes() {
+    // Single GitHub origin: no upstream key at all (never null), so the
+    // selector's "no upstream remote" null rule can fire.
+    let fx = Fixture::new(Some("https://github.com/example/repo.git"), None);
+    let remotes = ok(
+        &fx.engine,
+        "tasks.remotes",
+        json!({"projectId": fx.project_id}),
+    );
+    assert_eq!(remotes["origin"], "example/repo");
+    assert!(remotes.get("upstream").is_none());
+
+    // A non-GitHub upstream is topology, not an error: the key is absent.
+    git(
+        &fx.repo,
+        &[
+            "remote",
+            "add",
+            "upstream",
+            "https://gitlab.com/example/repo.git",
+        ],
+    );
+    let remotes = ok(
+        &fx.engine,
+        "tasks.remotes",
+        json!({"projectId": fx.project_id}),
+    );
+    assert_eq!(remotes["origin"], "example/repo");
+    assert!(remotes.get("upstream").is_none());
+}
+
+#[test]
+fn remotes_without_a_github_remote_reports_both_absent() {
+    // No GitHub remote at all: both keys absent. (Its own test because one
+    // Fixture holds the file-wide gh-override lock for its whole test.)
+    let plain = Fixture::new(Some("https://gitlab.com/example/repo.git"), None);
+    let remotes = ok(
+        &plain.engine,
+        "tasks.remotes",
+        json!({"projectId": plain.project_id}),
+    );
+    assert!(remotes.get("origin").is_none());
+    assert!(remotes.get("upstream").is_none());
+    assert_eq!(
+        err_code(
+            &plain.engine,
+            "tasks.remotes",
+            json!({"projectId": "does-not-exist"}),
+        ),
+        "not_found"
+    );
+}
+
+#[test]
+fn list_auto_resolves_upstream_first_and_source_pins_the_remote() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_list_view()),
+    );
+    git(
+        &fx.repo,
+        &[
+            "remote",
+            "add",
+            "upstream",
+            "https://github.com/upstream-org/repo.git",
+        ],
+    );
+
+    // Auto: upstream wins, matching the fork's fork-contribution heuristic.
+    let listed = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id}),
+    );
+    assert_eq!(listed["repo"], "upstream-org/repo");
+    assert!(
+        fx.last_argv().contains("--repo upstream-org/repo"),
+        "auto must query the upstream repo, got: {}",
+        fx.last_argv()
+    );
+
+    // Explicit pins route to the named remote's repo.
+    let listed = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "source": "origin"}),
+    );
+    assert_eq!(listed["repo"], "example/repo");
+    assert!(fx.last_argv().contains("--repo example/repo"));
+    let listed = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "source": "upstream"}),
+    );
+    assert_eq!(listed["repo"], "upstream-org/repo");
+
+    // tasks.show follows the same pin: the row shown came from that repo.
+    ok(
+        &fx.engine,
+        "tasks.show",
+        json!({"projectId": fx.project_id, "number": 7, "source": "origin"}),
+    );
+    assert!(
+        fx.last_argv().contains("--repo example/repo"),
+        "show must honor the source pin, got: {}",
+        fx.last_argv()
+    );
+}
+
+#[test]
+fn list_without_an_upstream_remote_keeps_origin_for_auto_and_rejects_the_pin() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_list_view()),
+    );
+    let listed = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id}),
+    );
+    assert_eq!(listed["repo"], "example/repo", "auto falls back to origin");
+    assert_eq!(
+        err_code(
+            &fx.engine,
+            "tasks.list",
+            json!({"projectId": fx.project_id, "source": "upstream"}),
+        ),
+        "no_github_remote",
+        "an explicit upstream pin must never fall back to origin silently"
+    );
+}

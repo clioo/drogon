@@ -6,6 +6,9 @@ export const MAX_TASKS_QUERY_CHARS = 256;
 
 export type TaskIssueState = "open" | "closed" | "all";
 export type TasksListMode = "issues" | "pulls";
+/** Which git remote's GitHub repo a tasks query reads; absent is `auto`
+ *  (the daemon resolves upstream-first, like the reference client). */
+export type TasksRemoteSource = "origin" | "upstream";
 export type TaskPullRequestState = "open" | "closed" | "merged" | "draft";
 export type PRReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
 export type CheckState = "success" | "failure" | "pending" | "neutral" | "none";
@@ -68,6 +71,9 @@ export type TasksListResult = {
   total?: number;
 };
 export type TasksShowResult = { issue: TaskIssue };
+/** `tasks.remotes` result: GitHub `owner/repo` slug per remote name; a key
+ *  is absent (never null) when that remote is missing or non-GitHub. */
+export type TasksRemotesResult = { origin?: string; upstream?: string };
 export type TasksStartResult = {
   issueNumber: number;
   worktree: {
@@ -99,18 +105,24 @@ export interface TasksBridge {
     perPage?: number;
     /** "issues" (default) or "pulls"; the daemon fetches `gh pr list` for pulls. */
     mode?: TasksListMode;
+    /** Remote pin from the issue-source selector; absent is `auto`. */
+    source?: TasksRemoteSource;
   }): Promise<Result<TasksListResult>>;
   tasksShow(input: {
     projectId: string;
     number: number;
+    source?: TasksRemoteSource;
   }): Promise<Result<TasksShowResult>>;
   tasksStart(input: {
     projectId: string;
     number: number;
     /** pulls mode checks out the PR head branch into the worktree. */
     mode?: TasksListMode;
+    source?: TasksRemoteSource;
   }): Promise<Result<TasksStartResult>>;
   tasksLinks(input: { projectId: string }): Promise<Result<TasksLinksResult>>;
+  /** Local git-config remote topology for the issue-source selector. */
+  tasksRemotes(input: { projectId: string }): Promise<Result<TasksRemotesResult>>;
   /**
    * Interim project/worktree passthroughs (journey J6): the daemon's
    * `project.list`/`worktree.list` have no first-class desktop bridge yet,
@@ -153,6 +165,8 @@ const id = z
   .max(128)
   .regex(/^[^\s\x00-\x1f\x7f]+$/u);
 const projectId = z.object({ projectId: id });
+const source = z.enum(["origin", "upstream"]).optional();
+const repoSlug = z.string().min(1).max(256);
 
 export const TASKS_PAGE_SIZE = 36;
 
@@ -167,13 +181,16 @@ export const tasksBridgeSchemas = {
     page: z.number().int().min(1).max(10).optional(),
     perPage: z.number().int().min(1).max(100).optional(),
     mode: z.enum(["issues", "pulls"]).optional(),
+    source,
   }),
-  tasksShow: projectId.extend({ number: z.number().int().positive() }),
+  tasksShow: projectId.extend({ number: z.number().int().positive(), source }),
   tasksStart: projectId.extend({
     number: z.number().int().positive(),
     mode: z.enum(["issues", "pulls"]).optional(),
+    source,
   }),
   tasksLinks: projectId,
+  tasksRemotes: projectId,
   tasksProjects: z.object({}),
   tasksWorktrees: z.object({ projectId: id.optional() }),
 };
@@ -279,6 +296,10 @@ export const tasksResultSchemas = {
     headBranch: z.string().min(1).max(512).optional(),
   }),
   "tasks.links": z.object({ links: z.array(link).max(1000) }),
+  "tasks.remotes": z.object({
+    origin: repoSlug.optional(),
+    upstream: repoSlug.optional(),
+  }),
   "project.list": z.object({ projects: z.array(projectRef).max(10000) }),
   "worktree.list": z.object({ worktrees: z.array(worktreeRef).max(10000) }),
   // Interim only (see TasksBridge): the workspace rows merged as synthetic

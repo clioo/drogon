@@ -1,10 +1,13 @@
-// Minimal 5-field cron preview for the automation form: the next `count`
-// UTC fire times at or after `fromMs`, or null when the expression is not
-// a supported 5-field schedule. The daemon (croner) remains the scheduling
-// authority; this only previews common shapes in the form. Supported per
-// field: `*`, `*/n`, `a-b`, `a-b/n`, comma lists, single values, and
-// JAN..DEC / MON..SUN names. Day-of-month/day-of-week follow standard cron:
-// both restricted means either may match.
+// Minimal 5-field cron preview for the automation form: up to `count`
+// next UTC fire times strictly after `fromMs`, iterated croner-style
+// (next fire after the last, bounded by a per-fire horizon, never by a
+// fixed window) so rare schedules — yearly, leap day — still preview and
+// save. Null means the expression is not a supported 5-field schedule or
+// never fires within the horizon; the daemon (croner) remains the
+// scheduling authority. Supported per field: `*`, `*/n`, `a-b`, `a-b/n`,
+// comma lists, single values, and JAN..DEC / MON..SUN names.
+// Day-of-month/day-of-week follow standard cron: both restricted means
+// either may match.
 
 const MONTH_NAMES: Record<string, number> = {
   JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6,
@@ -113,7 +116,55 @@ function matchesDay(schedule: CronSchedule, date: Date): boolean {
   return domMatch && dowMatch;
 }
 
-/** Next `count` UTC fire times (ms epoch) strictly after `fromMs`. */
+// Minute/day constants for the day-stepped scan below.
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+// Per-fire search horizon, in days. The widest gap a valid 5-field cron
+// can have is the 8-year leap-day hole around 2100 (2096-02-29 fires next
+// on 2104-02-29), so ten years always finds a real schedule's next fire;
+// anything still unfired past it never fires (e.g. Feb 31), which the
+// daemon's croner check also rejects at save time ("no future occurrence").
+const FIRE_SEARCH_HORIZON_DAYS = 3660;
+
+/** Earliest time-of-day fire (ms) on the UTC day `dayStartMs`, strictly
+ *  after `afterMs`, or null when no hour/minute pair qualifies. */
+function firstFireOnDay(
+  hours: readonly number[],
+  minutes: readonly number[],
+  dayStartMs: number,
+  afterMs: number,
+): number | null {
+  for (const hour of hours) {
+    for (const minute of minutes) {
+      const at = dayStartMs + (hour * 60 + minute) * MINUTE_MS;
+      if (at > afterMs) return at;
+    }
+  }
+  return null;
+}
+
+/** Next fire strictly after `afterMs`, or null when none occurs within the
+ *  horizon. Steps whole UTC days (not minutes) and jumps to the first
+ *  matching time-of-day, so a leap-day schedule costs days of iteration
+ *  instead of years of minute steps — croner `next()` semantics, bounded
+ *  by the horizon rather than by a fixed window. */
+function nextFireAfter(schedule: CronSchedule, afterMs: number): number | null {
+  const hours = [...schedule.hours].sort((a, b) => a - b);
+  const minutes = [...schedule.minutes].sort((a, b) => a - b);
+  let dayStartMs = Math.floor(afterMs / DAY_MS) * DAY_MS;
+  for (let day = 0; day < FIRE_SEARCH_HORIZON_DAYS; day += 1, dayStartMs += DAY_MS) {
+    if (!matchesDay(schedule, new Date(dayStartMs))) continue;
+    const fire = firstFireOnDay(hours, minutes, dayStartMs, afterMs);
+    if (fire !== null) return fire;
+  }
+  return null;
+}
+
+/** Next `count` UTC fire times (ms epoch) strictly after `fromMs`.
+ *  Returns every fire found up to `count` — a yearly or leap-day schedule
+ *  yields its real next fires even when they are years apart — and null
+ *  only when the expression is not a supported 5-field schedule or has no
+ *  occurrence within the horizon at all. */
 export function previewCronFires(
   cron: string,
   fromMs: number,
@@ -122,18 +173,12 @@ export function previewCronFires(
   const schedule = parseCron(cron);
   if (schedule === null) return null;
   const fires: number[] = [];
-  // Start at the next minute boundary strictly after fromMs.
-  let cursor = Math.floor(fromMs / 60_000) * 60_000 + 60_000;
-  const deadline = fromMs + 366 * 24 * 60 * 60 * 1000;
-  for (; cursor <= deadline && fires.length < count; cursor += 60_000) {
-    const date = new Date(cursor);
-    if (
-      schedule.minutes.has(date.getUTCMinutes()) &&
-      schedule.hours.has(date.getUTCHours()) &&
-      matchesDay(schedule, date)
-    ) {
-      fires.push(cursor);
-    }
+  let afterMs = fromMs;
+  for (let i = 0; i < count; i += 1) {
+    const fire = nextFireAfter(schedule, afterMs);
+    if (fire === null) break;
+    fires.push(fire);
+    afterMs = fire;
   }
-  return fires.length === count ? fires : null;
+  return fires.length > 0 ? fires : null;
 }

@@ -7,6 +7,7 @@ export const tasks: TasksBridge = {
   tasksShow: (value) => ipcRenderer.invoke("drogon:tasksShow", value),
   tasksStart: (value) => ipcRenderer.invoke("drogon:tasksStart", value),
   tasksLinks: (value) => ipcRenderer.invoke("drogon:tasksLinks", value),
+  tasksRemotes: (value) => ipcRenderer.invoke("drogon:tasksRemotes", value),
   tasksProjects: () => ipcRenderer.invoke("drogon:tasksProjects", {}),
   tasksWorktrees: (value) => ipcRenderer.invoke("drogon:tasksWorktrees", value),
 };

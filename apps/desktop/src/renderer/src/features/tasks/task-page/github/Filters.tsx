@@ -14,6 +14,11 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "../../ui/tooltip";
 import { Button } from "../../../../components/ui/button";
 import { getGitHubTaskKindPresets } from "../../task-page-localized-options";
 import type { TaskPageModelProps } from "../../task-page-model";
+import {
+  IssueSourceSelector,
+  issueSourceChipClass,
+  sameGitHubOwnerRepo,
+} from "../../issue-source-selector";
 
 export function TaskPageGitHubFilters({
   model,
@@ -31,6 +36,10 @@ export function TaskPageGitHubFilters({
     githubTaskKind,
     newGitHubIssueUrl,
     openExternal,
+    issueSourceOrigin,
+    issueSourceUpstream,
+    issueSourcePreference,
+    onSelectIssueSource,
   } = model;
   return (
     // Why: top of the joined GitHub list card — pairs with the
@@ -141,6 +150,38 @@ export function TaskPageGitHubFilters({
           </Tooltip>
         </div>
       </div>
+
+      {(() => {
+        // Source Filters.tsx: the two-pill selector renders only when
+        // origin and upstream both resolve and diverge (the fork's
+        // hasUpstreamCandidateDivergence null rules). Drogon's picker is
+        // single-selection, so the fork's multi-repo RepoBadgeLabel prefix
+        // and its IssueSourceIndicator fallback (issues/PRs fetched from
+        // different repos — impossible here, one daemon repo per project)
+        // have no counterpart; the bare chip row is what the fork renders
+        // for one selected repo.
+        const selectorRenderable =
+          issueSourceOrigin !== null &&
+          issueSourceUpstream !== null &&
+          !sameGitHubOwnerRepo(issueSourceOrigin, issueSourceUpstream);
+        if (!selectorRenderable) {
+          return null;
+        }
+        // Why: <div> not <span> — the child selector renders a block <div>
+        // (div-in-span is invalid HTML); inline-flex looks identical.
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className={issueSourceChipClass}>
+              <IssueSourceSelector
+                preference={issueSourcePreference}
+                origin={issueSourceOrigin}
+                upstream={issueSourceUpstream}
+                onChange={onSelectIssueSource}
+              />
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -14,8 +14,9 @@ use drogon_protocol::RpcError;
 use drogon_protocol::tasks::{
     CheckState, PRMergeableState, PRReviewDecision, ProviderCheckSummary, TaskIssue,
     TaskIssueState, TaskLabel, TaskLink, TaskPullRequest, TaskPullRequestState, TasksLinksParams,
-    TasksLinksResult, TasksListMode, TasksListParams, TasksListResult, TasksShowParams,
-    TasksShowResult, TasksStartParams, TasksStartResult,
+    TasksLinksResult, TasksListMode, TasksListParams, TasksListResult, TasksRemoteSource,
+    TasksRemotesParams, TasksRemotesResult, TasksShowParams, TasksShowResult, TasksStartParams,
+    TasksStartResult,
 };
 use drogon_protocol::tasks::{MAX_TASKS_PAGE, MAX_TASKS_PER_PAGE};
 use drogon_protocol::worktree::Worktree;
@@ -208,6 +209,48 @@ fn github_repo_for_project(project_path: &str) -> Result<String, RpcError> {
             url.trim()
         ))
     })
+}
+
+/// The GitHub `owner/repo` slug of one named remote, local git config only.
+/// `Ok(None)` covers both a missing remote (`git config --get` exits
+/// non-zero) and a non-GitHub URL — the topology query reports shape, it
+/// never errors on a repo that simply has no GitHub remote of that name.
+fn github_repo_for_remote(project_path: &str, remote: &str) -> Result<Option<String>, RpcError> {
+    let argv = vec![
+        "config".to_string(),
+        "--get".to_string(),
+        format!("remote.{remote}.url"),
+    ];
+    let url = match run_git(Path::new(project_path), &argv) {
+        Ok(url) => url,
+        Err(err) if err.code == "io_error" => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    Ok(parse_github_repo(&url))
+}
+
+/// Repo slug a tasks query reads, given the caller's source pin. `None` is
+/// the reference client's `auto`: upstream when a GitHub upstream remote
+/// exists (fork-contribution issues/PRs live there), else origin. An
+/// explicit pin errors with `no_github_remote` when that remote is missing
+/// or not GitHub — never a silent fall-back to the other remote.
+fn resolve_tasks_repo(
+    project_path: &str,
+    source: Option<TasksRemoteSource>,
+) -> Result<String, RpcError> {
+    match source {
+        Some(TasksRemoteSource::Origin) => github_repo_for_project(project_path),
+        Some(TasksRemoteSource::Upstream) => github_repo_for_remote(project_path, "upstream")?
+            .ok_or_else(|| {
+                no_github_remote(
+                    "this repository has no upstream remote pointing at GitHub".to_string(),
+                )
+            }),
+        None => match github_repo_for_remote(project_path, "upstream")? {
+            Some(upstream) => Ok(upstream),
+            None => github_repo_for_project(project_path),
+        },
+    }
 }
 
 // --- `gh issue` JSON ----------------------------------------------------------
@@ -811,9 +854,17 @@ impl Engine {
 
     pub(super) fn do_tasks_list(&self, value: &Value) -> Result<Value, RpcError> {
         let params: TasksListParams = decode(value)?;
-        let (state, query, page, per_page, mode) = params.validate()?;
+        let validated = params.validate()?;
+        let (state, query, page, per_page, mode, source) = (
+            validated.state,
+            validated.query,
+            validated.page,
+            validated.per_page,
+            validated.mode,
+            validated.source,
+        );
         let (_, project_path, _) = self.tasks_git_project_path(&params.project_id)?;
-        let repo = github_repo_for_project(&project_path)?;
+        let repo = resolve_tasks_repo(&project_path, source)?;
         // A filtered list must see every row before slicing: `gh` has no
         // server-side title/assignee filter for this call shape, so a
         // windowed fetch would silently drop matches past the window and
@@ -895,9 +946,9 @@ impl Engine {
 
     pub(super) fn do_tasks_show(&self, value: &Value) -> Result<Value, RpcError> {
         let params: TasksShowParams = decode(value)?;
-        params.validate()?;
+        let source = params.validate()?;
         let (_, project_path, _) = self.tasks_git_project_path(&params.project_id)?;
-        let repo = github_repo_for_project(&project_path)?;
+        let repo = resolve_tasks_repo(&project_path, source)?;
         let stdout = run_gh(Path::new(&project_path), &view_argv(&repo, params.number))?;
         let raw: GhIssue = serde_json::from_str(&stdout)
             .map_err(|_| error::io_error("gh issue view returned unparsable JSON".to_string()))?;
@@ -914,10 +965,10 @@ impl Engine {
 
     pub(super) fn do_tasks_start(&self, value: &Value) -> Result<Value, RpcError> {
         let params: TasksStartParams = decode(value)?;
-        let mode = params.validate()?;
+        let (mode, source) = params.validate()?;
         let (project_id, project_path, project_name) =
             self.tasks_git_project_path(&params.project_id)?;
-        let repo = github_repo_for_project(&project_path)?;
+        let repo = resolve_tasks_repo(&project_path, source)?;
 
         // An existing link makes a repeated start idempotent: return the
         // live worktree instead of creating a second one. (The request
@@ -1217,6 +1268,23 @@ impl Engine {
             "baseRef": Option::<String>::None,
             "createdAt": created_at,
         }))
+    }
+
+    /// `tasks.remotes`: the project's GitHub remote topology from local git
+    /// config (`git remote -v` equivalent, two `git config --get` probes).
+    /// Each slug is absent when that remote is missing or non-GitHub — the
+    /// renderer's issue-source selector hides itself then, exactly like the
+    /// reference's null rules (no origin, no upstream, or same slug).
+    pub(super) fn do_tasks_remotes(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: TasksRemotesParams = decode(value)?;
+        params.validate()?;
+        let (_, project_path, _) = self.tasks_git_project_path(&params.project_id)?;
+        let result = TasksRemotesResult {
+            origin: github_repo_for_remote(&project_path, "origin")?,
+            upstream: github_repo_for_remote(&project_path, "upstream")?,
+        };
+        serde_json::to_value(&result)
+            .map_err(|_| error::internal_error("Could not serialize tasks remotes"))
     }
 
     pub(super) fn do_tasks_links(&self, value: &Value) -> Result<Value, RpcError> {
