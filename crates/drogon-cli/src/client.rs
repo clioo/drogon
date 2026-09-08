@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use drogon_protocol::Request;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{CliError, internal_error};
@@ -40,7 +40,7 @@ pub struct Workspace {
     pub host_id: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
     Live,
@@ -51,7 +51,7 @@ pub enum Verdict {
 /// Mirrors `session-contract.ts`'s `AgentState`. `NeedsInput` is produced
 /// by `session.hook_event` (the per-session Claude Code hooks file) and
 /// carries the hook timestamp in `agentStateAt`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
     Working,
@@ -73,7 +73,7 @@ impl AgentState {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: String,
@@ -193,7 +193,7 @@ pub struct WorkspaceList {
     pub workspaces: Vec<Workspace>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionList {
     pub sessions: Vec<Session>,
@@ -521,7 +521,11 @@ pub fn check_removed(removed: &Removed, expected_id: &str) -> Result<(), String>
 /// service actually implements: an exited session is always agentState
 /// `exited`, and `working`/`idle`/`needs_input` carry a non-null
 /// `agentStateAt` (activity stamp, or the hook-event stamp for the wait
-/// signal the card freshness ranking sorts on).
+/// signal the card freshness ranking sorts on). An exited session honestly
+/// keeps its last agent-state timestamp (#222: a pre-restart wait stamp
+/// outlives the exit in rows written before the daemon cleared them), so
+/// `exited` accepts a null or non-null `agentStateAt`; renderers treat it
+/// as history, never as a live wait signal.
 pub fn check_session(session: &Session) -> Result<(), String> {
     require_nonempty("id", &session.id)?;
     require_nonempty("workspaceId", &session.workspace_id)?;
@@ -548,7 +552,7 @@ pub fn check_session(session: &Session) -> Result<(), String> {
                 ));
             }
         }
-        AgentState::Exited | AgentState::Unknown => {
+        AgentState::Unknown => {
             if session.agent_state_at.is_some() {
                 return Err(format!(
                     "agentState {:?} must not carry an agentStateAt",
@@ -556,6 +560,9 @@ pub fn check_session(session: &Session) -> Result<(), String> {
                 ));
             }
         }
+        // Exited keeps its last timestamp as history (see the doc above);
+        // nothing to check here.
+        AgentState::Exited => {}
     }
     Ok(())
 }
@@ -565,6 +572,22 @@ pub fn check_session_list(list: &SessionList) -> Result<(), String> {
         check_session(session).map_err(|err| format!("session {}: {err}", session.id))?;
     }
     Ok(())
+}
+
+/// Splits a `session.list` result into the records that satisfy the session
+/// invariants plus one honest warning per rejected record, so a single bad
+/// record can never fail the whole list (#222). Callers render the kept
+/// records and surface the warnings on stderr.
+pub fn partition_session_list(list: SessionList) -> (Vec<Session>, Vec<String>) {
+    let mut kept = Vec::with_capacity(list.sessions.len());
+    let mut warnings = Vec::new();
+    for session in list.sessions {
+        match check_session(&session) {
+            Ok(()) => kept.push(session),
+            Err(violation) => warnings.push(format!("session {}: {violation}", session.id)),
+        }
+    }
+    (kept, warnings)
 }
 
 /// A read result must be internally consistent: valid base64 whose decoded
@@ -992,6 +1015,70 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(session.verdict, Verdict::Unverifiable);
+    }
+
+    fn test_session(agent_state: AgentState, agent_state_at: Option<&str>) -> Session {
+        Session {
+            id: "s1".into(),
+            workspace_id: "w1".into(),
+            host_id: "h1".into(),
+            incarnation: "inc".into(),
+            command: "sh".into(),
+            args: vec![],
+            cols: 80,
+            rows: 24,
+            verdict: Verdict::Live,
+            exit_code: None,
+            created_at: "2026-09-05T12:00:00Z".into(),
+            agent_state,
+            agent_state_at: agent_state_at.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn exited_session_may_carry_its_last_state_timestamp() {
+        // #222: rows written before the daemon cleared wait stamps on exit
+        // list as `exited` with a non-null `agentStateAt`; that is honest
+        // history and must validate.
+        let mut stamped = test_session(AgentState::Exited, Some("2026-09-05T12:00:00Z"));
+        stamped.verdict = Verdict::Exited;
+        assert!(check_session(&stamped).is_ok());
+        let mut bare = test_session(AgentState::Exited, None);
+        bare.verdict = Verdict::Exited;
+        assert!(check_session(&bare).is_ok());
+    }
+
+    #[test]
+    fn live_state_invariants_still_hold() {
+        assert!(check_session(&test_session(AgentState::Idle, None)).is_err());
+        assert!(
+            check_session(&test_session(
+                AgentState::Unknown,
+                Some("2026-09-05T12:00:00Z")
+            ))
+            .is_err()
+        );
+        let mut mismatched = test_session(AgentState::Idle, Some("2026-09-05T12:00:00Z"));
+        mismatched.verdict = Verdict::Exited;
+        assert!(check_session(&mismatched).is_err());
+    }
+
+    #[test]
+    fn partition_session_list_isolates_one_bad_record() {
+        let mut good = test_session(AgentState::Idle, Some("2026-09-05T12:00:00Z"));
+        good.id = "good-1".into();
+        let mut historic = test_session(AgentState::Exited, Some("2026-09-05T12:00:00Z"));
+        historic.id = "good-2".into();
+        historic.verdict = Verdict::Exited;
+        let mut bad = test_session(AgentState::Unknown, None);
+        bad.id = "bad-9".into();
+        bad.cols = 0;
+        let (kept, warnings) = partition_session_list(SessionList {
+            sessions: vec![good, bad, historic],
+        });
+        assert_eq!(kept.len(), 2);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("bad-9"), "warning names the record");
     }
 
     #[test]

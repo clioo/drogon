@@ -14,6 +14,7 @@ import {
 } from "./acceptance-process.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
+import { probeRenderedSessionRestart } from "./probe-rendered-session-restart.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
@@ -497,6 +498,36 @@ try {
     assert.equal(closing.sealedDigest, report.sealedDigest);
     report.checks.push(
       "sealed-final-artifact-identity-unchanged-after-acceptance",
+    );
+  }
+  if (!packaged) {
+    // R16-AL (fixes #222): kill -9 ONLY the owned daemon mid-session,
+    // restart it over the same data dir, and prove the session list still
+    // renders — including a legacy exited row that still carries its last
+    // agent-state timestamp — with no wipe and the New tab button intact.
+    report.checks.push(
+      ...(await probeRenderedSessionRestart({
+        page,
+        workspaceId: registered.id,
+        output,
+        dataDir,
+        daemon,
+        daemonBin: path.join(
+          root,
+          "target",
+          "debug",
+          process.platform === "win32" ? "drogond.exe" : "drogond",
+        ),
+        cliBin: path.join(
+          root,
+          "target",
+          "debug",
+          process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
+        ),
+        adoptDaemon: (child) => {
+          daemon = child;
+        },
+      })),
     );
   }
   report.status = "PASSED";
