@@ -156,6 +156,57 @@ describe("github rows", () => {
     expect(html).toContain(">Open<");
     expect(html).toContain("Open workspace attached to issue");
     expect(html).toContain("issue-7-issue-7");
+    // Source Rows.tsx marks the attached worktree with the FolderKanban glyph.
+    expect(html).toContain("lucide-folder-kanban");
+  });
+
+  test("issue Start keeps the source button size and paints the attached state", () => {
+    const fresh = render(
+      createElement(TaskPageGitHubRows, {
+        model: baseModel({ filteredWorkItems: [toWorkItem(issue(7), "p1")] }),
+      }),
+    );
+    // Source Rows.tsx: the issue Start button is size="xs" on the
+    // muted wash; the attached Open button drops the wash for primary.
+    expect(fresh).toContain('data-size="xs"');
+    expect(fresh).toContain("bg-background/80");
+    const attached = render(
+      createElement(TaskPageGitHubRows, {
+        model: baseModel({
+          filteredWorkItems: [toWorkItem(issue(7), "p1")],
+          taskLinks: [
+            {
+              projectId: "p1",
+              issueNumber: 7,
+              worktreeId: "w1",
+              branch: "issue-7-issue-7",
+              createdAt: "",
+            },
+          ],
+        }),
+      }),
+    );
+    expect(attached).not.toContain("bg-background/80");
+  });
+
+  test("assignees and status keep the source button triggers", () => {
+    const assigned = render(
+      createElement(TaskPageGitHubRows, {
+        model: baseModel({ filteredWorkItems: [toWorkItem(issue(7), "p1")] }),
+      }),
+    );
+    // Source Rows.tsx: nested buttons — the assignee trigger names the
+    // assignment and the status trigger names the state.
+    expect(assigned).toContain('aria-label="Assigned to octocat"');
+    expect(assigned).toContain("lucide-chevron-down");
+    const unassigned = render(
+      createElement(TaskPageGitHubRows, {
+        model: baseModel({
+          filteredWorkItems: [toWorkItem(issue(9, { assignees: [] }), "p1")],
+        }),
+      }),
+    );
+    expect(unassigned).toContain('aria-label="Assign issue"');
   });
 
   test("row selection starts the issue worktree (journey-J6 behavior kept)", () => {
@@ -215,6 +266,18 @@ describe("github list states", () => {
     expect(html).toContain("animate-pulse");
     expect(html).toContain(">ID<");
     expect(html).toContain("Title / Context");
+  });
+
+  test("issues skeletons mirror the Assignees/Status columns", () => {
+    const model = baseModel({
+      tasksLoading: true,
+      showGitHubTaskSkeletons: true,
+    });
+    const html = render(createElement(TaskPageGitHubList, { model }));
+    // Source List.tsx: one assignee shimmer plus the status pill shimmer.
+    expect(html).toContain("h-3 w-24 animate-pulse");
+    expect(html).toContain("h-5 w-14 animate-pulse");
+    expect(html).not.toContain("h-5 w-20 animate-pulse");
   });
 
   test("renders the pagination bar only when a next page exists", () => {

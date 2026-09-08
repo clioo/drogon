@@ -6,7 +6,9 @@
 import { cn } from "../../cn";
 import {
   GITHUB_TASK_HEADER_SURFACE_CLASS,
+  GITHUB_TASK_STICKY_ID_CELL_CLASS,
   GITHUB_TASK_STICKY_ID_HEADER_CLASS,
+  GITHUB_TASK_STICKY_TITLE_CELL_CLASS,
   GITHUB_TASK_STICKY_TITLE_HEADER_CLASS,
 } from "../../task-page-source-context";
 import { LoaderCircle } from "lucide-react";
@@ -94,21 +96,39 @@ export function TaskPageGitHubList({
           // 3-row stub jumps to ~30 real rows; matching the steady-
           // state height keeps layout stable across the load.
           <div className="divide-y divide-border/40">
-            {Array.from({ length: 12 }).map((_, i) => (
+            {Array.from({
+              length: 12,
+            }).map((_, i) => (
               <div key={i} className={cn("grid min-h-12 gap-3 px-3 py-2.5", githubTaskGridClass)}>
-                <div className="sticky left-3 z-20 flex items-center before:absolute before:-left-3 before:top-0 before:bottom-0 before:w-3 before:bg-inherit bg-background transition-colors">
+                <div className={GITHUB_TASK_STICKY_ID_CELL_CLASS}>
                   <div className="h-6 w-16 animate-pulse rounded-md bg-muted/70" />
                 </div>
-                <div className="sticky left-[92px] z-20 flex min-w-0 flex-col justify-center border-r border-border/40 pr-2 before:absolute before:-left-2 before:top-0 before:bottom-0 before:w-2 before:bg-inherit bg-background transition-colors">
+                <div className={GITHUB_TASK_STICKY_TITLE_CELL_CLASS}>
                   <div className="h-3.5 w-3/5 animate-pulse rounded bg-muted/70" />
                   <div className="mt-1.5 h-3 w-2/5 animate-pulse rounded bg-muted/60" />
                 </div>
-                <div className="flex items-center">
-                  <div className="h-5 w-14 animate-pulse rounded-full bg-muted/70" />
-                </div>
-                <div className="flex items-center">
-                  <div className="h-3 w-20 animate-pulse rounded bg-muted/60" />
-                </div>
+                {!showPRManagementColumns ? (
+                  <div className="flex items-center">
+                    <div className="h-3 w-24 animate-pulse rounded bg-muted/60" />
+                  </div>
+                ) : null}
+                {showPRManagementColumns ? (
+                  <>
+                    <div className="flex items-center">
+                      <div className="h-5 w-20 animate-pulse rounded-full bg-muted/70" />
+                    </div>
+                    <div className="flex items-center">
+                      <div className="h-5 w-20 animate-pulse rounded-full bg-muted/70" />
+                    </div>
+                    <div className="flex items-center">
+                      <div className="h-5 w-20 animate-pulse rounded-full bg-muted/70" />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center">
+                    <div className="h-5 w-14 animate-pulse rounded-full bg-muted/70" />
+                  </div>
+                )}
                 <div className="flex items-center">
                   <div className="h-3 w-20 animate-pulse rounded bg-muted/60" />
                 </div>
