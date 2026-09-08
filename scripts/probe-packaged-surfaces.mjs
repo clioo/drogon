@@ -710,10 +710,11 @@ export async function probePackagedSurfaces({
   );
 
   // Automations lists on a fresh daemon (empty, with the create entry).
-  // (R8-O1 renders the empty state as titled copy, not an empty testid.)
+  // (R8-O1 renders the empty state as titled copy, not an empty testid;
+  // R16-C ported the source title "No automations across loaded hosts".)
   await page.getByRole("button", { name: "Automations", exact: true }).click();
   await page.getByRole("heading", { name: "Automations", exact: true }).waitFor();
-  await page.getByText("No automations yet.", { exact: true }).waitFor();
+  await page.getByText("No automations across loaded hosts", { exact: true }).waitFor();
   await page.locator('[data-testid="automations-new"]').waitFor();
   await screenshot("automations.png");
   checks.push("automations-page-lists-empty-with-create-entry");
