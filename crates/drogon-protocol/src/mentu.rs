@@ -104,6 +104,52 @@ pub struct MentuRuntimeInfo {
     pub message: Option<String>,
 }
 
+/// Outcome of `mentu.runtime_install` (journey J9, fresh-install
+/// provisioning): whether this call actually copied bytes, or found the
+/// fixed runtime path already holding the identical, verified source.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MentuRuntimeInstallStatus {
+    Installed,
+    AlreadyInstalled,
+}
+
+/// Params for `mentu.runtime_install`: `source_path` is a local, already
+/// existing runtime binary (never fetched by the daemon itself — the caller
+/// is responsible for how it got on disk, e.g. this repo's
+/// `scripts/mentu-runtime-provision.mjs` staging one before packaging, or a
+/// developer pointing at a locally built `mentu-recipes`). Installation only
+/// activates it after its sha256 matches [`MENTU_LOCK_SHA256`]'s runtime
+/// value (`crate::mentu`'s `runtime` module owns the actual constant, kept
+/// out of this shape-only crate).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRuntimeInstallParams {
+    pub source_path: String,
+}
+
+impl MentuRuntimeInstallParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        if self.source_path.is_empty()
+            || self.source_path.len() > 4096
+            || self.source_path.contains('\0')
+        {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Invalid Mentu runtime source path.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRuntimeInstallResult {
+    pub runtime: MentuRuntimeInfo,
+    pub status: MentuRuntimeInstallStatus,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MentuApproval {

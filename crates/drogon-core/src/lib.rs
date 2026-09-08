@@ -449,6 +449,7 @@ impl Engine {
             "mentu.recipe" => self.mentu_recipe(&request.params),
             "mentu.recipe_save" => self.mentu_recipe_save(request),
             "mentu.runtime" => self.mentu_runtime_info(&request.params),
+            "mentu.runtime_install" => self.mentu_runtime_install(&request.params),
             "mentu.approve" => self.mentu_approve(request),
             "mentu.run" => self.mentu_run(request),
             "mentu.runs" => self.mentu_runs(&request.params),

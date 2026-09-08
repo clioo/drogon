@@ -18,15 +18,31 @@ use sha2::{Digest, Sha256};
 /// Copied from the read-only reference's `.mentu/mentu-runtime-lock.json`
 /// (revision `b72a1203d46c1d930be1aead65388ddfbe9a8fc4`, mentu-recipes
 /// 0.4.0, darwin-arm64). This crate never re-derives these values from the
-/// reference at build time; the pinned runtime binary itself is provisioned
-/// into a Drogon data directory out of band (see the PR for the exact
-/// command).
+/// reference at build time. The pinned runtime binary itself is built out
+/// of band (this repo never clones or builds `mentu-recipes`) and reaches a
+/// data directory either via `mentu.runtime_install` (see
+/// `crate::mentu::runtime_install`, journey J9 fresh-install usability) or
+/// by hand for local dev/tests.
 pub const MENTU_LOCK_REVISION: &str = "b72a1203d46c1d930be1aead65388ddfbe9a8fc4";
 pub const MENTU_LOCK_VERSION: &str = "0.4.0";
 pub const MENTU_LOCK_SHA256: &str =
     "124ef7391cf060051f45307c88bb10509f5fd9e7d7a10e66516b3bdaf14aa504";
 
 const RUNTIME_ENV_OVERRIDE: &str = "DROGON_MENTU_RUNTIME";
+
+/// Ported verbatim from the read-only reference's own fallback copy for this
+/// state (`src/renderer/src/components/mentu/recipe-pane-controller.ts`'s
+/// `capabilityResult.message ?? 'Mentu Recipes is unavailable on the
+/// execution host.'`, mirrored in this repo's own
+/// `recipe-pane-controller.ts`). The daemon must never format the raw I/O
+/// error into this user-facing string (issue #149): it goes to stderr only.
+const MENTU_RUNTIME_UNAVAILABLE_MESSAGE: &str =
+    "Mentu Recipes is unavailable on the execution host.";
+
+/// Ported verbatim from the read-only reference's
+/// `mentu-runtime-identity.ts`'s sha256-mismatch message.
+const MENTU_RUNTIME_MISMATCH_MESSAGE: &str =
+    "The application-owned Mentu runtime does not match the approved runtime lock.";
 
 /// Test-only seam, mirroring `tasks_rpc::set_gh_bin_override`: integration
 /// tests exercise the real fail-closed lock check against a fixture
@@ -40,7 +56,19 @@ pub fn set_expected_sha256_override(value: Option<String>) {
     *EXPECTED_SHA256_OVERRIDE.lock().unwrap() = value;
 }
 
-fn expected_sha256() -> String {
+/// Serializes every test in this crate that touches the process-wide
+/// [`EXPECTED_SHA256_OVERRIDE`] — this module's own tests and
+/// `runtime_install`'s — so parallel test threads in the same `cargo test`
+/// binary never race each other's override. A second, module-local lock
+/// would not actually exclude anything: both modules must share this one.
+#[cfg(test)]
+pub(crate) static SHA256_OVERRIDE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// `pub(crate)`, not `pub`: `runtime_install` (same install/verify seam)
+/// reads this to check a candidate source before activating it; nothing
+/// outside the crate needs the raw expected digest without the rest of
+/// [`runtime_info`]'s context.
+pub(crate) fn expected_sha256() -> String {
     EXPECTED_SHA256_OVERRIDE
         .lock()
         .unwrap()
@@ -100,6 +128,11 @@ pub fn runtime_info(data_dir: &Path) -> MentuRuntimeInfo {
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
         Err(e) => {
+            // The raw OS error (e.g. "No such file or directory (os error
+            // 2)") is a daemon-operator detail, never a renderer string
+            // (issue #149): it goes to stderr, the user-facing `message`
+            // stays the fixed fork copy above.
+            eprintln!("[mentu] runtime unavailable at {}: {e}", path.display());
             return MentuRuntimeInfo {
                 available: false,
                 path: Some(path.to_string_lossy().into_owned()),
@@ -108,7 +141,7 @@ pub fn runtime_info(data_dir: &Path) -> MentuRuntimeInfo {
                 expected_sha256: expected,
                 actual_sha256: None,
                 lock_matches: false,
-                message: Some(format!("Mentu runtime is not available: {e}")),
+                message: Some(MENTU_RUNTIME_UNAVAILABLE_MESSAGE.to_string()),
             };
         }
     };
@@ -125,7 +158,7 @@ pub fn runtime_info(data_dir: &Path) -> MentuRuntimeInfo {
         message: if lock_matches {
             None
         } else {
-            Some("The runtime binary does not match the approved Mentu runtime lock.".to_string())
+            Some(MENTU_RUNTIME_MISMATCH_MESSAGE.to_string())
         },
     }
 }
@@ -175,12 +208,22 @@ mod tests {
         let info = runtime_info(data_dir.path());
         assert!(!info.available);
         assert!(!info.lock_matches);
-        assert!(info.message.is_some());
+        // Regression for #149: the raw OS error (e.g. "os error 2") must
+        // never reach this user-facing message, only the fixed fork copy.
+        let message = info.message.unwrap();
+        assert_eq!(message, MENTU_RUNTIME_UNAVAILABLE_MESSAGE);
+        assert!(!message.to_lowercase().contains("os error"));
     }
 
     #[test]
     fn mismatched_sha256_is_reported_but_never_trusted() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // This test relies on no override being set (the default
+        // `MENTU_LOCK_SHA256`); it must exclude `runtime_install`'s tests,
+        // which set one, not just this module's own env-var lock.
+        let _sha_guard = SHA256_OVERRIDE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let data_dir = tempfile::tempdir().unwrap();
         let bin_dir = data_dir.path().join("mentu").join("runtime").join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
@@ -193,6 +236,7 @@ mod tests {
         assert!(!info.available);
         assert!(!info.lock_matches);
         assert_eq!(info.expected_sha256, MENTU_LOCK_SHA256);
+        assert_eq!(info.message.unwrap(), MENTU_RUNTIME_MISMATCH_MESSAGE);
         assert!(require_verified_runtime(data_dir.path()).is_err());
     }
 }

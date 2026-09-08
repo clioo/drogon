@@ -3,19 +3,19 @@
 //! execution, storage}`. Registered in `lib.rs`'s `CAPABILITIES` and
 //! `dispatch_inner`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use drogon_protocol::mentu::{
     MentuApproval, MentuApproveParams, MentuApproveResult, MentuCancelResult, MentuRecipeParams,
     MentuRecipeResult, MentuRecipeSaveParams, MentuRecipeSaveResult, MentuRecipesResult,
     MentuRunEvidenceParams, MentuRunEvidenceResult, MentuRunIdParams, MentuRunParams,
-    MentuRunResult, MentuRunStatus, MentuRunsParams, MentuRunsResult, MentuRuntimeResult,
-    MentuWorkspaceScopeParams,
+    MentuRunResult, MentuRunStatus, MentuRunsParams, MentuRunsResult, MentuRuntimeInstallParams,
+    MentuRuntimeResult, MentuWorkspaceScopeParams,
 };
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
 
-use crate::mentu::{execution, recipe, run_record, runtime, storage};
+use crate::mentu::{execution, recipe, run_record, runtime, runtime_install, storage};
 use crate::{Engine, error, workspace};
 
 fn parse<T: serde::de::DeserializeOwned>(params: &Value, what: &str) -> Result<T, RpcError> {
@@ -53,6 +53,19 @@ impl Engine {
     pub(crate) fn mentu_runtime_info(&self, _params: &Value) -> Result<Value, RpcError> {
         let info = runtime::runtime_info(self.data_dir());
         to_value(MentuRuntimeResult { runtime: info })
+    }
+
+    /// Additive (journey J9 fresh-install usability): activates a caller-
+    /// provided runtime at the fixed data-dir path, but only after its
+    /// sha256 matches the lock — see `mentu::runtime_install`. Never a
+    /// mutating/ledgered op: the filesystem check itself is what makes
+    /// replays idempotent, the same as `mentu_runtime_info`.
+    pub(crate) fn mentu_runtime_install(&self, params: &Value) -> Result<Value, RpcError> {
+        let parsed: MentuRuntimeInstallParams = parse(params, "mentu.runtime_install")?;
+        parsed.validate()?;
+        let result =
+            runtime_install::install_runtime(self.data_dir(), Path::new(&parsed.source_path))?;
+        to_value(result)
     }
 
     pub(crate) fn mentu_recipe_save(&self, request: &Request) -> Result<Value, RpcError> {

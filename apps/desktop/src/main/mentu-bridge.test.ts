@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { dispatchMentuRequest, type MentuMethod } from "./mentu-bridge";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  autoInstallBundledMentuRuntime,
+  dispatchMentuRequest,
+  type MentuMethod,
+} from "./mentu-bridge";
 import type { Result } from "../shared/session-contract";
 
 const runResult = {
@@ -149,5 +156,74 @@ describe("mentu bridge admission", () => {
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.result).toMatchObject({ run: runResult });
     }
+  });
+});
+
+describe("mentu runtime auto-install (journey J9 fresh-install usability)", () => {
+  const scratch: string[] = [];
+  afterEach(() => {
+    for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function fixtureSourcePath(): string {
+    const dir = mkdtempSync(join(tmpdir(), "mentu-auto-install-"));
+    scratch.push(dir);
+    const source = join(dir, "mentu-recipes");
+    writeFileSync(source, "#!/bin/sh\necho fixture\n");
+    return source;
+  }
+
+  it("does nothing when no bundled runtime exists at the source path", async () => {
+    let called = false;
+    await autoInstallBundledMentuRuntime(async () => {
+      called = true;
+      return { ok: true, result: {} };
+    }, join(tmpdir(), "does-not-exist", "mentu-recipes"));
+    expect(called).toBe(false);
+  });
+
+  it("installs a bundled runtime and logs the result", async () => {
+    const source = fixtureSourcePath();
+    const seen: Array<[string, unknown]> = [];
+    await autoInstallBundledMentuRuntime(async (method, params) => {
+      seen.push([method, params]);
+      return { ok: true, result: { status: "installed" } };
+    }, source);
+    expect(seen).toEqual([["mentu.runtime_install", { sourcePath: source }]]);
+  });
+
+  it("retries a retryable failure, then gives up and logs the failure", async () => {
+    const source = fixtureSourcePath();
+    let calls = 0;
+    await autoInstallBundledMentuRuntime(
+      async () => {
+        calls += 1;
+        return {
+          ok: false,
+          error: { code: "unverifiable", message: "daemon not ready", retryable: true },
+        };
+      },
+      source,
+      0,
+      3,
+    );
+    expect(calls).toBe(3);
+  });
+
+  it("gives up immediately on a non-retryable failure", async () => {
+    const source = fixtureSourcePath();
+    let calls = 0;
+    await autoInstallBundledMentuRuntime(async () => {
+      calls += 1;
+      return {
+        ok: false,
+        error: {
+          code: "mentu_runtime_lock_mismatch",
+          message: "does not match the lock",
+          retryable: false,
+        },
+      };
+    }, source);
+    expect(calls).toBe(1);
   });
 });

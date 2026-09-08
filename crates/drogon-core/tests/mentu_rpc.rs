@@ -227,6 +227,45 @@ impl Fixture {
         }
     }
 
+    /// No runtime pre-installed at the fixed data-dir path, but the
+    /// override is still pointed at `FIXTURE_SCRIPT`'s own hash, so
+    /// `mentu.runtime_install` given that exact source verifies and
+    /// activates it — the fresh-install path (journey J9).
+    fn new_uninstalled() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = root.path().join("data");
+        let fixture_sha256 = sha256_hex(FIXTURE_SCRIPT.as_bytes());
+        let _override = RuntimeOverride::set(Some(fixture_sha256));
+
+        let engine = Engine::open(&data_dir).unwrap();
+        let workspace_dir = root.path().join("workspace");
+        fs::create_dir_all(workspace_dir.join(".mentu").join("recipes")).unwrap();
+        let registered = ok(
+            &engine,
+            "workspace.register",
+            json!({"path": workspace_dir.to_str().unwrap()}),
+        );
+        let workspace_id = registered["id"].as_str().unwrap().to_string();
+        let workspace_path = fs::canonicalize(&workspace_dir).unwrap();
+        Fixture {
+            _root: root,
+            _override,
+            engine,
+            workspace_path,
+            workspace_id,
+        }
+    }
+
+    /// Writes a candidate runtime source file (deliberately not at the
+    /// fixed runtime path) inside this fixture's own temp root, for
+    /// `mentu.runtime_install` tests.
+    fn write_runtime_source(&self, name: &str, bytes: &[u8]) -> PathBuf {
+        let path = self._root.path().join(name);
+        fs::write(&path, bytes).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
     fn write_recipe(&self, name: &str) {
         let path = self
             .workspace_path
@@ -353,6 +392,67 @@ fn lock_mismatch_is_reported_and_run_refuses_to_start() {
         }),
     );
     assert_eq!(code, "mentu_runtime_unavailable");
+}
+
+#[test]
+fn runtime_install_activates_a_matching_source_and_is_idempotent() {
+    let fx = Fixture::new_uninstalled();
+    let before = ok(&fx.engine, "mentu.runtime", json!({}))["runtime"].clone();
+    assert_eq!(before["available"], false);
+
+    let source = fx.write_runtime_source("candidate", FIXTURE_SCRIPT.as_bytes());
+    let installed = ok(
+        &fx.engine,
+        "mentu.runtime_install",
+        json!({"sourcePath": source.to_str().unwrap()}),
+    );
+    assert_eq!(installed["status"], "installed");
+    assert_eq!(installed["runtime"]["available"], true);
+    assert_eq!(installed["runtime"]["lockMatches"], true);
+
+    let after = ok(&fx.engine, "mentu.runtime", json!({}))["runtime"].clone();
+    assert_eq!(after["available"], true);
+
+    // A second install with the identical source is idempotent: no error,
+    // and it reports it found the runtime already installed.
+    let replay = ok(
+        &fx.engine,
+        "mentu.runtime_install",
+        json!({"sourcePath": source.to_str().unwrap()}),
+    );
+    assert_eq!(replay["status"], "already_installed");
+    assert_eq!(replay["runtime"]["lockMatches"], true);
+}
+
+#[test]
+fn runtime_install_refuses_a_source_that_does_not_match_the_lock() {
+    let fx = Fixture::new_uninstalled();
+    let source = fx.write_runtime_source("candidate", b"not the fixture bytes");
+
+    let code = err_code(
+        &fx.engine,
+        "mentu.runtime_install",
+        json!({"sourcePath": source.to_str().unwrap()}),
+    );
+    assert_eq!(code, "mentu_runtime_lock_mismatch");
+
+    // A rejected source must never be activated: the runtime stays
+    // unavailable exactly as before the attempt.
+    let after = ok(&fx.engine, "mentu.runtime", json!({}))["runtime"].clone();
+    assert_eq!(after["available"], false);
+}
+
+#[test]
+fn runtime_install_validates_the_source_path_param() {
+    let fx = Fixture::new_uninstalled();
+    assert_eq!(
+        err_code(
+            &fx.engine,
+            "mentu.runtime_install",
+            json!({"sourcePath": ""})
+        ),
+        "invalid_argument"
+    );
 }
 
 #[test]

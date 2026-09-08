@@ -1,0 +1,4 @@
+# Staged by `scripts/mentu-runtime-provision.mjs` from a locally built
+# `mentu-recipes`, never committed — same precedent as the repo root's
+# `.mentu/runtime/`.
+mentu-runtime/
