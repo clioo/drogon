@@ -249,7 +249,8 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | R16-AS: Source Control de extremo a extremo (J2) coordinado con R16-R2 | R16 | Kimi | fusionada (#295: J2 verificado, 6 divergencias corregidas — grupos, diff, commit, sync, gating de Create PR) | #295 |
 | R16-BA: README, CHANGELOG, guion de demo y metadatos de licencia para el hackathon | R16 | Kimi | fusionada (#280) | #280 |
 | Instalación: bundle 1d83f98 (sellado 40/40) el 2026-09-08 ~02:1x — icono propio, Bots/Tasks rápidos | R16 | Coordinador | reemplazada | |
-| Instalación: bundle f1f690f (sellado 40/40) el 2026-09-08 ~04:5x — Forward del browser sin cuelgue, Restart daemon en el paquete (#288); siguiente tras R16-AR2 (#285) | R16 | Coordinador | instalado | |
+| Instalación: bundle f1f690f (sellado 40/40) el 2026-09-08 ~04:5x — Forward del browser sin cuelgue, Restart daemon en el paquete (#288); siguiente tras R16-AR2 (#285) | R16 | Coordinador | reemplazada | |
+| Instalación: bundle 26c7e90 (sellado 47/47) el 2026-09-08 08:12 — todos los hallazgos de Carlos (#230 #254 #300 #301 #270 #275 #294 #302), perf (#306); también ~/Applications (preview) | R16 | Coordinador | instalado | |
 | QA funcional rondas 4–6 y QA de UI rondas 7–8 (luna); Muse agotado (429) desde ~02:15 | QA | luna | en curso | #268 |
 | R16-AX2: #270 Close de Tasks, #272 tope de 18 sesiones, #278 acción New worktree bloqueada | R16 | GLM | fusionada (#287: #270 #272; #292 R16-AX3: #278 acción New worktree de la tarjeta de proyecto) | #287 #292 |
 | QA-UI ronda 8: estados de oráculo de fidelidad r8 (`compare-surfaces.mjs`) | QA | luna | fusionada (#289); ronda 9 en curso (luna) | #289 |
@@ -261,10 +262,15 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | R16-BH: todos los menús contextuales, dropdowns, popovers y diálogos item por item frente al fork (inventario + tabla de divergencias + estados de oráculo) | R16 | Kimi k3 | lanzada | |
 | QA fix R16-BI: #300 sidebar 70 px más angosto, #301 tira de tabs 9 px más alta y a todo el ancho, #303 separador de la barra de estado sin a11y, #270 Escape desde páginas | R16 | Kimi k3 | fusionada (#310; #300 #301 #303 #270 cerrados) | #310 |
 | QA fix R16-BJ: #294 diff de Source Control como tab del editor, #302 tab huérfano al borrar archivo abierto, #176 copy residual | R16 | GLM | fusionada (#314; #294 #302 #176 cerrados) | #314 |
-| QA funcional ronda 9 (re-walk completo del bundle empaquetado + guion de demo con el fixture) y QA de UI ronda 10 (composer, Session details, Ports, editor sucio, run detail, Bots history, Mentu Evidence) | QA | luna | hecha: bundle 0b3333d verificó #291 #292 #290 #175 #297; nuevo #309 (renderer no responde tras reinicio del daemon con tabs locales) → R16-BK; ronda 10 en curso (Tasks con gh real, modelo local con backoff, #307, evidencia #309) | |
-| R16-BF2: propagación push del estado de agente a la tarjeta y al badge (< 200 ms, como el fork) | R16 | Muse | PR #311 en rebase (conflicto tras #310 #314) | |
-| QA fix R16-BK: #309 el renderer empaquetado deja de responder tras reinicio del daemon con tabs de browser locales persistidas | R16 | GLM | lanzada (prioridad máxima) | |
-| CI R16-BL: #312 el job ubuntu de Foundation muere en el paso de tests del desktop con SIGTERM tras los mismos 49 archivos desde b1beaa6 (todos los PRs) | R16 | GLM | lanzada (prioridad máxima) | |
+| QA funcional rondas 9–10 (re-walk completo del bundle empaquetado + guion de demo con el fixture) y QA de UI ronda 10 (composer, Session details, Ports, editor sucio, run detail, Bots history, Mentu Evidence) | QA | luna | hechas: bundle 0b3333d verificó #291 #292 #290 #175 #297; nuevo #309 (renderer no responde tras reinicio del daemon con tabs locales) → R16-BK; ronda 10 en curso (Tasks con gh real, modelo local con backoff, #307, evidencia #309) ; r10 (bundle a714395) ejercitó Tasks con gh real, estados de Pi local, bots (#307), persistencia del browser y filó #315 → R16-BN; ronda 11 en curso | |
+| R16-BF2: propagación push del estado de agente a la tarjeta y al badge (< 200 ms, como el fork) | R16 | Muse | fusionada (#311: tarjeta/badge en ~34 ms medianos, presupuesto 200 ms en measure-navigation) | #311 |
+| QA fix R16-BK: #309 el renderer empaquetado deja de responder tras reinicio del daemon con tabs de browser locales persistidas | R16 | GLM | fusionada (#321: macOS suspendía el Electron de prueba en segundo plano → powerSaveBlocker; sonda sellada de tabs locales a través de Restart daemon y relanzado; #309 cerrado) | #321 |
+| CI R16-BL: #312 el job ubuntu de Foundation muere en el paso de tests del desktop con SIGTERM tras los mismos 49 archivos desde b1beaa6 (todos los PRs) | R16 | GLM | en curso (PR de debug #320) | |
+| QA-UI ronda 10: 8 estados nuevos del oráculo (composer, Session details, Ports, editor sucio, run detail, Bots history, Mentu Evidence…) | QA | luna | fusionada (#318); filó #316 → R16-BM; ronda 11 en curso | #318 |
+| QA fix R16-BM: #316 composer "Create worktree" del fork item por item (Project, Run on, Agent, Advanced) | R16 | Kimi k3 | lanzada | |
+| QA fix R16-BN: #315 Monaco añade un carácter al guardar tras seleccionar todo | R16 | Kimi | lanzada | |
+| R16-BO: #319 icono construido y verificado antes de instalar; install-preview tolera previews viejos | R16 | Muse | lanzada | |
+| R16-BP: seguridad de upgrade del data dir (inventario, migraciones con fixtures, backup previo, rechazo claro al degradar; probado desde f1f690f) | R16 | GLM | lanzada | |
 | Cierre: #186 cerrado (arreglado en #227), #279 cerrado (#291), #278 cerrado (#292); R16-AV cerrado tras #283 (worker_done nunca llegó; worktree barrido) | R16 | Coordinador | hecho | |
 | QA funcional rondas 7–8 y QA de UI rondas 8–9 | QA | luna | hechas: r8 verificó #175 #264 #259 #272 #209, reabrió #270, creó #302; UI r9 (#305) creó #300 #301 #303 y reabrió #176 | #289 #305 |
 
