@@ -29,6 +29,10 @@ import {
   normalizeTerminalFontWeightBold,
   resolveDefaultTerminalFontFamily,
 } from "./features/settings/terminal-typography";
+import {
+  DESKTOP_TERMINAL_SCROLLBACK_ROWS_DEFAULT,
+  normalizeDesktopTerminalScrollbackRows,
+} from "./features/terminal/terminal-scrollback-policy";
 
 export type Theme = "system" | "dark" | "light";
 
@@ -61,6 +65,28 @@ export type SettingsSubset = {
   locale: string;
   /** Terminal font size in px; consumed by the terminal surface CSS hook. */
   terminalFontSize: number;
+  /** Terminal wheel multiplier for normal scrollback (source default 1.15). */
+  terminalScrollSensitivity: number;
+  /** Terminal wheel multiplier while Alt is held (source default 5). */
+  terminalFastScrollSensitivity: number;
+  /** Discrete wheel reports for fullscreen TUIs (source default 1). */
+  terminalTuiScrollSensitivity: number;
+  /** Windows convention: right-click pastes; Ctrl+right-click opens the menu. */
+  terminalRightClickToPaste: boolean;
+  /** Hovering a terminal pane focuses it without a click. */
+  terminalFocusFollowsMouse: boolean;
+  /** Copy terminal selections to the system clipboard automatically. */
+  terminalClipboardOnSelect: boolean;
+  /** Allow terminal programs to write clipboard data through OSC 52. */
+  terminalAllowOsc52Clipboard: boolean;
+  /** Rows retained in xterm scrollback. */
+  terminalScrollbackRows: number;
+  /** Characters treated as word boundaries for double-click selection; empty uses xterm's default. */
+  terminalWordSeparator: string;
+  /** macOS Option behavior: auto, both, one side, or off. */
+  terminalMacOptionAsAlt: "auto" | "true" | "false" | "left" | "right";
+  /** Rewrite the physical macOS JIS Yen key as a backslash. */
+  terminalJISYenToBackslash: boolean;
   /**
    * Terminal font family (source terminalFontFamily). Empty means no
    * preference; xterm falls through to the monospace fallback chain.
@@ -103,12 +129,33 @@ export type StorageLike = {
   setItem(key: string, value: string): void;
 };
 
+export function defaultTerminalRightClickToPaste(): boolean {
+  if (
+    typeof navigator !== "undefined" &&
+    /Windows/i.test(navigator.userAgent)
+  ) {
+    return true;
+  }
+  return typeof process !== "undefined" && process.platform === "win32";
+}
+
 export const SETTINGS_DEFAULTS: SettingsSubset = {
   theme: "system",
   inspectorVisible: true,
   locale: "en",
-  // Source default 14 (terminal-pane-manager-options.ts, useTerminalFontZoom.ts).
+  // Source defaults (pane-terminal-options.ts and pane-terminal-mouse-wheel.ts).
   terminalFontSize: 14,
+  terminalScrollSensitivity: 1.15,
+  terminalFastScrollSensitivity: 5,
+  terminalTuiScrollSensitivity: 1,
+  terminalRightClickToPaste: defaultTerminalRightClickToPaste(),
+  terminalFocusFollowsMouse: false,
+  terminalClipboardOnSelect: false,
+  terminalAllowOsc52Clipboard: true,
+  terminalScrollbackRows: DESKTOP_TERMINAL_SCROLLBACK_ROWS_DEFAULT,
+  terminalWordSeparator: "",
+  terminalMacOptionAsAlt: "auto",
+  terminalJISYenToBackslash: false,
   terminalFontFamily: resolveDefaultTerminalFontFamily(),
   terminalFontWeight: 500,
   terminalFontWeightBold: 700,
@@ -184,6 +231,26 @@ function parseTerminalFontWeight(
   return normalize(value);
 }
 
+function normalizeTerminalScrollSensitivity(value: number): number {
+  return Math.min(10, Math.max(0.1, value));
+}
+
+function normalizeTerminalFastScrollSensitivity(value: number): number {
+  return Math.min(20, Math.max(1, value));
+}
+
+function normalizeTerminalTuiScrollSensitivity(value: number): number {
+  return Math.round(Math.min(10, Math.max(1, value)));
+}
+
+function parseFiniteTerminalNumber(
+  value: unknown,
+  normalize: (value: number) => number,
+): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return normalize(value);
+}
+
 function isDefaultHarnessId(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -198,6 +265,18 @@ function isPermissionMode(value: unknown): value is HarnessPermissionMode {
 
 function isGpuAcceleration(value: unknown): value is TerminalGpuAcceleration {
   return value === "auto" || value === "on" || value === "off";
+}
+
+function isMacOptionAsAlt(
+  value: unknown,
+): value is SettingsSubset["terminalMacOptionAsAlt"] {
+  return (
+    value === "auto" ||
+    value === "true" ||
+    value === "false" ||
+    value === "left" ||
+    value === "right"
+  );
 }
 
 function parseHarnessAgentDefault(value: unknown): HarnessAgentDefault | null {
@@ -270,6 +349,52 @@ export function parsePersistedSettings(
       out.locale = candidate.locale;
     if (isTerminalFontSize(candidate.terminalFontSize))
       out.terminalFontSize = candidate.terminalFontSize;
+    {
+      const value = parseFiniteTerminalNumber(
+        candidate.terminalScrollSensitivity,
+        normalizeTerminalScrollSensitivity,
+      );
+      if (value !== null) out.terminalScrollSensitivity = value;
+    }
+    {
+      const value = parseFiniteTerminalNumber(
+        candidate.terminalFastScrollSensitivity,
+        normalizeTerminalFastScrollSensitivity,
+      );
+      if (value !== null) out.terminalFastScrollSensitivity = value;
+    }
+    {
+      const value = parseFiniteTerminalNumber(
+        candidate.terminalTuiScrollSensitivity,
+        normalizeTerminalTuiScrollSensitivity,
+      );
+      if (value !== null) out.terminalTuiScrollSensitivity = value;
+    }
+    if (typeof candidate.terminalRightClickToPaste === "boolean")
+      out.terminalRightClickToPaste = candidate.terminalRightClickToPaste;
+    if (typeof candidate.terminalFocusFollowsMouse === "boolean")
+      out.terminalFocusFollowsMouse = candidate.terminalFocusFollowsMouse;
+    if (typeof candidate.terminalClipboardOnSelect === "boolean")
+      out.terminalClipboardOnSelect = candidate.terminalClipboardOnSelect;
+    if (typeof candidate.terminalAllowOsc52Clipboard === "boolean")
+      out.terminalAllowOsc52Clipboard = candidate.terminalAllowOsc52Clipboard;
+    if (
+      typeof candidate.terminalScrollbackRows === "number" &&
+      Number.isFinite(candidate.terminalScrollbackRows)
+    )
+      out.terminalScrollbackRows = normalizeDesktopTerminalScrollbackRows(
+        candidate.terminalScrollbackRows,
+      );
+    if (
+      typeof candidate.terminalWordSeparator === "string" &&
+      candidate.terminalWordSeparator.length <= 256 &&
+      NO_CONTROL_CHARS.test(candidate.terminalWordSeparator)
+    )
+      out.terminalWordSeparator = candidate.terminalWordSeparator;
+    if (isMacOptionAsAlt(candidate.terminalMacOptionAsAlt))
+      out.terminalMacOptionAsAlt = candidate.terminalMacOptionAsAlt;
+    if (typeof candidate.terminalJISYenToBackslash === "boolean")
+      out.terminalJISYenToBackslash = candidate.terminalJISYenToBackslash;
     if (isTerminalFontFamily(candidate.terminalFontFamily))
       out.terminalFontFamily = candidate.terminalFontFamily;
     {
@@ -357,6 +482,7 @@ export class SettingsStore {
   #key: string;
   #state: SettingsSubset;
   #unknownKeys: Record<string, unknown> = {};
+  #dirtyKeys = new Set<keyof SettingsSubset>();
   #timer: ReturnType<typeof setTimeout> | null = null;
   #firstPendingAt: number | null = null;
 
@@ -398,6 +524,7 @@ export class SettingsStore {
     value: SettingsSubset[K],
   ): SettingsSubset {
     this.#state = { ...this.#state, [key]: value };
+    this.#dirtyKeys.add(key);
     const now = Date.now();
     if (this.#firstPendingAt === null) this.#firstPendingAt = now;
     const delay = Math.min(DEBOUNCE_MS, MAX_PENDING_MS - (now - this.#firstPendingAt));
@@ -414,10 +541,26 @@ export class SettingsStore {
     }
     this.#firstPendingAt = null;
     try {
+      // Settings controls that predate the full store (for example the
+      // terminal Interaction/Advanced pane) use an envelope read-modify-write
+      // path. Refresh fields this instance did not edit so its later flush
+      // cannot clobber those live changes with an older startup snapshot.
+      const raw = this.#storage.getItem(this.#key);
+      const persisted = parsePersistedSettings(raw);
+      for (const key of Object.keys(this.#state) as (keyof SettingsSubset)[]) {
+        if (!this.#dirtyKeys.has(key) && persisted[key] !== undefined) {
+          this.#state = { ...this.#state, [key]: persisted[key] };
+        }
+      }
+      this.#unknownKeys = {
+        ...this.#unknownKeys,
+        ...parseUnknownSettingsKeys(raw),
+      };
       this.#storage.setItem(
         this.#key,
         JSON.stringify({ settings: { ...this.#unknownKeys, ...this.#state } }),
       );
+      this.#dirtyKeys.clear();
     } catch {
       // Storage unavailable: keep serving in-memory state; no durability promise.
     }

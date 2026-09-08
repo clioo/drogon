@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
   SETTINGS_DEFAULTS,
+  defaultTerminalRightClickToPaste,
   SettingsStore,
   mergeSettingLayers,
   parsePersistedSettings,
@@ -17,6 +18,17 @@ const defaults: SettingsSubset = {
   inspectorVisible: true,
   locale: "en",
   terminalFontSize: 14,
+  terminalScrollSensitivity: SETTINGS_DEFAULTS.terminalScrollSensitivity,
+  terminalFastScrollSensitivity: SETTINGS_DEFAULTS.terminalFastScrollSensitivity,
+  terminalTuiScrollSensitivity: SETTINGS_DEFAULTS.terminalTuiScrollSensitivity,
+  terminalRightClickToPaste: SETTINGS_DEFAULTS.terminalRightClickToPaste,
+  terminalFocusFollowsMouse: SETTINGS_DEFAULTS.terminalFocusFollowsMouse,
+  terminalClipboardOnSelect: SETTINGS_DEFAULTS.terminalClipboardOnSelect,
+  terminalAllowOsc52Clipboard: SETTINGS_DEFAULTS.terminalAllowOsc52Clipboard,
+  terminalScrollbackRows: SETTINGS_DEFAULTS.terminalScrollbackRows,
+  terminalWordSeparator: SETTINGS_DEFAULTS.terminalWordSeparator,
+  terminalMacOptionAsAlt: SETTINGS_DEFAULTS.terminalMacOptionAsAlt,
+  terminalJISYenToBackslash: SETTINGS_DEFAULTS.terminalJISYenToBackslash,
   terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
   terminalFontWeight: 500,
   terminalFontWeightBold: 700,
@@ -157,6 +169,13 @@ describe("typed get/set for the UI-chrome subset", () => {
     expect(store.get("locale")).toBe("en");
     expect(SETTINGS_DEFAULTS.theme).toBe("system");
   });
+  it("derives the right-click default from the current runtime platform", () => {
+    const expected = defaultTerminalRightClickToPaste();
+    const store = new SettingsStore(new MemoryStorage(), { namespace: "ui" });
+    expect(SETTINGS_DEFAULTS.terminalRightClickToPaste).toBe(expected);
+    expect(defaults.terminalRightClickToPaste).toBe(expected);
+    expect(store.get("terminalRightClickToPaste")).toBe(expected);
+  });
   it("set returns the updated in-memory state and get reflects it", () => {
     const store = new SettingsStore(new MemoryStorage(), { namespace: "ui" });
     const state = store.set("theme", "dark");
@@ -204,6 +223,17 @@ describe("persistence round-trip through injected storage", () => {
         inspectorVisible: true,
         locale: "es",
         terminalFontSize: 14,
+        terminalScrollSensitivity: SETTINGS_DEFAULTS.terminalScrollSensitivity,
+        terminalFastScrollSensitivity: SETTINGS_DEFAULTS.terminalFastScrollSensitivity,
+        terminalTuiScrollSensitivity: SETTINGS_DEFAULTS.terminalTuiScrollSensitivity,
+        terminalRightClickToPaste: SETTINGS_DEFAULTS.terminalRightClickToPaste,
+        terminalFocusFollowsMouse: SETTINGS_DEFAULTS.terminalFocusFollowsMouse,
+        terminalClipboardOnSelect: SETTINGS_DEFAULTS.terminalClipboardOnSelect,
+        terminalAllowOsc52Clipboard: SETTINGS_DEFAULTS.terminalAllowOsc52Clipboard,
+        terminalScrollbackRows: SETTINGS_DEFAULTS.terminalScrollbackRows,
+        terminalWordSeparator: SETTINGS_DEFAULTS.terminalWordSeparator,
+        terminalMacOptionAsAlt: SETTINGS_DEFAULTS.terminalMacOptionAsAlt,
+        terminalJISYenToBackslash: SETTINGS_DEFAULTS.terminalJISYenToBackslash,
         terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
         terminalFontWeight: 500,
         terminalFontWeightBold: 700,
@@ -232,6 +262,20 @@ describe("persistence round-trip through injected storage", () => {
     expect(second.get("theme")).toBe("dark");
     expect(second.get("inspectorVisible")).toBe(false);
     expect(second.get("locale")).toBe("en");
+  });
+  it("does not clobber an external terminal settings write on an unrelated flush", () => {
+    const storage = new MemoryStorage();
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    storage.seed(
+      settingsStorageKey("ui"),
+      JSON.stringify({ settings: { terminalScrollbackRows: 25_000 } }),
+    );
+    store.set("locale", "es");
+    store.flush();
+    expect(
+      JSON.parse(storage.peek(settingsStorageKey("ui")) as string).settings
+        .terminalScrollbackRows,
+    ).toBe(25_000);
   });
   it("debounces writes by 1s", () => {
     const storage = new MemoryStorage();
@@ -416,6 +460,17 @@ describe("unknown-key forward compatibility on read-modify-write", () => {
       inspectorVisible: true,
       locale: "es",
       terminalFontSize: 14,
+      terminalScrollSensitivity: SETTINGS_DEFAULTS.terminalScrollSensitivity,
+      terminalFastScrollSensitivity: SETTINGS_DEFAULTS.terminalFastScrollSensitivity,
+      terminalTuiScrollSensitivity: SETTINGS_DEFAULTS.terminalTuiScrollSensitivity,
+      terminalRightClickToPaste: SETTINGS_DEFAULTS.terminalRightClickToPaste,
+      terminalFocusFollowsMouse: SETTINGS_DEFAULTS.terminalFocusFollowsMouse,
+      terminalClipboardOnSelect: SETTINGS_DEFAULTS.terminalClipboardOnSelect,
+      terminalAllowOsc52Clipboard: SETTINGS_DEFAULTS.terminalAllowOsc52Clipboard,
+      terminalScrollbackRows: SETTINGS_DEFAULTS.terminalScrollbackRows,
+      terminalWordSeparator: SETTINGS_DEFAULTS.terminalWordSeparator,
+      terminalMacOptionAsAlt: SETTINGS_DEFAULTS.terminalMacOptionAsAlt,
+      terminalJISYenToBackslash: SETTINGS_DEFAULTS.terminalJISYenToBackslash,
       terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
       terminalFontWeight: 500,
       terminalFontWeightBold: 700,
