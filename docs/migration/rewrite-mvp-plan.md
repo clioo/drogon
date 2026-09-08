@@ -149,12 +149,12 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J11 R11-C: cobertura del paquete sellado para las superficies nuevas (barra derecha, menú +, composer, Automations, Bots, Tasks, Settings, barra) | R11 | OpenCode + Muse | fusionada: bundle sellado 40/40 PASSED sobre main | #82 |
 | J9 R11-D: panel y pestaña de Mentu portados literalmente del fork (Draft, Graph, Metrics, controles de ejecución) sobre las primitivas | R11 | Muse | fusionada: Graph/Run/Evidence/Metrics del fork, verify.commands y step_status corregidos; Open full tab cableado | #84 |
 | J2 R12-A: editor Monaco y visor de diff del fuente (cabecera, autosave, tema, DiffViewer) | R12 | Sonnet | lanzada | |
-| J5 R12-B: jump palette ⌘J y quick open ⌘P del fuente con files.search en el daemon y reveal en Explorer | R12 | Muse | lanzada | |
+| J5 R12-B: jump palette ⌘J y quick open ⌘P del fuente con files.search en el daemon y reveal en Explorer | R12 | Muse | fusionada: JumpPalette/QuickOpen del fuente, files.search con git ls-files y walk acotado, reveal en Explorer; 1489 tests | #95 |
 | J1 R12-D: interacciones del tab strip (reordenar con dnd-kit, menú contextual, pin, cerrar variantes) | R12 | Muse | fusionada: orden persistido por workspace, menú del fuente, pin, renombrar, cierre variantes, chevrons | #90 |
 | J1/J4 R12-E: remates de terminal y browser (política de pegado, popover de enlaces, reinicio con el mismo harness, chords con el guest enfocado) | R12 | GLM 5.3 Flash | lanzada | |
 | J7 R12-F: dashboard de Runs y página de detalle de ejecución de Automations | R12 | GLM 5.3 Flash | lanzada | |
-| J6 R12-G: Tasks en modo pull requests con celdas de revisión/checks/merge y start desde PR | R12 | OpenCode Go + Muse 1.3 | lanzada (relanzada en el plan Go a petición de Carlos) | |
-| J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode Go + Muse 1.3 | lanzada (relanzada en el plan Go a petición de Carlos) | |
+| J6 R12-G: Tasks en modo pull requests con celdas de revisión/checks/merge y start desde PR | R12 | OpenCode Go + Muse 1.3 | fusionada: modo PR del fuente con celdas de revisión/checks/merge, start desde PR | #93 |
+| J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode Go + Muse 1.3 | fusionada: borrador, inspector en modo edición, familia de validación del fork, mentu.recipe_save; 1448 tests | #94 |
 | J10 R12-I: paneles de Settings del fuente (Appearance, General, Agents, Notifications, Git y GitHub) | R12 | Muse | fusionada: orden de secciones del fuente, sección CLI en Agents con sonda real | #89 |
 | J8 R13-A: exactitud de la página Bots frente al fork (estados, formulario, avatar, controlador) sobre las primitivas | R13 | Muse | lanzada | |
 | J4 R13-B: panel Ports de la barra derecha con puertos del workspace y abrir en pestaña de browser | R13 | GLM 5.3 Flash | lanzada | |
