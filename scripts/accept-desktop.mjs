@@ -284,7 +284,7 @@ try {
   }
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
   await page.getByTestId("tasks-page-host").waitFor();
-  await page.getByRole("heading", { name: "Tasks", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Close tasks", exact: true }).waitFor();
   assert.equal(
     await page
       .getByRole("button", { name: "Tasks", exact: true })
