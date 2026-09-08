@@ -26,6 +26,38 @@ export function renderedPiIsReady(root = document) {
   );
 }
 
+/**
+ * Self-contained predicate (serialized into the page by
+ * `waitForSessionStripTab`): true when the session's own strip tab carries
+ * the daemon verdict as the tail of its accessible name. R16-E (#164)
+ * renamed strip tabs to "Terminal N" — the harness name never becomes the
+ * tab label — while keeping the legacy "<label> <verdict>" accessible-name
+ * shape (TabBar.tsx), so the probe matches the verdict suffix on the
+ * session's own tab instead of a hardcoded "Pi <verdict>" name. An
+ * "unverifiable" tab additionally carries "· <id>:<incarnation>" inside its
+ * label (session-recovery.ts `recoveryTabLabel`), which the suffix match
+ * tolerates. Scoped to the Sessions tablist: the right sidebar renders its
+ * own tabs with overlapping roles.
+ */
+export function sessionTabShowsVerdict({ id, suffix }) {
+  const tab = document.querySelector(
+    `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
+  );
+  return tab?.getAttribute("aria-label")?.endsWith(suffix) ?? false;
+}
+
+/**
+ * Waits for a session's strip tab to show a daemon verdict. One helper for
+ * the session-tab surface: callers pass the launched session id plus
+ * "live" or "unverifiable".
+ */
+export async function waitForSessionStripTab(page, sessionId, verdict) {
+  await page.waitForFunction(sessionTabShowsVerdict, {
+    id: sessionId,
+    suffix: ` ${verdict}`,
+  });
+}
+
 export async function probeRenderedHarness({
   page,
   workspaceId,
@@ -132,14 +164,12 @@ export async function probeRenderedHarness({
   await page
     .getByRole("button", { name: "Reveal active workspace", exact: true })
     .waitFor();
-  await page.getByRole("tab", { name: "Pi live", exact: true }).waitFor();
+  await waitForSessionStripTab(page, identity.sessionId, "live");
   const socket = path.join(dataDir, "runtime-v1.sock");
   const interrupted = path.join(dataDir, "acceptance-unreachable.sock");
   await rename(socket, interrupted);
   try {
-    await page
-      .getByRole("tab", { name: "Pi unverifiable", exact: true })
-      .waitFor();
+    await waitForSessionStripTab(page, identity.sessionId, "unverifiable");
     await page.screenshot({
       path: path.join(output, "pi-unverifiable.png"),
       animations: "disabled",
@@ -150,7 +180,7 @@ export async function probeRenderedHarness({
   await page
     .getByRole("button", { name: "Refresh connection", exact: true })
     .click();
-  await page.getByRole("tab", { name: "Pi live", exact: true }).waitFor();
+  await waitForSessionStripTab(page, identity.sessionId, "live");
   await waitForBridgeObservation(
     page,
     async (identity) => {

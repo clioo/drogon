@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderedPiIsReady } from "./probe-rendered-harness.mjs";
+import {
+  renderedPiIsReady,
+  sessionTabShowsVerdict,
+} from "./probe-rendered-harness.mjs";
 
 function terminal(textContent) {
   return {
@@ -39,4 +42,80 @@ test("the rendered Pi version and compact interactive controls prove TUI readine
     ),
     true,
   );
+});
+
+function stubDom(tab) {
+  let seen = "";
+  globalThis.document = {
+    querySelector(selector) {
+      seen = selector;
+      return tab;
+    },
+  };
+  globalThis.CSS = { escape: (value) => value };
+  return () => seen;
+}
+
+function ariaTab(name) {
+  return { getAttribute: (attr) => (attr === "aria-label" ? name : null) };
+}
+
+test("the session tab matches its verdict suffix on the R16-E Terminal N name", () => {
+  const seen = stubDom(ariaTab("Terminal 1 live"));
+  try {
+    assert.equal(
+      sessionTabShowsVerdict({ id: "ses-1", suffix: " live" }),
+      true,
+    );
+    assert.match(
+      seen(),
+      /\[role="tablist"\]\[aria-label="Sessions"\].*\[data-tab-id="ses-1"\]/,
+    );
+  } finally {
+    delete globalThis.document;
+    delete globalThis.CSS;
+  }
+});
+
+test("an unverifiable tab keeps matching through its recovery id suffix", () => {
+  const seen = stubDom(ariaTab("Terminal 1 · ses-1:inc-2 unverifiable"));
+  try {
+    assert.equal(
+      sessionTabShowsVerdict({ id: "ses-1", suffix: " unverifiable" }),
+      true,
+    );
+    assert.equal(
+      sessionTabShowsVerdict({ id: "ses-1", suffix: " live" }),
+      false,
+    );
+    assert.ok(seen().length > 0);
+  } finally {
+    delete globalThis.document;
+    delete globalThis.CSS;
+  }
+});
+
+test("a missing tab or a missing accessible name never matches", () => {
+  let seen = stubDom(null);
+  try {
+    assert.equal(
+      sessionTabShowsVerdict({ id: "ses-1", suffix: " live" }),
+      false,
+    );
+    assert.ok(seen().length > 0);
+  } finally {
+    delete globalThis.document;
+    delete globalThis.CSS;
+  }
+  seen = stubDom({ getAttribute: () => null });
+  try {
+    assert.equal(
+      sessionTabShowsVerdict({ id: "ses-1", suffix: " live" }),
+      false,
+    );
+    assert.ok(seen().length > 0);
+  } finally {
+    delete globalThis.document;
+    delete globalThis.CSS;
+  }
 });
