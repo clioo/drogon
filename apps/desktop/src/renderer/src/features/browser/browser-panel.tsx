@@ -25,10 +25,7 @@ import type {
   BrowserTabState,
 } from "../../../../shared/browser-contract";
 import type { BrowserBridge } from "./browser-bridge";
-import {
-  readCaptureWindowOpen,
-  writeCaptureWindowOpen,
-} from "./browser-bridge";
+import { readOpenLinksInApp, writeOpenLinksInApp } from "./browser-bridge";
 import { windowShellOpenExternal } from "../landing/github-star";
 import BrowserAddressBar from "./browser-address-bar";
 import { BrowserNavigationControlRow } from "./browser-navigation-control-row";
@@ -135,7 +132,9 @@ export function BrowserPanel({
   const [address, setAddress] = useState("");
   const [notice, setNotice] = useState("");
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
-  const [capture, setCapture] = useState(() => readCaptureWindowOpen());
+  const [openLinksInApp, setOpenLinksInApp] = useState(() =>
+    readOpenLinksInApp(),
+  );
   const [recentUrls, setRecentUrls] = useState<BrowserRecentUrl[]>(() =>
     readBrowserRecentUrls(workspaceId),
   );
@@ -462,10 +461,10 @@ export function BrowserPanel({
       .catch(() => setNotice("The tab could not be opened."));
   };
 
-  const toggleCapture = () => {
-    const next = !capture;
-    setCapture(next);
-    writeCaptureWindowOpen(next);
+  const toggleOpenLinksInApp = () => {
+    const next = !openLinksInApp;
+    setOpenLinksInApp(next);
+    writeOpenLinksInApp(next);
   };
 
   // One chord runner shared by the pane keydown handler and the forwarded
@@ -550,59 +549,59 @@ export function BrowserPanel({
       onKeyDown={onPaneKeyDown}
     >
       {!hideTabStrip && (
-      <div
-        className="browser-tabstrip"
-        role="tablist"
-        aria-label="Browser tabs"
-      >
-        {tabs.map((tab) => (
-          <div
-            key={tab.tabId}
-            className="browser-tab"
-            role="tab"
-            aria-selected={tab.tabId === activeTabId}
-            data-current={tab.tabId === activeTabId}
-          >
-            <button
-              className="browser-tab-label"
-              title={tab.url}
-              onClick={() => {
-                selectTab(tab.tabId);
-                void bridge
-                  .setBounds({
-                    tabId: tab.tabId,
-                    bounds:
-                      placeholderRef.current?.getBoundingClientRect() ?? {
-                        x: 0,
-                        y: 0,
-                        width: 0,
-                        height: 0,
-                      },
-                  })
-                  .catch(() => {});
-              }}
-            >
-              {tab.loading ? <span className="browser-dot" /> : null}
-              <span>{tabLabel(tab)}</span>
-            </button>
-            <button
-              className="browser-icon-button"
-              aria-label={`Close ${tabLabel(tab)}`}
-              onClick={() => closeTab(tab.tabId)}
-            >
-              <X size={13} />
-            </button>
-          </div>
-        ))}
-        <button
-          className="browser-icon-button"
-          aria-label="New tab"
-          title="New tab"
-          onClick={newTab}
+        <div
+          className="browser-tabstrip"
+          role="tablist"
+          aria-label="Browser tabs"
         >
-          <Plus size={14} />
-        </button>
-      </div>
+          {tabs.map((tab) => (
+            <div
+              key={tab.tabId}
+              className="browser-tab"
+              role="tab"
+              aria-selected={tab.tabId === activeTabId}
+              data-current={tab.tabId === activeTabId}
+            >
+              <button
+                className="browser-tab-label"
+                title={tab.url}
+                onClick={() => {
+                  selectTab(tab.tabId);
+                  void bridge
+                    .setBounds({
+                      tabId: tab.tabId,
+                      bounds:
+                        placeholderRef.current?.getBoundingClientRect() ?? {
+                          x: 0,
+                          y: 0,
+                          width: 0,
+                          height: 0,
+                        },
+                    })
+                    .catch(() => {});
+                }}
+              >
+                {tab.loading ? <span className="browser-dot" /> : null}
+                <span>{tabLabel(tab)}</span>
+              </button>
+              <button
+                className="browser-icon-button"
+                aria-label={`Close ${tabLabel(tab)}`}
+                onClick={() => closeTab(tab.tabId)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+          <button
+            className="browser-icon-button"
+            aria-label="New tab"
+            title="New tab"
+            onClick={newTab}
+          >
+            <Plus size={14} />
+          </button>
+        </div>
       )}
       <BrowserNavigationControlRow
         controls={{
@@ -773,10 +772,14 @@ export function BrowserPanel({
       />
       <label
         className="browser-capture"
-        title="Route terminal link-opens into this pane"
+        title="Open http(s) links in Drogon's built-in browser — from the terminal. ⇧⌘-click always uses your system browser."
       >
-        <input type="checkbox" checked={capture} onChange={toggleCapture} />
-        Capture links from terminals
+        <input
+          type="checkbox"
+          checked={openLinksInApp}
+          onChange={toggleOpenLinksInApp}
+        />
+        Open http(s) links in Drogon
       </label>
     </div>
   );

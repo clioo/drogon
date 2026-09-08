@@ -1,10 +1,12 @@
 //! Host-local harness discovery and argv planning; never starts a process.
 
 mod discovery;
+mod headless_env;
 mod known_tui_agents;
 mod launch;
 
 pub use discovery::{HarnessAvailability, HarnessInstallation, discover};
+pub use headless_env::{HeadlessEnvPlan, plan_headless_env};
 pub use known_tui_agents::{KNOWN_TUI_AGENT_IDS, is_known_tui_agent};
 pub use launch::{HarnessLaunchPlan, HarnessLaunchRequest, PermissionMode, plan_launch};
 

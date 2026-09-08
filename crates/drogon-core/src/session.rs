@@ -304,6 +304,19 @@ fn spawn_pty(
     cmd.args(args);
     cmd.cwd(cwd);
 
+    // Why not `slave.spawn_command` on unix: that path resets only
+    // SIGINT/SIGQUIT/SIGTERM/SIGHUP/SIGCHLD/SIGALRM before exec. A detached
+    // daemon commonly runs with SIGINT/SIGQUIT ignored and Rust's runtime
+    // ignores SIGPIPE at startup; POSIX keeps ignored dispositions across
+    // exec, so a session child could never be interrupted by ^C and
+    // pipeline tools lost default SIGPIPE behavior (issue #273). Our own
+    // spawn resets the full set (adding SIGPIPE and SIGTSTP) and clears the
+    // blocked signal mask in the child, then does the same
+    // setsid/TIOCSCTTY/fd-cleanup the pty crate's hook did. Windows keeps
+    // the crate's ConPTY spawn (no POSIX signals there).
+    #[cfg(unix)]
+    let child = spawn_child_unix(pair.master.as_ref(), &cmd)?;
+    #[cfg(windows)]
     let child = pair
         .slave
         .spawn_command(cmd)
@@ -314,6 +327,133 @@ fn spawn_pty(
     drop(pair.slave);
 
     Ok((pair.master, writer, reader, child))
+}
+
+/// Unix half of `spawn_pty`'s child launch: translate the already-composed
+/// [`CommandBuilder`] (session env, worker env, hook overlay, argv, cwd)
+/// into a `std::process::Command` so a `pre_exec` hook can reset inherited
+/// signal dispositions and the blocked-signal mask before exec, then
+/// reproduce the pty setup the crate's own hook did (setsid, the slave as
+/// controlling terminal, stray-fd cleanup). Dispositions that were ignored
+/// in the daemon survive exec per POSIX, so without this reset a session's
+/// shell inherits SIGINT/SIGQUIT/SIGPIPE ignored from a detached or
+/// Rust-runtime daemon and ^C can never interrupt it (issue #273).
+#[cfg(unix)]
+fn spawn_child_unix(
+    master: &dyn MasterPty,
+    builder: &CommandBuilder,
+) -> Result<Box<dyn Child + Send + Sync>, RpcError> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::io::FromRawFd;
+    use std::os::unix::process::CommandExt;
+
+    // The crate's `SlavePty` trait exposes no fd, so open the slave device
+    // ourselves by its tty name (O_NOCTTY: the child takes it as its
+    // controlling terminal explicitly in `pre_exec`).
+    let tty_name = master
+        .tty_name()
+        .ok_or_else(|| error::io_error("pty master exposes no tty name on unix"))?;
+    let c_path = std::ffi::CString::new(tty_name.as_os_str().as_bytes())
+        .map_err(|_| error::io_error("pty tty name contains a NUL byte"))?;
+    let slave_fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDWR | libc::O_NOCTTY) };
+    if slave_fd == -1 {
+        return Err(error::io_error(format!(
+            "open pty slave failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    let argv = builder.get_argv();
+    let program = argv
+        .first()
+        .ok_or_else(|| error::invalid_argument("session command is empty"))?;
+    let mut command = std::process::Command::new(program);
+    command.args(&argv[1..]);
+    // Mirror the crate's `as_command`: an invalid cwd falls back to $HOME
+    // rather than failing the spawn.
+    let cwd = builder
+        .get_cwd()
+        .filter(|dir| std::path::Path::new(dir).is_dir());
+    match cwd {
+        Some(dir) => {
+            command.current_dir(dir);
+        }
+        None => {
+            if let Some(home) = std::env::var_os("HOME") {
+                command.current_dir(home);
+            }
+        }
+    }
+    command.env_clear();
+    for (key, value) in builder.iter_full_env_as_str() {
+        command.env(key, value);
+    }
+    command.env("SHELL", builder.get_shell());
+
+    // Duplicate the slave fd for each stdio stream; std moves them onto
+    // 0/1/2 in the child before `pre_exec` runs, so the hook can take the
+    // controlling terminal via fd 0.
+    let dup_slave = || {
+        let fd = unsafe { libc::dup(slave_fd) };
+        if fd == -1 {
+            Err(error::io_error(format!(
+                "dup pty slave failed: {}",
+                std::io::Error::last_os_error()
+            )))
+        } else {
+            Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+        }
+    };
+    command
+        .stdin(std::process::Stdio::from(dup_slave()?))
+        .stdout(std::process::Stdio::from(dup_slave()?))
+        .stderr(std::process::Stdio::from(dup_slave()?));
+    unsafe {
+        libc::close(slave_fd);
+    }
+
+    unsafe {
+        command.pre_exec(|| {
+            // Reset every disposition the daemon may carry: a detached
+            // service often runs with SIGINT/SIGQUIT ignored, and Rust's
+            // runtime ignores SIGPIPE at startup. POSIX keeps ignored
+            // dispositions across exec, and a non-interactive shell cannot
+            // trap or reset a signal that was ignored on entry, so this is
+            // the only point where a session child can recover default
+            // behavior. Then clear any blocked-signal mask.
+            for signo in [
+                libc::SIGINT,
+                libc::SIGQUIT,
+                libc::SIGPIPE,
+                libc::SIGTERM,
+                libc::SIGHUP,
+                libc::SIGCHLD,
+                libc::SIGALRM,
+                libc::SIGTSTP,
+            ] {
+                libc::signal(signo, libc::SIG_DFL);
+            }
+            let empty_set: libc::sigset_t = std::mem::zeroed();
+            libc::sigprocmask(libc::SIG_SETMASK, &empty_set, std::ptr::null_mut());
+
+            // Session leader with the pty slave as controlling terminal:
+            // required for job-control signals (and SIGWINCH on resize) to
+            // reach the foreground process group.
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            #[allow(clippy::cast_lossless)]
+            if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            portable_pty::unix::close_random_fds();
+            Ok(())
+        });
+    }
+
+    let child = command
+        .spawn()
+        .map_err(|e| error::io_error(format!("spawn failed: {e}")))?;
+    Ok(Box::new(child))
 }
 
 fn finish_spawn(
@@ -915,6 +1055,10 @@ pub(crate) fn base64_decode(text: &str) -> Result<Vec<u8>, RpcError> {
 #[cfg(test)]
 #[path = "session_close_tests.rs"]
 mod session_close_tests;
+
+#[cfg(all(test, unix))]
+#[path = "session_signal_reset_tests.rs"]
+mod session_signal_reset_tests;
 
 #[cfg(test)]
 mod headless_completion_tests {

@@ -4,23 +4,28 @@ import type { Result } from "../../../../shared/session-contract";
 import {
   createBrowserAuthoritySource,
   planBrowserRehydrate,
-  readCaptureWindowOpen,
 } from "./browser-bridge";
 
-function stubCapture(value: boolean): void {
+function stubOpenLinksInApp(_value: boolean): void {
+  // The window-open seam no longer reads the Link Routing preference: popups
+  // route into a pane tab unconditionally (fork parity), so the storage
+  // stub only guards against accidental reads.
   vi.stubGlobal("window", {
     localStorage: {
-      getItem: () => (value ? "1" : "0"),
+      getItem: () => null,
       setItem: () => {},
     },
   });
 }
 
-function fakeBridge(
-  overrides: Partial<BrowserBridge> = {},
-): BrowserBridge {
-  const nope = () => Promise.resolve({ ok: false, error: { code: "x", message: "x", retryable: false } }) as Promise<Result<never>>;
-  const okNull = () => Promise.resolve({ ok: true, result: null }) as Promise<Result<null>>;
+function fakeBridge(overrides: Partial<BrowserBridge> = {}): BrowserBridge {
+  const nope = () =>
+    Promise.resolve({
+      ok: false,
+      error: { code: "x", message: "x", retryable: false },
+    }) as Promise<Result<never>>;
+  const okNull = () =>
+    Promise.resolve({ ok: true, result: null }) as Promise<Result<null>>;
   return {
     createTab: nope as BrowserBridge["createTab"],
     closeTab: nope as BrowserBridge["closeTab"],
@@ -33,9 +38,10 @@ function fakeBridge(
     snapshot: nope as BrowserBridge["snapshot"],
     onState: () => () => {},
     getState: () =>
-      Promise.resolve({ ok: true, result: { tabs: [], activeTabId: null } }) as ReturnType<
-        BrowserBridge["getState"]
-      >,
+      Promise.resolve({
+        ok: true,
+        result: { tabs: [], activeTabId: null },
+      }) as ReturnType<BrowserBridge["getState"]>,
     hardReload: nope as BrowserBridge["hardReload"],
     zoomIn: nope as BrowserBridge["zoomIn"],
     zoomOut: nope as BrowserBridge["zoomOut"],
@@ -52,7 +58,7 @@ function fakeBridge(
 
 describe("browser authority source", () => {
   test("allowed navigation proposes allow", async () => {
-    stubCapture(false);
+    stubOpenLinksInApp(false);
     const source = createBrowserAuthoritySource({
       bridge: fakeBridge({
         navigate: () =>
@@ -80,7 +86,7 @@ describe("browser authority source", () => {
     expect(decision).toEqual({ ok: true, result: { outcome: "allow" } });
   });
   test("host policy refusal becomes a block proposal", async () => {
-    stubCapture(false);
+    stubOpenLinksInApp(false);
     const source = createBrowserAuthoritySource({
       bridge: fakeBridge({
         navigate: () =>
@@ -105,8 +111,8 @@ describe("browser authority source", () => {
       result: { outcome: "block", reason: "Blocked: scheme." },
     });
   });
-  test("window-open routes into a pane tab only when captured", async () => {
-    stubCapture(true);
+  test("window-open routes into a pane tab unconditionally", async () => {
+    stubOpenLinksInApp(false);
     const createTab = vi.fn(() =>
       Promise.resolve({
         ok: true,
@@ -138,16 +144,15 @@ describe("browser authority source", () => {
       ok: true,
       result: { outcome: "allow", reason: "Opened in the Browser panel." },
     });
-    expect(readCaptureWindowOpen()).toBe(true);
   });
-  test("window-open proposes the system browser when not captured", async () => {
-    stubCapture(false);
+  test("window-open falls back to the system browser without a workspace", async () => {
+    stubOpenLinksInApp(false);
     const createTab = vi.fn();
     const source = createBrowserAuthoritySource({
       bridge: fakeBridge({
         createTab: createTab as unknown as BrowserBridge["createTab"],
       }),
-      workspaceId: () => "w1",
+      workspaceId: () => null,
     });
     const decision = await source.requestWindowOpen({
       tabId: "t1",
@@ -158,7 +163,8 @@ describe("browser authority source", () => {
       ok: true,
       result: {
         outcome: "open-in-system",
-        reason: expect.stringMatching(/system browser/),
+        reason:
+          "No workspace is selected, so the link cannot open in the pane.",
       },
     });
   });
@@ -188,7 +194,10 @@ describe("planBrowserRehydrate (R16-AJ, fixes #215)", () => {
   test("dedupes stored doubles", () => {
     expect(
       planBrowserRehydrate({
-        stored: [...stored, { tabId: "browser-tab-1", url: "https://example.test/a" }],
+        stored: [
+          ...stored,
+          { tabId: "browser-tab-1", url: "https://example.test/a" },
+        ],
         liveTabIds: [],
       }),
     ).toEqual(stored);

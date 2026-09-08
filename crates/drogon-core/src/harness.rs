@@ -140,10 +140,77 @@ impl Engine {
                 return Err(err);
             }
         };
-        let extra_env = ready
+        let mut extra_env = ready
             .as_ref()
             .map(|r| r.extra_env.clone())
             .unwrap_or_default();
+        let mut cleanup_paths: Vec<PathBuf> = ready
+            .as_ref()
+            .map(|r| r.cleanup_paths.clone())
+            .unwrap_or_default();
+        // Headless daemon runs (bots/automations) must not load the user's
+        // global harness config — skills, extensions, MCP servers — the
+        // way the interactive TUI banners do (issue #187): give the launch
+        // an isolated config dir instead (Pi: PI_CODING_AGENT_DIR,
+        // the fork's binary-facing override for unattended runs), linking
+        // only the provider/model/auth definitions the run was configured
+        // with. The overlay applies after the base session environment, so
+        // it wins over an inherited value even when the daemon itself runs
+        // inside another runtime's terminal.
+        if request.headless {
+            // The user's own Pi agent dir: their custom
+            // PI_CODING_AGENT_DIR if the daemon inherited one, else the
+            // default ~/.pi/agent. A dir inside this data dir is one of
+            // our own isolated headless dirs (e.g. the daemon was launched
+            // from a Drogon bot terminal) and must not mirror itself. An
+            // inherited dir must also look like a real config root: a
+            // Pi run creates its override dir on first use (sessions,
+            // empty auth/models-store), so a bare `is_dir` check would
+            // trust a Pi-created empty overlay over the real config and
+            // link nothing useful on later runs.
+            let own_root = self.data_dir.join("harness-env");
+            let looks_like_config_root =
+                |path: &std::path::Path| path.join("models.json").is_file();
+            let inherited_agent_dir = std::env::var_os("PI_CODING_AGENT_DIR")
+                .map(PathBuf::from)
+                .filter(|path| {
+                    path.is_dir() && !path.starts_with(&own_root) && looks_like_config_root(path)
+                });
+            let source_agent_dir = inherited_agent_dir.or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|home| home.join(".pi").join("agent"))
+                    .filter(|path| path.is_dir())
+            });
+            if let Some(plan) = drogon_harness::plan_headless_env(
+                request.harness_id,
+                &self.data_dir,
+                &uuid::Uuid::new_v4().to_string(),
+                source_agent_dir.as_deref(),
+            ) {
+                std::fs::create_dir_all(&plan.dir).map_err(|e| {
+                    error::io_error(format!("cannot create headless config dir: {e}"))
+                })?;
+                for (source, name) in &plan.link_files {
+                    if !source.is_file() {
+                        continue;
+                    }
+                    let dest = plan.dir.join(name);
+                    #[cfg(unix)]
+                    if std::os::unix::fs::symlink(source, &dest).is_err() {
+                        // Symlink denied (rare hardened mounts): fall back
+                        // to a copy; the file is read-only input for the run.
+                        let _ = std::fs::copy(source, &dest);
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let _ = std::fs::copy(source, &dest);
+                    }
+                }
+                extra_env.extend(plan.env);
+                cleanup_paths.push(plan.dir);
+            }
+        }
         let (session_id, handle, session_json) = match session_admission::launch_reserved(
             self.db.clone(),
             &self.data_dir,
@@ -153,10 +220,8 @@ impl Engine {
         ) {
             Ok(launched) => launched,
             Err(err) => {
-                if let Some(ready) = &ready {
-                    for path in &ready.cleanup_paths {
-                        crate::hooks::remove_settings_file(path);
-                    }
+                for path in &cleanup_paths {
+                    crate::hooks::remove_settings_file(path);
                 }
                 return Err(err);
             }
@@ -164,13 +229,13 @@ impl Engine {
         if request.headless {
             handle.set_headless();
         }
-        if let Some(ready) = ready {
-            for path in ready.cleanup_paths {
-                handle.add_hook_cleanup_path(path);
-            }
-            if ready.explicit_wait_clear {
-                handle.set_explicit_wait_clear();
-            }
+        for path in cleanup_paths {
+            handle.add_hook_cleanup_path(path);
+        }
+        if let Some(ready) = ready
+            && ready.explicit_wait_clear
+        {
+            handle.set_explicit_wait_clear();
         }
         self.sessions
             .lock()
@@ -285,5 +350,234 @@ fn harness_id_wire(harness_id: HarnessId) -> &'static str {
         HarnessId::Pi => "pi",
         HarnessId::Opencode => "opencode",
         HarnessId::Antigravity => "antigravity",
+    }
+}
+
+#[cfg(test)]
+mod headless_env_tests {
+    //! Behavioral proof for the headless config isolation (issue #187): a
+    //! daemon-run (headless) Pi launch spawns with `PI_CODING_AGENT_DIR`
+    //! pointing at an isolated, empty dir under the data dir, inherits no
+    //! `ORCA_*` from the daemon environment, and the dir is removed when
+    //! the session exits.
+    //!
+    //! Discovery resolves `pi` from this process's `PATH`, which parallel
+    //! tests must not mutate, so the seeded case re-execs this test binary
+    //! in a child whose PATH leads with a temp bin holding a fake `pi`
+    //! (same pattern as `session_admission_tests`' seeded subprocess).
+
+    use drogon_protocol::PROTOCOL_VERSION;
+    use serde_json::{Value, json};
+
+    use crate::Engine;
+
+    const SERVICE_CREDENTIAL: &str = "service-secret-token";
+    const SEED_FAKE_PI_BIN: &str = "DROGON_TEST_FAKE_PI_BIN";
+    const DONE_MARKER: &str = "FAKE-PI-DONE";
+
+    fn request(method: &str, params: Value) -> drogon_protocol::Request {
+        serde_json::from_value(json!({
+            "protocol": PROTOCOL_VERSION,
+            // Request ids dedupe retries: every call mints its own.
+            "requestId": format!("req-{}", uuid::Uuid::new_v4()),
+            "auth": SERVICE_CREDENTIAL,
+            "method": method,
+            "params": params,
+        }))
+        .unwrap()
+    }
+
+    fn fake_pi_script() -> &'static str {
+        "#!/bin/sh\n\
+         echo \"PI_AGENT_DIR=${PI_CODING_AGENT_DIR:-}\"\n\
+         echo \"PI_DIR_EXISTS=$([ -n \"${PI_CODING_AGENT_DIR:-}\" ] && [ -d \"$PI_CODING_AGENT_DIR\" ] && echo 1 || echo 0)\"\n\
+         echo \"MODELS_LINKED=$([ -e \"$PI_CODING_AGENT_DIR/models.json\" ] && echo 1 || echo 0)\"\n\
+         echo \"SKILLS_ABSENT=$([ ! -e \"$PI_CODING_AGENT_DIR/skills\" ] && [ ! -e \"$PI_CODING_AGENT_DIR/extensions\" ] && [ ! -e \"$PI_CODING_AGENT_DIR/mcp.json\" ] && [ ! -e \"$PI_CODING_AGENT_DIR/settings.json\" ] && echo 1 || echo 0)\"\n\
+         echo \"ORCA_COUNT=$(env | grep -c '^ORCA_' || true)\"\n\
+         echo \"PI_COUNT=$(env | grep -c '^PI_CODING_AGENT_DIR=' || true)\"\n\
+         echo \"FAKE-PI-DONE\"\n"
+    }
+
+    #[test]
+    fn headless_pi_runs_against_an_isolated_empty_agent_dir() {
+        if std::env::var_os(SEED_FAKE_PI_BIN).is_none() {
+            let bin = tempfile::tempdir().expect("fake bin dir");
+            let pi = bin.path().join("pi");
+            std::fs::write(&pi, fake_pi_script()).expect("write fake pi");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&pi, std::fs::Permissions::from_mode(0o755))
+                    .expect("chmod fake pi");
+            }
+            // A hermetic fake user Pi home: provider/auth definitions to
+            // link, plus the config that must never reach the run.
+            let home = tempfile::tempdir().expect("fake home");
+            let agent = home.path().join(".pi").join("agent");
+            std::fs::create_dir_all(agent.join("skills")).expect("fake skills dir");
+            std::fs::create_dir_all(agent.join("extensions")).expect("fake extensions dir");
+            for (name, body) in [
+                ("models.json", "{\"providers\":{}}"),
+                ("models-store.json", "{}"),
+                ("auth.json", "{}"),
+                ("mcp.json", "{\"mcpServers\":{}}"),
+                ("settings.json", "{\"packages\":[\"npm:fake\"]}"),
+            ] {
+                std::fs::write(agent.join(name), body).expect("fake config file");
+            }
+            // An inherited overlay dir that Pi itself created on an earlier
+            // run: it exists and holds Pi-managed files, but no
+            // models.json — it must not be trusted as the config source
+            // (that would link empty files and lose the provider config).
+            let foreign = tempfile::tempdir().expect("foreign overlay dir");
+            for (name, body) in [("models-store.json", "{}"), ("auth.json", "{}")] {
+                std::fs::write(foreign.path().join(name), body).expect("foreign file");
+            }
+            std::fs::create_dir(foreign.path().join("sessions")).expect("foreign sessions");
+            let exe = std::env::current_exe().expect("test executable");
+            let status = std::process::Command::new(exe)
+                .arg("harness::headless_env_tests::headless_pi_runs_against_an_isolated_empty_agent_dir")
+                .arg("--exact")
+                .arg("--nocapture")
+                .env(SEED_FAKE_PI_BIN, bin.path())
+                .env("HOME", home.path())
+                .env(
+                    "PATH",
+                    format!(
+                        "{}:{}",
+                        bin.path().to_string_lossy(),
+                        std::env::var("PATH").unwrap_or_default()
+                    ),
+                )
+                .env("ORCA_PI_SOURCE_AGENT_DIR", "/tmp/foreign-orca-overlay")
+                // A bogus inherited PI_CODING_AGENT_DIR must be replaced,
+                // not mirrored — even when the dir exists (Pi creates its
+                // override dir on first use, so existence alone proves
+                // nothing about whether real config lives there).
+                .env(
+                    "PI_CODING_AGENT_DIR",
+                    foreign.path().to_string_lossy().into_owned(),
+                )
+                .env("ORCA_PI_STATUS_OWNED", "1")
+                .status()
+                .expect("spawn seeded child");
+            assert!(status.success(), "seeded child must pass");
+            return;
+        }
+
+        let dir = tempfile::tempdir().expect("data dir");
+        let engine = Engine::open(dir.path()).expect("engine");
+        let folder = dir.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        let registered = engine.dispatch_authenticated(
+            request("workspace.register", json!({ "path": folder })),
+            SERVICE_CREDENTIAL,
+        );
+        assert!(registered.ok, "{registered:?}");
+        let workspace_id = registered.result.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let started = engine.dispatch_authenticated(
+            request(
+                "harness.start",
+                json!({
+                    "workspaceId": workspace_id,
+                    "harnessId": "pi",
+                    "headless": true,
+                    "prompt": "hello",
+                }),
+            ),
+            SERVICE_CREDENTIAL,
+        );
+        assert!(started.ok, "{started:?}");
+        let started = started.result.unwrap();
+        let session_id = started["id"].as_str().unwrap().to_string();
+        let incarnation = started["incarnation"].as_str().unwrap().to_string();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut text = String::new();
+        // The exit verdict lags the final output chunk by a reap tick, so
+        // keep polling after the marker appears instead of requiring both
+        // in the same read.
+        let exited = loop {
+            let read = engine.dispatch_authenticated(
+                request(
+                    "session.read",
+                    json!({ "sessionId": session_id, "incarnation": incarnation }),
+                ),
+                SERVICE_CREDENTIAL,
+            );
+            assert!(read.ok, "{read:?}");
+            let result = read.result.unwrap();
+            use base64::Engine as _;
+            let chunk = base64::engine::general_purpose::STANDARD
+                .decode(
+                    result["dataBase64"]
+                        .as_str()
+                        .expect("dataBase64")
+                        .as_bytes(),
+                )
+                .expect("buffer is base64");
+            text.push_str(&String::from_utf8_lossy(&chunk));
+            let verdict_exited = result["session"]["verdict"] == "exited";
+            if verdict_exited
+                || (!text.contains(DONE_MARKER) && std::time::Instant::now() >= deadline)
+            {
+                break verdict_exited;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for {DONE_MARKER}; buffer so far: {text}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+
+        // macOS canonicalizes the temp root (/var -> /private/var); the
+        // daemon works with canonical paths, so compare canonically.
+        let data_dir = dir
+            .path()
+            .canonicalize()
+            .expect("canonical data dir")
+            .to_string_lossy()
+            .into_owned();
+        assert!(
+            text.contains(&format!("PI_AGENT_DIR={data_dir}/harness-env/pi/")),
+            "headless Pi must see the isolated agent dir: {text}"
+        );
+        assert!(
+            text.contains("PI_DIR_EXISTS=1"),
+            "the isolated dir must exist at spawn: {text}"
+        );
+        assert!(
+            text.contains("ORCA_COUNT=0"),
+            "no ORCA_* variable may reach the run: {text}"
+        );
+        assert!(
+            text.contains("MODELS_LINKED=1"),
+            "provider/model definitions must stay reachable: {text}"
+        );
+        assert!(
+            text.contains("SKILLS_ABSENT=1"),
+            "skills/extensions/MCP/settings must stay isolated: {text}"
+        );
+        assert!(
+            text.contains("PI_COUNT=1"),
+            "exactly one PI_CODING_AGENT_DIR override: {text}"
+        );
+        assert!(exited, "the fake pi exits, so the run completes: {text}");
+
+        // Cleanup: the isolated dir is removed whole on exit, leaving no
+        // state a later run could pick up.
+        let leftover = dir.path().join("harness-env").join("pi");
+        let leftovers: Vec<_> = leftover
+            .read_dir()
+            .map(|entries| entries.flatten().collect())
+            .unwrap_or_default();
+        assert!(
+            leftovers.is_empty(),
+            "isolated dirs must be removed on exit: {leftovers:?}"
+        );
     }
 }

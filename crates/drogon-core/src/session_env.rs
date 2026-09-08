@@ -64,10 +64,15 @@ pub(crate) fn cli_file_name() -> &'static str {
 /// Whether an inherited variable is control-plane context that must not
 /// reach the child: a foreign runtime's identifiers or this runtime's own
 /// authority binding. The session-safe `DROGON_*` subset is set fresh by
-/// [`session_env_assignments`], never inherited.
+/// [`session_env_assignments`], never inherited. `PI_CODING_AGENT_DIR` is
+/// stripped for the same reason an `ORCA_*` overlay is: a daemon nested
+/// inside another runtime's terminal (or bot run) must not re-export that
+/// runtime's private agent-dir override into interactive sessions — those
+/// use the user's real config. Only `harness.start --headless` layers a
+/// service-owned override back on (issue #187).
 fn is_control_key(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
-    upper.starts_with("ORCA_") || upper.starts_with("DROGON_")
+    upper.starts_with("ORCA_") || upper.starts_with("DROGON_") || upper == "PI_CODING_AGENT_DIR"
 }
 
 /// PATH key/values of the inheriting process: the exact key spelling (Windows
@@ -342,13 +347,23 @@ mod tests {
             "DROGON_DISPATCH_CAPABILITY",
             "ORCA_WORKSPACE_ID",
             "orca_terminal_handle",
+            "PI_CODING_AGENT_DIR",
+            "pi_coding_agent_dir",
         ] {
             assert!(
                 is_control_key(key),
                 "{key} must be treated as control context"
             );
         }
-        for key in ["PATH", "HOME", "LANG", "DROGONISH", "MY_DROGON_VAR"] {
+        for key in [
+            "PATH",
+            "HOME",
+            "LANG",
+            "DROGONISH",
+            "MY_DROGON_VAR",
+            "PI_CODING_AGENT",
+            "PI_MODEL",
+        ] {
             assert!(!is_control_key(key), "{key} must be inherited untouched");
         }
     }

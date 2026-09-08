@@ -19,9 +19,9 @@ export {
 } from "./window-open-authority";
 export {
   createBrowserAuthoritySource,
-  readCaptureWindowOpen,
+  readOpenLinksInApp,
   windowBrowserBridge,
-  writeCaptureWindowOpen,
+  writeOpenLinksInApp,
   type BrowserBridge,
   type BrowserStateEvent,
   type BrowserTabState,
@@ -65,7 +65,10 @@ export {
   type BrowserToolbarMenuPolicy,
 } from "./browser-menu-policy";
 export { default as BrowserFind } from "./browser-find-bar";
-export { nextFindRequest, type BrowserFindRequestDirection } from "./browser-find-state";
+export {
+  nextFindRequest,
+  type BrowserFindRequestDirection,
+} from "./browser-find-state";
 export {
   BrowserPageContextMenu,
   isBrowserPageMenuCopyRow,
