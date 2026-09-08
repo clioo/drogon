@@ -9,6 +9,17 @@
 
 import type { ExplorerNode } from "./tree-model";
 
+/**
+ * Rename shortcut label: ↩ on macOS, Enter elsewhere (source
+ * `file-explorer-row-context-menu.tsx`: `isMac ? '↩' : 'Enter'`).
+ */
+export function renameShortcutLabel(platform?: string): string {
+  const userAgent =
+    platform ??
+    (typeof navigator !== "undefined" ? navigator.userAgent : "");
+  return userAgent.includes("Mac") ? "↩" : "Enter";
+}
+
 /** Delete chord label: ⌘⌫ on macOS, Delete elsewhere (source defaults). */
 export function deleteShortcutLabel(platform?: string): string {
   const userAgent =
@@ -109,7 +120,7 @@ export function buildRowMenuItems(
       id: "rename",
       label: "Rename",
       separatorBefore: true,
-      shortcut: "Enter",
+      shortcut: renameShortcutLabel(),
       ...mutateDisabled,
     },
     {

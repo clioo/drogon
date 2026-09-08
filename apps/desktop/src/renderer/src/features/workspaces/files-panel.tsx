@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import {
   FileExplorer,
   depthOf,
+  subscribeWorkspaceFilesChanged,
   type ExplorerNode,
   type FileExplorerDataSource,
 } from "../file-explorer";
@@ -280,6 +281,10 @@ export function createExplorerSource(
             .fileDelete({ ...scope, paths })
             .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
         : unsupported("files.delete"),
+    // Live external ticks (R16-L #157): the explorer reloads its loaded
+    // directories on each tick and defers while an inline edit is open.
+    subscribeFilesChanged: (listener) =>
+      subscribeWorkspaceFilesChanged(scope.workspaceId, listener),
   };
 }
 
