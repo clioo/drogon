@@ -240,6 +240,14 @@ and controller (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`,
 MIT). Character artwork is not redistributed; initials render instead. Each
 ported file keeps the MIT notice.
 
+The toast layer in `apps/desktop/src/renderer/src/components/ui/sonner.tsx`
+and the toast builders under `features/{shell,source-control,terminal,automations}/`
+(delete-worktree toasts, discard-failure toast, osc52 clipboard toasts) port
+the Drogon fork's `src/renderer/src/components/ui/sonner.tsx`, its
+`[data-sonner-toaster]` styles and the corresponding `toast.*` call sites
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
+file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
