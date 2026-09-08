@@ -15,7 +15,7 @@
 //        --remote-debugging-port=0, all inside a temp fixture it cleans up.
 // --keep Leave owned candidate processes running (debugging only).
 //
-// Per state and per color scheme (light + dark at 1440x900) it captures:
+// Per state and per color scheme (light + dark at the requested viewport) it captures:
 //   <state>.{ref,cand}.{png,aria.yaml,dom.json}
 // plus a cropped status-bar strip, then writes report.md (ranked differences,
 // each citing the reference SOURCE file and the candidate file to change)
@@ -40,9 +40,23 @@ import { emulatePageFocus } from "../acceptance-page-focus.mjs";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const REF_ROOT = "/Users/carlos/Documents/Drogon-mentu-session";
-const VIEWPORT = { width: 1440, height: 900 };
-
 const args = process.argv.slice(2);
+
+// The normal oracle remains the 1440×900 desktop comparison. Narrow sweeps
+// opt into the same state drivers with a real viewport override, allowing the
+// source's responsive tiers to be compared without duplicating the drivers.
+const requestedWidth = Number(flag("--width", 1440));
+const requestedHeight = Number(flag("--height", 900));
+assert.ok(
+  Number.isFinite(requestedWidth) && requestedWidth > 0,
+  `Invalid --width: ${requestedWidth}`,
+);
+assert.ok(
+  Number.isFinite(requestedHeight) && requestedHeight > 0,
+  `Invalid --height: ${requestedHeight}`,
+);
+const VIEWPORT = { width: requestedWidth, height: requestedHeight };
+
 function flag(name, def = null) {
   const i = args.indexOf(name);
   if (i === -1) return def;
@@ -4578,7 +4592,7 @@ function renderReport({ runId, states, inventory, stateResults, ranked, refMeta,
   const lines = [];
   lines.push(`# R5-F fidelity report — ${runId}`);
   lines.push("");
-  lines.push(`Viewport 1440x900, schemes: ${NO_DARK ? "light" : "light + dark"}.`);
+  lines.push(`Viewport ${VIEWPORT.width}x${VIEWPORT.height}, schemes: ${NO_DARK ? "light" : "light + dark"}.`);
   lines.push(`Reference (read-only, confirmation only): CDP ${REF_CDP} — title "${refMeta.title}", url ${refMeta.url}.`);
   lines.push(`Candidate: ${CAND_CDP ? `external CDP ${CAND_CDP}` : "owned production bundle (apps/desktop/out) + real drogond in a temp data dir, --remote-debugging-port=0"}.`);
   lines.push(`Candidate versions: ${JSON.stringify(candVersions).slice(0, 400)}`);

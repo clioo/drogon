@@ -282,8 +282,8 @@ function uiSettings(): SettingsStore {
 
 /**
  * Nullable read of the saved inspector choice: unlike the store's typed get
- * (which applies its default), this distinguishes "nothing saved yet" so the
- * viewport can decide the initial value.
+ * (which applies its default), this distinguishes "nothing saved yet" so
+ * the reference default can be applied explicitly.
  */
 function savedInspectorValue(): boolean | null {
   try {
@@ -460,10 +460,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [inspector, setInspector] = useState(() =>
-    resolveInspectorDefault(
-      matchMedia("(min-width: 1101px)").matches,
-      savedInspectorValue(),
-    ),
+    resolveInspectorDefault(savedInspectorValue()),
   );
   const [theme, setTheme] = useState<Theme>(() => settings.get("theme"));
   const [terminalFontSize, setTerminalFontSize] = useState(
@@ -603,19 +600,15 @@ export function App() {
   );
   // R6-B right sidebar: width, collapsed state and tab persist in the
   // shell's own localStorage keys (source defaults: width 280, Explorer).
-  // A saved open choice wins; otherwise the open default follows the
-  // inspector default for the viewport, preserving the pre-sidebar
-  // first-run layout for existing users.
+  // A saved open choice wins; otherwise the reference's visible default is
+  // used at every window width.
   const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
     loadRightSidebarWidth(window.localStorage),
   );
   const [rightSidebarOpen, setRightSidebarOpen] = useState(
     () =>
       loadRightSidebarOpen(window.localStorage) ??
-      resolveInspectorDefault(
-        matchMedia("(min-width: 1101px)").matches,
-        savedInspectorValue(),
-      ),
+      resolveInspectorDefault(savedInspectorValue()),
   );
   const [rightSidebarTab, setRightSidebarTab] = useState<RightSidebarTab>(
     () => loadRightSidebarTab(window.localStorage) ?? "explorer",
@@ -1570,18 +1563,6 @@ export function App() {
         hostId: workspace.hostId,
       });
   }, [selected, workspaces]);
-  useEffect(() => {
-    const wide = matchMedia("(min-width: 1101px)");
-    const adapt = () => {
-      // Mirrors the old inspector guard: a shrink hides the session panel
-      // without persisting, so an accidental shrink never becomes a saved
-      // "closed" choice.
-      if (!wide.matches && rightEffective === "session")
-        setRightSidebarOpen(false);
-    };
-    wide.addEventListener("change", adapt);
-    return () => wide.removeEventListener("change", adapt);
-  }, [rightEffective]);
   useEffect(() => {
     if (!selected || !status) {
       setLoadingSessions(false);

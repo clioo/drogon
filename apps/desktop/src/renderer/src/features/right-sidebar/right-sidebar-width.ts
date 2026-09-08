@@ -65,7 +65,7 @@ export function saveRightSidebarWidth(
 
 /**
  * Nullable read of the saved open choice: null means nothing was saved yet
- * and the caller falls back to the inspector default for the viewport.
+ * and the caller falls back to the reference's visible default.
  */
 export function loadRightSidebarOpen(
   storage: Pick<Storage, "getItem">,
