@@ -16,6 +16,8 @@ import { settings } from "./settings";
 import { nativeTheme } from "./native-theme";
 import { notifications } from "./notifications";
 import { tasks } from "./tasks";
+// R17-A additive wiring: jira namespace (granted preload/jira.ts).
+import { jira } from "./jira";
 import { mentu } from "./mentu";
 import { botBridgeExtras } from "./bot";
 import { appMenu } from "./app-menu";
@@ -109,6 +111,9 @@ const filesWatch: FilesWatchBridge = {
 Object.assign(
   bridge,
   { git, browser, notifications, shell, tasks, project, mentu },
+  // R17-A additive wiring: jira namespace (runtime-only merge, same
+  // pattern as the namespaces above).
+  { jira },
   botBridgeExtras,
   { appMenu },
   { filesWatch },

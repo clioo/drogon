@@ -6,6 +6,7 @@ pub mod automation;
 pub mod bot;
 pub mod browser;
 pub mod git;
+pub mod jira;
 pub mod mentu;
 pub mod orchestration_common;
 pub mod orchestration_mail;
