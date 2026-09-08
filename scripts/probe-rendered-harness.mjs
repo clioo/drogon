@@ -44,12 +44,18 @@ export async function probeRenderedHarness({
     .first()
     .boundingBox();
   const form = await page.locator(".harness-launch-form").boundingBox();
+  // The form opens under the "+" trigger inside the main pane (#189: since
+  // R16-D/R16-E the 28px trigger sits 8px inside the strip while the form
+  // starts at the strip's content edge, measured trigger.x 289 vs form.x
+  // 281 at 1280px). The check is "same column as the trigger" — a form
+  // starting within the trigger's inset cannot overlap the sidebar, which
+  // ends where the strip begins.
   assert.ok(
-    trigger && form && Math.abs(form.x - trigger.x) <= 2,
-    "Launch form stays aligned with its trigger, not over the sidebar",
+    trigger && form && form.x >= trigger.x - 12 && form.x - trigger.x <= 24,
+    `Launch form stays aligned with its trigger, not over the sidebar (trigger ${JSON.stringify(trigger)} form ${JSON.stringify(form)})`,
   );
   assert.equal(
-    await page.getByLabel("Model", { exact: true }).inputValue(),
+    await page.getByRole("textbox", { name: /^Model\b/ }).inputValue(),
     "",
   );
   assert.equal(
