@@ -3,10 +3,11 @@
 // terminal typing latency of the Drogon desktop against the live
 // orca-drogon reference, modeled on scripts/perf/measure-navigation.mjs.
 //
-//   # Packaged candidate (harness owns the lifecycle: spawns the bundle,
-//   # ensures one git project + worktree + workspace + one live echo
-//   # session (/bin/cat), types --keys keystrokes in a paced phase and a
-//   # burst phase, stops everything by PID):
+//   # Packaged candidate (harness owns the lifecycle: a setup spawn creates
+//   # one git project + worktree + workspace + one live echo session
+//   # (/bin/cat, canonical-mode kernel echo), then a fresh measured spawn
+//   # types --keys keystrokes in a paced phase and a burst phase; both are
+//   # stopped by PID):
 //   node scripts/perf/measure-terminal-input.mjs --bundle <Drogon.app> \
 //     --data-dir /tmp/drogon-typelat-data --profile-dir /tmp/drogon-typelat-profile \
 //     --fixture-repo /tmp/drogon-typelat-repo --keys 100 --out report.json
@@ -22,11 +23,12 @@
 // Per keystroke the in-page collector timestamps (a) key dispatch
 // (capture-phase keydown on the xterm textarea, in-page performance.now)
 // and (b) the echo parsed into the xterm buffer (onWriteParsed) and painted
-// (first onRender after the parse). p50/p95 are reported per phase. The
-// write path is observed by wrapping window.drogon.write: call count (the
-// coalescing signal), per-call round-trip ms, and the post-burst drain
-// tail. A daemon-side pty-receive timestamp (c) has no log/test hook in
-// protocol v1 and is reported as unavailable rather than guessed.
+// (first onRender after the parse). p50/p95 are reported per phase. A
+// daemon-side pty-receive timestamp (c) has no log/test hook in protocol v1
+// and is reported as unavailable rather than guessed; per-write bridge
+// round-trips are not monkey-patched because the preload bridge is frozen
+// (contextBridge Object.freeze) — backpressure shows up in the burst
+// drain-tail metric instead.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -266,24 +268,34 @@ async function selectWorktree(page, worktreeName) {
  * DOM text). Keystrokes are captured on the xterm textarea (capture phase,
  * in-page clock); echoes are matched as the longest common prefix of the
  * reconstructed buffer stream against the typed sequence (/bin/cat echoes
- * exactly what was typed, so LCP advances monotonically). Also wraps
- * window.drogon.write to count calls and time their round-trips.
- * Returns false when no live terminal exists yet.
+ * exactly what was typed, so the LCP advances monotonically). The collector
+ * is cumulative for the whole run so phase boundaries are index slices,
+ * never state resets. Returns "missing" when no live terminal exists yet,
+ * "remounted" when the registry swapped terminals (caller must re-install).
  */
 async function installCollector(page) {
   return page.evaluate(() => {
     const registry = window.__drogonTerminals;
-    if (!registry || registry.size === 0) return false;
+    if (!registry || registry.size === 0) return "missing";
     const terminal = [...registry.values()][0];
-    if (window.__drogonTypingProbe?.terminal === terminal) return true;
+    if (!terminal.element?.isConnected || !terminal.textarea?.isConnected) return "missing";
+    if (window.__drogonTypingProbe?.terminal === terminal) return "installed";
+    if (window.__drogonTypingProbe) return "remounted";
     const probe = {
       terminal,
       typed: "",
       // Per keystroke: dispatchAt from the capture-phase keydown; parsedAt /
       // renderedAt stamped when the echo prefix reaches this char's index.
       samples: [],
-      writes: [],
+      // Diagnostic counters: keydowns seen by the capture listener vs data
+      // events xterm actually emitted (a gap means xterm vetoed the key;
+      // data without echo means the pty/write side dropped it).
+      keydowns: 0,
+      dataEvents: 0,
     };
+    terminal.onData(() => {
+      probe.dataEvents += 1;
+    });
     const bufferStream = () => {
       const buffer = terminal.buffer.active;
       let text = "";
@@ -292,53 +304,59 @@ async function installCollector(page) {
       }
       return text;
     };
-    let matched = 0;
-    const stamp = (field) => {
+    let matchedParsed = 0;
+    let matchedRendered = 0;
+    const echoPrefixLength = () => {
       const stream = bufferStream();
       const typed = probe.typed;
       let k = 0;
       while (k < stream.length && k < typed.length && stream[k] === typed[k]) k += 1;
-      if (k <= matched) return;
+      return k;
+    };
+    const stampParsed = () => {
+      const k = echoPrefixLength();
+      if (k <= matchedParsed) return;
       const now = performance.now();
-      for (let i = matched; i < k; i += 1) {
+      for (let i = matchedParsed; i < k; i += 1) {
         const sample = probe.samples[i];
-        if (sample && sample[field] === undefined) sample[field] = now;
+        if (sample && sample.parsedAt === undefined) sample.parsedAt = now;
       }
-      matched = k;
+      matchedParsed = k;
+    };
+    const stampRendered = () => {
+      // The render can only paint what the parser already saw, but each
+      // field keeps its own prefix cursor: sharing one would suppress the
+      // rendered stamp for chars the parse stamp just claimed.
+      const k = Math.min(echoPrefixLength(), matchedParsed);
+      if (k <= matchedRendered) return;
+      const now = performance.now();
+      for (let i = matchedRendered; i < k; i += 1) {
+        const sample = probe.samples[i];
+        if (sample && sample.renderedAt === undefined) sample.renderedAt = now;
+      }
+      matchedRendered = k;
     };
     terminal.onWriteParsed(() => {
-      stamp("parsedAt");
+      stampParsed();
       // First paint of the parsed echo: onRender fires after the frame the
       // parser fed, so this is the user-visible echo moment.
       const disposable = terminal.onRender(() => {
         disposable.dispose();
-        stamp("renderedAt");
+        stampRendered();
       });
     });
-    const textarea = terminal.textarea ?? document.querySelector(".xterm-helper-textarea");
-    textarea?.addEventListener(
+    terminal.textarea.addEventListener(
       "keydown",
       (event) => {
         if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) return;
+        probe.keydowns += 1;
         probe.typed += event.key;
         probe.samples.push({ key: event.key, dispatchAt: performance.now() });
       },
       { capture: true },
     );
-    const originalWrite = window.drogon.write.bind(window.drogon);
-    window.drogon.write = (value) => {
-      const startedAt = performance.now();
-      const done = originalWrite(value);
-      Promise.resolve(done).finally(() => {
-        probe.writes.push({
-          bytes: new TextEncoder().encode(String(value?.text ?? "")).length,
-          ms: performance.now() - startedAt,
-        });
-      });
-      return done;
-    };
     window.__drogonTypingProbe = probe;
-    return true;
+    return "installed";
   });
 }
 
@@ -348,39 +366,71 @@ function keyFor(index) {
   return alphabet[(index * 7 + 3) % alphabet.length];
 }
 
-/** Types `count` keys with `gapMs` between presses. */
-async function typeKeys(page, count, gapMs) {
+/** Types `count` keys starting at sequence `offset` with `gapMs` between. */
+async function typeKeys(page, offset, count, gapMs) {
   for (let i = 0; i < count; i += 1) {
-    await page.keyboard.press(keyFor(i));
+    await page.keyboard.press(keyFor(offset + i));
     if (gapMs > 0) await delay(gapMs);
   }
 }
 
-/** Pulls and resets the in-page collector. */
-async function drainCollector(page) {
+/** Current collector size (keystrokes seen) and echoed count. */
+async function collectorProgress(page) {
   return page.evaluate(() => {
     const probe = window.__drogonTypingProbe;
-    if (!probe) return null;
-    const out = { samples: probe.samples, writes: probe.writes, typed: probe.typed.length };
-    probe.samples = [];
-    probe.writes = [];
-    return out;
+    if (!probe) return { samples: 0, echoed: 0 };
+    return {
+      samples: probe.samples.length,
+      echoed: probe.samples.filter((s) => s.renderedAt !== undefined).length,
+      keydowns: probe.keydowns,
+      dataEvents: probe.dataEvents,
+    };
   });
 }
 
-/** Waits for the echo backlog to settle after the last key. */
+/** Diagnostic snapshot for a dead warmup: focus, registry, buffer tail. */
+async function collectorDiagnostics(page) {
+  return page.evaluate(() => {
+    const registry = window.__drogonTerminals;
+    const probe = window.__drogonTypingProbe;
+    const terminal = probe?.terminal;
+    let tail = "";
+    if (terminal) {
+      const buffer = terminal.buffer.active;
+      for (let row = 0; row < Math.min(buffer.length, 3); row += 1) {
+        tail += buffer.getLine(row)?.translateToString(true) ?? "";
+      }
+    }
+    return {
+      registrySize: registry?.size ?? -1,
+      probeOnLiveTerminal: terminal ? [...(registry?.values() ?? [])].includes(terminal) : false,
+      textareaFocused: document.activeElement === terminal?.textarea,
+      activeElement: document.activeElement?.className ?? null,
+      keydowns: probe?.keydowns ?? 0,
+      dataEvents: probe?.dataEvents ?? 0,
+      typed: probe?.typed?.length ?? 0,
+      bufferTail: tail,
+    };
+  });
+}
+
+/** Waits until the echo prefix covers `expected` keystrokes. */
 async function waitForEchoes(page, expected, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  let last = 0;
   while (Date.now() < deadline) {
-    last = await page.evaluate(() => {
-      const probe = window.__drogonTypingProbe;
-      return probe ? probe.samples.filter((s) => s.renderedAt !== undefined).length : 0;
-    });
-    if (last >= expected) return true;
+    const progress = await collectorProgress(page);
+    if (progress.echoed >= expected) return true;
     await delay(100);
   }
   return false;
+}
+
+/** Pulls the cumulative collector (no reset; phases are index slices). */
+async function drainCollector(page) {
+  return page.evaluate(() => {
+    const probe = window.__drogonTypingProbe;
+    return probe ? { samples: probe.samples, typed: probe.typed.length } : null;
+  });
 }
 
 async function main() {
@@ -460,11 +510,12 @@ async function main() {
   const pacedCount = Math.ceil(KEYS * 0.6);
   const burstCount = KEYS - pacedCount;
 
-  const spawned = await spawnBundle(bundle, dataDir, profileDir);
-  const { browser, page } = await connectEndpoint(spawned.endpoint);
-  const stopInstance = async () => {
+  const stopInstance = async (browser, pid) => {
     await browser.close();
-    await stopPid(spawned.pid);
+    await stopPid(pid);
+    // Bundle mode never started a daemon of its own: the packaged app
+    // bootstrapped its bundled one, so shut it down quiescently through the
+    // same helper the sealed acceptance uses.
     try {
       const fixture = packagedFixtureDaemon(null, cliBin, dataDir);
       await fixture.capture();
@@ -473,57 +524,98 @@ async function main() {
       console.error(`daemon shutdown: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
-  try {
+
+  // Setup spawn (unmeasured): fixtures must exist before the measured spawn
+  // so the terminal pane never remounts mid-measurement (a mid-startup CLI
+  // creation races the sidebar digest and swaps the xterm instance under
+  // the collector). Only the Electron app stops here — the daemon and its
+  // live sessions survive by design (session survival), so the measured
+  // spawn reattaches to the still-live echo session.
+  {
+    const setup = await spawnBundle(bundle, dataDir, profileDir);
+    const { browser, page } = await connectEndpoint(setup.endpoint);
     const fixtures = ensureFixtures(cliBin, dataDir, fixtureOptions);
+    fixtureOptions.worktreeName = fixtures.worktreeName;
+    fixtureOptions.workspaceId = fixtures.workspaceId;
     console.error(`fixtures: workspace=${fixtures.workspaceId} worktree=${fixtures.worktreeName} created=${fixtures.created}`);
-    // A mid-startup creation can miss the sidebar digest race; measure-
-    // navigation respawns once in that case. The typing probe only needs
-    // the card visible, so wait generously instead.
-    console.error(`select: ${await selectWorktree(page, fixtures.worktreeName)}`);
+    await browser.close();
+    await stopPid(setup.pid);
+    // Let the setup daemon settle its endpoint lock before the measured
+    // spawn reattaches (an overlapping shutdown can strand the first reads).
+    await delay(2000);
+  }
+
+  const spawned = await spawnBundle(bundle, dataDir, profileDir);
+  const { browser, page } = await connectEndpoint(spawned.endpoint);
+  try {
+    console.error(`select: ${await selectWorktree(page, fixtureOptions.worktreeName)}`);
     // Make the terminal pane visible and focused.
     await page.getByTestId("sortable-tab").first().click().catch(() => {});
     await page.locator(".xterm").first().waitFor({ state: "visible", timeout: 30000 });
-    let installed = false;
-    for (let i = 0; i < 40 && !installed; i += 1) {
+    let installed = "missing";
+    for (let i = 0; i < 40 && installed !== "installed"; i += 1) {
       installed = await installCollector(page);
-      if (!installed) await delay(250);
+      if (installed === "remounted") throw new Error("terminal remounted under the collector");
+      if (installed !== "installed") await delay(250);
     }
-    if (!installed) throw new Error("no live terminal in the __drogonTerminals registry");
     await page.evaluate(() => {
       const terminal = [...window.__drogonTerminals.values()][0];
       terminal.focus();
     });
     await delay(300);
 
+    // Warmup: proves the keystroke→echo loop before measuring (a cold pane
+    // still seeking its replay tail would otherwise poison the first keys).
+    // Focus through a real pointer click — the same path a user takes.
+    await page.locator(".xterm").first().click({ position: { x: 200, y: 100 } });
+    await typeKeys(page, 0, 3, 80);
+    if (!(await waitForEchoes(page, 3, 10000))) {
+      console.error("warmup diagnostics:", JSON.stringify(await collectorDiagnostics(page)));
+      console.error(
+        "warmup dom:",
+        JSON.stringify(await page.evaluate(() => document.body.innerText.slice(0, 500))),
+      );
+      try {
+        const listed = cliJson(cliBin, dataDir, ["terminal", "list", "--workspace", fixtureOptions.workspaceId ?? ""]);
+        console.error(
+          "warmup sessions:",
+          JSON.stringify((listed.sessions ?? []).map((s) => ({ verdict: s.verdict, agentState: s.agentState }))),
+        );
+      } catch (error) {
+        console.error(`warmup session list failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      throw new Error("warmup echoes never rendered; the keystroke loop is not live");
+    }
+
     // Phase 1 (paced): 50 ms between keys — interactive typing.
-    await typeKeys(page, pacedCount, 50);
-    await waitForEchoes(page, pacedCount, 15000);
-    const paced = await drainCollector(page);
+    await typeKeys(page, 3, pacedCount, 50);
+    await waitForEchoes(page, 3 + pacedCount, 15000);
 
     // Phase 2 (burst): no gap — backpressure/coalescing behavior.
-    await typeKeys(page, burstCount, 0);
+    await typeKeys(page, 3 + pacedCount, burstCount, 0);
     const burstSentAt = Date.now();
-    const settled = await waitForEchoes(page, burstCount, 20000);
-    const burst = await drainCollector(page);
+    const settled = await waitForEchoes(page, 3 + pacedCount + burstCount, 20000);
     const drainTailMs = Date.now() - burstSentAt;
 
-    const pacedSeries = keystrokeSeries(paced?.samples);
-    const burstSeries = keystrokeSeries(burst?.samples);
-    const writes = [...(paced?.writes ?? []), ...(burst?.writes ?? [])];
+    const drained = await drainCollector(page);
+    const all = drained?.samples ?? [];
+    const paced = keystrokeSeries(all.slice(3, 3 + pacedCount));
+    const burst = keystrokeSeries(all.slice(3 + pacedCount, 3 + pacedCount + burstCount));
     const report = {
       app: "drogon-bundle",
       mode: MODE,
       bundle,
       startedAt,
       keys: KEYS,
+      warmupKeys: 3,
       phases: { paced: pacedCount, burst: burstCount, pacedGapMs: 50 },
       daemonPtyReceive: "unavailable: protocol v1 has no write-timestamp log/test hook",
       metrics: {
-        "paced:dispatch-to-parsed": pacedSeries.dispatchToParsed,
-        "paced:dispatch-to-rendered": pacedSeries.dispatchToRendered,
-        "paced:unmatched-echoes": pacedSeries.unmatchedEchoes,
-        "burst:dispatch-to-rendered": burstSeries.dispatchToRendered,
-        "burst:unmatched-echoes": burstSeries.unmatchedEchoes,
+        "paced:dispatch-to-parsed": paced.dispatchToParsed,
+        "paced:dispatch-to-rendered": paced.dispatchToRendered,
+        "paced:unmatched-echoes": paced.unmatchedEchoes,
+        "burst:dispatch-to-rendered": burst.dispatchToRendered,
+        "burst:unmatched-echoes": burst.unmatchedEchoes,
         "burst:drain-tail": {
           unit: "ms",
           // Wall time from the last burst key to the last observed echo;
@@ -531,17 +623,12 @@ async function main() {
           ms: settled ? drainTailMs : null,
           state: settled ? "settled" : "echo-timeout",
         },
-        "write:calls": {
-          keystrokes: (paced?.typed ?? 0) + (burst?.typed ?? 0),
-          calls: writes.length,
-          roundTrip: summarizeValues(writes.map((w) => w.ms)),
-        },
       },
     };
     console.log(JSON.stringify(report, null, 2));
     if (OUT) await writeFile(path.resolve(OUT), JSON.stringify(report, null, 2) + "\n");
   } finally {
-    await stopInstance();
+    await stopInstance(browser, spawned.pid);
   }
 }
 
