@@ -11,10 +11,14 @@
 //     (pane title "Terminal" + "Shells, renderer, sessions, and terminal
 //      behavior.")
 // Adapted: sessions list through this desktop's existing window.drogon
-// workspaces()/sessions()/stop() surface (no new IPC, no preload change).
-// The fork's Restart-daemon button, per-row "go to terminal" navigation and
+// workspaces()/sessions()/stop() surface, plus the additive
+// window.drogon.daemon.restart() channel (drogon:daemon:restart) for the
+// fork's Restart-daemon button. Per-row "go to terminal" navigation and the
 // TCC attribution notice have no MVP seam and are omitted; killing one
-// session confirms inline (arm-to-confirm) instead of the fork's dialog.
+// session and restarting the daemon confirm inline (arm-to-confirm)
+// instead of the fork's dialogs, and the daemon stops through its own
+// `runtime.shutdown` (refused while sessions live, so main stops every
+// session first) rather than the fork's in-process spawner.
 // Interaction (scroll sliders, right-click paste, focus-follows-mouse,
 // copy-on-select, OSC 52) and Advanced (scrollback rows, word separators,
 // option-as-alt, JIS yen) rows are omitted: TerminalPane hardcodes those
@@ -22,8 +26,12 @@
 // switch here would be dead. Rendering (GPU acceleration, typography)
 // stays under Appearance per the merged R16-G decision.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw, Trash2, X } from "lucide-react";
+import { LoaderCircle, RefreshCw, RotateCw, Trash2, X } from "lucide-react";
 import type { Session, Workspace } from "../../../../shared/session-contract";
+import type {
+  DaemonRestartInput,
+  DaemonRestartResult,
+} from "../../../../shared/daemon-contract";
 import { Button } from "../../components/ui/button";
 import { SettingsSection, SettingsSubsectionHeader } from "./settings-rows";
 
@@ -41,6 +49,9 @@ function windowDrogon(): {
   workspaces: () => Promise<{ ok: boolean; result?: { workspaces: Workspace[] }; error?: { message: string } }>;
   sessions: (workspaceId: string) => Promise<{ ok: boolean; result?: { sessions: Session[] }; error?: { message: string } }>;
   stop: (input: { sessionId: string; incarnation: string }) => Promise<{ ok: boolean; error?: { message: string } }>;
+  daemon?: {
+    restart: (input?: DaemonRestartInput) => Promise<DaemonRestartResult>;
+  };
 } | null {
   try {
     const bridge = (window as unknown as { drogon?: unknown }).drogon as Record<
@@ -74,6 +85,12 @@ export function TerminalSection(): React.JSX.Element {
   const [killingAll, setKillingAll] = useState(false);
   const [armedKill, setArmedKill] = useState<string | null>(null);
   const [armedKillAll, setArmedKillAll] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [armedRestart, setArmedRestart] = useState(false);
+  // Null while the manageability probe is in flight; a dev daemon started
+  // by the operator reports managed:false with the disabled reason.
+  const [daemonManaged, setDaemonManaged] = useState<boolean | null>(null);
+  const [daemonReason, setDaemonReason] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const mounted = useRef(true);
 
@@ -126,6 +143,37 @@ export function TerminalSection(): React.JSX.Element {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Manageability probe for the Restart daemon button: no side effects,
+  // so it is safe to run once on mount next to the first list.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const bridge = windowDrogon();
+      if (!bridge?.daemon) {
+        if (!cancelled) {
+          setDaemonManaged(false);
+          setDaemonReason("the desktop bridge is missing");
+        }
+        return;
+      }
+      try {
+        const availability = await bridge.daemon.restart({ probe: true });
+        if (!cancelled) {
+          setDaemonManaged(availability.managed);
+          setDaemonReason(availability.reason);
+        }
+      } catch {
+        if (!cancelled) {
+          setDaemonManaged(false);
+          setDaemonReason("could not reach the desktop bridge");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const killOne = useCallback(
     async (row: ManagedRow) => {
@@ -187,8 +235,40 @@ export function TerminalSection(): React.JSX.Element {
       );
   }, [load, refresh]);
 
+  // The fork's restart kills every terminal pane first; main does the
+  // same over `session.stop` before its own `runtime.shutdown`, so the
+  // renderer only reports the outcome and re-lists. The R16-M connection
+  // monitor owns the reconnecting banner while the daemon is down.
+  const restartDaemon = useCallback(async () => {
+    const bridge = windowDrogon();
+    if (!bridge?.daemon) return;
+    setRestarting(true);
+    let outcome: string | null = null;
+    try {
+      const result = await bridge.daemon.restart();
+      if (result.restarted) {
+        outcome = "Daemon restarted.";
+        if (mounted.current) {
+          setDaemonManaged(result.managed);
+          setDaemonReason(result.reason);
+        }
+      } else {
+        outcome = result.reason ?? "Could not restart the daemon.";
+      }
+    } catch {
+      outcome = "Could not restart the daemon.";
+    } finally {
+      if (mounted.current) {
+        setRestarting(false);
+        setArmedRestart(false);
+      }
+    }
+    await refresh();
+    if (mounted.current && outcome) setNotice(outcome);
+  }, [refresh]);
+
   const rows = load.status === "ready" ? load.rows : [];
-  const busy = refreshing || killing !== null || killingAll;
+  const busy = refreshing || killing !== null || killingAll || restarting;
 
   return (
     <SettingsSection
@@ -198,7 +278,7 @@ export function TerminalSection(): React.JSX.Element {
     >
       <SettingsSubsectionHeader
         title="Manage Sessions"
-        description="Recover from a frozen or misbehaving terminal by killing sessions."
+        description="Recover from a frozen or misbehaving terminal by killing sessions or restarting the underlying daemon."
       />
       <div className="mt-3 flex flex-col overflow-hidden rounded-lg border border-border/60">
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
@@ -241,6 +321,31 @@ export function TerminalSection(): React.JSX.Element {
               className="text-muted-foreground hover:text-destructive"
             >
               <Trash2 />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              disabled={busy || daemonManaged !== true}
+              onClick={() => {
+                if (armedRestart) void restartDaemon();
+                else setArmedRestart(true);
+              }}
+              onBlur={() => setArmedRestart(false)}
+              aria-label={
+                armedRestart ? "Confirm restart daemon" : "Restart daemon"
+              }
+              title={
+                daemonManaged === true
+                  ? (armedRestart ? "Confirm restart daemon" : "Restart daemon")
+                  : (daemonReason ?? "Restart daemon")
+              }
+              className="text-muted-foreground"
+            >
+              {restarting ? (
+                <LoaderCircle className="animate-spin" />
+              ) : (
+                <RotateCw />
+              )}
             </Button>
           </div>
         </div>
@@ -326,6 +431,12 @@ export function TerminalSection(): React.JSX.Element {
       {armedKillAll && rows.length > 0 ? (
         <p role="status" className="settings-note mt-2">
           Press Kill all sessions again to kill every session.
+        </p>
+      ) : null}
+      {armedRestart ? (
+        <p role="status" className="settings-note mt-2">
+          Press Restart daemon again to stop every session and restart the
+          daemon.
         </p>
       ) : null}
     </SettingsSection>

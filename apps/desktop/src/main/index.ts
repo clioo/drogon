@@ -70,6 +70,9 @@ import {
   bootstrapNativeRuntime,
   spawnDetachedDaemon,
 } from "./native-runtime-bootstrap";
+// R16-AD2: Manage Sessions "Restart daemon" — the orchestration lives in
+// daemon-restart.ts; this file only gates the channel and builds its deps.
+import { handleDaemonRestart } from "./daemon-restart";
 // R1-A: self-registering usage IPC (snapshot/refresh/awake); the module owns
 // its channels and validation, this line only loads it.
 import { registerUsageIpc } from "./usage/service";
@@ -451,6 +454,37 @@ function createWindow() {
 }
 
 /**
+ * Local-only endpoint observation shared by the startup bootstrap and the
+ * R16-AD2 restart channel: absence authorizes a spawn, anything else never
+ * does. Extracted verbatim so the two paths cannot diverge.
+ */
+async function observeDataDirEndpoint(
+  dataDir: string,
+  signal: AbortSignal,
+): Promise<LocalEndpointObservation> {
+  // A data directory that doesn't exist yet (fresh install: `drogond`
+  // has never run here) is absence, same as the probe connection
+  // itself refusing/not-existing. Any other resolution failure (e.g. a
+  // permissions error on a parent directory) is left ambiguous rather
+  // than assumed absent.
+  let resolvedDataDir: string;
+  try {
+    resolvedDataDir = await realpath(dataDir);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT"
+      ? { kind: "absent" }
+      : { kind: "ambiguous", reason: code ?? "data-directory-unreadable" };
+  }
+  return observeLocalEndpoint(
+    resolvedDataDir,
+    process.platform,
+    LOCAL_ENDPOINT_PROBE_TIMEOUT_MS,
+    signal,
+  );
+}
+
+/**
  * Attaches to a healthy existing service, or spawns the packaged `drogond`
  * exactly once, before the window (and therefore the renderer's first
  * `status` call) is created. Never removes a socket or force-kills an
@@ -480,28 +514,7 @@ async function bootstrapDaemon(): Promise<void> {
     binaryExists: () => existsSync(binaryPath),
     checkStatus: (signal) =>
       callNative("status", {}, undefined, signal) as Promise<Result<Status>>,
-    observeLocalEndpoint: async (signal): Promise<LocalEndpointObservation> => {
-      // A data directory that doesn't exist yet (fresh install: `drogond`
-      // has never run here) is absence, same as the probe connection
-      // itself refusing/not-existing. Any other resolution failure (e.g. a
-      // permissions error on a parent directory) is left ambiguous rather
-      // than assumed absent.
-      let resolvedDataDir: string;
-      try {
-        resolvedDataDir = await realpath(dataDir);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        return code === "ENOENT"
-          ? { kind: "absent" }
-          : { kind: "ambiguous", reason: code ?? "data-directory-unreadable" };
-      }
-      return observeLocalEndpoint(
-        resolvedDataDir,
-        process.platform,
-        LOCAL_ENDPOINT_PROBE_TIMEOUT_MS,
-        signal,
-      );
-    },
+    observeLocalEndpoint: (signal) => observeDataDirEndpoint(dataDir, signal),
     spawnDaemon: () =>
       spawnDetachedDaemon(binaryPath, ["--data-dir", dataDir], {
         ...process.env,
@@ -518,6 +531,60 @@ async function bootstrapDaemon(): Promise<void> {
     console.error(
       `[drogon] native runtime bootstrap: ${JSON.stringify(outcome)}`,
     );
+}
+
+/**
+ * R16-AD2 restart wiring (additive): one `drogon:daemon:restart` channel
+ * with the same trusted-renderer gate as `registerBridge`. The dev binary
+ * seam (`DROGON_DAEMON_BIN`) is honored only when not packaged — packaged
+ * builds always respawn their bundled binary — so development without the
+ * seam reports the daemon as external and the renderer disables the
+ * button instead of stopping a daemon it could not replace.
+ */
+function registerDaemonRestart() {
+  ipcMain.handle("drogon:daemon:restart", async (event, input: unknown) => {
+    if (
+      !window ||
+      event.sender !== window.webContents ||
+      event.senderFrame !== window.webContents.mainFrame
+    )
+      return invalid;
+    let dataDir: string;
+    try {
+      dataDir = dataDirectory();
+    } catch {
+      return {
+        restarted: false,
+        managed: false,
+        reason:
+          "The data directory cannot be resolved, so the daemon can't be restarted from here.",
+        stoppedSessions: 0,
+      };
+    }
+    const binaryName = process.platform === "win32" ? "drogond.exe" : "drogond";
+    const seam = process.env.DROGON_DAEMON_BIN;
+    return handleDaemonRestart(input, {
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+      dataDir,
+      packagedBinaryPath: path.join(process.resourcesPath, "bin", binaryName),
+      devDaemonBinary:
+        !app.isPackaged && seam && !seam.includes("\0") ? seam : null,
+      env: {
+        ...process.env,
+        PATH: buildDaemonPath(process.env.PATH, process.platform, homedir()),
+      },
+      binaryExists: existsSync,
+      call: (method, params) => callNative(method, params),
+      observeEndpoint: (signal) => observeDataDirEndpoint(dataDir, signal),
+      spawn: (binaryPath, args, env) =>
+        spawnDetachedDaemon(binaryPath, args, env),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      pollIntervalMs: 250,
+      shutdownWaitMs: 12_000,
+      spawnDeadlineMs: 10_000,
+    });
+  });
 }
 
 // Isolated acceptance profiles intentionally run multiple instances side by
@@ -547,6 +614,7 @@ if (!holdsSingleInstanceLock) {
     registerAppMenuBar();
     registerAppMenuIpc();
     registerBridge();
+    registerDaemonRestart();
     registerAutomationIpc(
       (event) =>
         window !== null &&
