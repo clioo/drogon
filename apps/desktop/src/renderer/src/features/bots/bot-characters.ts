@@ -1,7 +1,8 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/shared/drogon-bot-characters.ts (adapter: none -- the preset list and
+   src/shared/drogon-bot-characters.ts (adapter: the preset list and
    `drogonBotDisplayName` are pure text data, reused verbatim; the source's
-   avatar images are intentionally NOT ported, see BotAvatar.tsx). */
+   `DrogonBotCharacterPreset` union is re-exported under its fork name from
+   this repo's single definition site, BotCharacterPreset). */
 
 export type BotCharacterPreset =
   | "none"
@@ -22,6 +23,10 @@ export type BotCharacterPreset =
   | "robb"
   | "oberyn"
   | "hodor";
+
+/** The fork's name for the same union (shared/drogon-bot-contract.ts), so
+ *  ports like drogon-bot-avatar-assets keep their source signatures. */
+export type DrogonBotCharacterPreset = BotCharacterPreset;
 
 export const BOT_CHARACTERS: readonly {
   value: Exclude<BotCharacterPreset, "none">;

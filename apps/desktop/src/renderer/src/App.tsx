@@ -867,6 +867,11 @@ export function App() {
   // results carry their scope triple and render only on scope match, so no
   // stale snapshot ever shows for another workspace/host. No run control:
   // the panel is read-only until the BotRun bridge lands.
+  // #348: with no workspace selected the scope falls back to the app-global
+  // empty-workspace scope (""), matching the fork's app-global
+  // window.api.bots.list() — the Bots page loads across all of the host's
+  // workspaces instead of never loading. The native bot.snapshot RPC admits
+  // the empty-workspace scope as this host-global variant.
   const botsScope =
     current && status
       ? {
@@ -874,7 +879,13 @@ export function App() {
           workspaceId: current.id,
           locale: settings.get("locale"),
         }
-      : null;
+      : status
+        ? {
+            hostId: status.hostId,
+            workspaceId: "",
+            locale: settings.get("locale"),
+          }
+        : null;
   const botsScopeHost = botsScope?.hostId ?? null;
   const botsScopeWorkspace = botsScope?.workspaceId ?? null;
   const botsScopeLocale = botsScope?.locale ?? null;
@@ -1224,18 +1235,27 @@ export function App() {
     target?.focus();
     // rightTick re-runs this for same-tab re-routing (state bail-outs).
   }, [rightEffective, rightSidebarOpen, rightTick]);
-  // Bots keep-alive mirrors files: survives switches and transients,
-  // unmounts on explicit withhold or settled workspace loss. The Bots
-  // panel is read-only (no drafts), so remounts on snapshot refresh are
-  // safe; scope mismatch never renders (no stale data).
+  // Bots keep-alive mirrors Tasks (#348): the fork renders its Bots surface
+  // regardless of workspaces (AppWorkspaceShell.tsx mounts BotsPage with no
+  // workspace condition), so the page stays alive with none selected and
+  // unmounts only on explicit capability withhold or settled workspace loss
+  // after one was selected — never for having none yet. The panel is
+  // read-only (no drafts), so remounts on snapshot refresh are safe;
+  // scope mismatch never renders (no stale data).
   const botsExplicitWithhold =
     status !== null && !isBotsAvailable(liveCapabilities);
   const botsAliveRef = useRef(false);
-  if (route === BOTS_ROUTE_ID && botsAvailable && current)
+  const botsHadWorkspaceRef = useRef(false);
+  if (current) botsHadWorkspaceRef.current = true;
+  if (route === BOTS_ROUTE_ID && botsAvailable)
     botsAliveRef.current = true;
   else if (
     botsExplicitWithhold ||
-    (status && !current && !busy && !loadingSessions)
+    (status &&
+      !current &&
+      !busy &&
+      !loadingSessions &&
+      botsHadWorkspaceRef.current)
   )
     botsAliveRef.current = false;
   const botsAlive = botsAliveRef.current;
@@ -1381,8 +1401,10 @@ export function App() {
   // scope — over the placeholder while the snapshot is in flight — so the
   // section never falls back to the bare "Loading bots…" stub. Stale-scope
   // safety lives in the registry build above (placeholder, not old rows).
+  // #348: no filesProps requirement — with zero workspaces the descriptor
+  // resolves over the app-global scope and mounts without host props.
   const botsDescriptor: PanelDescriptor | null =
-    botsAlive && filesProps && botsAvailable && botsScope
+    botsAlive && botsAvailable && botsScope
       ? resolveRoute(panelRegistry, BOTS_ROUTE_ID)
       : null;
   // Full pages replace the session view, like the fork's ActivePage: no
@@ -1391,8 +1413,7 @@ export function App() {
   // below, so a routed-but-unavailable page falls back to the session
   // view instead of rendering an empty page. Back/Close return through
   // the view history, which restores the previous session entry.
-  const botsPageActive =
-    route === BOTS_ROUTE_ID && botsAlive && filesProps !== null;
+  const botsPageActive = route === BOTS_ROUTE_ID && botsAlive;
   const automationsPageActive =
     route === AUTOMATIONS_ROUTE_ID && automationsAlive && filesProps !== null;
   const tasksPageActive = route === TASKS_ROUTE_ID && tasksAlive;
@@ -3795,7 +3816,9 @@ export function App() {
                 />
               </section>
             </div>
-          ) : workspaces.length === 0 && route !== TASKS_ROUTE_ID ? (
+          ) : workspaces.length === 0 &&
+            route !== TASKS_ROUTE_ID &&
+            route !== BOTS_ROUTE_ID ? (
             noWorkspaceCopy ? (
               <NoWorkspacePage
                 title={noWorkspaceCopy.title}
@@ -3877,9 +3900,7 @@ export function App() {
               aria-label="Terminals"
               style={{
                 display:
-                  (route === BOTS_ROUTE_ID &&
-                    botsAlive &&
-                    filesProps !== null) ||
+                  (route === BOTS_ROUTE_ID && botsAlive) ||
                   (route === AUTOMATIONS_ROUTE_ID &&
                     automationsAlive &&
                     filesProps !== null) ||
@@ -4184,7 +4205,7 @@ export function App() {
                 )}
               </section>
             ) : null}
-            {botsAlive && filesProps ? (
+            {botsAlive ? (
               // No aria-label (see the Tasks host above): the Bots page
               // root is already `<main>`, so any label here would nest
               // `region Bots` around it — the double wrap from #128.
@@ -4197,12 +4218,20 @@ export function App() {
                   display: route === BOTS_ROUTE_ID ? undefined : "none",
                 }}
               >
-                {botsDescriptor ? (
+                {botsDescriptor && filesProps ? (
                   <MountedPanel
                     descriptor={botsDescriptor}
                     workspace={filesProps.workspace}
                     status={filesProps.status}
                   />
+                ) : botsDescriptor ? (
+                  // #348: no workspace yet (app-global snapshot scope): the
+                  // Bots descriptor consumes none of the host props, so its
+                  // component mounts directly — MountedPanel's contract
+                  // requires a real workspace/status pair, and the Bots
+                  // descriptor defines no focus/cleanup hooks, so skipping
+                  // its MountedPanel effect is behaviorally identical.
+                  botsDescriptor.component({ session: null })
                 ) : (
                   <div className="empty-state" role="status">
                     {(() => {

@@ -17,7 +17,7 @@ import type {
 export const READY_FOR_A_PURPOSE = "Ready for a purpose";
 export const HARNESS_DEFAULT_MODEL_LABEL = "Harness default";
 export const SESSION_LINKED_LABEL = "Session linked";
-export const SESSION_NONE_LABEL = "No session linked";
+export const SESSION_NONE_LABEL = "No session yet";
 
 /** Persisted session association only. This is a storage fact about a link,
  *  never a liveness verdict — a stored session can be stale. */

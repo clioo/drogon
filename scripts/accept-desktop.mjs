@@ -326,10 +326,28 @@ try {
   // Exercise the real left-sidebar click path before any workspace exists.
   // The shell used to update its route state but immediately replace every
   // routed page with Landing, making Bots, Tasks and Automations look inert.
-  for (const pageCase of [
-    { button: "Bots", title: "Bots" },
-    { button: "Automations", title: "Automations" },
-  ]) {
+  // R17-E (#348): Bots now mounts its real surface with zero workspaces —
+  // the fork renders BotsPage for activeView 'bots' with no workspace
+  // condition — so the fork header (title + New Bot) is the expectation
+  // here, not the NoWorkspacePage. Automations keeps the placeholder.
+  await page.getByRole("button", { name: "Bots", exact: true }).click();
+  await page.locator('[data-testid="bots-page-host"]').waitFor();
+  await page
+    .locator('[data-testid="bots-page-host"]')
+    .getByRole("heading", { name: "Bots", exact: true })
+    .waitFor();
+  await page
+    .locator('[data-testid="bots-page-host"]')
+    .getByRole("button", { name: "New Bot", exact: true })
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Bots", exact: true })
+      .getAttribute("aria-current"),
+    "page",
+  );
+  {
+    const pageCase = { button: "Automations", title: "Automations" };
     await page.getByRole("button", { name: pageCase.button, exact: true }).click();
     await page.getByTestId("no-workspace-page").waitFor();
     await page

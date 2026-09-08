@@ -72,12 +72,29 @@ const history = z.object({
   automationRunNumber: z.number().finite().nullable(),
 });
 export const botSnapshotInputSchema = scope
-  .extend({ locale: z.string().min(1).max(128) })
+  // #348: workspaceId "" is the app-global scope — the zero-workspace Bots
+  // page loads the host-wide snapshot through it (the fork's controller
+  // lists app-globally). Every other bot method stays workspace-scoped.
+  .extend({
+    workspaceId: z
+      .string()
+      .max(128)
+      .regex(/^[^\x00-\x1f\x7f]*$/u),
+    locale: z.string().min(1).max(128),
+  })
   .strict();
-export const botSnapshotResultSchema = scope.extend({
-  bots: z.array(bot),
-  history: z.array(history),
-});
+export const botSnapshotResultSchema = scope
+  .extend({
+    // Echoes the request's scope: "" back for the app-global read.
+    workspaceId: z
+      .string()
+      .max(128)
+      .regex(/^[^\x00-\x1f\x7f]*$/u),
+  })
+  .extend({
+    bots: z.array(bot),
+    history: z.array(history),
+  });
 
 // Structural transport validation only; native owns preset, harness and text policy.
 export const botCreateInputSchema = scope

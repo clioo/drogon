@@ -3,7 +3,7 @@ use rusqlite::params;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::{Engine, bots::storage, error, workspace};
+use crate::{Engine, bots::records::HistoryEntry, bots::storage, error, workspace};
 
 /// One budget shared by the preflight and the final materialized-size check, so callers
 /// cannot distinguish "rejected early" from "rejected late" by tuning payload shape.
@@ -24,36 +24,27 @@ impl Engine {
     pub(super) fn bot_snapshot(&self, value: &Value) -> Result<Value, RpcError> {
         let scope: SnapshotScope = serde_json::from_value(value.clone())
             .map_err(|_| error::invalid_argument("Invalid Bot snapshot scope"))?;
-        if scope.workspace_id.is_empty() || scope.locale.is_empty() || scope.locale.len() > 128 {
+        if scope.locale.is_empty() || scope.locale.len() > 128 {
             return Err(error::invalid_argument("Invalid Bot snapshot scope"));
         }
         let conn = self.db.lock().unwrap();
         let tx = conn.unchecked_transaction().map_err(error::from_sqlite)?;
-        let folder =
-            workspace::owned_path(&tx, &self.host_id, &scope.workspace_id, &scope.host_id)?;
-        preflight_snapshot_budget(&tx, &self.host_id, &folder)?;
-        let bots = storage::list_bots(&tx, &self.host_id, &folder, &scope.locale)
-            .map_err(snapshot_error)?;
-        let mut history = Vec::new();
-        // Enumerate only scoped Bots: history storage also retains deleted Bot evidence.
-        for bot in &bots {
-            for entry in storage::history_for_bot(&tx, &self.host_id, &folder, &bot.id)
-                .map_err(snapshot_error)?
-            {
-                history.push(json!({
-                    "run":entry.responsibility_run,
-                    "responsibilityName":entry.responsibility.map(|r|r.name),
-                    "automationName":entry.automation.map(|a|a.name),
-                    "automationRunNumber":entry.automation_run.and_then(|r|r.run_number),
-                }));
-            }
-        }
-        history.sort_by(|a, b| {
-            b["run"]["startedAt"]
-                .as_f64()
-                .unwrap_or(0.0)
-                .total_cmp(&a["run"]["startedAt"].as_f64().unwrap_or(0.0))
-        });
+        // An empty workspace scope is the app-global read (#348): the fork's
+        // controller lists Bots app-globally via window.api.bots.list(), so the
+        // zero-workspace Bots page asks for every Bot across the host's folders.
+        // Non-empty scopes stay exact single-workspace reads.
+        let (bots, history) = if scope.workspace_id.is_empty() {
+            self.snapshot_scope_global(&tx, &scope.locale)?
+        } else {
+            let folder = workspace::owned_path(
+                &tx,
+                &self.host_id,
+                &scope.workspace_id,
+                &scope.host_id,
+            )?;
+            preflight_snapshot_budget(&tx, &self.host_id, &folder)?;
+            self.snapshot_scope_folder(&tx, &folder, &scope.locale)?
+        };
         let mut bots_json = serde_json::to_value(&bots)
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?;
         project_bots_trigger_automation_id(&mut bots_json);
@@ -67,6 +58,81 @@ impl Engine {
         }
         Ok(result)
     }
+
+    /// One workspace's snapshot: the workspace's Bots, each with its
+    /// scoped history, newest-first.
+    fn snapshot_scope_folder(
+        &self,
+        tx: &rusqlite::Transaction,
+        folder: &str,
+        locale: &str,
+    ) -> Result<(Vec<Value>, Vec<Value>), RpcError> {
+        let bots = storage::list_bots(tx, &self.host_id, folder, locale).map_err(snapshot_error)?;
+        let mut bots_json = Vec::with_capacity(bots.len());
+        let mut history = Vec::new();
+        // Enumerate only scoped Bots: history storage also retains deleted Bot evidence.
+        for bot in &bots {
+            bots_json.push(
+                serde_json::to_value(bot)
+                    .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?,
+            );
+            for entry in storage::history_for_bot(tx, &self.host_id, folder, &bot.id)
+                .map_err(snapshot_error)?
+            {
+                history.push(history_entry_json(entry));
+            }
+        }
+        history.sort_by(|a, b| {
+            b["run"]["startedAt"]
+                .as_f64()
+                .unwrap_or(0.0)
+                .total_cmp(&a["run"]["startedAt"].as_f64().unwrap_or(0.0))
+        });
+        Ok((bots_json, history))
+    }
+
+    /// The app-global snapshot: every Bot across the host's folders, each
+    /// with its scoped history. Bots stay stored per workspace; only this
+    /// read crosses folders, and the response still echoes the (empty)
+    /// requested scope so callers can verify the match.
+    fn snapshot_scope_global(
+        &self,
+        tx: &rusqlite::Transaction,
+        locale: &str,
+    ) -> Result<(Vec<Value>, Vec<Value>), RpcError> {
+        preflight_snapshot_budget_global(tx, &self.host_id)?;
+        let entries = storage::list_bots_with_folders(tx, &self.host_id, locale)
+            .map_err(snapshot_error)?;
+        let mut bots_json = Vec::with_capacity(entries.len());
+        let mut history = Vec::new();
+        for (folder, bot) in &entries {
+            bots_json.push(
+                serde_json::to_value(bot)
+                    .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?,
+            );
+            for entry in storage::history_for_bot(tx, &self.host_id, folder, &bot.id)
+                .map_err(snapshot_error)?
+            {
+                history.push(history_entry_json(entry));
+            }
+        }
+        history.sort_by(|a, b| {
+            b["run"]["startedAt"]
+                .as_f64()
+                .unwrap_or(0.0)
+                .total_cmp(&a["run"]["startedAt"].as_f64().unwrap_or(0.0))
+        });
+        Ok((bots_json, history))
+    }
+}
+
+fn history_entry_json(entry: HistoryEntry) -> Value {
+    json!({
+        "run":entry.responsibility_run,
+        "responsibilityName":entry.responsibility.map(|r|r.name),
+        "automationName":entry.automation.map(|a|a.name),
+        "automationRunNumber":entry.automation_run.and_then(|r|r.run_number),
+    })
 }
 
 /// `ResponsibilityTrigger`'s `rename_all` covers only the `kind` tag, so a scheduled
@@ -102,6 +168,85 @@ fn snapshot_too_large() -> RpcError {
         "snapshot_too_large",
         "Bot snapshot exceeds the response limit",
     )
+}
+
+/// Host-wide preflight for the app-global scope (#348): the same
+/// COUNT/SUM probes as `preflight_snapshot_budget` with the folder
+/// predicate dropped, so the global read rejects an over-count/over-size
+/// store with the same `snapshot_too_large` before any row is parsed.
+fn preflight_snapshot_budget_global(
+    tx: &rusqlite::Transaction,
+    host_id: &str,
+) -> Result<(), RpcError> {
+    let history_rows: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM bot_responsibility_runs
+             WHERE bot_id IN (SELECT id FROM bots WHERE host_id = ?1)",
+            params![host_id],
+            |r| r.get(0),
+        )
+        .map_err(error::from_sqlite)?;
+    if history_rows > MAX_SNAPSHOT_HISTORY_ROWS {
+        return Err(snapshot_too_large());
+    }
+
+    let bots_bytes: i64 = tx
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(CAST(payload_json AS BLOB))), 0) FROM bots
+             WHERE host_id = ?1",
+            params![host_id],
+            |r| r.get(0),
+        )
+        .map_err(error::from_sqlite)?;
+    let runs_bytes: i64 = tx
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(CAST(payload_json AS BLOB))), 0)
+             FROM bot_responsibility_runs
+             WHERE bot_id IN (SELECT id FROM bots WHERE host_id = ?1)",
+            params![host_id],
+            |r| r.get(0),
+        )
+        .map_err(error::from_sqlite)?;
+    let repeated_responsibility_bytes: i64 = tx
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(CAST(b.payload_json AS BLOB))), 0)
+             FROM bot_responsibility_runs brr
+             JOIN bots b ON b.id = brr.bot_id
+             WHERE b.host_id = ?1",
+            params![host_id],
+            |r| r.get(0),
+        )
+        .map_err(error::from_sqlite)?;
+    let linked_automation_bytes: i64 = tx
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(CAST(a.payload_json AS BLOB))), 0)
+             FROM bot_responsibility_runs brr
+             JOIN automations a ON a.id = json_extract(brr.payload_json, '$.automationId')
+             WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1)",
+            params![host_id],
+            |r| r.get(0),
+        )
+        .map_err(error::from_sqlite)?;
+    let linked_automation_run_bytes: i64 = tx
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(CAST(ar.payload_json AS BLOB))), 0)
+             FROM bot_responsibility_runs brr
+             JOIN automation_runs ar ON ar.id = json_extract(brr.payload_json, '$.automationRunId')
+             WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1)",
+            params![host_id],
+            |r| r.get(0),
+        )
+        .map_err(error::from_sqlite)?;
+
+    let total = bots_bytes
+        .saturating_add(runs_bytes)
+        .saturating_add(repeated_responsibility_bytes)
+        .saturating_add(linked_automation_bytes)
+        .saturating_add(linked_automation_run_bytes);
+    if total > SNAPSHOT_BUDGET_BYTES {
+        return Err(snapshot_too_large());
+    }
+    Ok(())
 }
 
 /// Preflight bound for review P2-2: rejects an over-count/over-size scope with the same

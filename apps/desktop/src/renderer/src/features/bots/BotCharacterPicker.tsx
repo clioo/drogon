@@ -1,7 +1,7 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/bots/BotCharacterPicker.tsx verbatim (adapter:
-   none — DrogonBotAvatar renders initials on the source's frame instead of
-   the character artwork, see DrogonBotAvatar.tsx). */
+   none — DrogonBotAvatar renders the character artwork through
+   getDrogonBotAvatarSrc exactly like the source). */
 
 import { useState } from "react";
 import { Button } from "../../components/ui/button";
