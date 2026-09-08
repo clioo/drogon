@@ -19,6 +19,7 @@ import {
   nextRightSidebarWidth,
   RIGHT_SIDEBAR_DEFAULT_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
+  RIGHT_SIDEBAR_OPEN_STORAGE_KEY,
 } from "./right-sidebar-width";
 import {
   activityItemAriaLabel,
@@ -103,6 +104,10 @@ describe("right-sidebar-width", () => {
       1440 - 320,
     );
     assert.equal(
+      clampRightSidebarPanelWidth(900, 760),
+      760 - 320,
+    );
+    assert.equal(
       computeMaxRightSidebarPanelWidth(undefined),
       2000,
     );
@@ -117,6 +122,17 @@ describe("right-sidebar-width", () => {
     };
     assert.equal(loadRightSidebarWidth(storage), RIGHT_SIDEBAR_DEFAULT_WIDTH);
     assert.equal(loadRightSidebarOpen(storage), null);
+  });
+  it("preserves an explicit persisted closed choice", () => {
+    const store = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+    };
+    storage.setItem(RIGHT_SIDEBAR_OPEN_STORAGE_KEY, "0");
+    assert.equal(loadRightSidebarOpen(storage), false);
+    storage.setItem(RIGHT_SIDEBAR_OPEN_STORAGE_KEY, "1");
+    assert.equal(loadRightSidebarOpen(storage), true);
   });
   it("widens when the left-edge handle drags left", () => {
     assert.equal(

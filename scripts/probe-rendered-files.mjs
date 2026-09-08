@@ -6,6 +6,10 @@ import {
   setEditorValue,
   waitForEditorRegistered,
 } from "./acceptance-editor-text.mjs";
+import {
+  PARITY_COLOR_SCHEMES,
+  PARITY_VIEWPORT_WIDTHS,
+} from "./probe-packaged-surfaces.mjs";
 
 export async function probeRenderedFiles({ page, workspace, output }) {
   const first = "acceptance-first.txt";
@@ -18,8 +22,8 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   });
   // R6-B: Files lives in the right activity bar ("Explorer" button; the
   // accessible name carries the chord suffix, so the match is non-exact).
-  // The sidebar may start closed on narrow windows: the source chord opens
-  // it on Explorer when the button is not yet actionable.
+  // Route explicitly to Explorer so the probe is independent of the
+  // persisted right-sidebar tab/open state.
   const mod = process.platform === "darwin" ? "Meta" : "Control";
   // Anchored: the explorer toolbar now has its own "Refresh Explorer" /
   // "More Explorer Actions" buttons, so a substring match is ambiguous.
@@ -30,10 +34,9 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     "The candidate must advertise Explorer before rendered acceptance",
   );
   const panel = page.locator('section[aria-label="Files"]');
-  // The sidebar may start closed (narrow window): Playwright visibility
-  // ignores zero-width ancestor clipping, so never trust it here. The
-  // source chord opens the sidebar on Explorer from any state, and the
-  // panel's own rect is the only honest admission signal.
+  // Playwright visibility ignores zero-width ancestor clipping, so never
+  // trust it here. The source chord opens the sidebar on Explorer from any
+  // state, and the panel's own rect is the only honest admission signal.
   const ensureFilesVisible = async () => {
     const box = await panel.boundingBox().catch(() => null);
     if (box && box.width >= 200) return;
@@ -109,12 +112,11 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   );
   const originalViewport = page.viewportSize();
   try {
-    for (const width of [1440, 760]) {
+    for (const width of PARITY_VIEWPORT_WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
-      // Resizing can hide the panel (closed sidebar on narrow windows);
-      // reopen on Explorer so every capture measures the real layout.
+      // Reopen on Explorer so every capture measures the real layout.
       await ensureFilesVisible();
-      for (const colorScheme of ["light", "dark"]) {
+      for (const colorScheme of PARITY_COLOR_SCHEMES) {
         await page.emulateMedia({ colorScheme });
         await page.screenshot({
           path: path.join(output, `files-${width}-${colorScheme}.png`),
@@ -190,7 +192,7 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     "rendered-files-activity-switch-retains-draft",
     "rendered-files-save-confirmed-by-exact-disk-content-and-sibling-unchanged",
     "rendered-files-reload-reads-confirmed-disk-content",
-    "rendered-files-wide-and-narrow-layout-light-and-dark",
+    "rendered-files-parity-layout-light-and-dark-at-1440-1100-900-760",
   ];
 }
 

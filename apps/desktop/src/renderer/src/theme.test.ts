@@ -66,14 +66,11 @@ function darkCount(classList: ReturnType<typeof fakeRoot>["classList"]) {
 }
 
 describe("resolveInspectorDefault", () => {
-  it("prefers the saved value over the viewport, in both directions", () => {
-    expect(resolveInspectorDefault(true, false)).toBe(false);
-    expect(resolveInspectorDefault(false, true)).toBe(true);
-    expect(resolveInspectorDefault(true, true)).toBe(true);
-    expect(resolveInspectorDefault(false, false)).toBe(false);
+  it("prefers the saved value in both directions", () => {
+    expect(resolveInspectorDefault(false)).toBe(false);
+    expect(resolveInspectorDefault(true)).toBe(true);
   });
-  it("falls back to the viewport only when nothing is saved", () => {
-    expect(resolveInspectorDefault(true, null)).toBe(true);
-    expect(resolveInspectorDefault(false, null)).toBe(false);
+  it("keeps the sidebar visible when nothing is saved", () => {
+    expect(resolveInspectorDefault(null)).toBe(true);
   });
 });

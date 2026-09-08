@@ -166,8 +166,8 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
         }
         onSelectProject={() => setSection("project")}
       />
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-10 px-8 pb-24 pt-10">
             {visible.length === 0 && !showProject ? (
               <div className="flex min-h-[24rem] items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/30 text-sm text-muted-foreground">

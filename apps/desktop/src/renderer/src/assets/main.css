@@ -1061,26 +1061,8 @@
   border-radius: calc(var(--radius) * 0.6);
   padding: 3px 8px;
 }
-@media (max-width: 1100px) {
-  .files-panel {
-    flex-direction: column;
-  }
-  .workspace-explorer {
-    width: auto;
-    max-height: 40%;
-    border-right: 0;
-    border-bottom: 1px solid
-      color-mix(in srgb, var(--border) 72%, transparent);
-  }
-}
 /* R6-B: the session-details overlay recipe is retired with the inspector
-   aside — the panel now lives in the right sidebar host below, and the
-   narrow-viewport guard closes the sidebar instead of overlaying it. */
-@media (max-width: 800px) {
-  .workspace-sidebar {
-    width: 200px;
-  }
-}
+   aside — the panel now lives in the right sidebar host below. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

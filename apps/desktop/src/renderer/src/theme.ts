@@ -34,12 +34,10 @@ export function applyThemeToRoot(root: ThemeRoot, theme: EffectiveTheme): void {
 }
 
 /**
- * Initial inspector visibility: a saved user choice always wins; the
- * viewport default applies only when nothing has been saved yet (null).
+ * Initial inspector visibility: a saved user choice always wins. The
+ * reference keeps the right sidebar available at every window width, so a
+ * first run uses the same visible default instead of a viewport breakpoint.
  */
-export function resolveInspectorDefault(
-  viewportWide: boolean,
-  saved: boolean | null,
-): boolean {
-  return saved !== null ? saved : viewportWide;
+export function resolveInspectorDefault(saved: boolean | null): boolean {
+  return saved ?? true;
 }

@@ -20,6 +20,8 @@ import { readEditorValue, waitForEditorRegistered } from "./acceptance-editor-te
 // /opt/homebrew/bin) may still resolve it, which the Tasks check reports
 // honestly instead of assuming.
 export const FIXTURE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+export const PARITY_VIEWPORT_WIDTHS = Object.freeze([1440, 1100, 900, 760]);
+export const PARITY_COLOR_SCHEMES = Object.freeze(["light", "dark"]);
 
 /** Reads the palette opener's darwin chord from the keybinding registry. */
 export function paletteOpenChord(definitionsSource) {
@@ -635,28 +637,200 @@ async function probeBotsCreateAndResponsibility({ page, output }) {
   return checks;
 }
 
-/** Status bar: no horizontal overflow at narrow and wide viewports. */
+/** Status bar: no horizontal overflow at every parity width and scheme. */
 async function probeStatusBarOverflow({ page, output }) {
   const original = page.viewportSize();
   try {
-    for (const width of [760, 1440]) {
-      await page.setViewportSize({ width, height: 800 });
-      const statusBar = page.locator('footer[data-testid="status-bar"]');
-      await statusBar.waitFor();
-      const metrics = await statusBar.evaluate((element) => ({
-        clientWidth: element.clientWidth,
-        scrollWidth: element.scrollWidth,
-      }));
-      assertNoHorizontalOverflow(metrics, `status-bar@${width}px`);
-      await page.screenshot({
-        path: path.join(output, `status-bar-${width}.png`),
-        animations: "disabled",
-      });
+    for (const colorScheme of PARITY_COLOR_SCHEMES) {
+      await page.emulateMedia({ colorScheme });
+      for (const width of PARITY_VIEWPORT_WIDTHS) {
+        await page.setViewportSize({ width, height: 800 });
+        const statusBar = page.locator('footer[data-testid="status-bar"]');
+        await statusBar.waitFor();
+        // Give the ResizeObserver one turn to publish the new density tier
+        // before measuring its honest scroll width.
+        await page.waitForTimeout(100);
+        const metrics = await statusBar.evaluate((element) => ({
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        }));
+        assertNoHorizontalOverflow(
+          metrics,
+          `status-bar@${width}px-${colorScheme}`,
+        );
+        await page.screenshot({
+          path: path.join(output, `status-bar-${width}-${colorScheme}.png`),
+          animations: "disabled",
+        });
+      }
     }
   } finally {
     if (original) await page.setViewportSize(original);
+    await page.emulateMedia({ colorScheme: "light" });
   }
-  return ["status-bar-no-overflow-at-760-and-1440"];
+  return ["status-bar-no-overflow-at-1440-1100-900-760-light-and-dark"];
+}
+
+/**
+ * Settings and right-sidebar geometry are measured in the packaged app, not
+ * inferred from CSS strings. This catches flex min-content regressions,
+ * viewport-only sidebar rules and persisted widths that would otherwise be
+ * hidden by the shell's overflow clipping.
+ */
+async function probeResponsiveParity({ page }) {
+  const original = page.viewportSize();
+  const originalSidebarStorage = await page.evaluate(() => ({
+    open: localStorage.getItem("drogon:right-sidebar:open"),
+    width: localStorage.getItem("drogon:right-sidebar:width"),
+  }));
+  const mod = process.platform === "darwin" ? "Meta" : "Control";
+  try {
+    await page.getByRole("button", { name: "Sessions", exact: true }).click();
+    const workspace = page.locator('button[aria-label^="Select "]').first();
+    await workspace.waitFor({ timeout: 15000 });
+    await workspace.click();
+    await ensureRightSidebar(page);
+
+    // A user-closing the right sidebar is a persisted choice. Verify it
+    // survives a real renderer reload before restoring the panel for the
+    // width checks below.
+    await page
+      .getByRole("button", { name: "Toggle right sidebar", exact: true })
+      .click();
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="right-sidebar"]')
+          ?.getBoundingClientRect().width === 0,
+      null,
+      { timeout: 8000 },
+    );
+    await page.reload();
+    await page
+      .getByRole("button", { name: "Reveal active workspace", exact: true })
+      .waitFor({ timeout: 20000 });
+    await page.setViewportSize({ width: 900, height: 900 });
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="right-sidebar"]')
+          ?.getBoundingClientRect().width === 0,
+      null,
+      { timeout: 8000 },
+    );
+    // Explicit routing reopens and persists the panel, as it does for a user
+    // selecting Explorer from the activity rail/chord.
+    await page.keyboard.press(`${mod}+Shift+E`);
+    await page.waitForFunction(
+      () =>
+        (document
+          .querySelector('[data-testid="right-sidebar"]')
+          ?.getBoundingClientRect().width ?? 0) >= 220,
+      null,
+      { timeout: 8000 },
+    );
+
+    // Persist an intentionally oversized width, then let the app's rendered
+    // clamp prove the source's 320px non-sidebar reserve at 760px.
+    await page.setViewportSize({ width: 760, height: 900 });
+    await page.evaluate(() => {
+      localStorage.setItem("drogon:right-sidebar:open", "1");
+      localStorage.setItem("drogon:right-sidebar:width", "9999");
+    });
+    await page.reload();
+    await page
+      .getByRole("button", { name: "Reveal active workspace", exact: true })
+      .waitFor({ timeout: 20000 });
+    await page.waitForFunction(
+      () =>
+        (document
+          .querySelector('[data-testid="right-sidebar"]')
+          ?.getBoundingClientRect().width ?? 0) >= 220,
+      null,
+      { timeout: 8000 },
+    );
+    const sidebarMetrics = await page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="right-sidebar"]');
+      const left = document.querySelector(".workspace-sidebar");
+      return {
+        width: panel?.getBoundingClientRect().width ?? 0,
+        leftWidth: left?.getBoundingClientRect().width ?? 0,
+      };
+    });
+    assert.ok(
+      sidebarMetrics.width >= 220 && sidebarMetrics.width <= 440 + 1,
+      `right sidebar must clamp to 220..440px at 760px, got ${sidebarMetrics.width}px`,
+    );
+    assert.equal(
+      sidebarMetrics.leftWidth,
+      280,
+      `left sidebar must retain its source width at 760px, got ${sidebarMetrics.leftWidth}px`,
+    );
+
+    for (const colorScheme of PARITY_COLOR_SCHEMES) {
+      await page.emulateMedia({ colorScheme });
+      await page.keyboard.press(`${mod}+,`);
+      const settings = page.locator('section[aria-label="Settings"]');
+      await settings.waitFor({ timeout: 15000 });
+      for (const width of PARITY_VIEWPORT_WIDTHS) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.waitForTimeout(100);
+        const metrics = await page
+          .locator(".settings-view-shell")
+          .evaluate((shell) => {
+            const content = shell.querySelector(".overflow-y-auto");
+            return {
+              shellClientWidth: shell.clientWidth,
+              shellScrollWidth: shell.scrollWidth,
+              contentClientWidth: content?.clientWidth ?? 0,
+              contentScrollWidth: content?.scrollWidth ?? 0,
+            };
+          });
+        assertNoHorizontalOverflow(
+          {
+            clientWidth: metrics.shellClientWidth,
+            scrollWidth: metrics.shellScrollWidth,
+          },
+          `settings-shell@${width}px-${colorScheme}`,
+        );
+        assertNoHorizontalOverflow(
+          {
+            clientWidth: metrics.contentClientWidth,
+            scrollWidth: metrics.contentScrollWidth,
+          },
+          `settings-content@${width}px-${colorScheme}`,
+        );
+      }
+      await page.getByRole("button", { name: "Back to app", exact: true }).click();
+      await settings.waitFor({ state: "hidden" });
+    }
+
+    // Do not leave the next acceptance probe with the intentionally oversized
+    // test width. Restore the pre-probe preference and hydrate it through a
+    // real reload, so subsequent tab clicks measure the restored shell.
+    await page.evaluate((saved) => {
+      for (const [key, value] of Object.entries({
+        "drogon:right-sidebar:open": saved.open,
+        "drogon:right-sidebar:width": saved.width,
+      })) {
+        if (value === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+      }
+    }, originalSidebarStorage);
+    await page.setViewportSize(original ?? { width: 1440, height: 900 });
+    await page.reload();
+    await page
+      .getByRole("button", { name: "Reveal active workspace", exact: true })
+      .waitFor({ timeout: 20000 });
+  } finally {
+    if (original) await page.setViewportSize(original);
+    await page.emulateMedia({ colorScheme: "light" });
+  }
+  return [
+    "right-sidebar-open-choice-survives-reload",
+    "right-sidebar-width-clamps-and-left-sidebar-stays-280-at-760",
+    "settings-shell-and-content-fit-all-parity-widths-in-light-and-dark",
+  ];
 }
 
 /**
@@ -1089,8 +1263,28 @@ export async function probePackagedSurfaces({
       `tasks-page-renders-honest-state-with-gh-${ghInFixturePath ? "in" : "outside"}-fixture-path:${outcome}`,
     );
 
+  // Responsive parity: exercise the actual packaged shell at every requested
+  // width and scheme, including persisted right-sidebar state and settings
+  // overflow. This runs after the task journey so the workspace is real and
+  // the probe does not need synthetic renderer state.
+  checks.push(...(await probeResponsiveParity({ page })));
+
   // Terminal buffer registry: the debug registry exposes live xterm buffers
-  // (the reader the shared helper evaluates), never an empty handle.
+  // (the reader the shared helper evaluates), never an empty handle. A
+  // packaged renderer can paint the restored terminal before its xterm effect
+  // registers, so wait for the same live evidence instead of racing it.
+  await page.waitForFunction(
+    () => {
+      const registry = window.__drogonTerminals;
+      if (!registry || registry.size === 0) return false;
+      for (const terminal of registry.values()) {
+        if ((terminal.buffer?.active?.length ?? 0) > 0) return true;
+      }
+      return false;
+    },
+    null,
+    { timeout: 15000 },
+  );
   const terminalState = await page.evaluate(() => {
     const registry = window.__drogonTerminals;
     if (!registry || registry.size === 0) return { size: 0, rows: 0 };

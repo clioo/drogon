@@ -8,12 +8,21 @@ import {
   findCreatedStripTabName,
   fixtureHasBinary,
   FIXTURE_PATH,
+  PARITY_COLOR_SCHEMES,
+  PARITY_VIEWPORT_WIDTHS,
   folderViewSettled,
   paletteOpenChord,
   registryLiveness,
   summarizeAutomationHistory,
 } from "./probe-packaged-surfaces.mjs";
 import { extractTerminalText } from "./acceptance-terminal-text.mjs";
+
+describe("responsive parity matrix", () => {
+  it("covers every requested width and color scheme", () => {
+    assert.deepEqual(PARITY_VIEWPORT_WIDTHS, [1440, 1100, 900, 760]);
+    assert.deepEqual(PARITY_COLOR_SCHEMES, ["light", "dark"]);
+  });
+});
 
 describe("paletteOpenChord", () => {
   const entry = (darwin) =>
