@@ -40,6 +40,7 @@ import {
   loadTabStripState,
   partitionPinnedOrder,
   reconcileTabOrder,
+  remapTabOrder,
   saveTabStripState,
   togglePinnedOrder,
   type TabStripState,
@@ -51,7 +52,7 @@ import {
 } from "./features/new-workspace/composer-submit";
 import { TabBar } from "./features/shell/TabBar";
 import { editorTabId, type EditorTabState } from "./features/shell/editor-tab";
-import { EditorHost } from "./features/editor";
+import { EditorHost, planEditorRehydrate } from "./features/editor";
 import { TitlebarLeftControls } from "./features/shell/TitlebarLeftControls";
 import { RightSidebar } from "./features/right-sidebar/RightSidebar";
 import { SessionDetailsPanel } from "./features/right-sidebar/SessionDetailsPanel";
@@ -169,7 +170,10 @@ import {
   isBotsAvailable,
   registerBotsRoute,
 } from "./bots-mount";
-import { windowBrowserBridge } from "./features/browser/browser-bridge";
+import {
+  planBrowserRehydrate,
+  windowBrowserBridge,
+} from "./features/browser/browser-bridge";
 import type { BrowserTabState } from "../../shared/browser-contract";
 import { BrowserPanel } from "./features/browser/browser-panel";
 import {
@@ -440,6 +444,9 @@ export function App() {
   sessionsRef.current = sessions;
   const activeRef = useRef(active);
   activeRef.current = active;
+  // Render-time mirror for the async tab rehydrate below (sessionsRef pattern).
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -624,6 +631,9 @@ export function App() {
   const [activeBrowserTabId, setActiveBrowserTabId] = useState<string | null>(
     null,
   );
+  // Render-time mirror for the tab rehydrate live-echo wait below.
+  const browserTabsRef = useRef(browserTabs);
+  browserTabsRef.current = browserTabs;
   // R16-A editor tabs (fixes #133): open files are a third tab kind in the
   // main strip, alongside sessions and browser tabs — purely local state
   // (no host/daemon concept of "open tabs"; the daemon just serves file
@@ -634,6 +644,9 @@ export function App() {
   const [activeEditorTabId, setActiveEditorTabId] = useState<string | null>(
     null,
   );
+  // Render-time mirror for the async tab rehydrate below (sessionsRef pattern).
+  const editorTabsRef = useRef(editorTabs);
+  editorTabsRef.current = editorTabs;
   // R12-D tab strip: order, pins and renames persist per workspace in the
   // shell's own localStorage envelope (tab-order.ts), like the sidebar keys.
   const [tabStrip, setTabStrip] = useState<TabStripState>(() =>
@@ -2090,6 +2103,244 @@ export function App() {
       ),
       tabStrip.pinned,
     );
+  // R16-AJ (fixes #215): the envelope holds strip MEMBERSHIP, not just
+  // order actions. Editors (paths) and browser tabs (id+url) ride the same
+  // per-workspace envelope as additive keys, written on every membership
+  // change; the stored order is the live reconciled order so a restart
+  // restores positions without a prior reorder. Storage-only write (never
+  // setState): the read path already reconciles, so there is nothing to
+  // loop on. The workspace-switch commit is owned by the load effect
+  // above: this effect skips it (tabStrip still holds the previous
+  // workspace) and the re-render after the load carries the right strip.
+  // Per-kind settle gates (editors/browsers): a kind persists only after
+  // its rehydrate verification settled for this workspace (or there was
+  // nothing stored to verify). Until then the stored record wins, so a
+  // boot with empty in-memory lists can never clobber a full envelope,
+  // and an unverifiable kind (files.v1 withheld, host unreachable) keeps
+  // its stored record instead of persisting "unknown" as empty.
+  const membershipOwnerRef = useRef(selected);
+  const editorsSettledRef = useRef(new Set<string>());
+  const browsersSettledRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (membershipOwnerRef.current !== selected) {
+      membershipOwnerRef.current = selected;
+      return;
+    }
+    if (!selected) return;
+    const prev = loadTabStripState(window.localStorage, selected);
+    const editors = editorsSettledRef.current.has(selected)
+      ? editorTabs
+          .filter((tab) => tab.workspaceId === selected)
+          .map((tab) => tab.path)
+      : prev.editors;
+    const browsers = browsersSettledRef.current.has(selected)
+      ? browserTabs.map((tab) => ({
+          tabId: tab.tabId,
+          url: tab.url,
+        }))
+      : prev.browsers;
+    saveTabStripState(window.localStorage, selected, {
+      ...tabStrip,
+      order: liveStripOrder(),
+      editors,
+      browsers,
+    });
+    // Runs when the inputs settle; the write is storage-only (idempotent).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, editorTabs, browserTabs, sessions, tabStrip]);
+  // R16-AJ (fixes #215): one-shot per-workspace rehydrate of the persisted
+  // strip membership. Editor paths reopen after an existence check through
+  // the files bridge (missing files are skipped, never resurrected as
+  // empty tabs); browser entries missing from the host's live list are
+  // recreated with their stored URLs in stored strip order, and the stored
+  // order is remapped old id -> new id so positions survive the host's
+  // per-launch id minting. Runs once per workspace per mount: after this
+  // the live lists are the source of truth, so a user-closed tab stays
+  // closed across workspace switches (its close already rewrote the
+  // envelope via the persist effect above). Rehydrate never steals
+  // selection: tabs reopen in the background, like the fork's restore.
+  // Unsaved drafts are IN-MEMORY ONLY (files-draft-store.ts) and cannot
+  // survive a restart by construction — the fork behaves the same; the
+  // dirty-tab close guard is the only protection.
+  const rehydratedTabsRef = useRef(new Set<string>());
+  const rehydrateWorkspaceTabs = async (workspaceId: string) => {
+    const stored = loadTabStripState(window.localStorage, workspaceId);
+    if (stored.editors.length === 0)
+      editorsSettledRef.current.add(workspaceId);
+    if (stored.browsers.length === 0)
+      browsersSettledRef.current.add(workspaceId);
+    if (stored.editors.length === 0 && stored.browsers.length === 0) return;
+    if (selectedRef.current !== workspaceId) return;
+    const workspace = workspacesRef.current.find(
+      (item) => item.id === workspaceId,
+    );
+    const hostId = workspace?.hostId ?? contextRef.current.hostId;
+    if (stored.editors.length > 0 && hostId) {
+      const openPaths = new Set(
+        editorTabsRef.current
+          .filter((tab) => tab.workspaceId === workspaceId)
+          .map((tab) => tab.path),
+      );
+      const candidates = planEditorRehydrate({
+        storedPaths: stored.editors,
+        openPaths,
+      });
+      const existing: string[] = [];
+      let verified = true;
+      for (const path of candidates) {
+        if (selectedRef.current !== workspaceId) return;
+        try {
+          // Plain read, no maxBytes: maxBytes caps the file SIZE (a small
+          // cap fails every non-trivial file), so only an uncapped read
+          // answers "does this path still exist".
+          const read = await filesGatedBridge.fileRead({
+            hostId,
+            workspaceId,
+            path,
+          });
+          if (read.ok) existing.push(path);
+          else if (read.error.code !== "not_found") {
+            // Unverifiable (withheld capability, transient failure): abort
+            // without settling, so the stored record survives for the next
+            // restart instead of persisting "unknown" as empty. Only
+            // not_found honestly means "skip this file".
+            verified = false;
+            break;
+          }
+        } catch {
+          verified = false;
+          break;
+        }
+      }
+      if (selectedRef.current !== workspaceId) return;
+      if (verified) editorsSettledRef.current.add(workspaceId);
+      if (existing.length > 0) {
+        setEditorTabs((tabs) => {
+          const ids = new Set(tabs.map((tab) => tab.tabId));
+          const additions = existing
+            .filter((path) => !ids.has(editorTabId(workspaceId, path)))
+            .map((path) => ({
+              tabId: editorTabId(workspaceId, path),
+              workspaceId,
+              path,
+              dirty: false,
+            }));
+          return additions.length > 0 ? [...tabs, ...additions] : tabs;
+        });
+      }
+    }
+    if (stored.browsers.length === 0) return;
+    if (selectedRef.current !== workspaceId) return;
+    let liveIds: Set<string>;
+    try {
+      const state = await browserStaticBridge.getState();
+      if (!state.ok) return;
+      liveIds = new Set(
+        state.result.tabs
+          .filter((tab) => tab.workspaceId === workspaceId)
+          .map((tab) => tab.tabId),
+      );
+    } catch {
+      // The live list is unknown: recreating blindly could duplicate the
+      // host's tabs after a mere renderer reload, so nothing recreates and
+      // browsers stay unsettled (the stored record survives). The onState
+      // subscription still populates the strip with whatever the host
+      // holds.
+      return;
+    }
+    browsersSettledRef.current.add(workspaceId);
+    const missing = planBrowserRehydrate({
+      stored: stored.browsers,
+      liveTabIds: liveIds,
+    });
+    if (missing.length === 0) return;
+    const mapping: Record<string, string> = {};
+    for (const entry of missing) {
+      if (selectedRef.current !== workspaceId) return;
+      try {
+        let created = await browserStaticBridge.createTab({
+          workspaceId,
+          url: entry.url,
+        });
+        if (!created.ok && created.error.code === "browser_blocked") {
+          // Unloadable stored URL (a fresh tab's about:blank is blocked as
+          // an explicit load, while the default home tab IS blank): keep
+          // the tab membership with a blank page, exactly what the user
+          // left behind.
+          created = await browserStaticBridge.createTab({ workspaceId });
+        }
+        if (created.ok) mapping[entry.tabId] = created.result.tabId;
+      } catch {
+        // One failed recreation never blocks the rest.
+      }
+    }
+    // Total failure retries next restart: browsers stay unsettled, so the
+    // stored record survives instead of persisting an empty live list.
+    if (Object.keys(mapping).length === 0) return;
+    // Remap builder: positions/pins/renames/splits come from in-memory
+    // state (pristine stored positions plus any user reorder/pin/rename
+    // that landed during rehydrate — every strip writer saves
+    // synchronously, so in-memory is never behind storage here), while
+    // the browser records carry the recreated ids.
+    const buildRemapped = (): TabStripState => {
+      const base = tabStripRef.current;
+      const current = loadTabStripState(window.localStorage, workspaceId);
+      return {
+        ...current,
+        order: remapTabOrder(base.order, mapping),
+        pinned: base.pinned.map((id) => mapping[id] ?? id),
+        titles: Object.fromEntries(
+          Object.entries(base.titles).map(([id, title]) => [
+            mapping[id] ?? id,
+            title,
+          ]),
+        ),
+        splits: base.splits,
+        browsers: [
+          ...current.browsers.filter((entry) => !(entry.tabId in mapping)),
+          ...Object.keys(mapping).map((oldId) => ({
+            tabId: mapping[oldId],
+            url: missing.find((entry) => entry.tabId === oldId)?.url ?? "",
+          })),
+        ].filter((entry) => entry.url.length > 0),
+      };
+    };
+    // Crash-safe first: the storage envelope carries the remap even if
+    // the live echo below never arrives.
+    saveTabStripState(window.localStorage, workspaceId, buildRemapped());
+    // Bounded wait for the host subscription to echo the recreated tabs:
+    // only then do the new ids become the settled live truth, so the
+    // persist effect above can never write a settled-but-empty live list
+    // over the remapped record. A timeout settles anyway — the live list
+    // wins (e.g. the host dropped a tab as fast as it was recreated).
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      if (selectedRef.current !== workspaceId) return;
+      const live = new Set(
+        browserTabsRef.current
+          .filter((tab) => tab.workspaceId === workspaceId)
+          .map((tab) => tab.tabId),
+      );
+      if (Object.values(mapping).every((id) => live.has(id))) break;
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (selectedRef.current !== workspaceId) return;
+    browsersSettledRef.current.add(workspaceId);
+    // Recapture (a user pin/rename may have landed during the wait), then
+    // publish: the next persist run converges order + membership at once.
+    const remapped = buildRemapped();
+    tabStripRef.current = remapped;
+    setTabStrip(remapped);
+  };
+  useEffect(() => {
+    if (!selected || !status) return;
+    if (rehydratedTabsRef.current.has(selected)) return;
+    rehydratedTabsRef.current.add(selected);
+    void rehydrateWorkspaceTabs(selected);
+    // One-shot per workspace; the guard above owns re-entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, status]);
   const changeTabOrder = (order: string[]) =>
     updateTabStrip({ ...tabStrip, order });
   const toggleTabPin = (id: string) => {
@@ -2391,8 +2642,11 @@ export function App() {
         ),
       );
       // One strip write: the dissolved split plus the survivor's
-      // migrated order/pins/rename land together.
+      // migrated order/pins/rename land together. The base spread keeps
+      // the R16-AJ membership keys (editors/browsers), which the identity
+      // migration (order/pins/titles only) does not carry.
       const next: TabStripState = {
+        ...tabStripRef.current,
         ...migrateSplitTabIdentity(
           tabStripRef.current,
           dissolvedRoot,

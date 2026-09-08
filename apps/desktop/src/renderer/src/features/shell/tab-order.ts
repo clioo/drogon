@@ -8,12 +8,35 @@
    is those three id lists; pin/title state lives in this file's
    per-workspace envelope instead of the zustand tab slice. R16-N adds the
    split-terminal pair map (terminal-split.ts sanitize) as an additive
-   envelope key. */
+   envelope key. R16-AJ adds the editor/browser membership keys (sanitize
+   + remap), which are original to this repo. */
 
 import {
   sanitizeTerminalSplits,
   type PersistedTerminalSplitMap,
 } from "../terminal/terminal-split";
+
+/**
+ * One open browser tab's restore record (R16-AJ, fixes #215): the strip id
+ * plus the URL to reload. Tab ids are host-minted per launch, so a restart
+ * recreates the tab and remaps the stored order old id -> new id; the URL
+ * is what actually survives.
+ */
+export type PersistedBrowserTab = {
+  tabId: string;
+  url: string;
+};
+
+/**
+ * Envelope caps for the R16-AJ membership keys. The browser cap mirrors
+ * MAX_BROWSER_TABS (shared/browser-contract.ts); the editor cap bounds one
+ * localStorage envelope, and the path cap rejects garbage without judging
+ * legal path characters (any non-empty string the files bridge accepted).
+ */
+export const MAX_PERSISTED_EDITOR_TABS = 128;
+export const MAX_PERSISTED_BROWSER_TABS = 16;
+export const MAX_PERSISTED_PATH_CHARS = 1024;
+export const MAX_PERSISTED_URL_CHARS = 2048;
 
 export type TabStripState = {
   /** Stored strip order (session ids and browser tab ids, deduped at read). */
@@ -28,6 +51,18 @@ export type TabStripState = {
    * sizes. Absent/empty while every tab holds one pane.
    */
   splits: PersistedTerminalSplitMap;
+  /**
+   * Open editor files for this workspace, as paths (R16-AJ membership).
+   * Paths, not tab ids: the id is `${workspaceId}::${path}` and the
+   * workspace is the envelope key, so the path round-trips losslessly.
+   * Absent/empty on pre-membership envelopes.
+   */
+  editors: string[];
+  /**
+   * Open browser tabs for this workspace, as id+url records (R16-AJ
+   * membership). Absent/empty on pre-membership envelopes.
+   */
+  browsers: PersistedBrowserTab[];
 };
 
 export const EMPTY_TAB_STRIP_STATE: TabStripState = {
@@ -35,6 +70,8 @@ export const EMPTY_TAB_STRIP_STATE: TabStripState = {
   pinned: [],
   titles: {},
   splits: {},
+  editors: [],
+  browsers: [],
 };
 
 /** Storage key pattern mirrors the right-sidebar keys (`drogon:<area>:<name>`); one envelope per workspace. */
@@ -85,6 +122,20 @@ export function moveTabOrder(
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
   return next;
+}
+
+/**
+ * Rewrite stored ids through an old id -> new id mapping (R16-AJ browser
+ * rehydrate: the host mints fresh tab ids per launch, so recreated tabs
+ * take their stored positions instead of falling to the strip end).
+ * Unmapped ids pass through untouched; mapping values are NOT deduped
+ * against the order, so callers must map each stale id at most once.
+ */
+export function remapTabOrder(
+  order: readonly string[],
+  mapping: Readonly<Record<string, string>>,
+): string[] {
+  return order.map((id) => mapping[id] ?? id);
 }
 
 /** Move one entry by a signed delta (keyboard reorder primitive). */
@@ -192,19 +243,58 @@ function sanitizeTitles(value: unknown): Record<string, string> {
   return out;
 }
 
+function sanitizePathList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    if (entry.length === 0 || entry.length > MAX_PERSISTED_PATH_CHARS)
+      continue;
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    out.push(entry);
+  }
+  return out.slice(0, MAX_PERSISTED_EDITOR_TABS);
+}
+
+function sanitizeBrowserTabs(value: unknown): PersistedBrowserTab[] {
+  if (!Array.isArray(value)) return [];
+  const out: PersistedBrowserTab[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry))
+      continue;
+    const { tabId, url } = entry as Record<string, unknown>;
+    if (typeof tabId !== "string" || tabId.length === 0 || tabId.length > 128)
+      continue;
+    if (
+      typeof url !== "string" ||
+      url.length === 0 ||
+      url.length > MAX_PERSISTED_URL_CHARS
+    )
+      continue;
+    if (seen.has(tabId)) continue;
+    seen.add(tabId);
+    out.push({ tabId, url });
+  }
+  return out.slice(0, MAX_PERSISTED_BROWSER_TABS);
+}
+
 export function parseTabStripState(raw: string | null | undefined): TabStripState {
-  if (!raw) return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
+  if (!raw)
+    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-      return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
+      return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
     const candidate = parsed as { state?: unknown };
     if (
       typeof candidate.state !== "object" ||
       candidate.state === null ||
       Array.isArray(candidate.state)
     )
-      return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
+      return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
     const state = candidate.state as Record<string, unknown>;
     const order = sanitizeIdList(state.order);
     const pinned = sanitizeIdList(state.pinned).filter((id) =>
@@ -212,9 +302,19 @@ export function parseTabStripState(raw: string | null | undefined): TabStripStat
     );
     // Additive R16-N key: older envelopes simply hydrate to no splits.
     const splits = sanitizeTerminalSplits(state.splits);
-    return { order, pinned, titles: sanitizeTitles(state.titles), splits };
+    // Additive R16-AJ keys: older envelopes hydrate to no restored tabs.
+    const editors = sanitizePathList(state.editors);
+    const browsers = sanitizeBrowserTabs(state.browsers);
+    return {
+      order,
+      pinned,
+      titles: sanitizeTitles(state.titles),
+      splits,
+      editors,
+      browsers,
+    };
   } catch {
-    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
+    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
   }
 }
 
@@ -225,7 +325,7 @@ export function loadTabStripState(
   try {
     return parseTabStripState(storage.getItem(tabStripStorageKey(workspaceId)));
   } catch {
-    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {} };
+    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
   }
 }
 
