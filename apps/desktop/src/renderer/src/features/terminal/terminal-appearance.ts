@@ -1,10 +1,12 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from
-// src/renderer/src/components/terminal-pane/terminal-appearance.ts.
+// src/renderer/src/components/terminal-pane/terminal-appearance.ts and
+// src/renderer/src/lib/terminal-themes/defaults.ts.
 // Adapted: Orca's PaneManager/GlobalSettings/theme-catalog stack does not
-// exist in Drogon, so the theme is derived from this repo's own tokens
-// (apps/desktop/src/renderer/src/assets/main.css) per effective scheme.
-// The pure core (hexToRgba, composeActiveTerminalTheme, value-gated theme
-// equality) keeps the source semantics.
+// exist in Drogon, so the per-scheme theme is the fork's default catalog
+// entry for that scheme (Ghostty Default Style Dark / Builtin Tango Light),
+// values copied literally. The pure core (hexToRgba,
+// composeActiveTerminalTheme, value-gated theme equality) keeps the source
+// semantics.
 
 import type { ITheme } from "@xterm/xterm";
 
@@ -39,65 +41,68 @@ export function resolveTerminalScheme(
   return theme;
 }
 
-// Fixed 16-color ramps per scheme, tuned against the repo's own
-// --background/--foreground tokens (dark #0a0a0a/#fafafa, light #fff/#0a0a0a).
+// Fork default catalog entries, copied literally from
+// lib/terminal-themes/defaults.ts: most dark colors come from Ghostty (Orca
+// raises the dark selection contrast because Ghostty's original #3e4451
+// blends into gray instruction blocks); the light entry is Tango with
+// readable ANSI accents (never Tango's near-white legacy values).
 const DARK_ANSI: Record<string, string> = {
-  black: "#0a0a0a",
-  red: "#f87171",
-  green: "#4ade80",
-  yellow: "#facc15",
-  blue: "#60a5fa",
-  magenta: "#e879f9",
-  cyan: "#22d3ee",
-  white: "#e5e5e5",
-  brightBlack: "#525252",
-  brightRed: "#fca5a5",
-  brightGreen: "#86efac",
-  brightYellow: "#fde047",
-  brightBlue: "#93c5fd",
-  brightMagenta: "#f0abfc",
-  brightCyan: "#67e8f9",
-  brightWhite: "#fafafa",
+  black: "#1d1f21",
+  red: "#cc6666",
+  green: "#b5bd68",
+  yellow: "#f0c674",
+  blue: "#81a2be",
+  magenta: "#b294bb",
+  cyan: "#8abeb7",
+  white: "#c5c8c6",
+  brightBlack: "#666666",
+  brightRed: "#d54e53",
+  brightGreen: "#b9ca4a",
+  brightYellow: "#e7c547",
+  brightBlue: "#7aa6da",
+  brightMagenta: "#c397d8",
+  brightCyan: "#70c0b1",
+  brightWhite: "#eaeaea",
 };
 
 const LIGHT_ANSI: Record<string, string> = {
-  black: "#0a0a0a",
-  red: "#dc2626",
-  green: "#16a34a",
-  yellow: "#a16207",
-  blue: "#2563eb",
-  magenta: "#c026d3",
-  cyan: "#0891b2",
-  white: "#737373",
-  brightBlack: "#525252",
-  brightRed: "#ef4444",
-  brightGreen: "#22c55e",
-  brightYellow: "#ca8a04",
-  brightBlue: "#3b82f6",
-  brightMagenta: "#d946ef",
-  brightCyan: "#06b6d4",
-  brightWhite: "#0a0a0a",
+  black: "#2e3436",
+  red: "#cc0000",
+  green: "#4e9a06",
+  yellow: "#8e7700",
+  blue: "#3465a4",
+  magenta: "#75507b",
+  cyan: "#05727e",
+  white: "#6a6a6a",
+  brightBlack: "#555753",
+  brightRed: "#ef2929",
+  brightGreen: "#1b7a1b",
+  brightYellow: "#6d5a00",
+  brightBlue: "#204a87",
+  brightMagenta: "#ad7fa8",
+  brightCyan: "#034b50",
+  brightWhite: "#3d3d3d",
 };
 
 /**
- * Builds the xterm theme from the repo tokens for one scheme: themed
- * background/foreground, a visible cursor, a legible selection, the
- * transparent overview-ruler border and raised scrollbar-slider alphas from
- * the source (xterm's defaults are nearly invisible on dark backgrounds).
+ * Builds the xterm theme for one scheme from the fork's default catalog
+ * entry, plus the transparent overview-ruler border and raised
+ * scrollbar-slider alphas from the source (xterm's defaults are nearly
+ * invisible on dark backgrounds).
  */
 export function terminalThemeForScheme(scheme: TerminalScheme): ITheme {
   const dark = scheme === "dark";
   const ansi = dark ? DARK_ANSI : LIGHT_ANSI;
   return {
-    background: dark ? "#0a0a0a" : "#ffffff",
-    foreground: dark ? "#fafafa" : "#0a0a0a",
-    cursor: dark ? "#fafafa" : "#0a0a0a",
-    cursorAccent: dark ? "#0a0a0a" : "#ffffff",
-    selectionBackground: dark ? "#404040" : "#d4d4d4",
-    selectionForeground: dark ? "#fafafa" : "#0a0a0a",
+    background: dark ? "#282c34" : "#ffffff",
+    foreground: dark ? "#ffffff" : "#2e3434",
+    cursor: dark ? "#ffffff" : "#2e3434",
+    cursorAccent: dark ? "#282c34" : "#ffffff",
+    selectionBackground: dark ? "#5a7898" : "#accef7",
+    selectionForeground: dark ? "#ffffff" : "#2e3434",
     selectionInactiveBackground: dark
-      ? "rgba(64, 64, 64, 0.5)"
-      : "rgba(212, 212, 212, 0.5)",
+      ? "rgba(90, 120, 152, 0.5)"
+      : "rgba(172, 206, 247, 0.5)",
     // Why transparent ruler border: enabling the scrollbar shows xterm's
     // overview ruler, whose border would otherwise paint a bright line.
     overviewRulerBorder: "transparent",

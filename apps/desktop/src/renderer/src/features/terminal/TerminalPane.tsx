@@ -83,6 +83,11 @@ import {
   installTerminalLinkPointerGesture,
   type TerminalLinkPointerGesture,
 } from "./terminal-link-pointer-gesture";
+import { installTerminalLinkifierClickPriming } from "./terminal-linkifier-click-priming";
+import {
+  installTerminalBell,
+  readBellNotificationsEnabled,
+} from "./terminal-bell";
 import {
   closeTerminalLinkActionRequest,
   requestTerminalLinkAction,
@@ -105,11 +110,7 @@ import {
   createTerminalPanePaste,
   registerTerminalPanePasteListeners,
 } from "./terminal-pane-paste";
-import {
-  createBrowserAuthoritySource,
-  windowBrowserBridge,
-} from "../browser/browser-bridge";
-import { requestWindowOpenDecision } from "../browser/browser-nav-state";
+import { windowBrowserBridge } from "../browser/browser-bridge";
 import type { Session } from "../../../../shared/session-contract";
 import type { TerminalPasteSource } from "./terminal-paste-model";
 
@@ -554,44 +555,80 @@ export function TerminalPane({
       },
     });
     terminal.parser.registerOscHandler(52, (data) => osc52Handler(data));
+    // Fork parity (pane-pty-visibility-bind.ts onBell): BEL raises an
+    // attention signal, debounced so completion bursts surface once. The
+    // renderer cannot reach the native notification service, so the signal
+    // is a toast with the fork's copy, gated by the master switch and
+    // silent while this window is focused.
+    const disposeBell = installTerminalBell(terminal, {
+      notificationsEnabled: () => {
+        try {
+          return readBellNotificationsEnabled(window.localStorage);
+        } catch {
+          return true;
+        }
+      },
+      terminalFocused: () =>
+        typeof document !== "undefined" && document.hasFocus(),
+      labels: () => ({}),
+      notify: (title, body) => {
+        void toast(title, { description: body });
+      },
+    });
+    // Fork parity (terminal-url-link-hit-testing.ts openTerminalHttpLink):
+    // a modifier-held direct activation states the destination outright —
+    // the in-app browser tab — skipping the routing preference; ⇧ inverts
+    // to the system browser like the fork's alternate destination. The
+    // popover's "Open link" (no gesture event) always opens a tab: terminal
+    // link UI never routes to the system browser unasked.
     const openHttpUrl = async (
       url: string,
+      event?: Pick<MouseEvent, "shiftKey">,
     ): Promise<{ ok: true } | { ok: false; message: string }> => {
-      const source = createBrowserAuthoritySource({
-        bridge: windowBrowserBridge(),
-        workspaceId: () => sessionRef.current.workspaceId,
-      });
-      return new Promise((resolve) => {
-        void requestWindowOpenDecision({
-          tabId: "",
+      if (event?.shiftKey) {
+        window.dispatchEvent(
+          new CustomEvent("drogon:open-external-url", {
+            detail: { url },
+          }),
+        );
+        return { ok: true };
+      }
+      const workspaceId = sessionRef.current.workspaceId;
+      if (!workspaceId) {
+        return {
+          ok: false,
+          message: "No workspace is selected, so the link cannot open.",
+        };
+      }
+      try {
+        const result = await windowBrowserBridge().createTab({
+          workspaceId,
           url,
-          source,
-          onDecision: (decision) => {
-            if (decision.outcome === "allow") {
-              resolve({ ok: true });
-              return;
-            }
-            if (decision.outcome === "open-in-system") {
-              // No host system-open primitive exists yet (main/preload
-              // follow-up); the event carries the contract.
-              window.dispatchEvent(
-                new CustomEvent("drogon:open-external-url", {
-                  detail: { url },
-                }),
-              );
-              resolve({ ok: true });
-              return;
-            }
-            resolve({ ok: false, message: decision.reason });
-          },
-          onError: (message) => resolve({ ok: false, message }),
         });
-      });
+        return result.ok
+          ? { ok: true }
+          : { ok: false, message: result.error.message };
+      } catch {
+        return { ok: false, message: "The link could not be opened." };
+      }
     };
     terminal.loadAddon(
       new WebLinksAddon((event, url) =>
         handleTerminalWebLinkClick(url, event, {
-          openUrl: openHttpUrl,
+          openUrl: (linkUrl) => openHttpUrl(linkUrl, event ?? undefined),
+          requestAction: (mouse) =>
+            requestTerminalLinkAction(mouse, linkActionContext.current, {
+              destination: url,
+              kind: "url",
+              primary: {
+                label: "Open link",
+                run: () => {
+                  void openHttpUrl(url).then((result) => {
+                    if (!result.ok) report(result.message);
+                  });
+                },
+              },
+            }),
           clearSelection: () => terminal.clearSelection(),
           report,
         }),
@@ -729,6 +766,12 @@ export function TerminalPane({
     // (no drag, no selection) on a link raises the popover; PTY mouse-report
     // suppression is out of MVP scope, so the claim always succeeds.
     linkPointerGesture.current = installTerminalLinkPointerGesture(terminal);
+    // Fork parity (terminal-linkifier-click-priming.ts): xterm snapshots its
+    // current link on mousedown but resolves links only on mousemove, so a
+    // capture-phase primer re-runs the hover resolution for owned gestures
+    // before xterm's own mousedown snapshot.
+    const disposeLinkClickPriming =
+      installTerminalLinkifierClickPriming(terminal);
     linkActionContext.current = {
       paneId: 1,
       pointerGesture: linkPointerGesture.current,
@@ -947,6 +990,8 @@ export function TerminalPane({
       disposeTerminalWebglAddon(webgl.addon);
       webgl.addon = null;
       disposePasteListeners();
+      disposeBell.dispose();
+      disposeLinkClickPriming.dispose();
       linkPointerGesture.current?.dispose();
       linkPointerGesture.current = null;
       linkActionContext.current = null;
