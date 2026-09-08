@@ -36,12 +36,8 @@ impl Engine {
         let (bots, history) = if scope.workspace_id.is_empty() {
             self.snapshot_scope_global(&tx, &scope.locale)?
         } else {
-            let folder = workspace::owned_path(
-                &tx,
-                &self.host_id,
-                &scope.workspace_id,
-                &scope.host_id,
-            )?;
+            let folder =
+                workspace::owned_path(&tx, &self.host_id, &scope.workspace_id, &scope.host_id)?;
             preflight_snapshot_budget(&tx, &self.host_id, &folder)?;
             self.snapshot_scope_folder(&tx, &folder, &scope.locale)?
         };
@@ -101,8 +97,8 @@ impl Engine {
         locale: &str,
     ) -> Result<(Vec<Value>, Vec<Value>), RpcError> {
         preflight_snapshot_budget_global(tx, &self.host_id)?;
-        let entries = storage::list_bots_with_folders(tx, &self.host_id, locale)
-            .map_err(snapshot_error)?;
+        let entries =
+            storage::list_bots_with_folders(tx, &self.host_id, locale).map_err(snapshot_error)?;
         let mut bots_json = Vec::with_capacity(entries.len());
         let mut history = Vec::new();
         for (folder, bot) in &entries {

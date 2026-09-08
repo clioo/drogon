@@ -269,10 +269,12 @@ describe("BotsPanel projection", () => {
 });
 
 describe("BotsPanel render", () => {
-  it("renders the empty state without a create control until the service capability lands", () => {
+  it("renders the fork's empty state with its Create Bot control unconditionally (#348)", () => {
+    // Fork parity: the empty state always offers the Create Bot action —
+    // the fork gates nothing on bridge/scope presence.
     const markup = render(emptySnapshot);
     expect(markup).toContain("No Bots yet");
-    expect(markup).not.toContain("Create Bot");
+    expect(markup).toContain("Create Bot");
   });
 
   it("never renders a stored-but-stale session as live — link wording only, no liveness inference", () => {
@@ -296,39 +298,29 @@ describe("BotsPanel render", () => {
     expect(markup).not.toContain("live");
   });
 
-  it("renders caller-supplied observed liveness verbatim and nothing when no observation exists", () => {
-    const observed = {
-      bots: [bot()],
-      history: [],
-    };
-    const exited = render(observed, {
-      observedLivenessByBotId: { "bot-1": "exited" },
-    });
-    expect(exited).toContain("Observed liveness: exited");
-    const unverifiable = render(observed, {
-      observedLivenessByBotId: { "bot-1": "unverifiable" },
-    });
-    expect(unverifiable).toContain("Observed liveness: unverifiable");
-    const live = render(observed, {
-      observedLivenessByBotId: { "bot-1": "live" },
-    });
-    expect(live).toContain("Observed liveness: live");
-    const unobserved = render({
-      bots: [
-        bot({
-          currentSession: {
-            sessionId: "session-stale",
-            harness: "codex",
-            model: null,
-            startedAt: 1,
-            rotatedAt: null,
-          },
-        }),
-      ],
-      history: [],
-    });
-    expect(unobserved).not.toContain("Observed liveness");
-    expect(unobserved).not.toContain("live");
+  it("renders no observed-liveness line — the fork's card has none (#348)", () => {
+    // The pre-parity liveness annotation was invented UI; the fork's card
+    // shows only the stored session link. The projection helper stays for
+    // callers, but the surface never prints it.
+    const markup = render(
+      {
+        bots: [
+          bot({
+            currentSession: {
+              sessionId: "session-stale",
+              harness: "codex",
+              model: null,
+              startedAt: 1,
+              rotatedAt: null,
+            },
+          }),
+        ],
+        history: [],
+      },
+      { observedLivenessByBotId: { "bot-1": "live" } },
+    );
+    expect(markup).not.toContain("Observed liveness");
+    expect(markup).toContain("Session linked");
   });
 
   it("renders each bot card with description, model label and identity", () => {
@@ -377,12 +369,16 @@ describe("BotsPanel render", () => {
     expect(markup).not.toContain("Run Mention duty");
   });
 
-  it("renders no run control when no dispatch callback is supplied", () => {
+  it("renders the scheduled run control even without a dispatch callback (#348 fork parity)", () => {
+    // The fork's card always wires the Run control; without a callback the
+    // click is a silent no-op, but the control itself never disappears.
     const markup = render({
       bots: [bot({ responsibilities: [responsibility()] })],
       history: [],
     });
-    expect(markup).not.toContain("data-bot-id=");
+    expect(markup).toContain('data-bot-id="bot-1"');
+    expect(markup).toContain('data-responsibility-id="resp-1"');
+    expect(markup).toContain('aria-label="Run Review duty"');
   });
 
   it("keeps orphaned history evidence visible with explicit null-join markers", () => {
@@ -474,10 +470,12 @@ describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run
     }),
   };
 
-  it("renders no Create Bot / Open session controls without both bridge and scope", () => {
+  it("renders Create Bot / Open session controls unconditionally (#348 fork parity)", () => {
     const markup = render({ bots: [bot()], history: [] });
-    expect(markup).not.toContain("Create Bot");
-    expect(markup).not.toContain('data-testid="open-session-bot-1"');
+    expect(markup).toContain("New Bot");
+    expect(markup).toContain('data-testid="open-session-bot-1"');
+    expect(markup).toContain("Open session");
+    expect(markup).toContain('data-testid="delete-bot-bot-1"');
   });
 
   it("renders Create Bot on the empty state once bridge+scope are supplied", () => {
@@ -491,12 +489,12 @@ describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run
     expect(markup).toContain("Open session");
   });
 
-  it("still requires onRunResponsibility separately for the run button even with bridge+scope", () => {
+  it("renders the run button with or without the dispatch callback (#348 fork parity)", () => {
     const markup = render(
       { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
       { bridge, scope },
     );
-    expect(markup).not.toContain("data-responsibility-id=");
+    expect(markup).toContain('data-responsibility-id="resp-1"');
   });
 
   it("exposes the bot list as role=list named Bots (Orca BotsPage parity)", () => {
@@ -565,7 +563,11 @@ describe("BotsPanel styling contract (admitted tokens/primitives only)", () => {
         new URL(`./${file}`, import.meta.url),
         "utf8",
       );
-      expect(source.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
+      // Strip comments first: issue references like #348 are not colors.
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/.*$/gm, "$1");
+      expect(code.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
     }
   });
 });
@@ -598,9 +600,9 @@ describe("BotsPanel R7-E: header Back, add/delete responsibility controls", () =
     }),
   };
 
-  it("renders the header Back button only when onClose is supplied", () => {
+  it("renders the header Back button unconditionally, like the source (#348)", () => {
     const without = render({ bots: [bot()], history: [] });
-    expect(without).not.toContain(">Back<");
+    expect(without).toContain(">Back<");
     const withClose = render(
       { bots: [bot()], history: [] },
       { onClose: () => {} },
@@ -608,20 +610,20 @@ describe("BotsPanel R7-E: header Back, add/delete responsibility controls", () =
     expect(withClose).toContain(">Back<");
   });
 
-  it("renders Add/Delete responsibility controls only with both bridge methods and scope", () => {
+  it("renders Add responsibility unconditionally and no per-row Delete, like the source (#348)", () => {
     const gated = render(
       { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
       { bridge: { botSnapshot: fullBridge.botSnapshot }, scope },
     );
-    expect(gated).not.toContain("Add responsibility");
-    expect(gated).not.toContain("Delete Review duty");
+    expect(gated).toContain('data-testid="add-responsibility-bot-1"');
+    expect(gated).toContain("Add responsibility");
+    // Fork parity: the source card has no per-responsibility delete.
+    expect(gated).not.toContain('data-testid="delete-responsibility-resp-1"');
     const editable = render(
       { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
       { bridge: fullBridge, scope },
     );
     expect(editable).toContain('data-testid="add-responsibility-bot-1"');
     expect(editable).toContain("Add responsibility");
-    expect(editable).toContain('data-testid="delete-responsibility-resp-1"');
-    expect(editable).toContain("Delete Review duty");
   });
 });

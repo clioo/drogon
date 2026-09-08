@@ -135,8 +135,10 @@ describe("createBotsPanelDescriptor", () => {
       title: "Bots",
       panel: { snapshot: snapshot() },
     });
-    expect(renderComponent(ungated, { session: null })).not.toContain(
-      "data-bot-id=",
+    // #348 fork parity: the run control renders with or without the
+    // dispatch callback — only its click effect is gated.
+    expect(renderComponent(ungated, { session: null })).toContain(
+      'data-bot-id="bot-1"',
     );
   });
 
@@ -168,7 +170,7 @@ describe("createBotsPanelDescriptor", () => {
     expect(withNull).not.toContain("live");
   });
 
-  it("threads caller-observed liveness through the descriptor without deriving it from the host session", () => {
+  it("never renders an observed-liveness line, even when the caller threads one (#348)", () => {
     const descriptor = createBotsPanelDescriptor({
       routeId: "bots.panel",
       title: "Bots",
@@ -178,7 +180,8 @@ describe("createBotsPanelDescriptor", () => {
       },
     });
     const markup = renderComponent(descriptor, { session: null });
-    expect(markup).toContain("Observed liveness: unverifiable");
+    expect(markup).not.toContain("Observed liveness");
+    expect(markup).toContain("Session linked");
   });
 
   it("exposes exactly the shared descriptor surface and registers nothing", () => {

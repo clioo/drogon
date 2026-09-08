@@ -4227,11 +4227,20 @@ export function App() {
                 ) : botsDescriptor ? (
                   // #348: no workspace yet (app-global snapshot scope): the
                   // Bots descriptor consumes none of the host props, so its
-                  // component mounts directly — MountedPanel's contract
-                  // requires a real workspace/status pair, and the Bots
-                  // descriptor defines no focus/cleanup hooks, so skipping
-                  // its MountedPanel effect is behaviorally identical.
-                  botsDescriptor.component({ session: null })
+                  // component mounts over null host props — MountedPanel's
+                  // contract requires a real workspace/status pair, and the
+                  // Bots descriptor defines no focus/cleanup hooks, so
+                  // skipping its MountedPanel effect is behaviorally
+                  // identical.
+                  botsDescriptor.component({
+                    routeId: botsDescriptor.id,
+                    session: null,
+                    workspace: null,
+                    status: null,
+                    focusTarget: null,
+                  } as unknown as Parameters<
+                    typeof botsDescriptor.component
+                  >[0])
                 ) : (
                   <div className="empty-state" role="status">
                     {(() => {

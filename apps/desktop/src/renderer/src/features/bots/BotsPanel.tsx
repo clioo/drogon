@@ -78,17 +78,18 @@ export function BotsPanel({
       className="flex h-full min-h-0 flex-col bg-background text-foreground"
     >
       <header className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-3">
-        {onClose ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onClose}
-            className="shrink-0 gap-1.5"
-          >
-            <ArrowLeft className="size-3.5" />
-            Back
-          </Button>
-        ) : null}
+        {/* Fork parity (#348): the Back control renders unconditionally —
+            the fork's BotsPage always shows it; without an onClose it is a
+            no-op, never hidden. */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onClose}
+          className="shrink-0 gap-1.5"
+        >
+          <ArrowLeft className="size-3.5" />
+          Back
+        </Button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">Bots</h1>
           <p className="truncate text-xs text-muted-foreground">

@@ -1,7 +1,13 @@
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported expectations from Orca's
+   bots component tests onto the fork-verbatim card (R17-E #348): character
+   artwork avatar, immediate header Delete (no confirm), unconditional
+   Open session/Add responsibility controls, fork responsibility-row and
+   history-row composition, and the "No session yet" copy. */
+
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { BotDeleteConfirmDialog, BotResponsibilityCard } from "./BotResponsibilityCard";
+import { BotResponsibilityCard } from "./BotResponsibilityCard";
 import type {
   BotsPanelBot,
   BotsPanelHistoryEntry,
@@ -65,40 +71,46 @@ function historyEntry(
 }
 
 function render(
-  props: Parameters<typeof BotResponsibilityCard>[0],
+  props: Partial<Parameters<typeof BotResponsibilityCard>[0]> = {},
 ): string {
-  return renderToStaticMarkup(createElement(BotResponsibilityCard, props));
+  return renderToStaticMarkup(
+    createElement(BotResponsibilityCard, {
+      bot: bot(),
+      history: [],
+      onAddResponsibility: () => {},
+      onDelete: () => {},
+      onRunResponsibility: () => {},
+      onLaunch: () => {},
+      ...props,
+    }),
+  );
 }
 
 describe("BotResponsibilityCard", () => {
-  it("renders the identity header with initials avatar, preset badge and handle", () => {
-    const markup = render({ bot: bot(), history: [] });
+  it("renders the identity header with the character artwork avatar, preset badge and handle", () => {
+    const markup = render();
     expect(markup).toContain("Watcher");
     expect(markup).toContain("arya");
     expect(markup).toContain("Guard the realm.");
     expect(markup).toContain("@watcher");
-    // Initials of the character label on the source's avatar frame, never a
-    // character image.
-    expect(markup).toContain("AS");
-    expect(markup).not.toContain("<img");
+    // The fork's artwork branch: a known preset renders its <img> avatar.
+    expect(markup).toContain("<img");
+    expect(markup).toContain('aria-label="Watcher avatar"');
   });
 
   it("renders the source's Bot glyph fallback for the none preset", () => {
-    const markup = render({
-      bot: bot({ characterPreset: "none" }),
-      history: [],
-    });
+    const markup = render({ bot: bot({ characterPreset: "none" }) });
     expect(markup).not.toContain("<img");
     expect(markup).toContain('aria-label="Watcher avatar"');
   });
 
   it("renders the harness/model/session grid with source copy", () => {
-    const markup = render({ bot: bot(), history: [] });
+    const markup = render();
     expect(markup).toContain("Harness");
     expect(markup).toContain("Pi");
     expect(markup).toContain("Model policy");
     expect(markup).toContain("Harness default");
-    expect(markup).toContain("No session linked");
+    expect(markup).toContain("No session yet");
     const linked = render({
       bot: bot({
         currentSession: {
@@ -109,24 +121,39 @@ describe("BotResponsibilityCard", () => {
           rotatedAt: null,
         },
       }),
-      history: [],
     });
     expect(linked).toContain("Session linked");
   });
 
-  it("renders scheduled rows with trigger summary, Run payload and Delete", () => {
+  it("renders the source's title/instructions description fallback", () => {
+    expect(
+      render({
+        bot: bot({
+          displayIdentity: {
+            displayName: "Watcher",
+            handle: null,
+            title: "Reviewer",
+          },
+          instructions: "Guard the realm.",
+        }),
+      }),
+    ).toContain("Reviewer");
+    expect(render({ bot: bot({ instructions: "" }) })).toContain(
+      "Ready for a purpose",
+    );
+  });
+
+  it("renders scheduled rows with the Run payload and no invented controls", () => {
     const markup = render({
       bot: bot({ responsibilities: [responsibility()] }),
-      history: [],
-      onRunResponsibility: () => {},
-      onDeleteResponsibility: () => {},
     });
     expect(markup).toContain("Nightly review");
     expect(markup).toContain("scheduled");
-    expect(markup).toContain("auto-1");
     expect(markup).toContain('aria-label="Run Nightly review"');
     expect(markup).toContain('data-responsibility-id="resp-1"');
-    expect(markup).toContain('aria-label="Delete Nightly review"');
+    // Fork parity (#348): no per-row Delete and no mono trigger summary.
+    expect(markup).not.toContain('aria-label="Delete Nightly review"');
+    expect(markup).not.toContain("font-mono");
   });
 
   it("renders reactive rows without a run control and with the adapter note", () => {
@@ -141,38 +168,30 @@ describe("BotResponsibilityCard", () => {
           }),
         ],
       }),
-      history: [],
-      onRunResponsibility: () => {},
-      onDeleteResponsibility: () => {},
     });
     expect(markup).toContain("Mention duty");
-    expect(markup).toContain("mention.created");
     expect(markup).toContain("Event adapter not connected");
     expect(markup).not.toContain("Run Mention duty");
   });
 
-  it("renders no Run/Delete/Add controls without their callbacks", () => {
-    const markup = render({
-      bot: bot({ responsibilities: [responsibility()] }),
-      history: [],
-    });
-    expect(markup).not.toContain("data-responsibility-id=");
-    expect(markup).not.toContain("Add responsibility");
-    expect(markup).not.toContain("Open session");
+  it("renders Open session and Delete unconditionally, like the source", () => {
+    const markup = render();
+    expect(markup).toContain('data-testid="open-session-bot-1"');
+    expect(markup).toContain("Open session");
+    expect(markup).toContain('data-testid="delete-bot-bot-1"');
+    // The source deletes immediately: no confirm dialog markup exists.
+    expect(markup).not.toContain("bot-delete-confirm");
+    expect(markup).not.toContain("Delete &ldquo;Watcher&rdquo;?");
   });
 
-  it("renders Open session only when its callback is supplied", () => {
-    expect(
-      render({ bot: bot(), history: [] }),
-    ).not.toContain("Open session");
-    expect(
-      render({ bot: bot(), history: [], onOpenSession: () => {} }),
-    ).toContain("Open session");
+  it("always renders Add responsibility", () => {
+    const markup = render();
+    expect(markup).toContain('data-testid="add-responsibility-bot-1"');
+    expect(markup).toContain("Add responsibility");
   });
 
   it("filters history per bot, caps at three rows and marks orphans", () => {
     const markup = render({
-      bot: bot(),
       history: [
         historyEntry({ run: { ...historyEntry().run, id: "r1", botId: "other" } }),
         historyEntry({ run: { ...historyEntry().run, id: "r2" } }),
@@ -205,7 +224,6 @@ describe("BotResponsibilityCard", () => {
 
   it("renders the Mentu-run and recorded fallbacks for unlinked rows", () => {
     const mentu = render({
-      bot: bot(),
       history: [
         historyEntry({
           automationName: null,
@@ -219,7 +237,6 @@ describe("BotResponsibilityCard", () => {
     });
     expect(mentu).toContain("Mentu run mentu-7");
     const recorded = render({
-      bot: bot(),
       history: [
         historyEntry({
           responsibilityName: null,
@@ -233,103 +250,28 @@ describe("BotResponsibilityCard", () => {
     expect(recorded).toContain("Recorded");
   });
 
-  it("appends the stored terminal state to history rows, never a live claim", () => {
-    const exited = render({
-      bot: bot(),
+  it("renders history rows as the source does: name plus evidence line, no invocation badge, no observation suffix", () => {
+    const markup = render({
       history: [
         historyEntry({
           run: { ...historyEntry().run, id: "done", hostObservation: "exited" },
         }),
-      ],
-    });
-    expect(exited).toContain("run 3 · exited");
-    const unverifiable = render({
-      bot: bot(),
-      history: [
-        historyEntry({
-          automationRunNumber: null,
-          run: {
-            ...historyEntry().run,
-            id: "lost",
-            recipe: null,
-            hostObservation: "unverifiable",
-          },
-        }),
-      ],
-    });
-    expect(unverifiable).toContain("Recorded · unverifiable");
-    const live = render({
-      bot: bot(),
-      history: [
-        historyEntry({
-          run: { ...historyEntry().run, id: "live", hostObservation: "live" },
-        }),
-      ],
-    });
-    expect(live).toContain("run 3");
-    expect(live).not.toContain("run 3 · live");
-  });
-
-  it("renders no history section without rows", () => {
-    expect(render({ bot: bot(), history: [] })).not.toContain(
-      "Responsibility history",
-    );
-  });
-
-  it("renders the header Delete only when its callback is supplied", () => {
-    expect(render({ bot: bot(), history: [] })).not.toContain("delete-bot-");
-    const markup = render({ bot: bot(), history: [], onDeleteBot: () => {} });
-    expect(markup).toContain("delete-bot-bot-1");
-    expect(markup).toContain('aria-label="Delete Watcher"');
-    // The confirm dialog stays closed until Delete is pressed.
-    expect(markup).not.toContain("bot-delete-confirm");
-  });
-
-  it("labels scheduled runs Scheduled and manual ones Manual", () => {
-    const markup = render({
-      bot: bot(),
-      history: [
         historyEntry({
           run: { ...historyEntry().run, id: "sched", invocation: "scheduled" },
         }),
-        historyEntry({
-          run: { ...historyEntry().run, id: "man", invocation: "manual" },
-        }),
-        historyEntry({
-          run: { ...historyEntry().run, id: "legacy", invocation: null },
-        }),
       ],
     });
-    expect(markup).toContain("Scheduled");
-    expect(markup).toContain("Manual");
-  });
-});
-
-describe("BotDeleteConfirmDialog", () => {
-  function dialog(botName = "Watcher"): string {
-    return renderToStaticMarkup(
-      createElement(BotDeleteConfirmDialog, {
-        botName,
-        onConfirm: () => {},
-        onCancel: () => {},
-      }),
-    );
-  }
-
-  it("names the bot and states the native delete effects", () => {
-    const markup = dialog();
-    expect(markup).toContain("Watcher");
-    expect(markup).toContain("its responsibilities and their scheduled");
-    expect(markup).toContain("Past runs stay in history.");
+    expect(markup).toContain("Nightly review · run 3");
+    // The fork's evidence line carries no status verdict and no invocation
+    // badge — invented UI is not rendered.
+    expect(markup).not.toContain("· exited");
+    expect(markup).not.toContain(">Scheduled<");
+    expect(markup).not.toContain(">Manual<");
+    expect(markup).not.toContain("Completed");
+    expect(markup).not.toContain("succeeded");
   });
 
-  it("exposes an alertdialog with Cancel and Delete actions", () => {
-    const markup = dialog();
-    expect(markup).toContain('role="alertdialog"');
-    expect(markup).toContain('aria-modal="true"');
-    expect(markup).toContain("aria-labelledby=");
-    expect(markup).toContain("aria-describedby=");
-    expect(markup).toContain("bot-delete-confirm");
-    expect(markup).toContain("Cancel");
+  it("renders no history section without rows", () => {
+    expect(render()).not.toContain("Responsibility history");
   });
 });
