@@ -214,7 +214,11 @@ describe("resolveAutomationListEmptyState", () => {
         visibleCount: 0,
         searchActive: false,
         filterActive: false,
-      }).kind,
-    ).toBe("empty");
+      }),
+    ).toEqual({
+      kind: "empty",
+      title: "No automations across loaded hosts",
+      detail: null,
+    });
   });
 });

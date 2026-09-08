@@ -22,37 +22,51 @@ export type AutomationTemplate = {
   time: string;
 };
 
+// Source catalog (automation-templates.ts, English defaults): the dayOfWeek,
+// agentId and missedRunGraceMinutes seeds have no counterpart in this
+// repo's template shape, so only the schedule preset + wall-clock time that
+// the local editor backs are carried over.
 export function getAutomationTemplates(): AutomationTemplate[] {
   return [
     {
-      id: "morning-brief",
-      category: "Report",
-      label: "Morning brief",
-      description: "Summarize overnight changes in this workspace every weekday morning.",
-      name: "Morning brief",
-      prompt: "Summarize the overnight changes in this workspace: git log, open diffs and failing checks. Keep it under 20 lines.",
+      id: "repo-health-weekday",
+      category: "Repo health",
+      label: "Weekday repo audit",
+      description: "Check dependencies, failing tests, and risky open changes each weekday.",
+      name: "Weekday repo audit",
+      prompt: "Review the repository health. Check dependency updates, failing tests, lint/typecheck status, and risky open changes. Summarize findings and suggest the next action.",
       preset: "weekdays",
       time: "09:00",
     },
     {
-      id: "hourly-sweep",
-      category: "Maintenance",
-      label: "Hourly sweep",
-      description: "Check for failing checks or stale sessions once an hour.",
-      name: "Hourly sweep",
-      prompt: "Check this workspace for failing checks or stale sessions and report what needs attention.",
-      preset: "hourly",
-      time: "09:00",
+      id: "release-prep-weekly",
+      category: "Release prep",
+      label: "Release readiness",
+      description: "Prepare a weekly release risk summary from the current project state.",
+      name: "Release readiness review",
+      prompt: "Prepare a release readiness summary. Look for blockers, unmerged risky changes, missing validation, and documentation gaps. End with a concise release/no-release recommendation.",
+      preset: "weekly",
+      time: "14:00",
     },
     {
-      id: "weekly-review",
-      category: "Report",
-      label: "Weekly review",
-      description: "Review the week's commits and open work every Monday morning.",
-      name: "Weekly review",
-      prompt: "Review this week's commits and open work in this workspace and draft priorities for next week.",
-      preset: "weekly",
-      time: "09:00",
+      id: "recurring-review-daily",
+      category: "Recurring review",
+      label: "Daily change review",
+      description: "Scan recent work and call out correctness, UX, and test coverage risks.",
+      name: "Daily change review",
+      prompt: "Review recent changes in this workspace. Focus on correctness risks, UX regressions, missing tests, and follow-up tasks. Keep the report short and actionable.",
+      preset: "daily",
+      time: "16:30",
+    },
+    {
+      id: "maintenance-hourly",
+      category: "Maintenance",
+      label: "Hourly queue check",
+      description: "Look for stuck work, stale generated files, and failed local validation.",
+      name: "Hourly maintenance check",
+      prompt: "Check for stuck work, stale generated files, failing validation, and anything that needs human attention. Report only actionable issues.",
+      preset: "hourly",
+      time: "00:15",
     },
   ];
 }
