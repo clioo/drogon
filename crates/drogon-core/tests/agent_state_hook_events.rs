@@ -307,7 +307,8 @@ fn claude_harness_start_writes_hooks_file_and_exit_removes_it() {
     let marked = hook_event(&engine, &session_id, &incarnation, "Notification");
     assert_eq!(marked["agentState"], "needs_input");
 
-    // Other harnesses launch without hook wiring.
+    // Pi gets its own hook wiring (a `--extension` file, not `--settings`)
+    // -- see harness_agent_hooks_opencode_pi.rs for its full coverage.
     let pi = ok(
         &engine,
         "harness.start",
@@ -319,7 +320,7 @@ fn claude_harness_start_writes_hooks_file_and_exit_removes_it() {
             .unwrap()
             .iter()
             .any(|arg| arg == "--settings"),
-        "non-claude harnesses keep activity-based states"
+        "pi must never get claude's --settings wiring"
     );
     let pi_id = pi["id"].as_str().unwrap().to_string();
     let pi_inc = pi["incarnation"].as_str().unwrap().to_string();

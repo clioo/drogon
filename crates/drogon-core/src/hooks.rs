@@ -12,18 +12,21 @@
 //! path must be part of the launch argv (fixed before admission mints the
 //! session id), while the hook *commands* embed the real session id and
 //! incarnation (known after admission, written before spawn).
+//!
+//! OpenCode and Pi reuse this same `session.hook_event` RPC and the same
+//! per-session install/cleanup slot (`SessionHandle::set_hook_settings_file`)
+//! through their own installers in `harness_hooks::{opencode, pi}`, driven
+//! by `harness.rs`. Only the event *names* differ per harness — see
+//! `agent_state::classify_hook_event` for the full set and the wait/clear
+//! split.
 
 use std::path::{Path, PathBuf};
 
 use drogon_protocol::RpcError;
 use serde_json::{Value, json};
 
+use crate::agent_state::HookSignal;
 use crate::{Engine, error, require_str, session};
-
-/// Hook events that mark a session as waiting for the user. Anything else
-/// is refused with `invalid_argument` rather than silently ignored, so a
-/// misconfigured hook file fails loudly instead of looking idle.
-const WAIT_EVENTS: [&str; 2] = ["Stop", "Notification"];
 
 /// Directory under the data dir holding per-session hook settings files.
 pub(crate) fn hooks_dir(data_dir: &Path) -> PathBuf {
@@ -116,32 +119,45 @@ pub(crate) fn write_settings_file(
     Ok(())
 }
 
-/// Best-effort removal for paths the exiting handle never remembered (a
-/// failed launch after the write). Missing files are fine.
+/// Best-effort removal of a session's install artifact: a single settings
+/// file for claude/pi, or a whole overlay directory tree for OpenCode's
+/// `OPENCODE_CONFIG_DIR` overlay (see `harness_hooks::opencode::install`).
+/// Missing paths are fine; this also covers a failed launch that never
+/// reached spawn.
 pub(crate) fn remove_settings_file(path: &Path) {
-    let _ = std::fs::remove_file(path);
+    if path.is_dir() {
+        let _ = std::fs::remove_dir_all(path);
+    } else {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 impl Engine {
     /// `session.hook_event {sessionId, incarnation, event}`: the
-    /// `drogon-cli internal hook-event` callback from a session's Claude
-    /// Code hooks file. `Stop`/`Notification` stamp the handle
-    /// `needs_input`; later PTY output clears it. A stale incarnation or an
-    /// exited session never gains a wait signal.
+    /// `drogon-cli internal hook-event` callback from a session's harness
+    /// hook file (claude's `--settings`, OpenCode's status plugin, or Pi's
+    /// agent-status extension). A wait event stamps the handle
+    /// `needs_input`; a clear event resets it explicitly (OpenCode/Pi only —
+    /// see `SessionHandle::set_explicit_wait_clear`). For claude, later PTY
+    /// output alone already clears it. A stale incarnation or an exited
+    /// session never gains a wait signal.
     pub(crate) fn do_session_hook_event(&self, params: &Value) -> Result<Value, RpcError> {
         let event = require_str(params, "event")?;
-        if !WAIT_EVENTS.contains(&event) {
+        let Some(signal) = crate::agent_state::classify_hook_event(event) else {
             return Err(error::invalid_argument(
-                "event must be one of: Stop, Notification",
+                "event is not a recognized harness hook signal",
             ));
-        }
+        };
         let (handle, _) = self.require_session_with_incarnation(params)?;
         if handle.is_exited() {
             return Err(error::unverifiable(
                 "session already exited; hook event is moot",
             ));
         }
-        handle.note_hook_event();
+        match signal {
+            HookSignal::Wait => handle.note_hook_event(),
+            HookSignal::Clear => handle.clear_hook_event(),
+        }
         Ok(session::snapshot(&handle))
     }
 }
@@ -151,10 +167,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wait_events_are_exactly_stop_and_notification() {
-        assert!(WAIT_EVENTS.contains(&"Stop"));
-        assert!(WAIT_EVENTS.contains(&"Notification"));
-        assert_eq!(WAIT_EVENTS.len(), 2);
+    fn claude_stop_and_notification_are_wait_signals() {
+        use crate::agent_state::{HookSignal, classify_hook_event};
+        assert_eq!(classify_hook_event("Stop"), Some(HookSignal::Wait));
+        assert_eq!(classify_hook_event("Notification"), Some(HookSignal::Wait));
+    }
+
+    #[test]
+    fn remove_settings_file_deletes_a_directory_tree_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = dir.path().join("overlay");
+        std::fs::create_dir_all(overlay.join("plugins")).unwrap();
+        std::fs::write(overlay.join("plugins").join("p.js"), "x").unwrap();
+        remove_settings_file(&overlay);
+        assert!(!overlay.exists());
     }
 
     #[test]

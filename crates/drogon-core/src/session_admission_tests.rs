@@ -29,7 +29,7 @@ fn launch_refuses_an_open_transaction_before_spawning() {
     let db = Arc::new(open_fixture());
     let plan = reserve_committed(&db, "/tmp", "/bin/echo", &["must-not-launch".into()]);
     db.lock().unwrap().execute_batch("BEGIN IMMEDIATE").unwrap();
-    let result = launch_reserved(db.clone(), no_dir(), plan, None);
+    let result = launch_reserved(db.clone(), no_dir(), plan, None, &[]);
     db.lock().unwrap().execute_batch("ROLLBACK").unwrap();
     if let Ok((_, handle, _)) = &result {
         stop_quietly(handle);
@@ -51,7 +51,7 @@ fn launch_refuses_changed_creation_identity() {
             [plan.session_id()],
         )
         .unwrap();
-    let result = launch_reserved(db, no_dir(), plan, None);
+    let result = launch_reserved(db, no_dir(), plan, None, &[]);
     if let Ok((_, handle, _)) = &result {
         stop_quietly(handle);
     }
@@ -222,7 +222,7 @@ fn rollback_reservation_spawns_no_child() {
         .expect("reserve")
         // No commit: the transaction rolls back when `tx` drops here.
     };
-    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None);
+    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None, &[]);
     match outcome {
         Err(err) => assert_eq!(err.code, "unverifiable"),
         Ok((_, handle, _)) => {
@@ -241,7 +241,7 @@ fn launch_returns_exact_reserved_identity() {
     let expected_incarnation = plan.incarnation().to_string();
     let expected_workspace = plan.workspace_id().to_string();
     let expected_host = plan.host_id().to_string();
-    let (id, handle, _) = launch_reserved(db.clone(), no_dir(), plan, None).expect("launch");
+    let (id, handle, _) = launch_reserved(db.clone(), no_dir(), plan, None, &[]).expect("launch");
     let _guard = ChildGuard { handle: &handle };
     assert_eq!(id, expected_id);
     assert_eq!(handle.session_id, expected_id);
@@ -270,7 +270,7 @@ fn recovered_unverifiable_row_never_launches() {
             [&plan.session_id().to_string()],
         )
         .expect("sweep");
-    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None);
+    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None, &[]);
     match outcome {
         Err(err) => assert_eq!(err.code, "unverifiable"),
         Ok((_, handle, _)) => {
@@ -299,7 +299,7 @@ fn altered_row_never_launches() {
             [&plan.session_id().to_string()],
         )
         .expect("alter");
-    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None);
+    let outcome = launch_reserved(Arc::new(db), no_dir(), plan, None, &[]);
     match outcome {
         Err(_) => {}
         Ok((_, handle, _)) => {
@@ -358,7 +358,7 @@ fn private_child_sees_scoped_context_without_leaks() {
     let data_dir = dir.path().to_str().expect("utf8 dir").to_string();
     let env = worker_env(&plan, dir.path(), credential);
     let (id, handle, session_json) =
-        launch_reserved(db.clone(), dir.path(), plan, Some(env)).expect("launch");
+        launch_reserved(db.clone(), dir.path(), plan, Some(env), &[]).expect("launch");
     let _guard = ChildGuard { handle: &handle };
     assert_eq!(id, expected_id);
 
@@ -415,7 +415,7 @@ fn worker_env_debug_and_errors_omit_secret() {
     // Context bound to another reservation is refused before any effect,
     // without echoing the refused material.
     let other = reserve_committed(&db, "/tmp", "/bin/echo", &[]);
-    let err = match launch_reserved(Arc::new(db), no_dir(), other, Some(env)) {
+    let err = match launch_reserved(Arc::new(db), no_dir(), other, Some(env), &[]) {
         Err(err) => err,
         Ok(_) => panic!("mismatched context must be refused"),
     };
@@ -444,7 +444,7 @@ fn default_child_sees_session_env_but_no_control_inheritance() {
     );
     let expected_session = plan.session_id().to_string();
     let expected_data = dir.path().to_string_lossy().into_owned();
-    let (_, handle, _) = launch_reserved(db, dir.path(), plan, None).expect("launch");
+    let (_, handle, _) = launch_reserved(db, dir.path(), plan, None, &[]).expect("launch");
     let _guard = ChildGuard { handle: &handle };
     let text = read_text(&handle, "ENV-PROBE-DONE");
     assert!(
@@ -532,7 +532,7 @@ fn seeded_inherited_controls_stripped_in_isolated_subprocess() {
         "/bin/sh",
         &["-c".into(), "env; echo ENV-PROBE-DONE".into()],
     );
-    let (_, handle, _) = launch_reserved(db, no_dir(), plan, None).expect("launch");
+    let (_, handle, _) = launch_reserved(db, no_dir(), plan, None, &[]).expect("launch");
     let _guard = ChildGuard { handle: &handle };
     let text = read_text(&handle, "ENV-PROBE-DONE");
     assert!(

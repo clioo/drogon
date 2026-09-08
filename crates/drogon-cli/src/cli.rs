@@ -260,9 +260,14 @@ pub enum AutomationAction {
 }
 
 /// Hidden service-internal callbacks. Only the hook-event callback exists:
-/// Claude Code `Notification`/`Stop` hooks report a session waiting for the
-/// user. Hook payloads on stdin are drained and ignored (the settings file
-/// already names the session, incarnation and event).
+/// invoked by a harness's own hook mechanism to report a wait/clear signal
+/// for `session.hook_event` — Claude Code's `Notification`/`Stop` hooks in
+/// its per-session `--settings` file, OpenCode's status plugin (installed
+/// into an `OPENCODE_CONFIG_DIR` overlay), or Pi's agent-status extension
+/// (loaded with `--extension`). Hook payloads on stdin are drained and
+/// ignored (the invocation already names the session, incarnation and
+/// event via flags). `event` is validated server-side against the known
+/// set for all three (`drogon_core::agent_state::classify_hook_event`).
 #[derive(Subcommand, Debug)]
 pub enum InternalAction {
     HookEvent {

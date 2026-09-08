@@ -293,6 +293,28 @@ pub(crate) fn cli_command_for_hooks(data_dir: &Path) -> String {
     hooks::cli_command()
 }
 
+/// Env pairs an OpenCode/Pi hook plugin needs to call back into
+/// `drogon-cli internal hook-event` the way Claude's shell hook commands
+/// do (`hooks::hook_command`), applied as the `extra_env` overlay
+/// `harness.rs` passes through `session_admission::launch_reserved`.
+///
+/// `DROGON_SESSION_ID` is already exported unconditionally by
+/// [`session_env_assignments`] for every session, but the incarnation is
+/// deliberately withheld there (see the module docs: it is worker-launch
+/// scope). A harness hook plugin still needs it to report the same
+/// `--incarnation` a Claude hook command embeds, so it travels under this
+/// distinct name instead — never `DROGON_SESSION_INCARNATION`, which stays
+/// reserved for `WorkerEnvironment`.
+pub(crate) fn harness_hook_env(cli: &str, incarnation: &str) -> Vec<(String, String)> {
+    vec![
+        ("DROGON_HOOK_CLI".to_string(), cli.to_string()),
+        (
+            "DROGON_HOOK_INCARNATION".to_string(),
+            incarnation.to_string(),
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,6 +524,25 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(bin_dir(data.path()).join("drogon")).unwrap(),
             std::fs::read_to_string(bin_dir(data.path()).join("drogon")).unwrap()
+        );
+    }
+
+    #[test]
+    fn harness_hook_env_carries_cli_and_a_distinct_incarnation_key() {
+        let pairs = harness_hook_env("/data/x/bin/drogon-cli", "inc-9");
+        assert_eq!(
+            pairs,
+            vec![
+                (
+                    "DROGON_HOOK_CLI".to_string(),
+                    "/data/x/bin/drogon-cli".to_string()
+                ),
+                ("DROGON_HOOK_INCARNATION".to_string(), "inc-9".to_string()),
+            ]
+        );
+        assert!(
+            pairs.iter().all(|(k, _)| k != "DROGON_SESSION_INCARNATION"),
+            "must never reuse the worker-reserved incarnation key"
         );
     }
 
