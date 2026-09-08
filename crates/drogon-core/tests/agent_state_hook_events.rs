@@ -77,10 +77,18 @@ fn hook_event_marks_needs_input_and_output_clears_it() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
+    // Why `/bin/cat`, not a shell: a shell prints a startup prompt whose
+    // reader-side processing can land after the hook mark under load and
+    // spend the fresh wait signal (the reader clears on every chunk with no
+    // emission-time comparison). `cat` emits nothing until written to, so
+    // every chunk after the mark is causally fresh output -- the prompt
+    // bytes are gone by construction, not by timing luck. The later
+    // `session.write` still proves fresh output clears the signal, since
+    // `cat` echoes the written line back.
     let session = ok(
         &engine,
         "session.start",
-        json!({ "workspaceId": workspace_id, "command": "/bin/sh", "args": [] }),
+        json!({ "workspaceId": workspace_id, "command": "/bin/cat", "args": [] }),
     );
     let session_id = session["id"].as_str().unwrap().to_string();
     let incarnation = session["incarnation"].as_str().unwrap().to_string();
@@ -117,6 +125,7 @@ fn hook_event_marks_needs_input_and_output_clears_it() {
     );
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut cursor = 0u64;
+    let mut saw_output = false;
     let mut cleared = false;
     while Instant::now() < deadline {
         let read = ok(
@@ -128,16 +137,23 @@ fn hook_event_marks_needs_input_and_output_clears_it() {
         let text = String::from_utf8_lossy(&bytes).into_owned();
         cursor = read["nextCursor"].as_u64().unwrap();
         if text.contains("hook-probe-9f3") {
-            assert_eq!(
-                read["session"]["agentState"], "working",
-                "fresh output must clear needs_input back to working"
-            );
+            saw_output = true;
+        }
+        // The reader's ring push and wait-signal clear are separate lock
+        // acquisitions: a read can observe fresh bytes while the clear is
+        // still in flight. Poll for the cleared state instead of asserting
+        // it on the first marked read.
+        if saw_output && read["session"]["agentState"] == "working" {
             cleared = true;
             break;
         }
         sleep(Duration::from_millis(20));
     }
-    assert!(cleared, "expected the echo output to arrive");
+    assert!(saw_output, "expected the echo output to arrive");
+    assert!(
+        cleared,
+        "fresh output must clear needs_input back to working"
+    );
 
     let stopped = ok(
         &engine,
