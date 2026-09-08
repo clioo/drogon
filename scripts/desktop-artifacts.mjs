@@ -34,6 +34,12 @@ export function mentuRuntimeSignIgnore(revision) {
     file.split("\\").join("/").endsWith(suffix);
 }
 
+// Drogon bundle icon (R16-Z2, #201): the packager names the installed .icns
+// after the icon: stem, so the sealed run reads it back from the bundle
+// plist and fails closed on a stock-Electron regression.
+export const BUNDLE_ICON_FILE = "icon.icns";
+export const STOCK_ELECTRON_ICON_FILE = "electron.icns";
+
 // Detached sealed-bundle identity version. Bumped only when the canonical
 // sealed-tree encoding changes; acceptance reports and installers refuse
 // unknown versions instead of comparing digests across encodings.
@@ -77,6 +83,7 @@ export function bundlePaths(bundle, platform = process.platform) {
     ),
     info: path.join(resources, "build-info.json"),
     desktop: path.join(resources, "app"),
+    icon: path.join(resources, BUNDLE_ICON_FILE),
     // Additive sealed-identity paths. Existing callers destructure a subset,
     // so these fields narrowly extend the contract without changing it.
     notices: path.join(resources, "DEPENDENCY-NOTICES.txt"),
@@ -132,8 +139,41 @@ export async function fingerprintBundle(bundle, platform = process.platform) {
   return { artifacts, artifactDigest };
 }
 
+// CFBundleIconFile read-back for a macOS bundle. The packager preserves
+// the XML plist, so a tag read suffices; a binary plist (or an unreadable
+// one) falls back to PlistBuddy rather than guessing. Null off macOS.
+export async function bundleIconFile(bundle, platform = process.platform) {
+  if (platform !== "darwin") return null;
+  const plist = bundlePaths(bundle, platform).plist;
+  const raw = await readFile(plist, "utf8");
+  const xml = raw.match(
+    /<key>CFBundleIconFile<\/key>\s*<string>([^<]+)<\/string>/,
+  );
+  if (xml) return xml[1];
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  try {
+    const { stdout } = await promisify(execFile)("/usr/libexec/PlistBuddy", [
+      "-c",
+      "Print :CFBundleIconFile",
+      plist,
+    ]);
+    return stdout.trim();
+  } catch {
+    assert.fail(`Cannot read CFBundleIconFile from ${plist}`);
+  }
+}
+
 export async function verifiedBuildInfo(bundle, platform = process.platform) {
   const files = bundlePaths(bundle, platform);
+  if (platform === "darwin") {
+    assert.equal(
+      await bundleIconFile(bundle, platform),
+      BUNDLE_ICON_FILE,
+      `Bundle must carry the Drogon ${BUNDLE_ICON_FILE}, not stock ${STOCK_ELECTRON_ICON_FILE} ` +
+        "(run node scripts/build-app-icon.mjs and re-package)",
+    );
+  }
   const info = JSON.parse(await readFile(files.info, "utf8"));
   assert.equal(info.schema, 1);
   assert.equal(info.appBundleId, APP_BUNDLE_ID);

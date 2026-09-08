@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, session, shell } from "electron";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -107,6 +107,20 @@ if (backgroundWindow) {
 }
 if (process.env.DROGON_ELECTRON_PROFILE)
   app.setPath("userData", path.resolve(process.env.DROGON_ELECTRON_PROFILE));
+// Dev-run dock tile (R16-Z2, #201): `electron .` shows the stock Electron
+// dock icon because the .icns only exists inside a packaged bundle, so
+// point the dock at the committed PNG twin of the same artwork. Packaged
+// builds skip this: their CFBundleIconFile already carries icon.icns.
+// Same resources idiom as mentu-bridge (app path in dev), exists-guarded
+// so a missing PNG can never break boot.
+if (!app.isPackaged && process.platform === "darwin" && app.dock) {
+  try {
+    const devIcon = path.join(app.getAppPath(), "resources", "icon.png");
+    if (existsSync(devIcon)) app.dock.setIcon(nativeImage.createFromPath(devIcon));
+  } catch (error) {
+    console.warn("[window] dev dock icon:", error);
+  }
+}
 const invalid = {
   ok: false,
   error: {
