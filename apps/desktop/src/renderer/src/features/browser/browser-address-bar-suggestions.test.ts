@@ -1,5 +1,11 @@
 // Suggestions from the workspace's recent URLs plus the fork's search top
 // action (ported behavior: bare words search, URL-like input navigates).
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/browser-pane/assemble-chrome/browser-address-bar-suggestions.test.ts
+// (recents-first blank query, search top action for bare words, scheme
+// rejection, prefix-over-substring ranking), adapted to the local
+// suggestion model and extended with the fork's #234 search/URL rules.
 import { describe, expect, test } from "vitest";
 import {
   buildBrowserAddressBarSuggestions,

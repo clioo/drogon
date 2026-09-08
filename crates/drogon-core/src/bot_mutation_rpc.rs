@@ -1,4 +1,11 @@
 //! Born-empty Bot creation under canonical atomic receipts and execution-host ownership.
+//!
+//! MIT Copyright (c) 2026 Lovecast Inc. Adapted from the fork's
+//! `src/shared/drogon-bot-contract.ts` (responsibility and run-record
+//! shapes) and `src/main/bots/bot-service.ts` (responsibility
+//! create/run-record semantics), source revision
+//! `c97906287bb7a390b25e2025b600d9fb3c25d9c3`; the daemon keeps the
+//! same receipts/ownership invariants natively over SQLite.
 
 use rusqlite::{Connection, Transaction};
 use serde_json::{Value, json};

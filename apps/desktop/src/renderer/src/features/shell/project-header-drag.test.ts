@@ -1,4 +1,9 @@
 // @vitest-environment jsdom
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/sidebar/project-group-header-drag-start.test.ts
+// (arming on the row and on svg content, rejecting presses outside the
+// handle, buttons/inputs as actions), adapted to the flat project list.
 import { describe, expect, it } from "vitest";
 import {
   isProjectHeaderActionTarget,

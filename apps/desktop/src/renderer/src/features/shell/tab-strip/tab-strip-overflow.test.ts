@@ -1,3 +1,8 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/tab-bar/tab-strip-scroll-metrics.test.ts
+// (no-overflow when tabs fit, chevron/edge state at start/middle/end,
+// 1px rounding sliver tolerance), adapted to the local overflow model.
 import { describe, expect, it } from "vitest";
 import {
   computeTabStripOverflow,

@@ -1,5 +1,6 @@
 //! Recipe discovery and parsing for one workspace's `.mentu/recipes`
-//! directory. Tolerant like the fork's `mentu-recipe-files.ts`: a recipe
+//! directory. MIT Copyright (c) 2026 Lovecast Inc.
+//! Tolerant like the fork's `mentu-recipe-files.ts`: a recipe
 //! that fails to parse is listed with `issue` set rather than hiding the
 //! rest of the catalog, and only `.json` files inside `.mentu/recipes`
 //! (containment checked through `realpath`, symlink-safe) are ever read.

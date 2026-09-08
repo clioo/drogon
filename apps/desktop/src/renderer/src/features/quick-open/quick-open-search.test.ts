@@ -1,3 +1,8 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/quick-open-search.test.ts (natural order and
+// score 0 for empty queries, filename-over-path ranking, limit bounding,
+// oversized-query rejection), adapted to the local search API.
 import { describe, expect, test } from "vitest";
 import {
   applyQuickOpenRecency,

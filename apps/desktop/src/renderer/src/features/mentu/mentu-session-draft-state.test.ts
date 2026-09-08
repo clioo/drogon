@@ -1,7 +1,10 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
 // Draft-state unit tests for the fork-ported
 // `mentu-session-draft-state.ts`: issue formatting, the
-// validation-gated draft apply, and the per-path draft map helpers.
-
+// validation-gated draft apply, and the per-path draft map helpers. Test
+// cases follow the fork's src/renderer/src/components/mentu/mentu-session-draft-state.ts
+// semantics (path: message issue formatting, unknown-field retention,
+// invalid-draft refusal copy), adapted to the local draft store.
 import { describe, expect, it } from "vitest";
 import {
   applyMentuDraftSource,

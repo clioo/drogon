@@ -1,5 +1,10 @@
 //! SQLite storage for the **global** `Automation`/`AutomationRun` record
-//! authority (see `automations::records`). Every function here accepts an
+//! authority (see `automations::records`). MIT Copyright (c) 2026 Lovecast
+//! Inc.; the record shape is the native equivalent of the fork's
+//! `src/shared/automations-types.ts` and the run-history write/cascade
+//! semantics follow `src/main/automations/automation-run-writer.ts` and the
+//! fork persistence store's `deleteAutomation` cascade, source revision
+//! `c97906287bb7a390b25e2025b600d9fb3c25d9c3`. Every function here accepts an
 //! existing `&rusqlite::Connection` (or, for multi-step operations, is
 //! meant to be called inside a caller-owned `rusqlite::Transaction`
 //! borrowed `as_ref()` as a `Connection`) -- this module never opens its

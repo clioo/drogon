@@ -1,5 +1,6 @@
 //! Local, no-network provisioning of the pinned `mentu-recipes` runtime
-//! (journey J9 fresh-install usability). Mirrors the read-only reference's
+//! (journey J9 fresh-install usability). MIT Copyright (c) 2026 Lovecast
+//! Inc. Mirrors the read-only reference's
 //! build-time provisioning script
 //! (`config/scripts/mentu-runtime-package.cjs`'s `provisionMentuRuntime`):
 //! given a candidate binary already on disk, verify its sha256 against the

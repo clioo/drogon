@@ -1,3 +1,8 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/right-sidebar/file-explorer-keyboard-navigation.test.ts
+// (row fixtures, sample tree and navigation expectations), adapted to the
+// local flat-row NavigationProjection interface.
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   applyNavigation,

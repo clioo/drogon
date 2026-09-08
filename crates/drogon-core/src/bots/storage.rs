@@ -1,7 +1,13 @@
 //! SQLite storage for native `Bot` records, their responsibilities and
 //! responsibility-run history, joining the same connection/transaction as
 //! `automations::storage` -- never a second database authority or a
-//! Bot-only shadow of the global automation records. The standalone
+//! Bot-only shadow of the global automation records.
+//!
+//! MIT Copyright (c) 2026 Lovecast Inc. Adapted from the fork's
+//! `src/shared/drogon-bot-contract.ts` (host/folder scoping, responsibility
+//! history) and `src/main/bots/bot-service.ts` (scheduled-responsibility
+//! creation and run recording), source revision
+//! `c97906287bb7a390b25e2025b600d9fb3c25d9c3`. The standalone
 //! [`migrate`] keeps its per-step-committing behavior, while the aggregate
 //! `Engine::open` startup applies these same steps through
 //! `db::migrate_and_recover`'s single rollback-safe transaction (see

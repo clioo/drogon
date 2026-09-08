@@ -1,5 +1,10 @@
 // Reload control states: the button doubles as Stop mid-load and Retry
 // after a failure; failed loads always retry (never plain-reload).
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/browser-pane/navigate/browser-reload-action.test.ts
+// (Stop-while-loading, retry-from-every-entry-point, idle reload with hard
+// reload behind the menu), adapted to the local reload-state model.
 import { describe, expect, test } from "vitest";
 import {
   browserReloadButtonLabel,
