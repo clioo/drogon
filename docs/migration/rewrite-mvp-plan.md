@@ -228,16 +228,28 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J2/J4 R16-AM: barra derecha de extremo a extremo (Explorer, Ports, Session details, rail) | R16 | Muse | lanzada | |
 | Infra R16-AK: CI Foundation en verde en ubuntu/macos/windows (#232) | R16 | Muse | fusionada (#233 tests, #247 heap macOS, #258 de-flake hook_event); Foundation verde en los 3 runners | #233 #247 #258 |
 | Infra: en modo prueba la app no abre browser externo, Finder ni selector nativo (#225); monitor de foco con PID en el coordinador | R16 | Coordinador | fusionada | #225 |
-| Hallazgos de Carlos en la app instalada (2026-09-08): #229 filas de sesión en la tarjeta → R16-AN; #230 colores de Claude Code → R16-AH; #231 lanzar agentes directo con defaults yolo de Orca → R16-AO; #234 barra de direcciones con búsqueda del fork (scareware) y #235 pestaña de browser → R16-AP; #237 Bots no abre / lento y #238 Tasks lento con filtros duplicados → R16-AQ | R16 | Muse | fusionadas: R16-AN #229 (#251), R16-AP #234 #235 (#249), R16-AO #231 (#260, lanzamiento directo con defaults yolo); en curso: R16-AQ (#237 #238 #236 #246), R16-AR (#230 #254 #187), R16-Z3 (#201 raster) | #249 #251 #260 |
+| Hallazgos de Carlos en la app instalada (2026-09-08): #229 filas de sesión en la tarjeta → R16-AN; #230 colores de Claude Code → R16-AH; #231 lanzar agentes directo con defaults yolo de Orca → R16-AO; #234 barra de direcciones con búsqueda del fork (scareware) y #235 pestaña de browser → R16-AP; #237 Bots no abre / lento y #238 Tasks lento con filtros duplicados → R16-AQ | R16 | Muse | todas fusionadas: #229 (#251), #234 #235 (#249), #231 (#260), #237 #238 (#262), #201 (#243 #263); #230 en R16-AR | #249 #251 #260 #262 #263 |
 | Regla (Carlos): si Muse llega a su límite de uso de noche, los workers se relanzan con `pi --provider openai-codex --model gpt-5.6-luna --thinking max` | R16 | Coordinador | vigente | |
 | QA ronda 3 sobre main ≥ 883239f y QA de UI ronda 6 sobre main 5c69fa6 | QA | Muse | en curso | |
 | Tope de concurrencia (Carlos, noche del 2026-09-08): 9 workers (incluidos seguimientos) + 2 QA; nada nuevo hasta bajar de 9; specs en cola: R16-Z3 (icono), R16-AL2 (#228) | R16 | Coordinador | vigente | |
 | QA de UI ronda 6: estados command-palette, launch-dialog, shortcuts-rebind, tasks-filters | QA | Muse | fusionada (#248); ronda en curso | #248 |
 | Mezcla de modelos (Carlos, 2026-09-08 02:30): 6 workers Kimi (`kimi-for-coding` high; UI/UX `k3-256k` high) + 1 Muse Contributor max + 2 GLM-5.3-flash max; QA en Muse con fallback `gpt-5.6-luna` | R16 | Coordinador | vigente | |
-| QA fix R16-AL2: #228 stubs de sesiones tras reinicio cerrables, Kill all y Retry | R16 | Kimi | lanzada | |
-| QA fix R16-AR: #254 toggle de captura de enlaces, #187 aislamiento del entorno de Pi headless, #230 colores del TUI | R16 | Kimi | lanzada | |
-| R16-AT: robustez con 20 sesiones / 6 worktrees (jank, memoria, restore) | R16 | Kimi | lanzada | |
+| QA fix R16-AL2: #228 stubs de sesiones tras reinicio cerrables, Kill all y Retry | R16 | Kimi | fusionada (#265) | #265 |
+| QA fix R16-AR: #254 toggle de captura de enlaces, #187 aislamiento del entorno de Pi headless, #230 colores del TUI | R16 | Kimi | en curso (Kimi); pliega #273 (SIGINT heredado) |  |
+| R16-AT: robustez con 20 sesiones / 6 worktrees (jank, memoria, restore) | R16 | Kimi | fusionada (#271: cola de replay con tope del fork, coalescencia de updates, throttle de panes ocultos; 48 s → 0.5 s al cambiar a una pestaña inundada); #272 #273 filed | #271 |
 | QA de UI ronda 7 sobre main 98dce07 (estados worktree-card-rows, browser-tab-loading, editor-header, address-bar-suggestions) | QA | Muse | en curso | |
+| QA fix R16-AQ2: #236 preview de cron para horarios raros, #246 pastillas Upstream/Origin | R16 | Kimi | fusionada | #269 |
+| QA fix R16-AD3: #241 tema System sigue al SO, #244 #245 controles del pane de atajos | R16 | GLM | fusionada | #267 |
+| R16-AU: catálogo de atajos del fork, despacho compartido, reenvío a terminal/browser | R16 | luna | fusionada | #266 |
+| R16-AX: #257 paleta ⌘J del fork y Retry del banner de error; pliega #270 #272 | R16 | GLM | #274 fusionada; #270 #272 en curso | #274 |
+| R16-AZ: cabeceras MIT en 23 ports, THIRD_PARTY_NOTICES, catálogo de fidelidad (43 estados) | R16 | Kimi | fusionada | #276 |
+| R16-AV: barrido de tema claro y anchos 760–1440 en todas las páginas | R16 | luna | lanzada | |
+| R16-AW: #264 cuelgue del renderer con Forward en el browser, #259 Restart daemon en el paquete | R16 | luna | lanzada (bloqueantes) | |
+| R16-AY: barra de estado J12 (medidores de uso, awake, contadores, clics) | R16 | GLM | lanzada | |
+| R16-AS: Source Control de extremo a extremo (J2) coordinado con R16-R2 | R16 | Kimi | lanzada | |
+| R16-BA: README, CHANGELOG, guion de demo y metadatos de licencia para el hackathon | R16 | Kimi | lanzada | |
+| Instalación: bundle 1d83f98 (sellado 40/40) el 2026-09-08 ~02:1x — icono propio, Bots/Tasks rápidos; siguiente tras R16-AW | R16 | Coordinador | instalado | |
+| QA funcional rondas 4–6 y QA de UI rondas 7–8 (luna); Muse agotado (429) desde ~02:15 | QA | luna | en curso | #268 |
 
 ## 7. QA continuo
 
