@@ -148,7 +148,7 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J4 R11-B: chrome de la pestaña de browser del fuente (barra de direcciones, navegación, banners, menú, buscar, menú contextual) | R11 | Muse | fusionada: 1278 tests, oráculo browser PASSED; chords con el guest enfocado pendientes | #83 |
 | J11 R11-C: cobertura del paquete sellado para las superficies nuevas (barra derecha, menú +, composer, Automations, Bots, Tasks, Settings, barra) | R11 | OpenCode + Muse | fusionada: bundle sellado 40/40 PASSED sobre main | #82 |
 | J9 R11-D: panel y pestaña de Mentu portados literalmente del fork (Draft, Graph, Metrics, controles de ejecución) sobre las primitivas | R11 | Muse | fusionada: Graph/Run/Evidence/Metrics del fork, verify.commands y step_status corregidos; Open full tab cableado | #84 |
-| J2 R12-A: editor Monaco y visor de diff del fuente (cabecera, autosave, tema, DiffViewer) | R12 | Sonnet | lanzada | |
+| J2 R12-A: editor Monaco y visor de diff del fuente (cabecera, autosave, tema, DiffViewer) | R12 | Sonnet | fusionada: Monaco con workers locales, cola de guardado/autosave del fuente, CsvViewer, DiffViewer con navegación; 1604 tests | #99 |
 | J5 R12-B: jump palette ⌘J y quick open ⌘P del fuente con files.search en el daemon y reveal en Explorer | R12 | Muse | fusionada: JumpPalette/QuickOpen del fuente, files.search con git ls-files y walk acotado, reveal en Explorer; 1489 tests | #95 |
 | J1 R12-D: interacciones del tab strip (reordenar con dnd-kit, menú contextual, pin, cerrar variantes) | R12 | Muse | fusionada: orden persistido por workspace, menú del fuente, pin, renombrar, cierre variantes, chevrons | #90 |
 | J1/J4 R12-E: remates de terminal y browser (política de pegado, popover de enlaces, reinicio con el mismo harness, chords con el guest enfocado) | R12 | GLM 5.3 Flash | lanzada | |
@@ -156,6 +156,11 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J6 R12-G: Tasks en modo pull requests con celdas de revisión/checks/merge y start desde PR | R12 | OpenCode Go + Muse 1.3 | fusionada: modo PR del fuente con celdas de revisión/checks/merge, start desde PR | #93 |
 | J9 R12-H: edición de recetas Mentu con mentu.recipe_save y validación del fork | R12 | OpenCode Go + Muse 1.3 | fusionada: borrador, inspector en modo edición, familia de validación del fork, mentu.recipe_save; 1448 tests | #94 |
 | J10 R12-I: paneles de Settings del fuente (Appearance, General, Agents, Notifications, Git y GitHub) | R12 | Muse | fusionada: orden de secciones del fuente, sección CLI en Agents con sonda real | #89 |
-| J8 R13-A: exactitud de la página Bots frente al fork (estados, formulario, avatar, controlador) sobre las primitivas | R13 | Muse | lanzada | |
+| J8 R13-A: exactitud de la página Bots frente al fork (estados, formulario, avatar, controlador) sobre las primitivas | R13 | Muse | fusionada: composición, formulario y controlador del fork; avatar con iniciales (arte no redistribuido) | #97 |
 | J4 R13-B: panel Ports de la barra derecha con puertos del workspace y abrir en pestaña de browser | R13 | GLM 5.3 Flash | lanzada | |
-| Fidelidad R13-C: toasts del fuente (sonner) y sus llamadas en las superficies del MVP | R13 | Muse | lanzada | |
+| Fidelidad R13-C: toasts del fuente (sonner) y sus llamadas en las superficies del MVP | R13 | Muse | fusionada: Toaster del fuente y toasts de worktree, source control, terminal, editor y automations con copy exacto | #98 |
+| J1 R14-A: menú de acciones de proyecto del fuente (Project Settings, Remove Project) y filas del menú Options | R14 | Muse | lanzada | |
+| Shell R14-B: menú nativo de la app con submenú Appearance, persistencia de bounds de ventana, badge del dock | R14 | GLM 5.3 Flash | lanzada | |
+| J1 R14-C: needs_input y working para OpenCode y Pi con el plugin/extensión de estado del fuente | R14 | Sonnet | lanzada | |
+| J9 R14-D: contenido de evidencia de ejecuciones Mentu en el panel de receta | R14 | OpenCode Go + Muse 1.3 | lanzada | |
+| J10 R14-E: tipografía del terminal del fuente (familia, peso, peso en negrita) | R14 | OpenCode Go + Muse 1.3 | lanzada | |
