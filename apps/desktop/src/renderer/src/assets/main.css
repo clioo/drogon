@@ -2722,3 +2722,35 @@
 [data-worktree-card-drag-preview='true'] * {
   cursor: grabbing !important;
 }
+
+/* ── R16-E window chrome (#145) + card parity (#147) ─────────────────── */
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
+   src/renderer/src/assets/main.css (.titlebar/.titlebar-left drag
+   regions) and
+   src/renderer/src/components/tab-group/TabGroupPanel.tsx (the tab row
+   is a window-drag region under hiddenInset; interactive children opt
+   out with no-drag). The sidebar titlebar row (.titlebar-left) and the
+   right-sidebar header (.right-sidebar-header-drag) already drag above;
+   this extends the same recipe to the tab strip's empty area. */
+/* Why: with titleBarStyle hiddenInset the empty strip area moves the
+   window; tabs, buttons and the rename input opt out so they stay
+   clickable (Electron drag regions swallow renderer pointer events). */
+.tab-strip-window-drag {
+  -webkit-app-region: drag;
+}
+.tab-strip-window-drag [role="tab"],
+.tab-strip-window-drag button,
+.tab-strip-window-drag input {
+  -webkit-app-region: no-drag;
+}
+/* Why: the fork's worktree card keeps the agent summary and the relative
+   time on one compact line with no duplicated session count; the line
+   truncates instead of wrapping the timestamp onto its own row. */
+.shell-worktree-card-summary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}

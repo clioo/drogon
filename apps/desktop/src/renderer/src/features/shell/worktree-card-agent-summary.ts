@@ -35,6 +35,20 @@ export function formatSummaryStateLabel(state: AgentState): string {
  * source's `summarizeAgents`. Empty string when there are no sessions;
  * the card hides the summary then.
  */
+/**
+ * One-line card summary: the agent summary plus the relative activity
+ * time (the fork's compact summary shape). The summary already carries
+ * the session count ("1 session working"), so no second count is ever
+ * appended. Empty string when there is no summary to show.
+ */
+export function formatWorktreeCardSummaryLine(
+  agentSummary: string,
+  activeRelative: string,
+): string {
+  if (!agentSummary) return "";
+  return activeRelative ? `${agentSummary} · ${activeRelative}` : agentSummary;
+}
+
 export function summarizeCardAgentStates(sessions: Session[]): string {
   if (sessions.length === 0) return "";
   const counts = new Map<AgentState, number>();

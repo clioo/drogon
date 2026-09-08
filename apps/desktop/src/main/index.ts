@@ -33,6 +33,7 @@ import {
   revealRestoredWindow,
   type MainWindowStateLifecycle,
 } from "./window/window-state";
+import { buildMainWindowChromeOptions } from "./window/window-chrome";
 import { readBuildInfo } from "./build-info";
 import { registerAutomationIpc } from "./automation-bridge";
 import { dispatchFileRequest } from "./file-bridge";
@@ -338,6 +339,10 @@ function createWindow() {
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     title: "Drogon",
+    // R16-E window chrome (source createMainWindow.ts:98-115): hiddenInset
+    // keeps the native traffic lights inside the sidebar titlebar row on
+    // macOS; the renderer drag regions in assets/main.css do the moving.
+    ...buildMainWindowChromeOptions(process.platform),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,

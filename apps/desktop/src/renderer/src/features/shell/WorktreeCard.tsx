@@ -18,7 +18,10 @@ import type { Workspace } from "../../../../shared/session-contract";
 import { WorktreeContextMenu } from "./WorktreeContextMenu";
 import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
 import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
-import { summarizeCardAgentStates } from "./worktree-card-agent-summary";
+import {
+  formatWorktreeCardSummaryLine,
+  summarizeCardAgentStates,
+} from "./worktree-card-agent-summary";
 import type { WorktreeCardPrDisplay } from "./worktree-card-pr-display";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
 
@@ -155,7 +158,6 @@ export function WorktreeCard({
             upstream={gitStatus?.branch.upstream ?? null}
             issueNumber={issueNumber}
             pr={pr}
-            agentSummary={agentSummary}
           />
           {worktree.baseRef ? (
             <span
@@ -165,16 +167,27 @@ export function WorktreeCard({
               base {worktree.baseRef}
             </span>
           ) : null}
-          {summary.activeRelative && (
-            <span className="shell-worktree-card-time">
-              {summary.activeRelative}
+          {/* Why: the fork's card keeps the agent summary and the relative
+              time on one compact line (no duplicated session count); the
+              line truncates instead of wrapping the timestamp alone. */}
+          {attached.length === 0 ? (
+            <span className="shell-worktree-card-summary">
+              No sessions yet
+            </span>
+          ) : (
+            <span
+              className="shell-worktree-card-summary"
+              title={formatWorktreeCardSummaryLine(
+                agentSummary,
+                summary.activeRelative,
+              )}
+            >
+              {formatWorktreeCardSummaryLine(
+                agentSummary,
+                summary.activeRelative,
+              )}
             </span>
           )}
-          <span className="shell-worktree-card-state">
-            {attached.length > 0
-              ? `${attached.length} session${attached.length === 1 ? "" : "s"}`
-              : "No sessions yet"}
-          </span>
         </button>
         <span className="shell-worktree-card-menu">
           <button

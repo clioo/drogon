@@ -91,7 +91,7 @@ describe("TabBar strip order", () => {
     expect(tabIds()).toEqual(["c", "a", "b"]);
     expect(
       screen
-        .getByRole("tab", { name: /cmd-c/ })
+        .getByRole("tab", { name: /Terminal 1/ })
         .getAttribute("data-pinned"),
     ).toBe("true");
   });
@@ -202,7 +202,7 @@ describe("TabBar rename", () => {
     const first = screen.getAllByRole("tab")[0];
     fireEvent.doubleClick(first);
     const input = (await screen.findByDisplayValue(
-      "cmd-a",
+      "Terminal 1",
     )) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "db" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -213,8 +213,32 @@ describe("TabBar rename", () => {
     const onCommitTitle = vi.fn();
     renderStrip({ onCommitTitle });
     fireEvent.doubleClick(screen.getAllByRole("tab")[0]);
-    const input = await screen.findByDisplayValue("cmd-a");
+    const input = await screen.findByDisplayValue("Terminal 1");
     fireEvent.keyDown(input, { key: "Escape" });
     expect(onCommitTitle).not.toHaveBeenCalled();
+  });
+});
+
+describe("TabBar default titles", () => {
+  it("titles session tabs Terminal N in strip order (never the process name)", () => {
+    renderStrip({});
+    expect(
+      screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label")),
+    ).toEqual(["Terminal 1 live", "Terminal 2 live", "Terminal 3 live"]);
+    expect(screen.queryByRole("tab", { name: /cmd-a/ })).toBeNull();
+  });
+
+  it("keeps strip-position numbering after a removal", () => {
+    renderStrip({ sessions: [session("a"), session("c")] });
+    expect(
+      screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label")),
+    ).toEqual(["Terminal 1 live", "Terminal 2 live"]);
+  });
+
+  it("prefers the committed rename over the default", () => {
+    renderStrip({ customTitles: { b: "db" } });
+    expect(
+      screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label")),
+    ).toEqual(["Terminal 1 live", "db live", "Terminal 3 live"]);
   });
 });

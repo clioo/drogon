@@ -7,7 +7,10 @@ import {
   getPrChipAccessibleLabel,
   getPrChipLabel,
 } from "./worktree-card-pr-display";
-import { summarizeCardAgentStates } from "./worktree-card-agent-summary";
+import {
+  formatWorktreeCardSummaryLine,
+  summarizeCardAgentStates,
+} from "./worktree-card-agent-summary";
 import type { Session } from "../../../../shared/session-contract";
 
 function session(id: string, agentState: Session["agentState"]): Session {
@@ -33,7 +36,6 @@ describe("card meta badges projection", () => {
       hasWorktreeCardMetaBadges({
         issueNumber: null,
         pr: null,
-        agentSummary: "",
         ahead: 0,
         behind: 0,
       }),
@@ -42,11 +44,22 @@ describe("card meta badges projection", () => {
       hasWorktreeCardMetaBadges({
         issueNumber: 7,
         pr: null,
-        agentSummary: "",
         ahead: null,
         behind: null,
       }),
     ).toBe(true);
+  });
+
+  test("summary line keeps the agent summary and time on one line", () => {
+    // The summary already carries the session count, so the line never
+    // repeats it and never splits the timestamp onto its own row.
+    expect(
+      formatWorktreeCardSummaryLine("1 session working", "just now"),
+    ).toBe("1 session working · just now");
+    expect(
+      formatWorktreeCardSummaryLine("1 needs input, 1 working", ""),
+    ).toBe("1 needs input, 1 working");
+    expect(formatWorktreeCardSummaryLine("", "just now")).toBe("");
   });
 
   test("ahead/behind label mirrors git.status counts", () => {
