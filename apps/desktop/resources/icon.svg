@@ -1,0 +1,15 @@
+<!-- Original Drogon product mark (no Orca/fork art): a flat flame bud rising
+     from a bold D on a dark rounded tile. Colours are the app's own
+     main.css tokens: tile #171717 (dark card), mark #fafafa
+     (primary foreground / foreground), flame #f97316 with #fdba74 core
+     (the agent-question orange hue both themes share). Thick strokes keep
+     the D legible from 16px to 512px. Carlos can replace this file and
+     re-run `node scripts/build-app-icon.mjs`. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#171717"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="4"/>
+  <rect x="131" y="132" width="70" height="248" rx="35" fill="#fafafa"/>
+  <path d="M 201 167 H 249 C 347 167 347 345 249 345 H 201" fill="none" stroke="#fafafa" stroke-width="70" stroke-linecap="round"/>
+  <path d="M 340 192 C 312 152 318 108 340 68 C 362 108 368 152 340 192 Z" fill="#f97316"/>
+  <path d="M 340 168 C 326 144 329 116 340 92 C 351 116 354 144 340 168 Z" fill="#fdba74"/>
+</svg>

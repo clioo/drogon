@@ -101,9 +101,18 @@ await writeFile(infoPath, JSON.stringify(info, null, 2) + "\n");
 // Ships it when present, skips cleanly otherwise — the sealed acceptance
 // stays green without it, same as before this runtime existed.
 const bundledMentuRuntime = path.join(root, "apps", "desktop", "resources", "mentu-runtime");
+// R16-Z2 (#201): original Drogon icon. The .icns is a committed build
+// artifact of apps/desktop/resources/icon.svg — regenerate with
+// `node scripts/build-app-icon.mjs` after replacing the SVG, never by hand.
+const appIcon = path.join(root, "apps", "desktop", "resources", "icon.icns");
+assert.ok(
+  existsSync(appIcon),
+  "Missing committed app icon: run node scripts/build-app-icon.mjs (Fixes #201)",
+);
 const [packagedDirectory] = await packager({
   dir: source,
   name: "Drogon",
+  icon: appIcon,
   executableName: "Drogon",
   appBundleId: APP_BUNDLE_ID,
   appVersion: info.version,
