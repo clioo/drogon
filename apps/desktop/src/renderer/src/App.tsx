@@ -103,6 +103,7 @@ import {
   isProjectsAvailable,
   isWorktreesAvailable,
   loadProjectView,
+  reloadWorkspacesSnapshot,
   useProjectRegistryRefresh,
   windowProjectBridge,
 } from "./features/shell/project-adapter";
@@ -1427,8 +1428,30 @@ export function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  // Issue #146: re-read the project view when another process moves the registry.
-  useProjectRegistryRefresh(setProjectReloadTick);
+  // R16-AJ (fixes #218): background workspaces reload for out-of-band
+  // registry moves (digest below) and daemon reconnects (R16-M path).
+  // Silent by design: a transient failure keeps the prior list (the
+  // sidebar digest still applied), and selection/sessions are untouched —
+  // same-id workspaces re-render in place, so terminal scrollback
+  // survives. Exactly one `workspaces()` call per invocation.
+  const reloadWorkspaces = useCallback(async () => {
+    const next = await reloadWorkspacesSnapshot(() =>
+      window.drogon.workspaces(),
+    );
+    // Null keeps the prior list; the next digest or reconnect retries.
+    if (next) setWorkspaces(next);
+  }, []);
+  // Issue #146: re-read the project view when another process moves the
+  // registry. Issue #218: the same digest re-runs the `workspaces()` load
+  // that feeds the session area — the digest used to refresh only the
+  // sidebar groups, so selecting a CLI-created worktree showed the
+  // no-workspace fallback until restart. Stable handler: the subscription
+  // below is created once, so each revision bumps + reloads exactly once.
+  const handleRegistryRevision = useCallback(
+    () => void reloadWorkspaces(),
+    [reloadWorkspaces],
+  );
+  useProjectRegistryRefresh(setProjectReloadTick, handleRegistryRevision);
   // Issue #185: reload whenever the daemon connection becomes ready. The
   // watcher lives at root (not in the banner) because the banner unmounts
   // exactly when the workspace list is empty — the state that needs the
@@ -1447,13 +1470,17 @@ export function App() {
     // every same-identity pane — and its scrollback — mounted. A full
     // refresh() here would remount all panes and clear their buffers just
     // as the service returns. Errors set during the outage belonged to
-    // it, so a success clears them.
+    // it, so a success clears them. R16-AJ (fixes #218): a silent
+    // workspaces reload rides along, so worktrees created elsewhere while
+    // disconnected (e.g. `drogon-cli worktree create`) open in the session
+    // area without a restart.
     void window.drogon
       .status()
       .then((response) => {
         if (!response.ok) return;
         setError("");
         setStatus(response.result);
+        void reloadWorkspaces();
       })
       .catch(() => {});
   });

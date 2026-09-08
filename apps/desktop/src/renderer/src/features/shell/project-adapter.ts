@@ -91,23 +91,66 @@ export function subscribeProjectRegistryRefresh(
 }
 
 /**
+ * Pure revision fan-out for the live registry refresh (issues #146, #218):
+ * one pushed revision bumps the project-reload tick AND refreshes the
+ * workspaces state, each exactly once per revision. Split from the React
+ * hook below so the refresh path is unit-testable without a DOM.
+ */
+export function createRegistryRevisionHandler(input: {
+  bumpProjects: () => void;
+  refreshWorkspaces: (revision: string) => void;
+}): (revision: string) => void {
+  return (revision) => {
+    input.bumpProjects();
+    input.refreshWorkspaces(revision);
+  };
+}
+
+/**
+ * Background `workspaces()` re-read for the digest and reconnect paths
+ * (issue #218). Returns the fresh list, or null when the load fails — the
+ * caller keeps its prior list, so a transient failure never blanks the
+ * session area. Exactly one load per call.
+ */
+export async function reloadWorkspacesSnapshot(
+  load: () => Promise<Result<{ workspaces: Workspace[] }>>,
+): Promise<Workspace[] | null> {
+  try {
+    const response = await load();
+    if (!response.ok) return null;
+    return response.result.workspaces;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Live registry refresh (issue #146): subscribes once to main's
  * `drogon:projectsChanged` push and bumps the project-reload tick on
  * every new revision, so the existing `loadProjectView` effect re-reads
  * `project.list` with no restart and no local mutation. `bump` is the
  * stable `setProjectReloadTick` dispatcher, which keeps the App call
- * site to one subscription line.
+ * site to one subscription line. `onRevision` (issue #218) additionally
+ * refreshes the `workspaces()` state that feeds the session area — the
+ * digest used to refresh only the sidebar groups, so a CLI-created
+ * worktree rendered a card that opened the no-workspace fallback.
  */
 export function useProjectRegistryRefresh(
   bump: (update: (tick: number) => number) => void,
+  onRevision?: (revision: string) => void,
 ): void {
   useEffect(() => {
     const stop = subscribeProjectRegistryRefresh(
       windowProjectBridge(window.drogon),
-      () => bump((tick) => tick + 1),
+      onRevision
+        ? createRegistryRevisionHandler({
+            bumpProjects: () => bump((tick) => tick + 1),
+            refreshWorkspaces: onRevision,
+          })
+        : () => bump((tick) => tick + 1),
     );
     return stop ?? undefined;
-  }, [bump]);
+  }, [bump, onRevision]);
 }
 
 /** Reads the live `project` namespace off `window.drogon` (absent → {}). */
