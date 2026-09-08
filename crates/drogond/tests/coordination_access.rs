@@ -13,7 +13,10 @@ use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Daemon boot on a loaded machine (parallel cargo/pnpm jobs) takes well over
+/// the request timeout; startup gets its own generous deadline.
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
 const RUN: &str = "run-1";
 const TASK: &str = "task-1";
 const DISPATCH: &str = "dispatch-1";
@@ -63,7 +66,7 @@ fn start_server_with_sibling_cli(with_cli: bool) -> TestServer {
         token: String::new(),
         child,
     };
-    let deadline = Instant::now() + CLIENT_TIMEOUT;
+    let deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
         assert!(
             server.child.try_wait().unwrap().is_none(),

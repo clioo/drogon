@@ -89,14 +89,25 @@ impl Fixture {
 }
 
 fn git(cwd: &Path, args: &[&str]) -> String {
+    // Fixture git must not see the developer's global/system config
+    // (default branch, hooks, signing, templates) or prompt for anything.
     let output = std::process::Command::new("git")
         .args(args)
         .current_dir(cwd)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_AUTHOR_NAME", "fixture")
+        .env("GIT_AUTHOR_EMAIL", "fixture@example.com")
+        .env("GIT_COMMITTER_NAME", "fixture")
+        .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
         .output()
         .expect("spawn real git for fixture setup");
     assert!(
         output.status.success(),
-        "git {args:?} failed: {}",
+        "git {args:?} failed (status {:?})\nstdout: {}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap()
@@ -257,7 +268,10 @@ fn commit_amend_folds_into_the_previous_commit() {
 fn pull_fast_forwards_from_a_bare_remote() {
     let fx = Fixture::new();
     let remote = fx._root.path().join("remote.git");
-    git(fx._root.path(), &["init", "-q", "--bare", "remote.git"]);
+    git(
+        fx._root.path(),
+        &["init", "-q", "--bare", "-b", "main", "remote.git"],
+    );
     git(
         &fx.repo,
         &["remote", "add", "origin", remote.to_str().unwrap()],
@@ -287,7 +301,10 @@ fn pull_fast_forwards_from_a_bare_remote() {
 fn fetch_updates_remote_tracking_without_touching_the_worktree() {
     let fx = Fixture::new();
     let remote = fx._root.path().join("remote.git");
-    git(fx._root.path(), &["init", "-q", "--bare", "remote.git"]);
+    git(
+        fx._root.path(),
+        &["init", "-q", "--bare", "-b", "main", "remote.git"],
+    );
     git(
         &fx.repo,
         &["remote", "add", "origin", remote.to_str().unwrap()],
