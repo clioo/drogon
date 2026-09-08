@@ -5,10 +5,10 @@ import { installBrowserWindowCloseGuard } from "./browser-window-close-installat
 import { usageBridge } from "./usage";
 import { git } from "./git";
 import { project } from "./project";
+import { shell } from "./shell";
 import { browser } from "./browser";
 import { settings } from "./settings";
 import { notifications } from "./notifications";
-import { shell } from "./shell";
 import { tasks } from "./tasks";
 import { mentu } from "./mentu";
 import { botBridgeExtras } from "./bot";

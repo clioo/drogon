@@ -27,6 +27,7 @@ function render(sidebarWidth = 280): string {
         onBrowse: async () => null,
         onSubmitAdd: async () => null,
         onSubmitRemove: async () => null,
+        onSubmitRename: async () => null,
       }),
     ),
   );

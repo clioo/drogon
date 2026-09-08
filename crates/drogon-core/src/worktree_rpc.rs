@@ -132,6 +132,7 @@ fn worktree_json(
     branch: &str,
     head: &str,
     base_ref: Option<&str>,
+    title: Option<&str>,
     created_at: &str,
 ) -> Value {
     json!({
@@ -142,6 +143,7 @@ fn worktree_json(
         "branch": branch,
         "head": head,
         "baseRef": base_ref,
+        "title": title,
         "createdAt": created_at,
     })
 }
@@ -241,6 +243,7 @@ impl Engine {
             &name,
             &head,
             base_ref.as_deref(),
+            None,
             &created_at,
         ))
     }
@@ -264,7 +267,7 @@ impl Engine {
             })?;
             return Ok(json!({
                 "worktrees": [worktree_json(
-                    &project.id, &project.id, &workspace_id, &project.path, "", "", None,
+                    &project.id, &project.id, &workspace_id, &project.path, "", "", None, None,
                     &project.created_at,
                 )]
             }));
@@ -272,7 +275,7 @@ impl Engine {
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, path, branch, head, base_ref, created_at FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
+                "SELECT id, workspace_id, path, branch, head, base_ref, title, created_at FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         struct Row {
@@ -282,6 +285,7 @@ impl Engine {
             branch: String,
             head: String,
             base_ref: Option<String>,
+            title: Option<String>,
             created_at: String,
         }
         let rows: Vec<Row> = stmt
@@ -293,7 +297,8 @@ impl Engine {
                     branch: r.get(3)?,
                     head: r.get(4)?,
                     base_ref: r.get(5)?,
-                    created_at: r.get(6)?,
+                    title: r.get(6)?,
+                    created_at: r.get(7)?,
                 })
             })
             .map_err(error::from_sqlite)?
@@ -338,6 +343,7 @@ impl Engine {
                     &branch,
                     &head,
                     row.base_ref.as_deref(),
+                    row.title.as_deref(),
                     &row.created_at,
                 )
             })
@@ -377,6 +383,48 @@ impl Engine {
         conn.execute("DELETE FROM workspaces WHERE id = ?1", [&workspace_id])
             .map_err(error::from_sqlite)?;
         Ok(json!({ "id": id, "removed": true }))
+    }
+
+    /// Display-title rename (`worktree.rename { worktreeId, name }`).
+    /// Renames exactly what Orca's inline rename renames: the card's
+    /// display title stored on the worktree row. The git branch and the
+    /// worktree directory are untouched — verify by comparing `branch`
+    /// and `path` before and after.
+    pub(super) fn do_worktree_rename(&self, params: &Value) -> Result<Value, RpcError> {
+        let decoded: drogon_protocol::worktree::WorktreeRenameParams =
+            serde_json::from_value(params.clone())
+                .map_err(|_| error::invalid_argument("Invalid worktree.rename parameters"))?;
+        decoded.validate_name()?;
+        let name = decoded.name.trim().to_string();
+
+        let conn = self.db.lock().unwrap();
+        let changed = conn
+            .execute(
+                "UPDATE worktrees SET title = ?1 WHERE id = ?2",
+                rusqlite::params![name, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+        if changed == 0 {
+            return Err(error::not_found("worktree not found"));
+        }
+        let row: (String, String, String, String, String, String, Option<String>, String) =
+            conn.query_row(
+                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, created_at FROM worktrees WHERE id = ?1",
+                [&decoded.worktree_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+            )
+            .map_err(error::from_sqlite)?;
+        Ok(worktree_json(
+            &row.0,
+            &row.1,
+            &row.2,
+            &row.3,
+            &row.4,
+            &row.5,
+            row.6.as_deref(),
+            Some(&name),
+            &row.7,
+        ))
     }
 }
 

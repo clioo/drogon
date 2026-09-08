@@ -10,4 +10,6 @@ export const project: ProjectBridge = {
   worktreeList: (value) => ipcRenderer.invoke("drogon:worktreeList", value),
   worktreeRemove: (value) =>
     ipcRenderer.invoke("drogon:worktreeRemove", value),
+  worktreeRename: (value) =>
+    ipcRenderer.invoke("drogon:worktreeRename", value),
 };

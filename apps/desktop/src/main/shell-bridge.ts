@@ -6,12 +6,36 @@
 // handler is unit-testable without Electron.
 import { ipcMain, shell } from "electron";
 import type { BrowserWindow } from "electron";
+import { z } from "zod";
 import {
   isExternalUrlAllowed,
   SHELL_OPEN_EXTERNAL_CHANNEL,
 } from "../shared/shell-contract";
 import type { Result } from "../shared/session-contract";
 import type { ShellOpenExternalResult } from "../shared/shell-contract";
+
+
+// Worktree card menu actions (R9-A): Reveal in Finder / Open in editor go
+// through Electron's `shell` module, the same surface Orca's window.api
+// exposes for these menu actions. The renderer already holds the absolute
+// worktree path, so there is no daemon round-trip.
+const fsPath = z
+  .string()
+  .min(1)
+  .max(32_768)
+  .refine((value) => !value.includes("\0"));
+
+export const shellBridgeSchemas = {
+  showItemInFolder: z.object({ path: fsPath }),
+  openPath: z.object({ path: fsPath }),
+};
+
+export type ShellMethod = keyof typeof shellBridgeSchemas;
+
+const channelFor: Record<ShellMethod, string> = {
+  showItemInFolder: "drogon:showItemInFolder",
+  openPath: "drogon:openPath",
+};
 
 const invalid = {
   ok: false,
@@ -65,4 +89,28 @@ export function registerShellBridge(
       return dispatchOpenExternalRequest(input);
     },
   );
+  for (const method of Object.keys(shellBridgeSchemas) as ShellMethod[]) {
+    ipcMain.handle(channelFor[method], async (event, input: unknown) => {
+      const window = getWindow();
+      if (
+        !window ||
+        event.sender !== window.webContents ||
+        event.senderFrame !== window.webContents.mainFrame
+      )
+        return { ...invalid };
+      const parsed = shellBridgeSchemas[method].safeParse(input);
+      if (!parsed.success) return { ...invalid };
+      if (method === "showItemInFolder") {
+        shell.showItemInFolder(parsed.data.path);
+        return { ok: true as const, result: { shown: true } };
+      }
+      const error = await shell.openPath(parsed.data.path);
+      if (error)
+        return {
+          ok: false as const,
+          error: { code: "io_error", message: error, retryable: false },
+        };
+      return { ok: true as const, result: { opened: true } };
+    });
+  }
 }

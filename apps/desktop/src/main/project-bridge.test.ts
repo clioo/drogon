@@ -109,4 +109,102 @@ describe("dispatchProjectRequest", () => {
     expect(called).toBe(false);
     expect(result.ok).toBe(false);
   });
+
+  test("forwards worktree.rename with worktreeId/name and returns the title", async () => {
+    const renamed = {
+      ok: true as const,
+      result: {
+        id: "t1",
+        projectId: "p1",
+        workspaceId: "w9",
+        path: "/data/repo/demo-a",
+        branch: "demo-a",
+        head: "abc",
+        baseRef: "main",
+        title: "My feature",
+        createdAt: "2026-09-07T00:00:00Z",
+      },
+    };
+    const seen: Array<{ method: string; params: object }> = [];
+    const result = await dispatchProjectRequest(
+      "worktreeRename",
+      { worktreeId: "t1", name: "My feature" },
+      async (method, params) => {
+        seen.push({ method, params });
+        return renamed;
+      },
+    );
+    expect(seen).toEqual([
+      { method: "worktree.rename", params: { worktreeId: "t1", name: "My feature" } },
+    ]);
+    expect(result).toEqual(renamed);
+  });
+
+  test("rejects worktree.rename with a blank name before reaching the service", async () => {
+    let called = false;
+    const result = await dispatchProjectRequest(
+      "worktreeRename",
+      { worktreeId: "t1", name: "" },
+      async () => {
+        called = true;
+        return { ok: true as const, result: {} };
+      },
+    );
+    expect(called).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  test("preserves a renamed worktree title through the list response", async () => {
+    const listed = {
+      ok: true as const,
+      result: {
+        worktrees: [
+          {
+            id: "t1",
+            projectId: "p1",
+            workspaceId: "w9",
+            path: "/data/repo/demo-a",
+            branch: "demo-a",
+            head: "abc",
+            baseRef: null,
+            title: "ZQ",
+            createdAt: "2026-09-07T00:00:00Z",
+          },
+        ],
+      },
+    };
+    const result = await dispatchProjectRequest(
+      "worktreeList",
+      { projectId: "p1" },
+      async () => listed,
+    );
+    expect(result).toEqual(listed);
+  });
+
+  test("accepts a worktree without a title (never renamed yet)", async () => {
+    const listed = {
+      ok: true as const,
+      result: {
+        worktrees: [
+          {
+            id: "t1",
+            projectId: "p1",
+            workspaceId: "w9",
+            path: "/data/repo/demo-a",
+            branch: "demo-a",
+            head: "abc",
+            baseRef: null,
+            title: null,
+            createdAt: "2026-09-07T00:00:00Z",
+          },
+        ],
+      },
+    };
+    const result = await dispatchProjectRequest(
+      "worktreeList",
+      { projectId: "p1" },
+      async () => listed,
+    );
+    expect(result).toEqual(listed);
+  });
 });

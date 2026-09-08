@@ -387,6 +387,7 @@ mod tests {
             branch: "issue-7-fix-the-sidebar".into(),
             head: "abc123".into(),
             base_ref: None,
+            title: None,
             created_at: "2026-09-06T12:00:00Z".into(),
         };
         let result = TasksStartResult {

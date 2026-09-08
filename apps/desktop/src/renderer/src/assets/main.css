@@ -2283,3 +2283,170 @@
   --git-decoration-copied: #73c991;
   --git-decoration-ignored: #6e6e6e;
 }
+
+/* R9-A worktree card actions (append-only): Radix context-menu chrome for
+   the card menu, the inline-rename editor, the delete-dialog extras, and
+   the ahead/behind + PR + agent-summary badges. Mirrors the source's
+   dropdown panel, item rows with icons, shortcut chip, and destructive
+   row; tokens follow this repo's theme variables. */
+.shell-worktree-context-menu-scope {
+  position: relative;
+  min-width: 0;
+}
+.shell-worktree-context-menu-trigger {
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.shell-worktree-context-menu {
+  z-index: 70;
+  min-width: 13rem;
+  padding: 4px;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.8);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.22);
+}
+.shell-worktree-context-menu-label {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.shell-worktree-context-menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 17px;
+  border-radius: calc(var(--radius) * 0.6);
+  outline: none;
+  user-select: none;
+  cursor: default;
+}
+.shell-worktree-context-menu-item:focus-visible,
+.shell-worktree-context-menu-item[data-highlighted] {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.shell-worktree-context-menu-item[data-disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.shell-worktree-context-menu-item svg {
+  flex-shrink: 0;
+}
+.shell-worktree-context-menu-item-destructive {
+  color: #dc2626;
+}
+.shell-worktree-context-menu-item-destructive:focus-visible,
+.shell-worktree-context-menu-item-destructive[data-highlighted] {
+  background: color-mix(in srgb, #dc2626 10%, transparent);
+  color: #dc2626;
+}
+.shell-worktree-context-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+.shell-worktree-context-menu-shortcut {
+  margin-left: auto;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.shell-worktree-title-rename {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+.shell-worktree-title-rename-input {
+  min-width: 0;
+  height: 1lh;
+  padding: 0;
+  font: inherit;
+  color: var(--foreground);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+.shell-worktree-title-rename-input:disabled {
+  opacity: 0.6;
+}
+.shell-worktree-title-rename-error {
+  font-size: 11px;
+  color: #dc2626;
+  overflow-wrap: anywhere;
+}
+.shell-delete-dialog {
+  gap: 10px;
+}
+.shell-dialog-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.shell-delete-dialog-description {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.shell-delete-target-preview {
+  padding: 8px 12px;
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: calc(var(--radius) * 0.8);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  overflow-wrap: anywhere;
+}
+.shell-delete-dirty-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #dc2626;
+}
+.shell-delete-warning-panel {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: calc(var(--radius) * 0.8);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+.shell-worktree-card-ahead-behind {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.shell-worktree-card-pr {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--foreground);
+}
+.shell-worktree-card-agents {
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}

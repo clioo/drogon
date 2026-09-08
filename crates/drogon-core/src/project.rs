@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::{Engine, error, now_rfc3339, optional_str, require_str};
 
 pub(crate) const PROJECTS_SCHEMA_COMPONENT: &str = "projects";
-pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 1;
+pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 2;
 
 fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
@@ -56,12 +56,38 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             |r| r.get(0),
         )
         .optional()?;
-    if existing.is_none() {
-        create_v1_tables(tx)?;
-        tx.execute(
-            "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
-            params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
-        )?;
+    // v2 adds the nullable display-title column renamed by
+    // `worktree.rename` (Orca's inline rename renames the card's display
+    // title only — never the git branch, never the directory).
+    fn apply_v2_title_column(tx: &Transaction) -> rusqlite::Result<()> {
+        let has_title: bool = tx
+            .prepare("PRAGMA table_info(worktrees)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .any(|name| name == "title");
+        if !has_title {
+            tx.execute("ALTER TABLE worktrees ADD COLUMN title TEXT", [])?;
+        }
+        Ok(())
+    }
+    match existing {
+        None => {
+            create_v1_tables(tx)?;
+            apply_v2_title_column(tx)?;
+            tx.execute(
+                "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        Some(1) => {
+            apply_v2_title_column(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        _ => {}
     }
     Ok(())
 }

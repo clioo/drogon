@@ -436,6 +436,7 @@ impl Engine {
             "worktree.create" => self.mutating(request, Self::do_worktree_create),
             "worktree.list" => self.do_worktree_list(&request.params),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
+            "worktree.rename" => self.mutating(request, Self::do_worktree_rename),
             "tasks.list" => self.do_tasks_list(&request.params),
             "tasks.show" => self.do_tasks_show(&request.params),
             "tasks.start" => self.mutating(request, Self::do_tasks_start),

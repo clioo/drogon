@@ -34,7 +34,8 @@ import type { ProjectGroup } from "./project-adapter";
 import { filterProjectGroups } from "./project-adapter";
 import { isWideSidebarHeader } from "./app-chrome-layout";
 import { AddProjectDialog } from "./AddProjectDialog";
-import { RemoveWorktreeDialog } from "./RemoveWorktreeDialog";
+import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
+import { readSkipDeleteWorktreeConfirm } from "./DeleteWorktreeSkipConfirmOption";
 import { WorktreeCard } from "./WorktreeCard";
 
 /** Which project dialog the sidebar currently shows, if any. */
@@ -141,6 +142,7 @@ export function ProjectList({
   onBrowse,
   onSubmitAdd,
   onSubmitRemove,
+  onSubmitRename,
 }: {
   groups: ProjectGroup[];
   workspaces: Workspace[];
@@ -163,6 +165,7 @@ export function ProjectList({
     name?: string;
   }) => Promise<string | null>;
   onSubmitRemove: (worktree: Worktree, force: boolean) => Promise<string | null>;
+  onSubmitRename: (worktree: Worktree, name: string) => Promise<string | null>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -336,16 +339,30 @@ export function ProjectList({
           worktreesAvailable={worktreesAvailable}
           onSelectWorkspace={onSelectWorkspace}
           onNewWorktree={() => onCreateWorkspace(group.project.id)}
-          onRemoveWorktree={(worktree) =>
-            onOpenAction({ kind: "remove", worktreeId: worktree.id })
-          }
+          onRemoveWorktree={(worktree) => {
+            // The persisted "Don't ask again" preference bypasses the
+            // dialog; a failure reopens it so the error stays visible.
+            if (
+              readSkipDeleteWorktreeConfirm() &&
+              !isImplicitFolderWorktree(worktree)
+            ) {
+              void onSubmitRemove(worktree, false).then((failure) => {
+                if (failure)
+                  onOpenAction({ kind: "remove", worktreeId: worktree.id });
+              });
+              return;
+            }
+            onOpenAction({ kind: "remove", worktreeId: worktree.id });
+          }}
+          onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
         />
       ))}
       {removeTarget && (
-        <RemoveWorktreeDialog
+        <DeleteWorktreeDialog
           worktree={removeTarget}
           workspaces={workspaces}
           disabled={disabled}
+          isFolderWorkspaceDelete={isImplicitFolderWorktree(removeTarget)}
           onSubmit={(force) => onSubmitRemove(removeTarget, force)}
           onClose={onCloseAction}
         />
@@ -404,6 +421,7 @@ function ProjectRow({
   onSelectWorkspace,
   onNewWorktree,
   onRemoveWorktree,
+  onRenameWorktree,
 }: {
   group: ProjectGroup;
   workspaces: Workspace[];
@@ -414,6 +432,7 @@ function ProjectRow({
   onSelectWorkspace: (workspaceId: string) => void;
   onNewWorktree: () => void;
   onRemoveWorktree: (worktree: Worktree) => void;
+  onRenameWorktree: (worktree: Worktree, name: string) => Promise<string | null>;
 }) {
   const project: Project = group.project;
   const canCreate =
@@ -447,12 +466,20 @@ function ProjectRow({
             sessions={sessions}
             selected={worktree.workspaceId === selectedWorkspaceId}
             disabled={disabled}
+            projectKind={project.kind}
+            implicitFolderWorktree={isImplicitFolderWorktree(worktree)}
             onSelect={onSelectWorkspace}
             onRemove={
               worktreesAvailable && !isImplicitFolderWorktree(worktree)
                 ? () => onRemoveWorktree(worktree)
                 : null
             }
+            onRename={
+              worktreesAvailable && !isImplicitFolderWorktree(worktree)
+                ? (name) => onRenameWorktree(worktree, name)
+                : null
+            }
+            onCreateWorktree={canCreate ? () => onNewWorktree() : null}
           />
         ))}
       </div>

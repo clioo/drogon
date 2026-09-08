@@ -17,6 +17,11 @@ pub struct Worktree {
     pub branch: String,
     pub head: String,
     pub base_ref: Option<String>,
+    /// Display title set by `worktree.rename`; `None` when never renamed.
+    /// Never a branch rename and never a directory move — mirrors Orca's
+    /// `updateWorktreeMeta(displayName)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub created_at: String,
 }
 
@@ -43,6 +48,29 @@ pub struct WorktreeRemoveParams {
     pub force: bool,
 }
 
+/// Display-title rename: `{ worktreeId, name }`. Renames exactly what
+/// Orca's inline rename renames — the card's display title — never the
+/// git branch and never the worktree directory.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeRenameParams {
+    pub worktree_id: String,
+    pub name: String,
+}
+
+impl WorktreeRenameParams {
+    pub fn validate_name(&self) -> Result<(), crate::RpcError> {
+        let trimmed = self.name.trim();
+        if trimmed.is_empty() || self.name.len() > 256 || self.name.contains('\0') {
+            return Err(crate::RpcError::new(
+                "invalid_argument",
+                "Invalid worktree name.",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeListResult {
@@ -63,6 +91,7 @@ mod tests {
             branch: "feature".into(),
             head: "abc123".into(),
             base_ref: Some("main".into()),
+            title: None,
             created_at: "2026-09-05T12:00:00Z".into(),
         }
     }
@@ -110,6 +139,33 @@ mod tests {
         let forced: WorktreeRemoveParams =
             serde_json::from_value(json!({"id": "w1", "force": true})).unwrap();
         assert!(forced.force);
+    }
+
+    #[test]
+    fn title_is_additive_and_defaults_to_none() {
+        let value = serde_json::to_value(sample()).unwrap();
+        assert!(value.get("title").is_none());
+        let mut titled = sample();
+        titled.title = Some("My feature".into());
+        let value = serde_json::to_value(&titled).unwrap();
+        assert_eq!(value["title"], "My feature");
+        let back: Worktree = serde_json::from_value(value).unwrap();
+        assert_eq!(back.title.as_deref(), Some("My feature"));
+    }
+
+    #[test]
+    fn rename_params_use_worktree_id_and_name_wire_keys() {
+        let params: WorktreeRenameParams =
+            serde_json::from_value(json!({"worktreeId": "w1", "name": "New title"})).unwrap();
+        assert_eq!(params.worktree_id, "w1");
+        params.validate_name().unwrap();
+        for bad in ["", "   ", &"x".repeat(257), "has\0nul"] {
+            let params = WorktreeRenameParams {
+                worktree_id: "w1".into(),
+                name: bad.into(),
+            };
+            assert!(params.validate_name().is_err(), "must reject {bad:?}");
+        }
     }
 
     #[test]

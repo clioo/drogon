@@ -64,6 +64,7 @@ let window: BrowserWindow | null = null;
 function registerBridge() {
   registerGitBridge(() => window);
   registerProjectBridge(() => window);
+  registerShellBridge(() => window);
   registerSettingsProbes(() => window);
   registerTasksBridge(() => window);
   registerBotBridge(() => window);

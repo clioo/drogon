@@ -28,6 +28,13 @@ export function isExternalUrlAllowed(url: unknown): url is string {
   return parsed.protocol === "https:" || parsed.protocol === "http:";
 }
 
+export type ShellShowItemResult = { shown: true };
+export type ShellOpenPathResult = { opened: true };
+
 export interface ShellBridge {
   openExternal(url: string): Promise<Result<ShellOpenExternalResult>>;
+  /** Reveal a path in Finder (R9-A worktree card menu). */
+  showItemInFolder(input: { path: string }): Promise<Result<ShellShowItemResult>>;
+  /** Open a path with the system default handler (R9-A worktree card menu). */
+  openPath(input: { path: string }): Promise<Result<ShellOpenPathResult>>;
 }
