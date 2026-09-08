@@ -138,6 +138,22 @@ export interface DesktopBridge extends FileBridge, BotBridge {
     input: Identity & { cols: number; rows: number },
   ): Promise<Result<Session>>;
   stop(input: Identity): Promise<Result<Session>>;
+  /**
+   * Additive (R16-AL2, issue #228): the user-initiated close. Stops a live
+   * PTY when this service instance owns it and forgets the durable record,
+   * so exited rows AND post-restart `unverifiable` stubs alike release
+   * their tab (a stub can never be resolved to `exited` — loss of contact
+   * is not exit — so an explicit close is the honest dismissal). The
+   * returned verdict is observed truth only: a forgotten stub still reads
+   * `unverifiable`.
+   */
+  close(input: Identity): Promise<Result<Session>>;
+  /**
+   * Additive (R16-AL2, issue #228): forgets a record this service
+   * instance holds no live handle for (a stub or an exited row). Refuses
+   * a live session — `close` is the route that stops first.
+   */
+  forget(input: Identity): Promise<Result<Session>>;
   /** Non-secret packaged build identity (or `null` in development, or a build without it); never a token or path. */
   buildInfo(): Promise<{
     revision: string;

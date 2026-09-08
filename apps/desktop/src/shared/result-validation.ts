@@ -90,6 +90,8 @@ export const resultSchemas: Record<string, z.ZodType> = {
   "session.write": z.object({ acceptedBytes: z.number().int().nonnegative() }),
   "session.resize": session,
   "session.stop": session,
+  "session.close": session,
+  "session.forget": session,
   "harness.list": z
     .object({ hostId: id, harnesses: z.array(harness) })
     .transform((value) => ({

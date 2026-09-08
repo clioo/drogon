@@ -724,6 +724,26 @@ pub(crate) fn stop(handle: &SessionHandle) -> Result<Value, RpcError> {
     stop_with_action(handle).session
 }
 
+/// Forgets the durable row of a session the caller is explicitly done with
+/// (R16-AL2, issue #228). This is the only honest way to dismiss an
+/// `unverifiable` stub: the liveness rule forbids rewriting loss of contact
+/// as `exited`, so the record cannot be "resolved" — it can only be
+/// removed. Callers must stop (or positively confirm the exit of) any live
+/// handle before forgetting; an orphaned live PTY is the one outcome this
+/// module must never produce.
+pub(crate) fn forget_record(conn: &rusqlite::Connection, session_id: &str) -> Result<(), RpcError> {
+    let changed = conn
+        .execute(
+            "DELETE FROM sessions WHERE id = ?1",
+            rusqlite::params![session_id],
+        )
+        .map_err(error::from_sqlite)?;
+    if changed != 1 {
+        return Err(error::not_found("session not found"));
+    }
+    Ok(())
+}
+
 pub(crate) struct StopObservation {
     pub(crate) process_action: drogon_protocol::orchestration_worker::ProcessAction,
     pub(crate) session: Result<Value, RpcError>,
@@ -853,6 +873,10 @@ pub(crate) fn base64_decode(text: &str) -> Result<Vec<u8>, RpcError> {
         .decode(text)
         .map_err(|_| error::invalid_argument("dataBase64 is not valid base64"))
 }
+
+#[cfg(test)]
+#[path = "session_close_tests.rs"]
+mod session_close_tests;
 
 #[cfg(test)]
 mod headless_completion_tests {

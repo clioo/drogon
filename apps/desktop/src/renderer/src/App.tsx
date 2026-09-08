@@ -244,9 +244,13 @@ import {
   SettingsStore,
 } from "./settings-store";
 import {
+  assertCloseReplyFor,
   recoveryActionFor,
   recoveryTabLabel,
   retryAffordanceDisabled,
+  retryOfferKey,
+  retryStillUnverifiable,
+  SESSIONS_INVALIDATE_EVENT,
 } from "./session-recovery";
 import {
   applyThemeToRoot,
@@ -1447,9 +1451,39 @@ export function App() {
       }),
     [action],
   );
+  // R16-AL2 (issue #228): per-tab "Retry connection". `refresh` re-attaches
+  // anything the service can still serve (a healed connection keeps its
+  // handles; those panes resume on their own). The pending set remembers
+  // which sessions were unverifiable when the click happened; when the
+  // fresh list lands, the ones STILL unverifiable advance
+  // `recoveryOfferNonce`, and their panes swap the inert retry loop for
+  // the recovery overlay (Restart). One bump serves every still-dead
+  // session — each pane gates on its own verdict and dismissed nonce.
+  const [recoveryOfferNonce, setRecoveryOfferNonce] = useState(0);
+  const retryOfferPendingRef = useRef<Set<string> | null>(null);
+  const retryConnection = useCallback(() => {
+    retryOfferPendingRef.current = new Set(
+      sessionsRef.current
+        .filter((item) => item.verdict === "unverifiable")
+        .map((item) => retryOfferKey(item)),
+    );
+    void refresh();
+  }, [refresh]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    // R16-AL2 (issue #228): Settings → Terminal kills/closes sessions
+    // directly through the daemon (its Kill buttons act on stubs too, via
+    // `session.close`, which forgets the record). App owns no part of that
+    // flow, so the pane re-lists on this signal: forgotten rows simply
+    // never come back, and their tabs disappear. Registered once:
+    // setRevision is a stable state setter.
+    const onInvalidate = () => setRevision((value) => value + 1);
+    window.addEventListener(SESSIONS_INVALIDATE_EVENT, onInvalidate);
+    return () =>
+      window.removeEventListener(SESSIONS_INVALIDATE_EVENT, onInvalidate);
+  }, []);
   // R16-AJ (fixes #218): background workspaces reload for out-of-band
   // registry moves (digest below) and daemon reconnects (R16-M path).
   // Silent by design: a transient failure keeps the prior list (the
@@ -1575,6 +1609,18 @@ export function App() {
           (item) => !isSessionDismissed(dismissed, item.hostId, item),
         );
         setSessions(visible);
+        // R16-AL2 (issue #228): a user-initiated Retry connection captured
+        // the then-unverifiable sessions before refreshing; whichever of
+        // them THIS fresh list still reports unverifiable resolved nothing
+        // by waiting, so their panes may offer the recovery overlay
+        // (Restart). Live-again sessions re-attach on their own and are
+        // never offered.
+        const pending = retryOfferPendingRef.current;
+        if (pending && pending.size > 0) {
+          retryOfferPendingRef.current = null;
+          if (retryStillUnverifiable(pending, visible).length > 0)
+            setRecoveryOfferNonce((value) => value + 1);
+        }
         setActive((value) =>
           visible.some((item) => item.id === value)
             ? value
@@ -2568,10 +2614,16 @@ export function App() {
     changeTheme(
       theme === "system" ? "dark" : theme === "dark" ? "light" : "system",
     );
+  // The tab close is an explicit, confirmed dismissal (R16-AL2, issue
+  // #228): `session.close` stops a live PTY and forgets the durable
+  // record, so `exited` rows AND post-restart `unverifiable` stubs alike
+  // release their tab. The reply verdict is never gated on: a stub keeps
+  // its honest `unverifiable` (loss of contact is not exit) and is
+  // removed anyway — the user, not the liveness oracle, decided to close.
   const close = (session: Session) =>
     action(async () => {
       const result = checked(
-        await window.drogon.stop({
+        await window.drogon.close({
           sessionId: session.id,
           incarnation: session.incarnation,
         }),
@@ -2580,15 +2632,8 @@ export function App() {
       // reply at the IPC boundary; this is defense-in-depth so a confirmed
       // dismissal is never recorded against the wrong session if that
       // boundary were ever bypassed.
-      if (
-        result.id !== session.id ||
-        result.incarnation !== session.incarnation ||
-        result.hostId !== session.hostId
-      )
-        throw new Error("The service's response was not for this session.");
-      if (result.verdict !== "exited")
-        throw new Error("Session exit is not confirmed. The tab remains open.");
-      // Only an explicit, confirmed close hides the tab going forward — a
+      assertCloseReplyFor(result, session);
+      // Only an explicit close hides the tab going forward — a
       // session that merely exited on its own must keep reappearing.
       // Dismissal keys off the session's own recorded host, not this
       // connection's current (mutable) belief about which host it's on.
@@ -2650,20 +2695,16 @@ export function App() {
       });
     });
   const stopOneSession = async (session: Session) => {
+    // Pane teardown inside a tab close is a dismissal too (R16-AL2, #228):
+    // `close` stops the PTY when live and forgets the record, so a split
+    // member that is a post-restart stub cannot survive the tab close.
     const result = checked(
-      await window.drogon.stop({
+      await window.drogon.close({
         sessionId: session.id,
         incarnation: session.incarnation,
       }),
     );
-    if (
-      result.id !== session.id ||
-      result.incarnation !== session.incarnation ||
-      result.hostId !== session.hostId
-    )
-      throw new Error("The service's response was not for this session.");
-    if (result.verdict !== "exited")
-      throw new Error("Session exit is not confirmed. The tab remains open.");
+    assertCloseReplyFor(result, session);
     markSessionDismissed(session.hostId, session.id, session.incarnation);
   };
   // Closing one split pane (header X, context menu, exit overlay): only
@@ -2812,6 +2853,33 @@ export function App() {
         typeof detail.sessionId === "string"
           ? sessionsRef.current.find((item) => item.id === detail.sessionId)
           : undefined;
+      // R16-AL2 (issue #228): restarting a post-restart stub revives its
+      // work as a NEW session; the stub record itself must then be
+      // forgotten (`session.close`, best-effort) or its unverifiable row
+      // would linger beside the revived terminal — and a tombstone cannot
+      // hide it, since dismissal only ever masks `exited` sessions. A
+      // genuinely exited session keeps its record: its tab and retained
+      // output are still meaningful.
+      const forgetRevivedStub = (session: Session | undefined) => {
+        if (!session || session.verdict !== "unverifiable") return;
+        markSessionDismissed(session.hostId, session.id, session.incarnation);
+        setSessions((items) =>
+          items.filter(
+            (item) =>
+              !(
+                item.id === session.id &&
+                item.hostId === session.hostId &&
+                item.incarnation === session.incarnation
+              ),
+          ),
+        );
+        void window.drogon
+          .close({
+            sessionId: session.id,
+            incarnation: session.incarnation,
+          })
+          .catch(() => {});
+      };
       const launch = projectTerminalRestartLaunch(prior, detail.workspaceId);
       void action(async () => {
         const captured = {
@@ -2860,6 +2928,7 @@ export function App() {
           );
           if (old)
             markSessionDismissed(old.hostId, old.id, old.incarnation);
+          forgetRevivedStub(old);
           setSessions((items) =>
             appendOrReplaceSession(
               items.filter((item) => item.id !== detail.sessionId),
@@ -2871,6 +2940,7 @@ export function App() {
           );
           return;
         }
+        forgetRevivedStub(prior);
         setSessions((items) => appendOrReplaceSession(items, result));
         setActive(result.id);
       });
@@ -3402,7 +3472,7 @@ export function App() {
                 onCloseSession={(item) => void closeTabSession(item)}
                 onCloseBrowserTab={(tabId) => void closeBrowserTab(tabId)}
                 onCloseEditorTab={closeEditorTab}
-                onRetry={() => void refresh()}
+                onRetry={() => void retryConnection()}
                 onCreateTerminal={() => void create()}
                 onLaunchHarness={launchHarness}
                 onNewBrowserTab={() => void newBrowserTab()}
@@ -3464,6 +3534,7 @@ export function App() {
                     revision={revision}
                     fontSize={terminalFontSize}
                     gpuMode={terminalGpuAcceleration}
+                    recoveryNonce={recoveryOfferNonce}
                     canSplit={Boolean(
                       selected && status && !busy && !loadingSessions,
                     )}

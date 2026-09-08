@@ -15,6 +15,7 @@ import {
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
 import { probeRenderedSessionRestart } from "./probe-rendered-session-restart.mjs";
+import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
@@ -507,6 +508,38 @@ try {
     // agent-state timestamp — with no wipe and the New tab button intact.
     report.checks.push(
       ...(await probeRenderedSessionRestart({
+        page,
+        workspaceId: registered.id,
+        output,
+        dataDir,
+        daemon,
+        daemonBin: path.join(
+          root,
+          "target",
+          "debug",
+          process.platform === "win32" ? "drogond.exe" : "drogond",
+        ),
+        cliBin: path.join(
+          root,
+          "target",
+          "debug",
+          process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
+        ),
+        adoptDaemon: (child) => {
+          daemon = child;
+        },
+      })),
+    );
+  }
+  if (!packaged) {
+    // R16-AL2 (fixes #228): kill -9 the restarted daemon again, seed two
+    // rows the startup sweep turns into `unverifiable` stubs, and prove
+    // the strip's stubs are closable (tab close forgets), retriable
+    // (Retry offers the recovery overlay with Restart, which revives and
+    // forgets), and clearable (Settings → Terminal → Kill all sessions
+    // acts on stubs and live sessions alike).
+    report.checks.push(
+      ...(await probeRenderedExitedStubs({
         page,
         workspaceId: registered.id,
         output,

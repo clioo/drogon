@@ -131,6 +131,89 @@ describe("terminal manage sessions", () => {
     expect(await screen.findByText("Killed all sessions.")).toBeDefined();
   });
 
+  // R16-AL2 (issue #228): `stop` alone was a silent no-op on post-restart
+  // stubs — it reports their verdict but can never remove them. Kill all
+  // goes through `close` so every row kind is actually cleared.
+  test("kill-all closes (kill + forget) every listed session, stubs included", async () => {
+    const close = vi.fn(async () => ({ ok: true, result: session() }));
+    const stop = vi.fn(async () => ({ ok: true, result: session() }));
+    (window as { drogon?: unknown }).drogon = {
+      workspaces: async () => ({ ok: true, result: { workspaces: [workspace()] } }),
+      sessions: async () => ({
+        ok: true,
+        result: {
+          sessions: [
+            session(),
+            session({
+              id: "stub",
+              verdict: "unverifiable",
+              agentState: "unknown",
+            }),
+          ],
+        },
+      }),
+      stop,
+      close,
+    };
+    render(<TerminalSection />);
+    fireEvent.click(await screen.findByRole("button", { name: "Kill all sessions" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm kill all sessions" }),
+    );
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+    expect(stop).not.toHaveBeenCalled();
+    expect(await screen.findByText("Killed all sessions.")).toBeDefined();
+  });
+
+  test("killing one unverifiable stub closes (forgets) it instead of stopping", async () => {
+    const close = vi.fn(async () => ({
+      ok: true,
+      result: session({ verdict: "unverifiable" }),
+    }));
+    const stop = vi.fn(async () => ({ ok: true, result: session() }));
+    (window as { drogon?: unknown }).drogon = {
+      workspaces: async () => ({ ok: true, result: { workspaces: [workspace()] } }),
+      sessions: async () => ({
+        ok: true,
+        result: {
+          sessions: [session({ verdict: "unverifiable", agentState: "unknown" })],
+        },
+      }),
+      stop,
+      close,
+    };
+    render(<TerminalSection />);
+    fireEvent.click(await screen.findByRole("button", { name: "Kill session s1" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm kill session s1" }),
+    );
+    await waitFor(() =>
+      expect(close).toHaveBeenCalledWith({ sessionId: "s1", incarnation: "i1" }),
+    );
+    expect(stop).not.toHaveBeenCalled();
+    expect(await screen.findByText("Killed session.")).toBeDefined();
+  });
+
+  test("killing one live session still stops it (record stays as exited)", async () => {
+    const close = vi.fn(async () => ({ ok: true, result: session() }));
+    const stop = vi.fn(async () => ({ ok: true, result: session() }));
+    (window as { drogon?: unknown }).drogon = {
+      workspaces: async () => ({ ok: true, result: { workspaces: [workspace()] } }),
+      sessions: async () => ({ ok: true, result: { sessions: [session()] } }),
+      stop,
+      close,
+    };
+    render(<TerminalSection />);
+    fireEvent.click(await screen.findByRole("button", { name: "Kill session s1" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm kill session s1" }),
+    );
+    await waitFor(() =>
+      expect(stop).toHaveBeenCalledWith({ sessionId: "s1", incarnation: "i1" }),
+    );
+    expect(close).not.toHaveBeenCalled();
+  });
+
   test("refresh re-lists after sessions change", async () => {
     let ids = ["s1"];
     (window as { drogon?: unknown }).drogon = {

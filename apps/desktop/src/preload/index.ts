@@ -49,6 +49,10 @@ const bridge: DesktopBridge = {
   write: (value) => ipcRenderer.invoke("drogon:write", value),
   resize: (value) => ipcRenderer.invoke("drogon:resize", value),
   stop: (value) => ipcRenderer.invoke("drogon:stop", value),
+  // R16-AL2 (issue #228): close stops a live PTY and forgets the record;
+  // forget removes a handle-less record. Both return the final Session.
+  close: (value) => ipcRenderer.invoke("drogon:close", value),
+  forget: (value) => ipcRenderer.invoke("drogon:forget", value),
   harnesses: () => ipcRenderer.invoke("drogon:harnesses"),
   startHarness: (value) => ipcRenderer.invoke("drogon:startHarness", value),
   buildInfo: () => ipcRenderer.invoke("drogon:buildInfo"),
