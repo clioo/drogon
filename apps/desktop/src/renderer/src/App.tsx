@@ -197,6 +197,7 @@ import {
 } from "./automations-mount";
 import {
   TASKS_CAPABILITY,
+  TASKS_PAGE_HOST_TESTID,
   TASKS_ROUTE_ID,
   createGatedTasksBridge,
   createGatedTasksProjectBridge,
@@ -939,6 +940,10 @@ export function App() {
   // Bots header Back closes the page like the fork: it rides a ref because
   // the view-history handler is defined further down this component.
   const botsCloseRef = useRef<() => void>(() => {});
+  // #270: same pattern for the Tasks page's Close/Esc — the registered
+  // descriptor (the workspace-scoped mount) needs a stable onClose that
+  // resolves to the view-history handler defined further down.
+  const tasksCloseRef = useRef<() => void>(() => {});
   // #237: the Bots page registers the moment its scope exists — over an
   // empty placeholder snapshot with snapshotPending — so the nav switch
   // paints the fork's page chrome (header + loading state) in the same
@@ -1398,6 +1403,11 @@ export function App() {
         onOpenTerminal: (workspaceId: string) => {
           void openTaskTerminal(workspaceId);
         },
+        // #270: the descriptor mount previously rendered with onClose
+        // undefined, so the header Close button and Escape were no-ops
+        // whenever a workspace was selected (the no-workspace mount below
+        // passed goBackViewHistory directly and worked).
+        onClose: () => tasksCloseRef.current(),
       }),
     [filesBaseRegistry, tasksGatedBridge, loadTaskGroups, openTaskTerminal],
   );
@@ -1810,6 +1820,7 @@ export function App() {
     applyViewEntry(currentView(next));
   };
   botsCloseRef.current = goBackViewHistory;
+  tasksCloseRef.current = goBackViewHistory;
   const goForwardViewHistory = () => {
     const next = goForwardView(viewHistory, liveWorkspaceIds);
     if (next === viewHistory) return;
@@ -3759,7 +3770,7 @@ export function App() {
                 ref={tasksSectionRef}
                 tabIndex={-1}
                 className="terminal-column"
-                data-testid="tasks-page-host"
+                data-testid={TASKS_PAGE_HOST_TESTID}
                 style={{
                   display: route === TASKS_ROUTE_ID ? undefined : "none",
                 }}

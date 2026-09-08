@@ -47,6 +47,10 @@ import {
   loadIssueSourcePreference,
   saveIssueSourcePreference,
 } from "./issue-source-preference";
+import {
+  TASKS_PAGE_HOST_SELECTOR,
+  useTaskPageGlobalEscape,
+} from "./task-page-global-escape";
 
 /** `tasks.remotes` reports slugs as `owner/repo`; anything else is treated
  *  as absent rather than trusted (the selector's null rules decide from
@@ -160,6 +164,12 @@ function writeTasksPageCache(key: TasksPageCacheKey, result: TasksPageCachedResu
 }
 
 export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: TasksPageHost) {
+  // #270: fork `use-task-page-global-effects.ts` — Escape closes the page
+  // from anywhere (window capture) once the page is the visible surface.
+  useTaskPageGlobalEscape({
+    closeTaskPage: () => onClose?.(),
+    hostSelector: TASKS_PAGE_HOST_SELECTOR,
+  });
   const [groups, setGroups] = useState<ProjectGroup[]>(() => loadGroups());
   const [projectId, setProjectId] = useState<string | null>(() =>
     pickDefaultProject(loadGroups()),

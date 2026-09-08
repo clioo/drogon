@@ -112,6 +112,9 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
 } {
   const log = deps.log ?? ((message: string) => console.log(message));
   let states = new Map<string, string>();
+  // #272: false until the first poll has seeded the baseline, so the boot
+  // snapshot never floods the renderer with first-sighting events.
+  let primed = false;
   let inFlight = false;
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -120,8 +123,11 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
     inFlight = true;
     try {
       const { sessions, workspaceNames } = await deps.listSessions();
-      const { next, transitions } = diffAgentStates(states, sessions);
+      const { next, transitions } = diffAgentStates(states, sessions, {
+        emitFirstSightings: primed,
+      });
       states = next;
+      primed = true;
       for (const transition of transitions) {
         const window = deps.getWindow();
         const agentState =

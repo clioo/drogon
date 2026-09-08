@@ -141,6 +141,39 @@ describe("createNeedsInputWatcher", () => {
     expect(states[0].event).toMatchObject({ sessionId: "a", agentState: "idle" });
   });
 
+  it("#272: the boot poll is baseline; an out-of-band session forwards on a later tick", async () => {
+    const window = fakeWindow();
+    const shell = (id: string): WatchedSession => ({
+      id,
+      workspaceId: "ws-1",
+      command: "/bin/sleep",
+      harnessId: null,
+      agentState: "unknown",
+      agentStateAt: null,
+    });
+    // Tick 1: the pre-existing session list (baseline — quiet). Tick 2: a
+    // session created out-of-band by drogon-cli appears in the same
+    // workspace; the renderer must hear about it so the strip refetches.
+    const deps = depsFor(window, [
+      { sessions: [shell("early")] },
+      { sessions: [shell("early"), shell("cli-late")] },
+    ]);
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(0);
+    const states = window.sent.filter(
+      (item) => item.channel === "ui:session-state-changed",
+    );
+    expect(states).toHaveLength(1);
+    expect(states[0].event).toMatchObject({
+      sessionId: "cli-late",
+      workspaceId: "ws-1",
+      agentState: "unknown",
+    });
+  });
+
   it("still forwards badge transitions while the toggle is off", async () => {
     const window = fakeWindow();
     const deps = depsFor(window, [{ sessions: [waiting("a")] }], {

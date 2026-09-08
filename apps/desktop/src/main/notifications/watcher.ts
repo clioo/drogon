@@ -36,10 +36,19 @@ function normalizedState(session: WatchedSession): string {
  * render the new state; only entering `needs_input` also notifies), plus
  * a leave entry for a `needs_input` session that vanished from the list.
  * Steady states stay quiet — the renderer already shows them.
+ *
+ * `emitFirstSightings` (#272): once the baseline poll is primed, a session
+ * the poller has never seen (created out-of-band by drogon-cli or another
+ * client) is forwarded like any transition — never notified — so the
+ * selected workspace's strip refetches and the new tab appears live, as
+ * the fork's push channel does. The first poll stays baseline: at boot the
+ * renderer fetches the list itself, and emitting every pre-existing
+ * session would only trigger one redundant refetch.
  */
 export function diffAgentStates(
   previous: ReadonlyMap<string, string>,
   sessions: WatchedSession[],
+  options?: { emitFirstSightings?: boolean },
 ): { next: Map<string, string>; transitions: SessionTransition[] } {
   const next = new Map<string, string>();
   const transitions: SessionTransition[] = [];
@@ -48,10 +57,14 @@ export function diffAgentStates(
     next.set(session.id, state);
     const was = previous.get(session.id);
     // A first sighting is the poll baseline, not a change — except an
-    // already-waiting session, which the renderer never saw enter.
+    // already-waiting session, which the renderer never saw enter, and
+    // (once primed) a genuinely new session, which the renderer's strip
+    // must learn about (#272).
     if (was === undefined) {
       if (state === "needs_input")
         transitions.push({ session, entered: true });
+      else if (options?.emitFirstSightings)
+        transitions.push({ session, entered: false });
       continue;
     }
     if (was === state) continue;
