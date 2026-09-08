@@ -594,6 +594,28 @@ async function probeStatusBarOverflow({ page, output }) {
   return ["status-bar-no-overflow-at-760-and-1440"];
 }
 
+/**
+ * Close every tab left in the Sessions strip (editor tabs from earlier
+ * probes) through the tab's own close affordance, answering a dirty-close
+ * dialog with the discard action when one appears.
+ */
+async function closeOpenStripTabs(page) {
+  const tabs = page.locator('[role="tablist"][aria-label="Sessions"] [role="tab"]');
+  for (let guard = 0; guard < 10 && (await tabs.count()) > 0; guard += 1) {
+    const tab = tabs.first();
+    await tab.hover();
+    const closer = tab.locator("[data-tab-close-button]");
+    if ((await closer.count()) > 0) await closer.first().click();
+    else {
+      await tab.click();
+      await page.keyboard.press("Meta+w");
+    }
+    const discard = page.getByRole("button", { name: /^(Don't save|Close without saving|Discard)$/ });
+    if (await discard.count()) await discard.first().click();
+    await page.waitForTimeout(150);
+  }
+}
+
 export async function probePackagedSurfaces({
   page,
   workspace,
@@ -768,6 +790,9 @@ export async function probePackagedSurfaces({
   checks.push(...(await probeSourceControlStage({ page, output })));
   // Later probes address the folder workspace again.
   await page.getByRole("button", { name: "Select folder" }).click();
+  // R15-C (#161): files opened by the Explorer probe stay as editor tabs in
+  // this workspace, so the empty landing only renders once they are closed.
+  await closeOpenStripTabs(page);
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
 
   // Right sidebar: with every session closed the details panel is empty.
