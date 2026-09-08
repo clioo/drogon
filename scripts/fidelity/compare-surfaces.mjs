@@ -569,7 +569,14 @@ const SURFACES = [
       "src/renderer/src/components/settings/NotificationsPane.tsx",
       "src/renderer/src/components/settings/NotificationSoundSection.tsx",
     ],
-    probes: ["Notifications", "Enable Notifications", "Terminal Bell", "aria-label"],
+    probes: [
+      "Notifications",
+      "Enable Notifications",
+      "Agent Task Complete",
+      "Terminal Bell",
+      "Suppress While Focused",
+      "aria-label",
+    ],
     candFiles: ["apps/desktop/src/renderer/src/features/settings/notifications-section.tsx"],
   },
   {

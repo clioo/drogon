@@ -83,7 +83,7 @@ export const SETTINGS_SECTIONS: readonly SettingsNavEntry[] = [
   {
     id: "notifications",
     title: "Notifications",
-    description: "When Drogon may interrupt you.",
+    description: "Native desktop notifications for agent and terminal events.",
     group: "interface",
     icon: Bell,
   },

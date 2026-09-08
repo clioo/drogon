@@ -1,22 +1,30 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/main/ipc/native-notification-delivery.ts (adapter: Orca's HTTP hook
-   server and sound selection collapse to polling session.list — this repo
-   has no daemon push channel, so the renderer polls as it does now and
-   main polls alongside it for transitions; click focuses the session tab
-   via ui:focus-session). */
+   src/main/ipc/native-notification-delivery.ts and
+   src/main/ipc/notification-options.ts (adapter: sound/permission UI stays
+   outside this MVP; BF2's session-state push feeds Agent Task Complete and
+   xterm BEL reaches main over the additive IPC channel; click focuses the
+   session tab via ui:focus-session). */
 import { nativeNotificationsSuppressed } from "./background-suppression";
 import { BrowserWindow, Notification, ipcMain } from "electron";
 import path from "node:path";
 import {
+  notificationBellSchema,
+  notificationPreferencesPatchSchema,
   notificationsIpcChannels,
   type FocusSessionEvent,
   type SessionStateChangedEvent,
 } from "../../shared/notifications-contract";
 import { callNative, dataDirectory } from "../native-client";
-import { NOTIFICATIONS_SETTINGS_FILE, NotificationsSettings } from "./settings";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  NOTIFICATIONS_SETTINGS_FILE,
+  NotificationsSettings,
+} from "./settings";
 import {
   diffAgentStates,
+  formatAgentTaskComplete,
   formatNeedsInput,
+  isAgentTaskCompleteTransition,
   type WatchedSession,
 } from "./watcher";
 
@@ -29,6 +37,8 @@ export type NeedsInputWatcherDeps = {
     workspaceNames: Map<string, string>;
   }>;
   isEnabled: () => boolean;
+  /** Fork suppressWhenFocused: do not interrupt an already focused app. */
+  suppressWhenFocused?: () => boolean;
   show: (title: string, body: string, onClick: () => void) => void;
   pollIntervalMs?: number;
   log?: (message: string) => void;
@@ -123,6 +133,7 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
     inFlight = true;
     try {
       const { sessions, workspaceNames } = await deps.listSessions();
+      const previousStates = states;
       const { next, transitions } = diffAgentStates(states, sessions, {
         emitFirstSightings: primed,
       });
@@ -146,7 +157,16 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
             stateEvent,
           );
         }
-        if (!transition.entered || !deps.isEnabled()) continue;
+        // The push stream owns working → needs_input completion banners. The
+        // polling fallback still forwards the state to the renderer, but must
+        // not double-deliver that same event when it catches up a few ms later.
+        if (
+          !transition.entered ||
+          previousStates.get(transition.session.id) === "working" ||
+          !deps.isEnabled() ||
+          (deps.suppressWhenFocused?.() ?? false)
+        )
+          continue;
         const { title, body } = formatNeedsInput(
           transition.session,
           workspaceNames.get(transition.session.workspaceId) ?? null,
@@ -205,7 +225,10 @@ function showElectronNotification(
 ): void {
   // Test instances (background window) keep the delivery log line but never
   // put a native banner on the user's screen.
-  if (nativeNotificationsSuppressed(process.env)) return;
+  if (nativeNotificationsSuppressed(process.env)) {
+    console.log(`[background] suppressed native notification: ${title} — ${body}`);
+    return;
+  }
   const notification = new Notification({
     title,
     body,
@@ -220,8 +243,115 @@ function showElectronNotification(
   notification.show();
 }
 
+export type AgentTaskCompletionEvent = SessionStateChangedEvent & {
+  /** Optional enrichment used by direct/unit-test consumers. */
+  command?: string;
+  harnessId?: string | null;
+};
+
+export type AgentTaskCompletionObserverDeps = {
+  getWindow: () => BrowserWindow | null;
+  isEnabled: () => boolean;
+  suppressWhenFocused?: () => boolean;
+  resolveContext?: (
+    event: AgentTaskCompletionEvent,
+  ) => Promise<{ session: WatchedSession; workspaceName: string | null }>;
+  show: (title: string, body: string, onClick: () => void) => void;
+  log?: (message: string) => void;
+};
+
+/**
+ * Consumes the same BF2 session-state stream used by the renderer. A first
+ * sighting is only a baseline; the fork's completion rule is specifically a
+ * working → idle/needs_input transition. Keeping this observer separate from
+ * the 2 s needs_input reconciliation means the native event is instant while
+ * the old poll remains a recovery path for badges.
+ */
+export function createAgentTaskCompletionObserver(
+  deps: AgentTaskCompletionObserverDeps,
+): { observe: (event: AgentTaskCompletionEvent) => void; reset: () => void } {
+  const states = new Map<string, string>();
+  const log = deps.log ?? ((message: string) => console.log(message));
+  const resolveContext =
+    deps.resolveContext ??
+    (async (event: AgentTaskCompletionEvent) => ({
+      session: {
+        id: event.sessionId,
+        workspaceId: event.workspaceId,
+        command: event.command ?? "",
+        harnessId: event.harnessId,
+        agentState: event.agentState,
+        agentStateAt: event.agentStateAt,
+      },
+      workspaceName: null,
+    }));
+
+  const observe = (event: AgentTaskCompletionEvent): void => {
+    const previous = states.get(event.sessionId);
+    states.set(event.sessionId, event.agentState);
+    if (!isAgentTaskCompleteTransition(previous, event.agentState)) return;
+    if (!deps.isEnabled() || (deps.suppressWhenFocused?.() ?? false)) return;
+    void resolveContext(event)
+      .then(({ session, workspaceName }) => {
+        // Settings/focus can change while session.list resolves.
+        if (!deps.isEnabled() || (deps.suppressWhenFocused?.() ?? false)) return;
+        const { title, body } = formatAgentTaskComplete(
+          { ...session, agentState: event.agentState },
+          workspaceName,
+        );
+        const focus: FocusSessionEvent = {
+          sessionId: event.sessionId,
+          workspaceId: event.workspaceId,
+        };
+        deps.show(title, body, () => {
+          const target = deps.getWindow();
+          if (!target || target.isDestroyed()) return;
+          if (target.isMinimized()) target.restore();
+          target.show();
+          target.focus();
+          target.webContents.send(
+            notificationsIpcChannels.focusSession,
+            focus,
+          );
+        });
+        log(`[drogon] agent_task_complete notification shown: ${title} — ${body}`);
+      })
+      .catch(() => {
+        // A missing session during daemon reconnect cannot prove completion
+        // false; the state transition remains consumed and the next one can
+        // notify normally.
+      });
+  };
+
+  return {
+    observe,
+    reset: () => states.clear(),
+  };
+}
+
 let settings: NotificationsSettings | null = null;
 let stopWatcher: (() => void) | null = null;
+let agentTaskCompletionObserver: ReturnType<
+  typeof createAgentTaskCompletionObserver
+> | null = null;
+
+function focusedWindow(getWindow: () => BrowserWindow | null): boolean {
+  const target = getWindow();
+  if (!target || target.isDestroyed()) return false;
+  return typeof target.isFocused === "function" && target.isFocused();
+}
+
+function focusSession(
+  getWindow: () => BrowserWindow | null,
+  focus: FocusSessionEvent,
+): void {
+  const target = getWindow();
+  if (!target || target.isDestroyed()) return;
+  if (target.isMinimized()) target.restore();
+  target.show();
+  target.focus();
+  target.webContents.send(notificationsIpcChannels.focusSession, focus);
+}
 
 function getSettings(): NotificationsSettings {
   if (!settings) {
@@ -246,6 +376,17 @@ export function setNotificationsSettingsForTests(
 export function stopNotificationsWatcherForTests(): void {
   stopWatcher?.();
   stopWatcher = null;
+  agentTaskCompletionObserver?.reset();
+  agentTaskCompletionObserver = null;
+}
+
+/** BF2 session-state consumer; main/session-state-bridge calls this for every
+ * deduped push event. Kept as a function seam so the bridge has no import of
+ * Electron delivery details beyond this additive consumer. */
+export function observeAgentStateForNotification(
+  event: AgentTaskCompletionEvent,
+): void {
+  agentTaskCompletionObserver?.observe(event);
 }
 
 // Same posture as the usage bridge: only our own window's main frame.
@@ -257,13 +398,45 @@ function isAppMainFrame(event: Electron.IpcMainInvokeEvent): boolean {
   );
 }
 
-/** Registers the toggle IPC and starts the transition poller. Main entry
- * owns the import; this line only loads the module. */
+export type TerminalBellNotificationDeps = {
+  getPreferences: () => ReturnType<NotificationsSettings["getPreferences"]>;
+  isFocused: () => boolean;
+  resolveWorkspaceName: (
+    workspaceId: string,
+  ) => Promise<string | null>;
+  show: (title: string, body: string, onClick: () => void) => void;
+  onClick: (event: { sessionId: string; workspaceId: string }) => void;
+};
+
+/** Pure bell-event admission used by the IPC handler and unit tests. */
+export function createTerminalBellNotificationHandler(
+  deps: TerminalBellNotificationDeps,
+): (input: unknown) => Promise<boolean> {
+  return async (input: unknown): Promise<boolean> => {
+    const parsed = notificationBellSchema.safeParse(input);
+    if (!parsed.success) return false;
+    const preferences = deps.getPreferences();
+    if (!preferences.enabled || !preferences.terminalBell) return false;
+    if (preferences.suppressWhenFocused && deps.isFocused()) return false;
+    const focus = parsed.data;
+    const workspaceName = (await deps.resolveWorkspaceName(focus.workspaceId)) ??
+      "workspace";
+    deps.show(
+      `Bell in ${workspaceName}`,
+      "Attention requested",
+      () => deps.onClick(focus),
+    );
+    return true;
+  };
+}
+
+/** Registers the toggle/event IPC and starts the transition poller. Main
+ * entry owns the import; this line only loads the module. */
 export function registerNotificationsIpc(
   getWindow: () => BrowserWindow | null,
 ): void {
   ipcMain.handle(notificationsIpcChannels.getEnabled, (event) => {
-    if (!isAppMainFrame(event)) return true;
+    if (!isAppMainFrame(event)) return DEFAULT_NOTIFICATION_PREFERENCES.enabled;
     return getSettings().getEnabled();
   });
   ipcMain.handle(
@@ -274,11 +447,74 @@ export function registerNotificationsIpc(
       return getSettings().setEnabled(input);
     },
   );
+  ipcMain.handle(notificationsIpcChannels.getPreferences, (event) => {
+    if (!isAppMainFrame(event)) return { ...DEFAULT_NOTIFICATION_PREFERENCES };
+    return getSettings().getPreferences();
+  });
+  ipcMain.handle(
+    notificationsIpcChannels.setPreferences,
+    (event, input: unknown) => {
+      if (!isAppMainFrame(event)) return getSettings().getPreferences();
+      const parsed = notificationPreferencesPatchSchema.safeParse(input);
+      if (!parsed.success) return getSettings().getPreferences();
+      return getSettings().setPreferences(parsed.data);
+    },
+  );
+  const handleBell = createTerminalBellNotificationHandler({
+    getPreferences: () => getSettings().getPreferences(),
+    isFocused: () => focusedWindow(getWindow),
+    resolveWorkspaceName: async (workspaceId) => {
+      const { workspaceNames } = await listSessionsAndPaths();
+      return workspaceNames.get(workspaceId) ?? null;
+    },
+    show: showElectronNotification,
+    onClick: (focus) => focusSession(getWindow, focus),
+  });
+  ipcMain.handle(notificationsIpcChannels.bell, (event, input: unknown) => {
+    if (!isAppMainFrame(event)) return false;
+    return handleBell(input).catch(() => false);
+  });
   stopWatcher?.();
+  agentTaskCompletionObserver?.reset();
+  agentTaskCompletionObserver = createAgentTaskCompletionObserver({
+    getWindow,
+    isEnabled: () => {
+      const preferences = getSettings().getPreferences();
+      return preferences.enabled && preferences.agentTaskComplete;
+    },
+    suppressWhenFocused: () => {
+      const preferences = getSettings().getPreferences();
+      return preferences.suppressWhenFocused && focusedWindow(getWindow);
+    },
+    resolveContext: async (event) => {
+      const { sessions, workspaceNames } = await listSessionsAndPaths();
+      const found = sessions.find((session) => session.id === event.sessionId);
+      return {
+        session:
+          found ?? {
+            id: event.sessionId,
+            workspaceId: event.workspaceId,
+            command: event.command ?? "",
+            harnessId: event.harnessId,
+            agentState: event.agentState,
+            agentStateAt: event.agentStateAt,
+          },
+        workspaceName: workspaceNames.get(event.workspaceId) ?? null,
+      };
+    },
+    show: showElectronNotification,
+  });
   stopWatcher = createNeedsInputWatcher({
     getWindow,
     listSessions: listSessionsAndPaths,
-    isEnabled: () => getSettings().getEnabled(),
+    isEnabled: () => {
+      const preferences = getSettings().getPreferences();
+      return preferences.enabled && preferences.agentTaskComplete;
+    },
+    suppressWhenFocused: () => {
+      const preferences = getSettings().getPreferences();
+      return preferences.suppressWhenFocused && focusedWindow(getWindow);
+    },
     show: showElectronNotification,
   }).stop;
 }

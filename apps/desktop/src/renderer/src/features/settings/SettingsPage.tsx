@@ -75,6 +75,12 @@ export type SettingsPageProps = {
   ) => void;
   notifyOnAgentNeedsInput: boolean;
   onNotifyChange: (next: boolean) => void;
+  notifyOnAgentTaskComplete?: boolean;
+  onAgentTaskCompleteChange?: (next: boolean) => void;
+  notifyOnTerminalBell?: boolean;
+  onTerminalBellChange?: (next: boolean) => void;
+  notifySuppressWhenFocused?: boolean;
+  onSuppressWhenFocusedChange?: (next: boolean) => void;
   /** Selected workspace path for the git probe; null renders the honest empty state. */
   workspacePath: string | null;
   initialSection?: SettingsPageSection;
@@ -229,6 +235,12 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                   <NotificationsSection
                     notifyOnAgentNeedsInput={props.notifyOnAgentNeedsInput}
                     onNotifyChange={props.onNotifyChange}
+                    notifyOnAgentTaskComplete={props.notifyOnAgentTaskComplete}
+                    onAgentTaskCompleteChange={props.onAgentTaskCompleteChange}
+                    notifyOnTerminalBell={props.notifyOnTerminalBell}
+                    onTerminalBellChange={props.onTerminalBellChange}
+                    notifySuppressWhenFocused={props.notifySuppressWhenFocused}
+                    onSuppressWhenFocusedChange={props.onSuppressWhenFocusedChange}
                   />
                 ) : null}
                 {visible.includes("shortcuts") ? <ShortcutsSection /> : null}

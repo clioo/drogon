@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createAgentTaskCompletionObserver,
   createNeedsInputWatcher,
+  createTerminalBellNotificationHandler,
+  type AgentTaskCompletionEvent,
   type NeedsInputWatcherDeps,
 } from "./service";
 import type { WatchedSession } from "./watcher";
@@ -75,6 +78,113 @@ afterEach(() => {
   while (stoppables.length) stoppables.pop()?.stop();
 });
 
+describe("createTerminalBellNotificationHandler", () => {
+  it("gates the bell by master/event settings and focused state", async () => {
+    const shown: { title: string; body: string }[] = [];
+    const input = { sessionId: "s-1", workspaceId: "ws-1" };
+    const base = {
+      getPreferences: () => ({
+        enabled: true,
+        agentTaskComplete: true,
+        terminalBell: true,
+        suppressWhenFocused: true,
+      }),
+      isFocused: () => false,
+      resolveWorkspaceName: async () => "term-e2e",
+      show: (title: string, body: string) => shown.push({ title, body }),
+      onClick: vi.fn(),
+    };
+    const handler = createTerminalBellNotificationHandler(base);
+    expect(await handler(input)).toBe(true);
+    expect(shown).toEqual([
+      { title: "Bell in term-e2e", body: "Attention requested" },
+    ]);
+    expect(
+      await createTerminalBellNotificationHandler({
+        ...base,
+        getPreferences: () => ({ ...base.getPreferences(), terminalBell: false }),
+      })(input),
+    ).toBe(false);
+    expect(
+      await createTerminalBellNotificationHandler({
+        ...base,
+        isFocused: () => true,
+      })(input),
+    ).toBe(false);
+    expect(await handler({ sessionId: "", workspaceId: "ws-1" })).toBe(false);
+  });
+});
+
+describe("createAgentTaskCompletionObserver", () => {
+  it("notifies only for working to idle/needs_input", async () => {
+    const window = fakeWindow();
+    const shown: { title: string; body: string }[] = [];
+    const observer = createAgentTaskCompletionObserver({
+      getWindow: () => window as never,
+      isEnabled: () => true,
+      resolveContext: async (event) => ({
+        session: {
+          id: event.sessionId,
+          workspaceId: event.workspaceId,
+          command: "/usr/local/bin/pi",
+          harnessId: "pi",
+          agentState: event.agentState,
+        },
+        workspaceName: "wt-1",
+      }),
+      show: (title, body) => shown.push({ title, body }),
+    });
+    const event = (agentState: string): AgentTaskCompletionEvent => ({
+      sessionId: "a",
+      workspaceId: "ws-1",
+      agentState,
+      agentStateAt: null,
+    });
+    observer.observe(event("working"));
+    observer.observe(event("idle"));
+    await Promise.resolve();
+    expect(shown).toEqual([
+      { title: "wt-1 - Pi finished", body: "Pi finished." },
+    ]);
+    observer.observe(event("needs_input"));
+    await Promise.resolve();
+    expect(shown).toHaveLength(1);
+    observer.observe(event("working"));
+    observer.observe(event("needs_input"));
+    await Promise.resolve();
+    expect(shown).toHaveLength(2);
+    expect(shown[1]).toEqual({
+      title: "wt-1 - Pi needs input",
+      body: "Pi needs input.",
+    });
+  });
+
+  it("gates delivery by the event setting and focused-window rule", async () => {
+    const window = fakeWindow();
+    const show = vi.fn();
+    const observer = createAgentTaskCompletionObserver({
+      getWindow: () => window as never,
+      isEnabled: () => false,
+      suppressWhenFocused: () => false,
+      show,
+    });
+    observer.observe({
+      sessionId: "a",
+      workspaceId: "ws-1",
+      agentState: "working",
+      agentStateAt: null,
+    });
+    observer.observe({
+      sessionId: "a",
+      workspaceId: "ws-1",
+      agentState: "idle",
+      agentStateAt: null,
+    });
+    await Promise.resolve();
+    expect(show).not.toHaveBeenCalled();
+  });
+});
+
 describe("createNeedsInputWatcher", () => {
   it("notifies once per entry into needs_input and logs the firing", async () => {
     const window = fakeWindow();
@@ -115,6 +225,22 @@ describe("createNeedsInputWatcher", () => {
     const states = window.sent.filter((item) => item.channel === "ui:session-state-changed");
     expect(states).toHaveLength(2);
     expect(states[1].event).toMatchObject({ sessionId: "a", agentState: "working" });
+  });
+
+  it("leaves working to needs_input delivery to the push observer", async () => {
+    const window = fakeWindow();
+    const deps = depsFor(window, [
+      { sessions: [{ ...waiting("a"), agentState: "working" }] },
+      { sessions: [waiting("a")] },
+    ]);
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(0);
+    expect(
+      window.sent.filter((item) => item.channel === "ui:session-state-changed"),
+    ).toHaveLength(1);
   });
 
   it("forwards activity transitions without notifying (idle shell leaves working)", async () => {
