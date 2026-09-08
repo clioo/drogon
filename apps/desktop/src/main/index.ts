@@ -27,6 +27,7 @@ import {
   zoomFocusedWindow,
 } from "./menu/register-app-menu";
 import { setUnreadDockBadgeCount } from "./dock/unread-badge";
+import { suppressForegroundSideEffect } from "./background-test-mode";
 import {
   installWindowStateLifecycle,
   loadWindowState,
@@ -197,11 +198,13 @@ function registerAppMenuBar() {
     onOpenSettings: () => sendFromTrustedRenderer({ type: "open-settings" }),
     onOpenExploreDrogon: (targetWindow) => {
       void targetWindow;
-      void shell.openExternal(EXPLORE_DROGON_URL);
+      if (!suppressForegroundSideEffect("openExternal", EXPLORE_DROGON_URL))
+        void shell.openExternal(EXPLORE_DROGON_URL);
     },
     onOpenGettingStarted: (targetWindow) => {
       void targetWindow;
-      void shell.openExternal(DROGON_README_URL);
+      if (!suppressForegroundSideEffect("openExternal", DROGON_README_URL))
+        void shell.openExternal(DROGON_README_URL);
     },
     // Why: this repo's keybinding table assigns the zoom chords to the native
     // menu with no renderer handler, so main zooms the focused window's page
@@ -267,6 +270,10 @@ function registerBridge() {
         case "addWorkspace":
           return callNative("workspace.register", { path: value });
         case "chooseFolder": {
+          // A native picker would activate the app over the user; test
+          // instances report "canceled" (harnesses register paths via CLI).
+          if (suppressForegroundSideEffect("showOpenDialog", "chooseFolder"))
+            return null;
           const chosen = await dialog.showOpenDialog(window, {
             properties: ["openDirectory"],
           });
