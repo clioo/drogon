@@ -48,9 +48,18 @@ jobs:
       # test.isolate false), which removes the fork/SIGTERM churn entirely;
       # this is the only configuration observed green on ubuntu since the
       # regression began (Foundation runs 34243171831 and 34244706496).
-      - run: pnpm --filter @drogon/desktop test
-        # Fail fast with a clear message if the desktop suite hangs; the
-        # suite takes ~1-2 min on every platform.
+      # #312: the ubuntu-22.04 runner kills the whole step tree after ~51
+      # completed files, with the forks pool and with worker threads alike,
+      # so the trigger scales with what one step accumulates rather than with
+      # process churn. Four shards keep every step well under that point and
+      # localize the kill if it ever comes back.
+      - run: pnpm --filter @drogon/desktop test --shard=1/4
+        timeout-minutes: 15
+      - run: pnpm --filter @drogon/desktop test --shard=2/4
+        timeout-minutes: 15
+      - run: pnpm --filter @drogon/desktop test --shard=3/4
+        timeout-minutes: 15
+      - run: pnpm --filter @drogon/desktop test --shard=4/4
         timeout-minutes: 15
       # The production bundle (Monaco + renderer) exceeds the default Node
       # heap on macos-14 runners: raise it for this step only.
