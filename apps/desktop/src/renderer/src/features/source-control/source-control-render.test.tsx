@@ -24,6 +24,10 @@ function html(node: React.ReactElement): string {
   ).replace(/<!-- -->/g, "");
 }
 
+function rawHtml(node: React.ReactElement): string {
+  return renderToString(node).replace(/<!-- -->/g, "");
+}
+
 const entry: SourceControlEntry = {
   path: "src/App.tsx",
   area: "unstaged",
@@ -161,14 +165,24 @@ describe("source control render", () => {
   });
 
   test("branch line-total chip announces raw counts", () => {
-    const out = html(
-      createElement(SourceControlBranchLineTotalChip, { added: 12, removed: 4 }),
+    // This component has no tooltip trigger; avoid mounting an unrelated
+    // Radix provider so the SSR contract stays deterministic on Windows CI.
+    const out = rawHtml(
+      createElement(SourceControlBranchLineTotalChip, {
+        added: 12,
+        removed: 4,
+      }),
     );
     expect(out).toContain('data-testid="source-control-branch-line-total"');
     expect(out).toContain('aria-label="12 lines added, 4 lines deleted"');
-    expect(html(createElement(SourceControlBranchLineTotalChip, { added: 0, removed: 0 }))).toBe(
-      "",
-    );
+    expect(
+      rawHtml(
+        createElement(SourceControlBranchLineTotalChip, {
+          added: 0,
+          removed: 0,
+        }),
+      ),
+    ).toBe("");
   });
 
   test("branch row names the branch and upstream", () => {
