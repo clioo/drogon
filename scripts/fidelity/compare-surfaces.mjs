@@ -1689,7 +1689,7 @@ async function candSetup(page, state, ctx) {
     }
     await delay(600);
     try {
-      const item = page.getByRole("menuitem", { name: "New Terminal", exact: true });
+      const item = page.getByRole("menuitem", { name: /^New Terminal/ });
       if ((await item.count()) > 0) {
         await item.first().click({ timeout: 3000 });
         notes.push("create menu: plain New Terminal chosen");
@@ -1843,7 +1843,7 @@ async function candSetup(page, state, ctx) {
       if (await tryClick(page, "button", "New tab")) {
         await delay(600);
         try {
-          const entry = page.getByRole("menuitem", { name: "New Browser Tab", exact: true });
+          const entry = page.getByRole("menuitem", { name: /^New Browser Tab/ });
           if ((await entry.count()) > 0) {
             await entry.first().click({ timeout: 3000 });
             notes.push("browser tab opened through the + create menu");
@@ -2268,7 +2268,7 @@ async function candSetup(page, state, ctx) {
       if (await tryClick(page, "button", "New tab")) {
         await delay(600);
         try {
-          const entry = page.getByRole("menuitem", { name: "New Browser Tab", exact: true });
+          const entry = page.getByRole("menuitem", { name: /^New Browser Tab/ });
           if ((await entry.count()) > 0) {
             await entry.first().click({ timeout: 3000 });
             notes.push("browser tab opened through the + create menu");

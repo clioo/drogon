@@ -9,6 +9,8 @@ import { CommitArea } from "./commit-area";
 import { SourceControlDiscardDialog } from "./discard-dialog";
 import { SourceControlBranchLineTotalChip } from "./branch-line-total-chip";
 import { SourceControlBranchContextRow } from "./branch-context-row";
+import { SourceControlHeaderToolbar } from "./header-toolbar";
+import { resolveCreatePrToolbarAction } from "./create-pr-action";
 import { SyncRow } from "./sync-row";
 import { EmptyState } from "./empty-state";
 import { DiffLineCounts } from "./diff-line-counts";
@@ -192,17 +194,97 @@ describe("source control render", () => {
       onPush: () => {},
       onPull: () => {},
       onFetch: () => {},
-      onCreatePr: () => {},
     };
     const withUpstream = html(
       createElement(SyncRow, { ...props, upstream: "origin/main", ahead: 1, behind: 0 }),
     );
     expect(withUpstream).toContain("origin/main");
-    expect(withUpstream).toContain("New PR");
+    // The fork has no "New PR" string anywhere: PR creation lives in the
+    // header toolbar as "Create PR" (see #136).
+    expect(withUpstream).not.toContain("New PR");
+    expect(withUpstream).not.toContain("Create PR");
+    expect(withUpstream).toContain("Push");
+    expect(withUpstream).toContain("Pull");
+    expect(withUpstream).toContain("Fetch");
     const withoutUpstream = html(
       createElement(SyncRow, { ...props, upstream: null, ahead: null, behind: null }),
     );
     expect(withoutUpstream).toContain("No upstream");
+  });
+
+  test("header toolbar keeps the fork slots: Create PR, filter, overflow", () => {
+    const toolbarProps = {
+      filterQuery: "",
+      filterExpanded: false,
+      onFilterQueryChange: () => {},
+      onFilterExpandedChange: () => {},
+      isCreatingPr: false,
+      onCreatePr: () => {},
+      sourceControlViewMode: "list" as const,
+      onToggleViewMode: () => {},
+      onRefresh: () => {},
+      refreshDisabled: false,
+      branchHead: "main",
+      upstream: "origin/main",
+      ahead: 2,
+      behind: 0,
+      lineTotalAdded: 0,
+      lineTotalRemoved: 0,
+      reviewUrl: null,
+      onOpenReviewPage: () => {},
+    };
+    const enabled = html(
+      createElement(SourceControlHeaderToolbar, {
+        ...toolbarProps,
+        createPrAction: resolveCreatePrToolbarAction({
+          busy: false,
+          upstream: "origin/main",
+          ahead: 2,
+          hasUncommitted: false,
+        }),
+      }),
+    );
+    expect(enabled).toContain("Create PR");
+    expect(enabled).toContain("Filter files by name");
+    expect(enabled).toContain("More source control actions");
+    // The fork has no Refresh button in the collapsed toolbar (see #136);
+    // manual refresh stays in the overflow menu.
+    expect(enabled).not.toContain("Refresh source control status");
+    const disabled = html(
+      createElement(SourceControlHeaderToolbar, {
+        ...toolbarProps,
+        createPrAction: resolveCreatePrToolbarAction({
+          busy: false,
+          upstream: null,
+          ahead: null,
+          hasUncommitted: false,
+        }),
+      }),
+    );
+    // The fork renders Create PR disabled rather than hiding it.
+    expect(disabled).toContain("Create PR");
+    expect(disabled).toContain('disabled=""');
+  });
+
+  test("branch row opens the review page only when a review url is known", () => {
+    const rowProps = {
+      branchHead: "feature-x",
+      upstream: "origin/main",
+      ahead: 2,
+      behind: 0,
+      lineTotalAdded: 5,
+      lineTotalRemoved: 0,
+    };
+    const withReview = html(
+      createElement(SourceControlBranchContextRow, {
+        ...rowProps,
+        reviewUrl: "https://github.com/clioo/drogon/pull/1",
+        onOpenReviewPage: () => {},
+      }),
+    );
+    expect(withReview).toContain("Open review page in browser");
+    const withoutReview = html(createElement(SourceControlBranchContextRow, rowProps));
+    expect(withoutReview).not.toContain("Open review page in browser");
   });
 
   test("empty state and diff counts render their copy", () => {

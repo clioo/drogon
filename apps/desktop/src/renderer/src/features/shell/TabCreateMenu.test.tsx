@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 // Tab create menu parity (#135): fork order (New Terminal, New Browser Tab,
 // Mentu, harness entries with icons, Agent settings…), fork copy ("Mentu"),
-// search combobox filtering, and chord hints.
+// search combobox filtering, and chord hints. #167: the static-row chords
+// resolve through the shared keybinding table (never a host constant) and
+// stay exposed to assistive tech like the fork's DropdownMenuShortcut.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -14,6 +16,7 @@ import {
   TAB_CREATE_SEARCH_PLACEHOLDER,
   TabCreateMenu,
 } from "./TabCreateMenu";
+import { tabCreateMenuChord } from "./TabCreateMenuChords";
 
 beforeEach(installRadixJsdomStubs);
 afterEach(cleanup);
@@ -32,6 +35,16 @@ const HARNESSES: Harness[] = [
   harness("antigravity", "Antigravity"),
 ];
 
+/**
+ * jsdom is non-Mac, so the shared table resolves to the "other" chords
+ * (Ctrl+T / Ctrl+Shift+B); darwin rendering (⌘T / ⌘⇧B) is pinned by
+ * TabCreateMenuChords.test.ts. The host props mirror production: App still
+ * sends the stale terminal chord and "" for the browser row, and the menu
+ * must render the table values regardless (see #167).
+ */
+const TABLE_TERMINAL_CHORD = tabCreateMenuChord("tab.newTerminal", "other");
+const TABLE_BROWSER_CHORD = tabCreateMenuChord("tab.newBrowser", "other");
+
 function mount(overrides?: Partial<React.ComponentProps<typeof TabCreateMenu>>) {
   render(
     <Tooltip.Provider>
@@ -40,8 +53,8 @@ function mount(overrides?: Partial<React.ComponentProps<typeof TabCreateMenu>>) 
         hostId="host"
         harnesses={HARNESSES}
         disabled={false}
-        newTerminalShortcut="⌘T"
-        newBrowserShortcut="⌘⇧B"
+        newTerminalShortcut="⌘⇧N"
+        newBrowserShortcut=""
         onCreateTerminal={() => {}}
         onLaunch={() => Promise.resolve(false)}
         onNewBrowserTab={() => {}}
@@ -90,8 +103,8 @@ describe("TabCreateMenu order and copy", () => {
     mount({ onOpenAgentSettings });
     openMenu();
     expect(menuItemNames()).toEqual([
-      "New Terminal⌘T",
-      "New Browser Tab⌘⇧B",
+      `New Terminal${TABLE_TERMINAL_CHORD}`,
+      `New Browser Tab${TABLE_BROWSER_CHORD}`,
       "Mentu",
       "Claude",
       "Pi",
@@ -99,6 +112,31 @@ describe("TabCreateMenu order and copy", () => {
       "Antigravity",
       "Agent settings…",
     ]);
+  });
+
+  it("renders the shared-table chords even when the host passes a stale chord", () => {
+    // TABLE_* already resolve through shared/keybindings; a stale host
+    // value must never reach the menu (see #167).
+    expect(TABLE_TERMINAL_CHORD).not.toBe("");
+    expect(TABLE_TERMINAL_CHORD).not.toBe("⌘⇧N");
+    mount({ newTerminalShortcut: "⌘⇧N", newBrowserShortcut: "stale" });
+    openMenu();
+    const names = menuItemNames();
+    expect(names[0]).toBe(`New Terminal${TABLE_TERMINAL_CHORD}`);
+    expect(names[1]).toBe(`New Browser Tab${TABLE_BROWSER_CHORD}`);
+  });
+
+  it("exposes the static-row chords in the accessible name like the fork", () => {
+    mount();
+    openMenu();
+    // The fork renders chords via DropdownMenuShortcut (a plain span, no
+    // aria-hidden), so the chord is part of the accessible name.
+    expect(
+      screen.getByRole("menuitem", { name: `New Terminal${TABLE_TERMINAL_CHORD}` }),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("menuitem", { name: `New Browser Tab${TABLE_BROWSER_CHORD}` }),
+    ).not.toBeNull();
   });
 
   it("uses the fork copy Mentu, never Open Mentu", () => {
@@ -128,12 +166,13 @@ describe("TabCreateMenu order and copy", () => {
     }
   });
 
-  it("falls back to the platform browser chord when the host passes none", () => {
+  it("resolves the browser chord from the shared table when the host passes none", () => {
     mount({ harnesses: [], newBrowserShortcut: "" });
     openMenu();
     // jsdom UA is non-Mac: "Ctrl+Shift+B" (darwin renders "⌘⇧B").
     expect(
-      screen.getByRole("menuitem", { name: "New Browser Tab" }).textContent,
+      screen.getByRole("menuitem", { name: `New Browser Tab${TABLE_BROWSER_CHORD}` })
+        .textContent,
     ).toContain("Ctrl+Shift+B");
   });
 

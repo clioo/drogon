@@ -21,9 +21,9 @@ import type {
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import {
-  formatSidebarChord,
-  resolveChordPlatform,
-} from "../right-sidebar/shortcut-label";
+  tabCreateMenuChord,
+  type TabCreateMenuChordPlatform,
+} from "./TabCreateMenuChords";
 import { HarnessMenuIcon } from "./TabCreateMenuIcons";
 import {
   emptyHarnessLaunchForm,
@@ -45,8 +45,11 @@ import {
 export const TAB_CREATE_SEARCH_PLACEHOLDER =
   "Search open tabs, history, files, URLs, agents…";
 
-/** Display chord when the host passes none (App still sends ""). */
-const NEW_BROWSER_FALLBACK_CHORD = "CmdOrCtrl+Shift+B";
+/** darwin vs other, mirroring the fork's shortcut-platform split. */
+function menuChordPlatform(): TabCreateMenuChordPlatform {
+  const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  return userAgent.includes("Mac") ? "darwin" : "other";
+}
 
 /**
  * Entries deliberately not ported from the fork's create menu, and why:
@@ -100,11 +103,12 @@ export function matchesTabCreateQuery(
   return tokens.every((token) => haystack.includes(token));
 }
 
-function platformChord(chord: string): string {
-  const userAgent =
-    typeof navigator === "undefined" ? "" : navigator.userAgent;
-  return formatSidebarChord(chord, resolveChordPlatform(userAgent));
-}
+/**
+ * Static-row chords resolve through the shared keybinding table, never a
+ * hand-written constant: the host props below are a legacy fallback used
+ * only when the table has no binding, so a stale App-level chord (see
+ * #167) can never reach the menu again.
+ */
 
 /**
  * The tab strip "+" menu, in the fork's order: New Terminal, New Browser
@@ -136,7 +140,11 @@ export function TabCreateMenu({
   /** Stored default harness (badged in the menu) and per-harness field defaults used to pre-fill a pristine form. Read-only here; edited in Settings. */
   defaultHarnessId?: string;
   launchDefaults?: Record<string, HarnessAgentDefault>;
-  /** Display chords for the static rows ("" hides the hint). */
+  /**
+   * Legacy host-provided display chords, kept so App/TabBar keep compiling.
+   * The menu renders the shared-table chord first and only falls back to
+   * these when the table has no binding, so a stale host value never wins.
+   */
   newTerminalShortcut: string;
   newBrowserShortcut: string;
   onCreateTerminal(): void;
@@ -186,7 +194,11 @@ export function TabCreateMenu({
 
   const showMentu = !!onOpenMentu && !!mentuAvailable;
   const showAgentSettings = !!onOpenAgentSettings;
-  const browserShortcut = newBrowserShortcut || platformChord(NEW_BROWSER_FALLBACK_CHORD);
+  const chordPlatform = menuChordPlatform();
+  const terminalShortcut =
+    tabCreateMenuChord("tab.newTerminal", chordPlatform) || newTerminalShortcut;
+  const browserShortcut =
+    tabCreateMenuChord("tab.newBrowser", chordPlatform) || newBrowserShortcut;
 
   const terminalVisible = matchesTabCreateQuery(
     "New Terminal",
@@ -457,10 +469,8 @@ export function TabCreateMenu({
                 >
                   <TerminalSquare className="size-4 text-muted-foreground" />
                   New Terminal
-                  {newTerminalShortcut && (
-                    <span className="tab-create-shortcut" aria-hidden="true">
-                      {newTerminalShortcut}
-                    </span>
+                  {terminalShortcut && (
+                    <span className="tab-create-shortcut">{terminalShortcut}</span>
                   )}
                 </DropdownMenu.Item>
               )}
@@ -472,9 +482,7 @@ export function TabCreateMenu({
                   <Globe className="size-4 text-muted-foreground" />
                   New Browser Tab
                   {browserShortcut && (
-                    <span className="tab-create-shortcut" aria-hidden="true">
-                      {browserShortcut}
-                    </span>
+                    <span className="tab-create-shortcut">{browserShortcut}</span>
                   )}
                 </DropdownMenu.Item>
               )}

@@ -1,13 +1,44 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-// src/renderer/src/components/right-sidebar/source-control/panel/branch-context-row.tsx.
+// src/renderer/src/components/right-sidebar/source-control/panel/branch-context-row.tsx
+// (branch identity, base-line stats and ManualReviewLinkButton) and
+// review/hosted-review-header-chrome.tsx (the review-link chrome).
 // Adapter: branch-compare/base-ref/hosted-review flows have no MVP backend,
 // so the row shows HEAD identity plus the daemon's upstream ahead/behind
-// and the uncommitted line total. DOM, classes and ARIA follow the source's
-// branch-identity and stat nodes.
+// and the uncommitted line total; the review link opens the just-created
+// PR url (the only review url Drogon can back honestly). DOM, classes and
+// ARIA follow the source's branch-identity and stat nodes.
 import React from "react";
-import { Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { Tooltip } from "radix-ui";
+import { Button } from "../../components/ui/button";
 import { SourceControlBranchLineTotalChip } from "./branch-line-total-chip";
+
+function ReviewLinkButton({ onOpen }: { onOpen: () => void }): React.JSX.Element {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <span className="inline-flex shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label="Open review page in browser"
+            title="Open review page in browser"
+            onClick={onOpen}
+          >
+            <ExternalLink className="size-3.5" />
+          </Button>
+        </span>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content side="bottom" sideOffset={6} className="tooltip">
+          Open review page in browser
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
 
 function HeadIdentity({ branchHead }: { branchHead: string }): React.JSX.Element {
   // Why: focusable + tooltip so truncated long branch names stay discoverable.
@@ -66,6 +97,8 @@ export function SourceControlBranchContextRow({
   lineTotalRemoved,
   loading,
   onRefresh,
+  reviewUrl,
+  onOpenReviewPage,
 }: {
   branchHead: string | null;
   upstream: string | null;
@@ -75,6 +108,8 @@ export function SourceControlBranchContextRow({
   lineTotalRemoved: number;
   loading?: boolean;
   onRefresh?: () => void;
+  reviewUrl?: string | null;
+  onOpenReviewPage?: () => void;
 }): React.JSX.Element | null {
   if (!branchHead) {
     return (
@@ -142,6 +177,9 @@ export function SourceControlBranchContextRow({
               {upstream}
             </span>
             {stats}
+            {reviewUrl && onOpenReviewPage ? (
+              <ReviewLinkButton onOpen={onOpenReviewPage} />
+            ) : null}
           </div>
         )}
       </div>
