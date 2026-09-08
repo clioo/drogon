@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, screen, session, shell } from "electron";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -83,6 +83,10 @@ import { registerUsageIpc, disposeUsage, getUsageStore } from "./usage/service";
 import { listWorkspacePorts } from "./usage/workspace-port-list";
 // R16-AY2: awake Auto watcher (caffeinate held only while an agent works).
 import { createAwakeAutoWatcher } from "./awake-auto";
+// Issue #309: background-test instances must never be OS-suspended
+// (App Nap) while idle — a suspended process stays "alive" but stops
+// servicing its DevTools endpoint, which is the reported CDP freeze.
+import { createAppActivityGuard } from "./app-activity-guard";
 
 // Bounds one probe connection attempt within the overall bootstrap budget
 // below; not a substitute for it (the overall budget is what actually
@@ -673,7 +677,15 @@ if (!holdsSingleInstanceLock) {
   // R16-AY2 awake Auto: hold caffeinate only while an agent session works;
   // assigned when ready, stopped on quit so auto never outlives the app.
   let awakeAutoWatcher: ReturnType<typeof createAwakeAutoWatcher> | null = null;
+  // Issue #309: one process-lifetime suspension blocker per background-test
+  // instance (caffeinate never covered App Nap); released on real quit.
+  const activityGuard = createAppActivityGuard({
+    isBackgroundTestMode: backgroundWindow,
+    start: (type) => powerSaveBlocker.start(type),
+    stop: (id) => powerSaveBlocker.stop(id),
+  });
   void app.whenReady().then(async () => {
+    activityGuard.startIfNeeded();
     session.defaultSession.setPermissionRequestHandler(
       (_webContents, _permission, callback) => callback(false),
     );
@@ -715,8 +727,10 @@ if (!holdsSingleInstanceLock) {
   });
   // The keep-awake setting lasts exactly as long as the app: release our
   // caffeinate child on real quit so quitting awake never orphans it (auto
-  // mode included: the watcher stops first, then the child is killed).
+  // mode included: the watcher stops first, then the child is killed). The
+  // #309 suspension blocker rides the same window.
   app.on("will-quit", () => {
+    activityGuard.release();
     awakeAutoWatcher?.stop();
     disposeUsage();
   });
