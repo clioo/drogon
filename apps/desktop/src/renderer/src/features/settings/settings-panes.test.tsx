@@ -46,6 +46,8 @@ describe("appearance projection", () => {
         onThemeChange={() => {}}
         terminalFontSize={13}
         onTerminalFontSizeChange={() => {}}
+        terminalGpuAcceleration="auto"
+        onTerminalGpuAccelerationChange={() => {}}
         inspectorVisible={true}
         onInspectorChange={() => {}}
       />,
@@ -136,6 +138,8 @@ describe("settings page order", () => {
         onThemeChange={noop}
         terminalFontSize={13}
         onTerminalFontSizeChange={noop}
+        terminalGpuAcceleration="auto"
+        onTerminalGpuAccelerationChange={noop}
         inspectorVisible={true}
         onInspectorChange={noop}
         harnesses={[]}
