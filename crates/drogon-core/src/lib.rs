@@ -635,7 +635,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id FROM sessions ORDER BY created_at",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at FROM sessions ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         let rows: Vec<_> = stmt
@@ -707,7 +707,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id FROM sessions WHERE id = ?1",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at FROM sessions WHERE id = ?1",
                 [session_id],
                 row_to_session_json,
             )
@@ -747,9 +747,10 @@ impl Engine {
 /// This process holds no [`session::SessionHandle`] for a row read straight
 /// from SQLite (it belongs to a prior process instance, per
 /// `db::recover_from_prior_instance`), so there is no PTY activity clock to
-/// derive `working`/`idle`/`needs_input` from here — only the durable
-/// verdict is known. `session::to_json` is the path that has a live handle
-/// and computes the full activity-based state.
+/// derive `working`/`idle` from here — only the durable verdict and the
+/// durable wait signal (`needs_input_at`, when set) are known.
+/// `session::to_json` is the path that has a live handle and computes the
+/// full activity-based state.
 /// The daemon-side default session shell, matching what the desktop main
 /// process sends for an ordinary new terminal. Used when `session.start`
 /// omits `command` (additive restart-reuse path).
@@ -765,8 +766,14 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
     let args_json: String = r.get(5)?;
     let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
     let verdict: String = r.get(8)?;
+    // A restored row re-reports an uncleared wait signal with its original
+    // stamp (the agent asked and was never answered); anything else without
+    // a live handle is honestly `unknown`, never a guessed idle.
+    let needs_input_at: Option<String> = r.get(12)?;
     let agent_state = if verdict == "exited" {
         "exited"
+    } else if needs_input_at.is_some() {
+        "needs_input"
     } else {
         "unknown"
     };
@@ -785,7 +792,7 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "exitCode": r.get::<_, Option<i64>>(9)?,
             "createdAt": r.get::<_, String>(10)?,
             "agentState": agent_state,
-            "agentStateAt": Value::Null,
+            "agentStateAt": needs_input_at,
             "harnessId": r.get::<_, Option<String>>(11)?,
         }),
     ))

@@ -134,9 +134,13 @@ impl SessionHandle {
 
     /// Records a hook wait signal; the next PTY output chunk clears it,
     /// unless [`Self::set_explicit_wait_clear`] opted this session out of
-    /// that generic clear.
+    /// that generic clear. The stamp is also durable (`sessions` row), so a
+    /// daemon restart keeps reporting a still-waiting session as
+    /// `needs_input` instead of `unknown`.
     pub(crate) fn note_hook_event(&self) {
-        *self.needs_input_at.lock().unwrap() = Some(crate::now_rfc3339());
+        let stamp = crate::now_rfc3339();
+        *self.needs_input_at.lock().unwrap() = Some(stamp.clone());
+        persist_wait_signal(self, Some(&stamp));
     }
 
     /// Explicit clear signal from a harness hook's own resumption event
@@ -145,6 +149,7 @@ impl SessionHandle {
     /// opted out of the generic clear.
     pub(crate) fn clear_hook_event(&self) {
         *self.needs_input_at.lock().unwrap() = None;
+        persist_wait_signal(self, None);
     }
 
     /// Opts this session out of the reader thread's generic activity-based
@@ -322,6 +327,7 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                     // output clearing the signal here would be wrong.
                     if !handle.explicit_wait_clear.load(Ordering::Acquire) {
                         *handle.needs_input_at.lock().unwrap() = None;
+                        persist_wait_signal(&handle, None);
                     }
                 }
                 Err(_) => break,
@@ -409,6 +415,18 @@ fn persist_exit(handle: &SessionHandle, exit_code: i64) -> Result<(), RpcError> 
         return Err(error::io_error("Session exit record is missing"));
     }
     Ok(())
+}
+
+/// Mirrors the in-memory wait signal into the durable `sessions` row so
+/// the wait survives a daemon restart. Best-effort like the reader
+/// thread's other observations: a failed write must never break the live
+/// session it reports on — the next signal overwrites it anyway.
+fn persist_wait_signal(handle: &SessionHandle, stamp: Option<&str>) {
+    let conn = handle.db.lock().unwrap();
+    let _ = conn.execute(
+        "UPDATE sessions SET needs_input_at = ?2 WHERE id = ?1",
+        rusqlite::params![handle.session_id, stamp],
+    );
 }
 
 pub(crate) fn persist_admission(handle: &SessionHandle) -> Result<(), RpcError> {

@@ -125,7 +125,8 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
             verdict TEXT NOT NULL,
             exit_code INTEGER,
             created_at TEXT NOT NULL,
-            harness_id TEXT
+            harness_id TEXT,
+            needs_input_at TEXT
         );
         CREATE TABLE IF NOT EXISTS requests (
             request_id TEXT PRIMARY KEY,
@@ -182,6 +183,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     crate::coordination_attempts::migrate(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_mail::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
     migrate_sessions_harness_id(&tx)?;
+    migrate_sessions_needs_input(&tx)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;
@@ -203,6 +205,28 @@ fn migrate_sessions_harness_id(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         .map(|count| count > 0)?;
     if !has_column {
         tx.execute_batch("ALTER TABLE sessions ADD COLUMN harness_id TEXT;")?;
+    }
+    Ok(())
+}
+
+/// Additive migration for the sticky wait signal: `needs_input_at` keeps
+/// the wall-clock stamp of the most recent uncleared `session.hook_event`
+/// wait signal, so a daemon restart reports a still-waiting session as
+/// `needs_input` (with its original stamp) instead of `unknown`. The
+/// verdict still flips to `unverifiable` in
+/// [`recover_from_prior_instance`] — only the wait signal is durable, never
+/// the activity clock. Idempotent: fresh databases already created the
+/// column in [`create_tables`].
+fn migrate_sessions_needs_input(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let has_column: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'needs_input_at'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)?;
+    if !has_column {
+        tx.execute_batch("ALTER TABLE sessions ADD COLUMN needs_input_at TEXT;")?;
     }
     Ok(())
 }

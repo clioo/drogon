@@ -1,13 +1,18 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/NewWorkspaceComposerCard.tsx with
    components/new-workspace/{NewWorkspaceComposerProjectSection,
-   NewWorkspaceComposerNameSection,NewWorkspaceComposerFooter}.tsx
-   (adapter: MVP subset — project selector, name, base ref, create — over
-   this repo's Project/Worktree RPC contract; no remote hosts, agents,
-   smart-name sources, setup or sparse-checkout sections). */
+   NewWorkspaceComposerNameSection,NewWorkspaceComposerFooter,
+   NewWorkspaceComposerAgentSection}.tsx
+   (adapter: MVP subset — project selector, name, base ref, agent picker
+   with model/provider, create — over this repo's Project/Worktree RPC
+   contract and `harness.start`; no remote hosts, smart-name sources,
+   setup, sparse-checkout, effort/prompt/unattended sections — the "+"
+   launch form covers those). */
 import { useEffect, useRef, useState } from "react";
 import { CornerDownLeft, FolderPlus } from "lucide-react";
 import type {
+  Harness,
+  HarnessLaunchInput,
   Project,
   Workspace,
 } from "../../../../shared/session-contract";
@@ -15,8 +20,12 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import type { ProjectGroup } from "../shell/project-adapter";
 import {
+  composerAgentLaunchInput,
   composerPrimaryActionLabel,
+  emptyComposerAgentSelection,
+  initialComposerAgentId,
   resolveComposerSubmit,
+  type ComposerAgentSelection,
 } from "./composer-submit";
 
 function submitModifierLabel(): string {
@@ -28,11 +37,13 @@ function submitModifierLabel(): string {
 
 /**
  * New-workspace composer card (MVP): project selector with the source's
- * "Add project" affordance, name, base ref for git projects, and a
- * primary action that creates a worktree (`worktree.create`) or opens a
- * folder project's implicit workspace. Daemon errors surface verbatim;
- * client pre-checks come from the shared project form rules. Mod+Enter
- * submits, matching the source's screen-submit shortcut.
+ * "Add project" affordance, name, base ref for git projects, an agent
+ * picker with model/provider, and a primary action that creates a
+ * worktree (`worktree.create`) or opens a folder project's implicit
+ * workspace, then starts the picked agent (`harness.start`) in it.
+ * Daemon errors surface verbatim; client pre-checks come from the shared
+ * project form rules. Mod+Enter submits, matching the source's
+ * screen-submit shortcut.
  */
 export function NewWorkspaceComposer({
   groups,
@@ -40,8 +51,11 @@ export function NewWorkspaceComposer({
   projectId,
   disabled,
   nameInputRef,
+  harnesses,
+  defaultHarnessId,
   onProjectChange,
   onSubmitWorktree,
+  onLaunchAgent,
   onSelectWorkspace,
   onAddProject,
   onClose,
@@ -51,13 +65,23 @@ export function NewWorkspaceComposer({
   projectId: string | null;
   disabled: boolean;
   nameInputRef: React.RefObject<HTMLInputElement | null>;
+  /** Listed harnesses for the Agent picker; empty hides the section. */
+  harnesses: Harness[];
+  /** Stored default harness, preselected when actually available. */
+  defaultHarnessId: string;
   onProjectChange: (projectId: string | null) => void;
   /** Resolves a verbatim daemon error, or null on success (then closes). */
   onSubmitWorktree: (input: {
     projectId: string;
     name: string;
     baseRef?: string;
+    agent: ComposerAgentSelection;
   }) => Promise<string | null>;
+  /**
+   * Starts the picked agent in a folder project's implicit workspace.
+   * Resolves a verbatim daemon error, or null on success (then closes).
+   */
+  onLaunchAgent: (launch: HarnessLaunchInput) => Promise<string | null>;
   onSelectWorkspace: (workspaceId: string) => void;
   /** Closes the composer and opens the add-project dialog. */
   onAddProject: () => void;
@@ -67,6 +91,10 @@ export function NewWorkspaceComposer({
     groups.find((group) => group.project.id === projectId)?.project ?? null;
   const [name, setName] = useState("");
   const [baseRef, setBaseRef] = useState(project?.defaultBaseRef ?? "");
+  const [agent, setAgent] = useState<ComposerAgentSelection>(() => ({
+    ...emptyComposerAgentSelection(),
+    harnessId: initialComposerAgentId(harnesses, defaultHarnessId),
+  }));
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const busy = disabled || sending;
@@ -86,6 +114,7 @@ export function NewWorkspaceComposer({
       projectId,
       name,
       baseRef,
+      agent,
     });
     if ("error" in resolved) {
       setError(resolved.error);
@@ -96,13 +125,29 @@ export function NewWorkspaceComposer({
     try {
       if (resolved.target.kind === "implicit") {
         onSelectWorkspace(resolved.target.workspaceId);
-        onClose();
+        if (!resolved.target.agent.harnessId) {
+          onClose();
+          return;
+        }
+        const launch = composerAgentLaunchInput(
+          resolved.target.workspaceId,
+          resolved.target.agent,
+          crypto.randomUUID(),
+        );
+        if (!launch) {
+          onClose();
+          return;
+        }
+        const failure = await onLaunchAgent(launch);
+        if (failure) setError(failure);
+        else onClose();
         return;
       }
       const failure = await onSubmitWorktree({
         projectId: resolved.target.project.id,
         name: resolved.target.name,
         baseRef: resolved.target.baseRef,
+        agent: resolved.target.agent,
       });
       if (failure) setError(failure);
     } finally {
@@ -204,6 +249,75 @@ export function NewWorkspaceComposer({
               onChange={(event) => setBaseRef(event.target.value)}
               disabled={busy}
               placeholder={project?.defaultBaseRef ?? "repo default"}
+            />
+          </div>
+        )}
+        {harnesses.length > 0 && (
+          <div className="composer-section">
+            <label className="composer-label" htmlFor="composer-agent">
+              Agent
+            </label>
+            <select
+              id="composer-agent"
+              className="composer-select"
+              value={agent.harnessId ?? ""}
+              disabled={busy}
+              onChange={(event) =>
+                setAgent((prev) => ({
+                  ...prev,
+                  harnessId:
+                    (event.target.value || null) as ComposerAgentSelection["harnessId"],
+                }))
+              }
+            >
+              <option value="">None</option>
+              {harnesses.map((harness) => (
+                <option
+                  key={harness.harnessId}
+                  value={harness.harnessId}
+                  disabled={harness.availability !== "available"}
+                >
+                  {harness.displayName}
+                  {harness.availability !== "available"
+                    ? " (unavailable)"
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {agent.harnessId && (
+          <div className="composer-section">
+            <label className="composer-label" htmlFor="composer-model">
+              Model <span className="shell-optional">(optional)</span>
+            </label>
+            <Input
+              id="composer-model"
+              value={agent.model}
+              onChange={(event) =>
+                setAgent((prev) => ({ ...prev, model: event.target.value }))
+              }
+              disabled={busy}
+              placeholder="Harness default"
+            />
+          </div>
+        )}
+        {agent.harnessId === "pi" && (
+          <div className="composer-section">
+            <label className="composer-label" htmlFor="composer-provider">
+              Provider <span className="shell-optional">(optional)</span>
+            </label>
+            <Input
+              id="composer-provider"
+              value={agent.provider}
+              onChange={(event) =>
+                setAgent((prev) => ({
+                  ...prev,
+                  provider: event.target.value,
+                }))
+              }
+              disabled={busy}
+              placeholder="Pi default"
             />
           </div>
         )}

@@ -1,14 +1,19 @@
 import { describe, expect, test } from "vitest";
 import type {
+  Harness,
   Project,
   Workspace,
   Worktree,
 } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "../shell/project-adapter";
 import {
+  composerAgentLaunchInput,
   composerPrimaryActionLabel,
+  emptyComposerAgentSelection,
+  initialComposerAgentId,
   initialComposerProjectId,
   resolveComposerSubmit,
+  type ComposerAgentSelection,
 } from "./composer-submit";
 
 function folderProject(): Project {
@@ -62,18 +67,67 @@ function workspace(): Workspace {
   };
 }
 
+function noAgent(): ComposerAgentSelection {
+  return emptyComposerAgentSelection();
+}
+
+function piAgent(): ComposerAgentSelection {
+  return {
+    harnessId: "pi",
+    model: "qwen3.8-flash-next-nvidia-nvfp4",
+    provider: "dgx-spark",
+  };
+}
+
+function piHarness(): Harness {
+  return {
+    harnessId: "pi",
+    displayName: "Pi",
+    availability: "available",
+    executable: "/opt/pi",
+  };
+}
+
+function claudeHarness(): Harness {
+  return {
+    harnessId: "claude",
+    displayName: "Claude Code",
+    availability: "available",
+    executable: "/opt/claude",
+  };
+}
+
 describe("resolveComposerSubmit", () => {
   test("a folder project opens its implicit workspace without a name", () => {
     const resolved = resolveComposerSubmit([folderGroup()], [workspace()], {
       projectId: "folder:1",
       name: "",
       baseRef: "",
+      agent: noAgent(),
     });
     expect(resolved).toEqual({
       target: {
         kind: "implicit",
         project: folderProject(),
         workspaceId: "ws-1",
+        agent: noAgent(),
+      },
+    });
+  });
+
+  test("a folder project carries the picked agent for the implicit workspace", () => {
+    const resolved = resolveComposerSubmit([folderGroup()], [workspace()], {
+      projectId: "folder:1",
+      name: "",
+      baseRef: "",
+      agent: piAgent(),
+    });
+    expect(resolved).toEqual({
+      target: {
+        kind: "implicit",
+        project: folderProject(),
+        workspaceId: "ws-1",
+        agent: piAgent(),
       },
     });
   });
@@ -83,6 +137,7 @@ describe("resolveComposerSubmit", () => {
       projectId: "folder:1",
       name: "",
       baseRef: "",
+      agent: noAgent(),
     });
     expect(resolved).toEqual({
       error:
@@ -96,6 +151,7 @@ describe("resolveComposerSubmit", () => {
         projectId: null,
         name: "",
         baseRef: "",
+        agent: noAgent(),
       }),
     ).toEqual({ error: "Choose a project to continue." });
     expect(
@@ -103,6 +159,7 @@ describe("resolveComposerSubmit", () => {
         projectId: "nope",
         name: "",
         baseRef: "",
+        agent: noAgent(),
       }),
     ).toEqual({ error: "Choose a project to continue." });
   });
@@ -112,6 +169,7 @@ describe("resolveComposerSubmit", () => {
       projectId: "git:1",
       name: "  demo-a ",
       baseRef: "  main  ",
+      agent: noAgent(),
     });
     expect(resolved).toEqual({
       target: {
@@ -119,6 +177,25 @@ describe("resolveComposerSubmit", () => {
         project: gitProject(),
         name: "demo-a",
         baseRef: "main",
+        agent: noAgent(),
+      },
+    });
+  });
+
+  test("a git project carries the picked agent for the post-create launch", () => {
+    const resolved = resolveComposerSubmit([gitGroup()], [], {
+      projectId: "git:1",
+      name: "demo-a",
+      baseRef: "",
+      agent: piAgent(),
+    });
+    expect(resolved).toEqual({
+      target: {
+        kind: "worktree",
+        project: gitProject(),
+        name: "demo-a",
+        baseRef: undefined,
+        agent: piAgent(),
       },
     });
   });
@@ -128,6 +205,7 @@ describe("resolveComposerSubmit", () => {
       projectId: "git:1",
       name: "demo-a",
       baseRef: "   ",
+      agent: noAgent(),
     });
     expect(resolved).toEqual({
       target: {
@@ -135,6 +213,7 @@ describe("resolveComposerSubmit", () => {
         project: gitProject(),
         name: "demo-a",
         baseRef: undefined,
+        agent: noAgent(),
       },
     });
   });
@@ -144,10 +223,86 @@ describe("resolveComposerSubmit", () => {
       projectId: "git:1",
       name: "has space",
       baseRef: "",
+      agent: piAgent(),
     });
     expect(resolved).toEqual({
       error: "The name must not contain whitespace or control characters.",
     });
+  });
+});
+
+describe("initialComposerAgentId", () => {
+  test("preselects the stored default when it is available", () => {
+    expect(initialComposerAgentId([piHarness(), claudeHarness()], "pi")).toBe(
+      "pi",
+    );
+  });
+
+  test("falls back to no agent when the default is missing or unavailable", () => {
+    expect(initialComposerAgentId([piHarness()], "claude")).toBeNull();
+    expect(
+      initialComposerAgentId(
+        [
+          {
+            ...claudeHarness(),
+            availability: "missing",
+          },
+        ],
+        "claude",
+      ),
+    ).toBeNull();
+    expect(initialComposerAgentId([], "")).toBeNull();
+    expect(initialComposerAgentId([piHarness()], "")).toBeNull();
+  });
+});
+
+describe("composerAgentLaunchInput", () => {
+  test("no harness means no launch (today's create-without-session)", () => {
+    expect(
+      composerAgentLaunchInput("ws-1", noAgent(), "req-1"),
+    ).toBeNull();
+  });
+
+  test("a Pi pick carries provider and model to harness.start", () => {
+    expect(composerAgentLaunchInput("ws-1", piAgent(), "req-1")).toEqual({
+      workspaceId: "ws-1",
+      harnessId: "pi",
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+      provider: "dgx-spark",
+      effort: undefined,
+      prompt: undefined,
+      permissionMode: "inherit",
+      requestId: "req-1",
+    });
+  });
+
+  test("blank model and provider reach the service as absent keys", () => {
+    expect(
+      composerAgentLaunchInput(
+        "ws-1",
+        { harnessId: "pi", model: "  ", provider: "" },
+        "req-1",
+      ),
+    ).toEqual({
+      workspaceId: "ws-1",
+      harnessId: "pi",
+      model: undefined,
+      provider: undefined,
+      effort: undefined,
+      prompt: undefined,
+      permissionMode: "inherit",
+      requestId: "req-1",
+    });
+  });
+
+  test("a provider picked for another harness never leaks through", () => {
+    expect(
+      composerAgentLaunchInput(
+        "ws-1",
+        { harnessId: "claude", model: "", provider: "dgx-spark" },
+        "req-1",
+      )?.provider,
+    ).toBeUndefined();
   });
 });
 

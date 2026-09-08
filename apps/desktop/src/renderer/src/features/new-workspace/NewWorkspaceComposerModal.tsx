@@ -1,15 +1,24 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/NewWorkspaceComposerModal.tsx (adapter: MVP
-   subset over this repo's Project/Worktree RPC contract — no agents,
-   remotes, setup or quick-session paths; the add-project affordance
-   closes the composer and opens the add dialog instead of layering). */
+   subset over this repo's Project/Worktree RPC contract — agent picker
+   included, no remotes, setup or quick-session paths; the add-project
+   affordance closes the composer and opens the add dialog instead of
+   layering). */
 import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Dialog } from "radix-ui";
-import type { Workspace } from "../../../../shared/session-contract";
+import type {
+  Harness,
+  HarnessLaunchInput,
+  Workspace,
+} from "../../../../shared/session-contract";
 import type { ProjectGroup } from "../shell/project-adapter";
 import { NewWorkspaceComposer } from "./NewWorkspaceComposer";
-import { composerPrimaryActionLabel, initialComposerProjectId } from "./composer-submit";
+import {
+  composerPrimaryActionLabel,
+  initialComposerProjectId,
+  type ComposerAgentSelection,
+} from "./composer-submit";
 
 /**
  * New-workspace composer modal: the source's quick-create surface for
@@ -22,7 +31,10 @@ export function NewWorkspaceComposerModal({
   workspaces,
   initialProjectId,
   disabled,
+  harnesses,
+  defaultHarnessId,
   onSubmitWorktree,
+  onLaunchAgent,
   onSelectWorkspace,
   onAddProject,
   onClose,
@@ -31,12 +43,17 @@ export function NewWorkspaceComposerModal({
   workspaces: Workspace[];
   initialProjectId: string | null;
   disabled: boolean;
+  /** Listed harnesses for the composer's Agent picker. */
+  harnesses: Harness[];
+  defaultHarnessId: string;
   /** Resolves a verbatim daemon error, or null on success (then closes). */
   onSubmitWorktree: (input: {
     projectId: string;
     name: string;
     baseRef?: string;
+    agent: ComposerAgentSelection;
   }) => Promise<string | null>;
+  onLaunchAgent: (launch: HarnessLaunchInput) => Promise<string | null>;
   onSelectWorkspace: (workspaceId: string) => void;
   /** Closes the composer and opens the add-project dialog. */
   onAddProject: () => void;
@@ -89,8 +106,11 @@ export function NewWorkspaceComposerModal({
             projectId={projectId}
             disabled={disabled}
             nameInputRef={nameInputRef}
+            harnesses={harnesses}
+            defaultHarnessId={defaultHarnessId}
             onProjectChange={setProjectId}
             onSubmitWorktree={onSubmitWorktree}
+            onLaunchAgent={onLaunchAgent}
             onSelectWorkspace={onSelectWorkspace}
             onAddProject={onAddProject}
             onClose={onClose}
