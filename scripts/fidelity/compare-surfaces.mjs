@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -206,6 +206,24 @@ const SURFACES = [
     ],
     probes: ["github-task-row", "Start workspace", "Pagination", "aria-label"],
     candFiles: ["apps/desktop/src/renderer/src/features/tasks/task-page/github/Rows.tsx"],
+  },
+  {
+    // R5: the only state with a dirty git worktree. The candidate
+    // registers a real git project through drogon-cli (the right
+    // activity bar's gitOnly gate hides Source Control for folder
+    // projects), then dirties one tracked file plus one untracked
+    // file; the reference side only opens its own panel
+    // (navigate-only, ref owns its data).
+    id: "source-control-dirty",
+    label: "Source Control panel with uncommitted changes (git fixture)",
+    refDir: "src/renderer/src/components/right-sidebar/source-control",
+    refFiles: [
+      "src/renderer/src/components/right-sidebar/source-control/panel/panel-content.tsx",
+      "src/renderer/src/components/right-sidebar/source-control/listing/uncommitted-sections.tsx",
+      "src/renderer/src/components/right-sidebar/source-control/listing/section-header.tsx",
+    ],
+    probes: ["Unstaged", "Untracked", "Commit message", "aria-label"],
+    candFiles: ["apps/desktop/src/renderer/src/features/source-control/uncommitted-sections.tsx"],
   },
   {
     id: "bots",
@@ -1346,7 +1364,7 @@ async function refSetup(page, state, ctx) {
       break;
     }
     case "source-control": {
-      const open = await page.getByRole("textbox", { name: "Commit message" }).count().catch(() => 0);
+      const open = await page.getByRole("region", { name: "Changes" }).count().catch(() => 0);
       if (open > 0) notes.push("Source Control panel already open; captured as-is");
       else if (await tryClick(page, "button", "Source Control (⌘⇧G)", 2500)) notes.push("Source Control opened via activity bar");
       else {
@@ -1354,6 +1372,25 @@ async function refSetup(page, state, ctx) {
           await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 2500 });
           await delay(350);
           notes.push("Source Control opened via fallback match");
+        } catch {
+          missing.push("no Source Control activity button reachable");
+        }
+      }
+      break;
+    }
+    case "source-control-dirty": {
+      // Navigate-only like source-control: dirty content is ref-owned
+      // (nothing created or modified here). When the ref panel shows
+      // no changes, the candidate compares against the fork SOURCE
+      // (uncommitted-sections.tsx) instead — recorded as non-coverage.
+      const open = await page.getByRole("region", { name: "Changes" }).count().catch(() => 0);
+      if (open > 0) notes.push("Source Control panel already open; captured as-is (ref owns dirty content)");
+      else if (await tryClick(page, "button", "Source Control (⌘⇧G)", 2500)) notes.push("Source Control opened via activity bar (ref owns dirty content)");
+      else {
+        try {
+          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 2500 });
+          await delay(350);
+          notes.push("Source Control opened via fallback match (ref owns dirty content)");
         } catch {
           missing.push("no Source Control activity button reachable");
         }
@@ -2172,6 +2209,117 @@ async function candSetup(page, state, ctx) {
       return false;
     }
   };
+  const reloadCandidate = async (label) => {
+    try {
+      await page.reload();
+      await emulatePageFocus(page).catch(() => {});
+      await page
+        .getByRole("button", { name: "Reveal active workspace", exact: true })
+        .waitFor({ timeout: 25000 });
+      await ensureCandidateViewport(page, notes);
+      notes.push(`${label}: candidate reloaded around the fixture`);
+      return true;
+    } catch (error) {
+      missing.push(`${label}: candidate reload failed: ${error.message.split("\n")[0]}`);
+      return false;
+    }
+  };
+  // R5: a real git project for the Source Control panel. Folder
+  // projects never pass the right activity bar's gitOnly gate, so the
+  // repo is registered through drogon-cli (same RPCs as the Add
+  // Project dialog, per #146/#160) and the candidate reloads so App
+  // picks it up. Returns the sc-wt worktree path, or null with
+  // missing noted.
+  const ensureGitProject = async (label) => {
+    if (!ctx.dataDir) {
+      missing.push(`${label} needs the owned candidate (dataDir unavailable)`);
+      return null;
+    }
+    if (process.platform === "win32") {
+      missing.push(`${label} git fixture is unix-only`);
+      return null;
+    }
+    const cliBin = path.join(root, "target", "debug", "drogon-cli");
+    const repo = path.join(path.dirname(ctx.workspace), "sc-repo");
+    try {
+      await mkdir(repo, { recursive: true });
+      await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: repo }).catch(() => {});
+      await execFileAsync("git", ["config", "user.email", "fixture@example.com"], { cwd: repo }).catch(() => {});
+      await execFileAsync("git", ["config", "user.name", "fixture"], { cwd: repo }).catch(() => {});
+      await writeFile(path.join(repo, "notes.txt"), "sc fixture\n");
+      await execFileAsync("git", ["add", "notes.txt"], { cwd: repo }).catch(() => {});
+      // Already committed on a rerun: "nothing to commit" fails here
+      // and is ignored; the tree keeps its committed base.
+      await execFileAsync("git", ["commit", "-q", "-m", "initial"], { cwd: repo }).catch(() => {});
+      notes.push("fixture: sc-repo git repo with one commit");
+    } catch (error) {
+      missing.push(`sc-repo git fixture failed: ${error.message.split("\n")[0]}`);
+      return null;
+    }
+    if (!ctx.scProjectId) {
+      try {
+        const out = await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json", "project", "add", repo,
+        ]);
+        ctx.scProjectId = JSON.parse(out.stdout).result?.id ?? "registered";
+        notes.push("fixture: sc-repo registered as a project");
+      } catch (error) {
+        missing.push(`sc-repo registration failed: ${error.message.split("\n")[0]}`);
+        return null;
+      }
+      // A project is not a workspace: only a worktree becomes the
+      // active workspace the panel binds to (real `git worktree add`
+      // under the hood, like the Create-workspace dialog).
+      try {
+        const out = await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json",
+          "worktree", "create", "--project", ctx.scProjectId, "--name", "sc-wt",
+        ]);
+        ctx.scWorktreePath = JSON.parse(out.stdout).result?.path ?? null;
+        notes.push("fixture: sc-wt worktree created (active-workspace candidate)");
+      } catch (error) {
+        missing.push(`sc-wt worktree failed: ${error.message.split("\n")[0]}`);
+        return null;
+      }
+      if (!ctx.scWorktreePath) {
+        missing.push("sc-wt worktree path missing from CLI output");
+        return null;
+      }
+      if (!(await reloadCandidate("fixture"))) return null;
+    }
+    // Prefer sc-wt as the active workspace so the panel binds to it.
+    // The sidebar repopulates asynchronously after a reload, so wait
+    // for the row instead of probing it once.
+    try {
+      const select = page.getByRole("button", { name: /^Select sc-wt/ }).first();
+      await select.waitFor({ timeout: 15000 });
+      await select.click({ timeout: 3000 });
+      await delay(500);
+      notes.push("sc-wt selected as the active workspace");
+    } catch {
+      notes.push("sc-wt Select unavailable (reload selection kept)");
+    }
+    return ctx.scWorktreePath ?? repo;
+  };
+  // The commit composer only renders with uncommitted changes, so panel
+  // presence probes region "Changes", not the commit box.
+  const openSourceControl = async () => {
+    const panelOpen = () => page.getByRole("region", { name: "Changes" }).count().catch(() => 0);
+    if ((await panelOpen()) > 0) {
+      notes.push("Source Control panel already open; captured as-is");
+      return true;
+    }
+    try {
+      await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 3000 });
+      await delay(500);
+      const nowOpen = await panelOpen();
+      notes.push(nowOpen > 0 ? "Source Control opened through the right activity bar" : "Source Control click acted but the Changes panel never appeared");
+      return nowOpen > 0;
+    } catch {
+      missing.push("Source Control activity button unavailable (capability or fixture)");
+      return false;
+    }
+  };
   switch (state) {
     case "empty":
       notes.push(ctx.candProjectId ? "project already exists; captured as-is" : "fresh empty app");
@@ -2413,28 +2561,57 @@ async function candSetup(page, state, ctx) {
       break;
     }
     case "source-control": {
-      await ensureProject().catch(() => {});
-      // Own temp fixture: one modified tracked file, mirroring the retired
-      // "changes" state fixture. The reference side is never touched.
+      // Clean worktree: the panel should render its committed-empty
+      // state. The reference side is never touched.
+      const scope = await ensureGitProject("source-control");
+      if (!scope) break;
       try {
-        await execFileAsync("git", ["init"], { cwd: ctx.workspace }).catch(() => {});
-        await writeFile(path.join(ctx.workspace, "notes.txt"), "fidelity fixture\n");
-        await execFileAsync("git", ["add", "-A"], { cwd: ctx.workspace }).catch(() => {});
-        await writeFile(path.join(ctx.workspace, "notes.txt"), "fidelity fixture modified\n");
-        notes.push("git fixture: one modified tracked file");
+        await execFileAsync("git", ["checkout", "-q", "--", "notes.txt"], { cwd: scope }).catch(() => {});
+        await rm(path.join(scope, "scratch.txt"), { force: true });
+        notes.push("fixture: sc-wt restored clean");
       } catch {
-        notes.push("git fixture best-effort only");
+        notes.push("clean restore best-effort only");
       }
-      const open = await page.getByRole("textbox", { name: "Commit message" }).count().catch(() => 0);
-      if (open > 0) notes.push("Source Control panel already open; captured as-is");
-      else {
-        try {
-          await page.getByRole("button", { name: "Source Control" }).first().click({ timeout: 3000 });
-          await delay(350);
-          notes.push("Source Control opened through the right activity bar");
-        } catch {
-          missing.push("Source Control activity button unavailable (capability or fixture)");
-        }
+      await openSourceControl();
+      break;
+    }
+    case "source-control-dirty": {
+      // One modified tracked file plus one untracked file in sc-wt, so
+      // the Unstaged/Untracked sections render. Staging is untouched
+      // (R16-R2 owns stage behavior). The reference side is never
+      // touched.
+      const scope = await ensureGitProject("source-control-dirty");
+      if (!scope) break;
+      try {
+        await writeFile(path.join(scope, "notes.txt"), "sc fixture modified\n");
+        await writeFile(path.join(scope, "scratch.txt"), "untracked\n");
+        notes.push("fixture: sc-wt dirty (modified tracked + untracked)");
+      } catch (error) {
+        missing.push(`dirty fixture failed: ${error.message.split("\n")[0]}`);
+        break;
+      }
+      // The panel snapshots status on mount (manual refresh otherwise),
+      // so reload onto the dirty tree before opening it.
+      if (!(await reloadCandidate("dirty"))) break;
+      try {
+        const select = page.getByRole("button", { name: /^Select sc-wt/ }).first();
+        await select.waitFor({ timeout: 15000 });
+        await select.click({ timeout: 3000 });
+        await delay(500);
+        notes.push("sc-wt reselected after dirty reload");
+      } catch {
+        notes.push("sc-wt reselect best-effort only");
+      }
+      await openSourceControl();
+      try {
+        await page
+          .getByRole("region", { name: "Changes" })
+          .getByText("scratch.txt")
+          .first()
+          .waitFor({ timeout: 20000 });
+        notes.push("dirty rows rendered (scratch.txt visible)");
+      } catch {
+        missing.push("dirty rows did not render within 20s");
       }
       break;
     }
@@ -3370,6 +3547,7 @@ const ALL_STATES = [
   "statusbar-strip",
   "explorer",
   "source-control",
+  "source-control-dirty",
   "create-menu",
   "sidebar-menus",
   "tab-menus",
@@ -3406,6 +3584,7 @@ const CAND_OWNER = {
   "tasks-rows": "apps/desktop/src/renderer/src/features/tasks/task-page/github/Rows.tsx, List.tsx, ../PaginationBar.tsx",
   bots: "apps/desktop/src/renderer/src/features/bots/",
   explorer: "apps/desktop/src/renderer/src/features/file-explorer/",
+  "source-control-dirty": "apps/desktop/src/renderer/src/features/source-control/ChangesPanel.tsx, uncommitted-sections.tsx, section-header.tsx",
   "sidebar-menus": "apps/desktop/src/renderer/src/features/shell/ProjectList.tsx, project-actions-menu.tsx, WorktreeContextMenu.tsx",
   "tab-menus": "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx, TabContextMenu.tsx",
   "right-rail": "apps/desktop/src/renderer/src/features/right-sidebar/RightSidebar.tsx, features/file-explorer/FileExplorerMenus.tsx, features/ports/PortsPanel.tsx",
@@ -3444,6 +3623,7 @@ const STATE_SURFACE = {
   "statusbar-strip": "status-bar",
   explorer: "explorer",
   "source-control": "changes",
+  "source-control-dirty": "changes",
   "create-menu": "tab-bar",
   "sidebar-menus": "sidebar-menus",
   "tab-menus": "tab-menus",
