@@ -25,6 +25,10 @@ const defaults: SettingsSubset = {
   harnessDefaults: {},
   notifyOnAgentNeedsInput: true,
   terminalGpuAcceleration: "auto",
+  statusBarVisible: true,
+  tasksButtonVisible: true,
+  automationsButtonVisible: true,
+  titlebarAppNameVisible: true,
 };
 
 class MemoryStorage implements StorageLike {
@@ -205,6 +209,10 @@ describe("persistence round-trip through injected storage", () => {
         harnessDefaults: {},
         notifyOnAgentNeedsInput: true,
         terminalGpuAcceleration: "auto",
+        statusBarVisible: true,
+        tasksButtonVisible: true,
+        automationsButtonVisible: true,
+        titlebarAppNameVisible: true,
       },
     });
   });
@@ -395,6 +403,10 @@ describe("unknown-key forward compatibility on read-modify-write", () => {
       harnessDefaults: {},
       notifyOnAgentNeedsInput: true,
       terminalGpuAcceleration: "auto",
+      statusBarVisible: true,
+      tasksButtonVisible: true,
+      automationsButtonVisible: true,
+      titlebarAppNameVisible: true,
     });
   });
 });

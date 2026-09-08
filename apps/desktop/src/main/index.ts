@@ -1,10 +1,37 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { bridgeSchemas } from "../shared/bridge-validation";
 import type { Result, Status } from "../shared/session-contract";
+import {
+  appearanceMenuStateSchema,
+  menuIpcChannels,
+  setUnreadDockBadgeCountSchema,
+  type AppearanceMenuState,
+} from "../shared/menu-contract";
+import {
+  DEFAULT_WINDOW_HEIGHT,
+  DEFAULT_WINDOW_WIDTH,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+} from "../shared/window-state-contract";
+import {
+  DROGON_README_URL,
+  EXPLORE_DROGON_URL,
+  rebuildAppMenu,
+  registerAppMenu,
+  sendAppMenuCommandToWindow,
+  zoomFocusedWindow,
+} from "./menu/register-app-menu";
+import { setUnreadDockBadgeCount } from "./dock/unread-badge";
+import {
+  installWindowStateLifecycle,
+  loadWindowState,
+  restorableBounds,
+  type MainWindowStateLifecycle,
+} from "./window/window-state";
 import { readBuildInfo } from "./build-info";
 import { registerAutomationIpc } from "./automation-bridge";
 import { dispatchFileRequest } from "./file-bridge";
@@ -72,6 +99,84 @@ function contractViolation(message: string) {
   };
 }
 let window: BrowserWindow | null = null;
+let windowStateLifecycle: MainWindowStateLifecycle | null = null;
+
+/** Parses the dev seam "WxH+X+Y"; null when absent or malformed. */
+function parseWindowBoundsEnv(raw: string | undefined): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} | null {
+  if (!raw) return null;
+  const match = /^(\d+)x(\d+)\+(\d+)\+(\d+)$/.exec(raw);
+  if (!match) return null;
+  const [width, height, x, y] = match.slice(1).map(Number);
+  return { x, y, width, height };
+}
+
+// The View > Appearance checkbox marks read this snapshot; the renderer —
+// which owns the settings store — reports each change over the menu contract
+// and main rebuilds the menu (source: main-process-i18n-menu.ts
+// getAppearanceState + onToggleAppearance, adapted since Drogon has no
+// main-side store).
+let appearanceMenuState: AppearanceMenuState = {
+  statusBarVisible: true,
+  tasksButtonVisible: true,
+  automationsButtonVisible: true,
+  titlebarAppNameVisible: true,
+};
+
+function sendFromTrustedRenderer(command: Parameters<typeof sendAppMenuCommandToWindow>[1]) {
+  sendAppMenuCommandToWindow(window, command);
+}
+
+function registerAppMenuIpc() {
+  ipcMain.handle(menuIpcChannels.appearanceState, (event, payload: unknown) => {
+    if (!window || event.sender !== window.webContents) return false;
+    const validated = appearanceMenuStateSchema.safeParse(payload);
+    if (!validated.success) return false;
+    appearanceMenuState = validated.data;
+    rebuildAppMenu();
+    return true;
+  });
+  ipcMain.handle(
+    menuIpcChannels.setUnreadDockBadgeCount,
+    (event, count: unknown) => {
+      if (!window || event.sender !== window.webContents) return false;
+      const validated = setUnreadDockBadgeCountSchema.safeParse(count);
+      if (!validated.success) return false;
+      setUnreadDockBadgeCount(validated.data);
+      return true;
+    },
+  );
+}
+
+function registerAppMenuBar() {
+  registerAppMenu({
+    onOpenSettings: () => sendFromTrustedRenderer({ type: "open-settings" }),
+    onOpenExploreDrogon: (targetWindow) => {
+      void targetWindow;
+      void shell.openExternal(EXPLORE_DROGON_URL);
+    },
+    onOpenGettingStarted: (targetWindow) => {
+      void targetWindow;
+      void shell.openExternal(DROGON_README_URL);
+    },
+    // Why: this repo's keybinding table assigns the zoom chords to the native
+    // menu with no renderer handler, so main zooms the focused window's page.
+    onZoomIn: () => zoomFocusedWindow("in"),
+    onZoomOut: () => zoomFocusedWindow("out"),
+    onZoomReset: () => zoomFocusedWindow("reset"),
+    onToggleLeftSidebar: () =>
+      sendFromTrustedRenderer({ type: "toggle-left-sidebar" }),
+    onToggleRightSidebar: () =>
+      sendFromTrustedRenderer({ type: "toggle-right-sidebar" }),
+    onToggleAppearance: (key) =>
+      sendFromTrustedRenderer({ type: "toggle-appearance", key }),
+    getAppearanceState: () => appearanceMenuState,
+  });
+}
 
 function registerBridge() {
   registerGitBridge(() => window);
@@ -213,11 +318,23 @@ function registerBridge() {
 }
 
 function createWindow() {
+  // Window-state restore (source createMainWindow + Store.windowBounds):
+  // saved bounds win only when bigger than the minimum and meaningfully
+  // visible on an attached display; first launch stays 1400×920.
+  const saved = loadWindowState();
+  const savedBounds = restorableBounds(saved, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
+  if (savedBounds) {
+    console.log("[window] Restoring persisted windowBounds:", savedBounds);
+  }
+  if (saved.maximized) {
+    console.log("[window] Restoring persisted windowMaximized");
+  }
   window = new BrowserWindow({
-    width: 1400,
-    height: 920,
-    minWidth: 720,
-    minHeight: 480,
+    width: savedBounds?.width ?? DEFAULT_WINDOW_WIDTH,
+    height: savedBounds?.height ?? DEFAULT_WINDOW_HEIGHT,
+    ...(savedBounds ? { x: savedBounds.x, y: savedBounds.y } : {}),
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     title: "Drogon",
     webPreferences: {
@@ -234,12 +351,29 @@ function createWindow() {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
-  window.on("ready-to-show", () =>
-    backgroundWindow ? window?.showInactive() : window?.show(),
-  );
+  // Why: maximize before the first show so no un-maximized frame flashes
+  // (source revealInitialWindow maximizes in the same hook); the background
+  // seam shows inactive so the user keeps keyboard focus.
+  window.on("ready-to-show", () => {
+    if (saved.maximized) window?.maximize();
+    if (backgroundWindow) window?.showInactive();
+    else window?.show();
+  });
   window.on("closed", () => {
     window = null;
   });
+  windowStateLifecycle?.dispose();
+  windowStateLifecycle = installWindowStateLifecycle({ mainWindow: window });
+  // Dev-only window-bounds seam (like DROGON_ELECTRON_PROFILE): Electron's
+  // CDP exposes no Browser domain and macOS AX automation is not granted,
+  // so the relaunch oracle drives the real resize/move path through this
+  // "WxH+X+Y" env instead of a synthetic test double.
+  const seamBounds = parseWindowBoundsEnv(process.env.DROGON_WINDOW_BOUNDS);
+  if (!app.isPackaged && seamBounds) {
+    window.setBounds(seamBounds);
+  }
+  console.log("[window] Window bounds at startup:", window.getBounds(),
+    "maximized:", window.isMaximized());
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL)
     void window.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void window.loadFile(path.join(__dirname, "../renderer/index.html"));
@@ -337,16 +471,8 @@ if (!holdsSingleInstanceLock) {
       (_webContents, _permission, callback) => callback(false),
     );
     session.defaultSession.setPermissionCheckHandler(() => false);
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate([
-        ...(process.platform === "darwin"
-          ? [{ role: "appMenu" as const }]
-          : []),
-        { role: "editMenu" },
-        { role: "viewMenu" },
-        { role: "windowMenu" },
-      ]),
-    );
+    registerAppMenuBar();
+    registerAppMenuIpc();
     registerBridge();
     registerAutomationIpc(
       (event) =>

@@ -194,7 +194,15 @@ import {
   isPaletteOpen,
   resolveKeybindingPlatform,
   shouldDispatch,
-} from "./keybindings";
+} from "../../shared/keybindings";
+import type {
+  AppearanceMenuKey,
+  AppearanceMenuState,
+} from "../../shared/menu-contract";
+import {
+  useUnreadDockBadge,
+  windowAppMenuBridge,
+} from "./hooks/use-unread-dock-badge";
 import { guardHandler } from "./shortcuts";
 import {
   parsePersistedSettings,
@@ -432,6 +440,15 @@ export function App() {
   const [notifyOnAgentNeedsInput, setNotifyOnAgentNeedsInput] = useState(
     () => settings.get("notifyOnAgentNeedsInput"),
   );
+  // R14-B appearance flags (source default-on settings the native View >
+  // Appearance submenu checkbox-marks; consumed by the shell below).
+  const [appearanceFlags, setAppearanceFlags] = useState(() => ({
+    statusBarVisible: settings.get("statusBarVisible"),
+    tasksButtonVisible: settings.get("tasksButtonVisible"),
+    automationsButtonVisible: settings.get("automationsButtonVisible"),
+    titlebarAppNameVisible: settings.get("titlebarAppNameVisible"),
+  }));
+  const appearanceReportRef = useRef<string | null>(null);
   // Settings is a full page (route "settings"), not a dialog: opening it
   // remembers the previous route so "Back to app" returns to that view.
   const [settingsReturnRoute, setSettingsReturnRoute] = useState<string | null>(
@@ -2196,6 +2213,63 @@ export function App() {
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
   });
+  const setAppearanceFlag = (key: AppearanceMenuKey, value: boolean) => {
+    settings.set(key, value);
+    setAppearanceFlags((flags) => ({ ...flags, [key]: value }));
+  };
+  const toggleAppearanceFlag = (key: AppearanceMenuKey) =>
+    setAppearanceFlag(key, !appearanceFlags[key]);
+  useEffect(() => {
+    // R14-B native menu bridge (source register-app-menu.ts dispatches over
+    // IPC; the renderer owns these surfaces): one subscription forwards menu
+    // commands to the existing shell handlers, and the appearance flags are
+    // reported to main so the View > Appearance checkbox marks stay accurate
+    // (main rebuilds the menu on each report). Re-registered every render
+    // like the keybinding effect above so the handlers never go stale; the
+    // report is deduped because Electron re-applies the whole template.
+    const bridge = windowAppMenuBridge();
+    const offCommand = bridge?.onCommand((command) => {
+      if (command.type === "open-settings") openSettings();
+      else if (command.type === "toggle-left-sidebar") toggleSidebar();
+      else if (command.type === "toggle-right-sidebar") toggleRightSidebar();
+      else toggleAppearanceFlag(command.key);
+    });
+    const offPaste = bridge?.onPaste(() => {
+      // Source fallback for a focused text control (app-menu-paste.ts
+      // performNativePaste); terminal-owned paste lands with the terminal
+      // paste bridge, not here.
+      document.execCommand("paste");
+    });
+    const offSelection = bridge?.onSelectionAction((action) => {
+      document.execCommand(action === "copy" ? "copy" : "selectAll");
+    });
+    if (bridge) {
+      const state: AppearanceMenuState = {
+        statusBarVisible: appearanceFlags.statusBarVisible,
+        tasksButtonVisible: appearanceFlags.tasksButtonVisible,
+        automationsButtonVisible: appearanceFlags.automationsButtonVisible,
+        titlebarAppNameVisible: appearanceFlags.titlebarAppNameVisible,
+      };
+      const serialized = JSON.stringify(state);
+      if (appearanceReportRef.current !== serialized) {
+        appearanceReportRef.current = serialized;
+        bridge.reportAppearanceState(state).catch(() => {
+          // Menu sync is best-effort chrome; a missed report only delays a
+          // checkbox mark until the next flag change.
+        });
+      }
+    }
+    return () => {
+      offCommand?.();
+      offPaste?.();
+      offSelection?.();
+    };
+  });
+  // Dock unread badge (source useUnreadDockBadge): the needs_input count
+  // rides the same session list the sidebar cards use.
+  useUnreadDockBadge(
+    sessions.filter((session) => session.agentState === "needs_input").length,
+  );
   useEffect(() => {
     // Terminal font size rides a CSS hook the terminal surface reads, so the
     // stored choice applies without remounting sessions.
@@ -2245,6 +2319,8 @@ export function App() {
             route={route}
             onSelectRoute={setRoute}
             onOpenPalette={openCommandPalette}
+            showTasksButton={appearanceFlags.tasksButtonVisible}
+            showAutomationsButton={appearanceFlags.automationsButtonVisible}
             groups={projectGroups}
             workspaces={workspaces}
             sessions={sessions}
@@ -2289,6 +2365,26 @@ export function App() {
                   onTerminalGpuAccelerationChange={changeTerminalGpuAcceleration}
                   inspectorVisible={inspector}
                   onInspectorChange={changeInspector}
+                  statusBarVisible={appearanceFlags.statusBarVisible}
+                  onStatusBarVisibleChange={(visible) =>
+                    setAppearanceFlag("statusBarVisible", visible)
+                  }
+                  tasksButtonVisible={appearanceFlags.tasksButtonVisible}
+                  onTasksButtonVisibleChange={(visible) =>
+                    setAppearanceFlag("tasksButtonVisible", visible)
+                  }
+                  automationsButtonVisible={
+                    appearanceFlags.automationsButtonVisible
+                  }
+                  onAutomationsButtonVisibleChange={(visible) =>
+                    setAppearanceFlag("automationsButtonVisible", visible)
+                  }
+                  titlebarAppNameVisible={
+                    appearanceFlags.titlebarAppNameVisible
+                  }
+                  onTitlebarAppNameVisibleChange={(visible) =>
+                    setAppearanceFlag("titlebarAppNameVisible", visible)
+                  }
                   harnesses={harnesses}
                   defaultHarnessId={defaultHarnessId}
                   onDefaultHarnessChange={changeDefaultHarness}
@@ -2837,7 +2933,12 @@ export function App() {
           onClose={() => setComposer(null)}
         />
       )}
-      <StatusBar terminalCount={sessions.length} onOpenSettings={() => openSettings()} />
+      {appearanceFlags.statusBarVisible ? (
+        <StatusBar
+          terminalCount={sessions.length}
+          onOpenSettings={() => openSettings()}
+        />
+      ) : null}
       <Toaster closeButton toastOptions={{ className: "font-sans text-sm" }} />
     </Tooltip.Provider>
   );

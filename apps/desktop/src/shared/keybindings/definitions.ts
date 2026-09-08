@@ -388,6 +388,15 @@ export function resolveKeybindingPlatform(
   return uiPlatform === "darwin" ? "darwin" : "linux";
 }
 
+/** NodeJS.Platform → the table's platform key (source getKeybindingPlatform). */
+export function getKeybindingPlatform(
+  platform: typeof process.platform,
+): KeybindingPlatform {
+  if (platform === "darwin") return "darwin";
+  if (platform === "win32") return "win32";
+  return "linux";
+}
+
 export function isDigitIndexDefinition(
   definition: KeybindingDefinition,
 ): boolean {

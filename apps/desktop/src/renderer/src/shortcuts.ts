@@ -12,7 +12,7 @@ import {
   resolveKeybindingPlatform,
   type KeybindingDefinition,
   type KeybindingPlatform,
-} from "./keybindings/definitions";
+} from "../../shared/keybindings/definitions";
 
 export type { KeybindingDefinition };
 

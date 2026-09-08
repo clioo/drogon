@@ -22,7 +22,7 @@ import {
   createKeybindingRegistry,
   isEditableTarget,
   resolveKeybindingPlatform,
-} from "../../keybindings";
+} from "../../../../shared/keybindings";
 import { resolvePaletteFocusRestoreTarget } from "./focus-restore";
 import {
   JumpPalette,

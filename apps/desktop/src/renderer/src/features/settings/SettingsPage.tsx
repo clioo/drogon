@@ -51,6 +51,15 @@ export type SettingsPageProps = {
   onEditorFontFamilyChange?: (family: string) => void;
   inspectorVisible: boolean;
   onInspectorChange: (visible: boolean) => void;
+  /** R14-B appearance flags (View > Appearance submenu marks + shell visibility). */
+  statusBarVisible: boolean;
+  onStatusBarVisibleChange: (visible: boolean) => void;
+  tasksButtonVisible: boolean;
+  onTasksButtonVisibleChange: (visible: boolean) => void;
+  automationsButtonVisible: boolean;
+  onAutomationsButtonVisibleChange: (visible: boolean) => void;
+  titlebarAppNameVisible: boolean;
+  onTitlebarAppNameVisibleChange: (visible: boolean) => void;
   harnesses: Harness[];
   defaultHarnessId: string;
   onDefaultHarnessChange: (harnessId: string) => void;
@@ -195,6 +204,20 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     onEditorFontFamilyChange={props.onEditorFontFamilyChange}
                     inspectorVisible={props.inspectorVisible}
                     onInspectorChange={props.onInspectorChange}
+                    statusBarVisible={props.statusBarVisible}
+                    onStatusBarVisibleChange={props.onStatusBarVisibleChange}
+                    tasksButtonVisible={props.tasksButtonVisible}
+                    onTasksButtonVisibleChange={
+                      props.onTasksButtonVisibleChange
+                    }
+                    automationsButtonVisible={props.automationsButtonVisible}
+                    onAutomationsButtonVisibleChange={
+                      props.onAutomationsButtonVisibleChange
+                    }
+                    titlebarAppNameVisible={props.titlebarAppNameVisible}
+                    onTitlebarAppNameVisibleChange={
+                      props.onTitlebarAppNameVisibleChange
+                    }
                   />
                 ) : null}
                 {visible.includes("notifications") ? (

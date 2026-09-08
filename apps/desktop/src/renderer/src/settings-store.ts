@@ -83,6 +83,14 @@ export type SettingsSubset = {
   notifyOnAgentNeedsInput: boolean;
   /** Terminal renderer policy: auto/on/off xterm.js WebGL gate (source terminalGpuAcceleration). */
   terminalGpuAcceleration: TerminalGpuAcceleration;
+  // R14-B appearance flags (source global-settings showTasksButton /
+  // showAutomationsButton / showTitlebarAppName + persisted-UI-state
+  // statusBarVisible, all default-on): the shell and the native View >
+  // Appearance submenu read these.
+  statusBarVisible: boolean;
+  tasksButtonVisible: boolean;
+  automationsButtonVisible: boolean;
+  titlebarAppNameVisible: boolean;
 };
 
 /** localStorage shape the store needs; injectable for tests and alternative stores. */
@@ -104,6 +112,10 @@ export const SETTINGS_DEFAULTS: SettingsSubset = {
   harnessDefaults: {},
   notifyOnAgentNeedsInput: true,
   terminalGpuAcceleration: "auto",
+  statusBarVisible: true,
+  tasksButtonVisible: true,
+  automationsButtonVisible: true,
+  titlebarAppNameVisible: true,
 };
 
 const DEBOUNCE_MS = 1000;
@@ -278,6 +290,14 @@ export function parsePersistedSettings(
       out.notifyOnAgentNeedsInput = candidate.notifyOnAgentNeedsInput;
     if (isGpuAcceleration(candidate.terminalGpuAcceleration))
       out.terminalGpuAcceleration = candidate.terminalGpuAcceleration;
+    for (const key of [
+      "statusBarVisible",
+      "tasksButtonVisible",
+      "automationsButtonVisible",
+      "titlebarAppNameVisible",
+    ] as const) {
+      if (typeof candidate[key] === "boolean") out[key] = candidate[key];
+    }
     return out;
   } catch {
     return {};

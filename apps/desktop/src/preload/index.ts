@@ -12,6 +12,7 @@ import { notifications } from "./notifications";
 import { tasks } from "./tasks";
 import { mentu } from "./mentu";
 import { botBridgeExtras } from "./bot";
+import { appMenu } from "./app-menu";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -58,9 +59,12 @@ const bridge: DesktopBridge = {
 // project, shell and the R2-S botCreate/botRun/botHistory additions) with
 // the coordinator-owned DesktopBridge type without editing it: a
 // runtime-only merge before the freeze, so no existing key changes shape.
+// R14-B adds the appMenu namespace (native menu commands, appearance state,
+// dock badge).
 Object.assign(
   bridge,
   { git, browser, notifications, shell, tasks, project, mentu },
   botBridgeExtras,
+  { appMenu },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

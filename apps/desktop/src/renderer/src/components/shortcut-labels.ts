@@ -9,9 +9,9 @@ import {
   bindingsForPlatform,
   getKeybindingDefinition,
   resolveKeybindingPlatform,
-} from "../keybindings/definitions";
-import { formatKeybinding, formatKeybindingList } from "../keybindings/labels";
-import { parseKeybinding } from "../keybindings/parser";
+} from "../../../shared/keybindings/definitions";
+import { formatKeybinding, formatKeybindingList } from "../../../shared/keybindings/labels";
+import { parseKeybinding } from "../../../shared/keybindings/parser";
 
 export type ShortcutPlatform = "darwin" | "other";
 

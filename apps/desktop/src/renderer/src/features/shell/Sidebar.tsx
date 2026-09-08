@@ -52,6 +52,8 @@ export function Sidebar({
   onSubmitRenameWorktree,
   onOpenProjectSettings,
   onOpenSettings,
+  showTasksButton = true,
+  showAutomationsButton = true,
 }: {
   open: boolean;
   width: number;
@@ -90,6 +92,9 @@ export function Sidebar({
   /** Opens the settings page on the given project's section. */
   onOpenProjectSettings: (project: Project) => void;
   onOpenSettings: (initialSection?: SettingsSectionId) => void;
+  /** Appearance flags (source showTasksButton / showAutomationsButton, default-on). */
+  showTasksButton?: boolean;
+  showAutomationsButton?: boolean;
 }) {
   const [resizing, setResizing] = useState(false);
   const dragRef = useRef({ startX: 0, startWidth: width });
@@ -135,6 +140,8 @@ export function Sidebar({
             route={route}
             onSelectRoute={onSelectRoute}
             onOpenPalette={onOpenPalette}
+            showTasksButton={showTasksButton}
+            showAutomationsButton={showAutomationsButton}
           />
           <div ref={scrollRef} className="shell-sidebar-scroll">
             <ProjectList

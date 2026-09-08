@@ -50,6 +50,14 @@ describe("appearance projection", () => {
         onTerminalGpuAccelerationChange={() => {}}
         inspectorVisible={true}
         onInspectorChange={() => {}}
+        statusBarVisible={true}
+        onStatusBarVisibleChange={() => {}}
+        tasksButtonVisible={true}
+        onTasksButtonVisibleChange={() => {}}
+        automationsButtonVisible={true}
+        onAutomationsButtonVisibleChange={() => {}}
+        titlebarAppNameVisible={true}
+        onTitlebarAppNameVisibleChange={() => {}}
       />,
     );
     expect(html).toContain("Appearance");
@@ -78,6 +86,14 @@ describe("appearance projection", () => {
         editorFontFamily=""
         inspectorVisible={true}
         onInspectorChange={() => {}}
+        statusBarVisible={true}
+        onStatusBarVisibleChange={() => {}}
+        tasksButtonVisible={true}
+        onTasksButtonVisibleChange={() => {}}
+        automationsButtonVisible={true}
+        onAutomationsButtonVisibleChange={() => {}}
+        titlebarAppNameVisible={true}
+        onTitlebarAppNameVisibleChange={() => {}}
       />,
     );
     expect(html).toContain("Font Family");
@@ -178,6 +194,14 @@ describe("settings page order", () => {
         onTerminalGpuAccelerationChange={noop}
         inspectorVisible={true}
         onInspectorChange={noop}
+        statusBarVisible={true}
+        onStatusBarVisibleChange={noop}
+        tasksButtonVisible={true}
+        onTasksButtonVisibleChange={noop}
+        automationsButtonVisible={true}
+        onAutomationsButtonVisibleChange={noop}
+        titlebarAppNameVisible={true}
+        onTitlebarAppNameVisibleChange={noop}
         harnesses={[]}
         defaultHarnessId=""
         onDefaultHarnessChange={noop}
