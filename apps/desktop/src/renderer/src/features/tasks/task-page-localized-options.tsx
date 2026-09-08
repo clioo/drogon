@@ -41,6 +41,14 @@ export function getGitHubStateFilters(): GitHubStateFilter[] {
   ];
 }
 
+export type GitHubTaskPresetId = "issues" | "my-issues" | "prs" | "my-prs";
+
+export type GitHubTaskPreset = {
+  id: GitHubTaskPresetId;
+  label: string;
+  query: string;
+};
+
 // Why: the source's mode buttons are Issues/PRs/Projects; this repo's daemon
 // serves no Projects board, so only the two `gh`-backed kinds survive, with
 // the source's button classes applied in ModeControls.
@@ -58,6 +66,46 @@ export const GITHUB_DEFAULT_PR_QUERY = "is:pr is:open";
 
 export function getGitHubDefaultQuery(kind: GitHubTaskKind): string {
   return kind === "pulls" ? GITHUB_DEFAULT_PR_QUERY : GITHUB_DEFAULT_ISSUE_QUERY;
+}
+
+// Source preset row (task-page-localized-options.tsx
+// getGitHubTaskKindPresets): the pill row above the search box. The fork
+// also offers a `review` (Needs review, `review-requested:@me`) PR preset,
+// which has no daemon counterpart — `gh pr list` returns no review-request
+// data, so the button would always render zero rows and is omitted.
+export function getGitHubTaskKindPresets(kind: GitHubTaskKind): GitHubTaskPreset[] {
+  return kind === "pulls"
+    ? [
+        { id: "prs", label: "Open", query: GITHUB_DEFAULT_PR_QUERY },
+        { id: "my-prs", label: "Mine", query: "author:@me is:pr is:open" },
+      ]
+    : [
+        { id: "issues", label: "Open", query: GITHUB_DEFAULT_ISSUE_QUERY },
+        { id: "my-issues", label: "Assigned to me", query: "assignee:@me is:issue is:open" },
+      ];
+}
+
+export function getGitHubDefaultPreset(kind: GitHubTaskKind): GitHubTaskPresetId {
+  return kind === "pulls" ? "prs" : "issues";
+}
+
+export function getGitHubTaskPresetQuery(preset: GitHubTaskPresetId): string {
+  switch (preset) {
+    case "issues":
+      return GITHUB_DEFAULT_ISSUE_QUERY;
+    case "my-issues":
+      return "assignee:@me is:issue is:open";
+    case "prs":
+      return GITHUB_DEFAULT_PR_QUERY;
+    case "my-prs":
+      return "author:@me is:pr is:open";
+  }
+}
+
+/** The fork opens issue filing outside the list (here: the system browser, never a create RPC). */
+export function buildNewGitHubIssueUrl(repo: string): string | null {
+  const slug = repo.trim();
+  return slug === "" ? null : `https://github.com/${slug}/issues/new`;
 }
 
 // Qualifiers the daemon already encodes elsewhere: the kind switch carries

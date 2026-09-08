@@ -25,13 +25,21 @@ import type {
   TaskPickerRepo,
 } from "./task-page-model";
 import { GITHUB_PR_TASK_GRID_CLASS, GITHUB_TASK_GRID_CLASS, TASK_SEARCH_DEBOUNCE_MS } from "./task-page-source-context";
-import type { GitHubStateFilterId, GitHubTaskKind } from "./task-page-localized-options";
+import type {
+  GitHubStateFilterId,
+  GitHubTaskKind,
+  GitHubTaskPresetId,
+} from "./task-page-localized-options";
 import {
+  buildNewGitHubIssueUrl,
+  getGitHubDefaultPreset,
   getGitHubDefaultQuery,
   getGitHubModeButtons,
+  getGitHubTaskPresetQuery,
   getSourceOptions,
   projectTasksDaemonQuery,
 } from "./task-page-localized-options";
+import { windowShellOpenExternal } from "../landing/github-star";
 
 export const TASKS_ROUTE_ID = "tasks";
 export const TASKS_TITLE = "Tasks";
@@ -92,6 +100,11 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   );
   const [githubTaskKind, setGithubTaskKind] = useState<GitHubTaskKind>("issues");
   const [stateFilter, setStateFilter] = useState<GitHubStateFilterId>("open");
+  // Source preset pill (fork use-task-page-search-actions): set by preset
+  // clicks and kind switches, cleared the moment the user types.
+  const [activeTaskPreset, setActiveTaskPreset] = useState<GitHubTaskPresetId | null>(() =>
+    getGitHubDefaultPreset("issues"),
+  );
   // Source default (presetToQuery): the box opens prefilled with the kind's
   // qualifier query; the daemon projection below strips the implied parts.
   const [taskSearchInput, setTaskSearchInput] = useState(() =>
@@ -268,16 +281,35 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     setRefreshNonce((nonce) => nonce + 1);
   }, [refreshGroups, refreshLinks]);
 
+  // Source use-task-page-search-actions: typing detaches the view from any
+  // preset (the debounce effect above still commits the draft per key).
   const handleTaskSearchChange = useCallback((_value: string) => {
-    // The debounce effect above commits the draft; nothing to do per key.
+    setActiveTaskPreset(null);
   }, []);
 
+  // Source preset click: the pill fully determines the query; the state
+  // pills stay the state control. A refresh is forced even when the query
+  // is unchanged so stale rows never read as if the filter did nothing.
+  const handleSelectTaskPreset = useCallback((preset: GitHubTaskPresetId) => {
+    const query = getGitHubTaskPresetQuery(preset);
+    setTaskSearchInput(query);
+    setAppliedTaskSearch(query);
+    setActiveTaskPreset(preset);
+    setPage(1);
+    setFurthestPage(1);
+    setRefreshNonce((nonce) => nonce + 1);
+  }, []);
+
+  // Source handleResetGithubTaskSearch: Clear restores the kind default —
+  // query, pill and open state — never a bare box. The daemon projection
+  // maps the default back to no query.
   const handleResetGithubTaskSearch = useCallback(() => {
-    // Why: Clear restores the kind default like the source's preset row,
-    // never a bare box — the daemon projection maps it back to no query.
     setTaskSearchInput(getGitHubDefaultQuery(githubTaskKind));
     setAppliedTaskSearch(getGitHubDefaultQuery(githubTaskKind));
+    setActiveTaskPreset(getGitHubDefaultPreset(githubTaskKind));
+    setStateFilter("open");
     setPage(1);
+    setFurthestPage(1);
   }, [githubTaskKind]);
 
   // Selecting a row keeps the journey-J6 behavior: start a worktree for
@@ -345,34 +377,37 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
       selectedRepo && repo
         ? { url: `https://github.com/${repo}`, label: repo }
         : null,
+    // Filing stays on GitHub (no create RPC): the button opens this URL
+    // in the system browser. Null until the daemon resolves the slug.
+    newGitHubIssueUrl: selectedRepo && repo ? buildNewGitHubIssueUrl(repo) : null,
+    openExternal:
+      typeof window === "undefined" ? null : windowShellOpenExternal(window.drogon),
     githubMode: "items",
     githubTaskKind,
+    // Source handleSelectGithubTaskKind: switching kinds always lands on
+    // the kind's default preset view (query, pill and open state).
     onSelectGithubTaskKind: (kind) => {
       setPage(1);
       setFurthestPage(1);
       setGithubTaskKind(kind);
-      // Why: a pristine/default box follows the kind (source presetToQuery);
-      // user-typed text survives the switch.
-      const nextDefault = getGitHubDefaultQuery(kind);
-      setTaskSearchInput((current) =>
-        current.trim() === "" || current === getGitHubDefaultQuery(githubTaskKind)
-          ? nextDefault
-          : current,
-      );
-      setAppliedTaskSearch((current) =>
-        current.trim() === "" || current === getGitHubDefaultQuery(githubTaskKind)
-          ? nextDefault
-          : current,
-      );
+      setTaskSearchInput(getGitHubDefaultQuery(kind));
+      setAppliedTaskSearch(getGitHubDefaultQuery(kind));
+      setActiveTaskPreset(getGitHubDefaultPreset(kind));
+      setStateFilter("open");
     },
     githubModeButtons: getGitHubModeButtons(),
     showPRManagementColumns: githubTaskKind === "pulls",
     stateFilter,
+    // A state change replaces every row's meaning, so the view detaches
+    // from any preset like the source's filter changes do.
     onStateFilter: (state) => {
       setPage(1);
       setFurthestPage(1);
+      setActiveTaskPreset(null);
       setStateFilter(state);
     },
+    activeTaskPreset,
+    onSelectTaskPreset: handleSelectTaskPreset,
     taskSearchInput,
     setTaskSearchInput,
     appliedTaskSearch,
