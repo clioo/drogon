@@ -41,6 +41,7 @@ function fakeContents(): GuestContentsLike & {
     },
     getTitle: () => "Example",
     executeJavaScript: async () => ({}),
+    setBackgroundThrottling() {},
     navigationHistory: {
       canGoBack: () => false,
       canGoForward: () => false,

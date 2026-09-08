@@ -9,6 +9,7 @@ import { runAcceptanceProcess, startAcceptanceProcess, stopAcceptanceProcess } f
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { readEditorValue, waitForEditorRegistered } from "./acceptance-editor-text.mjs";
+import { decodePng } from "./build-app-icon.mjs";
 
 // Extended packaged-acceptance surfaces (journey J11): palette, Settings,
 // Changes, Automations, Bots, status bar and Tasks, each as a real CDP
@@ -146,6 +147,23 @@ export function browserSnapshotShowsGuest(snapshot, marker) {
       ? snapshot
       : JSON.stringify(snapshot ?? "");
   return text.includes(marker);
+}
+
+/** A guest screenshot must contain more than the all-black native-view failure surface. */
+export function guestScreenshotHasPaint(pngBytes) {
+  const raster = decodePng(pngBytes);
+  let brightPixels = 0;
+  for (let offset = 0; offset < raster.pixels.length; offset += 4) {
+    if (
+      raster.pixels[offset + 3] > 0 &&
+      raster.pixels[offset] > 180 &&
+      raster.pixels[offset + 1] > 180 &&
+      raster.pixels[offset + 2] > 180
+    ) {
+      brightPixels += 1;
+    }
+  }
+  return brightPixels >= 256;
 }
 
 /** Liveness of the `window.__drogonTerminals` debug registry. */
@@ -428,11 +446,45 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
       .getByRole("tab", { name: /127\.0\.0\.1/ })
       .first()
       .waitFor({ timeout: 30000 });
+    // The native WebContentsView is a separate CDP target from the renderer
+    // shell. Capture that target itself: the screenshot must contain painted
+    // pixels, and its accessibility tree must expose the heading the shell's
+    // chrome cannot provide.
+    let guestPage = null;
+    const guestTargetDeadline = Date.now() + 30000;
+    while (!guestPage && Date.now() < guestTargetDeadline) {
+      guestPage =
+        page
+          .context()
+          .pages()
+          .find((candidate) => candidate.url().startsWith(guestUrl)) ?? null;
+      if (!guestPage) await delay(100);
+    }
+    assert.ok(guestPage, `browser guest target must exist for ${guestUrl}`);
+    await guestPage
+      .getByRole("heading", { name: guest, exact: true })
+      .waitFor({ timeout: 30000 });
+    const guestAria = await guestPage.locator("body").ariaSnapshot();
+    assert.match(
+      guestAria,
+      new RegExp(`heading [^\\n]*${guest.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}`),
+      "browser guest accessibility tree must expose its heading",
+    );
+    const guestScreenshot = await guestPage.screenshot({
+      path: path.join(output, "browser-guest.png"),
+      animations: "disabled",
+    });
+    assert.equal(
+      guestScreenshotHasPaint(guestScreenshot),
+      true,
+      "browser guest screenshot must contain painted pixels",
+    );
     await page.screenshot({
       path: path.join(output, "browser.png"),
       animations: "disabled",
     });
     terminalChecks.push("tab-strip-plus-menu-creates-browser-tab-rendering-guest");
+    terminalChecks.push("browser-guest-paints-pixels-and-exposes-heading");
     const deadline = Date.now() + 60000;
     let tabId = null;
     let lastListError = "no attempts";

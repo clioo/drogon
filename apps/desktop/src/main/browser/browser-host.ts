@@ -66,6 +66,8 @@ export type GuestContentsLike = {
   getURL(): string;
   getTitle(): string;
   executeJavaScript(code: string): Promise<unknown>;
+  /** Keep embedded guests repainting when their native view is briefly hidden during pane switches. */
+  setBackgroundThrottling(enabled: boolean): void;
   navigationHistory: {
     canGoBack(): boolean;
     canGoForward(): boolean;
@@ -426,6 +428,11 @@ export class BrowserHost {
     const tabId = nextTabId();
     const view = this.createView({ webPreferences: { ...GUEST_WEB_PREFERENCES } });
     const contents = view.webContents as unknown as GuestContentsLike;
+    // The guest is a native child view that starts hidden while the renderer
+    // mounts and reports its first bounds. Chromium can throttle that hidden
+    // compositor and retain a black surface after the page commits; the fork
+    // disables background throttling for every browsing guest for this reason.
+    contents.setBackgroundThrottling(false);
     lockDownGuestSession(contents.session);
     // Popups never open OS windows: denied here, routed into a pane tab.
     contents.setWindowOpenHandler(({ url }) => {
