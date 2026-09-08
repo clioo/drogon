@@ -104,6 +104,10 @@ import {
   useProjectRegistryRefresh,
   windowProjectBridge,
 } from "./features/shell/project-adapter";
+import {
+  resolveConnectionReadyReload,
+  useConnectionReadyReload,
+} from "./features/shell/connection-ready-reload";
 import type { ProjectGroup } from "./features/shell/project-adapter";
 import type { ProjectAction } from "./features/shell/ProjectList";
 import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
@@ -1395,6 +1399,34 @@ export function App() {
   }, [refresh]);
   // Issue #146: re-read the project view when another process moves the registry.
   useProjectRegistryRefresh(setProjectReloadTick);
+  // Issue #185: reload whenever the daemon connection becomes ready. The
+  // watcher lives at root (not in the banner) because the banner unmounts
+  // exactly when the workspace list is empty — the state that needs the
+  // retry. A boot pass with no confirmed status means the mount refresh
+  // failed transiently, so reload everything; otherwise re-attach via the
+  // R16-M status-only path that preserves terminal pane scrollback.
+  useConnectionReadyReload((previous) => {
+    const reload = resolveConnectionReadyReload(status !== null, previous);
+    if (reload === "skip") return;
+    if (reload === "full") {
+      void refresh();
+      return;
+    }
+    // Re-attaches without remounting panes: a fresh status identity
+    // retriggers the sessions effect while the unchanged revision keeps
+    // every same-identity pane — and its scrollback — mounted. A full
+    // refresh() here would remount all panes and clear their buffers just
+    // as the service returns. Errors set during the outage belonged to
+    // it, so a success clears them.
+    void window.drogon
+      .status()
+      .then((response) => {
+        if (!response.ok) return;
+        setError("");
+        setStatus(response.result);
+      })
+      .catch(() => {});
+  });
   useEffect(() => {
     // Reloads the project view whenever the workspace list or the live
     // capabilities change; the adapter degrades to the workspace
@@ -2910,28 +2942,14 @@ export function App() {
             </div>
           </header>
           {/* R16-M daemon connection (fork parity): the ported banner owns
-              the retry ladder, the disconnect toast and the down→up reload;
-              while connected an unrelated error keeps the legacy banner. */}
+              the retry ladder and the disconnect toast (ready-transition
+              reloads live in useConnectionReadyReload at root, issue
+              #185); while connected an unrelated error keeps the legacy
+              banner. */}
           <DaemonConnectionBanner
             error={error}
             retryDisabled={busy}
             onRetry={() => void refresh()}
-            onReconnected={() => {
-              // Re-attaches without remounting panes: a fresh status
-              // identity retriggers the sessions effect while the unchanged
-              // revision keeps every same-identity pane — and its scrollback
-              // — mounted. A full refresh() here would remount all panes and
-              // clear their buffers just as the service returns. Errors set
-              // during the outage belonged to it, so a success clears them.
-              void window.drogon
-                .status()
-                .then((response) => {
-                  if (!response.ok) return;
-                  setError("");
-                  setStatus(response.result);
-                })
-                .catch(() => {});
-            }}
           />
             </>
           )}

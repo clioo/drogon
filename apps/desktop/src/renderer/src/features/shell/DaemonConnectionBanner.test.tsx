@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // DaemonConnectionBanner: legacy error passthrough while connected,
-// fork-literal retrying/disconnected cards while down, single
-// down→up reload, and the disconnect toast lifecycle.
+// fork-literal retrying/disconnected cards while down, manual retry,
+// and the disconnect toast lifecycle (ready-transition reloads live in
+// useConnectionReadyReload, issue #185).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { toast } from "sonner";
@@ -44,17 +45,12 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderBanner(overrides?: {
-  error?: string;
-  onRetry?: () => void;
-  onReconnected?: () => void;
-}) {
+function renderBanner(overrides?: { error?: string; onRetry?: () => void }) {
   return render(
     <DaemonConnectionBanner
       error={overrides?.error ?? ""}
       retryDisabled={false}
       onRetry={overrides?.onRetry ?? (() => {})}
-      onReconnected={overrides?.onReconnected ?? (() => {})}
     />,
   );
 }
@@ -114,16 +110,16 @@ describe("DaemonConnectionBanner", () => {
     );
   });
 
-  it("reloads once when the service returns and dismisses the toast", async () => {
+  it("dismisses the toast when the service returns", async () => {
+    // Ready-transition reloads live in useConnectionReadyReload (issue
+    // #185); the banner only owns display, toast and manual retry.
     let down = true;
     seedMonitor(() => Promise.resolve(down ? "refused" : null));
-    const onReconnected = vi.fn();
-    renderBanner({ onReconnected });
+    renderBanner();
     await settle(0);
-    expect(onReconnected).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).not.toBeNull();
     down = false;
     await settle(500);
-    expect(onReconnected).toHaveBeenCalledTimes(1);
     expect(dismiss).toHaveBeenCalled();
     expect(screen.queryByRole("status")).toBeNull();
   });
