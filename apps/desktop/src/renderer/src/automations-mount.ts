@@ -60,6 +60,8 @@ export function createGatedAutomationBridge(
     remove: gate("remove"),
     runNow: gate("runNow"),
     history: gate("history"),
+    runsAll: gate("runsAll"),
+    run: gate("run"),
   };
 }
 

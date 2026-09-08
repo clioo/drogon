@@ -258,6 +258,14 @@ hunk reconstruction, line stats, navigation context) port the Drogon fork's
 `monaco-editor` and `@monaco-editor/react` (MIT). Each ported file keeps the
 MIT notice.
 
+The Automations Runs dashboard and run details page in
+`apps/desktop/src/renderer/src/features/automations/` (AutomationRunsDashboard,
+AutomationRunsDashboardSurface, AutomationRunsTable, AutomationRunDetailsPage,
+AutomationRunPageFrame, AutomationsPageBreadcrumb, automation-runs-dashboard-model)
+port the Drogon fork's `src/renderer/src/components/automations/**` (fork
+revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
+keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

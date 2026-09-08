@@ -494,3 +494,30 @@ pub fn list_automation_runs(conn: &Connection, automation_id: &str) -> Result<Ve
         .map(|json| Ok(serde_json::from_str(&json)?))
         .collect()
 }
+
+/// Every stored run grouped by automation id: the runs-across-automations
+/// scan behind `automation.runs_all`. One pass over the single runs table;
+/// ordering is the caller's concern.
+pub fn list_all_automation_runs(conn: &Connection) -> Result<Vec<(String, Vec<AutomationRun>)>> {
+    let mut stmt = conn.prepare("SELECT automation_id, payload_json FROM automation_runs")?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut order: Vec<String> = Vec::new();
+    let mut grouped: std::collections::HashMap<String, Vec<AutomationRun>> =
+        std::collections::HashMap::new();
+    for (automation_id, json) in rows {
+        let runs = grouped.entry(automation_id.clone()).or_default();
+        if runs.is_empty() {
+            order.push(automation_id);
+        }
+        runs.push(serde_json::from_str(&json)?);
+    }
+    Ok(order
+        .into_iter()
+        .map(|automation_id| {
+            let runs = grouped.remove(&automation_id).unwrap_or_default();
+            (automation_id, runs)
+        })
+        .collect())
+}

@@ -45,10 +45,13 @@ export function AutomationRunHistory({
   runs,
   automationId,
   now,
+  onOpenRun,
 }: {
   runs: AutomationRunView[];
   automationId: string;
   now: number;
+  /** Source behavior: a row click (or Enter) selects and opens the run. */
+  onOpenRun?: (run: AutomationRunView) => void;
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedRunState, setSelectedRunState] = useState<{
@@ -85,6 +88,7 @@ export function AutomationRunHistory({
         if (selectedRun) {
           event.preventDefault();
           setSelectedRunState({ automationId, runId: selectedRun.run.id });
+          onOpenRun?.(selectedRun.run);
         }
         return;
       }
@@ -105,7 +109,7 @@ export function AutomationRunHistory({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [automationId, runs, selectedRun]);
+  }, [automationId, onOpenRun, runs, selectedRun]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -149,6 +153,7 @@ export function AutomationRunHistory({
               )}
               onClick={() => {
                 setSelectedRunState({ automationId, runId: entry.run.id });
+                onOpenRun?.(entry.run);
               }}
             >
               <div className="min-w-0">

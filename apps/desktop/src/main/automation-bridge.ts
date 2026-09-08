@@ -23,6 +23,8 @@ const NATIVE_METHOD: Record<AutomationOp, keyof typeof automationResultSchemas> 
   delete: "automation.delete",
   runNow: "automation.run_now",
   history: "automation.history",
+  runsAll: "automation.runs_all",
+  run: "automation.run",
 };
 
 const invalid = (): Result<never> => ({
@@ -57,11 +59,14 @@ export async function dispatchAutomationRequest(
       },
     };
   const output = checked.data as Record<string, unknown>;
-  // Identity echo: a response for another automation is never returned.
+  // Identity echo: a response for another automation (or run) is never
+  // returned. `list`/`runsAll` are aggregations with no single identity.
   const wantId =
     op === "history"
       ? (parsed.data as { automationId: string }).automationId
-      : (parsed.data as { id?: string }).id;
+      : op === "run"
+        ? (parsed.data as { runId: string }).runId
+        : (parsed.data as { id?: string }).id;
   if (wantId !== undefined) {
     const gotId =
       op === "history"
@@ -70,7 +75,7 @@ export async function dispatchAutomationRequest(
           )
           ? wantId
           : null
-        : (output.id ?? output.automationId ?? null);
+        : ((output.id ?? output.automationId ?? null) as string | null);
     if (gotId !== wantId)
       return {
         ok: false,

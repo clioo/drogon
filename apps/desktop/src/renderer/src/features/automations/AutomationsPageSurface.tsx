@@ -2,14 +2,15 @@
 // src/renderer/src/components/automations/AutomationsPageSurface.tsx.
 // Adaptation: local automations over this repo's `automation.*` bridge.
 // The surface owns list state (search/filter/selection), the editor draft,
-// delete target and detail history; runs-dashboard, external scopes, hosts,
-// SSH and Hermes branches are out of MVP scope. Layout and component order
-// (top bar → list panel / detail pane → editor dialog → delete dialogs)
-// mirror the reference.
+// delete target, detail history, the runs dashboard (pageView 'runs') and
+// the run details page (pageView 'run') with the source's breadcrumb
+// navigation; external scopes, hosts, SSH and Hermes branches are out of
+// MVP scope. Layout and component order mirror the reference.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type {
   AutomationBridge,
+  AutomationRunDetail,
   AutomationRunView,
   AutomationSummary,
 } from "../../../../shared/automation-contract";
@@ -29,6 +30,8 @@ import {
   shouldConfirmAutomationDelete,
 } from "./AutomationDeleteDialogs";
 import { persistSkipDeleteAutomationConfirm } from "./automation-delete-confirm-preference";
+import { AutomationRunsDashboardSurface } from "./AutomationRunsDashboardSurface";
+import { AutomationRunDetailsPage } from "./AutomationRunDetailsPage";
 import type { AutomationTemplate } from "./AutomationListEmptyView";
 import {
   blankAutomationDraft,
@@ -38,6 +41,18 @@ import {
   type AutomationEditorDraft,
 } from "./automation-editor-validation";
 import type { AutomationPaneTab } from "./automation-detail-tab-navigation";
+import { shouldHandleAutomationDetailEscapeKey } from "./automation-detail-tab-navigation";
+import {
+  canRerunAutomationRun,
+  getAutomationRunViewState,
+  waitForAutomationRerunPendingVisibility,
+} from "./automation-run-view-state";
+import { getAutomationRunWorkspaceDisplay } from "./automation-run-workspace-display";
+import { useAutomationRunsDashboard } from "./use-automation-runs-dashboard";
+import {
+  buildAutomationRunsDashboardEntries,
+  type AutomationRunsDashboardEntry,
+} from "./automation-runs-dashboard-model";
 import {
   EMPTY_AUTOMATION_LIST_FILTER,
   isAutomationListSearchQueryTooLarge,
@@ -52,6 +67,9 @@ export type AutomationsPageSurfaceProps = {
   listWorkspaces: () => Promise<Result<{ workspaces: Workspace[] }>>;
   listHarnesses?: () => Promise<Result<{ hostId: string; harnesses: Harness[] }>>;
 };
+
+type AutomationsPageView = "automations" | "runs" | "run";
+type RunPageOrigin = "runs" | "automation";
 
 function draftFromAutomation(
   automation: AutomationSummary,
@@ -115,6 +133,23 @@ export function AutomationsPageSurface({
   const [runsError, setRunsError] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [relativeNow, setRelativeNow] = useState(() => Date.now());
+  // Runs dashboard + run details page state (source pageView model).
+  const [pageView, setPageView] = useState<AutomationsPageView>("automations");
+  const [runPageOrigin, setRunPageOrigin] = useState<RunPageOrigin>("runs");
+  const [runDetail, setRunDetail] = useState<AutomationRunDetail | null>(null);
+  const [runDetailLoading, setRunDetailLoading] = useState(false);
+  const [runDetailError, setRunDetailError] = useState<string | null>(null);
+  const [runRerunPending, setRunRerunPending] = useState(false);
+  const [runHistoryReloadToken, setRunHistoryReloadToken] = useState(0);
+  const runsDashboard = useAutomationRunsDashboard({
+    enabled: pageView === "runs",
+    bridge,
+    reloadToken: runHistoryReloadToken,
+  });
+  const runsEntries: readonly AutomationRunsDashboardEntry[] = useMemo(
+    () => buildAutomationRunsDashboardEntries(runsDashboard.items),
+    [runsDashboard.items],
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => setRelativeNow(Date.now()), 30_000);
@@ -198,6 +233,7 @@ export function AutomationsPageSurface({
       setSelectedId(id);
       setIsDetailOpen(true);
       setActivePaneTab("overview");
+      setPageView("automations");
       void loadRuns(id);
     },
     [loadRuns],
@@ -206,7 +242,116 @@ export function AutomationsPageSurface({
   const backToList = useCallback(() => {
     setIsDetailOpen(false);
     setActivePaneTab("overview");
+    setPageView("automations");
   }, []);
+
+  // --- Runs dashboard and run details page navigation (source model) -----
+
+  const showAutomationsList = useCallback(() => {
+    setPageView("automations");
+    setRunDetail(null);
+    setRunDetailError(null);
+    setIsDetailOpen(false);
+    setActivePaneTab("overview");
+  }, []);
+
+  const showRunsDashboard = useCallback(() => {
+    setPageView("runs");
+    setRunDetail(null);
+    setRunDetailError(null);
+    setIsDetailOpen(false);
+    setActivePaneTab("overview");
+  }, []);
+
+  const showAutomationDetails = useCallback(() => {
+    setPageView("automations");
+    setRunDetail(null);
+    setRunDetailError(null);
+    setIsDetailOpen(true);
+    setActivePaneTab("runs");
+  }, []);
+
+  const openRunPage = useCallback(
+    (runId: string, automationId: string, origin: RunPageOrigin) => {
+      setRunPageOrigin(origin);
+      setPageView("run");
+      setSelectedId(automationId);
+      setIsDetailOpen(true);
+      setRunDetailLoading(true);
+      setRunDetailError(null);
+      void bridge
+        .run({ runId })
+        .then((result) => {
+          if (!result.ok) throw new Error(result.error.message);
+          setRunDetail(result.result);
+        })
+        .catch((failure: unknown) => {
+          setRunDetail(null);
+          setRunDetailError(
+            failure instanceof Error ? failure.message : "Could not load the run.",
+          );
+        })
+        .finally(() => setRunDetailLoading(false));
+    },
+    [bridge],
+  );
+
+  const refreshRunDetail = useCallback(
+    (runId: string) => {
+      void bridge.run({ runId }).then((result) => {
+        if (result.ok) setRunDetail(result.result);
+      });
+    },
+    [bridge],
+  );
+
+  const rerunRunPage = useCallback(() => {
+    if (!selected || !runDetail) return;
+    const automationId = selected.id;
+    setRunRerunPending(true);
+    void bridge
+      .runNow({ id: automationId })
+      .catch(() => undefined)
+      .then(() => waitForAutomationRerunPendingVisibility(Date.now()))
+      .then(() => {
+        setRunRerunPending(false);
+        void refresh();
+        refreshRunDetail(runDetail.id);
+      });
+  }, [bridge, refresh, refreshRunDetail, runDetail, selected]);
+
+  // Escape precedence for the runs dashboard and the run page (source
+  // use-automations-page-escape): run → back per origin; runs → list.
+  // Dialogs and fields above the page consume Escape first via the shared
+  // guard.
+  useEffect(() => {
+    if (pageView !== "run" && pageView !== "runs") {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!shouldHandleAutomationDetailEscapeKey(event)) {
+        return;
+      }
+      event.preventDefault();
+      if (pageView === "run") {
+        setRunDetail(null);
+        setRunDetailError(null);
+        if (runPageOrigin === "automation") {
+          setPageView("automations");
+          setIsDetailOpen(true);
+          setActivePaneTab("runs");
+        } else {
+          setPageView("runs");
+          setIsDetailOpen(false);
+          setActivePaneTab("overview");
+        }
+        return;
+      }
+      setPageView("automations");
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [pageView, runPageOrigin]);
 
   const openCreate = useCallback(
     (template?: AutomationTemplate) => {
@@ -382,22 +527,100 @@ export function AutomationsPageSurface({
   const draftErrors = useMemo(() => validateAutomationDraft(draft), [draft]);
   const selectedWorkspaceName = selected ? workspaceNameFor(selected.workspaceId) : "";
 
+  // Run page derived state (source use-automation-run-page-state, adapted:
+  // session existence comes from the daemon's `automation.run`).
+  const runPageWorkspace = useMemo(
+    () =>
+      runDetail?.workspaceId
+        ? (workspaces.find((entry) => entry.id === runDetail.workspaceId) ?? null)
+        : null,
+    [runDetail?.workspaceId, workspaces],
+  );
+  const runPageWorkspaceDisplay = useMemo(
+    () =>
+      runDetail
+        ? getAutomationRunWorkspaceDisplay({
+            run: runDetail,
+            workspace: runPageWorkspace,
+          })
+        : null,
+    [runDetail, runPageWorkspace],
+  );
+  const runPageViewState = useMemo(
+    () =>
+      runDetail
+        ? getAutomationRunViewState({
+            run: runDetail,
+            sessionExists: runDetail.sessionExists,
+          })
+        : null,
+    [runDetail],
+  );
+  const canRerunRunPage = useMemo(
+    () =>
+      runDetail !== null &&
+      canRerunAutomationRun({ automationId: selected?.id ?? null, run: runDetail }),
+    [runDetail, selected?.id],
+  );
+
   return (
     <main
       className="relative flex h-full min-h-0 flex-col bg-background pt-5 text-foreground md:pt-6"
       data-testid="automations-panel"
     >
       <AutomationsPageTopBar
+        pageView={pageView}
         isDetailOpen={isDetailOpen}
         selectedAutomationName={selected?.name}
-        showAutomationsList={backToList}
+        runPageOrigin={runPageOrigin}
+        showAutomationsList={showAutomationsList}
+        showRunsDashboard={showRunsDashboard}
+        showAutomationDetails={showAutomationDetails}
       />
       {error !== null ? (
         <p role="alert" className="shrink-0 px-3 pb-2 text-sm text-destructive md:px-5">
           {error}
         </p>
       ) : null}
-      {isDetailOpen && selected ? (
+      {pageView === "runs" ? (
+        <AutomationRunsDashboardSurface
+          entries={runsEntries}
+          loading={runsDashboard.loading}
+          hasMore={runsDashboard.hasMore}
+          onLoadMore={runsDashboard.loadMore}
+          now={relativeNow}
+          error={runsDashboard.error}
+          onRefresh={() => setRunHistoryReloadToken((token) => token + 1)}
+          onOpenRun={(entry) =>
+            openRunPage(entry.run.id, entry.run.automationId, "runs")
+          }
+        />
+      ) : pageView === "run" && runDetail ? (
+        <AutomationRunDetailsPage
+          automation={selected}
+          run={runDetail}
+          relativeNow={relativeNow}
+          workspaceDisplay={runPageWorkspaceDisplay}
+          viewState={runPageViewState}
+          canRerun={canRerunRunPage}
+          isRerunPending={runRerunPending}
+          onRerun={rerunRunPage}
+          onOpenWorkspace={() => refreshRunDetail(runDetail.id)}
+          onBack={runPageOrigin === "automation" ? showAutomationDetails : showRunsDashboard}
+        />
+      ) : pageView === "run" ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-5">
+          {runDetailError !== null ? (
+            <p role="alert" className="text-sm text-destructive">
+              {runDetailError}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {runDetailLoading ? "Loading run…" : "Run not available."}
+            </p>
+          )}
+        </div>
+      ) : isDetailOpen && selected ? (
         <AutomationsDetailPane
           selected={selected}
           workspaceName={selectedWorkspaceName}
@@ -413,6 +636,7 @@ export function AutomationsPageSurface({
           onToggle={(automation) => void toggleEnabled(automation.id)}
           onDelete={(automation) => requestDelete(automation.id)}
           onBackToList={backToList}
+          onOpenRun={(run) => openRunPage(run.id, run.automationId, "automation")}
         />
       ) : (
         <AutomationsListPanel
@@ -430,6 +654,7 @@ export function AutomationsPageSurface({
           relativeNow={relativeNow}
           runningId={runningId}
           isRefreshing={refreshing}
+          onOpenRuns={showRunsDashboard}
           onSelect={openDetail}
           onRunNow={(id) => void runNow(id)}
           onEdit={openEdit}

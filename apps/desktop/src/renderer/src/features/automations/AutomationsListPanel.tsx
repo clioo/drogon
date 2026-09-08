@@ -38,6 +38,7 @@ export type AutomationsListPanelProps = {
   relativeNow: number;
   runningId: string | null;
   isRefreshing: boolean;
+  onOpenRuns: () => void;
   onSelect: (id: string) => void;
   onRunNow: (id: string) => void;
   onEdit: (id: string) => void;
@@ -65,6 +66,7 @@ export function AutomationsListPanel(
     relativeNow,
     runningId,
     isRefreshing,
+    onOpenRuns,
     onSelect,
     onRunNow,
     onEdit,
@@ -130,6 +132,7 @@ export function AutomationsListPanel(
         onListFilterChange={onListFilterChange}
         onRefresh={onRefresh}
         isRefreshing={isRefreshing}
+        onOpenRuns={onOpenRuns}
         openCreateDialog={() => openCreateDialog()}
       />
 

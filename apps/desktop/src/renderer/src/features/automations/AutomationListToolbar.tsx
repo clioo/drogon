@@ -1,8 +1,8 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/automations/AutomationListToolbar.tsx.
-// Adaptation: no host entries or runs-dashboard entry in the MVP (local
-// automations only); search, filter menu, refresh and New Automation stay.
-import { Plus, RefreshCw } from "lucide-react";
+// Adaptation: no host entries (local automations only); search, filter
+// menu, refresh, the source's Runs entry and New Automation stay.
+import { History, Plus, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { cn } from "./automation-class-names";
 import type { AutomationListArrowKey } from "./automation-list-keyboard-navigation";
@@ -23,6 +23,7 @@ type AutomationListToolbarProps = {
   onListFilterChange: (filter: AutomationListFilter) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
+  onOpenRuns: () => void;
   openCreateDialog: () => void;
 };
 
@@ -37,6 +38,7 @@ export function AutomationListToolbar({
   onListFilterChange,
   onRefresh,
   isRefreshing,
+  onOpenRuns,
   openCreateDialog,
 }: AutomationListToolbarProps): React.JSX.Element {
   return (
@@ -68,6 +70,16 @@ export function AutomationListToolbar({
         </Button>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onOpenRuns}
+          data-contextual-tour-target="automations-runs"
+        >
+          <History className="size-4" />
+          Runs
+        </Button>
         <Button
           type="button"
           size="sm"

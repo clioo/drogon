@@ -21,4 +21,7 @@ export const automationBridge: AutomationBridge = {
   runNow: (input: { id: string }) => invoke("runNow", input),
   history: (input: { automationId: string; limit?: number }) =>
     invoke("history", input as object),
+  runsAll: (input: { page: number; perPage: number; status?: string }) =>
+    invoke("runsAll", input as object),
+  run: (input: { runId: string }) => invoke("run", input as object),
 };

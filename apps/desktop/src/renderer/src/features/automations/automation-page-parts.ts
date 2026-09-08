@@ -53,3 +53,53 @@ export function formatAutomationDateTimeWithRelative(
   const relative = formatAutomationRelativeTime(value, now);
   return relative ? `${absolute} (${relative})` : absolute;
 }
+
+// Source automation-page-parts.tsx (getAutomationRunStatusLabel /
+// getAutomationRunStatusVariant) over this repo's string-typed wire
+// statuses; the vocabulary and Badge variants stay literal.
+export function getAutomationRunStatusLabel(status: string): string {
+  switch (status.toLowerCase()) {
+    case "pending":
+      return "Queued";
+    case "dispatching":
+      return "Starting";
+    case "dispatched":
+      return "Launched";
+    case "completed":
+      return "Done";
+    case "skipped_precheck":
+      return "Precheck skipped";
+    case "skipped_missed":
+      return "Skipped";
+    case "skipped_unavailable":
+      return "Unavailable";
+    case "skipped_needs_interactive_auth":
+      return "Needs credentials";
+    case "dispatch_failed":
+      return "Failed";
+    default:
+      return status;
+  }
+}
+
+export type AutomationRunBadgeVariant =
+  | "secondary"
+  | "outline"
+  | "destructive"
+  | "dot";
+
+export function getAutomationRunStatusVariant(
+  status: string,
+): AutomationRunBadgeVariant {
+  const normalized = status.toLowerCase();
+  if (normalized === "dispatched" || normalized === "completed") {
+    return "secondary";
+  }
+  if (normalized.startsWith("skipped")) {
+    return "outline";
+  }
+  if (normalized === "dispatch_failed") {
+    return "destructive";
+  }
+  return "dot";
+}
