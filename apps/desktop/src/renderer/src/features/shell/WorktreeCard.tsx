@@ -24,6 +24,9 @@ import {
 } from "./worktree-card-agent-summary";
 import type { WorktreeCardPrDisplay } from "./worktree-card-pr-display";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
+import { buildWorktreeAgentRows } from "./worktree-agent-rows";
+import { WorktreeAgentRow } from "./WorktreeAgentRow";
+import type { TabStripState } from "./tab-order";
 
 /**
  * One worktree card: inline-rename title, agent-state dot, unread marker
@@ -50,6 +53,9 @@ export function WorktreeCard({
   onRemove,
   onRename,
   onCreateWorktree,
+  onSelectSession = null,
+  activeSessionId = "",
+  tabStrip,
 }: {
   worktree: Worktree;
   workspaces: Workspace[];
@@ -61,6 +67,12 @@ export function WorktreeCard({
   /** Known PR for the chip; null hides it (no PR store yet). */
   pr?: WorktreeCardPrDisplay | null;
   onSelect: (workspaceId: string) => void;
+  /** Selects a session tab; null hides row activation (rows still render). */
+  onSelectSession?: ((sessionId: string) => void) | null;
+  /** Active session tab id for the focused-row highlight. */
+  activeSessionId?: string;
+  /** Strip order/pins/renames so row titles read exactly like tab titles. */
+  tabStrip?: TabStripState;
   /** Zero-based index among the project's visible cards (drag geometry). */
   cardIndex?: number;
   /** Arms the pointer drag session; absent disables card dragging. */
@@ -84,8 +96,25 @@ export function WorktreeCard({
   const attached = sessions.filter(
     (session) => session.workspaceId === worktree.workspaceId,
   );
-  const summary = summarizeCardSessions(attached);
-  const agentSummary = summarizeCardAgentStates(attached);
+  // One nested row per session (the fork's useWorktreeAgentRows slot); the
+  // summary counts below derive from these same rows so the two can never
+  // disagree — a session that never reported still owns its fallback row.
+  const rows = buildWorktreeAgentRows(attached, {
+    stripOrder: tabStrip?.order,
+    pinnedIds: tabStrip?.pinned,
+    customTitles: tabStrip?.titles,
+    activeSessionId,
+  });
+  const rowSessions = rows.map((row) => row.session);
+  const summary = summarizeCardSessions(rowSessions);
+  const agentSummary = summarizeCardAgentStates(rowSessions);
+  // Row activation selects the workspace first, then the session tab: the
+  // workspace switch clears the active tab, so the tab selection must win
+  // last in the same batch (mirrors the notification focus handler).
+  const handleSelectSession = (sessionId: string) => {
+    onSelect(worktree.workspaceId);
+    onSelectSession?.(sessionId);
+  };
   // Linked GitHub issue from the tasks link store (journey J6); null when
   // the worktree was not started from a task — no badge then.
   const issueNumber = useSyncExternalStore(
@@ -126,6 +155,10 @@ export function WorktreeCard({
         onClickCapture={onCardClickCapture}
         aria-label={`${name}${summary.unread ? ", needs input" : ""}`}
       >
+        {/* Main column: the card is a flex row (select content beside the
+            kebab), so the select button and the nested rows share one
+            column wrapper instead of squeezing each other to zero width. */}
+        <div className="shell-worktree-card-main">
         <button
           type="button"
           className="shell-worktree-card-select"
@@ -189,6 +222,26 @@ export function WorktreeCard({
             </span>
           )}
         </button>
+        {/* Nested session rows (the fork's inline agent list): one row per
+            session underneath the summary line, outside the select button
+            so rows stay real buttons. */}
+        {rows.length > 0 ? (
+          <div
+            className="shell-worktree-card-rows"
+            role="group"
+            aria-label={`${name} sessions`}
+          >
+            {rows.map((row) => (
+              <WorktreeAgentRow
+                key={row.session.id}
+                row={row}
+                disabled={disabled}
+                onSelect={handleSelectSession}
+              />
+            ))}
+          </div>
+        ) : null}
+        </div>
         <span className="shell-worktree-card-menu">
           <button
             type="button"

@@ -3152,6 +3152,9 @@ export function App() {
             // R16-N: split second panes are not sidebar rows either.
             sessions={stripSessions}
             selectedWorkspaceId={selected}
+            activeSessionId={activeRootId}
+            tabStrip={tabStrip}
+            onSelectSession={selectSessionTab}
             workspaceDisabled={busy}
             addDisabled={!status || busy}
             onSelectWorkspace={selectWorkspaceId}
