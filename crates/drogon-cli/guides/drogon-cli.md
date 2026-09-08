@@ -27,6 +27,8 @@ drogon-cli status --json
 ```
 
 If the CLI is missing, say so explicitly instead of inspecting source files.
+For the full machine-readable surface, run
+`drogon-cli agent-context --json` (local, no daemon needed).
 
 ## Inside A Drogon Terminal
 
@@ -69,9 +71,12 @@ them with `drogon-cli workspace list --json`, and register one with
 ## Projects And Worktrees
 
 A project is a Git repository or a plain folder that owns worktrees.
-Register one with `drogon-cli project add <PATH> --name <NAME>` and list
-them with `drogon-cli project list --json`. Create a worktree on a branch
-with `drogon-cli worktree create --project <ID> --name <NAME> --base <REF>`,
+Register one with `drogon-cli project add <PATH> --name <NAME>`, list
+them with `drogon-cli project list --json`, and drop a registration with
+`drogon-cli project remove <ID>` (bookkeeping only: files on disk are
+untouched). Create a worktree on a branch
+with `drogon-cli worktree create --project <ID> --name <NAME> --base <REF>`
+(`--base-branch` spells the same flag),
 list a project's worktrees with `drogon-cli worktree list --project <ID>`,
 and remove one with `drogon-cli worktree rm <ID> --force`. Removal refuses
 a dirty checkout unless `--force` is passed.
@@ -95,9 +100,11 @@ and stop a session with `drogon-cli terminal close --session <ID> --incarnation 
 
 Wait client-side instead of sleeping: `drogon-cli terminal wait --session <ID> --incarnation <TOKEN> --for exited --timeout-ms 5000`
 exits 0 once the session exits, while
-`drogon-cli terminal wait --session <ID> --incarnation <TOKEN> --for idle --timeout-ms 60000`
+`drogon-cli terminal wait --session <ID> --incarnation <TOKEN> --for tui-idle --timeout-ms 60000`
 exits 0 once the agent goes quiet (an exited session also satisfies an
 idle wait, since it will never work again), and
+`--for` also accepts the fork spellings `exit` (= `exited`) and
+`tui-idle` (= `idle`):
 `drogon-cli terminal wait --session <ID> --incarnation <TOKEN> --for output --timeout-ms 60000`
 exits 0 once any terminal output exists or arrives. A blown budget exits
 non-zero with a `timeout` reason naming the last observed state. Always
@@ -162,5 +169,7 @@ never established). Only an observed exit is an exit.
 Confirm `drogon-cli status --json` unless already checked this turn, then
 choose the narrowest command: `workspace list`, `project list`,
 `worktree list --project <ID>`, `terminal list`, `terminal read`, or
-`terminal wait`. For supervised work with task ownership and completion
-tracking, read `drogon-cli skills get orchestration`.
+`terminal wait`. When discovering flags from scratch, prefer
+`drogon-cli agent-context --json` over guessing. For supervised work with
+task ownership and completion tracking, read
+`drogon-cli skills get orchestration`.

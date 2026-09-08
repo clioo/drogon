@@ -20,8 +20,8 @@ pub struct Cli {
     /// Drogon data directory (default: DROGON_DATA_DIR, else platform default)
     ///
     /// Accepts an optional value: a following flag-shaped token leaves the
-    /// implicit-presence marker (`args.ts:58-75`), which `validate` then
-    /// refuses exactly like the source's required-value globals.
+    /// implicit-presence marker, which `validate` then refuses as
+    /// `Flag --data-dir requires a value.`
     #[arg(
         long,
         global = true,
@@ -73,6 +73,14 @@ pub enum Command {
         override_usage = "drogon-cli status\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     Status,
+    /// Print the machine-readable command schema for agents (local, no
+    /// runtime needed)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli agent-context\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    AgentContext,
+    /// Workspaces: registered directories that own terminal sessions
     Workspace {
         #[command(subcommand)]
         action: WorkspaceAction,
@@ -87,6 +95,7 @@ pub enum Command {
         #[command(subcommand)]
         action: WorktreeAction,
     },
+    /// Terminals: PTY sessions with a stable id plus an incarnation token
     Terminal {
         #[command(subcommand)]
         action: TerminalAction,
@@ -320,6 +329,15 @@ pub enum ProjectAction {
         override_usage = "drogon-cli project list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     List,
+    /// Remove a Project registration; files on disk are untouched
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli project remove <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Remove {
+        /// Project id, as listed by `project list`
+        id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -327,7 +345,7 @@ pub enum WorktreeAction {
     /// Create a git worktree for a Project on branch NAME
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>]\nValid flags: --base, --data-dir, --help, --json, --name, --project, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>]\nValid flags: --base, --base-branch, --data-dir, --help, --json, --name, --project, --request-id, --retry-request"
     )]
     Create {
         #[arg(long, value_name = "ID")]
@@ -335,8 +353,9 @@ pub enum WorktreeAction {
         #[arg(long, value_name = "NAME")]
         name: String,
         /// Start point for the new branch; omitted means the Project's
-        /// current HEAD
-        #[arg(long, value_name = "REF")]
+        /// current HEAD. `--base-branch` is the fork's name for the same
+        /// flag; both spellings map to the one `baseRef` param.
+        #[arg(long, visible_alias = "base-branch", value_name = "REF")]
         base: Option<String>,
     },
     /// List a Project's worktrees
@@ -556,10 +575,15 @@ pub enum BrowserAction {
 }
 
 /// What `terminal wait --for` polls for. Clap renders these kebab-case, so
-/// the wire values are exactly `exited|idle|output`.
+/// the wire values are exactly `exited|idle|output`. The `exit`/`tui-idle`
+/// aliases are the fork's `terminal wait --for` spellings (`exit|tui-idle`);
+/// they map to the same conditions and the same wire values. `close` stays
+/// the separate `terminal close` verb, never a wait condition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum WaitFor {
+    #[value(alias = "exit")]
     Exited,
+    #[value(alias = "tui-idle")]
     Idle,
     Output,
 }
@@ -662,6 +686,9 @@ impl Cli {
                     }
                 }
                 ProjectAction::List => {}
+                ProjectAction::Remove { id } => {
+                    require_nonempty("id", id)?;
+                }
             },
             Command::Worktree { action } => match action {
                 WorktreeAction::Create {
@@ -928,6 +955,7 @@ impl Cli {
                 }
             },
             Command::Status => {}
+            Command::AgentContext => {}
         }
         Ok(())
     }
@@ -1190,6 +1218,72 @@ mod tests {
     }
 
     #[test]
+    fn worktree_create_accepts_base_branch_as_base_alias() {
+        for args in [
+            vec![
+                "worktree",
+                "create",
+                "--project",
+                "p1",
+                "--name",
+                "feature",
+                "--base",
+                "main",
+            ],
+            vec![
+                "worktree",
+                "create",
+                "--project",
+                "p1",
+                "--name",
+                "feature",
+                "--base-branch",
+                "main",
+            ],
+        ] {
+            let cli = parse(&args).unwrap();
+            let Command::Worktree {
+                action:
+                    WorktreeAction::Create {
+                        project,
+                        name,
+                        base,
+                    },
+            } = &cli.command
+            else {
+                panic!("wrong subcommand");
+            };
+            assert_eq!(project, "p1");
+            assert_eq!(name, "feature");
+            assert_eq!(base.as_deref(), Some("main"));
+            assert!(cli.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn project_remove_takes_a_positional_id() {
+        let cli = parse(&["project", "remove", "proj-1"]).unwrap();
+        let Command::Project {
+            action: ProjectAction::Remove { id },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(id, "proj-1");
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["project", "remove", ""]).unwrap();
+        assert!(matches!(cli.validate(), Err(CliError::Usage(_))));
+    }
+
+    #[test]
+    fn agent_context_parses() {
+        let cli = parse(&["agent-context"]).unwrap();
+        assert!(matches!(cli.command, Command::AgentContext));
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
     fn worktree_create_requires_project_and_name() {
         let cli = parse(&["worktree", "create", "--project", "", "--name", "feature"]).unwrap();
         assert!(matches!(cli.validate(), Err(CliError::Usage(_))));
@@ -1271,9 +1365,9 @@ mod tests {
             assert!(cli.validate().is_ok());
         }
 
-        // Unknown conditions never reach the daemon.
-        assert!(
-            parse(&[
+        // The fork's spellings map to the same conditions and wire values.
+        for (spelling, expected) in [("exit", WaitFor::Exited), ("tui-idle", WaitFor::Idle)] {
+            let cli = parse(&[
                 "terminal",
                 "wait",
                 "--session",
@@ -1281,12 +1375,43 @@ mod tests {
                 "--incarnation",
                 "i",
                 "--for",
-                "tui-idle",
+                spelling,
                 "--timeout-ms",
                 "5000",
             ])
-            .is_err()
-        );
+            .unwrap();
+            let Command::Terminal {
+                action: TerminalAction::Wait { r#for, .. },
+            } = &cli.command
+            else {
+                panic!("wrong subcommand");
+            };
+            assert_eq!(*r#for, expected, "--for {spelling}");
+            assert!(cli.validate().is_ok());
+        }
+        assert_eq!(WaitFor::Exited.as_wire(), "exited");
+        assert_eq!(WaitFor::Idle.as_wire(), "idle");
+
+        // Unknown conditions never reach the daemon. `close` is the separate
+        // `terminal close` verb, never a wait condition.
+        for condition in ["close", "tui_idle", "EXITED"] {
+            assert!(
+                parse(&[
+                    "terminal",
+                    "wait",
+                    "--session",
+                    "s",
+                    "--incarnation",
+                    "i",
+                    "--for",
+                    condition,
+                    "--timeout-ms",
+                    "5000",
+                ])
+                .is_err(),
+                "--for {condition} must not parse"
+            );
+        }
 
         for budget in ["0", "900001"] {
             let cli = parse(&[

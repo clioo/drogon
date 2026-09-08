@@ -130,6 +130,10 @@ pub fn worktree_removed(removed: &Removed) -> String {
     format!("Removed worktree {}.", removed.id)
 }
 
+pub fn project_removed(removed: &Removed) -> String {
+    format!("Removed project {}.", removed.id)
+}
+
 pub fn session_started(session: &Session) -> String {
     format!(
         "Started session {} [{}] agent={} incarnation={} argv={:?} ({}x{})",

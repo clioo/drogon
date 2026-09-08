@@ -122,6 +122,8 @@ fn guides_cover_the_contracted_surface() {
         "terminal wait",
         "worktree create",
         "project add",
+        "project remove",
+        "agent-context",
         "harness start",
         "session.agent-state.v1",
     ] {
