@@ -51,6 +51,7 @@ import {
   TASKS_PAGE_HOST_SELECTOR,
   useTaskPageGlobalEscape,
 } from "./task-page-global-escape";
+import { readTasksPageSeed, writeTasksPageSeed } from "./tasks-page-seed-storage";
 
 /** `tasks.remotes` reports slugs as `owner/repo`; anything else is treated
  *  as absent rather than trusted (the selector's null rules decide from
@@ -119,7 +120,10 @@ function pickDefaultProject(groups: ProjectGroup[]): string | null {
 // result per request key (project, kind, derived state, daemon query,
 // page) survives in this module map — the fork's resume cache in local
 // form — and seeds the next mount's rows; the mount still revalidates, so
-// the seed only ever skips the skeleton, never the fetch.
+// the seed only ever skips the skeleton, never the fetch. R16-BF persists
+// the same results to localStorage (tasks-page-seed-storage): a renderer
+// restart drops the module map, and without the persisted seed the next
+// cold open would replay the full `gh` round trip before any row paints.
 export type TasksPageCacheKey = {
   projectId: string | null;
   kind: GitHubTaskKind;
@@ -211,7 +215,10 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
             : (loadIssueSourcePreference(initial) ?? "auto");
         })(),
     };
-    return { key, cached: readTasksPageCache(key) };
+    // The persisted seed only matters when the module map missed (a fresh
+    // renderer after a restart); within one lifetime the module map is
+    // always fresher.
+    return { key, cached: readTasksPageCache(key) ?? readTasksPageSeed(key) };
   });
   const [workItems, setWorkItems] = useState<TaskPageWorkItem[]>(() => mountSeed.cached?.workItems ?? []);
   const [repo, setRepo] = useState<string | null>(() => mountSeed.cached?.repo ?? null);
@@ -436,15 +443,18 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
         setWorkItems(nextItems);
         setHasNextPage(result.result.hasNextPage);
         setFurthestPage((current) => Math.max(current, result.result.page));
-        writeTasksPageCache(
-          { projectId, kind, state, query: daemonQuery, page, source },
-          {
-            repo: result.result.repo,
-            workItems: nextItems,
-            hasNextPage: result.result.hasNextPage,
-            furthestPage: result.result.page,
-          },
-        );
+        const cachedResult = {
+          repo: result.result.repo,
+          workItems: nextItems,
+          hasNextPage: result.result.hasNextPage,
+          furthestPage: result.result.page,
+        };
+        const cacheKey = { projectId, kind, state, query: daemonQuery, page, source };
+        writeTasksPageCache(cacheKey, cachedResult);
+        // Persist for the next restart's instant paint; the mount above
+        // revalidates on every open, so this seed never serves stale rows
+        // past the refresh.
+        writeTasksPageSeed(cacheKey, cachedResult);
       })
       .catch(() => {
         if (!cancelled) {
