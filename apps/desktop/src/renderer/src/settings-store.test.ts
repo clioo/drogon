@@ -16,7 +16,7 @@ const defaults: SettingsSubset = {
   theme: "system",
   inspectorVisible: true,
   locale: "en",
-  terminalFontSize: 13,
+  terminalFontSize: 14,
   terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
   terminalFontWeight: 500,
   terminalFontWeightBold: 700,
@@ -200,7 +200,7 @@ describe("persistence round-trip through injected storage", () => {
         theme: "system",
         inspectorVisible: true,
         locale: "es",
-        terminalFontSize: 13,
+        terminalFontSize: 14,
         terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
         terminalFontWeight: 500,
         terminalFontWeightBold: 700,
@@ -266,12 +266,18 @@ describe("persistence round-trip through injected storage", () => {
 describe("J10 additive keys (terminal font size, harness defaults, notifications)", () => {
   it("applies J10 defaults on a fresh store", () => {
     const store = new SettingsStore(new MemoryStorage(), { namespace: "ui" });
-    expect(store.get("terminalFontSize")).toBe(13);
+    expect(store.get("terminalFontSize")).toBe(14);
     expect(store.get("defaultHarnessId")).toBe("");
     expect(store.get("harnessDefaults")).toEqual({});
     expect(store.get("notifyOnAgentNeedsInput")).toBe(true);
-    expect(SETTINGS_DEFAULTS.terminalFontSize).toBe(13);
+    expect(SETTINGS_DEFAULTS.terminalFontSize).toBe(14);
     expect(SETTINGS_DEFAULTS.notifyOnAgentNeedsInput).toBe(true);
+  });
+  it("keeps a persisted 13 after the default moves to 14 (#131)", () => {
+    const storage = new MemoryStorage();
+    storage.seed(settingsStorageKey("ui"), '{"settings":{"terminalFontSize":13}}');
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    expect(store.get("terminalFontSize")).toBe(13);
   });
   it("round-trips the J10 keys through set + flush + reload", () => {
     const storage = new MemoryStorage();
@@ -394,7 +400,7 @@ describe("unknown-key forward compatibility on read-modify-write", () => {
       theme: "system",
       inspectorVisible: true,
       locale: "es",
-      terminalFontSize: 13,
+      terminalFontSize: 14,
       terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
       terminalFontWeight: 500,
       terminalFontWeightBold: 700,

@@ -242,7 +242,7 @@ describe("xterm option projection", () => {
 
   test("missing keys resolve to the live defaults, never undefined", () => {
     const projected = projectTerminalTypographyOptions({});
-    expect(projected.fontSize).toBe(13);
+    expect(projected.fontSize).toBe(14);
     expect(projected.fontWeight).toBe(500);
     expect(projected.fontWeightBold).toBe(700);
     expect(projected.fontFamily).toContain("monospace");

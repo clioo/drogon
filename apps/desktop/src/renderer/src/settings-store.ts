@@ -103,7 +103,8 @@ export const SETTINGS_DEFAULTS: SettingsSubset = {
   theme: "system",
   inspectorVisible: true,
   locale: "en",
-  terminalFontSize: 13,
+  // Source default 14 (terminal-pane-manager-options.ts, useTerminalFontZoom.ts).
+  terminalFontSize: 14,
   terminalFontFamily: resolveDefaultTerminalFontFamily(),
   terminalFontWeight: 500,
   terminalFontWeightBold: 700,
