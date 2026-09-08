@@ -10,10 +10,7 @@ import {
   resolveKeybindingPlatform,
 } from "./definitions";
 import { shouldDispatch } from "./dispatcher";
-import {
-  formatKeybinding,
-  formatKeybindingList,
-} from "./labels";
+import { formatKeybinding, formatKeybindingList } from "./labels";
 import {
   canonicalizeParsedKeybinding,
   normalizeChord,
@@ -118,11 +115,7 @@ describe("platform labels", () => {
   test("macOS uses symbols with no separator, others use words", () => {
     expect(formatKeybinding("Mod+Comma", "darwin")).toEqual(["⌘", ","]);
     expect(formatKeybinding("Mod+Comma", "linux")).toEqual(["Ctrl", ","]);
-    expect(formatKeybinding("Mod+Shift+N", "darwin")).toEqual([
-      "⌘",
-      "⇧",
-      "N",
-    ]);
+    expect(formatKeybinding("Mod+Shift+N", "darwin")).toEqual(["⌘", "⇧", "N"]);
     expect(formatKeybinding("Mod+Shift+N", "win32")).toEqual([
       "Ctrl",
       "Shift",
@@ -150,9 +143,9 @@ describe("platform labels", () => {
     expect(
       formatKeybindingList(["Mod+Equal", "Mod+Shift+Plus"], "darwin"),
     ).toBe("⌘=, ⌘⇧+");
-    expect(
-      formatKeybindingList(["Mod+Equal", "Mod+Shift+Plus"], "linux"),
-    ).toBe("Ctrl+=, Ctrl+Shift++");
+    expect(formatKeybindingList(["Mod+Equal", "Mod+Shift+Plus"], "linux")).toBe(
+      "Ctrl+=, Ctrl+Shift++",
+    );
     expect(formatKeybindingList([], "darwin")).toBe("Unassigned");
   });
 });
@@ -175,32 +168,40 @@ describe("registry uniqueness", () => {
       "Global",
       "Tabs",
       "Tab Navigation",
+      "Quick Commands",
+      "Browser",
+      "Editors",
+      "File Explorer",
       "Settings",
       "Terminal Panes",
+      "Agents",
     ]);
   });
 
-  test("this MVP subset has no linux/win32 divergence", () => {
-    for (const definition of KEYBINDING_DEFINITIONS) {
-      expect(
-        [...definition.defaultBindings.linux],
-        `${definition.id} linux/win32`,
-      ).toEqual([...definition.defaultBindings.win32]);
-    }
+  test("platform resolution follows the source table", () => {
     expect(resolveKeybindingPlatform("other")).toBe("linux");
     expect(resolveKeybindingPlatform("darwin")).toBe("darwin");
+    expect(
+      KEYBINDING_DEFINITIONS.find(
+        (definition) => definition.id === "browser.back",
+      )?.defaultBindings,
+    ).toEqual({
+      darwin: ["Mod+BracketLeft"],
+      linux: ["Alt+ArrowLeft"],
+      win32: ["Alt+ArrowLeft"],
+    });
   });
 
   test("digit-index representatives fire for any of 1-9", () => {
     const registry = createKeybindingRegistry();
     // Mod+5 selects the 5th workspace (index 4).
-    expect(
-      registry.match(input("5", { meta: true }), "darwin", "app"),
-    ).toEqual({ id: "workspace.selectByIndex", digitIndex: 4 });
+    expect(registry.match(input("5", { meta: true }), "darwin", "app")).toEqual(
+      { id: "workspace.selectByIndex", digitIndex: 4 },
+    );
     // Ctrl+3 on macOS selects the 3rd tab; Mod+3 stays the workspace chord.
-    expect(
-      registry.match(input("3", { ctrl: true }), "darwin", "app"),
-    ).toEqual({ id: "tab.selectByIndex", digitIndex: 2 });
+    expect(registry.match(input("3", { ctrl: true }), "darwin", "app")).toEqual(
+      { id: "tab.selectByIndex", digitIndex: 2 },
+    );
     expect(
       registry.match(input("3", { meta: true }), "darwin", "app")?.id,
     ).toBe("workspace.selectByIndex");
@@ -211,34 +212,35 @@ describe("registry uniqueness", () => {
     });
   });
 
-  test("disabled rows never match but keep their chords reserved", () => {
+  test("source defaults match in their declared scope", () => {
     const registry = createKeybindingRegistry();
-    // Mod+W (tab.close) matches nothing…
-    expect(registry.match(input("w", { meta: true }), "darwin", "app")).toBeNull();
-    // …while R16-N enables the fork's Mod+D splitRight chord in the
-    // terminal scope (splitDown stays disabled with the rest of #129).
+    expect(registry.match(input("w", { meta: true }), "darwin", "app")).toEqual(
+      {
+        id: "tab.close",
+        digitIndex: null,
+      },
+    );
     expect(
       registry.match(input("d", { meta: true }), "darwin", "terminal")?.id,
     ).toBe("terminal.splitRight");
     expect(
       registry.match(input("d", { meta: true }), "darwin", "app"),
     ).toBeNull();
-    // …yet the table still owns those chords, so a future registration
-    // cannot silently claim them: the conflict scan stays empty only
-    // because no second action claims them.
     const ids = KEYBINDING_DEFINITIONS.map((definition) => definition.id);
     expect(ids).toContain("tab.close");
     expect(ids).toContain("terminal.splitRight");
     expect(ids).toContain("terminal.splitDown");
     expect(ids).toContain("tab.newBrowser");
     expect(ids).toContain("tab.reopenClosed");
+    expect(ids).toContain("sidebar.ports.toggle");
+    expect(ids).toContain("browser.focusAddressBar");
   });
 
   test("platform-specific palette chord resolves per platform", () => {
     const registry = createKeybindingRegistry();
-    expect(registry.match(input("j", { meta: true }), "darwin", "app")?.id).toBe(
-      "worktree.palette",
-    );
+    expect(
+      registry.match(input("j", { meta: true }), "darwin", "app")?.id,
+    ).toBe("worktree.palette");
     expect(
       registry.match(input("j", { ctrl: true, shift: true }), "linux", "app")
         ?.id,
@@ -253,9 +255,9 @@ describe("registry uniqueness", () => {
     expect(
       registry.match(input("p", { ctrl: true, shift: true }), "linux", "app"),
     ).toBeNull();
-    expect(
-      registry.match(input("p", { ctrl: true }), "linux", "app")?.id,
-    ).toBe("worktree.quickOpen");
+    expect(registry.match(input("p", { ctrl: true }), "linux", "app")?.id).toBe(
+      "worktree.quickOpen",
+    );
   });
 });
 
@@ -302,7 +304,7 @@ describe("dispatcher scope rules", () => {
     ).toBe(false);
   });
 
-  test("tabs chords and workspace index yield to editable targets", () => {
+  test("tab navigation yields but explicit tab actions survive editable targets", () => {
     expect(
       shouldDispatch({
         id: "tab.nextAllTypes",
@@ -312,6 +314,15 @@ describe("dispatcher scope rules", () => {
         editableTarget: true,
       }),
     ).toBe(false);
+    expect(
+      shouldDispatch({
+        id: "tab.close",
+        scope: "tabs",
+        paletteOpen: false,
+        context: "app",
+        editableTarget: true,
+      }),
+    ).toBe(true);
     expect(
       shouldDispatch({
         id: "workspace.selectByIndex",

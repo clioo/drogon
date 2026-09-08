@@ -55,6 +55,7 @@ import {
 // of hardcoding one.
 import { resolveHarnessPermissionMode } from "../../shared/agent-defaults";
 import { TabBar } from "./features/shell/TabBar";
+import { tabCreateMenuChord } from "./features/shell/TabCreateMenuChords";
 import { editorTabId, type EditorTabState } from "./features/shell/editor-tab";
 import { EditorHost, planEditorRehydrate } from "./features/editor";
 import { TitlebarLeftControls } from "./features/shell/TitlebarLeftControls";
@@ -80,7 +81,6 @@ import {
   SIDEBAR_EXPLORER_TOGGLE_CHORD,
   SIDEBAR_RIGHT_TOGGLE_CHORD,
   SIDEBAR_SOURCE_CONTROL_TOGGLE_CHORD,
-  TAB_NEW_TERMINAL_CHORD,
 } from "./features/right-sidebar/shortcut-label";
 import { resolveAppChromeLayout } from "./features/shell/app-chrome-layout";
 import {
@@ -125,6 +125,7 @@ import { supportsHarnessLaunch } from "./harness-capability";
 import { projectTerminalRestartLaunch } from "./features/terminal/terminal-restart-launch";
 import {
   TERMINAL_CLEAR_EVENT,
+  TERMINAL_SEARCH_EVENT,
   TERMINAL_CLOSE_EVENT,
   TERMINAL_FILE_OPEN_EVENT,
   TERMINAL_RESTART_EVENT,
@@ -220,15 +221,7 @@ import {
   resolveRoute,
 } from "./route-panel-contract";
 import type { PanelDescriptor } from "./route-panel-contract";
-import {
-  contextFromTarget,
-  createKeybindingRegistry,
-  getKeybindingDefinition,
-  isEditableTarget,
-  isPaletteOpen,
-  resolveKeybindingPlatform,
-  shouldDispatch,
-} from "../../shared/keybindings";
+import { dispatchShellKeybinding } from "./features/shell/keybinding-dispatcher";
 import type {
   AppearanceMenuKey,
   AppearanceMenuState,
@@ -2945,16 +2938,11 @@ export function App() {
       window.removeEventListener(MENTU_OPEN_TAB_EVENT, onOpenMentuTab);
   }, []);
   useEffect(() => {
-    // Source-parity window chords (keybindings/definitions.ts): one shared
-    // table with the palette host, so a chord is claimed once per scope and
-    // conflicts are impossible by construction. Ids the palette owns
-    // (worktree.palette/quickOpen, tab travel) have no handler here.
-    const uiPlatform = navigator.userAgent.includes("Mac")
-      ? "darwin"
-      : "other";
-    const platform = resolveKeybindingPlatform(uiPlatform);
+    // Source-parity window chords (keybindings/definitions.ts) are matched by
+    // one shell dispatcher. Palette-owned ids and pane-local ids deliberately
+    // have no handler here, so the focused palette/browser/editor/terminal can
+    // keep the chord just as it does in the fork.
     const isDisabled = () => !selected || !status || busy || loadingSessions;
-    const registry = createKeybindingRegistry();
     const stepWorkspace = (delta: 1 | -1) => {
       if (workspaces.length === 0) return;
       const at = workspaces.findIndex((item) => item.id === selected);
@@ -2967,21 +2955,108 @@ export function App() {
       const workspace = workspaces[index];
       if (workspace) setSelected(workspace.id);
     };
-    const handlers: Record<string, (digit: number | null) => void> = {
+    const closeActiveTab = () => {
+      if (activeEditorTabId) {
+        closeEditorTab(activeEditorTabId);
+        return;
+      }
+      if (activeBrowserTabId) {
+        void closeBrowserTab(activeBrowserTabId);
+        return;
+      }
+      const session = sessions.find((item) => item.id === active);
+      if (session) void closeTabSession(session);
+    };
+    const closeAllEditorTabs = () => {
+      for (const tab of visibleEditorTabs) closeEditorTab(tab.tabId);
+    };
+    const focusWorktreeList = () => {
+      document
+        .querySelector<HTMLElement>(
+          '[aria-label="Filter projects and worktrees"]',
+        )
+        ?.focus();
+    };
+    const defaultAgent = harnesses.find(
+      (harness) =>
+        harness.availability === "available" &&
+        harness.harnessId === defaultHarnessId,
+    );
+    const terminalPaneId = (event: KeyboardEvent): string => {
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        const pane = target.closest<HTMLElement>("[data-terminal-pane-id]");
+        if (pane?.dataset.terminalPaneId) return pane.dataset.terminalPaneId;
+      }
+      return activeRootId || active;
+    };
+    const focusAdjacentTerminalPane = (
+      event: KeyboardEvent,
+      direction: -1 | 1,
+    ) => {
+      const target = event.target;
+      const pane =
+        target instanceof HTMLElement
+          ? target.closest<HTMLElement>(".terminal-split-pane")
+          : null;
+      const host = pane?.parentElement;
+      const panes = host
+        ? Array.from(host.querySelectorAll<HTMLElement>(".terminal-split-pane"))
+        : [];
+      const at = pane ? panes.indexOf(pane) : -1;
+      const next = panes[at + direction];
+      next?.querySelector<HTMLElement>(".xterm-helper-textarea")?.focus();
+    };
+    const handlers: Record<
+      string,
+      (digit: number | null, event: KeyboardEvent) => void
+    > = {
       // Source id tab.newTerminal ("New terminal tab", Mod+T) replaces the
-      // Drogon-only workspace.newTerminal on Mod+Shift+N; that chord is the
-      // source's secondary workspace.create binding.
+      // old Drogon workspace.newTerminal chord.
       "tab.newTerminal": guardHandler(() => void create(), isDisabled),
-      // J10: Mod+, opens the Settings page from anywhere — never gated on
-      // workspace, connection or busy state.
+      // J10: Mod+, opens Settings from anywhere.
       "app.settings": () => openSettings(),
-      "workspace.create": guardHandler(() => requestCreateWorkspace(), () => busy),
-      "terminal.clear": () => {
-        window.dispatchEvent(new CustomEvent(TERMINAL_CLEAR_EVENT));
+      // The source owns force reload in the window shortcut router; the
+      // renderer fallback keeps the same behavior for Drogon's dev window.
+      "app.forceReload": () => window.location.reload(),
+      "workspace.create": guardHandler(
+        () => requestCreateWorkspace(),
+        () => busy,
+      ),
+      "terminal.clear": (_digit, event) => {
+        window.dispatchEvent(
+          new CustomEvent(TERMINAL_CLEAR_EVENT, {
+            detail: { sessionId: terminalPaneId(event) },
+          }),
+        );
       },
-      // R16-N: the fork's Split Terminal Right chord (Mod+D / Mod+Shift+D)
-      // splits the active tab; the action itself no-ops while already
-      // split, so the guard only needs a live terminal tab.
+      "terminal.search": (_digit, event) => {
+        window.dispatchEvent(
+          new CustomEvent(TERMINAL_SEARCH_EVENT, {
+            detail: { sessionId: terminalPaneId(event) },
+          }),
+        );
+      },
+      "terminal.focusNextPane": (_digit, event) =>
+        focusAdjacentTerminalPane(event, 1),
+      "terminal.focusPreviousPane": (_digit, event) =>
+        focusAdjacentTerminalPane(event, -1),
+      "terminal.closePane": (_digit, event) => {
+        const session = sessions.find(
+          (item) => item.id === terminalPaneId(event),
+        );
+        if (session) {
+          window.dispatchEvent(
+            new CustomEvent<TerminalCloseDetail>(TERMINAL_CLOSE_EVENT, {
+              detail: {
+                sessionId: session.id,
+                workspaceId: session.workspaceId,
+              },
+            }),
+          );
+        }
+      },
+      // R16-N: fork Split Terminal Right (Mod+D / Mod+Shift+D).
       "terminal.splitRight": guardHandler(
         () => {
           if (activeBrowserTabId) return;
@@ -2990,26 +3065,59 @@ export function App() {
         },
         () => !activeRootId && !active,
       ),
+      // Drogon's split host is horizontal-only today; keeping the source's
+      // down chord on the same creation path is the honest fallback until a
+      // tree layout replaces the flat two-pane adapter.
+      "terminal.splitDown": guardHandler(
+        () => {
+          if (activeBrowserTabId) return;
+          const id = activeRootId || active;
+          if (id) void splitTerminalRight(id);
+        },
+        () => !activeRootId && !active,
+      ),
       "sidebar.left.toggle": toggleSidebar,
-      // R6-B right sidebar (definitions-core-1.ts): Mod+L toggles the right
-      // sidebar, Mod+Shift+E reveals Explorer, Mod+Shift+G reveals Source
-      // Control (gated on git.v1, like the activity bar).
       "sidebar.right.toggle": toggleRightSidebar,
       "sidebar.explorer.toggle": showRightExplorer,
       "sidebar.sourceControl.toggle": guardHandler(
         showRightSourceControl,
         () => !gitPanelAvailable,
       ),
-      // tab.newBrowser (definitions-core-2.ts): the strip's New Browser Tab.
-      "tab.newBrowser": guardHandler(() => void newBrowserTab(), isDisabled),
-      // #197 tab.newMarkdown (definitions-core-2.ts, Mod+Shift+M): the
-      // create menu's New Markdown row; same disabled gate as New Terminal.
-      "tab.newMarkdown": guardHandler(() => void createNewMarkdownTab(), isDisabled),
-      "worktree.history.back": guardHandler(goBackViewHistory, () =>
-        !canGoBackView(viewHistory, liveWorkspaceIds),
+      "sidebar.ports.toggle": guardHandler(
+        () => openRightSidebarOn("ports"),
+        () => !selected,
       ),
-      "worktree.history.forward": guardHandler(goForwardViewHistory, () =>
-        !canGoForwardView(viewHistory, liveWorkspaceIds),
+      "sidebar.focusWorktreeList": focusWorktreeList,
+      "view.tasks": () => setRoute(TASKS_ROUTE_ID),
+      // Source's default-agent tab action is macOS-only. The same default
+      // harness/settings path as the New Workspace composer keeps its local
+      // model/provider and permission defaults intact.
+      "tab.newAgent": guardHandler(
+        () => {
+          if (defaultAgent && selected) {
+            void launchComposerAgent(selected, {
+              harnessId: defaultAgent.harnessId,
+              model: "",
+              provider: "",
+            });
+          }
+        },
+        () => !defaultAgent || isDisabled(),
+      ),
+      "tab.newBrowser": guardHandler(() => void newBrowserTab(), isDisabled),
+      "tab.newMarkdown": guardHandler(
+        () => void createNewMarkdownTab(),
+        isDisabled,
+      ),
+      "tab.close": guardHandler(closeActiveTab, isDisabled),
+      "tab.closeAll": guardHandler(closeAllEditorTabs, isDisabled),
+      "worktree.history.back": guardHandler(
+        goBackViewHistory,
+        () => !canGoBackView(viewHistory, liveWorkspaceIds),
+      ),
+      "worktree.history.forward": guardHandler(
+        goForwardViewHistory,
+        () => !canGoForwardView(viewHistory, liveWorkspaceIds),
       ),
       "worktree.navigateUp": () => stepWorkspace(-1),
       "worktree.navigateDown": () => stepWorkspace(1),
@@ -3018,56 +3126,7 @@ export function App() {
       },
     };
     const keydown = (event: KeyboardEvent) => {
-      const context = contextFromTarget(event.target);
-      const editable = isEditableTarget(event.target);
-      const match = registry.match(
-        {
-          key: event.key,
-          altKey: event.altKey,
-          metaKey: event.metaKey,
-          ctrlKey: event.ctrlKey,
-          shiftKey: event.shiftKey,
-        },
-        platform,
-        context,
-        { editableTarget: editable },
-      );
-      if (!match) return;
-      const handler = handlers[match.id];
-      if (!handler) return;
-      const scope =
-        getKeybindingDefinition(match.id)?.scope ?? "global";
-      if (
-        !shouldDispatch({
-          id: match.id,
-          scope,
-          paletteOpen: isPaletteOpen(),
-          context,
-          editableTarget: editable,
-        })
-      )
-        return;
-      // terminal.clear stays live without a workspace (clearing a visible
-      // terminal is always safe); app.settings tunnels everywhere.
-      if (match.id !== "app.settings" && match.id !== "terminal.clear" && isDisabled()) {
-        // Window-level shell chords stay live without a workspace.
-        if (
-          match.id !== "workspace.create" &&
-          match.id !== "sidebar.left.toggle" &&
-          match.id !== "sidebar.right.toggle" &&
-          match.id !== "sidebar.explorer.toggle" &&
-          match.id !== "sidebar.sourceControl.toggle" &&
-          match.id !== "worktree.history.back" &&
-          match.id !== "worktree.history.forward" &&
-          match.id !== "worktree.navigateUp" &&
-          match.id !== "worktree.navigateDown" &&
-          match.id !== "workspace.selectByIndex"
-        )
-          return;
-        if (match.id === "workspace.create" && busy) return;
-      }
-      event.preventDefault();
-      handler(match.digitIndex);
+      dispatchShellKeybinding({ event, handlers });
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
@@ -3374,11 +3433,14 @@ export function App() {
                 hostId={status?.hostId ?? null}
                 defaultHarnessId={defaultHarnessId}
                 launchDefaults={harnessDefaults}
-                newTerminalShortcut={formatSidebarChord(
-                  TAB_NEW_TERMINAL_CHORD,
+                newTerminalShortcut={tabCreateMenuChord(
+                  "tab.newTerminal",
                   chordPlatform,
                 )}
-                newBrowserShortcut=""
+                newBrowserShortcut={tabCreateMenuChord(
+                  "tab.newBrowser",
+                  chordPlatform,
+                )}
                 closeDisabled={busy || loadingSessions || !status}
                 retryDisabled={retryAffordanceDisabled({
                   refreshInFlight: busy,

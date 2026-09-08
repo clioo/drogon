@@ -77,10 +77,7 @@ export function formatKeybinding(
   return parts;
 }
 
-function formatModifierGlyph(
-  modifier: string,
-  isMac: boolean,
-): string | null {
+function formatModifierGlyph(modifier: string, isMac: boolean): string | null {
   switch (modifier) {
     case "Cmd":
       return isMac ? "⌘" : "Cmd";
@@ -103,7 +100,11 @@ export function formatKeybindingList(
   if (bindings.length === 0) return "Unassigned";
   return bindings
     .map((binding) => {
-      const separator = platform === "darwin" ? "" : "+";
+      const separator = parseKeybinding(binding)?.doubleTapModifier
+        ? " "
+        : platform === "darwin"
+          ? ""
+          : "+";
       return formatKeybinding(binding, platform).join(separator);
     })
     .join(", ");

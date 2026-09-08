@@ -21,6 +21,11 @@ export interface ParsedKeybinding {
 export interface KeybindingInput {
   key?: string;
   code?: string;
+  /** Both DOM-style names and source keybinding names are accepted. */
+  alt?: boolean;
+  meta?: boolean;
+  control?: boolean;
+  shift?: boolean;
   altKey?: boolean;
   metaKey?: boolean;
   ctrlKey?: boolean;
@@ -106,11 +111,7 @@ export function normalizeKeyToken(token: string): string | null {
 
 export function parseModifierToken(rawPart: string): ModifierToken | null {
   const part = rawPart.toLowerCase();
-  if (
-    part === "mod" ||
-    part === "cmdorctrl" ||
-    part === "commandorcontrol"
-  ) {
+  if (part === "mod" || part === "cmdorctrl" || part === "commandorcontrol") {
     return "Mod";
   }
   if (
@@ -121,11 +122,7 @@ export function parseModifierToken(rawPart: string): ModifierToken | null {
   ) {
     return "Cmd";
   }
-  if (
-    part === "ctrl" ||
-    part === "control" ||
-    rawPart === "⌃"
-  ) {
+  if (part === "ctrl" || part === "control" || rawPart === "⌃") {
     return "Ctrl";
   }
   if (
@@ -151,9 +148,7 @@ export function emptyParsedKeybinding(): ParsedKeybinding {
   };
 }
 
-function parseDoubleTapKeybinding(
-  rawParts: string[],
-): ParsedKeybinding | null {
+function parseDoubleTapKeybinding(rawParts: string[]): ParsedKeybinding | null {
   const modifiers: ModifierToken[] = [];
   let sawDoubleTap = false;
   for (const rawPart of rawParts) {
@@ -213,9 +208,7 @@ export function parseKeybinding(binding: string): ParsedKeybinding | null {
   return parsed.key ? parsed : null;
 }
 
-export function canonicalizeParsedKeybinding(
-  parsed: ParsedKeybinding,
-): string {
+export function canonicalizeParsedKeybinding(parsed: ParsedKeybinding): string {
   if (parsed.doubleTapModifier) {
     return `DoubleTap+${parsed.doubleTapModifier}`;
   }

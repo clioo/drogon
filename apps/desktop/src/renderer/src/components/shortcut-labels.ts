@@ -2,16 +2,19 @@
 // Ported from the Orca reference (read-only):
 //   src/renderer/src/hooks/useShortcutLabel.ts
 //     (formatShortcutKeyComboDetails / useShortcutKeyDetails projections)
-// Adapted: no zustand store and no user overrides — Drogon's keybinding core
-// (definitions table + labels formatter) is the single source; the platform
+// Adapted: no zustand store — Drogon's keybinding core and persisted override
+// store (definitions table + labels formatter) are the single source; the platform
 // comes from the userAgent like the source's getShortcutPlatform.
 import {
-  bindingsForPlatform,
   getKeybindingDefinition,
   resolveKeybindingPlatform,
 } from "../../../shared/keybindings/definitions";
-import { formatKeybinding, formatKeybindingList } from "../../../shared/keybindings/labels";
+import {
+  formatKeybinding,
+  formatKeybindingList,
+} from "../../../shared/keybindings/labels";
 import { parseKeybinding } from "../../../shared/keybindings/parser";
+import { getEffectiveBindings } from "../../../shared/keybindings/overrides";
 
 export type ShortcutPlatform = "darwin" | "other";
 
@@ -37,7 +40,7 @@ export function formatShortcutKeyComboDetails(
   const definition = getKeybindingDefinition(actionId);
   if (!definition || definition.status.kind === "disabled") return [];
   const keybindingPlatform = resolveKeybindingPlatform(platform);
-  return bindingsForPlatform(definition, keybindingPlatform).map((binding) => ({
+  return getEffectiveBindings(definition, keybindingPlatform).map((binding) => ({
     keys: formatKeybinding(binding, keybindingPlatform),
     doubleTap: parseKeybinding(binding)?.doubleTapModifier != null,
   }));
@@ -79,7 +82,7 @@ export function formatShortcutChordHint(
   const definition = getKeybindingDefinition(actionId);
   if (!definition || definition.status.kind === "disabled") return null;
   const keybindingPlatform = resolveKeybindingPlatform(platform);
-  const [binding] = bindingsForPlatform(definition, keybindingPlatform);
+  const [binding] = getEffectiveBindings(definition, keybindingPlatform);
   if (binding === undefined) return null;
   return formatKeybindingList([binding], keybindingPlatform);
 }

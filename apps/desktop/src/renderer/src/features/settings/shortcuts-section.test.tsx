@@ -1,8 +1,7 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
 // Projection tests for the editable Shortcuts section: every implemented
-// action renders a recorder button (not static text), the search box and
-// group headers stay, and non-implemented rows keep their reason without
-// a recorder.
+// source action renders a recorder button (not static text), the search box
+// and group headers stay, and every source default remains visible.
 import { describe, expect, test } from "vitest";
 import { renderToString } from "react-dom/server";
 import { ShortcutsSection } from "./shortcuts-section";
@@ -18,11 +17,12 @@ describe("ShortcutsSection edit surface", () => {
     expect(html).toContain("Search shortcuts");
     expect(html).toContain("Keyboard shortcuts");
   });
-  test("non-implemented rows stay read-only with their reason", () => {
+  test("source defaults remain editable in the rebinding pane", () => {
     const html = render();
-    expect(html).toContain("Unavailable:");
-    // The read-only rows carry no recorder button.
-    expect(html).not.toContain("Change shortcut for Force Reload");
+    expect(html).toContain("Change shortcut for Force Reload");
+    expect(html).toContain("Change shortcut for Close active tab");
+    expect(html).toContain("Show Ports");
+    expect(html).toContain("Add shortcut for Show Ports");
   });
   test("rows advertise immediate effect and reset affordance copy", () => {
     const html = render();

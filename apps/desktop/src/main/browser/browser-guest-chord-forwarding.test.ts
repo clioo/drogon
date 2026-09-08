@@ -23,7 +23,7 @@ function input(overrides: Record<string, unknown> = {}) {
 }
 
 describe("matchGuestBrowserChord", () => {
-  it("matches Mod+L/R/F on the platform modifier", () => {
+  it("matches the browser defaults on the platform modifier", () => {
     expect(matchGuestBrowserChord(input({ meta: true }), true)).toBe(
       "focus-address-bar",
     );
@@ -36,22 +36,45 @@ describe("matchGuestBrowserChord", () => {
     expect(matchGuestBrowserChord(input({ meta: true, key: "f" }), true)).toBe(
       "find",
     );
+    expect(matchGuestBrowserChord(input({ meta: true, key: "[" }), true)).toBe(
+      "back",
+    );
+    expect(matchGuestBrowserChord(input({ meta: true, key: "]" }), true)).toBe(
+      "forward",
+    );
+    expect(
+      matchGuestBrowserChord(
+        input({ meta: true, key: "r", shift: true }),
+        true,
+      ),
+    ).toBe("hard-reload");
   });
 
-  it("rejects the wrong platform modifier, shift, alt and keyUp", () => {
+  it("rejects the wrong platform modifier, alt, repeat and keyUp", () => {
     // On macOS Ctrl is left for Emacs-style caret moves.
     expect(matchGuestBrowserChord(input({ control: true }), true)).toBeNull();
     expect(matchGuestBrowserChord(input({ meta: true }), false)).toBeNull();
     expect(
-      matchGuestBrowserChord(input({ meta: true, shift: true }), true),
+      matchGuestBrowserChord(
+        input({ meta: true, shift: true, key: "l" }),
+        true,
+      ),
     ).toBeNull();
+    expect(
+      matchGuestBrowserChord(
+        input({ meta: true, key: "r", shift: true }),
+        true,
+      ),
+    ).toBe("hard-reload");
     expect(
       matchGuestBrowserChord(input({ meta: true, alt: true }), true),
     ).toBeNull();
     expect(
       matchGuestBrowserChord(input({ meta: true, type: "keyUp" }), true),
     ).toBeNull();
-    expect(matchGuestBrowserChord(input({ meta: true, key: "x" }), true)).toBeNull();
+    expect(
+      matchGuestBrowserChord(input({ meta: true, key: "x" }), true),
+    ).toBeNull();
   });
 });
 
@@ -79,8 +102,7 @@ describe("installGuestBrowserChordForwarding", () => {
       forward,
     });
     const handler = listeners.get("before-input-event") as
-      | ((event: unknown, input: unknown) => void)
-      | undefined;
+      ((event: unknown, input: unknown) => void) | undefined;
     expect(handler).toBeDefined();
     const event = { preventDefault: vi.fn() };
     handler!(event, input({ meta: true, key: "l" }));
