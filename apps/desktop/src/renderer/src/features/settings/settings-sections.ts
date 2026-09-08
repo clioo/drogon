@@ -9,7 +9,7 @@
 //   src/renderer/src/components/settings/settings-navigation-foundations.ts
 //   (SETTINGS_NAV_GROUPS titles: "AI Capabilities", "Set Up", "Workflows",
 //   "Interface").
-// Adapted: only the six MVP-backed sections exist (the ~34 fork panes for
+// Adapted: only the seven MVP-backed sections exist (the ~34 fork panes for
 // updater, telemetry, cloud, remote servers, mobile, plugins and friends
 // are out of the MVP — no rows below). Titles stay the honest MVP ones:
 // "Git and GitHub" (the source "Git & Source Control" covers branch
@@ -22,6 +22,7 @@ import {
   Keyboard,
   Palette,
   SlidersHorizontal,
+  SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -64,6 +65,13 @@ export const SETTINGS_SECTIONS: readonly SettingsNavEntry[] = [
     description: "Read-only identity and login status on this host.",
     group: "workflows",
     icon: GitBranch,
+  },
+  {
+    id: "terminal",
+    title: "Terminal",
+    description: "Shells, renderer, sessions, and terminal behavior.",
+    group: "workflows",
+    icon: SquareTerminal,
   },
   {
     id: "appearance",

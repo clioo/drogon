@@ -1,3 +1,20 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Ported copy/layout from the Orca reference (read-only):
+//   src/renderer/src/components/settings/NotificationsPane.tsx
+//     (pane title "Notifications", description "Native desktop
+//      notifications for agent activity and terminal events.", master
+//      "Enable Notifications" row with "Native system notifications for
+//      background events.")
+// Adapted: only the master switch is wired — it drives the existing
+// notifyOnAgentNeedsInput preference (the only notification event Drogon
+// emits: the main needs_input poller) and mirrors to the main
+// notifications service like before. The fork's per-event rows (Agent Task
+// Complete, Terminal Bell), sound combobox, Suppress While Focused, test
+// button and macOS delivery alert are omitted: per-event and sound choices
+// cannot reach the main delivery process over the fixed boolean
+// notifications IPC (shared/notifications-contract.ts, preload owned), and
+// there is no bell-event source, sound-playback subsystem or permission
+// probe in the MVP — a switch for any of them would be dead.
 import { useEffect } from "react";
 import { SettingsSection, SettingsSwitchRow } from "./settings-rows";
 
@@ -24,11 +41,11 @@ export function NotificationsSection({
     <SettingsSection
       id="notifications"
       title="Notifications"
-      description="When Drogon may interrupt you. Delivery itself is wired separately; this switch is the master control."
+      description="Native desktop notifications for agent activity and terminal events."
     >
       <SettingsSwitchRow
-        label="Notify when an agent needs input"
-        description="Off means working agents stay silent until you check on them."
+        label="Enable Notifications"
+        description="Native system notifications for background events."
         checked={notifyOnAgentNeedsInput}
         onChange={onNotifyChange}
       />
