@@ -165,7 +165,8 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J9 R14-D: contenido de evidencia de ejecuciones Mentu en el panel de receta | R14 | OpenCode Go + Muse 1.3 | fusionada: mentu.run_evidence con lectura acotada, filas de evidencia con stdout/stderr y truncado; 1709 tests | #109 |
 | J10 R14-E: tipografía del terminal del fuente (familia, peso, peso en negrita) | R14 | OpenCode Go + Muse 1.3 | fusionada: familia con búsqueda de fuentes del sistema, pesos 500/700, editor sigue al terminal; 1657 tests | #104 |
 | Infra: ventana en segundo plano para pruebas (`DROGON_BACKGROUND_WINDOW=1`: showInactive, política accessory, sin throttling) y foco emulado por CDP en aceptación/oráculo | R14 | Coordinador | fusionada; comprobado: la app en primer plano nunca cambió durante la aceptación | #105 |
-| Infra R15-A: probes del bundle sellado al día con la UI actual (barra de direcciones del browser y demás) para volver a 40/40 | R15 | Muse | lanzada | |
+| Infra R15-A: probes del bundle sellado al día con la UI actual (barra de direcciones del browser y demás) para volver a 40/40 | R15 | Muse | fusionada: sellado 40/40 dos veces; destapó el issue qa #114 (barra colapsada en anchos estrechos) | #115 |
+| QA fix R15-B: #114 barra de direcciones del browser en overlay al enfocar en anchos estrechos, como el fork | R15 | Muse | lanzada | |
 | QA: manos de accesibilidad para el agente QA (`scripts/qa/drogon-ui.mjs`) y probes sellados al día (paleta "Jump to...", Select de Radix en Mentu, conteo de pestañas por tablist) | R14 | Coordinador | fusionada | #108 |
 | QA ronda 1 sobre main 13d4e38: Pi + dgx-spark (qwen3.8-flash-next) usa la app compilada y reporta issues `qa` | QA | Pi local | lanzada | |
 
