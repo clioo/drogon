@@ -535,6 +535,12 @@ async function measureTabSwitch(page) {
 
 const PAGE_OPEN_BUDGET_MS = 300;
 const PARITY_RATIO = 1.25;
+// R16-BF2 push: the worktree card must track a session-state change in under
+// 200 ms median now that the daemon pushes (hook/PTY activity →
+// `session.events.poll` → `ui:session-state-changed`) instead of waiting for
+// the 2 s `session.list` poll. No reference leg exists (report-only before),
+// so this is an absolute budget on the sealed bundle.
+const WORKTREE_CARD_BUDGET_MS = 200;
 
 function checkReport(report, reference) {
   const refMetrics = reference.metrics ?? {};
@@ -542,11 +548,22 @@ function checkReport(report, reference) {
   for (const [id, metric] of Object.entries(report.metrics ?? {})) {
     // Every open:/back: leg is a sidebar-rail page open: ratio against the
     // same reference leg plus the 300 ms absolute budget. Lifecycle and
-    // interaction metrics without a reference fixture stay report-only.
+    // interaction metrics without a reference fixture stay report-only —
+    // except the pushed worktree-card update, which carries its own budget.
     const isPageOpen = id.startsWith("open:") || id.startsWith("back:");
     const ref = refMetrics[id];
     if (metric.median === null) {
       results[id] = { status: "fail", reason: "no valid samples" };
+      continue;
+    }
+    if (id === "update:worktree-card") {
+      const ok = metric.median <= WORKTREE_CARD_BUDGET_MS;
+      results[id] = {
+        status: ok ? "pass" : "fail",
+        drogonMedianMs: metric.median,
+        absoluteBudgetMs: WORKTREE_CARD_BUDGET_MS,
+        ok,
+      };
       continue;
     }
     if (!isPageOpen || !ref || ref.median === null) {

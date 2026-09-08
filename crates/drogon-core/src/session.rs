@@ -485,21 +485,36 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                 Ok(n) => {
                     handle.ring.lock().unwrap().push(&buf[..n]);
                     let now = Instant::now();
-                    if last_activity_marked
+                    let marked = if last_activity_marked
                         .map(|marked| now.duration_since(marked).as_millis() >= 200)
                         .unwrap_or(true)
                     {
                         last_activity_marked = Some(now);
                         *handle.last_activity.lock().unwrap() = Some((now, crate::now_rfc3339()));
-                    }
+                        true
+                    } else {
+                        false
+                    };
                     // Output resumes: the wait signal is spent, back to
                     // activity-based derivation. Skipped for sessions that
                     // opted into explicit-only clearing (OpenCode/Pi — see
                     // the `explicit_wait_clear` field doc): their TUIs can
                     // repaint while genuinely still waiting, so any byte of
                     // output clearing the signal here would be wrong.
-                    if !handle.explicit_wait_clear.load(Ordering::Acquire) {
-                        clear_wait_signal_on_activity(&handle);
+                    let cleared = if !handle.explicit_wait_clear.load(Ordering::Acquire) {
+                        clear_wait_signal_on_activity(&handle)
+                    } else {
+                        false
+                    };
+                    // R16-BF2 push: fresh output (and the wait clear it
+                    // carries) moves the agent state now — recorded after
+                    // both mutations so the snapshot reflects the new truth,
+                    // not the pre-clear signal. `record_snapshot` is
+                    // transition-guarded, so steady output stays quiet (one
+                    // event per stamp change) and the per-chunk fast path
+                    // above keeps its throttle.
+                    if marked || cleared {
+                        crate::session_events::record_snapshot(&snapshot(&handle));
                     }
                 }
                 Err(_) => break,
@@ -742,6 +757,11 @@ fn persist_exit(handle: &SessionHandle, exit_code: i64) -> Result<(), RpcError> 
     if changed != 1 {
         return Err(error::io_error("Session exit record is missing"));
     }
+    // R16-BF2 push: the exit moves the agent state to `exited` now. The
+    // snapshot derives `exited` from the reaped code (never a stamp), so a
+    // racing late activity mark can never resurrect `working` through the
+    // transition guard.
+    crate::session_events::record_snapshot(&snapshot(handle));
     Ok(())
 }
 
@@ -786,6 +806,10 @@ pub(crate) fn persist_admission(handle: &SessionHandle) -> Result<(), RpcError> 
             handle.session_id,
         )));
     }
+    // R16-BF2 push: a fresh admission is a state birth (`unknown` until the
+    // first output). Recording it lets the push bridge learn new sessions
+    // instantly instead of on the next `session.list` poll.
+    crate::session_events::record_snapshot(&snapshot(handle));
     Ok(())
 }
 

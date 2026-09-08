@@ -172,6 +172,7 @@ import {
 import { isExternalUrlAllowed } from "../../shared/shell-contract";
 import type { ShellBridge } from "../../shared/shell-contract";
 import { updateSessionProjection } from "./session-projection";
+import { applySessionStatePush } from "./features/shell/session-state-push";
 import { sessionLabel } from "./session-label";
 import {
   FILES_ROUTE_ID,
@@ -1709,31 +1710,26 @@ export function App() {
     const offState = bridge.onStateChanged((event) => {
       if (!known.includes(event.agentState as AgentState)) return;
       if (event.workspaceId !== contextRef.current.workspaceId) return;
-      const existing = sessionsRef.current.find(
-        (item) => item.id === event.sessionId,
-      );
-      if (!existing) {
+      // R16-BF2 push: one merge for the push stream and the 2 s poll alike,
+      // with duplicate/stale protection (`agentStateAt` compare) so the two
+      // sources can never regress each other. Previewed against the ref so
+      // unknown/duplicate events skip the update; applied through the
+      // updater form so back-to-back pushes cannot clobber each other.
+      const pushed = {
+        sessionId: event.sessionId,
+        workspaceId: event.workspaceId,
+        agentState: event.agentState as AgentState,
+        agentStateAt: event.agentStateAt ?? null,
+      };
+      const preview = applySessionStatePush(sessionsRef.current, pushed);
+      if (preview.unknown) {
         // A session this window never listed (started elsewhere): reload
         // once so it appears with its live state.
         setRevision((value) => value + 1);
         return;
       }
-      if (
-        (existing.agentState ?? "unknown") === event.agentState &&
-        (existing.agentStateAt ?? null) === (event.agentStateAt ?? null)
-      )
-        return;
-      setSessions((items) =>
-        items.map((item) =>
-          item.id === event.sessionId
-            ? {
-                ...item,
-                agentState: event.agentState as AgentState,
-                agentStateAt: event.agentStateAt,
-              }
-            : item,
-        ),
-      );
+      if (!preview.applied) return;
+      setSessions((items) => applySessionStatePush(items, pushed).sessions);
     });
     return () => {
       offFocus();

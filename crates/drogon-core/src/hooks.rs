@@ -165,7 +165,11 @@ impl Engine {
             HookSignal::Wait => handle.note_hook_event(),
             HookSignal::Clear => handle.clear_hook_event(),
         }
-        Ok(session::snapshot(&handle))
+        // R16-BF2 push: the hook signal moves the agent state now, so the
+        // card/badge must learn about it now — not on the next poll.
+        let snapshot = session::snapshot(&handle);
+        crate::session_events::record_snapshot(&snapshot);
+        Ok(snapshot)
     }
 }
 

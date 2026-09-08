@@ -51,6 +51,7 @@ mod workspace_files;
 mod worktree_rpc;
 
 mod service_quiescence;
+mod session_events;
 
 /// Public only for the `gh`-binary test seam (`set_gh_bin_override`);
 /// the RPC surface stays `Engine::dispatch`.
@@ -446,6 +447,10 @@ impl Engine {
             // R16-BC (additive): Ports-panel "Stop Process". Workspace-owned
             // local processes only — see `ports.rs` for the authorization rule.
             "ports.kill" => self.mutating(request, Self::do_ports_kill),
+            // R16-BF2 push feed: read-only long-poll over the session-state
+            // event log. Bypasses the ledger and the quiescence gate like
+            // `desktop.commands.poll`: it writes no rows and dedupes nothing.
+            "session.events.poll" => self.session_events_poll(&request.params),
             "project.add" => self.mutating(request, Self::do_project_add),
             "project.list" => {
                 let conn = self.db.lock().unwrap();
@@ -699,6 +704,27 @@ impl Engine {
             }
         }
         Ok(json!({ "sessions": sessions }))
+    }
+
+    /// R16-BF2 push feed: long-polls the session-state event log.
+    /// `{"afterSeq": n, "waitMs": ms}` → `{"bootId", "events", "nextSeq"}`.
+    /// `waitMs` clamps to 30 s; a zero wait drains once without blocking.
+    /// The `bootId` is this process's `service_instance_id`: a daemon
+    /// restart resets the log's sequence, so a changed boot id tells the
+    /// poller to resync from zero instead of waiting on a stale cursor.
+    fn session_events_poll(&self, params: &Value) -> Result<Value, RpcError> {
+        let after_seq = params.get("afterSeq").and_then(Value::as_u64).unwrap_or(0);
+        let wait_ms = params
+            .get("waitMs")
+            .and_then(Value::as_u64)
+            .unwrap_or(20_000)
+            .min(30_000);
+        let (events, next_seq) = session_events::poll(after_seq, wait_ms);
+        Ok(json!({
+            "bootId": self.service_instance_id,
+            "events": session_events::events_wire(&events),
+            "nextSeq": next_seq,
+        }))
     }
 
     fn do_session_read(&self, params: &Value) -> Result<Value, RpcError> {
