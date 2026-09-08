@@ -1,28 +1,24 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/task-page/github/Filters.tsx. Adaptations for
 // this repo's daemon: the search-qualifier preset row is literal (Open,
-// Assigned to me / Mine); the daemon `state` filter (open|closed|all) keeps
-// its own row below since the fork expresses closed only through query
-// text. The PR filter dropdowns have no daemon counterpart, the new-issue
-// button opens the repo's new-issue page in the system browser (no create
-// RPC exists), and the search field commits through the same 300ms debounce.
+// Assigned to me / Mine); closed/all come from the search text itself
+// (`is:closed`, or no state qualifier) exactly like the fork, so the
+// daemon `state` needs no second row. The PR filter dropdowns have no
+// daemon counterpart, the new-issue button opens the repo's new-issue page
+// in the system browser (no create RPC exists), and the search field
+// commits through the same 300ms debounce.
 import { cn } from "../../cn";
 import { Search, X, LoaderCircle, RefreshCw, Plus } from "lucide-react";
 import { Input } from "../../../../components/ui/input";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../ui/tooltip";
 import { Button } from "../../../../components/ui/button";
-import {
-  getGitHubStateFilters,
-  getGitHubTaskKindPresets,
-} from "../../task-page-localized-options";
+import { getGitHubTaskKindPresets } from "../../task-page-localized-options";
 import type { TaskPageModelProps } from "../../task-page-model";
 
 export function TaskPageGitHubFilters({
   model,
 }: TaskPageModelProps): React.JSX.Element | null {
   const {
-    stateFilter,
-    onStateFilter,
     activeTaskPreset,
     onSelectTaskPreset,
     taskSearchInput,
@@ -51,26 +47,6 @@ export function TaskPageGitHubFilters({
               key={option.id}
               type="button"
               onClick={() => onSelectTaskPreset(option.id)}
-              className={cn(
-                "rounded-md border px-2.5 py-1 text-xs font-medium transition",
-                active
-                  ? "border-border/50 bg-foreground/90 text-background shadow-xs"
-                  : "border-border/60 bg-background text-foreground shadow-xs hover:bg-muted/60",
-              )}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {getGitHubStateFilters().map((option) => {
-          const active = stateFilter === option.id;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => onStateFilter(option.id)}
               className={cn(
                 "rounded-md border px-2.5 py-1 text-xs font-medium transition",
                 active

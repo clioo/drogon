@@ -16,6 +16,7 @@ import type {
   BotsPanelProps,
   BotsPanelSnapshot,
 } from "./features/bots/bots-panel-contracts";
+import type { BotsPanelHydrationProps } from "./features/bots/BotsPanel";
 import type {
   BotBridge,
   BotScope,
@@ -162,9 +163,9 @@ function mintRequestId(): string {
  */
 export function buildWiredBotsPanelProps(
   gatedBridge: BotBridge & { read?: SessionReadSource },
-  panel: BotsPanelProps,
-): BotsPanelProps {
-  const wiredPanel: BotsPanelProps = { ...panel, bridge: gatedBridge };
+  panel: BotsPanelHydrationProps,
+): BotsPanelHydrationProps {
+  const wiredPanel: BotsPanelHydrationProps = { ...panel, bridge: gatedBridge };
   if (gatedBridge.read) {
     wiredPanel.sessionReader = gatedBridge.read as BotSessionReader;
   }
@@ -223,7 +224,7 @@ export function buildWiredBotsPanelProps(
 export function registerBotsRoute(
   registry: RouteRegistry,
   gatedBridge: BotBridge & { read?: SessionReadSource },
-  panel: BotsPanelProps,
+  panel: BotsPanelHydrationProps,
 ): RouteRegistry {
   const descriptor = createBotsPanelDescriptor({
     routeId: BOTS_ROUTE_ID,

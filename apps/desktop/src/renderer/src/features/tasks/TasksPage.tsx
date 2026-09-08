@@ -10,7 +10,6 @@ import type { ReactNode } from "react";
 import {
   TASKS_CAPABILITY,
   TASKS_PAGE_SIZE,
-  type TaskIssueState,
   type TaskLink,
   type TasksBridge,
 } from "../../../../shared/tasks-contract";
@@ -26,7 +25,6 @@ import type {
 } from "./task-page-model";
 import { GITHUB_PR_TASK_GRID_CLASS, GITHUB_TASK_GRID_CLASS, TASK_SEARCH_DEBOUNCE_MS } from "./task-page-source-context";
 import type {
-  GitHubStateFilterId,
   GitHubTaskKind,
   GitHubTaskPresetId,
 } from "./task-page-localized-options";
@@ -38,6 +36,7 @@ import {
   getGitHubTaskPresetQuery,
   getSourceOptions,
   projectTasksDaemonQuery,
+  projectTasksDaemonState,
 } from "./task-page-localized-options";
 import { windowShellOpenExternal } from "../landing/github-star";
 
@@ -93,13 +92,58 @@ function pickDefaultProject(groups: ProjectGroup[]): string | null {
   return (git ?? servable[0])?.project.id ?? null;
 }
 
+// Fork parity (#238): the page unmounts on every tab switch, so without a
+// cache each return visit replays the full skeleton. The last successful
+// result per request key (project, kind, derived state, daemon query,
+// page) survives in this module map — the fork's resume cache in local
+// form — and seeds the next mount's rows; the mount still revalidates, so
+// the seed only ever skips the skeleton, never the fetch.
+export type TasksPageCacheKey = {
+  projectId: string | null;
+  kind: GitHubTaskKind;
+  state: string;
+  query: string | undefined;
+  page: number;
+};
+
+export type TasksPageCachedResult = {
+  repo: string | null;
+  workItems: TaskPageWorkItem[];
+  hasNextPage: boolean;
+  furthestPage: number;
+};
+
+const tasksPageResultCache = new Map<string, TasksPageCachedResult>();
+
+function tasksPageCacheKeyString(key: TasksPageCacheKey): string {
+  return [key.projectId ?? "", key.kind, key.state, key.query ?? "", String(key.page)].join("|");
+}
+
+/** Test seam: drops every cached result between cases. */
+export function clearTasksPageResultCache(): void {
+  tasksPageResultCache.clear();
+}
+
+export function readTasksPageCache(key: TasksPageCacheKey): TasksPageCachedResult | undefined {
+  return tasksPageResultCache.get(tasksPageCacheKeyString(key));
+}
+
+function writeTasksPageCache(key: TasksPageCacheKey, result: TasksPageCachedResult): void {
+  tasksPageResultCache.set(tasksPageCacheKeyString(key), result);
+  // Bounded like the daemon's page window: one project accumulating every
+  // page it visits must not grow without limit.
+  if (tasksPageResultCache.size > 64) {
+    const oldest = tasksPageResultCache.keys().next();
+    if (!oldest.done) tasksPageResultCache.delete(oldest.value);
+  }
+}
+
 export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: TasksPageHost) {
   const [groups, setGroups] = useState<ProjectGroup[]>(() => loadGroups());
   const [projectId, setProjectId] = useState<string | null>(() =>
     pickDefaultProject(loadGroups()),
   );
   const [githubTaskKind, setGithubTaskKind] = useState<GitHubTaskKind>("issues");
-  const [stateFilter, setStateFilter] = useState<GitHubStateFilterId>("open");
   // Source preset pill (fork use-task-page-search-actions): set by preset
   // clicks and kind switches, cleared the moment the user types.
   const [activeTaskPreset, setActiveTaskPreset] = useState<GitHubTaskPresetId | null>(() =>
@@ -113,14 +157,32 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   const [appliedTaskSearch, setAppliedTaskSearch] = useState(() =>
     getGitHubDefaultQuery("issues"),
   );
-  const [workItems, setWorkItems] = useState<TaskPageWorkItem[]>([]);
-  const [repo, setRepo] = useState<string | null>(null);
+  // Fork parity (#238): no Open/Closed/All control — the daemon `state`
+  // rides the applied search text (is:closed, or no qualifier for all).
+  const tasksDaemonState = projectTasksDaemonState(appliedTaskSearch);
+  // Mount seed from the module result cache (read once): a return visit
+  // with the default view paints the last rows instantly instead of
+  // replaying the skeleton, then revalidates below like the fork's
+  // landing refresh.
+  const [mountSeed] = useState(() => {
+    const defaultQuery = getGitHubDefaultQuery("issues");
+    const key: TasksPageCacheKey = {
+      projectId: pickDefaultProject(loadGroups()),
+      kind: "issues",
+      state: projectTasksDaemonState(defaultQuery),
+      query: projectTasksDaemonQuery(defaultQuery),
+      page: 1,
+    };
+    return { key, cached: readTasksPageCache(key) };
+  });
+  const [workItems, setWorkItems] = useState<TaskPageWorkItem[]>(() => mountSeed.cached?.workItems ?? []);
+  const [repo, setRepo] = useState<string | null>(() => mountSeed.cached?.repo ?? null);
   const [listPhase, setListPhase] = useState<ListPhase>("loading");
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [githubUnavailable, setGithubUnavailable] = useState(false);
   const [page, setPage] = useState(1);
-  const [hasNextPage, setHasNextPage] = useState(false);
-  const [furthestPage, setFurthestPage] = useState(1);
+  const [hasNextPage, setHasNextPage] = useState(() => mountSeed.cached?.hasNextPage ?? false);
+  const [furthestPage, setFurthestPage] = useState(() => mountSeed.cached?.furthestPage ?? 1);
   const [loadingTargetPage, setLoadingTargetPage] = useState<number | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [taskLinks, setTaskLinks] = useState<TaskLink[]>([]);
@@ -206,9 +268,12 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     refreshLinks();
   }, [refreshLinks]);
 
-  // Reloads the list whenever the project, kind, state, applied query,
-  // page or refresh nonce changes. A late response for an older window is
-  // dropped, never rendered.
+  // Reloads the list whenever the project, kind, applied query (which
+  // carries the daemon state), page or refresh nonce changes. A late
+  // response for an older window is dropped, never rendered. Success
+  // feeds the module result cache so a tab switch back skips the
+  // skeleton; the default query stays unfiltered and keeps the daemon's
+  // cheap one-window probe (see tasks_rpc do_tasks_list).
   useEffect(() => {
     if (projectId === null) {
       setWorkItems([]);
@@ -218,13 +283,24 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     let cancelled = false;
     setListPhase("loading");
     setStartError(null);
-    const state: TaskIssueState = stateFilter;
+    const state = tasksDaemonState;
     const kind = githubTaskKind;
+    const daemonQuery = projectTasksDaemonQuery(appliedTaskSearch);
+    // Stale-while-revalidate (#238): a visited request paints its last
+    // rows instantly (kind/project/page switches back never re-skeleton)
+    // while the fetch below revalidates underneath.
+    const seed = readTasksPageCache({ projectId, kind, state, query: daemonQuery, page });
+    if (seed) {
+      setWorkItems(seed.workItems);
+      setRepo(seed.repo);
+      setHasNextPage(seed.hasNextPage);
+      setFurthestPage((current) => Math.max(current, seed.furthestPage));
+    }
     void bridge
       .tasksList({
         projectId,
         state,
-        query: projectTasksDaemonQuery(appliedTaskSearch),
+        query: daemonQuery,
         page,
         perPage: TASKS_PAGE_SIZE,
         mode: kind,
@@ -246,13 +322,22 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
         setTasksError(null);
         setGithubUnavailable(false);
         setRepo(result.result.repo);
-        setWorkItems(
+        const nextItems =
           kind === "pulls"
             ? (result.result.pulls ?? []).map((pull) => toPullWorkItem(pull, projectId))
-            : result.result.issues.map((issue) => toWorkItem(issue, projectId)),
-        );
+            : result.result.issues.map((issue) => toWorkItem(issue, projectId));
+        setWorkItems(nextItems);
         setHasNextPage(result.result.hasNextPage);
         setFurthestPage((current) => Math.max(current, result.result.page));
+        writeTasksPageCache(
+          { projectId, kind, state, query: daemonQuery, page },
+          {
+            repo: result.result.repo,
+            workItems: nextItems,
+            hasNextPage: result.result.hasNextPage,
+            furthestPage: result.result.page,
+          },
+        );
       })
       .catch(() => {
         if (!cancelled) {
@@ -266,7 +351,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     return () => {
       cancelled = true;
     };
-  }, [bridge, projectId, githubTaskKind, stateFilter, appliedTaskSearch, page, refreshNonce]);
+  }, [bridge, projectId, githubTaskKind, tasksDaemonState, appliedTaskSearch, page, refreshNonce]);
 
   // Why: the pagination bar speaks 0-based pages (source contract); the
   // daemon RPC is 1-based, so the adapter converts at the boundary.
@@ -287,8 +372,8 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     setActiveTaskPreset(null);
   }, []);
 
-  // Source preset click: the pill fully determines the query; the state
-  // pills stay the state control. A refresh is forced even when the query
+  // Source preset click: the pill fully determines the query (and through
+  // it the derived daemon state). A refresh is forced even when the query
   // is unchanged so stale rows never read as if the filter did nothing.
   const handleSelectTaskPreset = useCallback((preset: GitHubTaskPresetId) => {
     const query = getGitHubTaskPresetQuery(preset);
@@ -301,13 +386,12 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   }, []);
 
   // Source handleResetGithubTaskSearch: Clear restores the kind default —
-  // query, pill and open state — never a bare box. The daemon projection
-  // maps the default back to no query.
+  // query and pill — never a bare box. The default carries is:open, so the
+  // derived daemon state lands back on open with no extra control.
   const handleResetGithubTaskSearch = useCallback(() => {
     setTaskSearchInput(getGitHubDefaultQuery(githubTaskKind));
     setAppliedTaskSearch(getGitHubDefaultQuery(githubTaskKind));
     setActiveTaskPreset(getGitHubDefaultPreset(githubTaskKind));
-    setStateFilter("open");
     setPage(1);
     setFurthestPage(1);
   }, [githubTaskKind]);
@@ -356,8 +440,11 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     taskSource: "github",
     visibleSourceOptions: getSourceOptions(),
     taskSourceAvailabilityNoticeByProvider: {},
+    // Fork parity (#238): the pill target is the repo identity
+    // (owner/repo slug) like the source's provider-identity label — the
+    // project display name is only the pre-resolve fallback.
     taskSourceContextSummary: {
-      label: ["GitHub", "Local", selectedRepo?.name ?? repo ?? "No project"].join(" · "),
+      label: ["GitHub", "Local", repo ?? selectedRepo?.name ?? "No project"].join(" · "),
       title: ["GitHub source", repo ? `Source: ${repo}` : null].filter(Boolean).join(" · "),
     },
     closeTaskPage: () => onClose?.(),
@@ -385,7 +472,8 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     githubMode: "items",
     githubTaskKind,
     // Source handleSelectGithubTaskKind: switching kinds always lands on
-    // the kind's default preset view (query, pill and open state).
+    // the kind's default preset view (query and pill; the default query
+    // carries is:open, so the derived state follows).
     onSelectGithubTaskKind: (kind) => {
       setPage(1);
       setFurthestPage(1);
@@ -393,19 +481,9 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
       setTaskSearchInput(getGitHubDefaultQuery(kind));
       setAppliedTaskSearch(getGitHubDefaultQuery(kind));
       setActiveTaskPreset(getGitHubDefaultPreset(kind));
-      setStateFilter("open");
     },
     githubModeButtons: getGitHubModeButtons(),
     showPRManagementColumns: githubTaskKind === "pulls",
-    stateFilter,
-    // A state change replaces every row's meaning, so the view detaches
-    // from any preset like the source's filter changes do.
-    onStateFilter: (state) => {
-      setPage(1);
-      setFurthestPage(1);
-      setActiveTaskPreset(null);
-      setStateFilter(state);
-    },
     activeTaskPreset,
     onSelectTaskPreset: handleSelectTaskPreset,
     taskSearchInput,

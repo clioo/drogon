@@ -424,4 +424,32 @@ describe("use-bots-page-controller", () => {
     await waitFor(() => expect(screen.getByTestId("bots-empty")).toBeTruthy());
     expect(fake.snapshots()).toBe(1);
   });
+
+  // #237: the mount registers over a placeholder snapshot while the live
+  // one is in flight — first paint is the fork's loading state (never a
+  // one-frame empty state), and hydration swaps in the rows.
+  it("paints the loading state while the snapshot is pending, then hydrates", async () => {
+    const fake = fakeBridge([bot()]);
+    const { rerender } = render(
+      <BotsPanel
+        snapshot={{ bots: [], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        snapshotPending
+      />,
+    );
+    expect(screen.getByRole("status", { name: "Loading Bots" })).toBeTruthy();
+    expect(screen.queryByTestId("bots-empty")).toBeNull();
+    rerender(
+      <BotsPanel
+        snapshot={{ bots: [bot()], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "Loading Bots" })).toBeNull(),
+    );
+    expect(screen.queryByTestId("bots-empty")).toBeNull();
+  });
 });

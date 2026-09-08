@@ -40,6 +40,10 @@ export type BotsPageControllerDeps = {
     responsibilityId: string;
     harness?: BotRunHarnessSource;
   }) => void | Promise<void>;
+  /** True while the mount's first snapshot for the live scope is still in
+   *  flight over a placeholder snapshot: start (and stay) in the fork's
+   *  loading state instead of flashing the empty state. */
+  snapshotPending?: boolean;
 };
 
 function mintRequestId(prefix: string): string {
@@ -62,7 +66,17 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   }, [snapshot]);
   const effective = localSnapshot ?? snapshot;
 
-  const [loading, setLoading] = useState(false);
+  // Fork parity (#237): the mount registers the page over a placeholder
+  // snapshot and hydrates after, so the first paint must be the fork's
+  // loading state — never a one-frame empty state before the rows land.
+  const [loading, setLoading] = useState(Boolean(deps.snapshotPending));
+  useEffect(() => {
+    // Hydration (or scope change back to a settled snapshot) clears the
+    // mount-driven loading state. Manual refresh() owns its own
+    // loading window afterwards: pending is already false by then, so
+    // this effect never fights it.
+    if (!deps.snapshotPending) setLoading(false);
+  }, [deps.snapshotPending]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] =

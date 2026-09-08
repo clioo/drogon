@@ -19,6 +19,7 @@ import {
   getGitHubTaskKindPresets,
   getGitHubTaskPresetQuery,
   projectTasksDaemonQuery,
+  projectTasksDaemonState,
 } from "./task-page-localized-options";
 import { toWorkItem, type TaskPageModel } from "./task-page-model";
 import { GITHUB_TASK_GRID_CLASS } from "./task-page-source-context";
@@ -54,7 +55,6 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     setRepoSelection: () => {},
     selectedGitHubRepoExternalLink: { url: "https://github.com/example/repo", label: "example/repo" },
     githubMode: "items",
-    stateFilter: "open",
     githubTaskKind: "issues",
     onSelectGithubTaskKind: () => {},
     githubModeButtons: [
@@ -62,7 +62,6 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
       { id: "pulls", label: "PRs" },
     ],
     showPRManagementColumns: false,
-    onStateFilter: () => {},
     activeTaskPreset: "issues",
     onSelectTaskPreset: () => {},
     taskSearchInput: "",
@@ -363,19 +362,20 @@ describe("filters row", () => {
     expect(html).not.toContain(">Assigned to me<");
   });
 
-  test("renders the open/closed/all state controls with the active state", () => {
+  // #238: the fork has a single filter bar (preset pills + search) — no
+  // Open/Closed/All row. Closed/all ride the search text instead.
+  test("renders one filter bar with no open/closed/all state controls", () => {
     const html = render(
       createElement(TaskPageGitHubFilters, {
-        model: baseModel({ stateFilter: "closed" }),
+        model: baseModel({}),
       }),
     );
     expect(html).toContain(">Open<");
-    expect(html).toContain(">Closed<");
-    expect(html).toContain(">All<");
+    expect(html).toContain(">Assigned to me<");
+    expect(html).not.toContain(">Closed<");
+    expect(html).not.toContain(">All<");
     expect(html).toContain("Search GitHub issues...");
     expect(html).toContain("Refresh GitHub work");
-    // closed is the active pill: painted with the inverted foreground surface
-    expect(html).toContain("bg-foreground/90");
   });
 
   test("renders the clear-search affordance only with a draft", () => {
@@ -487,6 +487,19 @@ describe("github default query (source presetToQuery)", () => {
     expect(projectTasksDaemonQuery("assignee:octocat crash")).toBe(
       "assignee:octocat crash",
     );
+  });
+
+  test("derives the daemon state from the search text like the fork", () => {
+    // Every preset carries is:open; closed comes from the text alone.
+    expect(projectTasksDaemonState("is:issue is:open")).toBe("open");
+    expect(projectTasksDaemonState("is:pr is:open")).toBe("open");
+    expect(projectTasksDaemonState("assignee:@me is:issue is:open")).toBe("open");
+    expect(projectTasksDaemonState("is:issue is:closed")).toBe("closed");
+    expect(projectTasksDaemonState("IS:ISSUE IS:CLOSED")).toBe("closed");
+    expect(projectTasksDaemonState("crash on start")).toBe("all");
+    expect(projectTasksDaemonState("")).toBe("all");
+    // Conflicting qualifiers keep the open default, never closed.
+    expect(projectTasksDaemonState("is:open is:closed")).toBe("open");
   });
 });
 

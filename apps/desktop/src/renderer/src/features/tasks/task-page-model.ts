@@ -14,7 +14,6 @@ import type {
 } from "../../../../shared/tasks-contract";
 import type { GitHubWorkItemLike } from "./task-page-github-work-item-status";
 import type {
-  GitHubStateFilterId,
   GitHubTaskKind,
   GitHubTaskPresetId,
   SourceOption,
@@ -118,10 +117,10 @@ export type TaskPageModel = {
   /** True in pulls mode: rows render Reviewers/Checks/Merge instead of Assignees/Status. */
   showPRManagementColumns: boolean;
 
-  // Filters.
+  // Filters: one bar like the fork (preset pills + search). The daemon
+  // `state` is derived from the applied search text in TasksPage.tsx
+  // (projectTasksDaemonState), never a second control.
   githubMode: "items";
-  stateFilter: GitHubStateFilterId;
-  onStateFilter: (state: GitHubStateFilterId) => void;
   /** Source preset pill (fork Filters.tsx row); null once the user types. */
   activeTaskPreset: GitHubTaskPresetId | null;
   onSelectTaskPreset: (preset: GitHubTaskPresetId) => void;
