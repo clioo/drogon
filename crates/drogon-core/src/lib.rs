@@ -390,6 +390,7 @@ impl Engine {
             "automation.history" => self.automation_history(&request.params),
             "bot.history" => self.bot_history(&request.params),
             "files.list" => self.do_files_list(&request.params),
+            "files.search" => self.do_files_search(&request.params),
             "files.read" => self.do_files_read(&request.params),
             "files.write" => self.mutating(request, Self::do_files_write),
             "files.create" => self.mutating(request, Self::do_files_create),

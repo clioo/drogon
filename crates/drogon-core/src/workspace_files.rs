@@ -631,6 +631,270 @@ pub(crate) fn delete_paths(root: &Path, paths: &[String]) -> Result<Vec<String>,
     Ok(deleted)
 }
 
+/// Bounded result of [`search_files`]: workspace-relative `/`-separated
+/// paths in deterministic (sorted, breadth-first) order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SearchListing {
+    pub(crate) files: Vec<String>,
+    pub(crate) truncated: bool,
+}
+
+/// Hidden-dir blocklist ported from the reference quick-open filter
+/// (`src/shared/quick-open-filter.ts` `HIDDEN_DIR_BLOCKLIST` plus its
+/// `node_modules` prune): tool-generated caches/state, never hand-edited
+/// user dirs. A blocklist (not an allowlist) keeps novel dotfiles
+/// discoverable, so `.config` and friends stay searchable.
+const SEARCH_BLOCKED_DIRS: &[&str] = &[
+    ".git",
+    ".next",
+    ".nuxt",
+    ".cache",
+    ".stably",
+    ".vscode",
+    ".idea",
+    ".yarn",
+    ".pnpm-store",
+    ".terraform",
+    ".docker",
+    ".husky",
+    ".npm",
+    ".npm-global",
+    ".gvfs",
+    "node_modules",
+];
+
+/// Blocked `/`-separated relative path prefixes (the source's
+/// `.local/share` runtime-subtree rule).
+const SEARCH_BLOCKED_PATHS: &[&str] = &[".local/share"];
+
+/// Bounds on one search scan so a huge worktree cannot hold the call open:
+/// past either cap the scan stops and reports `truncated`.
+const SEARCH_MAX_DIRS: usize = 4000;
+const SEARCH_MAX_SCANNED_ENTRIES: usize = 100_000;
+
+/// True when a `/`-separated root-relative path crosses a blocked segment
+/// or prefix. Runs per candidate, so it stays allocation-free on hits.
+fn search_path_blocked(rel: &str) -> bool {
+    for blocked in SEARCH_BLOCKED_PATHS {
+        if rel == *blocked || rel.starts_with(&format!("{blocked}/")) {
+            return true;
+        }
+    }
+    rel.split('/')
+        .any(|segment| SEARCH_BLOCKED_DIRS.contains(&segment))
+}
+
+/// Case-insensitive subsequence match: every query char appears in the
+/// candidate in order. Empty query matches everything. The renderer owns
+/// fuzzy ranking; the daemon only needs the same recall boundary.
+fn search_query_matches(query_lower: &str, candidate: &str) -> bool {
+    if query_lower.is_empty() {
+        return true;
+    }
+    let candidate_lower = candidate.to_lowercase();
+    let mut rest = candidate_lower.as_str();
+    for q in query_lower.chars() {
+        match rest.find(q) {
+            Some(at) => rest = &rest[at + q.len_utf8()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+struct SearchCollector {
+    query_lower: String,
+    limit: usize,
+    files: Vec<String>,
+    extra_matches: usize,
+    incomplete: bool,
+}
+
+impl SearchCollector {
+    fn consider(&mut self, rel: &str) {
+        if !search_query_matches(&self.query_lower, rel) {
+            return;
+        }
+        if self.files.len() < self.limit {
+            self.files.push(rel.to_string());
+        } else {
+            self.extra_matches += 1;
+        }
+    }
+
+    fn listing(self) -> SearchListing {
+        SearchListing {
+            files: self.files,
+            truncated: self.extra_matches > 0 || self.incomplete,
+        }
+    }
+}
+
+/// True when `root` is itself a git repo root or a linked worktree (a
+/// `.git` dir or, for worktrees, a `.git` file). Checked without following
+/// the final component, so a planted `.git` symlink never reads as a repo.
+fn is_git_worktree_root(root: &Path) -> bool {
+    std::fs::symlink_metadata(root.join(".git"))
+        .map(|meta| {
+            let kind = meta.file_type();
+            kind.is_dir() || kind.is_file()
+        })
+        .unwrap_or(false)
+}
+
+/// Lists candidates via `git ls-files --cached --others --exclude-standard`
+/// (`-z` for newline-safe paths): tracked plus untracked-but-not-ignored
+/// files, honoring `.gitignore`. Returns false when git is unavailable or
+/// the directory is not actually a repo, so the caller falls back to the
+/// plain walk below. Never fails the search outright.
+fn try_search_via_git_ls_files(root: &Path, collector: &mut SearchCollector) -> bool {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
+        .output();
+    let output = match output {
+        Ok(output) if output.status.success() => output,
+        _ => return false,
+    };
+    let mut scanned = 0usize;
+    for chunk in output.stdout.split(|byte| *byte == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        scanned += 1;
+        if scanned > SEARCH_MAX_SCANNED_ENTRIES {
+            collector.incomplete = true;
+            break;
+        }
+        // Lossy is deliberate here: git paths that are not UTF-8 cannot
+        // round-trip the JSON wire anyway (list_dir refuses them outright).
+        let path = String::from_utf8_lossy(chunk).replace('\\', "/");
+        if path.is_empty() || search_path_blocked(&path) {
+            continue;
+        }
+        collector.consider(&path);
+    }
+    true
+}
+
+/// Plain breadth-first walk over the `cap_std` root handle for non-git
+/// workspaces, applying the same blocklist the git path gets from
+/// `--exclude-standard` plus [`search_path_blocked`]. Descends only into
+/// true directories (`file_type` never follows the final component), so a
+/// symlinked dir is listed as one candidate, never traversed out of root.
+/// Siblings sort by name, so output order is deterministic.
+fn search_via_walk(root_dir: &Dir, collector: &mut SearchCollector) {
+    let mut queue: Vec<String> = vec![String::new()];
+    let mut cursor = 0usize;
+    let mut dirs_visited = 0usize;
+    let mut scanned = 0usize;
+    while cursor < queue.len() {
+        if dirs_visited >= SEARCH_MAX_DIRS {
+            collector.incomplete = true;
+            break;
+        }
+        dirs_visited += 1;
+        let rel = queue[cursor].clone();
+        cursor += 1;
+        let read_dir = if rel.is_empty() {
+            root_dir.entries()
+        } else {
+            root_dir.read_dir(rel.as_str())
+        };
+        let read_dir = match read_dir {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        let mut names: Vec<(String, bool)> = Vec::new();
+        for entry in read_dir {
+            scanned += 1;
+            if scanned > SEARCH_MAX_SCANNED_ENTRIES {
+                collector.incomplete = true;
+                break;
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            let name = match entry.file_name().into_string() {
+                Ok(name) => name,
+                Err(_) => continue,
+            };
+            let is_dir = match entry.file_type() {
+                Ok(kind) => kind.is_dir(),
+                Err(_) => continue,
+            };
+            names.push((name, is_dir));
+        }
+        if collector.incomplete {
+            break;
+        }
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, is_dir) in names {
+            let child = if rel.is_empty() {
+                name
+            } else {
+                format!("{rel}/{name}")
+            };
+            if search_path_blocked(&child) {
+                continue;
+            }
+            if is_dir {
+                queue.push(child);
+            } else {
+                collector.consider(&child);
+            }
+        }
+    }
+}
+
+/// Bounded workspace-relative path search for quick open. A git repo root
+/// (or linked worktree) lists via `git ls-files` honoring `.gitignore`;
+/// anything else walks with the source's ignore list. `query` is a
+/// case-insensitive subsequence filter (empty matches all); at most
+/// `limit` paths return with `truncated` set when more matched or the
+/// scan hit its internal caps.
+pub(crate) fn search_files(
+    root: &Path,
+    query: &str,
+    limit: usize,
+) -> Result<SearchListing, RpcError> {
+    if limit == 0 {
+        return Err(error::invalid_argument(
+            "file search limit must be at least 1",
+        ));
+    }
+    let normalized = query.trim();
+    if normalized.contains('\0') {
+        return Err(error::invalid_argument(
+            "file search query contains a NUL byte",
+        ));
+    }
+    if normalized.len() > drogon_protocol::workspace_files::MAX_FILE_SEARCH_QUERY_BYTES {
+        return Err(error::invalid_argument("file search query is too large"));
+    }
+    let mut collector = SearchCollector {
+        query_lower: normalized.to_lowercase(),
+        limit,
+        files: Vec::new(),
+        extra_matches: 0,
+        incomplete: false,
+    };
+    if is_git_worktree_root(root) && try_search_via_git_ls_files(root, &mut collector) {
+        return Ok(collector.listing());
+    }
+    let root_dir = open_root_dir(root)?;
+    search_via_walk(&root_dir, &mut collector);
+    Ok(collector.listing())
+}
+
 /// `cap_std`'s `Metadata::modified` returns its own `cap_std::time::SystemTime`
 /// (it has no `now`/`elapsed`, only conversion to/from `std`, to keep the
 /// capability model from smuggling in ambient clock access) rather than

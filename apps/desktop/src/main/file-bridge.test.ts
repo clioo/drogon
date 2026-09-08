@@ -273,4 +273,42 @@ describe("file bridge admission", () => {
       ),
     ).toEqual({ ok: false, error: missing });
   });
+
+  it("maps fileSearch onto files.search with identity and bound checks", async () => {
+    const seen: unknown[] = [];
+    const search = { hostId: "host", workspaceId: "workspace", query: "app" };
+    const response = {
+      hostId: "host",
+      workspaceId: "workspace",
+      query: "app",
+      files: ["src/app.ts"],
+      truncated: false,
+    };
+    const accepted = await dispatchFileRequest("fileSearch", search, async (method, params) => {
+      seen.push([method, params]);
+      return { ok: true, result: response };
+    });
+    expect(accepted.ok).toBe(true);
+    expect(seen).toEqual([
+      ["files.search", { hostId: "host", workspaceId: "workspace", query: "app" }],
+    ]);
+    // Daemon echoes the trimmed query; an untrimmed ask still validates.
+    const padded = await dispatchFileRequest(
+      "fileSearch",
+      { ...search, query: "  app  " },
+      async () => ({ ok: true, result: response }),
+    );
+    expect(padded.ok).toBe(true);
+    const mismatched = await dispatchFileRequest("fileSearch", search, async () => ({
+      ok: true,
+      result: { ...response, workspaceId: "other" },
+    }));
+    expect(mismatched).toMatchObject({ ok: false, error: { code: "internal_error" } });
+    const overLimit = await dispatchFileRequest(
+      "fileSearch",
+      { ...search, limit: 501 },
+      async () => ({ ok: true, result: response }),
+    );
+    expect(overLimit).toMatchObject({ ok: false, error: { code: "invalid_argument" } });
+  });
 });

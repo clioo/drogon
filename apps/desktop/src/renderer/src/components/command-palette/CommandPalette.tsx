@@ -1,5 +1,16 @@
+/* MIT Copyright (c) 2026 Lovecast Inc.
+ * Palette host: owns the ⌘J/⌘P chords (keybindings/definitions.ts:
+ * worktree.palette / worktree.quickOpen toggle or switch modes), focus
+ * restore and mode state. The ⌘J surface is the source's jump palette
+ * (features/jump-palette, ported from WorktreeJumpPalette.tsx and its
+ * worktree-jump-palette-* rows in source order); ⌘P is the source's
+ * quick open (features/quick-open). The Drogon-only command rows the
+ * source does not have are no longer rendered here — their command ids
+ * stay registered in the keybinding table and reachable via menus and
+ * Settings. CommandDialog/surface copy ("Jump to...") follows the source.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Command } from "cmdk";
+import type { BrowserTabState } from "../../../../shared/browser-contract";
 import type { FileBridge } from "../../../../shared/file-contract";
 import type {
   Session,
@@ -12,22 +23,17 @@ import {
   isEditableTarget,
   resolveKeybindingPlatform,
 } from "../../keybindings";
-import { formatShortcutChordHint, resolveShortcutPlatform } from "../shortcut-labels";
-import {
-  COMMAND_DEFS,
-  commandTokenScore,
-  rankCommands,
-  type CommandContext,
-} from "./command-registry";
-import {
-  collectWorkspaceFiles,
-  rankQuickOpenFiles,
-  type QuickOpenFile,
-} from "./quick-open-matches";
 import { resolvePaletteFocusRestoreTarget } from "./focus-restore";
-import { capPaletteSection } from "./render-cap";
-import { loadRecentCommands, recordRecentCommand } from "./recent-commands";
-import { openTabCreateMenu } from "./harness-menu";
+import {
+  JumpPalette,
+  buildJumpBrowserTabs,
+  buildJumpQuickActions,
+  buildJumpTabs,
+  buildJumpWorktrees,
+  type JumpQuickActionId,
+} from "../../features/jump-palette";
+import { QuickOpen } from "../../features/quick-open";
+import type { ProjectGroup } from "../../features/shell/project-adapter";
 
 export type PaletteMode = "commands" | "quick";
 
@@ -38,6 +44,9 @@ export interface CommandPaletteHostProps {
   workspaces: Workspace[];
   sessions: Session[];
   activeSessionId: string;
+  projectGroups: ProjectGroup[];
+  browserTabs: BrowserTabState[];
+  activeBrowserTabId: string | null;
   filesAvailable: boolean;
   botsAvailable: boolean;
   changesAvailable: boolean;
@@ -49,8 +58,10 @@ export interface CommandPaletteHostProps {
   connected: boolean;
   busy: boolean;
   onNewTerminal(): void;
+  onNewBrowserTab(): void;
   onSelectWorkspace(id: string): void;
   onSelectSession(id: string): void;
+  onSelectBrowserTab(tabId: string): void;
   onOpenFiles(): void;
   onOpenBots(): void;
   onToggleRightSidebar(): void;
@@ -61,6 +72,7 @@ export interface CommandPaletteHostProps {
   onOpenSettings(): void;
   onSetTheme(theme: Theme): void;
   onAddWorkspace(): void;
+  onAddProject(): void;
   /** Routes to the Files panel for the path; the panel reveals the file. */
   onOpenFile(path: string): void;
 }
@@ -168,9 +180,22 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
   });
 
   if (!open) return null;
+  if (mode === "quick") {
+    return (
+      <QuickOpen
+        query={query}
+        onQueryChange={setQuery}
+        onClose={closePalette}
+        fileBridge={props.fileBridge}
+        hostId={props.hostId}
+        workspaceId={props.workspaceId}
+        filesAvailable={props.filesAvailable}
+        onOpenFile={props.onOpenFile}
+      />
+    );
+  }
   return (
-    <PaletteDialog
-      mode={mode}
+    <JumpPaletteSurface
       query={query}
       onQueryChange={setQuery}
       onClose={closePalette}
@@ -179,397 +204,76 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
   );
 }
 
-type DialogProps = CommandPaletteHostProps & {
-  mode: PaletteMode;
-  query: string;
-  onQueryChange(query: string): void;
-  onClose(): void;
-};
-
-function PaletteDialog(props: DialogProps) {
-  const { mode, query, onQueryChange, onClose } = props;
-  const context: CommandContext = {
-    connected: props.connected,
-    busy: props.busy,
-    hasWorkspace: props.workspaceId !== "",
-    filesAvailable: props.filesAvailable,
-    botsAvailable: props.botsAvailable,
-    changesAvailable: props.changesAvailable,
-    harnessAvailable: props.harnessAvailable,
-    worktreesAvailable: props.worktreesAvailable,
-    canCreateWorktree: props.canCreateWorktree,
-  };
-  const [recentIds, setRecentIds] = useState<string[]>(() =>
-    loadRecentCommands(window.localStorage),
+function JumpPaletteSurface(
+  props: CommandPaletteHostProps & {
+    query: string;
+    onQueryChange(query: string): void;
+    onClose(): void;
+  },
+) {
+  const tabs = useMemo(
+    () => buildJumpTabs(props.sessions, props.activeSessionId),
+    [props.sessions, props.activeSessionId],
   );
-  const runStaticCommand = (id: string) => {
+  const worktrees = useMemo(
+    () =>
+      buildJumpWorktrees(props.projectGroups, props.sessions, props.workspaceId),
+    [props.projectGroups, props.sessions, props.workspaceId],
+  );
+  const browserTabs = useMemo(
+    () => buildJumpBrowserTabs(props.browserTabs, props.activeBrowserTabId),
+    [props.browserTabs, props.activeBrowserTabId],
+  );
+  const quickActions = useMemo(
+    () =>
+      buildJumpQuickActions({
+        canCreateWorktree: props.canCreateWorktree,
+        canNewTerminal:
+          props.connected && !props.busy && props.workspaceId !== "",
+        canNewBrowserTab:
+          props.connected && !props.busy && props.workspaceId !== "",
+        canAddProject: props.connected && !props.busy,
+      }),
+    [props.canCreateWorktree, props.connected, props.busy, props.workspaceId],
+  );
+
+  const onQuickAction = (id: JumpQuickActionId) => {
     switch (id) {
+      case "worktree.new":
+        props.onNewWorktree();
+        break;
       case "terminal.new":
         props.onNewTerminal();
         break;
-      case "harness.launch":
-        openTabCreateMenu();
+      case "browser.new":
+        props.onNewBrowserTab();
         break;
-      case "panel.files":
-        props.onOpenFiles();
-        break;
-      case "panel.bots":
-        props.onOpenBots();
-        break;
-      case "sidebar.right.toggle":
-        props.onToggleRightSidebar();
-        break;
-      case "sidebar.left.toggle":
-        props.onToggleSidebar();
-        break;
-      case "sidebar.explorer.toggle":
-        props.onShowExplorer();
-        break;
-      case "sidebar.sourceControl.toggle":
-        props.onShowSourceControl();
-        break;
-      case "inspector.toggle":
-        props.onToggleInspector();
+      case "project.add":
+        props.onAddProject();
         break;
       case "settings.open":
         props.onOpenSettings();
         break;
-      case "theme.light":
-        props.onSetTheme("light");
-        break;
-      case "theme.dark":
-        props.onSetTheme("dark");
-        break;
-      case "theme.system":
-        props.onSetTheme("system");
-        break;
-      case "workspace.add":
-        props.onAddWorkspace();
-        break;
-      case "worktree.new":
-        props.onNewWorktree();
-        break;
-      default:
-        return;
     }
-    setRecentIds(recordRecentCommand(window.localStorage, id));
-    onClose();
   };
 
   return (
-    <div
-      className="command-palette-overlay"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <Command
-        label={mode === "commands" ? "Command palette" : "Quick open"}
-        shouldFilter={false}
-        className="command-palette"
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onClose();
-          }
-        }}
-      >
-        <Command.Input
-          autoFocus
-          value={query}
-          onValueChange={onQueryChange}
-          placeholder={
-            mode === "commands" ? "Type a command…" : "Type a file name…"
-          }
-          className="command-palette-input"
-        />
-        <Command.List className="command-palette-list">
-          {mode === "commands" ? (
-            <CommandRows
-              {...props}
-              context={context}
-              recentIds={recentIds}
-              onRunStatic={runStaticCommand}
-              onClose={onClose}
-            />
-          ) : (
-            <QuickOpenRows {...props} onClose={onClose} />
-          )}
-        </Command.List>
-        <div className="command-palette-footer">
-          <span>↑↓ navigate</span>
-          <span>↵ select</span>
-          <span>esc close</span>
-        </div>
-      </Command>
-    </div>
-  );
-}
-
-function CommandRows(
-  props: DialogProps & {
-    context: CommandContext;
-    recentIds: string[];
-    onRunStatic(id: string): void;
-  },
-) {
-  const { query, context, recentIds } = props;
-  // Chord hints render through the keybinding labels formatter (⌘T on macOS,
-  // Ctrl+T elsewhere) — the same labels the Shortcuts settings pane shows.
-  const palettePlatform = resolveShortcutPlatform(
-    typeof navigator === "undefined" ? "" : navigator.userAgent,
-  );
-  const chordHint = (actionId: string | undefined): string | null =>
-    actionId ? formatShortcutChordHint(actionId, palettePlatform) : null;
-  const ranked = useMemo(
-    () =>
-      rankCommands({ defs: COMMAND_DEFS, query, context, recentIds }),
-    [query, context, recentIds],
-  );
-  const normalized = query.trim().toLowerCase();
-  const queryTokens = useMemo(
-    () => [...new Set(normalized.split(/[^\p{L}\p{N}]+/u).filter(Boolean))],
-    [normalized],
-  );
-  const workspaceMatches = useMemo(() => {
-    if (props.workspaces.length === 0) return [];
-    if (!normalized)
-      return props.workspaces.map((workspace) => ({ workspace, score: 0 }));
-    return props.workspaces
-      .map((workspace) => ({
-        workspace,
-        score: commandTokenScore(queryTokens, [
-          workspace.name,
-          workspace.path,
-        ]),
-      }))
-      .filter((row) => row.score > 0)
-      .sort((a, b) => b.score - a.score);
-  }, [props.workspaces, normalized, queryTokens]);
-  const sessionMatches = useMemo(() => {
-    if (props.sessions.length === 0) return [];
-    if (!normalized)
-      return props.sessions.map((session) => ({ session, score: 0 }));
-    return props.sessions
-      .map((session) => ({
-        session,
-        score: commandTokenScore(queryTokens, [
-          session.command,
-          session.id,
-        ]),
-      }))
-      .filter((row) => row.score > 0)
-      .sort((a, b) => b.score - a.score);
-  }, [props.sessions, normalized, queryTokens]);
-
-  const commands = capPaletteSection(ranked);
-  const workspaces = capPaletteSection(workspaceMatches);
-  const sessions = capPaletteSection(sessionMatches);
-  const empty =
-    commands.visible.length === 0 &&
-    workspaces.visible.length === 0 &&
-    sessions.visible.length === 0;
-
-  return (
-    <>
-      {empty && (
-        <div className="command-palette-empty" role="status">
-          No matching commands.
-        </div>
-      )}
-      {commands.visible.length > 0 && (
-        <Command.Group heading="Commands" className="command-palette-section">
-          {commands.visible.map((row) => (
-            <Command.Item
-              key={row.def.id}
-              value={row.def.id}
-              disabled={!row.enabled}
-              onSelect={() => {
-                if (row.enabled) props.onRunStatic(row.def.id);
-              }}
-              className="jump-palette-item command-palette-row"
-            >
-              <span className="command-palette-label">{row.def.label}</span>
-              {row.recent && (
-                <span className="command-palette-badge">recent</span>
-              )}
-              {row.enabled
-                ? (() => {
-                    const hint =
-                      chordHint(row.def.keybindingActionId) ?? row.def.hint;
-                    return (
-                      hint && (
-                        <kbd className="command-palette-hint">{hint}</kbd>
-                      )
-                    );
-                  })()
-                : (
-                    <span className="command-palette-disabled-reason">
-                      {row.disabledReason}
-                    </span>
-                  )}
-            </Command.Item>
-          ))}
-          {commands.overflowCount > 0 && (
-            <OverflowHint count={commands.overflowCount} />
-          )}
-        </Command.Group>
-      )}
-      {workspaces.visible.length > 0 && (
-        <Command.Group
-          heading="Switch workspace"
-          className="command-palette-section"
-        >
-          {workspaces.visible.map(({ workspace }) => (
-            <Command.Item
-              key={`workspace:${workspace.id}`}
-              value={`workspace:${workspace.id}`}
-              onSelect={() => {
-                props.onSelectWorkspace(workspace.id);
-                props.onClose();
-              }}
-              className="jump-palette-item command-palette-row"
-            >
-              <span className="command-palette-label">{workspace.name}</span>
-              <span className="command-palette-path">{workspace.path}</span>
-            </Command.Item>
-          ))}
-          {workspaces.overflowCount > 0 && (
-            <OverflowHint count={workspaces.overflowCount} />
-          )}
-        </Command.Group>
-      )}
-      {sessions.visible.length > 0 && (
-        <Command.Group
-          heading="Switch session"
-          className="command-palette-section"
-        >
-          {sessions.visible.map(({ session }) => (
-            <Command.Item
-              key={`session:${session.id}`}
-              value={`session:${session.id}`}
-              onSelect={() => {
-                props.onSelectSession(session.id);
-                props.onClose();
-              }}
-              className="jump-palette-item command-palette-row"
-            >
-              <span className="command-palette-label">
-                {session.command || session.id}
-              </span>
-              <span className="command-palette-path">{session.verdict}</span>
-            </Command.Item>
-          ))}
-          {sessions.overflowCount > 0 && (
-            <OverflowHint count={sessions.overflowCount} />
-          )}
-        </Command.Group>
-      )}
-    </>
-  );
-}
-
-function OverflowHint({ count }: { count: number }) {
-  return (
-    <div className="command-palette-overflow" role="status">
-      +{count} more — keep typing to narrow
-    </div>
-  );
-}
-
-function QuickOpenRows(
-  props: DialogProps,
-) {
-  const { query, fileBridge, hostId, workspaceId, filesAvailable } = props;
-  const [files, setFiles] = useState<QuickOpenFile[] | null>(null);
-  const [walkError, setWalkError] = useState("");
-  const [walkTruncated, setWalkTruncated] = useState(false);
-  const generation = useRef(0);
-
-  useEffect(() => {
-    if (!filesAvailable || hostId === null || workspaceId === "") {
-      setFiles([]);
-      setWalkError(
-        filesAvailable
-          ? "No workspace selected."
-          : "Files unavailable: service does not advertise files.v1",
-      );
-      return;
-    }
-    const current = ++generation.current;
-    setFiles(null);
-    setWalkError("");
-    setWalkTruncated(false);
-    void collectWorkspaceFiles({
-      bridge: fileBridge,
-      scope: { hostId, workspaceId },
-    }).then(
-      (result) => {
-        if (generation.current !== current) return;
-        setFiles(result.files);
-        setWalkTruncated(result.truncated);
-      },
-      (failure: unknown) => {
-        if (generation.current !== current) return;
-        setFiles([]);
-        setWalkError(
-          failure instanceof Error ? failure.message : "Could not list files.",
-        );
-      },
-    );
-  }, [fileBridge, hostId, workspaceId, filesAvailable]);
-
-  const matches = useMemo(
-    () => (files === null ? [] : rankQuickOpenFiles(files, query)),
-    [files, query],
-  );
-  const capped = capPaletteSection(matches);
-
-  if (files === null) {
-    return (
-      <div className="command-palette-empty" role="status">
-        Listing files…
-      </div>
-    );
-  }
-  if (walkError) {
-    return (
-      <div className="command-palette-empty" role="alert">
-        {walkError}
-      </div>
-    );
-  }
-  if (capped.visible.length === 0) {
-    return (
-      <div className="command-palette-empty" role="status">
-        No matching files.
-      </div>
-    );
-  }
-  return (
-    <>
-      {walkTruncated && (
-        <div className="command-palette-overflow" role="status">
-          Listing truncated at service limits — keep typing to narrow
-        </div>
-      )}
-      {capped.visible.map((match) => (
-        <Command.Item
-          key={`file:${match.path}`}
-          value={`file:${match.path}`}
-          onSelect={() => {
-            props.onOpenFile(match.path);
-            props.onClose();
-          }}
-          className="jump-palette-item command-palette-row"
-        >
-          <span className="command-palette-label">{match.name}</span>
-          <span className="command-palette-path">{match.path}</span>
-        </Command.Item>
-      ))}
-      {capped.overflowCount > 0 && (
-        <OverflowHint count={capped.overflowCount} />
-      )}
-    </>
+    <JumpPalette
+      query={props.query}
+      onQueryChange={props.onQueryChange}
+      onClose={props.onClose}
+      tabs={tabs}
+      worktrees={worktrees}
+      browserTabs={browserTabs}
+      quickActions={quickActions}
+      canCreateWorktree={props.canCreateWorktree}
+      onSelectSession={props.onSelectSession}
+      onSelectWorkspace={props.onSelectWorkspace}
+      onSelectBrowserTab={props.onSelectBrowserTab}
+      onQuickAction={onQuickAction}
+      // The composer owns naming: the query-prefilled create row opens it
+      // and the user confirms the name there.
+      onCreateWorktree={() => props.onNewWorktree()}
+    />
   );
 }

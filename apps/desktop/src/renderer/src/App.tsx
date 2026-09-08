@@ -2655,6 +2655,9 @@ export function App() {
         workspaces={workspaces}
         sessions={sessions}
         activeSessionId={active}
+        projectGroups={projectGroups}
+        browserTabs={browserTabs}
+        activeBrowserTabId={activeBrowserTabId}
         filesAvailable={isFilesAvailable(liveCapabilities)}
         botsAvailable={isBotsAvailable(liveCapabilities)}
         changesAvailable={isChangesAvailable(liveCapabilities)}
@@ -2666,6 +2669,7 @@ export function App() {
         connected={status !== null}
         busy={busy}
         onNewTerminal={() => void create()}
+        onNewBrowserTab={() => void newBrowserTab()}
         onSelectWorkspace={(id) => {
           const resolution = resolveWorkspaceSelection(selected, id);
           if (!resolution.changed) return;
@@ -2673,7 +2677,8 @@ export function App() {
           setActive("");
           setSessions([]);
         }}
-        onSelectSession={setActive}
+        onSelectSession={selectSessionTab}
+        onSelectBrowserTab={selectBrowserTab}
         onOpenFiles={() => showRightExplorer()}
         onOpenBots={() => setRoute(BOTS_ROUTE_ID)}
         onToggleRightSidebar={toggleRightSidebar}
@@ -2684,6 +2689,7 @@ export function App() {
         onOpenSettings={() => openSettings()}
         onSetTheme={changeTheme}
         onAddWorkspace={() => requestCreateWorkspace()}
+        onAddProject={requestAddProject}
         onOpenFile={openFileInFiles}
       />
       {composer && (

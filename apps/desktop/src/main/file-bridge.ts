@@ -7,6 +7,8 @@ import {
   MAX_DELETE_PATHS,
   MAX_DIRECTORY_ENTRIES,
   MAX_FILE_BYTES,
+  MAX_FILE_SEARCH_QUERY_BYTES,
+  MAX_FILE_SEARCH_RESULTS,
 } from "../shared/file-contract";
 import type { Result } from "../shared/session-contract";
 import { callNative } from "./native-client";
@@ -76,11 +78,73 @@ type NativeCall = (
   requestId?: string,
 ) => Promise<Result<unknown>>;
 
+const fileSearchBridgeSchema = z.object({
+  hostId: opaqueId,
+  workspaceId: opaqueId,
+  query: z
+    .string()
+    .refine(
+      (value) =>
+        !value.includes("\0") &&
+        new TextEncoder().encode(value).length <= MAX_FILE_SEARCH_QUERY_BYTES,
+    ),
+  limit: z.number().int().min(1).max(MAX_FILE_SEARCH_RESULTS).optional(),
+});
+const fileSearchResultSchema = z.object({
+  hostId: opaqueId,
+  workspaceId: opaqueId,
+  query: z.string().max(MAX_FILE_SEARCH_QUERY_BYTES),
+  files: z.array(z.string().min(1).max(32_768)).max(MAX_FILE_SEARCH_RESULTS),
+  truncated: z.boolean(),
+});
+
+export type FileSearchMethod = "fileSearch";
+
 export async function dispatchFileRequest(
-  method: FileMethod | ExplorerFileMethod,
+  method: FileMethod | ExplorerFileMethod | FileSearchMethod,
   input: unknown,
   call: NativeCall = callNative,
 ): Promise<Result<unknown>> {
+  if (method === "fileSearch") {
+    const parsed = fileSearchBridgeSchema.safeParse(input);
+    if (!parsed.success)
+      return {
+        ok: false,
+        error: {
+          code: "invalid_argument",
+          message: "Invalid file search request.",
+          retryable: false,
+        },
+      };
+    const asked = parsed.data;
+    const result = await call("files.search", {
+      hostId: asked.hostId,
+      workspaceId: asked.workspaceId,
+      query: asked.query,
+      ...(asked.limit !== undefined ? { limit: asked.limit } : {}),
+    });
+    if (!result.ok) return result;
+    const checked = fileSearchResultSchema.safeParse(result.result);
+    const invalid = (): Result<never> => ({
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The file search response does not match the requested identity.",
+        retryable: false,
+      },
+    });
+    if (!checked.success) return invalid();
+    const output = checked.data;
+    if (
+      output.hostId !== asked.hostId ||
+      output.workspaceId !== asked.workspaceId ||
+      output.query !== asked.query.trim() ||
+      output.files.length > (asked.limit ?? MAX_FILE_SEARCH_RESULTS)
+    )
+      return invalid();
+    return { ok: true, result: output };
+  }
   const explorerParsed =
     method in explorerBridgeSchemas
       ? explorerBridgeSchemas[method as ExplorerFileMethod].safeParse(input)

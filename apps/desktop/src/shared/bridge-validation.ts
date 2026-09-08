@@ -41,6 +41,10 @@ export const bridgeSchemas = {
   fileCreate: z.object({}).passthrough(),
   fileRename: z.object({}).passthrough(),
   fileDelete: z.object({}).passthrough(),
+  // Bounded quick-open search (R12-B): the channel gate only admits an
+  // object here; main/file-bridge.ts re-validates the shape strictly
+  // before the native call, so the two never drift apart.
+  fileSearch: z.object({}).passthrough(),
   status: z.undefined(),
   workspaces: z.undefined(),
   chooseFolder: z.undefined(),
