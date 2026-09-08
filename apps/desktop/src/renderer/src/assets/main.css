@@ -1331,6 +1331,14 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* R16-AG2 (#209, fork StatusBarSurface narrow tiers): clip paint during the
+   resize round-trip before the ResizeObserver collapse lands. The collapse
+   tiers guarantee content fits in steady state, so this never clips text —
+   and scrollWidth still reports honestly, so the sealed overflow probe
+   cannot be fooled by it. */
+footer[data-testid="status-bar"] {
+  overflow: hidden;
+}
 
 /* Shell (R2-A, Orca port, MIT Copyright (c) 2026 Lovecast Inc.): sidebar
    nav rows reuse .workspace-row; below are the project/worktree card,

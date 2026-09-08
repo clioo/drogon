@@ -97,6 +97,20 @@ describe("DaemonConnectionSegment", () => {
     expect(getDaemonConnectionSnapshot().attempt).toBe(0);
   });
 
+  it("collapses to icon + dot at narrow widths, keeping the tooltip", async () => {
+    seedMonitor(() => Promise.resolve(null));
+    render(<DaemonConnectionSegment compact />);
+    await settle(0);
+    const host = segmentHost();
+    expect(host?.getAttribute("data-daemon-connection-segment")).toBe(
+      "connected",
+    );
+    expect(host?.textContent).not.toContain("Connected");
+    expect(host?.getAttribute("title")).toContain(
+      "Drogon service: Connected",
+    );
+  });
+
   it("composes the tooltip from summary, attempt and error", () => {
     const title = daemonSegmentTitle({
       state: "reconnecting",
