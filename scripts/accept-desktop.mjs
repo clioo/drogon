@@ -21,6 +21,9 @@ import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
 import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
 import {
+  probeRenderedBrowserTabsAcrossDaemonRestart,
+} from "./probe-rendered-browser-tabs-restart.mjs";
+import {
   probeGhUnavailable,
   probePackagedSurfaces,
 } from "./probe-packaged-surfaces.mjs";
@@ -345,6 +348,61 @@ try {
     // final quiescent cleanup rather than weakening that ownership check.
     fixtureDaemon = packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir);
     await fixtureDaemon.capture();
+    // Issue #309 regression: QA r9's pair of persisted local browser tabs
+    // (127.0.0.1 + localhost) must survive BOTH daemon-restart paths with
+    // the renderer answering CDP within budget — Settings → Restart daemon,
+    // and a quit/relaunch whose stop quiescently shuts the bundled daemon
+    // down so relaunch bootstraps a replacement (new identity, asserted).
+    report.checks.push(
+      ...(await probeRenderedBrowserTabsAcrossDaemonRestart({
+        page,
+        workspaceId: registered.id,
+        cli: packaged.cli,
+        dataDir,
+        output,
+        relaunch: async () => {
+          await browser.close();
+          browser = null;
+          const stopped = await stopOwned(
+            desktop,
+            "browser-tabs probe app instance",
+          );
+          assert.equal(stopped.verdict, "exited");
+          assert.equal(
+            stopped.forced,
+            false,
+            "browser-tabs probe relaunch must not require force",
+          );
+          // Fixture handles are single-identity by design and the probe's
+          // Settings restart above already minted a newer identity than the
+          // outer handle holds, so pin the incumbent daemon with a fresh
+          // handle before shutting it down quiescently (the QA r9 `stop`).
+          const incumbentHandle = packagedFixtureDaemon(
+            packaged.daemon,
+            packaged.cli,
+            dataDir,
+          );
+          await incumbentHandle.capture();
+          const incumbent = await incumbentHandle.rpc("status");
+          await incumbentHandle.stop();
+          await launchDesktop();
+          const replacement = packagedFixtureDaemon(
+            packaged.daemon,
+            packaged.cli,
+            dataDir,
+          );
+          await replacement.capture();
+          const fresh = await replacement.rpc("status");
+          assert.notEqual(
+            fresh.serviceInstanceId,
+            incumbent.serviceInstanceId,
+            "relaunch must have restarted the daemon (new service identity)",
+          );
+          fixtureDaemon = replacement;
+          return { page, readyAt: Date.now() };
+        },
+      })),
+    );
   }
   await page.getByRole("button", { name: "New tab", exact: true }).click();
   await page
