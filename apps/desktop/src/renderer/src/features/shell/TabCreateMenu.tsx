@@ -30,6 +30,7 @@ import {
   normalizeHarnessLaunchInput,
   type HarnessLaunchFormValues,
 } from "../../harness-launch-form";
+import { resolvePiModelField } from "./pi-model-mapping";
 import {
   isPristineLaunchForm,
   resolveLaunchDefaults,
@@ -165,6 +166,10 @@ export function TabCreateMenu({
     emptyHarnessLaunchForm(),
   );
   const [submitting, setSubmitting] = useState(false);
+  // Fork-parity model validation (#192): a Model value that cannot map to
+  // provider/model shows here and blocks the launch — input is never
+  // silently dropped, and no `startHarness` call is made until it maps.
+  const [formError, setFormError] = useState<string | null>(null);
   // Synchronous guard against a rapid double-invoke (e.g. two fast
   // keyboard-driven `onSelect`s) that `submitting` state alone might not
   // catch before its next render commits.
@@ -260,6 +265,7 @@ export function TabCreateMenu({
   const closeForm = () => {
     setSelected(null);
     setValues(emptyHarnessLaunchForm());
+    setFormError(null);
     lastAttempt.current = null;
   };
 
@@ -288,11 +294,25 @@ export function TabCreateMenu({
     // regardless of the (disabled) submit button's own attribute — this
     // must reject that path too, not just the visible button click.
     if (!selected || disabled || !hostId) return;
-    const params = normalizeHarnessLaunchInput(
-      workspaceId,
-      selected.harnessId,
-      values,
-    );
+    // #192: the Model field maps to provider/model first (fork
+    // `provider/model-id` semantics, plus a pasted flags string). An
+    // unmappable value blocks here with the fork's error — the launch
+    // never fires, so the input cannot be silently dropped.
+    const mapped = resolvePiModelField({
+      harnessId: selected.harnessId,
+      model: values.model,
+      provider: values.provider,
+    });
+    if ("error" in mapped) {
+      setFormError(mapped.error);
+      return;
+    }
+    setFormError(null);
+    const params = normalizeHarnessLaunchInput(workspaceId, selected.harnessId, {
+      ...values,
+      model: mapped.model ?? "",
+      provider: mapped.provider ?? "",
+    });
     const key = JSON.stringify(params);
     const requestId =
       lastAttempt.current?.key === key
@@ -557,10 +577,16 @@ export function TabCreateMenu({
                   placeholder="Harness default"
                   value={values.model}
                   disabled={submitting}
-                  onChange={(event) =>
-                    setValues((v) => ({ ...v, model: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    setFormError(null);
+                    setValues((v) => ({ ...v, model: event.target.value }));
+                  }}
                 />
+                {selected.harnessId === "pi" && (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    Use an exact Pi provider/model ID. Blank uses Pi settings.
+                  </span>
+                )}
               </label>
               <label>
                 Initial prompt (optional)
@@ -616,6 +642,11 @@ export function TabCreateMenu({
                     : "Skip permission prompts (unattended)"}
                 </label>
               </details>
+              {formError && (
+                <p role="alert" className="text-xs leading-5 text-destructive">
+                  {formError}
+                </p>
+              )}
               <div className="form-actions">
                 <Button
                   type="submit"

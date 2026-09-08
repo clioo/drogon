@@ -6,7 +6,13 @@
 // stay exposed to assistive tech like the fork's DropdownMenuShortcut.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { Tooltip } from "radix-ui";
 import type { Harness } from "../../../../shared/session-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
@@ -223,5 +229,74 @@ describe("TabCreateMenu order and copy", () => {
     ]) {
       expect(TAB_CREATE_MENU_NOT_PORTED).toContain(entry);
     }
+  });
+});
+
+describe("TabCreateMenu harness launch form (#192)", () => {
+  function openPiForm() {
+    mount();
+    openMenu();
+    const item = screen.getByRole("menuitem", { name: "Pi" });
+    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
+    fireEvent.click(item);
+    return screen.getByPlaceholderText("Harness default");
+  }
+
+  it("carries a pasted flags string to the launch as provider+model", async () => {
+    const onLaunch = vi.fn(() => Promise.resolve(true));
+    mount({ onLaunch });
+    openMenu();
+    const item = screen.getByRole("menuitem", { name: "Pi" });
+    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
+    fireEvent.click(item);
+    fireEvent.change(screen.getByPlaceholderText("Harness default"), {
+      target: {
+        value: "--provider dgx-spark --model qwen3.8-flash-next-nvidia-nvfp4",
+      },
+    });
+    fireEvent.change(
+      screen.getByLabelText("Initial prompt (optional)", {
+        selector: "input",
+      }),
+      { target: { value: "Say the single word: PONG" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(1));
+    expect(onLaunch.mock.calls[0][0]).toMatchObject({
+      workspaceId: "ws",
+      harnessId: "pi",
+      provider: "dgx-spark",
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+      prompt: "Say the single word: PONG",
+      permissionMode: "inherit",
+    });
+  });
+
+  it("blocks an invalid model with the fork error and never launches", async () => {
+    const onLaunch = vi.fn(() => Promise.resolve(true));
+    mount({ onLaunch });
+    openMenu();
+    const item = screen.getByRole("menuitem", { name: "Pi" });
+    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
+    fireEvent.click(item);
+    fireEvent.change(screen.getByPlaceholderText("Harness default"), {
+      target: { value: "--bogus x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/Unsupported flag/);
+    expect(onLaunch).not.toHaveBeenCalled();
+  });
+
+  it("shows the fork hint under the Pi model field", () => {
+    openPiForm();
+    expect(
+      screen.getByText(
+        "Use an exact Pi provider/model ID. Blank uses Pi settings.",
+      ),
+    ).not.toBeNull();
   });
 });
