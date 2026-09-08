@@ -62,6 +62,42 @@ describe("appearance projection", () => {
     expect(html).toContain("Show session details");
     expect(html).toContain('role="switch"');
   });
+
+  test("renders the source terminal typography rows (R14-E)", () => {
+    const html = render(
+      <AppearanceSection
+        theme="dark"
+        onThemeChange={() => {}}
+        terminalFontSize={13}
+        onTerminalFontSizeChange={() => {}}
+        terminalGpuAcceleration="auto"
+        onTerminalGpuAccelerationChange={() => {}}
+        terminalFontFamily="JetBrains Mono"
+        terminalFontWeight={400}
+        terminalFontWeightBold={800}
+        editorFontFamily=""
+        inspectorVisible={true}
+        onInspectorChange={() => {}}
+      />,
+    );
+    expect(html).toContain("Font Family");
+    expect(html).toContain(
+      "Default terminal font family for new panes and live updates.",
+    );
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain("Font Weight");
+    expect(html).toContain("Bold Font Weight");
+    expect(html).toContain("100-900");
+    expect(html).toContain("Editor Font Family");
+    expect(html).toContain(
+      "Font used by file editors and diff views. Leave empty to follow the terminal font.",
+    );
+    expect(html).toContain("Same as terminal font");
+    // Controlled values render into the inputs.
+    expect(html).toContain('value="JetBrains Mono"');
+    expect(html).toContain('value="400"');
+    expect(html).toContain('value="800"');
+  });
 });
 
 describe("agents projection", () => {

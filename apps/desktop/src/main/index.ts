@@ -13,6 +13,7 @@ import { registerProjectBridge } from "./project-bridge";
 import { registerShellBridge } from "./shell-bridge";
 import { registerSettingsProbes } from "./settings-probes";
 import { registerSettingsCliBridge } from "./settings-bridge";
+import { registerFontsBridge } from "./fonts";
 import { registerTasksBridge } from "./tasks-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
 import { registerNotificationsIpc } from "./notifications/service";
@@ -76,6 +77,7 @@ function registerBridge() {
   registerShellBridge(() => window);
   registerSettingsProbes(() => window);
   registerSettingsCliBridge(() => window);
+  registerFontsBridge(() => window);
   registerTasksBridge(() => window);
   registerBotBridge(() => window);
   registerMentuBridge(() => window);

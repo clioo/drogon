@@ -29,6 +29,16 @@ export type SettingsPageProps = {
   onTerminalFontSizeChange: (size: number) => void;
   terminalGpuAcceleration: TerminalGpuAcceleration;
   onTerminalGpuAccelerationChange: (mode: TerminalGpuAcceleration) => void;
+  /** Source typography knobs (optional pass-through; AppearanceSection
+   *  falls back to the persisted envelope when omitted). */
+  terminalFontFamily?: string;
+  onTerminalFontFamilyChange?: (family: string) => void;
+  terminalFontWeight?: number;
+  onTerminalFontWeightChange?: (weight: number) => void;
+  terminalFontWeightBold?: number;
+  onTerminalFontWeightBoldChange?: (weight: number) => void;
+  editorFontFamily?: string;
+  onEditorFontFamilyChange?: (family: string) => void;
   inspectorVisible: boolean;
   onInspectorChange: (visible: boolean) => void;
   harnesses: Harness[];
@@ -133,6 +143,16 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     onTerminalGpuAccelerationChange={
                       props.onTerminalGpuAccelerationChange
                     }
+                    terminalFontFamily={props.terminalFontFamily}
+                    onTerminalFontFamilyChange={props.onTerminalFontFamilyChange}
+                    terminalFontWeight={props.terminalFontWeight}
+                    onTerminalFontWeightChange={props.onTerminalFontWeightChange}
+                    terminalFontWeightBold={props.terminalFontWeightBold}
+                    onTerminalFontWeightBoldChange={
+                      props.onTerminalFontWeightBoldChange
+                    }
+                    editorFontFamily={props.editorFontFamily}
+                    onEditorFontFamilyChange={props.onEditorFontFamilyChange}
                     inspectorVisible={props.inspectorVisible}
                     onInspectorChange={props.onInspectorChange}
                   />

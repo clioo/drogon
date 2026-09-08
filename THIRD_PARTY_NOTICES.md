@@ -266,6 +266,14 @@ port the Drogon fork's `src/renderer/src/components/automations/**` (fork
 revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file
 keeps the MIT notice.
 
+The terminal typography settings in
+`apps/desktop/src/renderer/src/features/settings/{terminal-typography,font-autocomplete}.ts(x)`,
+the appearance section additions and `apps/desktop/src/main/fonts.ts` port the
+Drogon fork's `src/renderer/src/components/settings/TerminalAppearanceSection.tsx`,
+`terminal-typography-search.ts` and its font enumeration (fork revision
+`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
+MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

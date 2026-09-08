@@ -5,8 +5,10 @@ import {
   mergeSettingLayers,
   parsePersistedSettings,
   readTerminalGpuAcceleration,
+  readTerminalTypography,
   settingsStorageKey,
   writeTerminalGpuAcceleration,
+  writeTerminalTypography,
 } from "./settings-store";
 import type { SettingsSubset, StorageLike } from "./settings-store";
 
@@ -15,6 +17,10 @@ const defaults: SettingsSubset = {
   inspectorVisible: true,
   locale: "en",
   terminalFontSize: 13,
+  terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
+  terminalFontWeight: 500,
+  terminalFontWeightBold: 700,
+  editorFontFamily: "",
   defaultHarnessId: "",
   harnessDefaults: {},
   notifyOnAgentNeedsInput: true,
@@ -191,6 +197,10 @@ describe("persistence round-trip through injected storage", () => {
         inspectorVisible: true,
         locale: "es",
         terminalFontSize: 13,
+        terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
+        terminalFontWeight: 500,
+        terminalFontWeightBold: 700,
+        editorFontFamily: "",
         defaultHarnessId: "",
         harnessDefaults: {},
         notifyOnAgentNeedsInput: true,
@@ -377,6 +387,10 @@ describe("unknown-key forward compatibility on read-modify-write", () => {
       inspectorVisible: true,
       locale: "es",
       terminalFontSize: 13,
+      terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
+      terminalFontWeight: 500,
+      terminalFontWeightBold: 700,
+      editorFontFamily: "",
       defaultHarnessId: "",
       harnessDefaults: {},
       notifyOnAgentNeedsInput: true,
@@ -437,5 +451,100 @@ describe("terminalGpuAcceleration persistence (R11-A)", () => {
         "terminalGpuAcceleration",
       ),
     ).toBe("off");
+  });
+});
+
+describe("terminal typography persistence (R14-E)", () => {
+  it("applies the source typography defaults on a fresh store", () => {
+    const store = new SettingsStore(new MemoryStorage(), { namespace: "ui" });
+    expect(store.get("terminalFontFamily")).toBe(
+      SETTINGS_DEFAULTS.terminalFontFamily,
+    );
+    expect(store.get("terminalFontWeight")).toBe(500);
+    expect(store.get("terminalFontWeightBold")).toBe(700);
+    expect(store.get("editorFontFamily")).toBe("");
+  });
+  it("round-trips family, weights and editor font through the store", () => {
+    const storage = new MemoryStorage();
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    store.set("terminalFontFamily", "JetBrains Mono");
+    store.set("terminalFontWeight", 400);
+    store.set("terminalFontWeightBold", 800);
+    store.set("editorFontFamily", "Fira Code");
+    store.flush();
+    const reopened = new SettingsStore(storage, { namespace: "ui" });
+    expect(reopened.get("terminalFontFamily")).toBe("JetBrains Mono");
+    expect(reopened.get("terminalFontWeight")).toBe(400);
+    expect(reopened.get("terminalFontWeightBold")).toBe(800);
+    expect(reopened.get("editorFontFamily")).toBe("Fira Code");
+  });
+  it("keeps valid typography keys and drops malformed ones individually", () => {
+    expect(
+      parsePersistedSettings(
+        '{"settings":{"terminalFontFamily":"Menlo","terminalFontWeight":"bold","terminalFontWeightBold":750,"editorFontFamily":12}}',
+      ),
+    ).toEqual({ terminalFontFamily: "Menlo", terminalFontWeightBold: 750 });
+  });
+  it("normalizes out-of-range persisted weights into 100-900", () => {
+    expect(
+      parsePersistedSettings(
+        '{"settings":{"terminalFontWeight":10,"terminalFontWeightBold":1200}}',
+      ),
+    ).toEqual({ terminalFontWeight: 100, terminalFontWeightBold: 900 });
+  });
+  it("rejects font names with control characters or overlong values", () => {
+    expect(parsePersistedSettings('{"settings":{"terminalFontFamily":"a\\u0000b"}}')).toEqual(
+      {},
+    );
+    expect(
+      parsePersistedSettings(
+        `{"settings":{"editorFontFamily":"${"x".repeat(300)}"}}`,
+      ),
+    ).toEqual({});
+  });
+  it("the envelope reader falls back to defaults on absent or garbage data", () => {
+    const storage = new MemoryStorage();
+    expect(readTerminalTypography(storage)).toEqual({
+      terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
+      terminalFontWeight: 500,
+      terminalFontWeightBold: 700,
+      editorFontFamily: "",
+    });
+    storage.seed(settingsStorageKey("ui"), "not json{");
+    expect(readTerminalTypography(storage).terminalFontWeight).toBe(500);
+  });
+  it("the envelope writer preserves sibling keys, known and unknown", () => {
+    const storage = new MemoryStorage();
+    storage.seed(
+      settingsStorageKey("ui"),
+      JSON.stringify({
+        settings: { theme: "dark", futureField: "keep", terminalFontSize: 15 },
+      }),
+    );
+    writeTerminalTypography(storage, {
+      terminalFontFamily: "Fira Code",
+      terminalFontWeight: 450,
+    });
+    const raw = JSON.parse(storage.peek(settingsStorageKey("ui")) as string);
+    expect(raw.settings).toEqual({
+      theme: "dark",
+      futureField: "keep",
+      terminalFontSize: 15,
+      terminalFontFamily: "Fira Code",
+      terminalFontWeight: 450,
+    });
+  });
+  it("the envelope writer normalizes weights and rejects invalid families", () => {
+    const storage = new MemoryStorage();
+    writeTerminalTypography(storage, {
+      terminalFontWeight: 450.5,
+      terminalFontWeightBold: 950,
+    });
+    const first = JSON.parse(storage.peek(settingsStorageKey("ui")) as string);
+    expect(first.settings.terminalFontWeight).toBe(451);
+    expect(first.settings.terminalFontWeightBold).toBe(900);
+    writeTerminalTypography(storage, { terminalFontFamily: "a\nb" });
+    const second = JSON.parse(storage.peek(settingsStorageKey("ui")) as string);
+    expect(second.settings.terminalFontFamily).toBeUndefined();
   });
 });

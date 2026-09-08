@@ -35,8 +35,8 @@ export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
   {
     id: "appearance",
     title: "Appearance",
-    description: "Theme and terminal text size.",
-    keywords: ["theme", "dark", "light", "system", "font", "terminal", "text size", "interface"],
+    description: "Theme and terminal typography.",
+    keywords: ["theme", "dark", "light", "system", "font", "terminal", "text size", "interface", "typography", "family", "weight", "bold", "editor"],
   },
   {
     id: "notifications",
