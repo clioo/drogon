@@ -1,6 +1,7 @@
 // Cached usage snapshot with fail-closed backoff. No Electron imports here so
 // vitest can cover the scheduling/merging logic directly; service.ts adds IPC.
 import type {
+  AwakeMode,
   AwakeSnapshot,
   MemorySnapshot,
   PortsSnapshot,
@@ -155,8 +156,15 @@ export class UsageStore {
     this.deps.awake.dispose();
   }
 
-  setAwake(mode: "on" | "off"): AwakeSnapshot {
+  setAwake(mode: AwakeMode): AwakeSnapshot {
     const next = this.deps.awake.setMode(mode);
+    this.snapshot = { ...this.snapshot, awake: next, updatedAt: this.deps.now() };
+    return next;
+  }
+
+  /** Auto-mode activity transition from main/awake-auto.ts's session watch. */
+  setAgentWorking(working: boolean): AwakeSnapshot {
+    const next = this.deps.awake.setAgentWorking(working);
     this.snapshot = { ...this.snapshot, awake: next, updatedAt: this.deps.now() };
     return next;
   }

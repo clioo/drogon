@@ -2,9 +2,14 @@
 // Ported from the Orca reference (read-only; never edit the reference):
 //   src/main/macos-system-sleep-assertion.ts (own a single /usr/bin/caffeinate
 //     child; retry/backoff and unexpected-exit reporting trimmed for Drogon)
+//   src/shared/computer-awake-mode.ts (on/auto/off vocabulary; the fork's
+//     normalize/legacy-boolean bridge collapses here to the three literals)
 // Owns exactly one `caffeinate` child while awake is on: spawned by us, killed
 // by us, never anything else. Off macOS the mode is remembered but no process
 // is spawned (supported: false) so the toggle stays honest.
+// Auto mode (R16-AY2, fork semantics): the assertion is held only while an
+// agent session is working; awake-auto.ts feeds setAgentWorking from the
+// daemon's session list, and idle/quit release the child.
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import type { AwakeMode, AwakeSnapshot } from "../../shared/usage-contract";
 
@@ -24,6 +29,7 @@ const CAFFINATE_ARGS = ["-i", "-s"];
 export class AwakeController {
   private mode: AwakeMode = "off";
   private child: ChildProcess | null = null;
+  private agentWorking = false;
   private readonly platform: NodeJS.Platform;
   private readonly spawn: CaffeinateSpawn;
 
@@ -35,15 +41,34 @@ export class AwakeController {
   getSnapshot(): AwakeSnapshot {
     return {
       mode: this.mode,
-      active: this.mode === "on" && this.child !== null,
+      // "Active" always means our assertion is actually held, not just
+      // requested: in auto an idle agent keeps active false.
+      active: this.child !== null,
       supported: this.platform === "darwin",
     };
   }
 
   setMode(mode: AwakeMode): AwakeSnapshot {
     this.mode = mode;
-    if (mode === "on") this.startOwned();
-    else this.stopOwned();
+    // Entering auto trusts the last known activity report, so On→Agent with a
+    // working agent keeps holding without a flicker; any stale report
+    // self-corrects within one watcher poll (awake-auto.ts re-reports on the
+    // first tick after re-entry).
+    if (mode === "on" || (mode === "auto" && this.agentWorking)) {
+      this.startOwned();
+    } else {
+      this.stopOwned();
+    }
+    return this.getSnapshot();
+  }
+
+  /** Auto-mode input from the session watcher: hold/release per activity. */
+  setAgentWorking(working: boolean): AwakeSnapshot {
+    this.agentWorking = working;
+    if (this.mode === "auto") {
+      if (working) this.startOwned();
+      else this.stopOwned();
+    }
     return this.getSnapshot();
   }
 

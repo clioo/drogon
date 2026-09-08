@@ -4,6 +4,8 @@ import {
   clampUsedPercent,
   formatResetCountdown,
   formatWindowChipLabel,
+  formatWindowLabel,
+  type AwakeMode,
   type PortsSnapshot,
   type ProviderUsage,
 } from "../../../../shared/usage-contract";
@@ -169,11 +171,196 @@ export function hasVisibleUsage(
 export const REFRESH_RATE_LIMITS_LABEL = "Refresh rate limits";
 export const REFRESH_USAGE_DATA_TITLE = "Refresh usage data";
 
+// --- Usage popover roster (R16-AY2; fork UsageRosterPanel.tsx helpers) ----
+
+export type UsageRosterWindow = {
+  key: "session" | "weekly" | "fable";
+  /** Short bucket/window label: 5h, wk, or Fable (fork shortLabel). */
+  label: string;
+  used: number;
+  resetsAt: number | null;
+};
+
+/** Windows that actually carry data (fork usedSections), with roster labels. */
+export function usageRosterWindows(provider: ProviderUsage): UsageRosterWindow[] {
+  const rows: UsageRosterWindow[] = [];
+  if (provider.session) {
+    rows.push({
+      key: "session",
+      label: formatWindowLabel(provider.session.windowMinutes),
+      used: clampUsedPercent(provider.session.usedPercent),
+      resetsAt: provider.session.resetsAt,
+    });
+  }
+  if (provider.weekly) {
+    rows.push({
+      key: "weekly",
+      label: formatWindowLabel(provider.weekly.windowMinutes),
+      used: clampUsedPercent(provider.weekly.usedPercent),
+      resetsAt: provider.weekly.resetsAt,
+    });
+  }
+  if (provider.fableWeekly) {
+    // Fable shares the 7d window with weekly; labeled distinctly (fork).
+    rows.push({
+      key: "fable",
+      label: "Fable",
+      used: clampUsedPercent(provider.fableWeekly.usedPercent),
+      resetsAt: provider.fableWeekly.resetsAt,
+    });
+  }
+  return rows;
+}
+
+/** Worst-first roster order: the agent nearest a limit sits on top. */
+export function usageRosterMaxUsed(provider: ProviderUsage): number {
+  const rows = usageRosterWindows(provider);
+  return rows.length > 0 ? Math.max(...rows.map((row) => row.used)) : 0;
+}
+
+/** The soonest-resetting window summarizes the next reset in one line. */
+export function usageRosterResetLabel(
+  provider: ProviderUsage,
+  now: number,
+): string | null {
+  const resets = usageRosterWindows(provider)
+    .map((row) => row.resetsAt)
+    .filter((resetsAt): resetsAt is number => resetsAt !== null);
+  if (resets.length === 0) return null;
+  return formatResetCountdown(Math.min(...resets) - now);
+}
+
+export type UsageRosterTightest = { label: string; used: number };
+
+/**
+ * Compact-mode summary (fork getTightestUsageSection): the tightest window
+ * with its live remaining duration, chosen by consumption even when the
+ * display shows the complementary value.
+ */
+export function usageRosterTightest(
+  provider: ProviderUsage,
+  now: number,
+): UsageRosterTightest | null {
+  const rows = usageRosterWindows(provider);
+  if (rows.length === 0) return null;
+  const tightest = rows.reduce((current, candidate) =>
+    candidate.used > current.used ? candidate : current,
+  );
+  const windows = {
+    session: provider.session,
+    weekly: provider.weekly,
+    fable: provider.fableWeekly ?? null,
+  } as const;
+  const window = windows[tightest.key];
+  const label =
+    window && window.resetsAt !== null
+      ? formatWindowChipLabel(window, now)
+      : tightest.label;
+  return { label, used: tightest.used };
+}
+
+/** Mirrors the 60/80 bar bands so the number matches its bar (fork
+    usage-roster-formatting usageTextColorClass). */
+export function usageTextColorClass(used: number): string {
+  if (used >= 80) return "text-red-500";
+  if (used >= 60) return "text-yellow-500";
+  return "text-foreground";
+}
+
 /**
  * Source awake form (CaffeinateStatusSegment.tsx): mode label plus the
  * Active/Inactive activity suffix, e.g. "Keep computer awake, Off · Inactive".
+ * Auto renders the fork's user-facing label "Agent" (agent-awake-copy.ts
+ * getAgentAwakeModeLabel: On / Agent / Off).
  */
-export function awakeStatusLabel(mode: "on" | "off", active: boolean): string {
-  const modeLabel = mode === "on" ? "On" : "Off";
-  return `Keep computer awake, ${modeLabel} · ${active ? "Active" : "Inactive"}`;
+export function agentAwakeModeLabel(mode: AwakeMode): string {
+  if (mode === "on") return "On";
+  if (mode === "auto") return "Agent";
+  return "Off";
+}
+
+export function awakeStatusLabel(mode: AwakeMode, active: boolean): string {
+  return `Keep computer awake, ${agentAwakeModeLabel(mode)} · ${active ? "Active" : "Inactive"}`;
+}
+
+/** Fork menu copy (CaffeinateStatusSegment onDescription). */
+export const AWAKE_MODE_DESCRIPTIONS: Record<AwakeMode, string> = {
+  on: "Keep this computer awake continuously",
+  auto: "Stay awake while an agent is working",
+  off: "Allow normal system sleep behavior",
+};
+
+/**
+ * Source empty-usage gate (status-bar-provider-visibility.ts
+ * isUsageEmptyState, adapted): both providers must have settled (never while
+ * the first snapshot is still loading) and report themselves unconfigured —
+ * unavailable. A configured provider failing transiently stays visible on
+ * purpose, so error never counts as empty. Drogon has no managed-account
+ * settings signal, so the snapshot is the only voice.
+ */
+export function isUsageEmptyState(
+  providers: readonly ProviderUsage[],
+): boolean {
+  return (
+    providers.length > 0 &&
+    providers.every((provider) => provider.status === "unavailable")
+  );
+}
+
+export type UsageRosterRowKind =
+  | "usage"
+  | "loading"
+  | "sign-in"
+  | "unavailable"
+  | "error"
+  | "empty";
+
+export type UsageRosterRowState = {
+  kind: UsageRosterRowKind;
+  statusLabel: string | null;
+};
+
+// Source sign-out patterns (usage-roster-row-state.ts): only explicit
+// signed-out copy earns the sign-in CTA — credential refresh and network
+// failures can mention auth while live sessions remain valid.
+const CONFIRMED_SIGN_OUT_PATTERNS = [
+  /\bnot signed in\b/i,
+  /\bnot logged in\b/i,
+  /\blogged out\b/i,
+  /\bauthentication required\b/i,
+  /\b(?:sign|log)[ -]?in required\b/i,
+  /\bplease (?:sign|log) in\b/i,
+  /\bplease reauthenticate\b/i,
+];
+
+function isConfirmedSignedOut(provider: ProviderUsage): boolean {
+  return Boolean(
+    provider.error &&
+      CONFIRMED_SIGN_OUT_PATTERNS.some((pattern) => pattern.test(provider.error ?? "")),
+  );
+}
+
+/**
+ * Source roster row state (usage-roster-row-state.ts
+ * getUsageRosterRowState): which footer a provider row renders — its windows,
+ * a loading line, a sign-in prompt, or the honest failure label.
+ */
+export function usageRosterRowState(
+  provider: ProviderUsage,
+  hasUsage: boolean,
+): UsageRosterRowState {
+  if (hasUsage) return { kind: "usage", statusLabel: null };
+  if (provider.status === "idle" || provider.status === "fetching") {
+    return { kind: "loading", statusLabel: "Loading usage…" };
+  }
+  if (isConfirmedSignedOut(provider)) {
+    return { kind: "sign-in", statusLabel: "not signed in" };
+  }
+  if (provider.status === "error") {
+    return { kind: "error", statusLabel: providerStatusLabel(provider) };
+  }
+  if (provider.status === "unavailable") {
+    return { kind: "unavailable", statusLabel: "Usage unavailable" };
+  }
+  return { kind: "empty", statusLabel: "No usage data" };
 }

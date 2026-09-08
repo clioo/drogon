@@ -71,7 +71,10 @@ export const portsSnapshotSchema = z.object({
 });
 export type PortsSnapshot = z.infer<typeof portsSnapshotSchema>;
 
-export const awakeModeSchema = z.enum(["on", "off"]);
+// "auto" (R16-AY2, additive like the fork's computer-awake-mode): the assertion
+// is held only while an agent session is working (main/awake-auto.ts watches
+// session.list); idle and app quit release it.
+export const awakeModeSchema = z.enum(["on", "auto", "off"]);
 export type AwakeMode = z.infer<typeof awakeModeSchema>;
 
 export const awakeSnapshotWireSchema = z.object({

@@ -90,7 +90,10 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   // (keep-alive) without unmounting it; the open editor tab lives in the
   // main tab group, independent of the right-sidebar panel. R16-B: Source
   // Control is git-only per the fork's gating, so the round-trip uses Ports.
-  await page.getByRole("button", { name: /^Ports/ }).click();
+  // R16-AY2: anchor on the activity-bar item — the status bar now also owns a
+  // "Ports, N workspace port(s)" segment (the fork's copy), so a bare /^Ports/
+  // would match two buttons.
+  await page.getByRole("button", { name: /^Ports \(/ }).click();
   await files.click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
