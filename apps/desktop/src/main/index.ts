@@ -30,6 +30,7 @@ import {
   installWindowStateLifecycle,
   loadWindowState,
   restorableBounds,
+  revealRestoredWindow,
   type MainWindowStateLifecycle,
 } from "./window/window-state";
 import { readBuildInfo } from "./build-info";
@@ -353,11 +354,15 @@ function createWindow() {
   );
   // Why: maximize before the first show so no un-maximized frame flashes
   // (source revealInitialWindow maximizes in the same hook); the background
-  // seam shows inactive so the user keeps keyboard focus.
+  // seam reveals inactive so the user keeps keyboard focus.
   window.on("ready-to-show", () => {
-    if (saved.maximized) window?.maximize();
-    if (backgroundWindow) window?.showInactive();
-    else window?.show();
+    if (window) {
+      revealRestoredWindow({
+        window,
+        savedMaximized: saved.maximized,
+        backgroundWindow,
+      });
+    }
   });
   window.on("closed", () => {
     window = null;

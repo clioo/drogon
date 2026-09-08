@@ -44,6 +44,7 @@ vi.mock("electron", () => ({
 import {
   installWindowStateLifecycle,
   restorableBounds,
+  revealRestoredWindow,
   type MainWindowStateLifecycle,
 } from "./window-state";
 import {
@@ -215,6 +216,56 @@ describe("window state persistence", () => {
     listeners.get("leave-full-screen")![0]();
     expect(sendMock).toHaveBeenCalledWith("window:fullscreen-changed", true);
     expect(sendMock).toHaveBeenCalledWith("window:fullscreen-changed", false);
+  });
+});
+
+describe("revealRestoredWindow flag guards", () => {
+  function makeRevealWindow() {
+    return {
+      maximize: vi.fn(),
+      show: vi.fn(),
+      showInactive: vi.fn(),
+      focus: vi.fn(),
+      moveTop: vi.fn(),
+    };
+  }
+
+  it("reveals inactive under DROGON_BACKGROUND_WINDOW=1 and never steals focus", () => {
+    const win = makeRevealWindow();
+    revealRestoredWindow({
+      window: win,
+      savedMaximized: true,
+      backgroundWindow: true,
+    });
+    // Maximize is a bounds op that precedes the reveal in both paths.
+    expect(win.maximize).toHaveBeenCalledTimes(1);
+    expect(win.showInactive).toHaveBeenCalledTimes(1);
+    expect(win.show).not.toHaveBeenCalled();
+    expect(win.focus).not.toHaveBeenCalled();
+    expect(win.moveTop).not.toHaveBeenCalled();
+  });
+
+  it("reveals focused in a normal foreground launch", () => {
+    const win = makeRevealWindow();
+    revealRestoredWindow({
+      window: win,
+      savedMaximized: false,
+      backgroundWindow: false,
+    });
+    expect(win.show).toHaveBeenCalledTimes(1);
+    expect(win.showInactive).not.toHaveBeenCalled();
+    expect(win.maximize).not.toHaveBeenCalled();
+  });
+
+  it("skips maximize when nothing was saved maximized", () => {
+    const win = makeRevealWindow();
+    revealRestoredWindow({
+      window: win,
+      savedMaximized: false,
+      backgroundWindow: true,
+    });
+    expect(win.maximize).not.toHaveBeenCalled();
+    expect(win.showInactive).toHaveBeenCalledTimes(1);
   });
 });
 
