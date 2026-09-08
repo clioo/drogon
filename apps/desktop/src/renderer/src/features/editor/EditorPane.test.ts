@@ -750,8 +750,12 @@ describe("restoredDraft truthfulness", () => {
         onSave: okSave(),
       }),
     );
-    // Truthfully dirty at first paint:
-    expect(markup).toContain("Unsaved changes");
+    // Truthfully dirty at first paint: no "(unsaved)" name suffix and no
+    // header status line (fork parity — the tab dot owns the dirty mark),
+    // so dirtiness renders as an ENABLED Save (no disabled attribute on
+    // any button).
+    expect(markup).not.toContain("Unsaved changes");
+    expect(markup).not.toMatch(/\sdisabled(=""|\s|>)/);
     expect(markup).not.toContain("Waiting for file content");
     // The content surface (Monaco in a real renderer) is fed `state.draft`,
     // not rendered as raw text by `renderToString` itself, so the actual
@@ -778,6 +782,8 @@ describe("restoredDraft truthfulness", () => {
       }),
     );
     expect(markup).not.toContain("Unsaved changes");
+    // Clean means Save stays disabled (the only in-pane dirty signal).
+    expect(markup).toMatch(/\sdisabled(="")/);
   });
 
   test("the read flow cannot clobber a restored dirty draft", () => {

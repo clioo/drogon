@@ -4,7 +4,10 @@ import { AlertTriangle, FileWarning, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { Result } from "../../../../shared/session-contract";
 import { CsvViewer } from "./CsvViewer";
-import { isCsvPath } from "./editor-language-by-extension";
+import {
+  isCsvPath,
+  monacoLanguageForPath,
+} from "./editor-language-by-extension";
 import { useEditorScheme } from "./editor-theme";
 import { getEditorHeaderState } from "./editor-header";
 import { getEditorCmdSaveTarget } from "./editor-cmd-save-target";
@@ -12,6 +15,10 @@ import { shouldUseLargeFileFallback } from "./editor-large-file-guard";
 import { flushPendingEditorChange } from "./editor-pending-flush";
 import { createEditorSaveQueue, type EditorSaveQueue } from "./editor-save-queue";
 import { useEditorAutosaveController } from "./editor-autosave-controller";
+import EditorViewToggle, { type EditorToggleValue } from "./EditorViewToggle";
+import { EditorPanelHeaderPath } from "./EditorPanelHeaderPath";
+import { EditorPanelMarkdownActionsMenu } from "./EditorPanelMarkdownActionsMenu";
+import { EditorChangesView, type ChangesLoadResult } from "./EditorChangesView";
 
 // Why lazy: `monaco-editor` assumes a browser global environment (it is not
 // safe to import under plain Node), and EditorPane.test.ts renders this
@@ -74,6 +81,13 @@ export interface EditorPaneProps {
    * it, dirty, exactly like an unmount/remount does today.
    */
   onClose?: () => void;
+  /**
+   * Uncommitted-changes load for the header's Changes toggle (fork:
+   * EditorViewToggle 'changes' = working tree vs HEAD). Absent hides the
+   * toggle (the fork hides it when a single mode is available); the host
+   * injects the `gitDiff` call so the pane never touches the bridge.
+   */
+  loadChanges?: (path: string) => Promise<ChangesLoadResult>;
 }
 
 /** Per-file retained editing state; survives switching between files. */
@@ -610,8 +624,17 @@ export function EditorPane({
   restoredDraft = null,
   onDraftChange,
   onClose,
+  loadChanges,
 }: EditorPaneProps) {
   const [csvSourceMode, setCsvSourceMode] = useState(false);
+  // Fork parity (EditorPanelHeader): the Edit/Changes toggle plus the
+  // More-actions menu's wrap/whitespace preferences. Pane-local by design:
+  // the view resets on every file switch (like the fork's per-file mode),
+  // while wrap/whitespace persist for the pane's lifetime. The wrap
+  // default (ON) mirrors the fork (`settings.editorWordWrap !== false`).
+  const [view, setView] = useState<EditorToggleValue>("edit");
+  const [wordWrap, setWordWrap] = useState(true);
+  const [showWhitespace, setShowWhitespace] = useState(false);
   const queueRef = useRef<EditorSaveQueue | null>(null);
   if (queueRef.current === null) queueRef.current = createEditorSaveQueue();
   useEffect(() => () => queueRef.current?.dispose(), []);
@@ -645,6 +668,12 @@ export function EditorPane({
     dispatch({ type: "file-opened", scope, path, content });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, path, content]);
+  useEffect(() => {
+    // The view is per-file chrome (like the fork's per-file toggle mode):
+    // switching files always lands back in Edit, never in a stale diff.
+    setView("edit");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope.hostId, scope.workspaceId, path]);
 
   const readConfirmed = isReadConfirmed(state);
   // Prop/state fence: before the effect dispatches, state still describes
@@ -782,12 +811,23 @@ export function EditorPane({
   const hasDom = typeof document !== "undefined";
   const large = shouldUseLargeFileFallback(state.draft.length);
   const showCsvTable = isCsvPath(path) && !csvSourceMode;
+  // Fork parity (EditorPanelHeader): the path button, the Edit/Changes
+  // toggle and the More-actions menu. Dirty state is conveyed by the tab
+  // dot (shared dot/close slot, no name suffix, no header status line —
+  // see EditorStripTab) plus the Save button's enabled state. Save/Close
+  // stay: the fork autosaves, but this build keeps its explicit Save.
+  const isMarkdown = monacoLanguageForPath(path) === "markdown";
+  const isDiffSurface = view === "changes";
+  const showToggle = loadChanges !== undefined;
   return (
     <section className="editor-pane" aria-label={`Editor: ${path}`}>
       <header className="editor-pane-header">
-        <span className="path" title={header.pathTitle}>
-          {header.pathLabel}
-        </span>
+        <EditorPanelHeaderPath
+          pathLabel={header.pathLabel}
+          pathTitle={header.pathTitle}
+          copyText={header.copyText}
+          copyToastLabel={header.copyToastLabel}
+        />
         {header.changedOnDisk && (
           <span
             className="editor-pane-changed-on-disk"
@@ -798,16 +838,18 @@ export function EditorPane({
             <AlertTriangle aria-hidden size={14} /> Changed on disk
           </span>
         )}
-        {dirty && (
-          <span
-            className="editor-pane-dirty"
-            role="status"
-            aria-label="Unsaved changes"
-          >
-            ● Unsaved changes
-          </span>
+        {showToggle && (
+          <EditorViewToggle value={view} onChange={setView} />
         )}
-        {isCsvPath(path) && (
+        <EditorPanelMarkdownActionsMenu
+          isMarkdown={isMarkdown}
+          isDiffSurface={isDiffSurface}
+          wordWrapChecked={wordWrap}
+          showWhitespace={showWhitespace}
+          onToggleWordWrap={() => setWordWrap((value) => !value)}
+          onToggleWhitespace={() => setShowWhitespace((value) => !value)}
+        />
+        {isCsvPath(path) && !isDiffSurface && (
           <Button
             variant="outline"
             size="sm"
@@ -844,7 +886,16 @@ export function EditorPane({
         </div>
       )}
       <div className="editor-pane-surface" aria-label={`Contents of ${path}`}>
-        {showCsvTable ? (
+        {isDiffSurface && loadChanges ? (
+          <EditorChangesView
+            path={path}
+            scheme={scheme}
+            wordWrap={wordWrap}
+            showWhitespace={showWhitespace}
+            loadChanges={loadChanges}
+            onBackToEdit={() => setView("edit")}
+          />
+        ) : showCsvTable ? (
           <CsvViewer content={state.draft} path={path} />
         ) : large ? (
           <textarea
@@ -875,6 +926,7 @@ export function EditorPane({
               path={path}
               content={state.draft}
               scheme={scheme}
+              wordWrap={wordWrap}
               onChange={(value) => {
                 dispatch({ type: "edited", value });
                 // Per-edit recording: every keystroke reaches the

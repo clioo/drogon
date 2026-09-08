@@ -61,7 +61,9 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await page.getByRole("tab", { name: first, exact: true }).waitFor();
   assert.equal(await readEditorValue(page, first), "first baseline\n");
   await setEditorValue(page, first, "unsaved first draft\n");
-  await page.getByLabel("Unsaved changes", { exact: true }).first().waitFor();
+  // R16-X2 (fixes #195): the fork's shared dot/close slot is the only
+  // dirty mark — no "(unsaved)" suffix, no status line.
+  await page.locator('[data-testid="editor-tab-dirty-dot"]').first().waitFor();
   assert.equal(
     await readFile(path.join(workspace, first), "utf8"),
     "first baseline\n",
@@ -70,9 +72,9 @@ export async function probeRenderedFiles({ page, workspace, output }) {
   await waitForEditorRegistered(page, second);
   assert.equal(await readEditorValue(page, second), "second baseline\n");
   // Reopening the first file reuses its existing tab (never a duplicate):
-  // the strip must show exactly one tab per open file. Its label now
-  // carries the dirty suffix, so the lookup is a prefix match.
-  const firstTab = page.getByRole("tab", { name: new RegExp(`^${first}`) });
+  // the strip must show exactly one tab per open file. R16-X2 (fixes
+  // #195): the tab label carries no dirty suffix, so the lookup is exact.
+  const firstTab = page.getByRole("tab", { name: first, exact: true });
   await firstTab.click();
   await waitForEditorRegistered(page, first);
   assert.equal(await readEditorValue(page, first), "unsaved first draft\n");
@@ -94,7 +96,7 @@ export async function probeRenderedFiles({ page, workspace, output }) {
     .getByRole("button", { name: "Save", exact: true })
     .click();
   await page
-    .getByLabel("Unsaved changes", { exact: true })
+    .locator('[data-testid="editor-tab-dirty-dot"]')
     .first()
     .waitFor({ state: "hidden" });
   assert.equal(

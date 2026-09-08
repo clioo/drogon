@@ -9,8 +9,14 @@
  * features/workspaces/files-panel.tsx's embedded `<EditorPane>` — that
  * panel now renders the Explorer tree only.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { EditorPane, scopedFileKey, type EditorScope } from "./EditorPane";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  EditorPane,
+  scopedFileKey,
+  type EditorScope,
+} from "./EditorPane";
+import type { ChangesLoadResult } from "./EditorChangesView";
+import { windowGitBridge } from "../../changes-mount";
 import {
   createRequestIdSource,
   makeFileSaver,
@@ -130,6 +136,37 @@ export function EditorHost({
     });
   }, [stableScope.workspaceId]);
 
+  // Fork parity (EditorViewToggle 'changes'): uncommitted changes come
+  // from the same `gitDiff` RPC the Changes panel uses, scoped to this
+  // host+workspace plus the requested path. Injected into the pane as a
+  // plain loader so EditorPane keeps its backend-through-callbacks
+  // contract (the pane never touches `window.drogon` itself).
+  const loadChanges = useCallback(
+    (loadPath: string): Promise<ChangesLoadResult> => {
+      const scope = { ...stableScope, path: loadPath };
+      return windowGitBridge()
+        .gitDiff(scope)
+        .then(
+          (result) =>
+            result.ok
+              ? {
+                  ok: true as const,
+                  diff: result.result.diff,
+                  truncated: result.result.truncated,
+                }
+              : { ok: false as const, message: result.error.message },
+          (failure: unknown) => ({
+            ok: false as const,
+            message:
+              failure instanceof Error
+                ? failure.message
+                : "The changes could not be loaded.",
+          }),
+        );
+    },
+    [stableScope],
+  );
+
   if (path === null) {
     return (
       <EditorPane
@@ -195,6 +232,7 @@ export function EditorHost({
       readError={readErrorFor(read, stableScope, path)}
       onReload={reload}
       onSave={onSave}
+      loadChanges={loadChanges}
       onClose={onClose}
       onDraftChange={(draft) => {
         drafts.recordDraft(stableScope, path, draft);

@@ -42,6 +42,11 @@ export interface MonacoFileEditorProps {
   content: string;
   scheme: EditorScheme;
   readOnly?: boolean;
+  /**
+   * Fork parity (`settings.editorWordWrap !== false` means wrap on): word
+   * wrap defaults ON; the header's More-actions menu toggles it per pane.
+   */
+  wordWrap?: boolean;
   onChange(value: string): void;
   /** Cmd/Ctrl+S while this editor holds focus. */
   onRequestSave(): void;
@@ -76,6 +81,7 @@ export function MonacoFileEditor({
   content,
   scheme,
   readOnly = false,
+  wordWrap = true,
   onChange,
   onRequestSave,
   fontFamily,
@@ -169,6 +175,7 @@ export function MonacoFileEditor({
         fontFamily: resolveMonacoFontFamily(fontFamily),
         tabSize: 2,
         readOnly,
+        wordWrap: wordWrap ? "on" : "off",
         padding: { top: 0 },
       }}
     />

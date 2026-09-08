@@ -897,11 +897,68 @@
   border-bottom: 1px solid
     color-mix(in srgb, var(--border) 72%, transparent);
 }
-.editor-pane-header .path {
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
+   src/renderer/src/assets/main.css (.editor-header* block): the editor
+   header's file-path button (click-to-copy) plus the "copied" toast.
+   The header container itself stays this build's own .editor-pane-header
+   above; only the genuinely new chrome is ported. */
+.editor-header-text {
   min-width: 0;
+  flex: 1;
+}
+.editor-header-path {
+  display: block;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 0;
+  max-width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
+}
+.editor-header-path:hover,
+.editor-header-path:focus-visible {
+  color: var(--foreground);
+}
+.editor-header-path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.editor-header-copy-toast {
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  pointer-events: none;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 72%, transparent);
+  color: var(--foreground);
+  font-size: 11px;
+  line-height: 1.2;
   white-space: nowrap;
+}
+.editor-header-copy-toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 /* Editor canvas surface (ROOT-approved extras to Follow-up B): the emitted
    textarea fills the pane column on --editor-surface in the mono scale. No
