@@ -7,6 +7,7 @@ import {
   resolveLaunchDefaults,
   validateAgentDefaultField,
 } from "./agent-defaults";
+import { CliSection } from "./cli-section";
 import {
   SettingsFieldError,
   SettingsRow,
@@ -164,6 +165,7 @@ export function AgentsSection({
           </fieldset>
         );
       })}
+      <CliSection />
     </SettingsSection>
   );
 }

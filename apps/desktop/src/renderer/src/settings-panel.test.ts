@@ -53,11 +53,11 @@ describe("SettingsPanel redirect (dialog -> settings page route)", () => {
 describe("settings search filter (sidebar + pane share this)", () => {
   it("empty query matches every section in nav order", () => {
     expect(filterSettingsSections("")).toEqual([
-      "appearance",
       "agents",
-      "shortcuts",
       "git",
+      "appearance",
       "notifications",
+      "shortcuts",
     ]);
   });
 
@@ -76,7 +76,7 @@ describe("settings search filter (sidebar + pane share this)", () => {
 
   it("normalizes case and whitespace", () => {
     expect(normalizeSettingsSearchQuery("  Theme   DARK ")).toBe("theme dark");
-    const appearance = SETTINGS_SEARCH_BUCKETS[0]!;
+    const appearance = SETTINGS_SEARCH_BUCKETS.find((b) => b.id === "appearance")!;
     expect(matchesSettingsSearch("", appearance)).toBe(true);
     expect(matchesSettingsSearch("system", appearance)).toBe(true);
     expect(matchesSettingsSearch("nope", appearance)).toBe(false);

@@ -111,6 +111,18 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
               </div>
             ) : (
               <>
+                {visible.includes("agents") ? (
+                  <AgentsSection
+                    harnesses={props.harnesses}
+                    defaultHarnessId={props.defaultHarnessId}
+                    onDefaultHarnessChange={props.onDefaultHarnessChange}
+                    harnessDefaults={props.harnessDefaults}
+                    onHarnessDefaultChange={props.onHarnessDefaultChange}
+                  />
+                ) : null}
+                {visible.includes("git") ? (
+                  <GitSection workspacePath={props.workspacePath} />
+                ) : null}
                 {visible.includes("appearance") ? (
                   <AppearanceSection
                     theme={props.theme}
@@ -125,25 +137,13 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     onInspectorChange={props.onInspectorChange}
                   />
                 ) : null}
-                {visible.includes("agents") ? (
-                  <AgentsSection
-                    harnesses={props.harnesses}
-                    defaultHarnessId={props.defaultHarnessId}
-                    onDefaultHarnessChange={props.onDefaultHarnessChange}
-                    harnessDefaults={props.harnessDefaults}
-                    onHarnessDefaultChange={props.onHarnessDefaultChange}
-                  />
-                ) : null}
-                {visible.includes("shortcuts") ? <ShortcutsSection /> : null}
-                {visible.includes("git") ? (
-                  <GitSection workspacePath={props.workspacePath} />
-                ) : null}
                 {visible.includes("notifications") ? (
                   <NotificationsSection
                     notifyOnAgentNeedsInput={props.notifyOnAgentNeedsInput}
                     onNotifyChange={props.onNotifyChange}
                   />
                 ) : null}
+                {visible.includes("shortcuts") ? <ShortcutsSection /> : null}
               </>
             )}
           </div>
