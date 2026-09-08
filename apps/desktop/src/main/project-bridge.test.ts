@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { dispatchProjectRequest } from "./project-bridge";
+import {
+  dispatchProjectRequest,
+  startProjectRegistryWatcher,
+} from "./project-bridge";
+import { PROJECTS_CHANGED_CHANNEL } from "../shared/project-contract";
 
 const okProjects = {
   ok: true as const,
@@ -179,6 +183,80 @@ describe("dispatchProjectRequest", () => {
       async () => listed,
     );
     expect(result).toEqual(listed);
+  });
+
+  test("registry watcher pushes exactly when the revision moves (issue #146)", async () => {
+    const sent: Array<{ channel: string; revision: string }> = [];
+    const window = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, revision: string) =>
+          sent.push({ channel, revision }),
+      },
+    };
+    // Baseline, rest, unreadable, move, rest: only the move pushes.
+    const revisions: Array<string | null> = ["a", "a", null, "b", "b"];
+    const watcher = startProjectRegistryWatcher({
+      // The watcher only needs `isDestroyed`/`webContents.send`.
+      getWindow: () => window as never,
+      readRevision: async () => revisions.shift() ?? null,
+      pollIntervalMs: 60_000,
+    });
+    try {
+      await watcher.tick();
+      expect(sent).toEqual([]);
+      await watcher.tick();
+      expect(sent).toEqual([]);
+      await watcher.tick();
+      expect(sent).toEqual([]);
+      await watcher.tick();
+      expect(sent).toEqual([
+        { channel: PROJECTS_CHANGED_CHANNEL, revision: "b" },
+      ]);
+      await watcher.tick();
+      expect(sent).toHaveLength(1);
+    } finally {
+      watcher.stop();
+    }
+  });
+
+  test("registry watcher stays silent without a window and on a throwing reader", async () => {
+    const sent: string[] = [];
+    const destroyed = {
+      isDestroyed: () => true,
+      webContents: {
+        send: (channel: string) => sent.push(channel),
+      },
+    };
+    const watcher = startProjectRegistryWatcher({
+      getWindow: () => destroyed as never,
+      readRevision: async () => {
+        throw new Error("daemon down");
+      },
+      pollIntervalMs: 60_000,
+    });
+    try {
+      await watcher.tick();
+      await watcher.tick();
+      expect(sent).toEqual([]);
+    } finally {
+      watcher.stop();
+    }
+    // A null window is equally silent: the baseline still advances so a
+    // later window is not spammed with a stale move.
+    let reads = 0;
+    const headless = startProjectRegistryWatcher({
+      getWindow: () => null,
+      readRevision: async () => (reads += 1) > 1 ? "moved" : "base",
+      pollIntervalMs: 60_000,
+    });
+    try {
+      await headless.tick();
+      await headless.tick();
+    } finally {
+      headless.stop();
+    }
+    expect(reads).toBe(2);
   });
 
   test("accepts a worktree without a title (never renamed yet)", async () => {

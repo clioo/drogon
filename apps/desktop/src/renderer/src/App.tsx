@@ -100,6 +100,7 @@ import {
   isProjectsAvailable,
   isWorktreesAvailable,
   loadProjectView,
+  useProjectRegistryRefresh,
   windowProjectBridge,
 } from "./features/shell/project-adapter";
 import type { ProjectGroup } from "./features/shell/project-adapter";
@@ -1271,6 +1272,8 @@ export function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  // Issue #146: re-read the project view when another process moves the registry.
+  useProjectRegistryRefresh(setProjectReloadTick);
   useEffect(() => {
     // Reloads the project view whenever the workspace list or the live
     // capabilities change; the adapter degrades to the workspace

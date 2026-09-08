@@ -435,6 +435,7 @@ impl Engine {
                 let conn = self.db.lock().unwrap();
                 project::list(&conn)
             }
+            "project.changes" => self.do_project_changes(&request.params),
             "project.remove" => self.mutating(request, Self::do_project_remove),
             "worktree.create" => self.mutating(request, Self::do_worktree_create),
             "worktree.list" => self.do_worktree_list(&request.params),

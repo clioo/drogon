@@ -10,6 +10,7 @@ import {
   loadProjectView,
   projectWorkspacesAsFolderProjects,
   relativeActivityTime,
+  subscribeProjectRegistryRefresh,
   summarizeCardSessions,
   windowProjectBridge,
   worktreeDisplayName,
@@ -135,6 +136,41 @@ test("loader falls back when an advertised RPC fails", async () => {
   );
   expect(view.source).toBe("workspace-fallback");
   expect(view.groups).toHaveLength(1);
+});
+
+test("registry refresh stays inert without the push channel (older preload)", () => {
+  let calls = 0;
+  const stop = subscribeProjectRegistryRefresh({}, () => {
+    calls += 1;
+  });
+  expect(stop).toBeNull();
+  expect(calls).toBe(0);
+});
+
+test("registry refresh forwards each pushed revision and unsubscribes (issue #146)", () => {
+  const seen: string[] = [];
+  let live = true;
+  const stop = subscribeProjectRegistryRefresh(
+    {
+      onProjectsChanged: (listener) => {
+        listener("rev-1");
+        listener("rev-2");
+        return () => {
+          live = false;
+        };
+      },
+    },
+    (revision) => {
+      seen.push(revision);
+    },
+  );
+  expect(typeof stop).toBe("function");
+  // The push arrives synchronously through the bridge: the refresh path
+  // the App hook drives (bump the reload tick, re-read project.list) sees
+  // every revision main observed.
+  expect(seen).toEqual(["rev-1", "rev-2"]);
+  stop!();
+  expect(live).toBe(false);
 });
 
 test("orphan worktrees never render without their project", () => {

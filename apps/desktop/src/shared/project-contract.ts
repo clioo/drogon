@@ -3,6 +3,14 @@ import type { Result } from "./session-contract";
 
 export const PROJECT_CAPABILITY = "project.v1";
 export const WORKTREE_CAPABILITY = "worktree.v1";
+/**
+ * Main-to-renderer push channel (issue #146): main polls the daemon's
+ * `project.changes` revision digest and sends the new revision here
+ * whenever the registry moved out from under the renderer (e.g. a
+ * `drogon-cli project add` from another process). The renderer re-reads
+ * the project view; the payload itself carries no rows.
+ */
+export const PROJECTS_CHANGED_CHANNEL = "drogon:projectsChanged";
 
 export type ProjectBridge = {
   projectAdd(input: {
@@ -32,6 +40,19 @@ export type ProjectBridge = {
     worktreeId: string;
     name: string;
   }): Promise<Result<WorktreeResult>>;
+  /**
+   * Subscribes to registry pushes from main (issue #146). Every method
+   * above stays optional; this one is too, so older preloads simply never
+   * push and the sidebar keeps its current load-on-local-change behavior.
+   */
+  onProjectsChanged?: (
+    listener: (revision: string) => void,
+  ) => () => void;
+};
+
+/** Opaque registry revision from the daemon's `project.changes`. */
+export type ProjectChangesResult = {
+  revision: string;
 };
 
 export type ProjectResult = {
@@ -122,9 +143,12 @@ const worktreeResult = z.object({
   createdAt: z.string(),
 });
 
+const projectChangesResult = z.object({ revision: z.string() });
+
 export const projectResultSchemas = {
   "project.add": projectResult,
   "project.list": z.object({ projects: z.array(projectResult) }),
+  "project.changes": projectChangesResult,
   "project.remove": z.object({ id: z.string(), removed: z.boolean() }),
   "worktree.create": worktreeResult,
   "worktree.list": z.object({ worktrees: z.array(worktreeResult) }),
