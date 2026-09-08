@@ -78,6 +78,7 @@ function snapshot(): WorkspacePortsSnapshot {
 function fakeBridge(over: Partial<WorkspacePortsBridge> = {}): WorkspacePortsBridge {
   return {
     list: vi.fn().mockResolvedValue({ ok: true, result: snapshot() }),
+    kill: vi.fn().mockResolvedValue({ ok: true, result: { ok: true } }),
     ...over,
   };
 }
@@ -145,6 +146,52 @@ describe("LocalWorkspacePortsPanel", () => {
     await vi.waitFor(() =>
       expect(onOpenInBrowserTab).toHaveBeenCalledWith("http://127.0.0.1:3000"),
     );
+  });
+
+  it("Stop Process kills through the bridge and toasts the source copy", async () => {
+    const bridge = fakeBridge();
+    render(
+      <LocalWorkspacePortsPanel
+        isVisible
+        workspace={WORKSPACE}
+        onOpenInBrowserTab={() => {}}
+        bridge={bridge}
+      />,
+    );
+    await vi.waitFor(() => expect(screen.getByLabelText("Stop Process")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Stop Process"));
+    await vi.waitFor(() =>
+      expect(bridge.kill).toHaveBeenCalledWith({ workspaceId: "ws-1", pid: 11, port: 3000 }),
+    );
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Stopped process on :3000"),
+    );
+  });
+
+  it("Stop Process toasts the daemon's refusal reason and does not rescan", async () => {
+    const bridge = fakeBridge({
+      kill: vi.fn().mockResolvedValue({
+        ok: true,
+        result: { ok: false, reason: "Only workspace-owned local processes can be stopped here." },
+      }),
+    });
+    render(
+      <LocalWorkspacePortsPanel
+        isVisible
+        workspace={WORKSPACE}
+        onOpenInBrowserTab={() => {}}
+        bridge={bridge}
+      />,
+    );
+    await vi.waitFor(() => expect(screen.getByLabelText("Stop Process")).toBeTruthy());
+    const listsAfterInitial = vi.mocked(bridge.list).mock.calls.length;
+    fireEvent.click(screen.getByLabelText("Stop Process"));
+    await vi.waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Only workspace-owned local processes can be stopped here.",
+      ),
+    );
+    expect(vi.mocked(bridge.list).mock.calls.length).toBe(listsAfterInitial);
   });
 
   it("renders the unavailable notice when the scan reports one", async () => {

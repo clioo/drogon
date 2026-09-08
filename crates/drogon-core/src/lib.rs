@@ -40,6 +40,8 @@ pub mod git_worktree;
 mod harness;
 mod hooks;
 mod project;
+// R16-BC (additive): `ports.kill` — workspace-owned process stop.
+mod ports;
 mod ring;
 mod session;
 mod session_env;
@@ -441,6 +443,9 @@ impl Engine {
             "session.close" => self.mutating(request, Self::do_session_close),
             "session.forget" => self.mutating(request, Self::do_session_forget),
             "session.hook_event" => self.mutating(request, Self::do_session_hook_event),
+            // R16-BC (additive): Ports-panel "Stop Process". Workspace-owned
+            // local processes only — see `ports.rs` for the authorization rule.
+            "ports.kill" => self.mutating(request, Self::do_ports_kill),
             "project.add" => self.mutating(request, Self::do_project_add),
             "project.list" => {
                 let conn = self.db.lock().unwrap();
@@ -611,9 +616,36 @@ impl Engine {
         let cols = require_dimension(params, "cols", 80)?;
         let rows = require_dimension(params, "rows", 24)?;
 
-        let cwd = {
+        // R16-BC (#275, additive): optional explicit cwd for the spawn. The
+        // explorer's "Open in Terminal" passes the row directory; the spawn
+        // honours it only when it resolves to a real directory inside the
+        // workspace root — anything else is refused, never broadened.
+        let workspace_cwd = {
             let conn = self.db.lock().unwrap();
             workspace::get_path(&conn, &workspace_id)?
+        };
+        let cwd = match optional_str(params, "cwd")? {
+            Some(requested) => {
+                let requested_path = Path::new(requested);
+                if !requested_path.is_absolute() {
+                    return Err(error::invalid_argument("cwd must be an absolute path"));
+                }
+                let root = fs::canonicalize(&workspace_cwd)
+                    .unwrap_or_else(|_| PathBuf::from(&workspace_cwd));
+                let resolved = fs::canonicalize(requested_path).map_err(|_| {
+                    error::invalid_argument("cwd does not exist or is not readable")
+                })?;
+                if !(resolved == root || resolved.starts_with(&root)) {
+                    return Err(error::invalid_argument(
+                        "cwd must be inside the workspace root",
+                    ));
+                }
+                if !resolved.is_dir() {
+                    return Err(error::invalid_argument("cwd must be a directory"));
+                }
+                resolved.to_string_lossy().into_owned()
+            }
+            None => workspace_cwd,
         };
 
         // `session::spawn` durably records the pending admission before it

@@ -2,9 +2,11 @@
    src/renderer/src/components/right-sidebar/FileExplorerRow.tsx (row DOM,
    indent math, chevron/folder/file affordances, git-status and
    git-ignored decorations) and status-display.ts (STATUS_LABELS).
-   Adapted, all called out: drag-and-drop is out of MVP scope so the
-   draggable wiring is gone, and the Radix context menu becomes a
-   parent-owned `onContextMenu` callback. Rows stay plain buttons with no
+   Adapted, all called out: the Radix context menu becomes a parent-owned
+   `onContextMenu` callback, and the source's internal drag-and-drop
+   (R16-BC) arrives as an optional `rowDrag` handler bundle plus an
+   `isDropTarget` highlight, so the keyboard/ARIA structure stays
+   unchanged when dragging is not wired. Rows stay plain buttons with no
    treeitem role, exactly like the source; selection/expansion live in
    data attributes and keyboard stays container-owned (FileExplorer). */
 
@@ -37,6 +39,8 @@ export function FileExplorerRow({
   isSelected,
   isIgnored = false,
   rowIndex,
+  isDropTarget = false,
+  rowDrag,
   onClick,
   onDoubleClick,
   onNameDoubleClick,
@@ -49,6 +53,17 @@ export function FileExplorerRow({
   /** Git-ignored decoration (italic + badge, ignored tint). */
   isIgnored?: boolean;
   rowIndex: number;
+  /** Drag highlight: this row's parent dir is the active drop target. */
+  isDropTarget?: boolean;
+  /** Optional internal drag-and-drop wiring (R16-BC); absent = inert row. */
+  rowDrag?: {
+    onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void;
+    onDragEnd: () => void;
+    onDragOver: (event: React.DragEvent<HTMLButtonElement>) => void;
+    onDragEnter: (event: React.DragEvent<HTMLButtonElement>) => void;
+    onDragLeave: (event: React.DragEvent<HTMLButtonElement>) => void;
+    onDrop: (event: React.DragEvent<HTMLButtonElement>) => void;
+  };
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onDoubleClick: () => void;
   onNameDoubleClick: () => void;
@@ -65,16 +80,26 @@ export function FileExplorerRow({
       data-row-index={rowIndex}
       data-path={node.path}
       data-selected={isSelected ? "true" : undefined}
+      draggable={rowDrag ? true : undefined}
       className={
         "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left text-xs transition-colors " +
-        (isSelected
-          ? "text-accent-foreground"
-          : "hover:bg-accent hover:text-foreground")
+        (isDropTarget
+          ? "bg-border "
+          : isSelected
+            ? ""
+            : "hover:bg-accent hover:text-foreground ") +
+        (isSelected ? "text-accent-foreground" : "")
       }
       style={{ paddingLeft: `${node.depth * 16 + 8}px` }}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
+      onDragStart={rowDrag?.onDragStart}
+      onDragEnd={rowDrag?.onDragEnd}
+      onDragOver={rowDrag?.onDragOver}
+      onDragEnter={rowDrag?.onDragEnter}
+      onDragLeave={rowDrag?.onDragLeave}
+      onDrop={rowDrag?.onDrop}
     >
       {node.isDirectory ? (
         <>

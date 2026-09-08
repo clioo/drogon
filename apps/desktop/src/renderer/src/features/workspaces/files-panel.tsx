@@ -456,12 +456,14 @@ function FilesPanel({
       return openPathSurvivesDeletion(current.node.path, deleted) ? current : null;
     });
   };
-  // Open in Terminal goes through the existing session bridge: session
-  // start spans a shell at the workspace root (it takes no cwd), so the
-  // row's directory is noted in the call site only for future routing.
-  const openTerminalAt = (_cwd: string) => {
+  // Open in Terminal goes through the session bridge with the row's
+  // directory as the spawn cwd (#275, fork `startupCwd` parity): the
+  // explorer passes a workspace-relative dir ("" = root), resolved here
+  // against the workspace path; the daemon validates containment.
+  const openTerminalAt = (cwd: string) => {
+    const absolute = cwd === "" ? workspace.path : `${workspace.path}/${cwd}`;
     void window.drogon
-      .start(workspaceId)
+      .start(workspaceId, { cwd: absolute })
       .catch(() => undefined);
   };
   // Frame-safe derived values: a selection/open path from another scope is

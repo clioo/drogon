@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { fileBridgeSchemas } from "./file-validation";
 import { botSnapshotInputSchema } from "./bot-validation";
-import { workspacePortsInputSchema } from "./usage-contract";
+import {
+  workspacePortsInputSchema,
+  workspacePortKillInputSchema,
+} from "./usage-contract";
 
 const id = z
   .string()
@@ -80,6 +83,14 @@ export const bridgeSchemas = {
         )
         .max(256)
         .optional(),
+      // Additive (R16-BC, #275): explicit spawn directory; the daemon
+      // validates containment in the workspace root.
+      cwd: z
+        .string()
+        .min(1)
+        .max(32768)
+        .refine((value) => !value.includes("\0"))
+        .optional(),
     }),
   ]),
   read: identity.extend({
@@ -102,4 +113,7 @@ export const bridgeSchemas = {
   // R13-B Ports panel (additive): { workspaceId }; main/usage's
   // listWorkspacePorts re-checks the id before scanning.
   workspacePorts: workspacePortsInputSchema,
+  // R16-BC Ports "Stop Process" (additive): { workspaceId, pid, port };
+  // the daemon re-proves ownership before signalling anything.
+  workspacePortsKill: workspacePortKillInputSchema,
 } as const;

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { automationResultSchemas } from "./automation-contract";
 import { fileResultSchemas } from "./file-validation";
+import { workspacePortKillResultSchema } from "./usage-contract";
 
 const id = z.string().min(1).max(128);
 const workspace = z.object({
@@ -71,6 +72,9 @@ export const resultSchemas: Record<string, z.ZodType> = {
   }),
   "workspace.register": workspace,
   "workspace.list": z.object({ workspaces: z.array(workspace) }),
+  // R16-BC (additive): Ports-panel "Stop Process" domain outcome (fork
+  // WorkspacePortKillResult shape; the shared schema is the single source).
+  "ports.kill": workspacePortKillResultSchema,
   "session.start": session,
   "session.list": z.object({ sessions: z.array(session) }),
   "session.read": z

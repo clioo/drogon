@@ -16,6 +16,7 @@ export function LocalPortSection({
   emptyText,
   collapsed,
   onToggle,
+  onStopPort,
   onShowDetails,
   onOpenInBrowser
 }: {
@@ -25,6 +26,7 @@ export function LocalPortSection({
   emptyText?: string
   collapsed: boolean
   onToggle: () => void
+  onStopPort: (port: WorkspacePortRow) => void
   onShowDetails: (port: WorkspacePortRow) => void
   onOpenInBrowser: (port: WorkspacePortRow, event?: React.MouseEvent<HTMLButtonElement>) => void
 }): React.JSX.Element | null {
@@ -59,6 +61,7 @@ export function LocalPortSection({
                 <LocalPortRow
                   key={port.id}
                   port={port}
+                  onStop={onStopPort}
                   onShowDetails={onShowDetails}
                   onOpenInBrowser={onOpenInBrowser}
                 />

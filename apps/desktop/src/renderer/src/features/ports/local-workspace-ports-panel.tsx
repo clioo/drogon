@@ -10,8 +10,8 @@
 //    (onOpenInBrowserTab) or, on Shift+Cmd/Ctrl+click, the system browser
 //    via shell.openExternal — the source's openWorkspacePortInBrowser flow;
 //  - refresh and system-browser-open failures toast like the source
-//    (sonner landed with r13-c); the Stop Process action waits for a
-//    workspacePorts.kill channel.
+//    (sonner landed with r13-c); Stop Process rides this repo's additive
+//    workspacePorts.kill bridge to the daemon's ports.kill (R16-BC).
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, Server } from 'lucide-react'
 import { toast } from 'sonner'
@@ -92,6 +92,42 @@ export function LocalWorkspacePortsPanel({
   const toggleSection = useCallback((sectionId: string) => {
     setCollapsedSections((current) => ({ ...current, [sectionId]: !current[sectionId] }))
   }, [])
+
+  // Source workspace-port-actions.ts killWorkspacePortForTarget +
+  // refreshWorkspacePortScanAfterStop: the kill is a domain result (the
+  // daemon re-proves ownership), success toasts the source's copy, then a
+  // re-scan runs immediately and again after the source's settle window
+  // (SIGTERM can leave the listener visible briefly).
+  const WORKSPACE_PORT_STOP_SETTLE_MS = 500
+  const handleStopPort = useCallback(
+    async (port: WorkspacePortRow) => {
+      if (!workspace || !port.pid) return
+      try {
+        const result = await bridge.kill({
+          workspaceId: workspace.id,
+          pid: port.pid,
+          port: port.port
+        })
+        if (!result.ok) {
+          toast.error(result.error.message)
+          return
+        }
+        const killResult = result.result
+        if (!killResult.ok) {
+          toast.error(killResult.reason ?? 'Failed to stop the process.')
+          return
+        }
+        toast.success(`Stopped process on :${port.port}`)
+        await refresh()
+        window.setTimeout(() => void refresh(), WORKSPACE_PORT_STOP_SETTLE_MS)
+      } catch (error) {
+        toast.error('Failed to stop the process.', {
+          description: error instanceof Error ? error.message : String(error)
+        })
+      }
+    },
+    [bridge, workspace, refresh]
+  )
 
   const handleOpenPortInBrowser = useCallback(
     async (port: WorkspacePortRow, event?: React.MouseEvent<HTMLButtonElement>) => {
@@ -182,6 +218,7 @@ export function LocalWorkspacePortsPanel({
               emptyText={refreshing && !scan ? 'Scanning...' : 'No ports detected'}
               collapsed={collapsedSections.active ?? false}
               onToggle={() => toggleSection('active')}
+              onStopPort={(port) => void handleStopPort(port)}
               onShowDetails={setDetailsPort}
               onOpenInBrowser={handleOpenPortInBrowser}
             />
@@ -191,6 +228,7 @@ export function LocalWorkspacePortsPanel({
               ports={otherWorkspacePorts}
               collapsed={collapsedSections.other ?? false}
               onToggle={() => toggleSection('other')}
+              onStopPort={(port) => void handleStopPort(port)}
               onShowDetails={setDetailsPort}
               onOpenInBrowser={handleOpenPortInBrowser}
             />
@@ -200,6 +238,7 @@ export function LocalWorkspacePortsPanel({
               ports={externalPorts}
               collapsed={collapsedSections.external ?? false}
               onToggle={() => toggleSection('external')}
+              onStopPort={(port) => void handleStopPort(port)}
               onShowDetails={setDetailsPort}
               onOpenInBrowser={handleOpenPortInBrowser}
             />

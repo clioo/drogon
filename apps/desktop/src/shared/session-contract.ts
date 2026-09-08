@@ -103,6 +103,12 @@ export type HarnessLaunchInput = {
 export type SessionLaunchReuse = {
   command?: string;
   args?: string[];
+  /**
+   * Additive (R16-BC, #275): explicit spawn directory for the new session
+   * (the explorer's "Open in Terminal" passes the row directory). The
+   * daemon honours it only inside the workspace root.
+   */
+  cwd?: string;
 };
 export type ReadResult = {
   session: Session;
