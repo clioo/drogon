@@ -213,17 +213,13 @@ async function probeMentuSurface({ page, workspace, output }) {
   await page.getByRole("button", { name: "Mentu" }).click();
   const panel = page.locator('[data-testid="mentu-panel"]');
   await panel.waitFor();
-  const recipeSelect = panel.getByLabel("Recipe", { exact: true });
+  // R11-D ported the fork's Radix Select: the trigger is a combobox that stays
+  // disabled until discovery finishes and the items live in a portal listbox,
+  // so there are no <option> elements to read.
+  const recipeSelect = panel.getByRole("combobox", { name: "Recipe", exact: true });
   await recipeSelect.waitFor();
-  await page.waitForFunction(
-    () =>
-      [...document.querySelectorAll('[data-testid="mentu-panel"] option')].some(
-        (option) => (option.textContent ?? "").includes("acceptance-hello"),
-      ),
-    null,
-    { timeout: 15000 },
-  );
-  await recipeSelect.selectOption({ label: "acceptance-hello" });
+  await recipeSelect.click({ timeout: 15000 });
+  await page.getByRole("option", { name: "acceptance-hello", exact: true }).click();
   await panel.getByText("say-hello", { exact: true }).waitFor();
   await page.screenshot({
     path: path.join(output, "mentu.png"),
@@ -638,8 +634,9 @@ export async function probePackagedSurfaces({
   const paletteInput = page.locator(".command-palette-input");
   await paletteInput.waitFor();
   // cmdk exposes the palette label on its input, not on a dialog role.
+  // R12-B ported the source's jump palette, whose input is labelled "Jump to...".
   await page
-    .getByRole("combobox", { name: "Command palette" })
+    .getByRole("combobox", { name: "Jump to..." })
     .waitFor();
   await screenshot("palette.png");
   checks.push(`palette-opens-from-registry-chord-${chord.replaceAll("+", "-")}`);

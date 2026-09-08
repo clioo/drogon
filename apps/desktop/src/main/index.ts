@@ -44,6 +44,14 @@ import { registerUsageIpc } from "./usage/service";
 const LOCAL_ENDPOINT_PROBE_TIMEOUT_MS = 2_000;
 
 app.setName("Drogon");
+// Test harnesses set DROGON_BACKGROUND_WINDOW=1 so the window never steals the
+// user's focus: shown inactive under an accessory activation policy, with
+// occluded-window throttling off so CDP-driven checks keep full speed.
+const backgroundWindow = process.env.DROGON_BACKGROUND_WINDOW === "1";
+if (backgroundWindow) {
+  app.commandLine.appendSwitch("disable-renderer-backgrounding");
+  app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+}
 if (process.env.DROGON_ELECTRON_PROFILE)
   app.setPath("userData", path.resolve(process.env.DROGON_ELECTRON_PROFILE));
 const invalid = {
@@ -193,6 +201,7 @@ function createWindow() {
       sandbox: true,
       nodeIntegration: false,
       webSecurity: true,
+      backgroundThrottling: !backgroundWindow,
     },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -200,7 +209,9 @@ function createWindow() {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
-  window.on("ready-to-show", () => window?.show());
+  window.on("ready-to-show", () =>
+    backgroundWindow ? window?.showInactive() : window?.show(),
+  );
   window.on("closed", () => {
     window = null;
   });
@@ -322,6 +333,8 @@ if (!holdsSingleInstanceLock) {
     startBrowserRelay(registerBrowserIpc(() => window));
     registerNotificationsIpc(() => window);
     await bootstrapDaemon();
+    if (backgroundWindow && process.platform === "darwin")
+      app.setActivationPolicy("accessory");
     createWindow();
     app.on("activate", () => {
       if (!window) createWindow();

@@ -150,6 +150,7 @@ export function buildLaunchEnv(baseEnv, fixture) {
   }
   env.DROGON_DATA_DIR = fixture.dataDir;
   env.DROGON_ELECTRON_PROFILE = fixture.profileDir;
+  env.DROGON_BACKGROUND_WINDOW = "1";
   if (process.platform !== "win32") env.SHELL = "/bin/sh";
   return env;
 }
@@ -588,7 +589,8 @@ export async function runExecute(layout = acceptanceLayout()) {
       clearedInheritedDrogonKeys: Object.keys(process.env).filter(
         (key) => key.startsWith("DROGON_") &&
           key !== "DROGON_DATA_DIR" &&
-          key !== "DROGON_ELECTRON_PROFILE",
+          key !== "DROGON_ELECTRON_PROFILE" &&
+          key !== "DROGON_BACKGROUND_WINDOW",
       ),
     };
 

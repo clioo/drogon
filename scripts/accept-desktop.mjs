@@ -12,6 +12,7 @@ import {
   stopAcceptanceProcess,
   runAcceptanceProcess,
 } from "./acceptance-process.mjs";
+import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import {
@@ -113,6 +114,7 @@ async function launchDesktop() {
         ...process.env,
         DROGON_DATA_DIR: dataDir,
         DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
+        DROGON_BACKGROUND_WINDOW: "1",
         ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
         ...(packaged ? { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" } : {}),
         ...(withHarness
@@ -154,6 +156,7 @@ async function launchDesktop() {
   for (let i = 0; i < 200 && !browser.contexts()[0]?.pages()[0]; i++)
     await delay(50);
   page = browser.contexts()[0].pages()[0];
+  await emulatePageFocus(page);
   assert.ok(page, "Electron must create a rendered page");
   page.setDefaultTimeout(15000);
   // R9-B: the sidebar footer is the source toolbar now (settings, help,

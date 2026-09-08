@@ -36,6 +36,7 @@ import {
   stopAcceptanceProcess,
   runAcceptanceProcess,
 } from "../acceptance-process.mjs";
+import { emulatePageFocus } from "../acceptance-page-focus.mjs";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const REF_ROOT = "/Users/carlos/Documents/Drogon-mentu-session";
@@ -649,6 +650,7 @@ async function launchCandidate() {
       ...process.env,
       DROGON_DATA_DIR: dataDir,
       DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
+      DROGON_BACKGROUND_WINDOW: "1",
       ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
     },
   });
@@ -682,6 +684,7 @@ async function launchCandidate() {
     if (!page) await delay(50);
   }
   assert.ok(page, "Electron must create a rendered page");
+  await emulatePageFocus(page);
   page.setDefaultTimeout(15000);
   // R9-B: the sidebar footer is the source toolbar now (settings, help,
   // reveal) — the "Service x.y.z" text is gone, so readiness waits for it.
