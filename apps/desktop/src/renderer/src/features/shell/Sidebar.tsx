@@ -131,7 +131,7 @@ export function Sidebar({
 
   return (
     <div
-      className="workspace-sidebar shell-sidebar relative min-h-0 flex-shrink-0 flex flex-col overflow-hidden"
+      className="workspace-sidebar shell-sidebar relative min-h-0 flex-shrink-0 bg-worktree-sidebar flex flex-col overflow-hidden"
       style={open ? { width } : { width: 0, borderRightWidth: 0 }}
     >
       {open && (

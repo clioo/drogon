@@ -485,7 +485,9 @@
 }
 .workspace-sidebar {
   flex-shrink: 0;
-  background: var(--sidebar);
+  /* #124: the sidebar paints the worktree-sidebar token (source
+     sidebar/index.tsx bg-worktree-sidebar), not the app --sidebar token. */
+  background: var(--worktree-sidebar);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;

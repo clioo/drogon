@@ -2,10 +2,11 @@
 // src/renderer/src/components/task-page/github/Filters.tsx. Adaptations for
 // this repo's daemon: the preset row drives the `state` filter
 // (open|closed|all) instead of GitHub search-qualifier presets, the PR
-// filter dropdowns and the new-issue draft button have no daemon
-// counterpart, and the search field commits through the same 300ms debounce.
+// filter dropdowns have no daemon counterpart, the new-issue button is the
+// source's disabled state (no create RPC), and the search field commits
+// through the same 300ms debounce.
 import { cn } from "../../cn";
-import { Search, X, LoaderCircle, RefreshCw } from "lucide-react";
+import { Search, X, LoaderCircle, RefreshCw, Plus } from "lucide-react";
 import { Input } from "../../../../components/ui/input";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../ui/tooltip";
 import { Button } from "../../../../components/ui/button";
@@ -66,7 +67,7 @@ export function TaskPageGitHubFilters({
             }}
             placeholder={
               githubTaskKind === "pulls"
-                ? "Search GitHub pull requests..."
+                ? "Search GitHub PRs..."
                 : "Search GitHub issues..."
             }
             className="h-8 rounded-md border-border/60 bg-background pl-8 pr-8 text-xs text-foreground shadow-xs"
@@ -83,6 +84,27 @@ export function TaskPageGitHubFilters({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2" data-contextual-tour-target="tasks-actions">
+          {/* Source copy and placement (Filters.tsx new-issue button): the
+          composer has no daemon counterpart (tasks.* serves no create RPC),
+          so the button stays disabled with the source's label — the same
+          state the source renders when no target repo is selected. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                disabled
+                title="New GitHub issue is unavailable: this build cannot create GitHub issues"
+                aria-label="New GitHub issue"
+                className="size-8 border-border/60 bg-background text-foreground shadow-xs hover:bg-muted/60"
+              >
+                <Plus className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              New GitHub issue
+            </TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

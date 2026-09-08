@@ -246,10 +246,12 @@ export function resolveAutomationListEmptyState(args: {
     };
   }
   if (args.totalCount === 0) {
+    // Source copy (automation-list-empty-state.ts, all-hosts-empty): the
+    // empty title names the loaded-hosts scope, with no detail line.
     return {
       kind: "empty",
-      title: "No automations yet.",
-      detail: "Create one to run a harness on a cron schedule in a workspace.",
+      title: "No automations across loaded hosts",
+      detail: null,
     };
   }
   return { kind: "rows", title: "", detail: null };

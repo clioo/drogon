@@ -1,9 +1,9 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/task-page-localized-options.tsx — GitHub-only
 // adaptation. The source icon set shrinks to GitHub (no Linear/Jira/GitLab
-// in this repo), and the reference's GitHub search-qualifier presets map
-// onto the daemon's `state` filter (open|closed|all), which is what the
-// mode-control row drives.
+// in this repo); the source's qualifier defaults (presetToQuery) prefill the
+// search box while projectTasksDaemonQuery strips the qualifiers the daemon
+// already encodes via kind + `state` (open|closed|all).
 
 import { GithubIcon } from "./github-icon";
 
@@ -47,6 +47,35 @@ export function getGitHubStateFilters(): GitHubStateFilter[] {
 export function getGitHubModeButtons(): { id: GitHubTaskKind; label: string }[] {
   return [
     { id: "issues", label: "Issues" },
-    { id: "pulls", label: "Pull requests" },
+    { id: "pulls", label: "PRs" },
   ];
+}
+
+// Source defaults (ui-slice-hydration-sanitizers.ts presetToQuery): the
+// search box opens prefilled with the kind's qualifier query.
+export const GITHUB_DEFAULT_ISSUE_QUERY = "is:issue is:open";
+export const GITHUB_DEFAULT_PR_QUERY = "is:pr is:open";
+
+export function getGitHubDefaultQuery(kind: GitHubTaskKind): string {
+  return kind === "pulls" ? GITHUB_DEFAULT_PR_QUERY : GITHUB_DEFAULT_ISSUE_QUERY;
+}
+
+// Qualifiers the daemon already encodes elsewhere: the kind switch carries
+// is:issue/is:pr and the state filter carries is:open/is:closed, so they are
+// stripped before the remainder goes out as the daemon's title/number
+// substring query. Anything else passes through untouched.
+const DAEMON_IMPLIED_QUALIFIERS = new Set([
+  "is:issue",
+  "is:pr",
+  "is:open",
+  "is:closed",
+]);
+
+export function projectTasksDaemonQuery(applied: string): string | undefined {
+  const remainder = applied
+    .split(/\s+/)
+    .filter((token) => token !== "" && !DAEMON_IMPLIED_QUALIFIERS.has(token.toLowerCase()))
+    .join(" ")
+    .trim();
+  return remainder === "" ? undefined : remainder;
 }

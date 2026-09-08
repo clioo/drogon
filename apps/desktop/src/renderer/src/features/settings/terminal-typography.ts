@@ -372,7 +372,8 @@ export function projectTerminalTypographyOptions(
   );
   return {
     fontFamily: buildTerminalFontFamily(settings.terminalFontFamily ?? ""),
-    fontSize: settings.terminalFontSize ?? 13,
+    // Source fallback 14 for terminal panes (editors stay 13).
+    fontSize: settings.terminalFontSize ?? 14,
     fontWeight: weights.fontWeight,
     fontWeightBold: weights.fontWeightBold,
   };

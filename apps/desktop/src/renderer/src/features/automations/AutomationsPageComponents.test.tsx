@@ -105,8 +105,12 @@ describe("AutomationsListPanel render", () => {
         openCreateDialog: noop,
       }),
     );
-    expect(html).toContain("No automations yet.");
+    expect(html).toContain("No automations across loaded hosts");
     expect(html).toContain("Start from a template");
+    expect(html).toContain("Weekday repo audit");
+    expect(html).toContain("Release readiness");
+    expect(html).toContain("Daily change review");
+    expect(html).toContain("Hourly queue check");
   });
 
   it("renders the empty view for loading and error states", () => {

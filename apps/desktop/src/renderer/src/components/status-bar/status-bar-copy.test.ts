@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { ProviderUsage } from "../../../../shared/usage-contract";
 import {
+  awakeStatusLabel,
+  hasVisibleUsage,
   memoryLabel,
   memoryTitle,
   portsAriaLabel,
@@ -8,6 +10,7 @@ import {
   portsTitle,
   providerMeterRows,
   providerTitle,
+  REFRESH_RATE_LIMITS_LABEL,
   terminalsTitle,
 } from "./status-bar-copy";
 
@@ -47,6 +50,26 @@ describe("provider meter projections", () => {
   });
   test("ok providers list every meter line in the tooltip", () => {
     expect(providerTitle(claude(), 0)).toContain("Fable · 8% used");
+  });
+});
+
+describe("source chrome copy (#127)", () => {
+  test("refresh names rate limits and gates on non-empty usage", () => {
+    expect(REFRESH_RATE_LIMITS_LABEL).toBe("Refresh rate limits");
+    expect(hasVisibleUsage([claude(), claude()], 0)).toBe(true);
+    const empty: ProviderUsage = {
+      ...claude(),
+      session: null,
+      weekly: null,
+      fableWeekly: null,
+      status: "ok",
+      error: null,
+    };
+    expect(hasVisibleUsage([empty, empty], 0)).toBe(false);
+  });
+  test("awake carries the mode plus the Active/Inactive suffix", () => {
+    expect(awakeStatusLabel("off", false)).toBe("Keep computer awake, Off · Inactive");
+    expect(awakeStatusLabel("on", true)).toBe("Keep computer awake, On · Active");
   });
 });
 

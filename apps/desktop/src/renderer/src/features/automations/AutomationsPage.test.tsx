@@ -43,10 +43,10 @@ describe("AutomationsPanel header and action copy", () => {
     expect(html).not.toContain("New automation</");
   });
 
-  it("notes the local-time schedule basis under the heading", () => {
+  it("renders the source's bare list heading with no subtitle paragraph", () => {
     const html = render();
-    expect(html).toContain("local time");
-    expect(html).not.toContain("Times are UTC.");
+    expect(html).toContain(">Automations</h1>");
+    expect(html).not.toContain("Local automations.");
   });
 
   it("renders the search field and the loading state", () => {

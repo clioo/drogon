@@ -106,7 +106,7 @@ export type TaskPageModel = {
   taskSourceAvailabilityNotice: { label: string; title: string } | null;
   taskPageListChromeHidden: boolean;
 
-  // Mode controls (repo combobox + external link, Issues/Pull requests kind switch).
+  // Mode controls (repo combobox + external link, Issues/PRs kind switch).
   taskPickerRepos: TaskPickerRepo[];
   repoSelection: Set<string>;
   setRepoSelection: (next: Set<string>) => void;

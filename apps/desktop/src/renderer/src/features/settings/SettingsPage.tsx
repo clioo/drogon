@@ -49,6 +49,9 @@ export type SettingsPageProps = {
   onTerminalFontWeightBoldChange?: (weight: number) => void;
   editorFontFamily?: string;
   onEditorFontFamilyChange?: (family: string) => void;
+  /** Retained for the App wiring (the store key still persists); Appearance
+   *  renders no session-details switch — the source has no such control and
+   *  visibility toggles through the right sidebar's session tab. */
   inspectorVisible: boolean;
   onInspectorChange: (visible: boolean) => void;
   /** R14-B appearance flags (View > Appearance submenu marks + shell visibility). */
@@ -202,8 +205,6 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     }
                     editorFontFamily={props.editorFontFamily}
                     onEditorFontFamilyChange={props.onEditorFontFamilyChange}
-                    inspectorVisible={props.inspectorVisible}
-                    onInspectorChange={props.onInspectorChange}
                     statusBarVisible={props.statusBarVisible}
                     onStatusBarVisibleChange={props.onStatusBarVisibleChange}
                     tasksButtonVisible={props.tasksButtonVisible}

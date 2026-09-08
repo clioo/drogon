@@ -26,6 +26,8 @@ import {
 import type { AwakeMode, UsageSnapshot } from "../../../../shared/usage-contract";
 import { ClaudeIcon, OpenAIIcon } from "./provider-icons";
 import {
+  awakeStatusLabel,
+  hasVisibleUsage,
   memoryLabel,
   memoryTitle,
   portsLabel,
@@ -33,6 +35,8 @@ import {
   portsTitle,
   providerMeterRows,
   providerTitle,
+  REFRESH_RATE_LIMITS_LABEL,
+  REFRESH_USAGE_DATA_TITLE,
   terminalsTitle,
 } from "./status-bar-copy";
 import type { ProviderUsage } from "../../../../shared/usage-contract";
@@ -183,9 +187,11 @@ export function StatusBar({
 
   const awake = snapshot?.awake;
   const awakeModeLabel = awake ? (awake.mode === "on" ? "On" : "Off") : null;
+  // Source form (CaffeinateStatusSegment activityLabel): the accessible name
+  // carries the mode plus the Active/Inactive suffix.
   const awakeTitle = awake
     ? awake.supported
-      ? `Keep computer awake, ${awakeModeLabel}`
+      ? awakeStatusLabel(awake.mode, awake.active)
       : "Keep computer awake is not supported on this platform"
     : "Awake state unavailable";
 
@@ -225,16 +231,20 @@ export function StatusBar({
             loading usage…
           </span>
         )}
-        <button
-          type="button"
-          className="status-bar-icon-button"
-          title="Refresh usage data"
-          aria-label="Refresh usage data"
-          onClick={handleRefresh}
-          disabled={fetching}
-        >
-          <RefreshCw size={11} className={fetching ? "animate-spin" : undefined} />
-        </button>
+        {/* Source gate (StatusBarSurface anyVisible && !isEmptyUsageState):
+        the refresh control renders only over non-empty usage. */}
+        {snapshot && hasVisibleUsage([snapshot.claude, snapshot.codex], now) ? (
+          <button
+            type="button"
+            className="status-bar-icon-button"
+            title={REFRESH_USAGE_DATA_TITLE}
+            aria-label={REFRESH_RATE_LIMITS_LABEL}
+            onClick={handleRefresh}
+            disabled={fetching}
+          >
+            <RefreshCw size={11} className={fetching ? "animate-spin" : undefined} />
+          </button>
+        ) : null}
       </div>
 
       <div className="status-bar-spacer" />
