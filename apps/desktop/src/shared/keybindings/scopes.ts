@@ -5,12 +5,12 @@
 //   keybindingIsActiveInContext, terminal-shortcut policy default)
 // Adapted: Drogon has no terminal-shortcut policy setting, so the policy is
 // fixed to the source default ("orca-first": app shortcuts win inside the
-// terminal). The browser/editor/fileExplorer scopes exist in the type for
-// source fidelity; this MVP table only uses global/tabs/terminal/settings.
+// terminal). Surface-local scopes are preferred by their pane dispatchers;
+// global chords retain the source's app-first behavior.
 
 import type { KeybindingDefinition } from "./definitions";
 
-export type KeybindingContext = "app" | "terminal";
+export type KeybindingContext = "app" | "terminal" | "browser";
 
 export function isKeybindingAllowedInTerminal(
   definition: KeybindingDefinition,
@@ -19,18 +19,42 @@ export function isKeybindingAllowedInTerminal(
 }
 
 /**
- * Tabs-scope chords never fire from an editable target (typing must win);
- * that matches the palette host's long-standing guard. Every other scope is
- * context-free under the orca-first policy: global chords fire inside the
- * terminal too, and terminal chords fire only there.
+ * Tab navigation/index chords yield from an editable target (typing must
+ * win), while explicit tab actions such as New/Close remain reachable. Every
+ * other scope is context-free under the orca-first policy: global chords fire
+ * inside the terminal too, and terminal chords fire only there. Pane
+ * dispatchers can prioritize their own scope when rows share a chord.
  */
+const EDITABLE_TAB_NAVIGATION_IDS = new Set([
+  "tab.nextSameType",
+  "tab.previousSameType",
+  "tab.nextAllTypes",
+  "tab.previousAllTypes",
+  "tab.previousRecent",
+  "tab.nextTerminal",
+  "tab.previousTerminal",
+  "tab.selectByIndex",
+]);
+
+/** Text editors yield navigation/index chords, but keep explicit tab actions
+ * such as New, Close and Reopen reachable while Monaco or an input is focused. */
+export function yieldsToEditableTarget(
+  definition: Pick<KeybindingDefinition, "id">,
+): boolean {
+  return EDITABLE_TAB_NAVIGATION_IDS.has(definition.id);
+}
+
 export function isActiveInContext(
   definition: KeybindingDefinition,
   context: KeybindingContext,
   options: { editableTarget?: boolean } = {},
 ): boolean {
   if (definition.scope === "terminal") return context === "terminal";
-  if (definition.scope === "tabs" && options.editableTarget === true) {
+  if (
+    definition.scope === "tabs" &&
+    options.editableTarget === true &&
+    yieldsToEditableTarget(definition)
+  ) {
     return false;
   }
   return true;

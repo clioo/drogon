@@ -2,10 +2,11 @@
 // Ported from the Orca reference (read-only):
 //   src/shared/keybindings/effective.ts (getEffectiveKeybindingsForAction,
 //   getDefaultBindings)
-// Adapted: this repo has no keybinding overrides store yet, so the override
-// branch is absent; the platform parameter is this repo's KeybindingPlatform
-// instead of NodeJS.Platform. This is the single lookup the native menu's
-// chord hints and the renderer shortcuts share.
+// Adapted: the platform parameter is this repo's KeybindingPlatform instead
+// of NodeJS.Platform. The persisted override store is shared by renderer
+// labels and dispatch; main-process menu hints remain default-only because
+// main has no renderer storage to read. This is the single lookup the native
+// menu's chord hints and the renderer shortcuts share.
 
 import {
   bindingsForPlatform,

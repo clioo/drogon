@@ -69,7 +69,10 @@ import {
 import { normalizeAddressBarInput } from "./browser-address-bar-suggestions";
 import { readBrowserSearchEngine } from "./browser-search-engine";
 
-function workspaceTabs(event: BrowserStateEvent, workspaceId: string): BrowserTabState[] {
+function workspaceTabs(
+  event: BrowserStateEvent,
+  workspaceId: string,
+): BrowserTabState[] {
   return event.tabs.filter((tab) => tab.workspaceId === workspaceId);
 }
 
@@ -137,7 +140,9 @@ export function BrowserPanel({
     readBrowserRecentUrls(workspaceId),
   );
   const [findOpen, setFindOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<BrowserPageMenuState | null>(null);
+  const [contextMenu, setContextMenu] = useState<BrowserPageMenuState | null>(
+    null,
+  );
   const [reloadMenuOpen, setReloadMenuOpen] = useState(false);
   const [zoomFlash, setZoomFlash] = useState<number | null>(null);
   const placeholderRef = useRef<HTMLDivElement>(null);
@@ -185,9 +190,9 @@ export function BrowserPanel({
   // the list (closed elsewhere, App reconciling) falls back to the last
   // page exactly like the self-managed path above.
   const activeTabId = controlled
-    ? (tabs.some((tab) => tab.tabId === controlledTabId)
-        ? controlledTabId
-        : (tabs.at(-1)?.tabId ?? null))
+    ? tabs.some((tab) => tab.tabId === controlledTabId)
+      ? controlledTabId
+      : (tabs.at(-1)?.tabId ?? null)
     : internalTabId;
   const selectTab = (tabId: string) => {
     setInternalTabId(tabId);
@@ -224,7 +229,11 @@ export function BrowserPanel({
     const key = `${workspaceId}:${active.url}`;
     if (recordedRef.current.has(key)) return;
     recordedRef.current.add(key);
-    recordBrowserRecentUrl({ workspaceId, url: active.url, title: active.title });
+    recordBrowserRecentUrl({
+      workspaceId,
+      url: active.url,
+      title: active.title,
+    });
     refreshRecents();
   }, [active, workspaceId, refreshRecents]);
 
@@ -253,7 +262,8 @@ export function BrowserPanel({
   }, [activeKey]);
   useEffect(
     () => () => {
-      if (zoomFlashTimer.current !== null) window.clearTimeout(zoomFlashTimer.current);
+      if (zoomFlashTimer.current !== null)
+        window.clearTimeout(zoomFlashTimer.current);
     },
     [],
   );
@@ -264,10 +274,13 @@ export function BrowserPanel({
     const rect = element.getBoundingClientRect();
     void bridge
       .setBounds({
-        ...(activeTabIdRef.current
-          ? { tabId: activeTabIdRef.current }
-          : {}),
-        bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        ...(activeTabIdRef.current ? { tabId: activeTabIdRef.current } : {}),
+        bounds: {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        },
       })
       .catch(() => {
         // Bounds are best-effort layout hints; a failed report must never
@@ -387,7 +400,8 @@ export function BrowserPanel({
   const flashZoom = (percent: number | undefined) => {
     if (percent === undefined) return;
     setZoomFlash(percent);
-    if (zoomFlashTimer.current !== null) window.clearTimeout(zoomFlashTimer.current);
+    if (zoomFlashTimer.current !== null)
+      window.clearTimeout(zoomFlashTimer.current);
     zoomFlashTimer.current = window.setTimeout(() => setZoomFlash(null), 1200);
   };
 
@@ -455,24 +469,46 @@ export function BrowserPanel({
   };
 
   // One chord runner shared by the pane keydown handler and the forwarded
-  // guest chords (R12-E): focus the address bar, reload, open find.
-  const runBrowserPaneChord = (chord: "focus-address-bar" | "reload" | "find") => {
+  // guest chords (R12-E): every browser-scope default reaches the same
+  // renderer-owned guest bridge, including history and hard reload.
+  const runBrowserPaneChord = (
+    chord:
+      | "focus-address-bar"
+      | "reload"
+      | "hard-reload"
+      | "find"
+      | "back"
+      | "forward",
+  ) => {
     if (chord === "focus-address-bar") {
       dismissSuggestionsRef.current?.();
       addressInputRef.current?.focus();
       addressInputRef.current?.select();
     } else if (chord === "reload") {
-      void runReloadTrigger("button");
-    } else {
+      void runReloadTrigger("reload");
+    } else if (chord === "hard-reload") {
+      void runReloadTrigger("hard-reload");
+    } else if (chord === "find") {
       setFindOpen(true);
+    } else if (active) {
+      void (
+        chord === "back"
+          ? bridge.back({ tabId: active.tabId })
+          : bridge.forward({ tabId: active.tabId })
+      ).catch(() => {
+        setNotice(
+          chord === "back"
+            ? "The page could not go back."
+            : "The page could not go forward.",
+        );
+      });
     }
   };
 
   // Reference keyboard, scoped to the active browser tab: the pane container
-  // owns Mod+L (address bar), Mod+R (reload) and Mod+F (find) exactly like
-  // the terminal owns its chords — preventDefault plus stopPropagation so
-  // the window-level registry (Mod+L toggles the right sidebar) never sees
-  // them while the user is in the page chrome.
+  // owns the browser-scope defaults exactly like the terminal owns its chords
+  // — preventDefault plus stopPropagation keeps the window-level registry
+  // (Mod+L toggles the right sidebar) from seeing page-chrome chords.
   const onPaneKeyDown = (event: React.KeyboardEvent) => {
     const chord = matchBrowserPaneChord(event, isMacPlatform());
     if (!chord || !active) return;
@@ -508,7 +544,11 @@ export function BrowserPanel({
   const viewport = viewportFor({ active, externalUrl });
 
   return (
-    <div className="browser-pane" data-testid="browser-pane" onKeyDown={onPaneKeyDown}>
+    <div
+      className="browser-pane"
+      data-testid="browser-pane"
+      onKeyDown={onPaneKeyDown}
+    >
       {!hideTabStrip && (
       <div
         className="browser-tabstrip"
@@ -531,12 +571,13 @@ export function BrowserPanel({
                 void bridge
                   .setBounds({
                     tabId: tab.tabId,
-                    bounds: placeholderRef.current?.getBoundingClientRect() ?? {
-                      x: 0,
-                      y: 0,
-                      width: 0,
-                      height: 0,
-                    },
+                    bounds:
+                      placeholderRef.current?.getBoundingClientRect() ?? {
+                        x: 0,
+                        y: 0,
+                        width: 0,
+                        height: 0,
+                      },
                   })
                   .catch(() => {});
               }}
@@ -652,7 +693,8 @@ export function BrowserPanel({
             setNotice("");
             return;
           }
-          if (active?.error) setDismissedBanner(`${active.tabId}:${active.error}`);
+          if (active?.error)
+            setDismissedBanner(`${active.tabId}:${active.error}`);
         }}
       />
       {findOpen && active ? (
@@ -729,12 +771,11 @@ export function BrowserPanel({
             .catch(() => setNotice("Devtools could not be opened."));
         }}
       />
-      <label className="browser-capture" title="Route terminal link-opens into this pane">
-        <input
-          type="checkbox"
-          checked={capture}
-          onChange={toggleCapture}
-        />
+      <label
+        className="browser-capture"
+        title="Route terminal link-opens into this pane"
+      >
+        <input type="checkbox" checked={capture} onChange={toggleCapture} />
         Capture links from terminals
       </label>
     </div>
@@ -759,7 +800,8 @@ export function bannerFor(input: {
     kind: "failed",
     title: host ? `Can't reach ${host}` : "Can't load this page",
     description: active.loadError?.description || active.error,
-    canOpenExternal: getOpenableExternalUrl(active.loadError?.url || active.url) !== null,
+    canOpenExternal:
+      getOpenableExternalUrl(active.loadError?.url || active.url) !== null,
   };
 }
 

@@ -12,10 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BrowserTabState } from "../../../../shared/browser-contract";
 import type { FileBridge } from "../../../../shared/file-contract";
-import type {
-  Session,
-  Workspace,
-} from "../../../../shared/session-contract";
+import type { Session, Workspace } from "../../../../shared/session-contract";
 import type { Theme } from "../../settings-store";
 import {
   contextFromTarget,
@@ -111,30 +108,74 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
   };
 
   // Source-parity chords (keybindings/definitions.ts): worktree.palette /
-  // worktree.quickOpen toggle or switch modes, tab travel moves across
-  // sessions. Tab chords stay out of editable fields and out of the way
-  // while the palette itself is open. Mod+K is terminal.clear, never the
-  // palette; App owns every other id in the table.
+  // worktree.quickOpen toggle or switch modes, tab travel moves across the
+  // unified terminal/browser/editor strip. Tab chords stay out of editable
+  // fields and out of the way while the palette itself is open. Mod+K is
+  // terminal.clear, never the palette; App owns every other id in the table.
   useEffect(() => {
-    const uiPlatform = navigator.userAgent.includes("Mac")
-      ? "darwin"
-      : "other";
+    const uiPlatform = navigator.userAgent.includes("Mac") ? "darwin" : "other";
     const platform = resolveKeybindingPlatform(uiPlatform);
     const registry = createKeybindingRegistry();
     const current = () => propsRef.current;
     const state = () => stateRef.current;
-    const selectSessionAt = (index: number) => {
-      const session = current().sessions[index];
-      if (session) current().onSelectSession(session.id);
+    type StripEntry =
+      | { kind: "session"; id: string }
+      | { kind: "browser"; id: string }
+      | { kind: "editor"; id: string };
+    const stripEntries = (): StripEntry[] => {
+      const props = current();
+      return [
+        ...props.sessions.map((session) => ({
+          kind: "session" as const,
+          id: session.id,
+        })),
+        ...props.browserTabs.map((tab) => ({
+          kind: "browser" as const,
+          id: tab.tabId,
+        })),
+        ...props.editorTabs.map((tab) => ({
+          kind: "editor" as const,
+          id: tab.tabId,
+        })),
+      ];
     };
-    const stepSession = (delta: 1 | -1) => {
-      const { sessions, activeSessionId, onSelectSession } = current();
-      if (sessions.length === 0) return;
-      const at = sessions.findIndex((item) => item.id === activeSessionId);
+    const activeStripEntry = (): StripEntry | null => {
+      const props = current();
+      const id =
+        props.activeEditorTabId ??
+        props.activeBrowserTabId ??
+        props.activeSessionId;
+      return stripEntries().find((entry) => entry.id === id) ?? null;
+    };
+    const selectEntry = (entry: StripEntry | undefined) => {
+      if (!entry) return;
+      const props = current();
+      if (entry.kind === "session") props.onSelectSession(entry.id);
+      else if (entry.kind === "browser") props.onSelectBrowserTab(entry.id);
+      else props.onSelectEditorTab(entry.id);
+    };
+    const selectTabAt = (index: number) => selectEntry(stripEntries()[index]);
+    const stepTabs = (
+      delta: 1 | -1,
+      sameType: boolean,
+      onlyKind?: StripEntry["kind"],
+    ) => {
+      const entries = stripEntries();
+      if (entries.length === 0) return;
+      const active = activeStripEntry();
+      const candidates = onlyKind
+        ? entries.filter((entry) => entry.kind === onlyKind)
+        : sameType && active
+          ? entries.filter((entry) => entry.kind === active.kind)
+          : entries;
+      if (candidates.length === 0) return;
+      const at = active
+        ? candidates.findIndex((entry) => entry.id === active.id)
+        : -1;
       const next =
-        (at < 0 ? (delta < 0 ? 0 : -1) : at + delta + sessions.length) %
-        sessions.length;
-      onSelectSession(sessions[next].id);
+        (at < 0 ? (delta < 0 ? 0 : -1) : at + delta + candidates.length) %
+        candidates.length;
+      selectEntry(candidates[next]);
     };
     const handlers: Record<string, (digit: number | null) => void> = {
       "worktree.palette": () => {
@@ -145,15 +186,19 @@ export function CommandPaletteHost(props: CommandPaletteHostProps) {
         if (state().open && state().mode === "quick") closePalette();
         else openPalette("quick");
       },
-      "tab.previousSameType": () => stepSession(-1),
-      "tab.previousAllTypes": () => stepSession(-1),
-      "tab.nextSameType": () => stepSession(1),
-      "tab.nextAllTypes": () => stepSession(1),
+      "tab.previousSameType": () => stepTabs(-1, true),
+      "tab.previousAllTypes": () => stepTabs(-1, false),
+      "tab.nextSameType": () => stepTabs(1, true),
+      "tab.nextAllTypes": () => stepTabs(1, false),
+      "tab.previousRecent": () => stepTabs(-1, false),
+      "tab.nextTerminal": () => stepTabs(1, false, "session"),
+      "tab.previousTerminal": () => stepTabs(-1, false, "session"),
       "tab.selectByIndex": (digit) => {
-        if (digit !== null) selectSessionAt(digit);
+        if (digit !== null) selectTabAt(digit);
       },
     };
     const keydown = (event: KeyboardEvent) => {
+      if (event.repeat || event.defaultPrevented) return;
       const match = registry.match(
         {
           key: event.key,
@@ -227,7 +272,11 @@ function JumpPaletteSurface(
   );
   const worktrees = useMemo(
     () =>
-      buildJumpWorktrees(props.projectGroups, props.sessions, props.workspaceId),
+      buildJumpWorktrees(
+        props.projectGroups,
+        props.sessions,
+        props.workspaceId,
+      ),
     [props.projectGroups, props.sessions, props.workspaceId],
   );
   const browserTabs = useMemo(

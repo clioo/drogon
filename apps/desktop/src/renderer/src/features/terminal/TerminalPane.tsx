@@ -56,9 +56,7 @@ import TerminalContextMenu, {
   type TerminalContextMenuPoint,
 } from "./TerminalContextMenu";
 import { splitRightShortcutLabel } from "./terminal-split";
-import {
-  TerminalProcessExitOverlay,
-} from "./TerminalProcessExitOverlay";
+import { TerminalProcessExitOverlay } from "./TerminalProcessExitOverlay";
 import { DaemonReconnectBanner } from "./DaemonReconnectBanner";
 import { useDaemonConnection } from "../shell/daemon-connection-store";
 import {
@@ -75,9 +73,7 @@ import {
   TERMINAL_FILE_OPEN_EVENT,
   type TerminalFileOpenDetail,
 } from "./terminal-file-link";
-import {
-  handleTerminalWebLinkClick,
-} from "./terminal-web-link-click";
+import { handleTerminalWebLinkClick } from "./terminal-web-link-click";
 import {
   isTerminalLinkDirectActivation,
   terminalLinkModifierHint,
@@ -119,10 +115,12 @@ import type { TerminalPasteSource } from "./terminal-paste-model";
 
 /**
  * Dispatched by the App-level `terminal.clear` chord (Cmd+K, source id from
- * definitions-core-3.ts). App only dispatches while focus is inside the
- * active session panel, so this listener clears unconditionally.
+ * definitions-core-3.ts). The optional session id lets split panes route the
+ * chord to the focused pane instead of clearing a sibling.
  */
 export const TERMINAL_CLEAR_EVENT = "drogon:terminal-clear";
+/** Dispatched by the shell dispatcher for the terminal-scope Find chord. */
+export const TERMINAL_SEARCH_EVENT = "drogon:terminal-search";
 
 /**
  * Dispatched by the exit overlay's Restart button. App wires it to the same
@@ -195,7 +193,6 @@ function resolveInitialTypography(options: {
     fontWeightBold: weights.fontWeightBold,
   };
 }
-
 
 type TerminalDebugRegistry = Map<string, Terminal>;
 declare global {
@@ -336,9 +333,25 @@ export function TerminalPane({
   };
 
   useEffect(() => {
-    const onClear = () => live.current?.terminal.clear();
+    const ownsEvent = (event: Event): boolean => {
+      const detail = (event as CustomEvent<{ sessionId?: unknown }>).detail;
+      return (
+        detail?.sessionId === undefined ||
+        detail.sessionId === sessionRef.current.id
+      );
+    };
+    const onClear = (event: Event) => {
+      if (ownsEvent(event)) live.current?.terminal.clear();
+    };
+    const onSearch = (event: Event) => {
+      if (ownsEvent(event)) setSearchOpen(true);
+    };
     window.addEventListener(TERMINAL_CLEAR_EVENT, onClear);
-    return () => window.removeEventListener(TERMINAL_CLEAR_EVENT, onClear);
+    window.addEventListener(TERMINAL_SEARCH_EVENT, onSearch);
+    return () => {
+      window.removeEventListener(TERMINAL_CLEAR_EVENT, onClear);
+      window.removeEventListener(TERMINAL_SEARCH_EVENT, onSearch);
+    };
   }, []);
 
   // Applies a later settings change without remounting the session: the
@@ -378,10 +391,8 @@ export function TerminalPane({
       allowProposedApi: true,
       screenReaderMode: true,
       theme:
-        composeActiveTerminalTheme(
-          terminalThemeForScheme(initialScheme),
-          {},
-        ) ?? undefined,
+        composeActiveTerminalTheme(terminalThemeForScheme(initialScheme), {}) ??
+        undefined,
     });
     // Debug/e2e registry like Orca's `window.__paneManagers`: rendered
     // acceptance reads the live buffer here because the WebGL renderer
@@ -412,7 +423,12 @@ export function TerminalPane({
       attachPending: boolean;
       failedSinceRecovery: boolean;
       refitRafId: number | null;
-    } = { addon: null, attachPending: false, failedSinceRecovery: false, refitRafId: null };
+    } = {
+      addon: null,
+      attachPending: false,
+      failedSinceRecovery: false,
+      refitRafId: null,
+    };
     // IntersectionObserver is the reveal signal (fork schedulePaneRevealRepaint);
     // until it fires, page visibility is the best known state.
     const paneVisible = {
@@ -423,7 +439,8 @@ export function TerminalPane({
     const isGpuEnabled = () =>
       resolvePaneRendererPolicy({
         userGpuMode:
-          gpuModeRef.current ?? readTerminalGpuAcceleration(window.localStorage),
+          gpuModeRef.current ??
+          readTerminalGpuAcceleration(window.localStorage),
       }).gpuEnabled;
     const refreshViewport = () => {
       try {
@@ -752,7 +769,8 @@ export function TerminalPane({
       search,
       input: queue,
       focus: () => terminal.focus(),
-      pasteFromClipboard: (source: TerminalPasteSource) => paste.pasteFromClipboard(source),
+      pasteFromClipboard: (source: TerminalPasteSource) =>
+        paste.pasteFromClipboard(source),
       syncRenderer: fitAndSyncTerminal,
     };
     // Paste policy target (R12-E): plan/execute writes bracketed or chunked
@@ -780,7 +798,8 @@ export function TerminalPane({
     const disposePasteListeners = registerTerminalPanePasteListeners({
       container: mount,
       paste,
-      isMac: typeof navigator !== "undefined" && navigator.userAgent.includes("Mac"),
+      isMac:
+        typeof navigator !== "undefined" && navigator.userAgent.includes("Mac"),
     });
     // The gesture + action context back the file-link popover: a plain click
     // (no drag, no selection) on a link raises the popover; PTY mouse-report
@@ -1002,7 +1021,10 @@ export function TerminalPane({
       observer.disconnect();
       visibility?.disconnect();
       if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onPageVisibilityChange);
+        document.removeEventListener(
+          "visibilitychange",
+          onPageVisibilityChange,
+        );
       }
       dprMedia?.removeEventListener("change", onDprChange);
       cancelPendingWebglRefit();
@@ -1068,7 +1090,10 @@ export function TerminalPane({
   const copySelection = () => {
     setMenu(null);
     if (!current) return;
-    void copyTerminalSelection({ terminal: current.terminal, writeClipboardText })
+    void copyTerminalSelection({
+      terminal: current.terminal,
+      writeClipboardText,
+    })
       .then((copied) => {
         if (!copied) callbacks.current.onError("Nothing is selected.");
       })

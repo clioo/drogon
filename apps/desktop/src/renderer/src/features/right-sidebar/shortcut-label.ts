@@ -25,8 +25,10 @@ export function formatSidebarChord(
   const labels: string[] = [];
   for (const part of chord.split("+").map((item) => item.trim())) {
     const token = part.toLowerCase();
-    if (token === "cmdorctrl") labels.push(platform === "darwin" ? "⌘" : "Ctrl");
-    else if (token === "shift") labels.push(platform === "darwin" ? "⇧" : "Shift");
+    if (token === "cmdorctrl")
+      labels.push(platform === "darwin" ? "⌘" : "Ctrl");
+    else if (token === "shift")
+      labels.push(platform === "darwin" ? "⇧" : "Shift");
     else if (token === "alt") labels.push(platform === "darwin" ? "⌥" : "Alt");
     else if (part !== "") labels.push(displayKey(part));
   }
@@ -37,5 +39,5 @@ export function formatSidebarChord(
 export const SIDEBAR_RIGHT_TOGGLE_CHORD = "CmdOrCtrl+L";
 export const SIDEBAR_EXPLORER_TOGGLE_CHORD = "CmdOrCtrl+Shift+E";
 export const SIDEBAR_SOURCE_CONTROL_TOGGLE_CHORD = "CmdOrCtrl+Shift+G";
-/** Source-adjacent: the tab strip's new-terminal row (workspace.newTerminal). */
-export const TAB_NEW_TERMINAL_CHORD = "CmdOrCtrl+Shift+N";
+/** Compatibility label; the tab strip resolves its chord from the shared table. */
+export const TAB_NEW_TERMINAL_CHORD = "CmdOrCtrl+T";

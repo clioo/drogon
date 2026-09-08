@@ -1,33 +1,55 @@
-// Pane-scoped browser chords, handled in the pane container's keydown like
-// the terminal does (the keybinding table is owned by another task, so the
-// pane consumes these directly). Scope rule from the source: the chords only
-// fire while a browser tab is active — the panel only mounts its chrome for
-// the active page, so mounting is the scope.
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Pane-local browser matching uses the shared source registry rather than a
+// second hand-written chord table. Browser scope is preferred so Mod+L does
+// not resolve to the global right-sidebar toggle while page chrome is active.
+import {
+  createKeybindingRegistry,
+  resolveKeybindingPlatform,
+  type KeybindingPlatform,
+} from "../../../../shared/keybindings";
 
-export type BrowserPaneChord = "focus-address-bar" | "reload" | "find";
+export type BrowserPaneChord =
+  "focus-address-bar" | "reload" | "hard-reload" | "find" | "back" | "forward";
 
-type ChordEvent = Pick<
-  KeyboardEvent | React.KeyboardEvent,
-  "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"
->;
+type ChordEvent = {
+  key: string;
+  code?: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  altKey?: boolean;
+  repeat?: boolean;
+};
 
-/**
- * Matches the reference's browser chrome chords: Mod+L focuses the address
- * bar, Mod+R reloads, Mod+F opens find (Mod is Cmd on macOS, Ctrl elsewhere).
- * Shift/Alt variants never match, so shifted chords stay free.
- */
+const CHORD_BY_ACTION: Partial<Record<string, BrowserPaneChord>> = {
+  "browser.focusAddressBar": "focus-address-bar",
+  "browser.reload": "reload",
+  "browser.hardReload": "hard-reload",
+  "browser.find": "find",
+  "browser.back": "back",
+  "browser.forward": "forward",
+};
+
+/** Match the source browser-scope defaults and any saved renderer override. */
 export function matchBrowserPaneChord(
   event: ChordEvent,
   isMac: boolean,
 ): BrowserPaneChord | null {
-  const mod = isMac ? event.metaKey : event.ctrlKey;
-  if (!mod || event.shiftKey || event.altKey) return null;
-  // Why: on macOS Ctrl+key reaches the pane for Emacs-style caret moves;
-  // only the platform Mod owns these chords.
-  if (isMac ? event.ctrlKey : event.metaKey) return null;
-  const key = event.key.toLowerCase();
-  if (key === "l") return "focus-address-bar";
-  if (key === "r") return "reload";
-  if (key === "f") return "find";
-  return null;
+  if (event.repeat) return null;
+  const registry = createKeybindingRegistry();
+  const platform: KeybindingPlatform = isMac ? "darwin" : "linux";
+  const match = registry.match(
+    {
+      key: event.key,
+      code: event.code,
+      altKey: event.altKey,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+    },
+    platform,
+    "browser",
+    { preferredScopes: ["browser"] },
+  );
+  return match ? (CHORD_BY_ACTION[match.id] ?? null) : null;
 }

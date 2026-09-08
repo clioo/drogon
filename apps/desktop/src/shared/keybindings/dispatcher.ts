@@ -7,15 +7,17 @@
 //     other chord belongs to the palette.
 //  3. terminal.clear is terminal-scoped: outside the terminal the chord stays
 //     reserved and no handler may claim it.
-//  4. Tabs-scope (and workspace index) chords never fire from an editable
-//     target, so typing wins. Global chords follow the orca-first policy and
-//     fire everywhere, including the terminal.
+//  4. Tab navigation/index chords yield from editable targets, while explicit
+//     tab actions remain reachable. Global chords follow the orca-first policy
+//     and fire everywhere, including the terminal.
 //  5. Otherwise preventDefault and run the handler exactly once.
 import type { KeybindingDefinition } from "./definitions";
-import type { KeybindingContext } from "./scopes";
+import { yieldsToEditableTarget, type KeybindingContext } from "./scopes";
 
 /** Terminal focus in Drogon means inside the active session panel. */
-export function contextFromTarget(target: EventTarget | null): KeybindingContext {
+export function contextFromTarget(
+  target: EventTarget | null,
+): KeybindingContext {
   if (
     target instanceof HTMLElement &&
     target.closest("#active-session-panel") !== null
@@ -39,7 +41,12 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   if (target.classList.contains("xterm-helper-textarea")) return false;
   if (target.isContentEditable) return true;
   const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return (
+    target.closest(
+      'input, textarea, select, [contenteditable=""], [contenteditable="true"]',
+    ) !== null
+  );
 }
 
 /**
@@ -58,8 +65,9 @@ export function shouldDispatch(params: {
     return false;
   }
   if (
-    (params.scope === "tabs" || params.id === "workspace.selectByIndex") &&
-    params.editableTarget
+    params.editableTarget &&
+    (params.id === "workspace.selectByIndex" ||
+      (params.scope === "tabs" && yieldsToEditableTarget({ id: params.id })))
   ) {
     return false;
   }

@@ -55,7 +55,12 @@ export type BrowserTabState = {
    * for guest load errors. Absent on older hosts; the pane falls back to
    * parsing `error`.
    */
-  loadError?: { kind: "blocked" | "failed"; code: number | null; description: string; url: string } | null;
+  loadError?: {
+    kind: "blocked" | "failed";
+    code: number | null;
+    description: string;
+    url: string;
+  } | null;
   /**
    * Additive (R11-B chrome): true once a page committed in this tab. Fresh
    * tabs and failed navigations show DOM states; committed pages stay
@@ -110,7 +115,8 @@ export type BrowserSnapshot = {
 };
 
 /** Additive (R12-E): pane chords forwarded while the guest has focus. */
-export type BrowserPaneChord = "focus-address-bar" | "reload" | "find";
+export type BrowserPaneChord =
+  "focus-address-bar" | "reload" | "hard-reload" | "find" | "back" | "forward";
 
 /** Additive (R12-E): one guest-captured pane chord, forwarded by main. */
 export type BrowserChordEvent = {
@@ -173,7 +179,9 @@ export const browserRelayOpenParamsSchema = z.object({
   workspaceId,
   url: urlInput.optional(),
 });
-export type BrowserRelayOpenParams = z.infer<typeof browserRelayOpenParamsSchema>;
+export type BrowserRelayOpenParams = z.infer<
+  typeof browserRelayOpenParamsSchema
+>;
 
 export const browserRelayTabParamsSchema = browserTabRefSchema;
 
@@ -181,17 +189,23 @@ export const browserRelayClickParamsSchema = z.object({
   tabId,
   selector: selectorInput,
 });
-export type BrowserRelayClickParams = z.infer<typeof browserRelayClickParamsSchema>;
+export type BrowserRelayClickParams = z.infer<
+  typeof browserRelayClickParamsSchema
+>;
 
 export const browserRelayFillParamsSchema = z.object({
   tabId,
   selector: selectorInput,
   text: z.string().max(MAX_BROWSER_FILL_TEXT_CHARS),
 });
-export type BrowserRelayFillParams = z.infer<typeof browserRelayFillParamsSchema>;
+export type BrowserRelayFillParams = z.infer<
+  typeof browserRelayFillParamsSchema
+>;
 
 export const browserRelayTabsParamsSchema = z.object({ workspaceId });
-export type BrowserRelayTabsParams = z.infer<typeof browserRelayTabsParamsSchema>;
+export type BrowserRelayTabsParams = z.infer<
+  typeof browserRelayTabsParamsSchema
+>;
 
 export const relayCommandKinds = [
   "browser.open",

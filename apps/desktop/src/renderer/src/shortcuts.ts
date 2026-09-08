@@ -6,13 +6,13 @@
 // `./keybindings/registry.ts`, which is scope-aware, exact and
 // conflict-free by construction.
 import {
-  bindingsForPlatform,
   getKeybindingDefinition,
   KEYBINDING_DEFINITIONS,
   resolveKeybindingPlatform,
   type KeybindingDefinition,
   type KeybindingPlatform,
 } from "../../shared/keybindings/definitions";
+import { getEffectiveBindings } from "../../shared/keybindings/overrides";
 
 export type { KeybindingDefinition };
 
@@ -47,7 +47,7 @@ export function chordsForPlatform(
   definition: KeybindingDefinition,
   platform: UiPlatform,
 ): readonly string[] {
-  return bindingsForPlatform(definition, toKeybindingPlatform(platform));
+  return getEffectiveBindings(definition, toKeybindingPlatform(platform));
 }
 
 /** First chord for one palette id on this UI platform, if it has any. */

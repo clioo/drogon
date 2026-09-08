@@ -110,10 +110,7 @@ export function ShortcutsSection(): React.JSX.Element {
         if (map.has(id)) continue;
         const others = ids
           .filter((other) => other !== id)
-          .map(
-            (other) =>
-              getKeybindingDefinition(other)?.title ?? other,
-          );
+          .map((other) => getKeybindingDefinition(other)?.title ?? other);
         map.set(
           id,
           `${bindingLabel(binding, platform)} conflicts with ${others.join(", ")}.`,
@@ -305,9 +302,7 @@ export function ShortcutsSection(): React.JSX.Element {
                 : row.definition.status.note}
             </span>
           ) : null}
-          {modified ? (
-            <span className="settings-note">Customized</span>
-          ) : null}
+          {modified ? <span className="settings-note">Customized</span> : null}
           {helper ? (
             <span
               role={helper.tone === "error" ? "alert" : "status"}
@@ -377,6 +372,22 @@ export function ShortcutsSection(): React.JSX.Element {
                     </Button>
                   </span>
                 ))}
+                {row.bindings.length === 0 && !appending && !digit ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-foreground"
+                    title="Add shortcut"
+                    aria-label={`Add shortcut for ${row.title}`}
+                    onClick={() => {
+                      clearError(row.id);
+                      setRecording({ actionId: row.id, index: 0 });
+                    }}
+                  >
+                    <Plus className="size-3" />
+                  </Button>
+                ) : null}
                 {appending ? (
                   <button
                     type="button"
@@ -391,7 +402,9 @@ export function ShortcutsSection(): React.JSX.Element {
                   </button>
                 ) : null}
               </span>
-              {!digit && (row.bindings.length > 0 || appending) && !appending ? (
+              {!digit &&
+              (row.bindings.length > 0 || appending) &&
+              !appending ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -437,9 +450,7 @@ export function ShortcutsSection(): React.JSX.Element {
                     key={binding}
                     className="inline-flex items-center gap-1"
                   >
-                    {chordIndex > 0 ? (
-                      <span aria-hidden="true">, </span>
-                    ) : null}
+                    {chordIndex > 0 ? <span aria-hidden="true">, </span> : null}
                     {formatEntryBinding(binding, platform).map((key, index) => (
                       <kbd key={index} className="settings-kbd">
                         {key}
@@ -480,9 +491,7 @@ export function ShortcutsSection(): React.JSX.Element {
           {groups.map(({ group, rows }) => (
             <div key={group}>
               <h3 className="settings-shortcut-group-title">{group}</h3>
-              <ul className="settings-shortcut-list">
-                {rows.map(renderRow)}
-              </ul>
+              <ul className="settings-shortcut-list">{rows.map(renderRow)}</ul>
             </div>
           ))}
         </div>

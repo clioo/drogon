@@ -10,9 +10,9 @@ import {
 
 describe("shortcut keycap formatting", () => {
   test("macOS renders glyphs without separators", () => {
-    expect(formatShortcutKeyComboDetails("worktree.navigateUp", "darwin")).toEqual([
-      { keys: ["⌘", "⇧", "↑"], doubleTap: false },
-    ]);
+    expect(
+      formatShortcutKeyComboDetails("worktree.navigateUp", "darwin"),
+    ).toEqual([{ keys: ["⌘", "⇧", "↑"], doubleTap: false }]);
   });
   test("other platforms render words joined with +", () => {
     expect(
@@ -20,9 +20,9 @@ describe("shortcut keycap formatting", () => {
     ).toEqual([{ keys: ["Ctrl", "Shift", "↑"], doubleTap: false }]);
   });
   test("the worktree palette reads ⌘J on macOS and Ctrl+Shift+J elsewhere", () => {
-    expect(formatShortcutKeyComboDetails("worktree.palette", "darwin")).toEqual([
-      { keys: ["⌘", "J"], doubleTap: false },
-    ]);
+    expect(formatShortcutKeyComboDetails("worktree.palette", "darwin")).toEqual(
+      [{ keys: ["⌘", "J"], doubleTap: false }],
+    );
     expect(formatShortcutKeyComboDetails("worktree.palette", "other")).toEqual([
       { keys: ["Ctrl", "Shift", "J"], doubleTap: false },
     ]);
@@ -33,12 +33,16 @@ describe("shortcut keycap formatting", () => {
     expect(details[0]?.keys).toEqual(["⌘", "N"]);
     expect(details[1]?.keys).toEqual(["⌘", "⇧", "N"]);
   });
-  test("disabled rows render no chips and no hint", () => {
-    expect(formatShortcutKeyComboDetails("tab.close", "darwin")).toEqual([]);
-    expect(formatShortcutChordHint("tab.close", "darwin")).toBeNull();
+  test("source rows expose their default chips and hint", () => {
+    expect(formatShortcutKeyComboDetails("tab.close", "darwin")).toEqual([
+      { keys: ["⌘", "W"], doubleTap: false },
+    ]);
+    expect(formatShortcutChordHint("tab.close", "darwin")).toBe("⌘W");
   });
   test("unknown actions render nothing", () => {
-    expect(formatShortcutKeyComboDetails("no.suchAction", "darwin")).toEqual([]);
+    expect(formatShortcutKeyComboDetails("no.suchAction", "darwin")).toEqual(
+      [],
+    );
   });
   test("chord hints: primary binding only, platform-correct", () => {
     expect(formatShortcutChordHint("tab.newTerminal", "darwin")).toBe("⌘T");
