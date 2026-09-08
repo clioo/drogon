@@ -166,7 +166,10 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | J10 R14-E: tipografía del terminal del fuente (familia, peso, peso en negrita) | R14 | OpenCode Go + Muse 1.3 | fusionada: familia con búsqueda de fuentes del sistema, pesos 500/700, editor sigue al terminal; 1657 tests | #104 |
 | Infra: ventana en segundo plano para pruebas (`DROGON_BACKGROUND_WINDOW=1`: showInactive, política accessory, sin throttling) y foco emulado por CDP en aceptación/oráculo | R14 | Coordinador | fusionada; comprobado: la app en primer plano nunca cambió durante la aceptación | #105 |
 | Infra R15-A: probes del bundle sellado al día con la UI actual (barra de direcciones del browser y demás) para volver a 40/40 | R15 | Muse | fusionada: sellado 40/40 dos veces; destapó el issue qa #114 (barra colapsada en anchos estrechos) | #115 |
-| QA fix R15-B: #114 barra de direcciones del browser en overlay al enfocar en anchos estrechos, como el fork | R15 | Muse | lanzada | |
+| QA fix R15-B: #114 barra de direcciones del browser en overlay al enfocar en anchos estrechos, como el fork | R15 | Muse | fusionada: overlay del fuente (min 220px, ResizeObserver); en 760px el input pasa de 0 a 126px al enfocar | #121 |
+| QA fix R15-C: #117 badge Working en terminales idle y #118 estado de Pi nunca working/needs_input; una sola proyección del estado del daemon con el mapeo del fork | R15 | Muse | lanzada | |
+| Fidelidad UI-AUDIT: catálogo de superficies de referencia (docs/fidelity/reference-surface-catalog.md) con 12 estados de oráculo propuestos | R15 | Muse | fusionada | #120 |
+| QA de UI ronda 1: oráculo contra la referencia, issues `ui-parity`, estados nuevos del oráculo | QA | Muse | lanzada | |
 | QA: manos de accesibilidad para el agente QA (`scripts/qa/drogon-ui.mjs`) y probes sellados al día (paleta "Jump to...", Select de Radix en Mentu, conteo de pestañas por tablist) | R14 | Coordinador | fusionada | #108 |
 | QA ronda 1 sobre main 13d4e38: Pi + dgx-spark (qwen3.8-flash-next) usa la app compilada y reporta issues `qa` | QA | Pi local | lanzada | |
 
