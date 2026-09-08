@@ -569,10 +569,20 @@ fn try_release_native(handle: &SessionHandle) {
 }
 
 fn persist_exit(handle: &SessionHandle, exit_code: i64) -> Result<(), RpcError> {
+    // An exit resolves any pending wait: the agent will never be answered,
+    // so its stamp must not outlive the session in the durable row. A
+    // restored `exited` row carrying a stale `needs_input_at` reports
+    // `agentState exited` with a non-null `agentStateAt`, which poisons
+    // every `session.list` consumer enforcing the session invariants
+    // (#222). Only the durable row clears: past the exit every reader is
+    // verdict-gated (`agent_state_fields` reports no stamp for `exited`,
+    // and `hook_event` refuses exited sessions), so the in-memory signal
+    // is unobservable — and taking its lock here would stall the exit
+    // poller behind PTY-output churn, delaying hook-artifact removal.
     let conn = handle.db.lock().unwrap();
     let changed = conn
         .execute(
-            "UPDATE sessions SET verdict = 'exited', exit_code = ?2 WHERE id = ?1",
+            "UPDATE sessions SET verdict = 'exited', exit_code = ?2, needs_input_at = NULL WHERE id = ?1",
             rusqlite::params![handle.session_id, exit_code],
         )
         .map_err(error::from_sqlite)?;

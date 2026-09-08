@@ -41,6 +41,7 @@ import {
   zoomLevelToFactor,
 } from "./window/window-chrome";
 import { readBuildInfo } from "./build-info";
+import { isolateSessionList } from "./session-bridge";
 import { registerAutomationIpc } from "./automation-bridge";
 import { dispatchFileRequest } from "./file-bridge";
 import { registerGitBridge } from "./git-bridge";
@@ -282,8 +283,21 @@ function registerBridge() {
           });
           return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
         }
-        case "sessions":
-          return callNative("session.list", { workspaceId: value });
+        case "sessions": {
+          // Per-record isolation (#222): one malformed record must never
+          // fail the whole list. Records that already failed the strict
+          // whole-list parse arrive here as an error and pass through
+          // unchanged; records inside an accepted envelope are re-checked
+          // one by one so a single bad one is dropped with a warning.
+          const response = await callNative("session.list", {
+            workspaceId: value,
+          });
+          if (!response.ok) return response;
+          const { sessions, warnings } = isolateSessionList(response.result);
+          for (const warning of warnings)
+            console.warn(`session.list: ${warning}`);
+          return { ok: true, result: { sessions } };
+        }
         case "start": {
           // Additive (R12-E restart reuse): the input is either the bare
           // workspaceId or an object carrying the prior session's recorded

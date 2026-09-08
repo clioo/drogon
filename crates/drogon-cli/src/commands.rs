@@ -20,8 +20,8 @@ use crate::client::{
     WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation, check_automation_history,
     check_automation_list, check_automation_run_now, check_browser_snapshot, check_browser_tab,
     check_browser_tabs, check_harness_catalog, check_project, check_project_list, check_read,
-    check_removed, check_session, check_session_list, check_status, check_workspace,
-    check_workspace_list, check_worktree, check_worktree_list, check_write,
+    check_removed, check_session, check_status, check_workspace, check_workspace_list,
+    check_worktree, check_worktree_list, check_write, partition_session_list,
 };
 use crate::error::{CliError, method_not_found, timeout};
 use crate::output;
@@ -155,9 +155,37 @@ async fn terminal(
             let call = client
                 .call("session.list", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
-            let list: SessionList =
-                Client::decode_checked(&call, "session.list", check_session_list)?;
-            emit(call, json, || output::session_list(&list), 0, None)
+            // One bad record must never fail the whole list (#222): keep
+            // the records that satisfy the session invariants, warn once
+            // per rejected record on stderr, and still exit 0. In JSON
+            // mode stdout carries the validated records only, never the
+            // rejected ones.
+            let list: SessionList = Client::decode(&call, "session.list")?;
+            let (sessions, warnings) = partition_session_list(list);
+            let list = SessionList { sessions };
+            let stderr_note = if warnings.is_empty() {
+                None
+            } else {
+                Some(warnings.join("\n"))
+            };
+            if json && stderr_note.is_some() {
+                let mut filtered = call.raw.clone();
+                filtered["result"]["sessions"] =
+                    serde_json::to_value(&list.sessions).map_err(|err| {
+                        CliError::local(
+                            crate::error::internal_error(format!("cannot encode response: {err}")),
+                            &call.request_id,
+                        )
+                    })?;
+                let call = CallOk {
+                    request_id: call.request_id,
+                    raw: filtered,
+                    result: call.result,
+                };
+                emit(call, json, || output::session_list(&list), 0, stderr_note)
+            } else {
+                emit(call, json, || output::session_list(&list), 0, stderr_note)
+            }
         }
         TerminalAction::Read {
             session,

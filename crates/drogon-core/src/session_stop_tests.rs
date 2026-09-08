@@ -174,6 +174,48 @@ fn restart_keeps_reporting_an_uncleared_wait_with_its_stamp() {
 }
 
 #[test]
+fn exit_clears_a_stale_wait_so_restart_lists_the_exited_session() {
+    // #222: a session that exits while its hook wait is uncleared (Pi
+    // sessions never get the generic PTY clear) must not leave its stamp
+    // in the durable row — after a daemon restart that row lists as
+    // `exited` with a non-null `agentStateAt` and poisons every
+    // `session.list` consumer enforcing the session invariants.
+    let dir = tempfile::tempdir().unwrap();
+    let id = {
+        let engine = Engine::open(dir.path()).unwrap();
+        let session = start_sleep_session(&engine, &dir, "30");
+        let waited = hook_event(&engine, &session, "AgentEnd");
+        assert_eq!(waited["agentState"], "needs_input");
+        let id = waited["id"].as_str().unwrap().to_string();
+        let handle = engine.sessions.lock().unwrap()[id.as_str()].clone();
+        let stopped = session::stop(&handle).unwrap();
+        assert_eq!(stopped["verdict"], "exited");
+        assert_eq!(session_row(&dir, &id).1, None);
+        id
+    };
+    // Same database, new engine: the daemon restart over the persisted DB.
+    let engine = Engine::open(dir.path()).unwrap();
+    let response = engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "list-after-restart".into(),
+        auth: None,
+        method: "session.list".into(),
+        params: json!({}),
+    });
+    assert!(response.ok, "{:?}", response.error);
+    let restored = response.result.unwrap()["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .expect("restarted daemon must still list the prior session")
+        .clone();
+    assert_eq!(restored["verdict"], "exited");
+    assert_eq!(restored["agentState"], "exited");
+    assert_eq!(restored["agentStateAt"], Value::Null);
+}
+
+#[test]
 fn old_schema_without_needs_input_gains_the_column_on_open() {
     let dir = tempfile::tempdir().unwrap();
     Connection::open(dir.path().join(DB_FILE_NAME))
