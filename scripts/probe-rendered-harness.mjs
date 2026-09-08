@@ -55,7 +55,7 @@ export async function probeRenderedHarness({
     `Launch form stays aligned with its trigger, not over the sidebar (trigger ${JSON.stringify(trigger)} form ${JSON.stringify(form)})`,
   );
   assert.equal(
-    await page.getByLabel("Model", { exact: true }).inputValue(),
+    await page.getByRole("textbox", { name: /^Model\b/ }).inputValue(),
     "",
   );
   assert.equal(
