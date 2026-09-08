@@ -8,6 +8,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Tooltip } from "radix-ui";
 import type { Session } from "../../../../shared/session-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
+import type { EditorTabState } from "./editor-tab";
 import { TabBar } from "./TabBar";
 
 beforeEach(installRadixJsdomStubs);
@@ -34,9 +35,14 @@ function renderStrip(overrides: {
   stripOrder?: string[];
   pinnedIds?: string[];
   customTitles?: Record<string, string>;
+  editorTabs?: EditorTabState[];
+  activeEditorTabId?: string | null;
   onOrderChange?: (order: string[]) => void;
   onCommitTitle?: (id: string, title: string | null) => void;
   onTogglePin?: (id: string) => void;
+  onSelectEditorTab?: (id: string) => void;
+  onCloseEditorTab?: (id: string) => void;
+  onCopyText?: (text: string) => void;
 }) {
   const onOrderChange = overrides.onOrderChange ?? (() => {});
   const onCommitTitle = overrides.onCommitTitle ?? (() => {});
@@ -48,6 +54,8 @@ function renderStrip(overrides: {
       activeSessionId="a"
       browserTabs={[]}
       activeBrowserTabId={null}
+      editorTabs={overrides.editorTabs ?? []}
+      activeEditorTabId={overrides.activeEditorTabId ?? null}
       harnesses={[]}
       workspaceId="ws"
       hostId="host"
@@ -65,11 +73,13 @@ function renderStrip(overrides: {
       onCloseToRight={() => {}}
       onCloseToLeft={() => {}}
       onCommitTitle={onCommitTitle}
-      onCopyText={() => {}}
+      onCopyText={overrides.onCopyText ?? (() => {})}
       onSelectSession={() => {}}
       onSelectBrowserTab={() => {}}
+      onSelectEditorTab={overrides.onSelectEditorTab ?? (() => {})}
       onCloseSession={() => {}}
       onCloseBrowserTab={() => {}}
+      onCloseEditorTab={overrides.onCloseEditorTab ?? (() => {})}
       onRetry={() => {}}
       onCreateTerminal={() => {}}
       onLaunchHarness={() => Promise.resolve(false)}
@@ -125,6 +135,8 @@ describe("TabBar strip order", () => {
         activeSessionId="a"
         browserTabs={[]}
         activeBrowserTabId={null}
+        editorTabs={[]}
+        activeEditorTabId={null}
         harnesses={[]}
         workspaceId="ws"
         hostId="host"
@@ -145,8 +157,10 @@ describe("TabBar strip order", () => {
         onCopyText={() => {}}
         onSelectSession={onSelect}
         onSelectBrowserTab={() => {}}
+        onSelectEditorTab={() => {}}
         onCloseSession={() => {}}
         onCloseBrowserTab={() => {}}
+        onCloseEditorTab={() => {}}
         onRetry={() => {}}
         onCreateTerminal={() => {}}
         onLaunchHarness={() => Promise.resolve(false)}
@@ -240,5 +254,62 @@ describe("TabBar default titles", () => {
     expect(
       screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label")),
     ).toEqual(["Terminal 1 live", "db live", "Terminal 3 live"]);
+  });
+});
+
+describe("TabBar editor tabs", () => {
+  const editorTabs: EditorTabState[] = [
+    { tabId: "ws::src/a.ts", workspaceId: "ws", path: "src/a.ts", dirty: false },
+    { tabId: "ws::src/b.ts", workspaceId: "ws", path: "src/b.ts", dirty: true },
+  ];
+
+  it("renders one tab per open file, titled by base name, alongside sessions", () => {
+    renderStrip({ editorTabs });
+    expect(tabIds()).toEqual(["a", "b", "c", "ws::src/a.ts", "ws::src/b.ts"]);
+    expect(screen.getByRole("tab", { name: "a.ts" })).not.toBeNull();
+    expect(screen.getByRole("tab", { name: /b\.ts \(unsaved\)/ })).not.toBeNull();
+  });
+
+  it("shows the dirty indicator only for a dirty editor tab", () => {
+    renderStrip({ editorTabs });
+    const clean = screen.getByRole("tab", { name: "a.ts" });
+    const dirty = screen.getByRole("tab", { name: /b\.ts \(unsaved\)/ });
+    expect(clean.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
+    expect(dirty.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
+  });
+
+  it("activating an editor tab reports its id and no session is marked active", () => {
+    const onSelectEditorTab = vi.fn();
+    renderStrip({ editorTabs, onSelectEditorTab });
+    fireEvent.click(screen.getByRole("tab", { name: "a.ts" }));
+    expect(onSelectEditorTab).toHaveBeenCalledWith("ws::src/a.ts");
+  });
+
+  it("an active editor tab clears the session's active state", () => {
+    renderStrip({ editorTabs, activeEditorTabId: "ws::src/a.ts" });
+    expect(
+      screen.getByRole("tab", { name: /cmd-a/ }).getAttribute("data-active"),
+    ).toBe("false");
+    expect(
+      screen.getByRole("tab", { name: "a.ts" }).getAttribute("data-active"),
+    ).toBe("true");
+  });
+
+  it("closes an editor tab through its close button", () => {
+    const onCloseEditorTab = vi.fn();
+    renderStrip({ editorTabs, onCloseEditorTab });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close a.ts" }),
+    );
+    expect(onCloseEditorTab).toHaveBeenCalledWith("ws::src/a.ts");
+  });
+
+  it("copies the path through the editor tab's context menu", async () => {
+    const onCopyText = vi.fn();
+    renderStrip({ editorTabs, onCopyText });
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a.ts" }));
+    const item = await screen.findByRole("menuitem", { name: "Copy Path" });
+    fireEvent.click(item);
+    expect(onCopyText).toHaveBeenCalledWith("src/a.ts");
   });
 });

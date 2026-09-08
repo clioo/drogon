@@ -2,10 +2,10 @@
    src/renderer/src/components/tab-bar/tab-bar-surface.tsx (strip chrome,
    overflow chevrons) and SortableTab.tsx (tab root chrome: border/state
    classes, active indicator, close affordance). Adapter: the strip holds
-   terminal sessions plus browser pages (no editor/simulator/agent rows);
-   order/pin/rename state is owned by App through tab-order.ts instead of
-   the zustand tab slice; keyboard reorder runs on Ctrl/Cmd+arrows so the
-   plain-arrow roving-tabindex model stays intact. */
+   terminal sessions, browser pages and editor (open file) tabs (no
+   simulator/agent rows); order/pin/rename state is owned by App through
+   tab-order.ts instead of the zustand tab slice; keyboard reorder runs on
+   Ctrl/Cmd+arrows so the plain-arrow roving-tabindex model stays intact. */
 import { useLayoutEffect, useRef, useState } from "react";
 import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import type { DragEndEvent, DragOverEvent } from "@dnd-kit/core";
@@ -24,10 +24,12 @@ import {
 } from "../../session-recovery";
 import { agentStateOf } from "./agent-state";
 import { AgentStateIcon } from "./AgentStateIcon";
+import type { EditorTabState } from "./editor-tab";
 import { ShellIconButton } from "./ShellIconButton";
 import { SortableTab, TAB_STRIP_DRAG_ACTIVATION_PX } from "./SortableTab";
 import { TabCreateMenu } from "./TabCreateMenu";
 import { SortableBrowserTab } from "./tab-strip/SortableBrowserTab";
+import { SortableEditorTab } from "./tab-strip/SortableEditorTab";
 import type { DropIndicator } from "./tab-chrome";
 import {
   moveTabOrder,
@@ -46,18 +48,23 @@ import {
 
 type StripEntry =
   | { kind: "session"; id: string }
-  | { kind: "browser"; id: string };
+  | { kind: "browser"; id: string }
+  | { kind: "editor"; id: string };
 
 /**
- * Unified tab strip: one tab per terminal session plus one per browser
- * page, then the "+" static create menu. Selecting a browser tab shows
- * the browser pane for that page in the tab area below the strip.
+ * Unified tab strip: one tab per terminal session, one per browser page
+ * and one per open file, then the "+" static create menu. Selecting a
+ * browser tab shows the browser pane for that page, and selecting an
+ * editor tab shows the full-width Monaco editor for that file, in the tab
+ * area below the strip.
  */
 export function TabBar({
   sessions,
   activeSessionId,
   browserTabs,
   activeBrowserTabId,
+  editorTabs,
+  activeEditorTabId,
   harnesses,
   workspaceId,
   hostId,
@@ -80,8 +87,10 @@ export function TabBar({
   onCopyText,
   onSelectSession,
   onSelectBrowserTab,
+  onSelectEditorTab,
   onCloseSession,
   onCloseBrowserTab,
+  onCloseEditorTab,
   onRetry,
   onCreateTerminal,
   onLaunchHarness,
@@ -93,6 +102,8 @@ export function TabBar({
   activeSessionId: string;
   browserTabs: BrowserTabState[];
   activeBrowserTabId: string | null;
+  editorTabs: EditorTabState[];
+  activeEditorTabId: string | null;
   harnesses: Harness[];
   workspaceId: string;
   hostId: string | null;
@@ -116,8 +127,10 @@ export function TabBar({
   onCopyText: (text: string) => void;
   onSelectSession: (id: string) => void;
   onSelectBrowserTab: (tabId: string) => void;
+  onSelectEditorTab: (tabId: string) => void;
   onCloseSession: (session: Session) => void;
   onCloseBrowserTab: (tabId: string) => void;
+  onCloseEditorTab: (tabId: string) => void;
   onRetry: () => void;
   onCreateTerminal: () => void;
   onLaunchHarness: (input: HarnessLaunchInput) => Promise<boolean>;
@@ -129,17 +142,20 @@ export function TabBar({
 }) {
   const sessionById = new Map(sessions.map((item) => [item.id, item]));
   const browserById = new Map(browserTabs.map((tab) => [tab.tabId, tab]));
+  const editorById = new Map(editorTabs.map((tab) => [tab.tabId, tab]));
   const ordered = partitionPinnedOrder(
     reconcileTabOrder(
       stripOrder,
       sessions.map((item) => item.id),
       browserTabs.map((tab) => tab.tabId),
+      editorTabs.map((tab) => tab.tabId),
     ),
     pinnedIds,
   );
   const entries: StripEntry[] = ordered.flatMap((id): StripEntry[] => {
     if (sessionById.has(id)) return [{ kind: "session", id }];
     if (browserById.has(id)) return [{ kind: "browser", id }];
+    if (editorById.has(id)) return [{ kind: "editor", id }];
     return [];
   });
   const pinned = new Set(pinnedIds);
@@ -243,7 +259,8 @@ export function TabBar({
   };
   const selectEntry = (entry: StripEntry) => {
     if (entry.kind === "session") onSelectSession(entry.id);
-    else onSelectBrowserTab(entry.id);
+    else if (entry.kind === "browser") onSelectBrowserTab(entry.id);
+    else onSelectEditorTab(entry.id);
   };
   const stepEntry = (currentId: string, delta: number) => {
     if (entries.length === 0) return;
@@ -373,10 +390,38 @@ export function TabBar({
                     />
                   );
                 }
+                if (entry.kind === "editor") {
+                  const tab = editorById.get(entry.id);
+                  if (!tab) return null;
+                  return (
+                    <SortableEditorTab
+                      key={tab.tabId}
+                      tab={tab}
+                      isActive={tab.tabId === activeEditorTabId}
+                      isPinned={pinned.has(tab.tabId)}
+                      hasTabsToRight={hasTabsToRight}
+                      hasTabsToLeft={hasTabsToLeft}
+                      tabCount={entries.length}
+                      dropIndicator={dropIndicatorById.get(tab.tabId)}
+                      onActivate={() => onSelectEditorTab(tab.tabId)}
+                      onClose={() => onCloseEditorTab(tab.tabId)}
+                      onCloseOthers={() => onCloseOthers(tab.tabId)}
+                      onCloseToRight={() => onCloseToRight(tab.tabId)}
+                      onCloseToLeft={() => onCloseToLeft(tab.tabId)}
+                      onTogglePin={() => onTogglePin(tab.tabId)}
+                      onCopyPath={() => onCopyText(tab.path)}
+                      onStripKeyDown={(event) =>
+                        stripKeyDown(event, tab.tabId)
+                      }
+                    />
+                  );
+                }
                 const item = sessionById.get(entry.id);
                 if (!item) return null;
                 const isActive =
-                  item.id === activeSessionId && activeBrowserTabId === null;
+                  item.id === activeSessionId &&
+                  activeBrowserTabId === null &&
+                  activeEditorTabId === null;
                 // Accessible name keeps the legacy "<label> <verdict>" shape
                 // (the verdict text moved off the visible row into the name
                 // so the strip matches the source chrome without losing the

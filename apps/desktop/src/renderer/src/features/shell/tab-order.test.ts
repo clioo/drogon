@@ -51,6 +51,23 @@ describe("reconcileTabOrder", () => {
       "b1",
     ]);
   });
+
+  it("keeps stored positions for editor (file) tabs alongside sessions and browser tabs", () => {
+    expect(
+      reconcileTabOrder(
+        ["src/b.ts", "s1", "src/a.ts"],
+        ["s1"],
+        ["b1"],
+        ["src/a.ts", "src/b.ts"],
+      ),
+    ).toEqual(["src/b.ts", "s1", "src/a.ts", "b1"]);
+  });
+
+  it("drops a closed editor tab id and appends a newly opened one", () => {
+    expect(
+      reconcileTabOrder(["src/a.ts", "s1"], ["s1"], [], ["src/b.ts"]),
+    ).toEqual(["s1", "src/b.ts"]);
+  });
 });
 
 describe("moveTabOrder", () => {

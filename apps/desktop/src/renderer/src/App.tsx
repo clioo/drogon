@@ -45,6 +45,8 @@ import {
 } from "./features/shell/tab-order";
 import { NewWorkspaceComposerModal } from "./features/new-workspace/NewWorkspaceComposerModal";
 import { TabBar } from "./features/shell/TabBar";
+import { editorTabId, type EditorTabState } from "./features/shell/editor-tab";
+import { EditorHost } from "./features/editor";
 import { TitlebarLeftControls } from "./features/shell/TitlebarLeftControls";
 import { RightSidebar } from "./features/right-sidebar/RightSidebar";
 import { SessionDetailsPanel } from "./features/right-sidebar/SessionDetailsPanel";
@@ -581,6 +583,16 @@ export function App() {
   const [activeBrowserTabId, setActiveBrowserTabId] = useState<string | null>(
     null,
   );
+  // R16-A editor tabs (fixes #133): open files are a third tab kind in the
+  // main strip, alongside sessions and browser tabs — purely local state
+  // (no host/daemon concept of "open tabs"; the daemon just serves file
+  // content). `tabId` is the path, so opening an already-open path can
+  // never mint a duplicate tab. Reset on workspace switch below, like the
+  // browser tab selection.
+  const [editorTabs, setEditorTabs] = useState<EditorTabState[]>([]);
+  const [activeEditorTabId, setActiveEditorTabId] = useState<string | null>(
+    null,
+  );
   // R12-D tab strip: order, pins and renames persist per workspace in the
   // shell's own localStorage envelope (tab-order.ts), like the sidebar keys.
   const [tabStrip, setTabStrip] = useState<TabStripState>(() =>
@@ -1066,6 +1078,13 @@ export function App() {
     // workspace-scoped); the subscription above repopulates the list.
     setActiveBrowserTabId(null);
     knownBrowserIds.current = new Set();
+    // Editor tabs (R16-A) are NOT cleared here: they are scope-stamped
+    // (EditorTabState.workspaceId) and filtered to the current workspace at
+    // every use site below, exactly like FilesOpenEntry's scopeKey pattern.
+    // An imperative reset here would race an open-and-switch-workspace
+    // request landing in this same tick (e.g. a terminal file link from a
+    // background workspace) — the effect runs after the render that also
+    // opens the new tab, and would wipe it out.
   }, [selected]);
   useEffect(() => {
     const ids = new Set(browserTabs.map((tab) => tab.tabId));
@@ -1107,6 +1126,30 @@ export function App() {
     activeBrowserTabId !== null
       ? (browserTabs.find((tab) => tab.tabId === activeBrowserTabId) ?? null)
       : null;
+  // Editor tabs are scope-stamped and never actively cleared on a
+  // workspace switch (see the reset effect above); every render-time use
+  // filters to the CURRENT workspace so a foreign-workspace tab is simply
+  // never visible or active — one render after a switch, with no reset
+  // effect that could race an open landing in the same tick.
+  const visibleEditorTabs = editorTabs.filter(
+    (tab) => tab.workspaceId === selected,
+  );
+  const activeEditorTab =
+    activeEditorTabId !== null
+      ? (visibleEditorTabs.find((tab) => tab.tabId === activeEditorTabId) ??
+        null)
+      : null;
+  // Editor host keep-alive mirrors the browser pane: mounts once a file is
+  // open or selected IN THIS WORKSPACE, survives tab-strip switches (the
+  // host itself keeps every previously-opened file's retained draft,
+  // matching EditorPane's own per-file reducer state), unmounts on settled
+  // workspace loss.
+  const editorHostAliveRef = useRef(false);
+  if (current && (activeEditorTab !== null || visibleEditorTabs.length > 0))
+    editorHostAliveRef.current = true;
+  else if (status && !current && !busy && !loadingSessions)
+    editorHostAliveRef.current = false;
+  const editorHostAlive = editorHostAliveRef.current;
   // Automations keep-alive mirrors files: survives switches and
   // transients, unmounts on explicit withhold or settled workspace loss.
   const automationsAvailable = isAutomationsAvailable(liveCapabilities);
@@ -1704,9 +1747,11 @@ export function App() {
   const openComposerForNewWorktree = () => {
     requestCreateWorkspace(newWorktreeTarget()?.id ?? null);
   };
-  // Quick-open reveal: records the request for the Files panel and opens
-  // the sidebar there. The panel applies it when its workspace matches
-  // (see FileOpenRequestCell); the tick re-renders even when already open.
+  // Quick-open reveal: records the request for the Files panel (so the
+  // Explorer tree highlights it) and opens the sidebar there, AND opens/
+  // reuses a main tab-group editor tab for the path (#133) — quick-open,
+  // the Explorer row click and the terminal file-link popover all funnel
+  // through this and openEditorTab below.
   const openFileInFiles = (path: string) => {
     if (!selected) {
       showRightExplorer();
@@ -1720,6 +1765,7 @@ export function App() {
     };
     setFileOpenTick((tick) => tick + 1);
     showRightExplorer();
+    openEditorTab(selected, path);
   };
   const create = () =>
     action(async () => {
@@ -1738,9 +1784,65 @@ export function App() {
   const selectSessionTab = (id: string) => {
     setActive(id);
     setActiveBrowserTabId(null);
+    setActiveEditorTabId(null);
   };
   const selectBrowserTab = (tabId: string) => {
     setActiveBrowserTabId(tabId);
+    setActiveEditorTabId(null);
+  };
+  // Editor tabs (R16-A, fixes #133): opening a path reuses its tab if
+  // already open in that workspace (tabId is workspace+path, so a
+  // duplicate can never be minted) and activates it; selecting one hides
+  // the terminal/browser panes the same way selecting a browser tab does.
+  // Closing the active tab falls back to a strip neighbor, or the
+  // terminal pane once no editor tab is left open in this workspace —
+  // never straight to a foreign tab kind's or workspace's state.
+  //
+  // `workspaceId` is an explicit argument (not read from `selected`/a ref)
+  // because the terminal file-link opener can switch workspaces and open
+  // a tab there in the SAME handler call, before `selected` itself has
+  // re-rendered — the caller already knows the target workspace.
+  const openEditorTab = (workspaceId: string, path: string) => {
+    const tabId = editorTabId(workspaceId, path);
+    setEditorTabs((tabs) =>
+      tabs.some((tab) => tab.tabId === tabId)
+        ? tabs
+        : [...tabs, { tabId, workspaceId, path, dirty: false }],
+    );
+    setActiveEditorTabId(tabId);
+    setActiveBrowserTabId(null);
+  };
+  const selectEditorTab = (tabId: string) => {
+    setActiveEditorTabId(tabId);
+    setActiveBrowserTabId(null);
+  };
+  // EditorHost only ever reports a dirty change for the path it is
+  // CURRENTLY rendering, which by construction is activeEditorTab's path
+  // — so the active tab id (not the bare path, which is not unique
+  // across workspaces) is the unambiguous target.
+  const setEditorTabDirty = (tabId: string, dirty: boolean) => {
+    setEditorTabs((tabs) =>
+      tabs.map((tab) =>
+        tab.tabId === tabId && tab.dirty !== dirty ? { ...tab, dirty } : tab,
+      ),
+    );
+  };
+  const closeEditorTab = (tabId: string) => {
+    setEditorTabs((tabs) => tabs.filter((tab) => tab.tabId !== tabId));
+    if (activeEditorTabId !== tabId) return;
+    const remaining = visibleEditorTabs.filter((tab) => tab.tabId !== tabId);
+    if (remaining.length === 0) {
+      setActiveEditorTabId(null);
+      return;
+    }
+    const order = liveStripOrder();
+    const at = order.indexOf(tabId);
+    const remainingIds = new Set(remaining.map((tab) => tab.tabId));
+    const neighbor = [
+      ...order.slice(at + 1),
+      ...order.slice(0, at).reverse(),
+    ].find((id) => remainingIds.has(id));
+    setActiveEditorTabId(neighbor ?? remaining[remaining.length - 1].tabId);
   };
   const newBrowserTab = () =>
     action(async () => {
@@ -1788,6 +1890,7 @@ export function App() {
         tabStrip.order,
         sessions.map((item) => item.id),
         browserTabs.map((tab) => tab.tabId),
+        visibleEditorTabs.map((tab) => tab.tabId),
       ),
       tabStrip.pinned,
     );
@@ -1798,6 +1901,7 @@ export function App() {
       tabStrip.order,
       sessions.map((item) => item.id),
       browserTabs.map((tab) => tab.tabId),
+      visibleEditorTabs.map((tab) => tab.tabId),
     );
     const next = togglePinnedOrder(order, tabStrip.pinned, id);
     updateTabStrip({ ...tabStrip, ...next });
@@ -1824,7 +1928,7 @@ export function App() {
     if (targets.length === 0) return;
     const doomed = new Set(targets);
     // Move selection off a doomed tab first so each close keeps a survivor.
-    const currentId = activeBrowserTabId ?? active;
+    const currentId = activeEditorTabId ?? activeBrowserTabId ?? active;
     if (doomed.has(currentId)) {
       const at = order.indexOf(anchorId);
       const neighbor = [
@@ -1832,7 +1936,9 @@ export function App() {
         ...order.slice(0, at).reverse(),
       ].find((id) => !doomed.has(id));
       if (neighbor) {
-        if (browserTabs.some((tab) => tab.tabId === neighbor))
+        if (visibleEditorTabs.some((tab) => tab.tabId === neighbor))
+          selectEditorTab(neighbor);
+        else if (browserTabs.some((tab) => tab.tabId === neighbor))
           selectBrowserTab(neighbor);
         else selectSessionTab(neighbor);
       }
@@ -1840,6 +1946,8 @@ export function App() {
     for (const target of targets) {
       const session = sessions.find((item) => item.id === target);
       if (session) void close(session);
+      else if (visibleEditorTabs.some((tab) => tab.tabId === target))
+        closeEditorTab(target);
       else void closeBrowserTab(target);
     }
   };
@@ -2017,8 +2125,8 @@ export function App() {
       }
       // Shift+click (system-default app) has no main primitive in this
       // build; the in-app editor is the honest fallback, never a drop.
-      // Line/column ride the event but the cell carries path only — the
-      // editor has no cursor addressing yet (files-panel owner follow-up).
+      // Line/column ride the event but the cell carries path only, and the
+      // opened editor tab has no cursor addressing yet (owner follow-up).
       fileOpenNonce.current += 1;
       fileOpenCell.current = {
         workspaceId,
@@ -2027,6 +2135,11 @@ export function App() {
       };
       setFileOpenTick((tick) => tick + 1);
       showRightExplorer();
+      // workspaceId (not selectedRef.current) — a workspace switch above
+      // has not re-rendered yet, so `selected` may still read the OLD
+      // workspace here; the tab must open under the id this handler
+      // actually resolved.
+      openEditorTab(workspaceId, detail.path);
     };
     const onRestart = (event: Event) => {
       const detail = (event as CustomEvent<TerminalRestartDetail>).detail;
@@ -2536,6 +2649,8 @@ export function App() {
                 activeSessionId={active}
                 browserTabs={browserTabs}
                 activeBrowserTabId={activeBrowserTabId}
+                editorTabs={visibleEditorTabs}
+                activeEditorTabId={activeEditorTab?.tabId ?? null}
                 harnesses={harnesses}
                 workspaceId={selected}
                 hostId={status?.hostId ?? null}
@@ -2565,8 +2680,10 @@ export function App() {
                 onCopyText={copyStripText}
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
+                onSelectEditorTab={selectEditorTab}
                 onCloseSession={(item) => void close(item)}
                 onCloseBrowserTab={(tabId) => void closeBrowserTab(tabId)}
+                onCloseEditorTab={closeEditorTab}
                 onRetry={() => void refresh()}
                 onCreateTerminal={() => void create()}
                 onLaunchHarness={launchHarness}
@@ -2583,7 +2700,8 @@ export function App() {
                 className="active-session-panel"
                 aria-busy={loadingSessions}
                 style={{
-                  display: activeBrowserTab ? "none" : undefined,
+                  display:
+                    activeBrowserTab || activeEditorTab ? "none" : undefined,
                 }}
               >
                 {terminal &&
@@ -2682,6 +2800,37 @@ export function App() {
                       workspaceId={current.id}
                       hideTabStrip
                       controlledTabId={activeBrowserTabId}
+                    />
+                  </div>
+                ) : null}
+              </div>
+              <div
+                id="editor-tab-panel"
+                role="tabpanel"
+                aria-labelledby={
+                  activeEditorTab ? `editor-tab-${activeEditorTab.tabId}` : undefined
+                }
+                className="active-session-panel"
+                style={{
+                  display: activeEditorTab ? undefined : "none",
+                }}
+              >
+                {editorHostAlive && current && status ? (
+                  // Full-width Monaco in the main pane (fixes #133): the
+                  // fill wrapper mirrors the browser pane above — the host
+                  // was built for a full-width column, not this row.
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <EditorHost
+                      bridge={filesGatedBridge}
+                      scope={{ hostId: status.hostId, workspaceId: current.id }}
+                      path={activeEditorTab?.path ?? null}
+                      onClose={() =>
+                        activeEditorTabId && closeEditorTab(activeEditorTabId)
+                      }
+                      onDirtyChange={(_path, dirty) => {
+                        if (activeEditorTabId)
+                          setEditorTabDirty(activeEditorTabId, dirty);
+                      }}
                     />
                   </div>
                 ) : null}
