@@ -55,6 +55,26 @@ describe("renameShortcutLabel", () => {
   });
 });
 
+describe("buildRowMenuItems Collapse Folder (fork gate)", () => {
+  test("shows only for expanded directories, after Open in Terminal", () => {
+    const collapsed = buildRowMenuItems(dirNode, 1, mutable, false);
+    expect(collapsed.some((item) => item.id === "collapse-folder")).toBe(false);
+    const fileExpanded = buildRowMenuItems(fileNode, 1, mutable, true);
+    expect(fileExpanded.some((item) => item.id === "collapse-folder")).toBe(false);
+    const expanded = buildRowMenuItems(dirNode, 1, mutable, true);
+    const ids = expanded.map((item) => item.id);
+    expect(ids).toContain("collapse-folder");
+    // Source order: Open in Terminal, [Find in Folder — not ported],
+    // Collapse Folder, Reveal in Finder.
+    expect(ids.indexOf("collapse-folder")).toBeGreaterThan(
+      ids.indexOf("open-in-terminal"),
+    );
+    expect(ids.indexOf("collapse-folder")).toBeLessThan(
+      ids.indexOf("reveal-in-finder"),
+    );
+  });
+});
+
 describe("buildRowMenuItems", () => {
   test("a file row carries the MVP subset in source order", () => {
     const items = buildRowMenuItems(fileNode, 1, mutable);

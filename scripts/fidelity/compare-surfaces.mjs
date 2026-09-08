@@ -2704,7 +2704,7 @@ async function refSetup(page, state, ctx) {
         // (data-native-file-drop-target="file-explorer"), no treeitem role.
         const file = page
           .locator('[data-native-file-drop-target="file-explorer"] button')
-          .filter({ hasText: /\.[a-z0-9]+$/i })
+          .filter({ hasText: /\.(md|txt|json|ts|tsx|js|yaml|yml|toml|rs)$/i })
           .first();
         const fallback = page.locator('[data-native-file-drop-target="file-explorer"] button').first();
         const row = (await file.count()) > 0 ? file : fallback;
@@ -2713,7 +2713,10 @@ async function refSetup(page, state, ctx) {
           await row.click({ timeout: 2500 });
           await delay(900);
           const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const tab = page.getByRole("button", { name: new RegExp(escaped) }).last();
+          // The fork's editor tab is a div[data-tab-id] whose text is the
+          // file name (its context menu binds there); role-based lookups
+          // never reach it.
+          const tab = page.locator("[data-tab-id]").filter({ hasText: new RegExp(escaped) }).first();
           const target = (await tab.count()) > 0 ? tab : page.getByRole("tab").last();
           await target.click({ button: "right", timeout: 2500 });
           await delay(600);
@@ -2810,10 +2813,15 @@ async function refSetup(page, state, ctx) {
       }
       await delay(600);
       try {
-        // Fork rows are plain buttons in the tree pane (no treeitem role).
+        // Fork rows are plain buttons in the tree pane (no treeitem role);
+        // prefer a file row so both sides capture the file menu variant.
+        const forkFile = page
+          .locator('[data-native-file-drop-target="file-explorer"] button')
+          .filter({ hasText: /\.(md|txt|json|ts|tsx|js|yaml|yml|toml|rs)$/i })
+          .first();
         const forkRow = page.locator('[data-native-file-drop-target="file-explorer"] button').first();
         const treeRow = page.getByRole("treeitem").first();
-        const row = (await forkRow.count()) > 0 ? forkRow : treeRow;
+        const row = (await forkFile.count()) > 0 ? forkFile : (await forkRow.count()) > 0 ? forkRow : treeRow;
         if ((await row.count()) > 0) {
           await row.click({ button: "right", timeout: 2500 });
           await delay(600);

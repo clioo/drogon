@@ -2,15 +2,18 @@
    src/renderer/src/components/tab-bar/SortableTabContextMenu.tsx (session
    tabs: pin, close variants, Change Title with the tab.close/tab.rename
    shortcut hints), BrowserTab.tsx (browser tabs: Duplicate Tab, pin, close
-   variants, Open In Browser) and EditorFileTabContextMenu.tsx (editor
+   variants, Open In Browser), EditorFileTabContextMenu.tsx (editor
    tabs: pin, close variants including Close All Editor Tabs, Copy Path /
-   Copy Relative Path, Reveal in Finder). Adapter: no split/workspace-layout
-   section (no pane splits in this build), no switch-view row (no native
-   chat view), no Tab Color section (no tab-color store), no editor Rename
-   row (no tab-driven file rename wiring) and no Open Markdown Preview row
-   (no markdown preview surface) — all listed as not-ported. Shortcut hints
-   resolve through the shared keybinding table with persisted overrides
-   (./tab-menu-shortcuts.ts), like the source's useOptionalShortcutLabel. */
+   Copy Relative Path, Reveal in Finder) and TerminalTabSplitMenuSection.tsx
+   (session tabs: the Split terminal submenu with its Split terminal right
+   entry). Adapter: no Move Tab to Split row and no workspace-layout section
+   (no split view), no split-down entry (#129 subset), no switch-view row
+   (no native chat view), no Tab Color section (no tab-color store), no
+   editor Rename row (no tab-driven file rename wiring) and no Open Markdown
+   Preview row (no markdown preview surface) — all listed as not-ported.
+   Shortcut hints resolve through the shared keybinding table with
+   persisted overrides (./tab-menu-shortcuts.ts), like the source's
+   useOptionalShortcutLabel. */
 
 import {
   Copy,
@@ -22,6 +25,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  SquareTerminal,
   X,
 } from "lucide-react";
 import {
@@ -30,6 +34,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import { TAB_CONTEXT_MENU_CONTENT_CLASS } from "./tab-chrome";
@@ -97,6 +104,7 @@ export function TabContextMenu({
   onCloseToRight,
   onCloseToLeft,
   onRenameOpen,
+  splitTerminal = null,
   onDuplicate,
   openInBrowser,
   onCloseAllEditorTabs,
@@ -115,6 +123,13 @@ export function TabContextMenu({
   onCloseToLeft: () => void;
   /** Session tabs: opens the inline rename editor. */
   onRenameOpen?: () => void;
+  /**
+   * Session tabs: the fork's "Split terminal" submenu (TerminalTabSplitMenuSection).
+   * Null hides the section; disabled greys it when the tab already holds
+   * two panes. Only "Split terminal right" is wired — this build has no
+   * split-down (#129 subset, listed as not-ported).
+   */
+  splitTerminal?: { disabled: boolean; onSplitRight: () => void } | null;
   /** Browser tabs: opens a second tab at the same URL (source: Duplicate Tab). */
   onDuplicate?: () => void;
   /** Browser tabs: opens the page in the system browser (shell.openExternal). */
@@ -135,6 +150,7 @@ export function TabContextMenu({
   const closeShortcut = menuShortcutLabel("tab.close", platform);
   const renameShortcut = menuShortcutLabel("tab.rename", platform);
   const closeAllShortcut = menuShortcutLabel("tab.closeAll", platform);
+  const splitRightShortcut = menuShortcutLabel("terminal.splitRight", platform);
   const closeOthersIcon =
     policy.kind === "session" ? (
       <ListX className="size-3.5 shrink-0" />
@@ -165,6 +181,23 @@ export function TabContextMenu({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
+        ) : null}
+        {policy.kind === "session" && splitTerminal ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger disabled={splitTerminal.disabled}>
+              <SquareTerminal className="size-3.5 shrink-0" />
+              Split terminal
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-[12rem]">
+              <DropdownMenuItem onSelect={splitTerminal.onSplitRight}>
+                <PanelRightClose className="size-3.5 shrink-0" />
+                Split terminal right
+                {splitRightShortcut ? (
+                  <DropdownMenuShortcut>{splitRightShortcut}</DropdownMenuShortcut>
+                ) : null}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         ) : null}
         <DropdownMenuItem onSelect={onTogglePin}>
           {policy.isPinned ? (

@@ -27,6 +27,11 @@ import { AgentStateIcon } from "./AgentStateIcon";
 import type { EditorTabState } from "./editor-tab";
 import { ShellIconButton } from "./ShellIconButton";
 import { SortableTab, TAB_STRIP_DRAG_ACTIVATION_PX } from "./SortableTab";
+import {
+  hydrateTerminalSplits,
+  splitForTab,
+  type PersistedTerminalSplitMap,
+} from "../terminal/terminal-split";
 import { TabCreateMenu } from "./TabCreateMenu";
 import { SortableBrowserTab } from "./tab-strip/SortableBrowserTab";
 import { SortableEditorTab } from "./tab-strip/SortableEditorTab";
@@ -87,6 +92,8 @@ export function TabBar({
   onCopyText,
   workspacePath,
   onDuplicateBrowserTab,
+  terminalSplits,
+  onSplitTerminal,
   onSelectSession,
   onSelectBrowserTab,
   onSelectEditorTab,
@@ -131,6 +138,10 @@ export function TabBar({
   onCopyText: (text: string) => void;
   /** Absolute path of the workspace root (editor Copy Relative Path). */
   workspacePath?: string | null;
+  /** Persisted terminal splits (drives the Split terminal submenu gate). */
+  terminalSplits?: PersistedTerminalSplitMap;
+  /** Session tabs: Split terminal right for this tab's root session. */
+  onSplitTerminal?: (sessionId: string) => void;
   /** Opens a second browser tab at the given URL (Duplicate Tab). */
   onDuplicateBrowserTab?: (url: string) => void;
   onSelectSession: (id: string) => void;
@@ -514,6 +525,20 @@ export function TabBar({
                     onCloseToLeft={onCloseToLeft}
                     onTogglePin={onTogglePin}
                     onCommitTitle={onCommitTitle}
+                    splitTerminal={
+                      onSplitTerminal
+                        ? {
+                            // Already split tabs keep the submenu visible
+                            // but disabled, like the source's busy gates.
+                            disabled:
+                              splitForTab(
+                                hydrateTerminalSplits(terminalSplits ?? {}),
+                                item.id,
+                              ) !== null,
+                            onSplitRight: () => onSplitTerminal(item.id),
+                          }
+                        : null
+                    }
                     onStripKeyDown={stripKeyDown}
                   />
                 );
