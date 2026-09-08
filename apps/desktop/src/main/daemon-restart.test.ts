@@ -174,6 +174,43 @@ describe("handleDaemonRestart", () => {
     expect(seen).toContain("runtime.shutdown");
   });
 
+  test("waits for the old endpoint to disappear before respawning", async () => {
+    const seen: string[] = [];
+    const spawn = vi.fn(async () => {});
+    const endpointStates = ["present", "absent", "absent"] as const;
+    let endpointReads = 0;
+    const observeEndpoint = vi.fn(async () => ({
+      kind: endpointStates[
+        Math.min(endpointReads++, endpointStates.length - 1)
+      ],
+    }));
+    const call = scripted(
+      {
+        status: [
+          () => ok(fences),
+          () => fail("unverifiable", "down"),
+          () => fail("unverifiable", "down"),
+          () => ok({ ...fences, serviceInstanceId: "svc2" }),
+        ],
+        "workspace.list": [() => ok({ workspaces: [] })],
+        "runtime.shutdown": [() => ok({ ...fences, accepted: true })],
+      },
+      seen,
+    );
+    const result = await handleDaemonRestart(
+      undefined,
+      deps({ call, spawn, observeEndpoint }),
+    );
+    expect(result).toEqual({
+      restarted: true,
+      managed: true,
+      reason: null,
+      stoppedSessions: 0,
+    });
+    expect(observeEndpoint).toHaveBeenCalledTimes(4);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
   test("a refused session stop aborts before the shutdown", async () => {
     const seen: string[] = [];
     const call = scripted(

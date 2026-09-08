@@ -42,10 +42,11 @@ impl std::error::Error for ServeError {}
 ///
 /// Ordering matters: the exclusive data-dir lock is acquired *before*
 /// anything else touches the directory, so a second `drogond` racing to
-/// start against the same `--data-dir` waits only through the bounded lock
-/// handoff window, then fails at the lock rather than possibly winning a
-/// narrower race on the socket path or the token file while this instance is
-/// mid-startup.
+/// start against the same `--data-dir` fails immediately at the lock rather
+/// than possibly winning a narrower race on the socket path or the token
+/// file while this instance is mid-startup. Managed restart waits for the
+/// incumbent endpoint to disappear before launching its replacement; startup
+/// itself must never wait behind an owned directory.
 #[cfg(unix)]
 pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     std::fs::create_dir_all(data_dir).map_err(ServeError::Io)?;
@@ -56,8 +57,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
             .map_err(ServeError::Io)?;
     }
 
-    let _lock = lock::acquire_exclusive_with_wait(data_dir, lock::STARTUP_LOCK_WAIT)
-        .map_err(ServeError::Io)?;
+    let _lock = lock::acquire_exclusive(data_dir).map_err(ServeError::Io)?;
     let listener = endpoint::establish(data_dir).map_err(ServeError::Io)?;
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = Engine::open(data_dir).map_err(ServeError::Engine)?;
@@ -95,8 +95,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
 pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     std::fs::create_dir_all(data_dir).map_err(ServeError::Io)?;
     reject_unsafe_data_dir(data_dir).map_err(ServeError::Io)?;
-    let _lock = lock::acquire_exclusive_with_wait(data_dir, lock::STARTUP_LOCK_WAIT)
-        .map_err(ServeError::Io)?;
+    let _lock = lock::acquire_exclusive(data_dir).map_err(ServeError::Io)?;
     let listener = endpoint::establish(data_dir).map_err(ServeError::Io)?;
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = Engine::open(data_dir).map_err(ServeError::Engine)?;

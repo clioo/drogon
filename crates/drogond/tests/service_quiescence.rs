@@ -19,6 +19,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -275,6 +276,47 @@ fn admitted_shutdown_stops_serving_thread_and_releases_lock() {
     // succeeds, which is also what allows a replacement instance to start.
     let _relock = drogond::lock::acquire_exclusive(fixture.dir.path())
         .expect("exclusive lock must be reacquirable after the owned exit");
+}
+
+#[test]
+fn second_drogond_refuses_an_owned_data_directory_promptly() {
+    let fixture = ServingFixture::start();
+    let started = std::time::Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_drogond"))
+        .arg("--data-dir")
+        .arg(fixture.dir.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn second drogond");
+
+    let mut observed = None;
+    while started.elapsed() < Duration::from_secs(2) {
+        match child.try_wait().expect("observe second drogond") {
+            Some(status) => {
+                observed = Some(status);
+                break;
+            }
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    if observed.is_none() {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("second drogond did not refuse within 2 seconds");
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("collect second drogond output");
+    let elapsed = started.elapsed();
+    assert!(elapsed < Duration::from_secs(2), "refusal took {elapsed:?}");
+    assert!(!output.status.success(), "second drogond must fail");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("exclusive lock"),
+        "refusal must explain the owned directory: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
