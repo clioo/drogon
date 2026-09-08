@@ -42,7 +42,7 @@ jobs:
           systemctl is-enabled systemd-oomd 2>/dev/null || true
           echo "== earlyoom =="; pgrep -a earlyoom || echo "not running"
           echo "== kernel threads-max =="; cat /proc/sys/kernel/threads-max
-      - name: Start detached memory sampler (setsid: survives process-group signals)
+      - name: Start detached memory sampler (setsid, survives process-group signals)
         run: |
           setsid bash -c '
             echo $$ > /tmp/sampler.pid
