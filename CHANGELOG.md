@@ -1,0 +1,268 @@
+# Changelog
+
+All notable changes to Drogon, grouped by area. Entries are generated from the
+titles of merged pull requests in [clioo/drogon](https://github.com/clioo/drogon),
+one line per PR with its number. The repository is young: releases are not
+tagged yet, so history is organized by the twelve MVP journeys (J1–J12, see
+[docs/migration/rewrite-mvp-plan.md](docs/migration/rewrite-mvp-plan.md)) plus
+supporting areas.
+
+### Core runtime & daemon
+
+- Build the independent Rust and Electron foundation for Drogon (#1)
+- Port provider session records with verified source parity (#2)
+- Add Bot storage and atomic startup migrations (#3)
+- Preserve native session and listener lifecycle (#4)
+- Preserve provider record extensions without shadowing typed authority (#5)
+- Verify live-child recovery across an actual service crash (#6)
+- Add fenced native quiescent shutdown (#8)
+- Integrate five-vertical checkpoints with combined acceptance (#10)
+- V3 checkpoints 001+002: workspace explorer/editor domain+UI, git baseline, host-routing (#12)
+- V4 checkpoint-001: automation dispatch evaluation, Mentu/Meet contracts, exported BotsPanel (#13)
+- V1 checkpoint-001: native dogfood + CLI argument parity 22/22 (#14)
+- V5 platform/release: Windows pipe probe, acceptance runbook, E5 decision prep (#15)
+
+### Shell, sidebar & fixes (J1)
+
+- r6-a-shell-chrome: exact shell chrome and left sidebar (#48)
+- acceptance: follow the ported shell selectors (#50)
+- project and workspace creation flow per orca-drogon source (#57)
+- shell chrome remainder per orca-drogon source (#73)
+- R9-A: worktree card actions — context menu, inline rename, delete dialog (#87)
+- tab strip interactions parity (drag reorder, menu, pin, rename, close variants) (#90)
+- R14-B: main-process shell parity — native app menu, window bounds persistence, dock unread badge (#122)
+- R14-B follow-up: flag-guarded reveal path and dock badge activation-policy guards (#140)
+- fix(parity): #124 #125 #126 #127 #131 #132 (#143)
+- fix(shell): #128 #130 standalone pages and activity-bar gating (#159)
+- feat(sidebar): drag reorder of projects and worktree cards (fork parity) (#162)
+- feat(shell): daemon disconnect and reconnect UX (fork parity) (#180)
+- fix(shell): sidebar always populates once the daemon is ready (#185) (#204)
+- fix(sidebar): worktree card nested session rows like the fork (Fixes #229) (#251)
+- fix(shell): worktree Delete menu works (Fixes #220); model field format and Retry (Fixes #221) (#253)
+
+### Terminal & sessions (J1)
+
+- drogon-cli terminal wait and bundled skill guides (R3-B) (#30)
+- drogon-cli shim in every Drogon terminal plus session env parity (R7-C) (#56)
+- R8-O2: terminal pane parity (theme, zoom, search, links, menu, osc52, exit overlay) (#68)
+- R12-E: terminal paste policy, link action popover, harness-aware restart, guest chord forwarding (#111)
+- fix(terminal): #153 WebGL activates only after first non-zero layout with DPR guards (#165)
+- R16-N: feat(terminal): split terminal right (fork parity) (#177)
+- fix(sessions): J1 loop end to end with the local model (#190)
+- infra: robust Rust tests, background test windows never activate, #198 terminal activation, plan status (#202)
+- fix(sessions): session list survives daemon restart with exited agent sessions (Fixes #222) (#250)
+- R16-AH: fix(terminal): terminal surface end to end (output, find, links, paste, zoom, exit overlay, restore) (#255)
+- fix(sessions): exited stubs are closable, Kill all and Retry act on them after restart (Fixes #228) (#265)
+- R16-AT: perf: robustness under 20 sessions / 6 worktrees (buffers, subscriptions, restore) (#271)
+
+### Agent state & notifications (J1)
+
+- Orca-style sidebar with project/worktree cards and agent-state tab bar (#22)
+- R3-C: needs_input agent state through Claude Code hooks, native notifications (J1) (#35)
+- fix(renderer): drop stale notification state left by the hooks rebase (#36)
+- R13-C: toast notifications parity (sonner Toaster + MVP surface toasts) (#98)
+- R14-C: OpenCode and Pi needs-input/working state via native hooks (#113)
+- fix(agent-state): #117 #118 forward every agent-state transition to the renderer (#139)
+- fix(agent-state): visuals and notification copy parity (#174)
+- fix(shell): #192 launch dialog model, #194 agent-state derivation, #197 create-menu rows (#206)
+- R16-AG: fix(shell): native menu, dock badge, notifications and window state end to end (#214)
+
+### Editor, Explorer & Source Control (J2)
+
+- Git review RPCs and Changes panel (journey J2) (#21)
+- Explorer panel FileExplorer parity (R10-D) (#79)
+- R10-B: Source Control panel content parity with orca-drogon (J2 remainder) (#80)
+- R12-A: Monaco editor and diff viewer parity with orca-drogon (#99)
+- R16-D fix(parity): #135 #137 tab create menu and explorer/source-control structure (#148)
+- fix(editor): #133 open files as main tab-group tabs, not an embedded sidebar editor (#161)
+- fix(shell): #145 hiddenInset window chrome; #147 Terminal N tabs, card summary line, Explorer default (#164)
+- fix(explorer): #156 #157 rename commits exactly, tree follows mutations live (#173)
+- fix(parity): #136 #167 source-control panel copy and create-menu chords (#182)
+- fidelity: oracle states for editor-tab, split-terminal, agent-state (#199)
+- R16-X: keyboard input reaches Monaco; dirty/external-write conflict marks and suspends autosave (fixes #144) (#210)
+- fidelity: oracle states for source-control clean/dirty (git-project fixture) (#216)
+- fix(editor): Save persistence (#207), dirty dot and header parity (#195 #196) (#256)
+
+### Command line (drogon-cli, J3)
+
+- Native coordination: scoped CLI, durable state and worker lifecycle (#9)
+- R1-S: Projects, git worktrees and agent state (Rust core, protocol, CLI) (#25)
+- R16-F fix(projects): #146 CLI-registered projects appear live in the sidebar (#160)
+- R16-AA: fix(cli): drogon-cli end to end from a session as agents use it (#200)
+
+### Browser & ports (J4)
+
+- embedded browser pane (journey J4) (#27)
+- browser control from drogon-cli via daemon-mediated desktop relay (#41)
+- R6-B: right sidebar activity bar, tab create menu, browser as tab (#63)
+- browser tab pane chrome parity (R11-B) (#83)
+- R13-B: Ports panel parity with the orca-drogon source (J4) (#106)
+- R15-A: sealed-bundle probes back to 40/40 (browser address user flow) (#115)
+- fix(browser): #114 overlay collapsed address bar on focus at narrow widths (#121)
+- R16-O: feat(browser): find bar, context menu, menu policy and banners parity (#172)
+- R16-Y fix(browser): J4 end to end and menu chord copy (#179) (#203)
+- fix(main): background test instances never open the system browser, Finder or native pickers (#225)
+- fix(shell): restore editor/browser tabs after restart (#215); refresh workspaces on project changes (#218) (#240)
+- fix(browser): address bar search fallback like the fork (Fixes #234); browser strip tab anatomy (Fixes #235) (#249)
+
+### Palette & quick open (J5)
+
+- R1-B: command palette, quick open and keyboard shortcuts (#17)
+- Land Project/Worktree contracts early and record palette ports (#18)
+- sidebar project/worktree flow, palette new-worktree, xterm font size, quick-open reveal (#40)
+- r12-b: jump palette (⌘J) and quick open (⌘P) parity (#95)
+- fix(palette): J5 jump, quick open and command palette end to end (#205)
+- fix(shell): ⌘J jump palette parity (#257); launch error Retry relaunches with the same inputs (#274)
+
+### Tasks (J6)
+
+- Plan status: browser merged, Tasks and CLI in progress (#28)
+- Tasks page backed by GitHub Issues (journey J6) (#38)
+- Plan status: Tasks merged; worker terminal cleanup rule (#39)
+- R8-G1: Tasks page parity (task-page port) + daemon paging for tasks.list (#71)
+- R12-G: Tasks page pull-request mode (J6 completion) (#93)
+- R16-P feat(tasks): rows, pagination and PR-mode parity (#181)
+- fix(tasks): end-to-end GitHub issues and PR mode with start-from-issue (#183)
+- fix(tasks,explorer): #126 filter chrome parity, #163 verification (#212)
+- fidelity: oracle states for command-palette, launch-dialog, shortcuts-rebind, tasks-filters (#248)
+
+### Automations (J7)
+
+- R2-B: cron scheduler in daemon plus Automations page (J7) (#29)
+- Plan status: automations and CLI merged (#31)
+- settings full page + Automations/Bots/Tasks copy-ARIA parity (#46)
+- R8-O1: Automations page parity (local automations) (#65)
+- R12-F: Automations Runs dashboard and run details page (J7, local automations) (#101)
+- probes: automations empty-state title follows the ported source copy (#158)
+- fidelity: oracle states for automation-runs, bot-responsibilities, toasts, settings-notifications/git (#170)
+- fix(automations): end-to-end runs incl. local-model agent (#211)
+- fix(harness): headless launch for bot and automation runs (#186) (#227)
+- R16-AQ2: fix(automations,tasks): cron preview for rare schedules (Fixes #236); issue-source pills (Fixes #246) (#269)
+
+### Bots (J8)
+
+- R2-S: Bots as a visible journey — create, chat, history (#42)
+- Notices for Bots and Tasks ports; plan status (#43)
+- Bots page remainder (R7-E) (#60)
+- bot.delete, scheduled-run history, card Delete + trigger labels (#67)
+- Bots page exactness against the Drogon fork (R13-A) (#97)
+- R16-S fix(bots): end-to-end run with the local model (#191)
+- fix(pages): Bots opens instantly like Orca (Fixes #237); Tasks single filter bar and fast default load (Fixes #238) (#262)
+
+### Mentu recipes (J9)
+
+- R5-S: Mentu inside the session — recipe panel and tab, approval, execution, evidence, retry (#52)
+- Plan status: Mentu merged, R7 wave (#54)
+- R10-C: terminal event wiring, shell.openExternal, Mentu activity item (#75)
+- r11-d: Mentu panel and tab ported literally from the Drogon fork (#84)
+- R12-H: Mentu recipe editing with daemon save and approval invalidation (#94)
+- desktop: background window mode for test launches; packaged probes follow ported palette and Mentu select (#105)
+- r14-d-mentu-evidence: Mentu run evidence content in the recipe pane (#109)
+- fidelity: oracle states for settings-terminal/agents/shortcuts, terminal-find, browser-find, mentu, session-details (#154)
+- R16-H: pinned Mentu runtime provisioning for fresh installs (J9) (#171)
+- fix(mentu): end-to-end recipe run with the pinned runtime (#193)
+
+### Settings & keybindings (J10)
+
+- Plan status: settings in progress (#32)
+- minimal Settings page (J10) (#33)
+- Record shell and settings ports; plan status (#34)
+- R8-G2: design tokens, fonts and base styles per orca-drogon source (#62)
+- source-parity keybindings (#70)
+- R12-I: settings panes parity (source order, drogon-cli status in Agents) (#89)
+- R14-E: terminal typography settings (family, weights, editor-follows-terminal) (#104)
+- R14-A: project header actions, remove dialog, options Show rows, project settings section (#107)
+- fidelity: oracle states for explorer/source-control/create-menu + sidebar-menus/tab-menus/right-rail/dialogs/settings-general (#138)
+- probes: keybinding definitions moved to shared/keybindings (#141)
+- R16-G: feat(settings): General pane and navigation parity (#166)
+- R16-Q fix(settings): #150 #152 #168 #169 Terminal pane, notification master copy, oracle states (#178)
+- fix(settings): J10 settings persist and take effect end to end (#223)
+- fix(settings): Manage Sessions restart clause and Restart daemon button (Fixes #213) (#239)
+- fix(agents): '+' menu launches immediately with Orca's agent defaults; Agents settings identical to the fork (Fixes #231) (#260)
+- fix(keybindings): every default chord matches the fork (#266)
+- fix(settings): System theme follows the OS (Fixes #241); Shortcuts Disable control and status rail (Fixes #244, Fixes #245) (#267)
+
+### Packaging & install (J11)
+
+- Stage recoverable native desktop startup and sealed preview packaging (#7)
+- installable Drogon preview with extended packaged acceptance (#51)
+- Plan status: packaging merged; six-worker cap (#53)
+- packaged acceptance coverage for post-J11 surfaces (#82)
+- R16-Z fix(packaging): fresh-install first run end to end (#219)
+- R16-AI: fix(accept): probes follow the R16 UI (harness form, packaged surfaces) (#224)
+- R16-Z2 feat(packaging): original Drogon app icon (#243)
+- fix(packaging): rasterize the app icon with Chromium (Fixes #201) (#263)
+
+### Status bar (J12)
+
+- R1-A: Orca-style bottom status bar with real data (J12) (#19)
+- Record status bar ports and update plan status (#20)
+- fix(renderer): restore closing brace lost in status bar merge (#24)
+- fix(status-bar): no horizontal overflow at narrow widths (fork segment priority) (#226)
+
+### Design system & UI primitives
+
+- R10-A: shared UI primitives ported from orca-drogon (shadcn set + reconciled button/input) (#77)
+
+### Fidelity & QA oracle
+
+- Rules: exact fidelity to the orca-drogon source; plan status (#37)
+- r5-f-fidelity: source-anchored fidelity oracle + first full audit (#44)
+- Plan status: fidelity oracle merged, R6 wave (#45)
+- Fidelity oracle: accept the Add-project label; plan status (#47)
+- small fidelity follow-ups per orca-drogon source (#88)
+- docs(fidelity): reference surface catalog (#120)
+- desktop: park background test windows; oracle sizes the candidate natively (#151)
+- R16-AZ: docs: MIT attribution headers, THIRD_PARTY_NOTICES and fidelity catalog refresh (#276)
+
+### Infrastructure & CI
+
+- V2: nav fixes + mount contract + settings/shortcuts foundation (#11)
+- ci green Foundation on ubuntu/macos/windows (hook_event timing, bot_history ordering, app-menu platform labels, main-tokens line endings) (#233)
+- task_4974921f3a45 follow-up: node heap for desktop build (macos-14 OOM) (#247)
+- de-flake hook_event needs_input test (startup-prompt race) (#258)
+
+### Docs & plan
+
+- Plan: ten-worker catalog, R8 wave (#55)
+- Plan: R7-C and R7-A merged (#58)
+- Plan: R9 wave launched (#59)
+- Plan: R7-E merged, R9-C launched (#61)
+- Plan: R8-G2 merged (#64)
+- Plan: R6-B and R8-O1 merged (#66)
+- Plan: R9-C and R8-O2 merged, R10 wave (#69)
+- Plan: R7-I merged, R10-D launched (#72)
+- Plan: R8-G1 and R9-B merged (#74)
+- Plan: R10-C merged, R11 wave; oracle Settings teardown (#76)
+- Plan: R10-A merged, R11-C and R11-D launched (#78)
+- Plan: R10-D and R10-B merged (#81)
+- Plan: R11-B, R11-C and R11-D merged (#85)
+- Plan: R12 wave launched (#86)
+- Plan: R9-A, R11-A, R12-I, R12-D merged (#91)
+- Plan: R13 wave launched (#92)
+- docs: present Drogon with English product copy and screenshots (#96)
+- plan: R12-B, R12-G, R12-H fusionadas (#100)
+- plan: R12-A, R13-A, R13-C fusionadas; ola R14 lanzada (#102)
+- plan: R12-F fusionada (#101) (#103)
+- qa: accessibility-tree hands for the QA agent; packaged tab-strip probe scoped (#108)
+- plan: R13-B, R14-A, R14-D, R14-E fusionadas; QA continuo (#110)
+- plan: R12-E fusionada (#111); R15-A lanzada (#112)
+- plan: R14-C fusionada (#113) (#116)
+- plan: R15-A fusionada (#115); R15-B lanzada (#119)
+- plan: R15-B fusionada (#121); catálogo UI; R15-C y QA de UI (#123)
+- plan: R14-B fusionada (#122) (#134)
+- plan: #138–#141 y ola R16 (#142)
+- plan: R16-C/D fusionadas; R16-E..J lanzadas (#155)
+- docs(plan): R16 status after #159–#178, new rows R16-L..Y and QA rounds 3–4 (#184)
+- docs(plan): status after #190–#206; fix(accept): launch-form alignment probe (#189) (#208)
+- docs(plan): status after #208–#214, R16-AI/AG2, sealed install blocked by #209 (#217)
+- docs(plan): status after #211–#240, installed-app findings, overnight fallback (#242)
+- docs(plan): status after #243–#251, install aa7d386, concurrency cap (#252)
+- docs(plan): status after #253–#260, install 3783ecc, model mix (#261)
+- qa: Round 7 fidelity oracle states (#268)
+- docs(plan): status after #262–#276, new tasks, install 1d83f98 (#277)
+
+- Rewrite MVP plan, current AGENTS rules, cmdk dependency (#16)
+- Plan status: R1-C and R2-A merged (#23)
+- Plan status: R1-S merged, R2-S in progress (#26)
+- Plan status: R6-A merged, R6-B launched (#49)
