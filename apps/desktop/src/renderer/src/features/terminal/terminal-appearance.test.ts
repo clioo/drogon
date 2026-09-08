@@ -1,6 +1,7 @@
-// MIT Copyright (c) 2026 Lovecast Inc. Appearance mapping is Drogon-new
-// (the source's terminal-appearance.test.ts covers Orca's theme catalog);
-// these tests pin this repo's token-derived theme contract.
+// MIT Copyright (c) 2026 Lovecast Inc. Appearance mapping pins the fork's
+// default catalog entries (lib/terminal-themes/defaults.ts: Ghostty Default
+// Style Dark / Builtin Tango Light), copied literally into
+// terminal-appearance.ts.
 import { describe, expect, it } from "vitest";
 import {
   applyTerminalAppearance,
@@ -23,18 +24,34 @@ describe("resolveTerminalScheme", () => {
 });
 
 describe("terminalThemeForScheme", () => {
-  it("derives the dark theme from the repo tokens", () => {
+  it("matches the fork's Ghostty Default Style Dark entry", () => {
     const theme = terminalThemeForScheme("dark");
-    expect(theme.background).toBe("#0a0a0a");
-    expect(theme.foreground).toBe("#fafafa");
-    expect(theme.cursor).toBe("#fafafa");
+    expect(theme.background).toBe("#282c34");
+    expect(theme.foreground).toBe("#ffffff");
+    expect(theme.cursor).toBe("#ffffff");
+    expect(theme.cursorAccent).toBe("#282c34");
+    expect(theme.selectionBackground).toBe("#5a7898");
+    expect(theme.selectionForeground).toBe("#ffffff");
+    expect(theme.red).toBe("#cc6666");
+    expect(theme.green).toBe("#b5bd68");
+    expect(theme.yellow).toBe("#f0c674");
+    expect(theme.blue).toBe("#81a2be");
+    expect(theme.brightWhite).toBe("#eaeaea");
   });
 
-  it("derives the light theme from the repo tokens", () => {
+  it("matches the fork's Builtin Tango Light entry", () => {
     const theme = terminalThemeForScheme("light");
     expect(theme.background).toBe("#ffffff");
-    expect(theme.foreground).toBe("#0a0a0a");
-    expect(theme.cursor).toBe("#0a0a0a");
+    expect(theme.foreground).toBe("#2e3434");
+    expect(theme.cursor).toBe("#2e3434");
+    expect(theme.cursorAccent).toBe("#ffffff");
+    expect(theme.selectionBackground).toBe("#accef7");
+    expect(theme.selectionForeground).toBe("#2e3434");
+    expect(theme.red).toBe("#cc0000");
+    expect(theme.green).toBe("#4e9a06");
+    expect(theme.yellow).toBe("#8e7700");
+    expect(theme.blue).toBe("#3465a4");
+    expect(theme.brightWhite).toBe("#3d3d3d");
   });
 
   it("keeps the selection legible and the scrollbar visible per scheme", () => {
@@ -104,8 +121,8 @@ describe("composeActiveTerminalTheme", () => {
       terminalBackgroundOpacity: 0.9,
       terminalCursorOpacity: 0.8,
     });
-    expect(composed?.background).toBe("rgba(10, 10, 10, 0.9)");
-    expect(composed?.cursor).toBe("rgba(250, 250, 250, 0.8)");
+    expect(composed?.background).toBe("rgba(40, 44, 52, 0.9)");
+    expect(composed?.cursor).toBe("rgba(255, 255, 255, 0.8)");
     const named = composeActiveTerminalTheme(
       { background: "#000000", cursor: "red" },
       { terminalCursorOpacity: 0.5 },
@@ -141,7 +158,7 @@ describe("applyTerminalAppearance", () => {
     } = {};
     applyTerminalAppearance({ options }, "dark");
     const first = options.theme;
-    expect(first?.background).toBe("#0a0a0a");
+    expect(first?.background).toBe("#282c34");
     expect(options.cursorStyle).toBe("block");
     expect(options.cursorBlink).toBe(true);
     expect(options.allowTransparency).toBe(false);
