@@ -248,6 +248,16 @@ the Drogon fork's `src/renderer/src/components/ui/sonner.tsx`, its
 (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
 file keeps the MIT notice.
 
+The Monaco file editor and diff viewer in
+`apps/desktop/src/renderer/src/features/editor/` (MonacoFileEditor, editor
+header/labels/dirty-state/pending-flush/save-queue/autosave modules, CsvViewer)
+and `features/source-control/diff/` (DiffViewer, diff editor options,
+hunk reconstruction, line stats, navigation context) port the Drogon fork's
+`src/renderer/src/components/editor/**` and `src/renderer/src/components/diff/**`
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT), on
+`monaco-editor` and `@monaco-editor/react` (MIT). Each ported file keeps the
+MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
