@@ -172,20 +172,37 @@ dev`. Capturas por Playwright CDP como hace `scripts/accept-desktop.mjs`.
 | QA de UI ronda 1: oráculo contra la referencia, issues `ui-parity`, estados nuevos del oráculo | QA | Muse | hecha: 14 estados, 12 issues (#124–#132, #135–#137), estados explorer/source-control/create-menu | #138 |
 | Shell R14-B follow-up: reveal de ventana y badge del dock guardados por `DROGON_BACKGROUND_WINDOW` con tests | R14 | GLM 5.3 Flash | fusionada | #140 |
 | Infra: probe sellado lee los atajos desde shared/keybindings | R14 | Coordinador | fusionada | #141 |
-| QA fix R16-A: #133 archivos como pestañas del grupo principal (TabGroupPanel del fork), Explorer solo árbol | R16 | Sonnet | lanzada | |
-| QA fix R16-B: #128 Tasks/Automations/Bots como páginas independientes y #130 ítems/gating de la barra de actividad derecha | R16 | Muse | lanzada | |
+| QA fix R16-A: #133 archivos como pestañas del grupo principal (TabGroupPanel del fork), Explorer solo árbol | R16 | Sonnet | fusionada: archivos como pestañas del grupo principal, cierre y reapertura por pestaña | #161 |
+| QA fix R16-B: #128 Tasks/Automations/Bots como páginas independientes y #130 ítems/gating de la barra de actividad derecha | R16 | Muse | fusionada (seguimiento #140) | #159 |
 | QA fix R16-C: lote copy/tokens #124 #125 #126 #127 #131 #132 #136 | R16 | Muse | fusionada: un commit por issue; no portado: aviso de gestor externo, presets de asignado, selector de fuente, botón de resource manager | #143 |
 | QA fix R16-D: #135 menú New tab del fuente y #137 estructura de Explorer y filas de Source Control | R16 | Muse | fusionada: combobox de búsqueda, orden/chords/iconos del fuente, filas planas; 1831 tests | #148 |
 | Infra: ventanas de prueba aparcadas fuera del área de trabajo; el oráculo dimensiona la candidata en nativo (sin emulación de viewport) | R16 | Coordinador | fusionada | #151 |
-| QA fix R16-E: #145 barra de título nativa (hiddenInset y semáforos del fork) y #147 títulos de pestaña, línea de la tarjeta, panel Explorer por defecto | R16 | Muse | lanzada | |
-| QA fix R16-F: #146 proyecto añadido por CLI no aparece en el sidebar | R16 | Muse | lanzada | |
-| J10 R16-G: Settings General y navegación del fuente; pliega #150 y #152 | R16 | Muse | lanzada | |
-| J9 R16-H: runtime fijado de Mentu empaquetado como el fork (provisión por script, instalación en el data dir con sha verificado); pliega #149 | R16 | Sonnet | lanzada | |
-| J1 R16-I: visuales de estado del agente y copy de notificaciones del fuente | R16 | Muse | lanzada | |
-| QA fix R16-J: #153 terminal a media escala en el cuadrante inferior izquierdo al montar antes del layout | R16 | Muse | lanzada | |
-| QA de UI ronda 2 sobre main 5d12eab | QA | Muse | en curso: #149, #150, #152 plegados en R16-G/H | |
+| QA fix R16-E: #145 barra de título nativa (hiddenInset y semáforos del fork) y #147 títulos de pestaña, línea de la tarjeta, panel Explorer por defecto | R16 | Muse | fusionada: hiddenInset con semáforos del fork, pestañas Terminal N, línea de la tarjeta, Explorer por defecto | #164 |
+| QA fix R16-F: #146 proyecto añadido por CLI no aparece en el sidebar | R16 | Muse | fusionada: digest `project.changes` empuja altas por CLI al sidebar | #160 |
+| J10 R16-G: Settings General y navegación del fuente; pliega #150 y #152 | R16 | Muse | fusionada: pane General y navegación del fuente; pane por defecto General | #166 |
+| J9 R16-H: runtime fijado de Mentu empaquetado como el fork (provisión por script, instalación en el data dir con sha verificado); pliega #149 | R16 | Sonnet | fusionada: `scripts/mentu-runtime-provision.mjs`, `mentu.runtime_install` en el bootstrap del daemon | #171 |
+| J1 R16-I: visuales de estado del agente y copy de notificaciones del fuente | R16 | Muse | fusionada: iconos/colores de estado y copy de notificaciones del fuente | #174 |
+| QA fix R16-J: #153 terminal a media escala en el cuadrante inferior izquierdo al montar antes del layout | R16 | Muse | fusionada: WebGL se activa tras el primer layout no nulo con guardas de DPR | #165 |
+| QA de UI ronda 2 sobre main 5d12eab | QA | Muse | hecha: #149 #150 #152 (R16-G/H/Q); estados settings-terminal/agents/shortcuts | #154 |
 | QA: manos de accesibilidad para el agente QA (`scripts/qa/drogon-ui.mjs`) y probes sellados al día (paleta "Jump to...", Select de Radix en Mentu, conteo de pestañas por tablist) | R14 | Coordinador | fusionada | #108 |
-| QA ronda 1 sobre main 13d4e38: Pi + dgx-spark (qwen3.8-flash-next) usa la app compilada y reporta issues `qa` | QA | Pi local | en curso: #117, #118 (corregidos en #139), #133 (R16-A) | |
+| QA ronda 1 sobre main 13d4e38: Pi + dgx-spark (qwen3.8-flash-next) usa la app compilada y reporta issues `qa` | QA | Pi local | en curso: #117 #118 (#139), #133 (#161), #156 #157 #163 (#173), #175 #176 (R16-R), #144 (R16-X), #179 (R16-Y) |  |
+| J1 R16-K: reordenar proyectos y tarjetas de worktree arrastrando (dnd del fuente) | R16 | Muse | fusionada | #162 |
+| J2 R16-L: #156 #157 renombrar/borrar exactos en Explorer y árbol que sigue las mutaciones; pliega #163 (esquemas files.create/rename/delete que faltaban en `callNative`) | R16 | Muse | fusionada; #163 pendiente de verificar en main | #173 |
+| J1 R16-M: pérdida y recuperación de la conexión con el daemon (banner, segmento de la barra de estado, overlay del panel, escalera de backoff del fuente, sin toast de reconexión) | R16 | Muse | en integración | #180 |
+| J1 R16-N: dividir terminal a la derecha (⌘D, menú contextual, sash, cabecera de panel); pliega #129 | R16 | Muse | fusionada | #177 |
+| J4 R16-O: barra de búsqueda, menú contextual, política de menú y banners del browser | R16 | Muse | fusionada | #172 |
+| J6 R16-P: filas, paginación y modo PR de Tasks frente al fuente; pliega #126 | R16 | Muse | lanzada | |
+| J10 R16-Q: pane Terminal, copy de Notifications, filas de Agents y Git (#150 #152 #168 #169, parcial: filas sin backend quedan listadas en el PR) | R16 | Muse | fusionada | #178 |
+| QA fix R16-R: #136 #167 #175 #176 copy y acciones de Source Control, chords del menú New tab | R16 | Muse | lanzada | |
+| J8 R16-S: Bots de extremo a extremo con el modelo local (crear, responsabilidades, run visible, historial) | R16 | Muse | lanzada | |
+| J7 R16-T: Automations de extremo a extremo (cron real de un minuto, run now, dashboard, run de agente local) | R16 | Muse | lanzada | |
+| J9 R16-U: Mentu de extremo a extremo con el runtime fijado (aprobar, ejecutar, evidencia, retry, cancelar) | R16 | Muse | lanzada | |
+| J1 R16-V: bucle J1 de extremo a extremo con el modelo local (composer → harness → estados → persistencia → reinicio) | R16 | Muse | lanzada | |
+| J6 R16-W: Tasks de extremo a extremo contra GitHub real (`gh`, start desde issue) | R16 | Muse | lanzada | |
+| QA fix R16-X: #144 el editor no recibe teclado; J2 editar/guardar de extremo a extremo con check sellado que teclea | R16 | Muse | lanzada | |
+| J4 R16-Y: browser de extremo a extremo (barra, navegación, buscar, zoom, menús, CLI, persistencia) y #179 chords del menú | R16 | Muse | lanzada | |
+| QA de UI ronda 3 sobre main f0ce137 | QA | Muse | hecha: verificados #125 #127 #132 (parcial) #128 #130; nuevos #167 #168 #169; estados automation-runs, bot-responsibilities, toasts, settings-notifications/git | #170 |
+| QA de UI ronda 4 sobre main 11c1bbb | QA | Muse | en curso: verificación de R16-B/F/J/K/Q y estados editor-tab, split-terminal, agent-state, tasks-rows | |
 
 ## 7. QA continuo
 
