@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createElement, createRef } from "react";
 import { renderToString } from "react-dom/server";
 import type {
+  Harness,
   Project,
   Workspace,
   Worktree,
@@ -55,10 +56,21 @@ function workspace(): Workspace {
   };
 }
 
+function piHarness(): Harness {
+  return {
+    harnessId: "pi",
+    displayName: "Pi",
+    availability: "available",
+    executable: "/opt/pi",
+  };
+}
+
 function render(
   groups: ProjectGroup[],
   workspaces: Workspace[],
   projectId: string | null,
+  harnesses: Harness[] = [],
+  defaultHarnessId = "",
 ): string {
   return renderToString(
     createElement(NewWorkspaceComposer, {
@@ -67,8 +79,11 @@ function render(
       projectId,
       disabled: false,
       nameInputRef: createRef<HTMLInputElement>(),
+      harnesses,
+      defaultHarnessId,
       onProjectChange: () => {},
       onSubmitWorktree: async () => null,
+      onLaunchAgent: async () => null,
       onSelectWorkspace: () => {},
       onAddProject: () => {},
       onClose: () => {},
@@ -103,5 +118,36 @@ describe("NewWorkspaceComposer chrome", () => {
     expect(html).toContain("Add a project before creating a workspace.");
     expect(html).toContain("Create workspace");
     expect(html).toContain("disabled");
+  });
+
+  test("no listed harnesses: the Agent picker stays hidden", () => {
+    const html = render([folderGroup(), gitGroup()], [workspace()], "git:1");
+    expect(html).not.toContain("composer-agent");
+  });
+
+  test("listed harnesses: Agent picker with a None default", () => {
+    const html = render(
+      [folderGroup(), gitGroup()],
+      [workspace()],
+      "git:1",
+      [piHarness()],
+    );
+    expect(html).toContain("Agent");
+    expect(html).toContain("None");
+    expect(html).toContain("Pi");
+    expect(html).not.toContain("Harness default");
+  });
+
+  test("stored default harness: model and Pi provider fields appear", () => {
+    const html = render(
+      [folderGroup(), gitGroup()],
+      [workspace()],
+      "git:1",
+      [piHarness()],
+      "pi",
+    );
+    expect(html).toContain("Harness default");
+    expect(html).toContain("Provider");
+    expect(html).toContain("Pi default");
   });
 });

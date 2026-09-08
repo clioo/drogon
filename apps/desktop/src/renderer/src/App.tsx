@@ -45,6 +45,10 @@ import {
   type TabStripState,
 } from "./features/shell/tab-order";
 import { NewWorkspaceComposerModal } from "./features/new-workspace/NewWorkspaceComposerModal";
+import {
+  composerAgentLaunchInput,
+  type ComposerAgentSelection,
+} from "./features/new-workspace/composer-submit";
 import { TabBar } from "./features/shell/TabBar";
 import { editorTabId, type EditorTabState } from "./features/shell/editor-tab";
 import { EditorHost } from "./features/editor";
@@ -1701,10 +1705,37 @@ export function App() {
     }
     return null;
   };
+  // Starts the composer's picked agent in a workspace (journey J1): the
+  // composer chains `worktree.create` + `harness.start` so a worktree can
+  // open straight into a Pi session with the free local provider/model.
+  // Resolves a verbatim daemon error, or null when the agent tab is live.
+  const launchComposerAgent = async (
+    workspaceId: string,
+    agent: ComposerAgentSelection,
+  ): Promise<string | null> => {
+    const launch = composerAgentLaunchInput(
+      workspaceId,
+      agent,
+      crypto.randomUUID(),
+    );
+    if (!launch) return null;
+    let session: Session;
+    try {
+      const result = await window.drogon.startHarness(launch);
+      if (!result.ok) return result.error.message;
+      session = result.result;
+    } catch {
+      return "Could not start the agent. Retry the connection.";
+    }
+    setSessions((items) => appendOrReplaceSession(items, session));
+    setActive(session.id);
+    return null;
+  };
   const submitWorktree = async (input: {
     projectId: string;
     name: string;
     baseRef?: string;
+    agent: ComposerAgentSelection;
   }): Promise<string | null> => {
     const bridge = windowProjectBridge(window.drogon);
     if (typeof bridge.worktreeCreate !== "function")
@@ -1717,10 +1748,15 @@ export function App() {
     } catch {
       return "Could not create the worktree. Retry the connection.";
     }
-    setProjectAction(null);
-    setComposer(null);
+    // The worktree exists from here on: a failed agent launch keeps the
+    // composer open on the error instead of closing over it, with the new
+    // workspace already selected behind.
+    const agentFailure = await launchComposerAgent(workspaceId, input.agent);
     await refresh();
     selectWorkspaceId(workspaceId);
+    if (agentFailure) return agentFailure;
+    setProjectAction(null);
+    setComposer(null);
     return null;
   };
   const submitRemoveWorktree = async (
@@ -3440,7 +3476,22 @@ export function App() {
           workspaces={workspaces}
           initialProjectId={composer.initialProjectId}
           disabled={busy}
+          harnesses={harnesses}
+          defaultHarnessId={defaultHarnessId}
           onSubmitWorktree={submitWorktree}
+          onLaunchAgent={async (launch) => {
+            let session: Session;
+            try {
+              const result = await window.drogon.startHarness(launch);
+              if (!result.ok) return result.error.message;
+              session = result.result;
+            } catch {
+              return "Could not start the agent. Retry the connection.";
+            }
+            setSessions((items) => appendOrReplaceSession(items, session));
+            setActive(session.id);
+            return null;
+          }}
           onSelectWorkspace={selectWorkspaceId}
           onAddProject={() => {
             setComposer(null);
