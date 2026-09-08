@@ -59,7 +59,7 @@ export function SortableTab({
   onCloseToLeft,
   onTogglePin,
   onCommitTitle,
-  onCopyId,
+  splitTerminal = null,
   onStripKeyDown,
 }: {
   id: string;
@@ -85,7 +85,8 @@ export function SortableTab({
   onCloseToLeft: (id: string) => void;
   onTogglePin: (id: string) => void;
   onCommitTitle: (id: string, title: string | null) => void;
-  onCopyId: (id: string) => void;
+  /** Session tabs: the fork's "Split terminal" submenu (null hides it). */
+  splitTerminal?: { disabled: boolean; onSplitRight: () => void } | null;
   /** Strip-level arrows/Home/End plus reorder, owned by the tab strip. */
   onStripKeyDown: (event: React.KeyboardEvent, id: string) => void;
 }): React.JSX.Element {
@@ -299,14 +300,13 @@ export function SortableTab({
         onOpenChange={setMenuOpen}
         point={menuPoint}
         policy={policy}
-        copyLabel="Copy Session ID"
         onTogglePin={() => onTogglePin(id)}
         onClose={() => onClose(id)}
         onCloseOthers={() => onCloseOthers(id)}
         onCloseToRight={() => onCloseToRight(id)}
         onCloseToLeft={() => onCloseToLeft(id)}
         onRenameOpen={openRename}
-        onCopy={() => onCopyId(id)}
+        splitTerminal={splitTerminal}
       />
     </div>
   );

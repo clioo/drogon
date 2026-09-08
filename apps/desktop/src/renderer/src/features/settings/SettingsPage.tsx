@@ -8,7 +8,11 @@
 // and the pane, and ⌘F focuses the search field.
 import { useEffect, useRef, useState } from "react";
 import type { Harness, Project } from "../../../../shared/session-contract";
-import type { HarnessAgentDefault, Theme, TerminalGpuAcceleration } from "../../settings-store";
+import type {
+  HarnessAgentDefault,
+  Theme,
+  TerminalGpuAcceleration,
+} from "../../settings-store";
 import { AgentsSection } from "./agents-section";
 import { AppearanceSection } from "./appearance-section";
 import { GeneralSection } from "./general-section";
@@ -75,6 +79,12 @@ export type SettingsPageProps = {
   ) => void;
   notifyOnAgentNeedsInput: boolean;
   onNotifyChange: (next: boolean) => void;
+  notifyOnAgentTaskComplete?: boolean;
+  onAgentTaskCompleteChange?: (next: boolean) => void;
+  notifyOnTerminalBell?: boolean;
+  onTerminalBellChange?: (next: boolean) => void;
+  notifySuppressWhenFocused?: boolean;
+  onSuppressWhenFocusedChange?: (next: boolean) => void;
   /** Selected workspace path for the git probe; null renders the honest empty state. */
   workspacePath: string | null;
   initialSection?: SettingsPageSection;
@@ -82,6 +92,11 @@ export type SettingsPageProps = {
   project?: Project | null;
   /** Removes the project registration; the page closes on success. */
   onRemoveProject?: (projectId: string) => void;
+  /** Persists Project Settings → Setup script; returns an error string or null. */
+  onUpdateSetupScript?: (
+    projectId: string,
+    setupScript: string | null,
+  ) => Promise<string | null>;
   onBack: () => void;
 };
 
@@ -102,10 +117,7 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
   // action for pointer users).
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "f"
-      ) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         searchInputRef.current?.focus();
         return;
@@ -200,9 +212,13 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                       props.onTerminalGpuAccelerationChange
                     }
                     terminalFontFamily={props.terminalFontFamily}
-                    onTerminalFontFamilyChange={props.onTerminalFontFamilyChange}
+                    onTerminalFontFamilyChange={
+                      props.onTerminalFontFamilyChange
+                    }
                     terminalFontWeight={props.terminalFontWeight}
-                    onTerminalFontWeightChange={props.onTerminalFontWeightChange}
+                    onTerminalFontWeightChange={
+                      props.onTerminalFontWeightChange
+                    }
                     terminalFontWeightBold={props.terminalFontWeightBold}
                     onTerminalFontWeightBoldChange={
                       props.onTerminalFontWeightBoldChange
@@ -229,6 +245,12 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                   <NotificationsSection
                     notifyOnAgentNeedsInput={props.notifyOnAgentNeedsInput}
                     onNotifyChange={props.onNotifyChange}
+                    notifyOnAgentTaskComplete={props.notifyOnAgentTaskComplete}
+                    onAgentTaskCompleteChange={props.onAgentTaskCompleteChange}
+                    notifyOnTerminalBell={props.notifyOnTerminalBell}
+                    onTerminalBellChange={props.onTerminalBellChange}
+                    notifySuppressWhenFocused={props.notifySuppressWhenFocused}
+                    onSuppressWhenFocusedChange={props.onSuppressWhenFocusedChange}
                   />
                 ) : null}
                 {visible.includes("shortcuts") ? <ShortcutsSection /> : null}
@@ -239,6 +261,7 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                       onRemoveProject={(projectId) =>
                         props.onRemoveProject?.(projectId)
                       }
+                      onUpdateSetupScript={props.onUpdateSetupScript}
                     />
                   </ProjectSettingsSectionChrome>
                 ) : null}

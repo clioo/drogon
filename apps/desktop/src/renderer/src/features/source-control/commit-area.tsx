@@ -1,10 +1,12 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/right-sidebar/source-control/commit/commit-area.tsx.
-// Adapter: the MVP action surface is Commit / Commit & Push / amend-last
-// (via the chevron menu); AI generation, hosted-review composers and
-// failure-recovery launches have no MVP backend and are not ported.
+// Adapter: AI generation, hosted-review composers and failure-recovery
+// launches have no MVP backend and are not ported. The chevron menu holds
+// the reference dropdown rows (see commit-dropdown-items.ts); the previous
+// port's amend toggle does not exist in the reference UI and was removed.
 import React from "react";
-import { CommitActionMenu, type CommitDropdownEntry, type CommitPrimaryAction } from "./commit-action-menu";
+import { CommitActionMenu, type CommitPrimaryAction } from "./commit-action-menu";
+import { buildCommitDropdownItems } from "./commit-dropdown-items";
 import { CommitMessageComposer } from "./commit-message-composer";
 import { CommitNotices, type CommitNoticeTone } from "./commit-notices";
 import { getCommitMessageTextareaRows } from "./commit-message-rows";
@@ -16,18 +18,32 @@ export type CommitAreaProps = {
   prNotice: { message: string; tone: CommitNoticeTone } | null;
   prUrl: string | null;
   isCommitting: boolean;
-  /** Commit & Push / amend chevron is busy (push or amend running). */
+  /** A remote operation (push/pull/fetch) is running. */
   isSecondaryBusy: boolean;
   showComposer?: boolean;
   stagedCount: number;
   hasPartiallyStagedChanges: boolean;
   isBusy: boolean;
-  amend: boolean;
-  canAmend: boolean;
+  /** Compare state for the dropdown rows and their labels. */
+  upstream: string | null;
+  ahead: number | null;
+  behind: number | null;
+  /** Create PR row gate, from resolveCreatePrToolbarAction. */
+  createPrDisabled: boolean;
+  createPrReason: string | null;
   onCommitMessageChange: (message: string) => void;
   onCommit: () => void;
   onCommitAndPush: () => void;
-  onToggleAmend: () => void;
+  onCommitAndSync: () => void;
+  onPush: () => void;
+  /** Fork's "Push before PR": push, then create the PR. */
+  onPushBeforePr: () => void;
+  /** Fork's "Fast-forward" row — this repo's pull is ff-only. */
+  onFastForward: () => void;
+  /** Fork's "Sync" row: pull, then push. */
+  onSync: () => void;
+  onFetch: () => void;
+  onCreatePr: () => void;
 };
 
 export function CommitArea({
@@ -42,50 +58,49 @@ export function CommitArea({
   stagedCount,
   hasPartiallyStagedChanges,
   isBusy,
-  amend,
-  canAmend,
+  upstream,
+  ahead,
+  behind,
+  createPrDisabled,
+  createPrReason,
   onCommitMessageChange,
   onCommit,
   onCommitAndPush,
-  onToggleAmend,
+  onCommitAndSync,
+  onPush,
+  onPushBeforePr,
+  onFastForward,
+  onSync,
+  onFetch,
+  onCreatePr,
 }: CommitAreaProps): React.JSX.Element {
   // Why: cap at 12 rows so a pasted multi-page message doesn't push the Commit button off-screen (textarea scrolls internally past that).
   const rows = getCommitMessageTextareaRows(commitMessage);
   const hasMessage = commitMessage.trim().length > 0;
-  // Amending needs no staged rows (it can also just rewrite the message);
-  // partially-staged files only warn via the row badges, they never block.
+  // Partially-staged files only warn via the row badges, they never block.
   void hasPartiallyStagedChanges;
-  const commitDisabled = isBusy || !hasMessage || (stagedCount === 0 && !amend);
+  const canCommit = hasMessage && stagedCount > 0;
+  const commitDisabled = isBusy || !canCommit;
   const primaryAction: CommitPrimaryAction = {
-    kind: amend ? "amend" : "commit",
-    label: isCommitting ? "Committing…" : amend ? "Amend" : "Commit",
-    title: amend
-      ? "Amend the previous commit with the staged changes"
-      : stagedCount === 0
+    kind: "commit",
+    label: isCommitting ? "Committing…" : "Commit",
+    title:
+      stagedCount === 0
         ? "Stage changes and write a message to commit"
         : "Commit staged changes",
     disabled: commitDisabled,
   };
-  const dropdownItems: CommitDropdownEntry[] = [
-    {
-      kind: "commit-push",
-      id: "commit-push",
-      label: "Commit & Push",
-      hint: hasMessage ? undefined : "Write a message first",
-      title: "Commit staged changes and push upstream",
-      disabled: isBusy || !hasMessage || stagedCount === 0,
-    },
-    { kind: "separator", id: "sep-amend" },
-    {
-      kind: "amend",
-      id: "amend",
-      label: amend ? "✓ Amend last commit" : "Amend last commit",
-      title: canAmend
-        ? "Fold staged changes into the previous commit"
-        : "No previous commit to amend",
-      disabled: !canAmend || isBusy,
-    },
-  ];
+  const dropdownItems = buildCommitDropdownItems({
+    hasMessage,
+    canCommit,
+    commitBusy: isBusy,
+    syncBusy: isSecondaryBusy,
+    hasUpstream: upstream != null,
+    ahead: ahead ?? 0,
+    behind: behind ?? 0,
+    createPrDisabled: createPrDisabled || isBusy,
+    createPrReason,
+  });
   const describedBy = [
     commitError ? "commit-area-error" : null,
     remoteActionError ? "commit-area-remote-error" : null,
@@ -113,8 +128,15 @@ export function CommitArea({
         dropdownItems={dropdownItems}
         onPrimaryAction={onCommit}
         onDropdownAction={(kind) => {
-          if (kind === "commit-push") onCommitAndPush();
-          else if (kind === "amend") onToggleAmend();
+          if (kind === "commit") onCommit();
+          else if (kind === "commit-push") onCommitAndPush();
+          else if (kind === "commit-sync") onCommitAndSync();
+          else if (kind === "push") onPush();
+          else if (kind === "create-pr") onCreatePr();
+          else if (kind === "push-pr") onPushBeforePr();
+          else if (kind === "fast-forward") onFastForward();
+          else if (kind === "sync") onSync();
+          else if (kind === "fetch") onFetch();
         }}
       />
       <CommitNotices
@@ -126,4 +148,3 @@ export function CommitArea({
     </div>
   );
 }
-

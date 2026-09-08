@@ -72,7 +72,6 @@ function renderCard(sessions: Session[], activeSessionId: string) {
       tabStrip={EMPTY_TAB_STRIP_STATE}
       onRemove={null}
       onRename={null}
-      onCreateWorktree={null}
       />
     </TooltipProvider>,
   );

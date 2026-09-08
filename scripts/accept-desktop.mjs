@@ -548,7 +548,11 @@ try {
     cwd: gitDir,
   });
   await writeFile(path.join(gitDir, "notes.txt"), "composer fixture\n");
-  await runAcceptanceProcess("git", [...gitIdentity, "add", "notes.txt"], {
+  await mkdir(path.join(gitDir, "src"));
+  await writeFile(path.join(gitDir, "src", "fixture.txt"), "sparse fixture\n");
+  await mkdir(path.join(gitDir, "docs"));
+  await writeFile(path.join(gitDir, "docs", "fixture.md"), "docs fixture\n");
+  await runAcceptanceProcess("git", [...gitIdentity, "add", "notes.txt", "src", "docs"], {
     cwd: gitDir,
   });
   await runAcceptanceProcess("git", [...gitIdentity, "commit", "-m", "composer fixture"], {
@@ -584,6 +588,91 @@ try {
   await page.getByRole("button", { name: "Select demo-a" }).waitFor();
   await page.locator(".shell-project-row", { hasText: "repo" }).waitFor();
   report.checks.push("composer-creates-git-worktree-and-selects-it");
+
+  // R16-BM2: exercise the source's Advanced rows on a disposable child:
+  // explicit branch, same-project parent, note, local setup script and a
+  // daemon-backed sparse preset all cross the real composer/IPC/daemon path.
+  const gitProject = await page.evaluate(async () => {
+    const listed = await window.drogon.project?.projectList?.();
+    if (!listed?.ok) throw new Error(listed?.error?.message ?? "project list unavailable");
+    return listed.result.projects.find((item) => item.path.endsWith("/repo"));
+  });
+  assert.ok(gitProject, "git project must be registered");
+  const setupResult = await page.evaluate(async (id) => {
+    return window.drogon.project?.projectUpdate?.({
+      id,
+      setupScript: "printf 'setup-ok\\n'",
+    });
+  }, gitProject.id);
+  assert.equal(setupResult?.ok, true);
+  const sparseResult = await page.evaluate(async (id) => {
+    return window.drogon.project?.saveSparsePreset?.({
+      projectId: id,
+      name: "Acceptance sparse",
+      directories: ["src"],
+    });
+  }, gitProject.id);
+  assert.equal(sparseResult?.ok, true);
+  const parentWorktreeId = await page.evaluate(async (id) => {
+    const listed = await window.drogon.project?.worktreeList?.({ projectId: id });
+    if (!listed?.ok) throw new Error(listed?.error?.message ?? "worktree list unavailable");
+    return listed.result.worktrees.find((item) => item.path.endsWith("/demo-a"))?.id;
+  }, gitProject.id);
+  assert.ok(parentWorktreeId, "demo-a must be available as a parent candidate");
+  await page.reload();
+  await page.getByRole("heading", { name: "Start a session" }).waitFor();
+
+  await page.getByRole("button", { name: "New workspace", exact: true }).click();
+  const advancedComposer = page.getByRole("dialog", { name: "Create workspace" });
+  await advancedComposer.getByRole("combobox", { name: "Project" }).click();
+  await page.getByRole("option", { name: /^repo/ }).click();
+  const advancedGitComposer = page.getByRole("dialog", { name: "Create worktree" });
+  await advancedGitComposer.getByRole("button", { name: "Advanced", exact: true }).click();
+  await advancedGitComposer.getByLabel("Branch name").fill("feature/demo-b");
+  await advancedGitComposer.getByRole("textbox", { name: "Note" }).fill("BM2 child");
+  await advancedGitComposer.getByRole("combobox", { name: "Parent worktree" }).click();
+  await page.getByRole("option", { name: /demo-a/ }).first().click();
+  await advancedGitComposer.getByRole("combobox").filter({ hasText: "Off" }).click();
+  await page.getByRole("option", { name: "Acceptance sparse" }).click();
+  await advancedGitComposer.locator('[data-workspace-name-input="true"]').fill("demo-b");
+  await advancedGitComposer.locator('[data-agent-combobox-root="true"][role="combobox"]').click();
+  await page.getByRole("option", { name: "Blank Terminal" }).click();
+  await advancedGitComposer.getByRole("button", { name: "Create worktree" }).click();
+  await page.getByRole("button", { name: "Select demo-b" }).waitFor();
+  const advancedWorktree = await page.evaluate(async (id) => {
+    const listed = await window.drogon.project?.worktreeList?.({ projectId: id });
+    if (!listed?.ok) throw new Error(listed?.error?.message ?? "worktree list unavailable");
+    return listed.result.worktrees.find((item) => item.path.endsWith("/demo-b"));
+  }, gitProject.id);
+  assert.equal(advancedWorktree?.branch, "feature/demo-b");
+  assert.equal(advancedWorktree?.note, "BM2 child");
+  assert.equal(advancedWorktree?.parentWorktreeId, parentWorktreeId);
+  report.checks.push("composer-advanced-branch-parent-note-setup-sparse");
+
+  if (withHarness) {
+    // Quick Session is intentionally gated to the harness acceptance: it
+    // launches the selected fixture Pi, then we remove the project through
+    // the real project bridge and prove its app-owned scratch is gone.
+    await page.getByRole("button", { name: "New workspace", exact: true }).click();
+    const quickComposer = page.getByRole("dialog", { name: "Create workspace" });
+    await quickComposer.getByRole("button", { name: /Quick Session/ }).click();
+    await page
+      .getByRole("button", { name: "Select Quick Session" })
+      .waitFor();
+    const quickProject = await page.evaluate(async () => {
+      const listed = await window.drogon.project?.projectList?.();
+      if (!listed?.ok) throw new Error(listed?.error?.message ?? "project list unavailable");
+      return listed.result.projects.find((item) => item.quickSession);
+    });
+    assert.ok(quickProject?.quickSession, "Quick Session must register an owned project");
+    const quickPath = quickProject.path;
+    const removed = await page.evaluate(async (id) => {
+      return window.drogon.project?.projectRemove?.({ id });
+    }, quickProject.id);
+    assert.equal(removed?.ok, true);
+    assert.equal(existsSync(quickPath), false);
+    report.checks.push("quick-session-registers-launches-and-cleans-up");
+  }
   // Later probes address the folder workspace, so select its card again.
   await page.getByRole("button", { name: "Select folder" }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();

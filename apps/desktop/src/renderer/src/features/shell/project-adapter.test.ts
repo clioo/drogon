@@ -1,5 +1,9 @@
 import { expect, test } from "vitest";
-import type { Session, Workspace } from "../../../../shared/session-contract";
+import type {
+  Session,
+  Worktree,
+  Workspace,
+} from "../../../../shared/session-contract";
 import {
   createRegistryRevisionHandler,
   filterProjectGroups,
@@ -9,6 +13,7 @@ import {
   isProjectsAvailable,
   isWorktreesAvailable,
   loadProjectView,
+  nestProjectWorktrees,
   projectWorkspacesAsFolderProjects,
   relativeActivityTime,
   reloadWorkspacesSnapshot,
@@ -175,19 +180,51 @@ test("registry refresh forwards each pushed revision and unsubscribes (issue #14
   expect(live).toBe(false);
 });
 
-test("orphan worktrees never render without their project", () => {
-  const groups = groupProjectWorktrees([], [
-    {
-      id: "t1",
-      projectId: "missing",
-      workspaceId: "w1",
-      path: "/x",
-      branch: "b",
-      head: "",
-      baseRef: null,
-      createdAt: "",
-    },
+test("sidebar nesting keeps parent order and flattens missing or cyclic parents", () => {
+  const base = (id: string): Worktree => ({
+    id,
+    projectId: "p1",
+    workspaceId: id,
+    path: `/repo/${id}`,
+    branch: id,
+    head: "",
+    baseRef: null,
+    createdAt: "",
+  });
+  const parent = base("parent");
+  const child = { ...base("child"), parentWorktreeId: "parent" };
+  const missing = { ...base("missing"), parentWorktreeId: "gone" };
+  expect(
+    nestProjectWorktrees([child, parent, missing]).map((row) => [
+      row.worktree.id,
+      row.depth,
+    ]),
+  ).toEqual([
+    ["parent", 0],
+    ["child", 1],
+    ["missing", 0],
   ]);
+  const cycleA = { ...base("cycle-a"), parentWorktreeId: "cycle-b" };
+  const cycleB = { ...base("cycle-b"), parentWorktreeId: "cycle-a" };
+  expect(nestProjectWorktrees([cycleA, cycleB])).toHaveLength(2);
+});
+
+test("orphan worktrees never render without their project", () => {
+  const groups = groupProjectWorktrees(
+    [],
+    [
+      {
+        id: "t1",
+        projectId: "missing",
+        workspaceId: "w1",
+        path: "/x",
+        branch: "b",
+        head: "",
+        baseRef: null,
+        createdAt: "",
+      },
+    ],
+  );
   expect(groups).toEqual([]);
 });
 
@@ -203,9 +240,7 @@ test("relative time renders short stamps and hides the unknown", () => {
   const now = Date.parse("2026-09-07T12:00:00Z");
   expect(relativeActivityTime(null, now)).toBe("");
   expect(relativeActivityTime("not-a-date", now)).toBe("");
-  expect(
-    relativeActivityTime("2026-09-07T11:59:30Z", now),
-  ).toBe("just now");
+  expect(relativeActivityTime("2026-09-07T11:59:30Z", now)).toBe("just now");
   expect(relativeActivityTime("2026-09-07T11:55:00Z", now)).toBe("5m ago");
   expect(relativeActivityTime("2026-09-07T10:00:00Z", now)).toBe("2h ago");
   expect(relativeActivityTime("2026-09-04T12:00:00Z", now)).toBe("3d ago");

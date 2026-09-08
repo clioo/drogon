@@ -51,8 +51,13 @@ import { registerSettingsProbes } from "./settings-probes";
 import { registerSettingsCliBridge } from "./settings-bridge";
 import { registerFontsBridge } from "./fonts";
 import { registerTasksBridge } from "./tasks-bridge";
+// R17-A additive wiring: jira data-layer bridge (granted main/jira-bridge.ts).
+import { registerJiraBridge } from "./jira-bridge";
 import { registerBrowserIpc } from "./browser/browser-ipc";
-import { registerNotificationsIpc } from "./notifications/service";
+import {
+  observeAgentStateForNotification,
+  registerNotificationsIpc,
+} from "./notifications/service";
 import { startSessionStatePush } from "./session-state-bridge";
 import { startBrowserRelay } from "./browser/relay-poller";
 import { dispatchBotSnapshot, registerBotBridge } from "./bot-bridge";
@@ -265,6 +270,8 @@ function registerBridge() {
   registerSettingsCliBridge(() => window);
   registerFontsBridge(() => window);
   registerTasksBridge(() => window);
+  // R17-A additive wiring (granted main/jira-bridge.ts).
+  registerJiraBridge(() => window);
   registerBotBridge(() => window);
   registerMentuBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
@@ -752,7 +759,10 @@ if (!holdsSingleInstanceLock) {
     registerNotificationsIpc(() => window);
     // R16-BF2 push: daemon `session.events.poll` → `ui:session-state-changed`
     // for the card/tab badge (the 2 s `session.list` poll stays as fallback).
-    startSessionStatePush({ getWindow: () => window });
+    startSessionStatePush({
+      getWindow: () => window,
+      onEvent: observeAgentStateForNotification,
+    });
     await bootstrapDaemon();
     void autoInstallBundledMentuRuntime();
     if (backgroundWindow && process.platform === "darwin")

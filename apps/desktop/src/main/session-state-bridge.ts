@@ -197,6 +197,9 @@ export function baseBackoffMs(): number {
 
 export type SessionStatePushDeps = {
   getWindow: () => BrowserWindow | null;
+  /** Additive consumers (native notifications) observe the same deduped push
+   * event that updates the renderer, avoiding a second polling source. */
+  onEvent?: (event: PushedSessionEvent) => void;
   call?: SessionDaemonCall;
   log?: (message: string) => void;
   /** Test seam: bound the loop to a fixed number of poll rounds. */
@@ -274,6 +277,7 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
             state: event.agentState,
             at: event.agentStateAt,
           });
+          deps.onEvent?.(event);
           const window = deps.getWindow();
           if (window && !window.isDestroyed())
             window.webContents.send(notificationsIpcChannels.stateChanged, {

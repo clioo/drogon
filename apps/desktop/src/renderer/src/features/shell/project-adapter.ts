@@ -53,10 +53,46 @@ export interface ProjectRpcBridge {
   projectRemove?: (input: {
     id: string;
   }) => Promise<Result<{ id: string; removed: boolean }>>;
+  projectUpdate?: (input: {
+    id: string;
+    setupScript?: string | null;
+  }) => Promise<Result<Project>>;
+  quickSessionCreate?: (input?: {
+    name?: string;
+  }) => Promise<Result<{ project: Project; workspaceId: string }>>;
+  sparsePresets?: (input: {
+    projectId: string;
+  }) => Promise<
+    Result<{
+      presets: Array<{
+        id: string;
+        projectId: string;
+        name: string;
+        directories: string[];
+      }>;
+    }>
+  >;
+  saveSparsePreset?: (input: {
+    projectId: string;
+    id?: string;
+    name: string;
+    directories: string[];
+  }) => Promise<
+    Result<{
+      id: string;
+      projectId: string;
+      name: string;
+      directories: string[];
+    }>
+  >;
   worktreeCreate?: (input: {
     projectId: string;
     name: string;
     baseRef?: string;
+    branch?: string;
+    note?: string;
+    parentWorktreeId?: string;
+    sparse?: string[];
   }) => Promise<Result<Worktree>>;
   worktreeRemove?: (input: {
     id: string;
@@ -65,6 +101,11 @@ export interface ProjectRpcBridge {
   worktreeRename?: (input: {
     worktreeId: string;
     name: string;
+  }) => Promise<Result<Worktree>>;
+  worktreeUpdate?: (input: {
+    worktreeId: string;
+    note?: string | null;
+    parentWorktreeId?: string | null;
   }) => Promise<Result<Worktree>>;
   /**
    * Push subscription for out-of-band registry moves (issue #146): main
@@ -221,6 +262,43 @@ export function groupProjectWorktrees(
 }
 
 /**
+ * Projects a flat daemon list into the sidebar's nesting order. The parent
+ * edge is display-only: a missing parent becomes a root, and malformed
+ * cycles are visited once and then flattened rather than hiding a card.
+ */
+export function nestProjectWorktrees(
+  worktrees: Worktree[],
+): Array<{ worktree: Worktree; depth: number }> {
+  const byId = new Map(worktrees.map((worktree) => [worktree.id, worktree]));
+  const children = new Map<string, Worktree[]>();
+  for (const worktree of worktrees) {
+    const parent = worktree.parentWorktreeId;
+    if (!parent || !byId.has(parent)) continue;
+    const siblings = children.get(parent) ?? [];
+    siblings.push(worktree);
+    children.set(parent, siblings);
+  }
+  const roots = worktrees.filter(
+    (worktree) =>
+      !worktree.parentWorktreeId || !byId.has(worktree.parentWorktreeId),
+  );
+  const visited = new Set<string>();
+  const rows: Array<{ worktree: Worktree; depth: number }> = [];
+  const visit = (worktree: Worktree, depth: number): void => {
+    if (visited.has(worktree.id)) return;
+    visited.add(worktree.id);
+    rows.push({ worktree, depth });
+    for (const child of children.get(worktree.id) ?? [])
+      visit(child, depth + 1);
+  };
+  for (const root of roots) visit(root, 0);
+  // A cycle has no root. Preserve those rows as top-level cards rather than
+  // allowing corrupt metadata to recurse forever or erase the sidebar.
+  for (const worktree of worktrees) visit(worktree, 0);
+  return rows;
+}
+
+/**
  * Loads the sidebar view: real projects/worktrees when the service
  * advertises both capabilities and implements the RPCs, otherwise the
  * workspace projection above. An RPC failure also falls back to the
@@ -246,8 +324,7 @@ export async function loadProjectView(
         // projects, so this single fan-out covers both kinds.
         const perProject = await Promise.all(
           listed.result.projects.map((project) =>
-            bridge
-              .worktreeList!({ projectId: project.id })
+            bridge.worktreeList!({ projectId: project.id })
               .then(
                 (trees) => ({ project, trees }),
                 () => null,
@@ -263,10 +340,7 @@ export async function loadProjectView(
             row !== null && row.trees.ok ? row.trees.result.worktrees : [],
           );
           return {
-            groups: groupProjectWorktrees(
-              listed.result.projects,
-              worktrees,
-            ),
+            groups: groupProjectWorktrees(listed.result.projects, worktrees),
             source: "rpc",
           };
         }

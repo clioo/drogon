@@ -402,7 +402,7 @@ fn two_concurrent_engine_open_calls_against_the_same_data_dir_both_succeed_consi
             ("mentu".to_string(), 1),
             ("orchestration_attempts".to_string(), 1),
             ("orchestration_mail".to_string(), 1),
-            ("projects".to_string(), 2),
+            ("projects".to_string(), 3),
         ]
     );
     assert!(final_snapshot.host_id.is_some());

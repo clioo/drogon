@@ -24,6 +24,7 @@ mod coordination_runs;
 mod coordination_worker_control;
 mod coordination_workers;
 mod desktop_relay_rpc;
+pub mod jira;
 pub mod locale_ordering;
 pub mod mentu;
 mod mentu_rpc;
@@ -165,6 +166,13 @@ pub struct Engine {
     desktop_relay: Mutex<RelayState>,
     worker_cli: Option<PathBuf>,
     worker_operations: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
+    /// R17-A: Jira integration state (site/token store, per-site request
+    /// queues, in-flight search registry). Lives on the Engine so parallel
+    /// tests with their own temp data dirs never share it. No outer mutex:
+    /// every member locks itself, and a search must never hold a lock
+    /// across its HTTP call or `jira.cancelSearchIssues` could not run on
+    /// another connection until the search finished.
+    jira: jira::JiraState,
     /// Lifecycle admission gate for quiescent shutdown. Every mutating
     /// method (`Engine::mutating`) holds the *read* side across its whole
     /// ledger interaction — admission, the work itself (including PTY
@@ -249,6 +257,7 @@ impl Engine {
             desktop_relay: Mutex::new(RelayState::default()),
             worker_cli: None,
             worker_operations: Mutex::new(HashMap::new()),
+            jira: jira::JiraState::new(data_dir),
             lifecycle_gate: RwLock::new(()),
             quiescent: AtomicBool::new(false),
             #[cfg(test)]
@@ -458,14 +467,39 @@ impl Engine {
             }
             "project.changes" => self.do_project_changes(&request.params),
             "project.remove" => self.mutating(request, Self::do_project_remove),
+            // R16-BM2 (additive): composer Advanced rows + Quick Session.
+            "project.update" => self.mutating(request, Self::do_project_update),
+            "project.quickSessionCreate" => {
+                self.mutating(request, Self::do_project_quick_session_create)
+            }
+            "project.sparsePresets" => self.do_project_sparse_presets(&request.params),
+            "project.saveSparsePreset" => {
+                self.mutating(request, Self::do_project_save_sparse_preset)
+            }
             "worktree.create" => self.mutating(request, Self::do_worktree_create),
             "worktree.list" => self.do_worktree_list(&request.params),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "worktree.rename" => self.mutating(request, Self::do_worktree_rename),
+            "worktree.update" => self.mutating(request, Self::do_worktree_update),
             "tasks.list" => self.do_tasks_list(&request.params),
             "tasks.show" => self.do_tasks_show(&request.params),
             "tasks.start" => self.mutating(request, Self::do_tasks_start),
             "tasks.links" => self.do_tasks_links(&request.params),
+            // R17-A: Jira data layer for the Tasks page (owned by this
+            // task; additive method arms).
+            "jira.connect" => self.jira_connect(&request.params),
+            "jira.disconnect" => self.jira_disconnect(&request.params),
+            "jira.selectSite" => self.jira_select_site(&request.params),
+            "jira.status" => self.jira_status(),
+            "jira.testConnection" => self.jira_test_connection(&request.params),
+            "jira.searchIssues" => self.jira_search_issues(&request.params),
+            "jira.cancelSearchIssues" => self.jira_cancel_search_issues(&request.params),
+            "jira.listIssues" => self.jira_list_issues(&request.params),
+            "jira.listProjects" => self.jira_list_projects(&request.params),
+            "jira.listIssueTypes" => self.jira_list_issue_types(&request.params),
+            "jira.listCreateFields" => self.jira_list_create_fields(&request.params),
+            "jira.listPriorities" => self.jira_list_priorities(&request.params),
+            "jira.searchUsers" => self.jira_search_users(&request.params),
             "tasks.remotes" => self.do_tasks_remotes(&request.params),
             "mentu.recipes" => self.mentu_recipes(&request.params),
             "mentu.recipe" => self.mentu_recipe(&request.params),

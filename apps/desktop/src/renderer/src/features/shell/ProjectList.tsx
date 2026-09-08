@@ -39,7 +39,7 @@ import {
   DropdownMenuSubTrigger,
 } from "../../components/ui/dropdown-menu";
 import type { ProjectGroup } from "./project-adapter";
-import { filterProjectGroups } from "./project-adapter";
+import { filterProjectGroups, nestProjectWorktrees } from "./project-adapter";
 import { isWideSidebarHeader } from "./app-chrome-layout";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
@@ -221,7 +221,9 @@ function OptionsMenuContent({
                   onSelect={(event) => event.preventDefault()}
                   onCheckedChange={() => onToggleProject(project.id)}
                 >
-                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {project.name}
+                  </span>
                 </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuSubContent>
@@ -310,7 +312,10 @@ export function ProjectList({
     path: string;
     name?: string;
   }) => Promise<string | null>;
-  onSubmitRemove: (worktree: Worktree, force: boolean) => Promise<string | null>;
+  onSubmitRemove: (
+    worktree: Worktree,
+    force: boolean,
+  ) => Promise<string | null>;
   /** Removes the project registration (never files); resolves an error verbatim, or null. */
   onSubmitRemoveProject: (project: Project) => Promise<string | null>;
   onSubmitRename: (worktree: Worktree, name: string) => Promise<string | null>;
@@ -322,15 +327,18 @@ export function ProjectList({
   // Persisted manual order (fork parity: pointer drag on headers/cards).
   // Applied before filtering so a reorder survives reload; the stored
   // lists only ever reorder ids the daemon still advertises.
-  const [projectOrder, setProjectOrder] = useState<string[]>(readStoredProjectOrder);
+  const [projectOrder, setProjectOrder] = useState<string[]>(
+    readStoredProjectOrder,
+  );
   const [worktreeOrder, setWorktreeOrder] = useState<Record<string, string[]>>(
     readStoredWorktreeOrder,
   );
   const sectionRef = useRef<HTMLElement | null>(null);
   const getScrollContainer = useCallback(
     (): HTMLElement | null =>
-      (sectionRef.current?.closest(".shell-sidebar-scroll") as HTMLElement | null) ??
-      null,
+      (sectionRef.current?.closest(
+        ".shell-sidebar-scroll",
+      ) as HTMLElement | null) ?? null,
     [],
   );
   const ordered = useMemo(
@@ -345,7 +353,8 @@ export function ProjectList({
   );
   const commitProjectOrder = useCallback((next: string[]) => {
     setProjectOrder(next);
-    if (typeof localStorage !== "undefined") saveSidebarProjectOrder(localStorage, next);
+    if (typeof localStorage !== "undefined")
+      saveSidebarProjectOrder(localStorage, next);
   }, []);
   const commitWorktreeOrder = useCallback(
     (projectId: string, next: string[]) => {
@@ -369,13 +378,14 @@ export function ProjectList({
   const projectsFilterCount = groups.filter((group) =>
     selectedProjectIds.includes(group.project.id),
   ).length;
-  const activeFilterCount =
-    (filterActive ? 1 : 0) + projectsFilterCount;
+  const activeFilterCount = (filterActive ? 1 : 0) + projectsFilterCount;
   const hasAnyFilter = activeFilterCount > 0;
   const activeFilterLabel = `${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"}`;
   const removeTarget = findWorktree(groups, action);
   const removeProjectTarget = findProject(groups, action);
-  const activityLabel = activityOnly ? "Turn off activity view" : "View activity";
+  const activityLabel = activityOnly
+    ? "Turn off activity view"
+    : "View activity";
   const optionsLabel = hasAnyFilter
     ? `Workspace options (${activeFilterLabel} active)`
     : "Workspace options";
@@ -673,9 +683,7 @@ function groupHasLiveSession(
   group: ProjectGroup,
   sessions: Session[],
 ): boolean {
-  const ids = new Set(
-    group.worktrees.map((worktree) => worktree.workspaceId),
-  );
+  const ids = new Set(group.worktrees.map((worktree) => worktree.workspaceId));
   return sessions.some(
     (session) => session.verdict === "live" && ids.has(session.workspaceId),
   );
@@ -748,13 +756,18 @@ function ProjectRow({
   onSelectWorkspace: (workspaceId: string) => void;
   onNewWorktree: () => void;
   onRemoveWorktree: (worktree: Worktree) => void;
-  onRenameWorktree: (worktree: Worktree, name: string) => Promise<string | null>;
+  onRenameWorktree: (
+    worktree: Worktree,
+    name: string,
+  ) => Promise<string | null>;
   onOpenProjectSettings: (project: Project) => void;
   onRemoveProject: (project: Project) => void;
 }) {
   const project: Project = group.project;
   const canCreate =
-    worktreesAvailable && project.kind === "git" && !project.id.startsWith("folder:");
+    worktreesAvailable &&
+    project.kind === "git" &&
+    !project.id.startsWith("folder:");
   return (
     <div className="shell-project">
       <div
@@ -796,44 +809,71 @@ function ProjectRow({
         </div>
       </div>
       <div className="shell-project-cards">
-        {group.worktrees.map((worktree, cardIndex) => (
-          <WorktreeCard
-            key={worktree.id}
-            worktree={worktree}
-            workspaces={workspaces}
-            sessions={sessions}
-            selected={worktree.workspaceId === selectedWorkspaceId}
-            disabled={disabled}
-            projectKind={project.kind}
-            implicitFolderWorktree={isImplicitFolderWorktree(worktree)}
-            cardIndex={cardIndex}
-            onCardPointerDown={(event) =>
-              onCardPointerDown(event, project.id, worktree.id)
-            }
-            onCardClickCapture={onCardClickCapture}
-            onSelect={onSelectWorkspace}
-            onSelectSession={onSelectSession}
-            activeSessionId={activeSessionId}
-            tabStrip={tabStrip}
-            onRemove={
-              worktreesAvailable && !isImplicitFolderWorktree(worktree)
-                ? () => onRemoveWorktree(worktree)
-                : null
-            }
-            onRename={
-              worktreesAvailable && !isImplicitFolderWorktree(worktree)
-                ? (name) => onRenameWorktree(worktree, name)
-                : null
-            }
-            onCreateWorktree={canCreate ? () => onNewWorktree() : null}
-          />
-        ))}
+        {(() => {
+          let cardIndex = 0;
+          const renderCard = (
+            worktree: Worktree,
+            depth: number,
+          ): React.JSX.Element => {
+            const currentIndex = cardIndex++;
+            const implicitFolderWorktree = isImplicitFolderWorktree(worktree);
+            const primaryCheckout =
+              project.kind === "git" && worktree.path === project.path;
+            return (
+              <div
+                key={worktree.id}
+                className={
+                  depth > 0 ? "ml-3 border-l border-border/50 pl-2" : undefined
+                }
+                data-worktree-nesting-depth={depth}
+              >
+                <WorktreeCard
+                  worktree={worktree}
+                  primaryCheckout={primaryCheckout}
+                  workspaces={workspaces}
+                  sessions={sessions}
+                  selected={worktree.workspaceId === selectedWorkspaceId}
+                  disabled={disabled}
+                  projectKind={project.kind}
+                  implicitFolderWorktree={implicitFolderWorktree}
+                  cardIndex={currentIndex}
+                  onCardPointerDown={(event) =>
+                    onCardPointerDown(event, project.id, worktree.id)
+                  }
+                  onCardClickCapture={onCardClickCapture}
+                  onSelect={onSelectWorkspace}
+                  onSelectSession={onSelectSession}
+                  activeSessionId={activeSessionId}
+                  tabStrip={tabStrip}
+                  onRemove={
+                    !worktreesAvailable
+                      ? null
+                      : implicitFolderWorktree || primaryCheckout
+                        ? () => onRemoveProject(project)
+                        : () => onRemoveWorktree(worktree)
+                  }
+                  onRename={
+                    worktreesAvailable && !implicitFolderWorktree
+                      ? (name) => onRenameWorktree(worktree, name)
+                      : null
+                  }
+                />
+              </div>
+            );
+          };
+          return nestProjectWorktrees(group.worktrees).map(
+            ({ worktree, depth }) => renderCard(worktree, depth),
+          );
+        })()}
       </div>
     </div>
   );
 }
 
-/** Folder projects expose one implicit worktree (the folder itself): nothing to remove. */
+/** Folder projects expose one implicit worktree (the folder itself). */
 function isImplicitFolderWorktree(worktree: Worktree): boolean {
-  return worktree.id.startsWith("implicit:") || worktree.projectId.startsWith("folder:");
+  return (
+    worktree.id.startsWith("implicit:") ||
+    worktree.projectId.startsWith("folder:")
+  );
 }

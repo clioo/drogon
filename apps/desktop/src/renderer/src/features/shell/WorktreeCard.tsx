@@ -5,7 +5,7 @@
    is the inline-rename editor, the meta row is the badges projection,
    and right-click / Menu-key / kebab open the worktree context menu.) */
 import { useState, useSyncExternalStore } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, StickyNote } from "lucide-react";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
 import {
@@ -45,6 +45,7 @@ export function WorktreeCard({
   disabled,
   projectKind,
   implicitFolderWorktree,
+  primaryCheckout = false,
   pr = null,
   onSelect,
   cardIndex = 0,
@@ -52,7 +53,6 @@ export function WorktreeCard({
   onCardClickCapture,
   onRemove,
   onRename,
-  onCreateWorktree,
   onSelectSession = null,
   activeSessionId = "",
   tabStrip,
@@ -64,6 +64,8 @@ export function WorktreeCard({
   disabled: boolean;
   projectKind: "git" | "folder";
   implicitFolderWorktree: boolean;
+  /** The card is the project's main checkout (path === project.path). */
+  primaryCheckout?: boolean;
   /** Known PR for the chip; null hides it (no PR store yet). */
   pr?: WorktreeCardPrDisplay | null;
   onSelect: (workspaceId: string) => void;
@@ -82,15 +84,13 @@ export function WorktreeCard({
   ) => void;
   /** Capture-phase click guard that swallows the select click after a drag. */
   onCardClickCapture?: (event: React.MouseEvent<HTMLElement>) => void;
-  /** Null for implicit folder worktrees, which have nothing to remove. */
+  /** Null only while the worktree bridge is unavailable. */
   onRemove: (() => void) | null;
   /**
    * Submits an inline-rename title; resolves an error message or null.
    * Null for implicit folder worktrees, whose title is the folder.
    */
   onRename: ((name: string) => Promise<string | null>) | null;
-  /** Opens the new-workspace composer for this project, or null. */
-  onCreateWorktree: (() => void) | null;
 }) {
   const [beginEditing, setBeginEditing] = useState(false);
   const attached = sessions.filter(
@@ -117,14 +117,13 @@ export function WorktreeCard({
   };
   // Linked GitHub issue from the tasks link store (journey J6); null when
   // the worktree was not started from a task — no badge then.
-  const issueNumber = useSyncExternalStore(
-    subscribeWorktreeIssueLinks,
-    () => getWorktreeIssueNumber(worktree.id),
+  const issueNumber = useSyncExternalStore(subscribeWorktreeIssueLinks, () =>
+    getWorktreeIssueNumber(worktree.id),
   );
   const name = worktreeDisplayName(worktree, workspaces);
+  const note = worktree.note?.trim() ?? "";
   const hostId =
-    workspaces.find((item) => item.id === worktree.workspaceId)?.hostId ??
-    null;
+    workspaces.find((item) => item.id === worktree.workspaceId)?.hostId ?? null;
   const gitStatus = useWorktreeGitStatus({
     hostId,
     workspaceId: worktree.workspaceId,
@@ -136,9 +135,9 @@ export function WorktreeCard({
       displayName={name}
       projectKind={projectKind}
       implicitFolderWorktree={implicitFolderWorktree}
+      primaryCheckout={primaryCheckout}
       disabled={disabled}
       onRename={onRename ? () => setBeginEditing(true) : null}
-      onCreateWorktree={onCreateWorktree}
       onDelete={onRemove}
     >
       <div
@@ -153,94 +152,100 @@ export function WorktreeCard({
             : undefined
         }
         onClickCapture={onCardClickCapture}
-        aria-label={`${name}${summary.unread ? ", needs input" : ""}`}
+        aria-label={`${name}${summary.unread ? ", needs input" : ""}${note ? `, Note: ${note}` : ""}`}
       >
         {/* Main column: the card is a flex row (select content beside the
             kebab), so the select button and the nested rows share one
             column wrapper instead of squeezing each other to zero width. */}
         <div className="shell-worktree-card-main">
-        <button
-          type="button"
-          className="shell-worktree-card-select"
-          aria-current={selected ? "page" : undefined}
-          aria-label={`Select ${name}`}
-          disabled={disabled}
-          onClick={() => onSelect(worktree.workspaceId)}
-        >
-          <span className="shell-worktree-card-top">
-            <AgentStateIcon state={summary.state} size={14} />
-            <WorktreeTitleInlineRename
-              displayName={name}
-              disabled={disabled || onRename === null}
-              beginEditing={beginEditing}
-              onBeginEditingConsumed={() => setBeginEditing(false)}
-              onRename={(next) => onRename?.(next) ?? Promise.resolve(null)}
-            />
-            {summary.unread && (
-              <span
-                className="shell-unread-dot"
-                aria-label="Unread agent request"
-                title="An agent in this worktree is waiting for input"
+          <button
+            type="button"
+            className="shell-worktree-card-select"
+            aria-current={selected ? "page" : undefined}
+            aria-label={`Select ${name}`}
+            disabled={disabled}
+            onClick={() => onSelect(worktree.workspaceId)}
+          >
+            <span className="shell-worktree-card-top">
+              <AgentStateIcon state={summary.state} size={14} />
+              <WorktreeTitleInlineRename
+                displayName={name}
+                disabled={disabled || onRename === null}
+                beginEditing={beginEditing}
+                onBeginEditingConsumed={() => setBeginEditing(false)}
+                onRename={(next) => onRename?.(next) ?? Promise.resolve(null)}
               />
-            )}
-          </span>
-          <WorktreeCardMetaBadges
-            branch={worktree.branch}
-            ahead={gitStatus?.branch.ahead ?? null}
-            behind={gitStatus?.branch.behind ?? null}
-            upstream={gitStatus?.branch.upstream ?? null}
-            issueNumber={issueNumber}
-            pr={pr}
-          />
-          {worktree.baseRef ? (
-            <span
-              className="shell-worktree-card-base"
-              title={`Based on ${worktree.baseRef}`}
-            >
-              base {worktree.baseRef}
+              {summary.unread && (
+                <span
+                  className="shell-unread-dot"
+                  aria-label="Unread agent request"
+                  title="An agent in this worktree is waiting for input"
+                />
+              )}
             </span>
-          ) : null}
-          {/* Why: the fork's card keeps the agent summary and the relative
+            <WorktreeCardMetaBadges
+              branch={worktree.branch}
+              ahead={gitStatus?.branch.ahead ?? null}
+              behind={gitStatus?.branch.behind ?? null}
+              upstream={gitStatus?.branch.upstream ?? null}
+              issueNumber={issueNumber}
+              pr={pr}
+            />
+            {worktree.baseRef ? (
+              <span
+                className="shell-worktree-card-base"
+                title={`Based on ${worktree.baseRef}`}
+              >
+                base {worktree.baseRef}
+              </span>
+            ) : null}
+            {/* Why: the fork's card keeps the agent summary and the relative
               time on one compact line (no duplicated session count); the
               line truncates instead of wrapping the timestamp alone. */}
-          {attached.length === 0 ? (
-            <span className="shell-worktree-card-summary">
-              No sessions yet
-            </span>
-          ) : (
-            <span
-              className="shell-worktree-card-summary"
-              title={formatWorktreeCardSummaryLine(
-                agentSummary,
-                summary.activeRelative,
-              )}
-            >
-              {formatWorktreeCardSummaryLine(
-                agentSummary,
-                summary.activeRelative,
-              )}
-            </span>
-          )}
-        </button>
-        {/* Nested session rows (the fork's inline agent list): one row per
+            {attached.length === 0 ? (
+              <span className="shell-worktree-card-summary">
+                No sessions yet
+              </span>
+            ) : (
+              <span
+                className="shell-worktree-card-summary"
+                title={formatWorktreeCardSummaryLine(
+                  agentSummary,
+                  summary.activeRelative,
+                )}
+              >
+                {formatWorktreeCardSummaryLine(
+                  agentSummary,
+                  summary.activeRelative,
+                )}
+              </span>
+            )}
+            {note ? (
+              <span className="shell-worktree-card-note" title={note}>
+                <StickyNote size={12} aria-hidden="true" />
+                <span>{note}</span>
+              </span>
+            ) : null}
+          </button>
+          {/* Nested session rows (the fork's inline agent list): one row per
             session underneath the summary line, outside the select button
             so rows stay real buttons. */}
-        {rows.length > 0 ? (
-          <div
-            className="shell-worktree-card-rows"
-            role="group"
-            aria-label={`${name} sessions`}
-          >
-            {rows.map((row) => (
-              <WorktreeAgentRow
-                key={row.session.id}
-                row={row}
-                disabled={disabled}
-                onSelect={handleSelectSession}
-              />
-            ))}
-          </div>
-        ) : null}
+          {rows.length > 0 ? (
+            <div
+              className="shell-worktree-card-rows"
+              role="group"
+              aria-label={`${name} sessions`}
+            >
+              {rows.map((row) => (
+                <WorktreeAgentRow
+                  key={row.session.id}
+                  row={row}
+                  disabled={disabled}
+                  onSelect={handleSelectSession}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
         <span className="shell-worktree-card-menu">
           <button

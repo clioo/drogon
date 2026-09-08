@@ -130,12 +130,21 @@ describe("source control render", () => {
       stagedCount: 1,
       hasPartiallyStagedChanges: false,
       isBusy: false,
-      amend: false,
-      canAmend: true,
+      upstream: "origin/main",
+      ahead: 1,
+      behind: 0,
+      createPrDisabled: false,
+      createPrReason: null,
       onCommitMessageChange: () => {},
       onCommit: () => {},
       onCommitAndPush: () => {},
-      onToggleAmend: () => {},
+      onCommitAndSync: () => {},
+      onPush: () => {},
+      onPushBeforePr: () => {},
+      onFastForward: () => {},
+      onSync: () => {},
+      onFetch: () => {},
+      onCreatePr: () => {},
     };
     const empty = html(createElement(CommitArea, { ...base, commitMessage: "" }));
     expect(empty).toContain("Commit");
@@ -146,7 +155,8 @@ describe("source control render", () => {
     expect(ready).toContain("Commit");
     expect(ready).not.toContain("disabled=");
     // The chevron menu items portal out of SSR; the trigger proves the
-    // Commit & Push / amend menu is wired.
+    // commit-and-remote dropdown (Commit & Push / Sync / Fetch / PR rows)
+    // is wired.
     expect(ready).toContain('aria-label="More commit and remote actions"');
   });
 

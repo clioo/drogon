@@ -20,5 +20,8 @@ export default defineConfig({
     // contract assertions at Vitest's 5 s default.
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // #312: worker threads avoid the process churn that can trigger the
+    // ubuntu-22.04 runner's external termination of the desktop suite.
+    pool: "threads",
   },
 });

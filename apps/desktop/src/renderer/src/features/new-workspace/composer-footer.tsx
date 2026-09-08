@@ -1,12 +1,12 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/new-workspace/NewWorkspaceComposerFooter.tsx
    (adapter: the error is this repo's verbatim daemon/client string, not the
-   source's {title,message,help} object; the Drogon-only "Start Quick Session"
-   button is not ported — Drogon's folder projects already create their
-   implicit workspace through the primary action; i18n keys inlined). */
+   source's {title,message,help} object; the fork's Quick Session now maps to
+   the daemon-owned scratch-project RPC; i18n keys inlined). */
 import React from "react";
 import { CornerDownLeft, LoaderCircle } from "lucide-react";
 import { Button } from "../../components/ui/button";
+import { DrogonQuickSession } from "./DrogonQuickSession";
 import { SwitchIndicator } from "../../components/ui/switch";
 import { cn } from "../../lib/utils";
 
@@ -20,6 +20,9 @@ type NewWorkspaceComposerFooterProps = {
   creating: boolean;
   primaryActionLabel: string;
   submitShortcutModifierLabel: string;
+  onCreateQuickSession?: () => void;
+  quickSessionDisabled?: boolean;
+  quickSessionCreating?: boolean;
 };
 
 export function NewWorkspaceComposerFooter({
@@ -32,6 +35,9 @@ export function NewWorkspaceComposerFooter({
   creating,
   primaryActionLabel,
   submitShortcutModifierLabel,
+  onCreateQuickSession,
+  quickSessionDisabled = false,
+  quickSessionCreating = false,
 }: NewWorkspaceComposerFooterProps): React.JSX.Element {
   return (
     <>
@@ -78,6 +84,13 @@ export function NewWorkspaceComposerFooter({
             <CornerDownLeft className="size-3" />
           </span>
         </Button>
+        {onCreateQuickSession ? (
+          <DrogonQuickSession
+            onCreate={onCreateQuickSession}
+            disabled={quickSessionDisabled}
+            creating={quickSessionCreating}
+          />
+        ) : null}
       </div>
     </>
   );

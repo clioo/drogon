@@ -6,6 +6,8 @@ import { ipcRenderer } from "electron";
 import {
   notificationsIpcChannels,
   type FocusSessionEvent,
+  type NotificationBellEvent,
+  type NotificationPreferences,
   type NotificationsBridge,
   type SessionStateChangedEvent,
 } from "../shared/notifications-contract";
@@ -15,6 +17,12 @@ export const notifications: NotificationsBridge = {
   getEnabled: () => ipcRenderer.invoke(notificationsIpcChannels.getEnabled),
   setEnabled: (enabled) =>
     ipcRenderer.invoke(notificationsIpcChannels.setEnabled, enabled),
+  getPreferences: () =>
+    ipcRenderer.invoke(notificationsIpcChannels.getPreferences),
+  setPreferences: (updates: Partial<NotificationPreferences>) =>
+    ipcRenderer.invoke(notificationsIpcChannels.setPreferences, updates),
+  notifyBell: (event: NotificationBellEvent) =>
+    ipcRenderer.invoke(notificationsIpcChannels.bell, event),
   onFocusSession: (listener: (event: FocusSessionEvent) => void) => {
     const wrapped = (_event: unknown, value: FocusSessionEvent) =>
       listener(value);

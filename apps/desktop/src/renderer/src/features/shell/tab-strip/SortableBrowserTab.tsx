@@ -1,10 +1,12 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/tab-bar/BrowserTab.tsx (menu items and
-   order: pin, close variants) and SortableTab.tsx (menu open/close
-   discipline). Adapter: the row chrome stays in BrowserStripTab (this
-   wrapper only owns useSortable and the shared TabContextMenu); no
-   duplicate/open-in-browser rows (no clone or external-open contract in
-   this build); "Copy URL" replaces the session menu's "Copy Session ID". */
+   order: Duplicate Tab, pin, close variants, Open In Browser) and
+   SortableTab.tsx (menu open/close discipline). Adapter: the row chrome
+   stays in BrowserStripTab (this wrapper only owns useSortable and the
+   shared TabContextMenu); no workspace-layout section (no pane splits in
+   this build). Duplicate Tab reuses the browser bridge's createTab(url)
+   and Open In Browser the shell.openExternal gate (http(s) only, like the
+   source's isHttpUrl guard). */
 
 import { useEffect, useRef, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
@@ -17,6 +19,12 @@ import {
   TAB_STRIP_CLOSE_MENUS_EVENT,
 } from "../TabContextMenu";
 import { TAB_STRIP_DRAG_ACTIVATION_PX } from "../SortableTab";
+import { windowShellOpenExternal } from "../../landing/github-star";
+
+/** Source gate for Open In Browser (BrowserTab.tsx): http(s) pages only. */
+function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url.trim());
+}
 
 /**
  * One browser page as a draggable tab-strip tab. Activation still runs on
@@ -37,7 +45,7 @@ export function SortableBrowserTab({
   onCloseToRight,
   onCloseToLeft,
   onTogglePin,
-  onCopyUrl,
+  onDuplicate,
   onStripKeyDown,
 }: {
   tab: BrowserTabState;
@@ -53,7 +61,8 @@ export function SortableBrowserTab({
   onCloseToRight: () => void;
   onCloseToLeft: () => void;
   onTogglePin: () => void;
-  onCopyUrl: () => void;
+  /** Opens a second tab at the same URL; null hides Duplicate Tab. */
+  onDuplicate: (() => void) | null;
   /** Strip-level arrows/Home/End plus reorder, owned by the tab strip. */
   onStripKeyDown: (event: React.KeyboardEvent) => void;
 }): React.JSX.Element {
@@ -126,14 +135,18 @@ export function SortableBrowserTab({
           hasTabsToRight,
           hasTabsToLeft,
         })}
-        copyLabel="Copy URL"
         onTogglePin={onTogglePin}
         onClose={onClose}
         onCloseOthers={onCloseOthers}
         onCloseToRight={onCloseToRight}
         onCloseToLeft={onCloseToLeft}
-        onRenameOpen={() => {}}
-        onCopy={onCopyUrl}
+        onDuplicate={onDuplicate ?? undefined}
+        openInBrowser={{
+          disabled: !isHttpUrl(tab.url),
+          onSelect: () => {
+            void windowShellOpenExternal(window.drogon)?.(tab.url);
+          },
+        }}
       />
     </div>
   );

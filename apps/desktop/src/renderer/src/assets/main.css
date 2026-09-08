@@ -2742,6 +2742,20 @@ footer[data-testid="status-bar"] {
   font-size: 11px;
   color: var(--muted-foreground);
 }
+.shell-worktree-card-note {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.shell-worktree-card-note > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ── Agent-state visuals (R16-I) ─────────────────────────────────────── */
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
@@ -2826,4 +2840,10 @@ footer[data-testid="status-bar"] {
   .daemon-connection-spinner {
     animation: none;
   }
+}
+.shell-worktree-context-menu-subtrigger-chevron {
+  margin-left: auto;
+  width: 14px;
+  height: 14px;
+  color: var(--muted-foreground);
 }

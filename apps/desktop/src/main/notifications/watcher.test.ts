@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   diffAgentStates,
+  formatAgentTaskComplete,
   formatNeedsInput,
+  isAgentTaskCompleteTransition,
   sessionLabelFor,
   worktreeNameFor,
   type WatchedSession,
@@ -138,6 +140,16 @@ describe("diffAgentStates", () => {
   });
 });
 
+describe("isAgentTaskCompleteTransition", () => {
+  it("only accepts working to idle or needs_input", () => {
+    expect(isAgentTaskCompleteTransition("working", "idle")).toBe(true);
+    expect(isAgentTaskCompleteTransition("working", "needs_input")).toBe(true);
+    expect(isAgentTaskCompleteTransition(undefined, "idle")).toBe(false);
+    expect(isAgentTaskCompleteTransition("idle", "working")).toBe(false);
+    expect(isAgentTaskCompleteTransition("working", "exited")).toBe(false);
+  });
+});
+
 describe("sessionLabelFor", () => {
   it("prefers the harnessId display name over the process basename", () => {
     // The R15-C wart: a Pi session launched through a bundle path must not
@@ -166,6 +178,26 @@ describe("sessionLabelFor", () => {
       "cli.js",
     );
     expect(sessionLabelFor("/bundle/cli.js", null)).toBe("cli.js");
+  });
+});
+
+describe("formatAgentTaskComplete", () => {
+  it("uses the fork finished copy for an idle transition", () => {
+    const { title, body } = formatAgentTaskComplete(
+      session("a", "idle"),
+      "wt-1",
+    );
+    expect(title).toBe("wt-1 - Claude Code finished");
+    expect(body).toBe("Claude Code finished.");
+  });
+
+  it("uses needs input copy for a waiting transition", () => {
+    const { title, body } = formatAgentTaskComplete(
+      session("a", "needs_input"),
+      "wt-1",
+    );
+    expect(title).toBe("wt-1 - Claude Code needs input");
+    expect(body).toBe("Claude Code needs input.");
   });
 });
 

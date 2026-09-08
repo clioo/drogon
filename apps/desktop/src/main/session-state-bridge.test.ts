@@ -75,8 +75,10 @@ describe("startSessionStatePush", () => {
       calls.count += 1;
       return pollOk("boot-1", [working(1)], 1);
     };
+    const observed: unknown[] = [];
     const stop = startSessionStatePush({
       getWindow: () => window as never,
+      onEvent: (event) => observed.push(event),
       call,
       maxRounds: 2,
       log: () => {},
@@ -84,6 +86,7 @@ describe("startSessionStatePush", () => {
     await waitFor(calls, 2);
     stop();
     // One forward for the transition; the resend on round two dedupes.
+    expect(observed).toHaveLength(1);
     expect(sent).toEqual([
       {
         channel: notificationsIpcChannels.stateChanged,

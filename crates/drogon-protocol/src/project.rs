@@ -2,7 +2,18 @@
 //! Worktrees (`docs/migration/rewrite-mvp-plan.md` journey J1). Mirrors
 //! `apps/desktop/src/shared/session-contract.ts`'s `Project` type.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Tri-state wire field (`project.update`): key absent → `None` (leave
+/// untouched), explicit null → `Some(None)` (clear), string → set. Serde
+/// maps a plain `Option<Option<String>>` null to the outer `None`, so the
+/// distinction needs this custom deserialize_with + default pair.
+fn tri_state_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::<String>::deserialize(deserializer)?))
+}
 
 pub const PROJECT_CAPABILITY: &str = "project.v1";
 
@@ -31,6 +42,14 @@ pub struct Project {
     pub name: String,
     pub kind: ProjectKind,
     pub default_base_ref: Option<String>,
+    /// Setup script from Project Settings, run in a "Setup" terminal after
+    /// worktree creation when the composer's Run-setup toggle is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_script: Option<String>,
+    /// True for a Quick Session scratch project (app-owned folder under the
+    /// data dir, deleted when the project is removed).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quick_session: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -39,6 +58,67 @@ pub struct ProjectAddParams {
     pub path: String,
     #[serde(default)]
     pub name: Option<String>,
+}
+
+/// Project-settings update (`project.update`): tri-state — absent leaves
+/// the column untouched, explicit null clears it.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectUpdateParams {
+    pub id: String,
+    #[serde(default, deserialize_with = "tri_state_string")]
+    pub setup_script: Option<Option<String>>,
+}
+
+/// Quick Session (`project.quickSessionCreate`): an app-owned scratch
+/// folder registered as a folder Project with its implicit Workspace.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickSessionCreateParams {
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickSessionCreateResult {
+    pub project: Project,
+    pub workspace_id: String,
+}
+
+/// A named sparse-checkout preset (the composer Advanced "Sparse checkout"
+/// row), stored per project.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SparsePreset {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub directories: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SparsePresetListParams {
+    pub project_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SparsePresetListResult {
+    pub presets: Vec<SparsePreset>,
+}
+
+/// Upsert (`project.saveSparsePreset`): `id` edits an existing preset,
+/// absent creates one.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SparsePresetSaveParams {
+    pub project_id: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    pub name: String,
+    pub directories: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -78,6 +158,8 @@ mod tests {
             name: "repo".into(),
             kind: ProjectKind::Git,
             default_base_ref: None,
+            setup_script: None,
+            quick_session: false,
         };
         let value = serde_json::to_value(&project).unwrap();
         assert_eq!(
@@ -143,10 +225,100 @@ mod tests {
                 name: "repo".into(),
                 kind: ProjectKind::Git,
                 default_base_ref: None,
+                setup_script: None,
+                quick_session: false,
             }],
         };
         let value = serde_json::to_value(&result).unwrap();
         assert!(value["projects"].is_array());
         assert_eq!(value["projects"][0]["id"], "p1");
+    }
+
+    #[test]
+    fn setup_script_and_quick_session_are_additive() {
+        let project = Project {
+            id: "p1".into(),
+            host_id: "h1".into(),
+            path: "/repo".into(),
+            name: "repo".into(),
+            kind: ProjectKind::Git,
+            default_base_ref: None,
+            setup_script: None,
+            quick_session: false,
+        };
+        let value = serde_json::to_value(&project).unwrap();
+        assert!(value.get("setupScript").is_none());
+        assert!(value.get("quickSession").is_none());
+        let mut configured = project.clone();
+        configured.setup_script = Some("pnpm install".into());
+        configured.quick_session = true;
+        let value = serde_json::to_value(&configured).unwrap();
+        assert_eq!(value["setupScript"], "pnpm install");
+        assert_eq!(value["quickSession"], true);
+        let back: Project = serde_json::from_value(value).unwrap();
+        assert_eq!(back, configured);
+        // Older daemons omit both keys; deserializing still works.
+        let legacy = serde_json::to_value(&project).unwrap();
+        let back: Project = serde_json::from_value(legacy).unwrap();
+        assert_eq!(back.setup_script, None);
+        assert!(!back.quick_session);
+    }
+
+    #[test]
+    fn update_params_distinguish_absent_from_explicit_null() {
+        let params: ProjectUpdateParams = serde_json::from_value(json!({"id": "p1"})).unwrap();
+        assert_eq!(params.setup_script, None);
+        let cleared: ProjectUpdateParams =
+            serde_json::from_value(json!({"id": "p1", "setupScript": null})).unwrap();
+        assert_eq!(cleared.setup_script, Some(None));
+        let set: ProjectUpdateParams =
+            serde_json::from_value(json!({"id": "p1", "setupScript": "make setup"})).unwrap();
+        assert_eq!(set.setup_script, Some(Some("make setup".into())));
+    }
+
+    #[test]
+    fn quick_session_result_wraps_project_and_workspace_id() {
+        let result = QuickSessionCreateResult {
+            project: Project {
+                id: "p9".into(),
+                host_id: "h1".into(),
+                path: "/data/quick-sessions/session-1".into(),
+                name: "Quick Session".into(),
+                kind: ProjectKind::Folder,
+                default_base_ref: None,
+                setup_script: None,
+                quick_session: true,
+            },
+            workspace_id: "ws9".into(),
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value["project"]["name"], "Quick Session");
+        assert_eq!(value["project"]["quickSession"], true);
+        assert_eq!(value["workspaceId"], "ws9");
+        let back: QuickSessionCreateResult = serde_json::from_value(value).unwrap();
+        assert_eq!(back, result);
+    }
+
+    #[test]
+    fn sparse_preset_wire_shapes() {
+        let preset = SparsePreset {
+            id: "sp1".into(),
+            project_id: "p1".into(),
+            name: "App only".into(),
+            directories: vec!["apps/desktop".into()],
+        };
+        let value = serde_json::to_value(&preset).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "id": "sp1", "projectId": "p1", "name": "App only",
+                "directories": ["apps/desktop"],
+            })
+        );
+        let save: SparsePresetSaveParams = serde_json::from_value(json!({
+            "projectId": "p1", "name": "App only", "directories": ["apps/desktop"]
+        }))
+        .unwrap();
+        assert_eq!(save.id, None);
     }
 }

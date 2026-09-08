@@ -28,10 +28,15 @@ const nativeMethodFor: Record<ProjectMethod, string> = {
   projectAdd: "project.add",
   projectList: "project.list",
   projectRemove: "project.remove",
+  projectUpdate: "project.update",
+  quickSessionCreate: "project.quickSessionCreate",
+  sparsePresets: "project.sparsePresets",
+  saveSparsePreset: "project.saveSparsePreset",
   worktreeCreate: "worktree.create",
   worktreeList: "worktree.list",
   worktreeRemove: "worktree.remove",
   worktreeRename: "worktree.rename",
+  worktreeUpdate: "worktree.update",
 };
 
 const invalid = {
@@ -52,9 +57,7 @@ export async function dispatchProjectRequest(
   if (!parsed.success) return { ...invalid };
   const nativeMethod = nativeMethodFor[method];
   const params =
-    parsed.data === undefined
-      ? {}
-      : (parsed.data as Record<string, unknown>);
+    parsed.data === undefined ? {} : (parsed.data as Record<string, unknown>);
   const result = await call(nativeMethod, params);
   if (!result.ok) return result;
   const checked = projectResultSchemas[
@@ -76,10 +79,15 @@ const channelFor: Record<ProjectMethod, string> = {
   projectAdd: "drogon:projectAdd",
   projectList: "drogon:projectList",
   projectRemove: "drogon:projectRemove",
+  projectUpdate: "drogon:projectUpdate",
+  quickSessionCreate: "drogon:quickSessionCreate",
+  sparsePresets: "drogon:sparsePresets",
+  saveSparsePreset: "drogon:saveSparsePreset",
   worktreeCreate: "drogon:worktreeCreate",
   worktreeList: "drogon:worktreeList",
   worktreeRemove: "drogon:worktreeRemove",
   worktreeRename: "drogon:worktreeRename",
+  worktreeUpdate: "drogon:worktreeUpdate",
 };
 
 /**
@@ -104,9 +112,10 @@ export type ProjectRegistryWatcherDeps = {
  * than a change, a failed read keeps the previous baseline so no move is
  * lost or double-reported, and the interval never keeps the app alive.
  */
-export function startProjectRegistryWatcher(
-  deps: ProjectRegistryWatcherDeps,
-): { tick: () => Promise<void>; stop: () => void } {
+export function startProjectRegistryWatcher(deps: ProjectRegistryWatcherDeps): {
+  tick: () => Promise<void>;
+  stop: () => void;
+} {
   let baseline: string | null = null;
   let inFlight = false;
 
@@ -156,6 +165,12 @@ export function startProjectRegistryWatcher(
 export function registerProjectBridge(
   getWindow: () => BrowserWindow | null,
 ): void {
+  // The legacy tasks bridge also registers a narrower `worktree.list`
+  // schema in the shared native-client registry. Re-assert the first-class
+  // project schema here so note/parent metadata survives native validation.
+  for (const [method, schema] of Object.entries(projectResultSchemas)) {
+    resultSchemas[method] = schema;
+  }
   for (const method of Object.keys(projectBridgeSchemas) as ProjectMethod[]) {
     ipcMain.handle(channelFor[method], async (event, input: unknown) => {
       const window = getWindow();
