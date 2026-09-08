@@ -580,6 +580,9 @@ impl crate::Engine {
                         effort: None,
                         provider: None,
                         permission_mode: None,
+                        // `automation.run_now` is a headless daemon run
+                        // (issue #186).
+                        headless: true,
                     };
                     (automation, harness)
                 };

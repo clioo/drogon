@@ -57,18 +57,28 @@ function kindIcon(kind: "reactive" | "scheduled") {
  *  names and the automation run number (never a status verdict): an
  *  automation-linked row names it, else a Mentu run id, else a bare
  *  recorded marker. Orphaned rows (deleted responsibility/automation)
- *  keep their null joins visible, never invented. */
+ *  keep their null joins visible, never invented. A stored terminal
+ *  observation (`exited` once the headless run's session exit is observed,
+ *  `unverifiable` when its observation failed) is appended as the row's
+ *  final state; a stored `live`/absent observation says nothing about
+ *  current liveness, so it stays unshown (the header session line owns
+ *  live observation from the caller's observation map). */
 function historyDetail(entry: BotsPanelHistoryEntry): string {
+  const observation = entry.run.hostObservation;
+  const finalState =
+    observation === "exited" || observation === "unverifiable"
+      ? ` · ${observation}`
+      : "";
   if (
     entry.automationRunNumber !== null &&
     entry.automationRunNumber !== undefined
   ) {
-    return `${entry.automationName ?? "automation"} · run ${entry.automationRunNumber}`;
+    return `${entry.automationName ?? "automation"} · run ${entry.automationRunNumber}${finalState}`;
   }
   if (entry.run.recipe?.runId) {
-    return `Mentu run ${entry.run.recipe.runId}`;
+    return `Mentu run ${entry.run.recipe.runId}${finalState}`;
   }
-  return "Recorded";
+  return `Recorded${finalState}`;
 }
 
 /** Inline confirm for the header bot Delete. Pure (no hooks of its own

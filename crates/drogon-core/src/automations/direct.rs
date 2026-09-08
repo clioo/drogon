@@ -111,6 +111,9 @@ fn harness_start_params(workspace_id: &str, prompt: &str, harness: &HarnessLaunc
     if let Some(permission_mode) = &harness.permission_mode {
         params["permissionMode"] = json!(permission_mode);
     }
+    if harness.headless {
+        params["headless"] = json!(true);
+    }
     params
 }
 

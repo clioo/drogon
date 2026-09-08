@@ -147,6 +147,7 @@ fn harness_params() -> HarnessLaunchParams {
         effort: None,
         provider: None,
         permission_mode: None,
+        headless: false,
     }
 }
 
@@ -474,6 +475,36 @@ fn foreign_workspace_host_refuses_even_when_automation_execution_target_already_
             current_host_id: HOST.to_string(),
         })
     );
+}
+
+#[test]
+fn headless_runs_carry_the_headless_flag_into_harness_start() {
+    let c = conn();
+    insert_workspace(&c, "w1", HOST);
+    bstorage::create_bot(&c, HOST, FOLDER, &sample_bot("b1", "Alice", 0.0)).unwrap();
+    let automation = sample_automation("a1", "b1", Some("w1".to_string()));
+    let responsibility = scheduled_responsibility("r1", "a1", true);
+    bstorage::create_scheduled_responsibility(&c, HOST, FOLDER, "b1", responsibility, automation)
+        .unwrap();
+
+    let mut headless = harness_params();
+    headless.headless = true;
+    let plan = ready_plan(
+        prepare_run_plan(
+            &c,
+            HOST,
+            FOLDER,
+            "b1",
+            "r1",
+            HOST,
+            &InvocationReason::ScheduledDue,
+            "due-100",
+            &headless,
+            100.0,
+        )
+        .unwrap(),
+    );
+    assert_eq!(plan.params["headless"], true);
 }
 
 // --- Phases 2/3: real dispatch through the fake seam, then recording ----

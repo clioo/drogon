@@ -404,11 +404,7 @@ mod tests {
         );
     }
 
-    fn request(
-        harness_id: HarnessId,
-        prompt: &str,
-        headless: bool,
-    ) -> HarnessLaunchRequest {
+    fn request(harness_id: HarnessId, prompt: &str, headless: bool) -> HarnessLaunchRequest {
         HarnessLaunchRequest {
             harness_id,
             model: None,
@@ -492,7 +488,10 @@ mod tests {
             plan(&request(HarnessId::Opencode, "hi", false)),
             ["--prompt=hi"]
         );
-        assert_eq!(plan(&request(HarnessId::Opencode, "hi", true)), ["run", "hi"]);
+        assert_eq!(
+            plan(&request(HarnessId::Opencode, "hi", true)),
+            ["run", "hi"]
+        );
     }
 
     #[test]
@@ -512,7 +511,10 @@ mod tests {
             plan(&request(HarnessId::Antigravity, "hi", false)),
             ["--prompt-interactive", "hi"]
         );
-        assert_eq!(plan(&request(HarnessId::Antigravity, "hi", true)), ["-p", "hi"]);
+        assert_eq!(
+            plan(&request(HarnessId::Antigravity, "hi", true)),
+            ["-p", "hi"]
+        );
     }
 
     #[test]

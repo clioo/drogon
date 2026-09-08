@@ -623,6 +623,22 @@ fn authorized_prepare_composes_the_operating_prompt_for_a_chat_turn() {
     assert!(harness_prompt.contains("Chat message\nWhat is the status?"));
     assert_eq!(plan.params["workspaceId"], "ws-1");
     assert_eq!(plan.params["harnessId"], "codex");
+    // Chat turns are headless daemon runs: no TUI, no approval surface.
+    assert_eq!(plan.params["headless"], true);
+}
+
+#[test]
+fn responsibility_runs_launch_headless() {
+    let (_dir, _engine, conn, host) = fixture();
+    seed_workspace(&conn, &host);
+    seed_scheduled_bot(&conn, &host, true);
+    let request = bot_run_rpc::parse_bot_run_request(&params(&host, json!({}))).unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::ReadyResponsibility { plan, .. } = prepared else {
+        panic!("expected Ready, got {prepared:?}");
+    };
+    assert_eq!(plan.params["headless"], true);
 }
 
 #[test]

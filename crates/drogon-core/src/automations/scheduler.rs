@@ -216,6 +216,8 @@ fn harness_for(automation: &Automation) -> HarnessLaunchParams {
         effort: None,
         provider: None,
         permission_mode: None,
+        // Scheduler fires are headless daemon runs (issue #186).
+        headless: true,
     }
 }
 

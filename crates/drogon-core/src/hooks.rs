@@ -155,6 +155,13 @@ impl Engine {
             ));
         }
         match signal {
+            // A headless daemon run (`pi -p`, `claude -p`, `opencode run`,
+            // `agy -p`) has no approval-answer surface: stamping a wait
+            // signal would pin it at `needs_input` forever with nobody able
+            // to answer (issue #186). Headless installs no hooks, so a wait
+            // signal here is unexpected anyway — ignore it, never report it.
+            // Its exit is the completion signal, not a hook event.
+            HookSignal::Wait if handle.is_headless() => {}
             HookSignal::Wait => handle.note_hook_event(),
             HookSignal::Clear => handle.clear_hook_event(),
         }

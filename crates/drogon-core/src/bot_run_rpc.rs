@@ -737,6 +737,9 @@ pub fn authorized_prepare(
         effort: harness.effort.clone(),
         provider: harness.provider.clone(),
         permission_mode: harness.permission_mode.clone(),
+        // Both turn kinds (responsibility and chat) are headless daemon
+        // runs: no TUI, no approval-answer surface (issue #186).
+        headless: true,
     };
 
     match &request.turn {
@@ -832,6 +835,9 @@ fn build_chat_harness_start_params(
     }
     if let Some(permission_mode) = &harness_params.permission_mode {
         params["permissionMode"] = json!(permission_mode);
+    }
+    if harness_params.headless {
+        params["headless"] = json!(true);
     }
     params
 }
