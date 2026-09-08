@@ -28,7 +28,12 @@ export function agentIconKind(state: AgentState): AgentIconKind {
   }
 }
 
-/** Accessible label shared by the tab badge and the card dot. */
+/**
+ * Accessible label shared by the tab badge and the card dot — the fork's
+ * `agentStateLabel` (AgentStateDot.tsx) verbatim for the four mapped states;
+ * `exited` has no fork equivalent (a Drogon-only verdict) and keeps its own
+ * label. The tooltip copy is the same string.
+ */
 export function agentStateLabel(state: AgentState): string {
   switch (state) {
     case "working":
@@ -40,7 +45,7 @@ export function agentStateLabel(state: AgentState): string {
     case "exited":
       return "Exited";
     case "unknown":
-      return "No agent update";
+      return "No recent update";
   }
 }
 

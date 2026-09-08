@@ -6,12 +6,18 @@
    Pure functions, unit-tested.) */
 import type { AgentState, Session } from "../../../../shared/session-contract";
 
+// Why: the source's SUMMARY_STATE_ORDER (waiting, blocked, working,
+// monitoring, interrupted, done, unverifiable, idle) puts the stale-channel
+// marker above true idle — the pane is still held. The same projection over
+// this repo's five states: needs_input first, then the live working state,
+// the terminal exited state (the source's done), the not-reporting marker,
+// and idle last.
 const SUMMARY_STATE_ORDER: AgentState[] = [
   "needs_input",
   "working",
-  "idle",
   "exited",
   "unknown",
+  "idle",
 ];
 
 export function formatSummaryStateLabel(state: AgentState): string {

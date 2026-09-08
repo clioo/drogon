@@ -12,6 +12,9 @@ export type WatchedSession = {
   id: string;
   workspaceId: string;
   command: string;
+  /** Which harness launched the session (`harness.start`); absent for plain
+   * shells. Drives the notification label — never the process basename. */
+  harnessId?: string | null;
   agentState?: string;
   agentStateAt?: string | null;
 };
@@ -65,12 +68,31 @@ export function diffAgentStates(
 }
 
 /**
- * Session label mirroring the renderer's `sessionLabel`: the harness
- * display name when the command matches a known harness executable, else
- * the command basename. Main cannot call the renderer helper (separate
- * bundle), so the small mapping lives here.
+ * Harness display names, mirroring the daemon's `HarnessId::display_name`
+ * (and the fork's agent-type labels): the session's `harnessId` names the
+ * label, never the process basename — a Pi session launched through a
+ * bundle path reports `pi`, not `cli.js`.
  */
-export function sessionLabelFor(command: string): string {
+const HARNESS_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  claude: "Claude Code",
+  pi: "Pi",
+  opencode: "OpenCode",
+  antigravity: "Antigravity",
+};
+
+/**
+ * Session label for the notification title: the harness display name when
+ * the session carries a known `harnessId`, else the command basename when
+ * it matches a known harness executable, else the raw basename. Main cannot
+ * call the renderer's `sessionLabel` (separate bundle), so the small mapping
+ * lives here.
+ */
+export function sessionLabelFor(
+  command: string,
+  harnessId?: string | null,
+): string {
+  if (harnessId && HARNESS_DISPLAY_NAMES[harnessId])
+    return HARNESS_DISPLAY_NAMES[harnessId];
   const base = command.split(/[\\/]/).at(-1) ?? "";
   switch (base) {
     case "claude":
@@ -92,13 +114,21 @@ export function worktreeNameFor(workspacePath: string): string {
   return base || workspacePath;
 }
 
-/** `"<label> needs your input"` + `"in <worktree>"` (title/body split). */
+/**
+ * Fork copy (`notification-options.ts` `buildAgentTaskComplete...` with a
+ * `blocked`/`waiting` snapshot): `"<workspace> - <label> needs input"` +
+ * `"<label> needs input."`. The fork's rich body (last assistant message /
+ * tool preview) has no equivalent here — `session.list` carries no message
+ * content — so the fallback body always applies.
+ */
 export function formatNeedsInput(
   session: WatchedSession,
-  workspacePath: string | null,
+  workspaceName: string | null,
 ): { title: string; body: string } {
+  const label = sessionLabelFor(session.command, session.harnessId);
+  const context = workspaceName || "workspace";
   return {
-    title: `${sessionLabelFor(session.command)} needs your input`,
-    body: `in ${workspacePath ? worktreeNameFor(workspacePath) : "the workspace"}`,
+    title: `${context} - ${label} needs input`,
+    body: `${label} needs input.`,
   };
 }

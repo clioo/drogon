@@ -22,6 +22,10 @@ const session = z.object({
   verdict: z.enum(["live", "unverifiable", "exited"]),
   exitCode: z.number().int().nullable(),
   createdAt: z.string(),
+  // R16-I (coordinator-owned touch, see PR): the daemon always reports
+  // `harnessId` (session-contract.ts) and the needs-input notification names
+  // the harness from it; optional so older services still validate.
+  harnessId: z.string().nullable().optional(),
   // R3-C: the daemon always reports these (session-contract.ts), but they
   // stay optional so a response from an older service without them still
   // validates; absent reads as `unknown` at the call sites.

@@ -25,7 +25,7 @@ export type NeedsInputWatcherDeps = {
   getWindow: () => BrowserWindow | null;
   listSessions: () => Promise<{
     sessions: WatchedSession[];
-    workspacePaths: Map<string, string>;
+    workspaceNames: Map<string, string>;
   }>;
   isEnabled: () => boolean;
   show: (title: string, body: string, onClick: () => void) => void;
@@ -47,6 +47,10 @@ function asWatchedSessions(value: unknown): WatchedSession[] {
       id: row.id,
       workspaceId: row.workspaceId,
       command: row.command,
+      harnessId:
+        typeof row.harnessId === "string" || row.harnessId === null
+          ? row.harnessId
+          : undefined,
       agentState: typeof row.agentState === "string" ? row.agentState : undefined,
       agentStateAt: typeof row.agentStateAt === "string" ? row.agentStateAt : null,
     });
@@ -54,23 +58,36 @@ function asWatchedSessions(value: unknown): WatchedSession[] {
   return out;
 }
 
-function asWorkspacePaths(value: unknown): Map<string, string> {
-  const paths = new Map<string, string>();
-  if (typeof value !== "object" || value === null) return paths;
+/**
+ * Workspace display names for the notification title (the fork's
+ * `formatNotificationWorktreeContext` adapted: the registered workspace name
+ * when known, else the last path segment, so a renamed workspace still reads
+ * as the user named it).
+ */
+function asWorkspaceNames(value: unknown): Map<string, string> {
+  const names = new Map<string, string>();
+  if (typeof value !== "object" || value === null) return names;
   const workspaces = (value as { workspaces?: unknown }).workspaces;
-  if (!Array.isArray(workspaces)) return paths;
+  if (!Array.isArray(workspaces)) return names;
   for (const item of workspaces) {
     if (typeof item !== "object" || item === null) continue;
     const row = item as Record<string, unknown>;
-    if (typeof row.id === "string" && typeof row.path === "string")
-      paths.set(row.id, row.path);
+    if (typeof row.id !== "string") continue;
+    if (typeof row.name === "string" && row.name) {
+      names.set(row.id, row.name);
+      continue;
+    }
+    if (typeof row.path === "string") {
+      const base = row.path.split(/[\\/]/).filter(Boolean).at(-1);
+      if (base) names.set(row.id, base);
+    }
   }
-  return paths;
+  return names;
 }
 
 async function listSessionsAndPaths(): Promise<{
   sessions: WatchedSession[];
-  workspacePaths: Map<string, string>;
+  workspaceNames: Map<string, string>;
 }> {
   const [sessionsResult, workspacesResult] = await Promise.all([
     callNative("session.list", {}),
@@ -80,8 +97,8 @@ async function listSessionsAndPaths(): Promise<{
     sessions: sessionsResult.ok
       ? asWatchedSessions(sessionsResult.result)
       : [],
-    workspacePaths: workspacesResult.ok
-      ? asWorkspacePaths(workspacesResult.result)
+    workspaceNames: workspacesResult.ok
+      ? asWorkspaceNames(workspacesResult.result)
       : new Map(),
   };
 }
@@ -101,7 +118,7 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
     if (inFlight) return;
     inFlight = true;
     try {
-      const { sessions, workspacePaths } = await deps.listSessions();
+      const { sessions, workspaceNames } = await deps.listSessions();
       const { next, transitions } = diffAgentStates(states, sessions);
       states = next;
       for (const transition of transitions) {
@@ -125,7 +142,7 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
         if (!transition.entered || !deps.isEnabled()) continue;
         const { title, body } = formatNeedsInput(
           transition.session,
-          workspacePaths.get(transition.session.workspaceId) ?? null,
+          workspaceNames.get(transition.session.workspaceId) ?? null,
         );
         const focus: FocusSessionEvent = {
           sessionId: transition.session.id,
