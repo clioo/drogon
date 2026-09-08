@@ -80,6 +80,18 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
             )?;
         }
+        // Downgrade guard: a recorded version newer than
+        // `PROJECTS_SCHEMA_VERSION` was written by a build this one cannot
+        // understand. The old `_ => {}` arm silently accepted it, letting an
+        // older build write rows into a future schema.
+        Some(found) if found > PROJECTS_SCHEMA_VERSION => {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_SCHEMA),
+                Some(format!(
+                    "projects schema version {found} is newer than supported {PROJECTS_SCHEMA_VERSION}"
+                )),
+            ));
+        }
         Some(1) => {
             apply_v2_title_column(tx)?;
             tx.execute(

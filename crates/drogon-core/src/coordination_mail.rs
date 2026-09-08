@@ -193,11 +193,16 @@ pub(crate) fn migrate_in_tx(tx: &Transaction) -> Result<(), RpcError> {
     // precisely `SCHEMA_VERSION` -- future (too high) or corrupt (0,
     // negative, or any other stray value) -- is refused explicitly rather
     // than silently stepped forward.
+    // Uniform downgrade-refusal copy (R16-BP): names the component, the
+    // found/supported versions and the "newer than" marker the desktop
+    // bootstrap classifies on, like every other component's refusal.
     if let Some(found) = found {
         if found != SCHEMA_VERSION {
             return Err(RpcError::new(
                 "unsupported_orchestration_contract",
-                "Unsupported orchestration mail schema version.",
+                format!(
+                    "orchestration mail schema version {found} is newer than the {SCHEMA_VERSION} this build supports; refusing to modify it"
+                ),
             ));
         }
         return Ok(());

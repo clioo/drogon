@@ -3,6 +3,41 @@ import type { LocalEndpointObservation } from "./native-client";
 import type { Result, Status } from "../shared/session-contract";
 
 /**
+ * Diagnostics handle for a spawned daemon. `stderrTail` resolves with the
+ * daemon's collected stderr once the process exits (the stream closes); for
+ * a healthy daemon it stays pending, which never blocks the bootstrap —
+ * callers only await it while the readiness poll is already failing.
+ */
+export type DaemonSpawnHandle = {
+  stderrTail(): Promise<string>;
+};
+
+/**
+ * The stderr marker a refusing `drogond` prints. Every component's
+ * future-version refusal renders "<component> schema version N is newer
+ * than [the] M ..." (see `bots::storage`, `coordination_access`, `mentu`,
+ * `project`), and the daemon's own bootstrap appends the offending data
+ * dir to the message, so this one substring classifies the downgrade case
+ * without coupling the desktop to any single component's wording.
+ */
+const REFUSAL_MARKER = "is newer than";
+
+/**
+ * Extracts the human-readable refusal reason from a dead daemon's stderr,
+ * or null when the output shows no schema refusal (a crash, an unsafe
+ * data-dir refusal, anything else). Keeps the last matching line so a
+ * multi-line log still carries the component, versions and data dir.
+ */
+export function classifyDaemonRefusal(stderrText: string): string | null {
+  const lines = stderrText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.includes(REFUSAL_MARKER));
+  const last = lines.at(-1);
+  return last ? last.replace(/^drogond:\s*/, "") : null;
+}
+
+/**
  * Pure decision core: every effect (status check, endpoint probe, binary
  * existence, spawn, sleep) is injected, so every branch below is directly
  * unit-testable without a real socket, filesystem, or child process.
@@ -21,9 +56,11 @@ export type BootstrapDeps = {
    * A real child process reports "failed to start" (ENOENT, EACCES) as an
    * async `error` event, not a synchronous throw — so this returns a
    * promise that rejects on that event. A synchronous throw here is still
-   * treated as a failed spawn too, never an unhandled crash.
+   * treated as a failed spawn too, never an unhandled crash. May return a
+   * [`DaemonSpawnHandle`] with stderr diagnostics; plain `void` (dev seams,
+   * tests) simply disables refusal classification.
    */
-  spawnDaemon(): Promise<void>;
+  spawnDaemon(): Promise<DaemonSpawnHandle | void>;
   sleep(ms: number): Promise<void>;
   pollIntervalMs: number;
   /** One budget for the *entire* bootstrap: initial observation, the spawn decision, and readiness polling all draw from it — not a separate clock each. */
@@ -44,7 +81,14 @@ export type BootstrapOutcome =
   | { kind: "spawn-failed"; message: string }
   | { kind: "spawn-timed-out" }
   | { kind: "spawned-then-healthy" }
-  | { kind: "spawned-then-timed-out" };
+  | { kind: "spawned-then-timed-out" }
+  /**
+   * The spawned daemon exited before becoming ready and its stderr shows a
+   * schema-version refusal: the data dir was written by a newer build.
+   * `reason` is the daemon's own one-line refusal (component, versions,
+   * data dir) for the renderer's downgrade dialog.
+   */
+  | { kind: "spawned-then-refused"; reason: string };
 
 /**
  * A raced call settles exactly one of three ways, kept distinct rather than
@@ -184,10 +228,30 @@ export async function bootstrapNativeRuntime(
   // `race` — a poll failure is treated like "not yet answered" (the daemon
   // is already spawned; a transient failure doesn't undo that), and a
   // `sleep` that hangs or throws can't extend the wait past the deadline.
+  // Between polls, a closed stderr stream is classified: a daemon that died
+  // with a schema refusal is reported as `spawned-then-refused` immediately
+  // instead of burning the whole readiness budget and landing on a generic
+  // timeout — the downgrade dialog must appear in seconds, not after a
+  // silent hang that looks like a broken app.
+  let stderrTail: (() => Promise<string>) | null =
+    typeof spawned.value?.stderrTail === "function"
+      ? spawned.value.stderrTail.bind(spawned.value)
+      : null;
   while (remaining() > 0) {
     const check = await race(deps.checkStatus, remaining());
     if (check.kind === "value" && check.value.ok)
       return { kind: "spawned-then-healthy" };
+    if (stderrTail) {
+      const readTail: () => Promise<string> = stderrTail;
+      const tail = await race((_signal) => readTail(), remaining());
+      if (tail.kind === "value") {
+        const reason = classifyDaemonRefusal(tail.value);
+        if (reason) return { kind: "spawned-then-refused", reason };
+        // Stream closed with no refusal in it — a non-schema crash. Stop
+        // re-reading; the loop falls through to the honest timeout.
+        stderrTail = null;
+      }
+    }
     if (remaining() <= 0) break;
     await race(
       (_signal) => deps.sleep(Math.min(deps.pollIntervalMs, remaining())),
@@ -211,17 +275,43 @@ export function spawnDetachedDaemon(
   binaryPath: string,
   args: string[],
   env: NodeJS.ProcessEnv,
-): Promise<void> {
+): Promise<DaemonSpawnHandle> {
   return new Promise((resolve, reject) => {
+    // stderr is captured (capped ring) purely for downgrade-refusal
+    // classification; stdout stays ignored — the daemon is quiet on stdout.
+    const stderrChunks: Buffer[] = [];
+    let stderrBytes = 0;
+    const STDERR_CAP_BYTES = 16 * 1024;
+    let closed = false;
     const child = spawn(binaryPath, args, {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
       shell: false,
       env,
     });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      if (stderrBytes >= STDERR_CAP_BYTES) return;
+      stderrBytes += chunk.length;
+      stderrChunks.push(chunk);
+      if (stderrBytes > STDERR_CAP_BYTES)
+        stderrChunks.push(Buffer.from("\n[truncated]\n"));
+    });
+    const stderrText = (): string =>
+      Buffer.concat(stderrChunks).toString("utf8");
+    const stderrTail = (): Promise<string> =>
+      new Promise((resolveTail) => {
+        if (closed) {
+          resolveTail(stderrText());
+          return;
+        }
+        child.once("close", () => resolveTail(stderrText()));
+      });
+    child.once("close", () => {
+      closed = true;
+    });
     child.once("error", reject);
-    child.once("spawn", () => resolve());
+    child.once("spawn", () => resolve({ stderrTail }));
     // Detached + unref'd: the daemon outlives this process, including on
     // GUI quit. It is never spawned as a child this app would reap.
     child.unref();

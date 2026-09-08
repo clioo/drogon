@@ -60,7 +60,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let _lock = lock::acquire_exclusive(data_dir).map_err(ServeError::Io)?;
     let listener = endpoint::establish(data_dir).map_err(ServeError::Io)?;
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
-    let engine = Engine::open(data_dir).map_err(ServeError::Engine)?;
+    let engine = open_engine_naming_data_dir(data_dir)?;
     let engine = Arc::new(configure_worker_cli(engine)?);
     // Daemon-owned automation tick loop (R2-B): a plain OS thread polling
     // every 15 s. It exits on engine quiescence or here on serve exit.
@@ -98,7 +98,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let _lock = lock::acquire_exclusive(data_dir).map_err(ServeError::Io)?;
     let listener = endpoint::establish(data_dir).map_err(ServeError::Io)?;
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
-    let engine = Engine::open(data_dir).map_err(ServeError::Engine)?;
+    let engine = open_engine_naming_data_dir(data_dir)?;
     let engine = Arc::new(configure_worker_cli(engine)?);
     // Daemon-owned automation tick loop (R2-B); see the Unix serve above.
     let mut scheduler = drogon_core::automations::scheduler::spawn(
@@ -129,6 +129,17 @@ fn configure_worker_cli(engine: Engine) -> Result<Engine, ServeError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(engine),
         Err(error) => Err(ServeError::Io(error)),
     }
+}
+
+/// Opens the engine; on failure the error message names the data dir, so a
+/// schema-version refusal printed by `drogond` (and surfaced by the desktop
+/// bootstrap) tells the user *which* directory a newer build wrote and what
+/// not to touch — instead of a bare "schema version 4 is newer".
+pub fn open_engine_naming_data_dir(data_dir: &Path) -> Result<Engine, ServeError> {
+    Engine::open(data_dir).map_err(|mut e| {
+        e.message = format!("{} (data dir: {})", e.message, data_dir.display());
+        ServeError::Engine(e)
+    })
 }
 
 /// Refuses a data directory that is itself a symlink — following it would

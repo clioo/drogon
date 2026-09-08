@@ -31,9 +31,14 @@ pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), RpcError> {
         .optional()
         .map_err(error::from_sqlite)?;
     if version.is_some_and(|v| v != 1) {
+        // Uniform downgrade-refusal copy (R16-BP): names the component and
+        // the "newer than" marker the desktop bootstrap classifies on.
         return Err(RpcError::new(
             "unsupported_orchestration_contract",
-            "Unsupported attempt schema version.",
+            format!(
+                "orchestration attempts schema version {} is newer than the 1 this build supports; refusing to modify it",
+                version.unwrap_or_default()
+            ),
         ));
     }
     tx.execute_batch(

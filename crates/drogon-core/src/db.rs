@@ -170,8 +170,248 @@ impl From<rusqlite::Error> for StartupError {
     }
 }
 
+/// How many pre-migration backups to retain under `<data-dir>/backups`.
+pub const PRE_MIGRATION_BACKUP_RETENTION: usize = 3;
+
+/// Every per-component `schema_versions` entry this build knows, with its
+/// current supported version. Keep in sync with the constants in each
+/// component module; `upgrade_safety.rs` cross-checks the pairings against
+/// the modules' own recorded migrations so drift fails a test.
+const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
+    (
+        automations_storage::AUTOMATIONS_SCHEMA_COMPONENT,
+        automations_storage::AUTOMATIONS_SCHEMA_VERSION,
+    ),
+    (
+        bots_storage::BOTS_SCHEMA_COMPONENT,
+        bots_storage::BOTS_SCHEMA_VERSION,
+    ),
+    (
+        mentu_storage::MENTU_SCHEMA_COMPONENT,
+        mentu_storage::MENTU_SCHEMA_VERSION,
+    ),
+    (
+        crate::project::PROJECTS_SCHEMA_COMPONENT,
+        crate::project::PROJECTS_SCHEMA_VERSION,
+    ),
+    ("coordination_access", 1),
+    ("orchestration_mail", 1),
+    ("orchestration_attempts", 1),
+];
+
+/// One recorded component version a forward migration would advance.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) struct PendingMigration {
+    pub component: String,
+    pub recorded: i64,
+    pub target: i64,
+}
+
+/// Reads every recorded per-component version and reports those older than
+/// this build's current version. Components with no recorded row yet are
+/// fresh installs (created directly at current), never pending. The main
+/// schema (sessions/requests/workspaces) has no version row of its own; its
+/// additive column migrations are detected structurally instead.
+fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<PendingMigration>> {
+    let has_schema_versions: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_versions'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)?;
+    let mut pending = Vec::new();
+    if has_schema_versions {
+        for (component, current) in VERSIONED_COMPONENTS {
+            let recorded: Option<i64> = conn
+                .query_row(
+                    "SELECT version FROM schema_versions WHERE component = ?1",
+                    [component],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(recorded) = recorded
+                && recorded < *current
+            {
+                pending.push(PendingMigration {
+                    component: (*component).to_string(),
+                    recorded,
+                    target: *current,
+                });
+            }
+        }
+    }
+    // Main-schema additive columns: an older data dir's `sessions` table
+    // lacks them; a fresh or current one already has both.
+    if let Ok(Some((_, cols))) = table_columns(conn, "sessions") {
+        let has = |name: &str| cols.iter().any(|c| c == name);
+        if !(has("harness_id") && has("needs_input_at")) {
+            pending.push(PendingMigration {
+                component: "sessions (main schema columns)".to_string(),
+                recorded: 1,
+                target: 1,
+            });
+        }
+    }
+    Ok(pending)
+}
+
+fn table_columns(
+    conn: &Connection,
+    table: &str,
+) -> rusqlite::Result<Option<(String, Vec<String>)>> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+            [table],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)?;
+    if !exists {
+        return Ok(None);
+    }
+    let cols = conn
+        .prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(Some((table.to_string(), cols)))
+}
+
+/// The first time a newer build opens an older data dir — i.e. whenever a
+/// forward migration is about to run — snapshot the database next to it
+/// (`<data-dir>/backups/pre-migration-<utc>/drogon.sqlite3` plus a
+/// `manifest.json`), retaining the newest [`PRE_MIGRATION_BACKUP_RETENTION`].
+/// The snapshot uses `VACUUM INTO`, which yields a consistent single-file
+/// copy even with a live WAL and, crucially, is legal *outside* a
+/// transaction — which is why this runs before the aggregate startup
+/// transaction opens. Best-effort by design: every migration itself is
+/// additive and rollback-safe, so a failed backup (disk full, read-only
+/// dir) degrades to a loud stderr note rather than refusing startup.
+fn create_pre_migration_backup_if_needed(conn: &Connection) {
+    let pending = match pending_forward_migrations(conn) {
+        Ok(pending) if !pending.is_empty() => pending,
+        Ok(_) => return,
+        Err(e) => {
+            eprintln!("drogond: pre-migration backup skipped (cannot read schema_versions): {e}");
+            return;
+        }
+    };
+    // `conn.path()` is the database *file*; the backup lives beside it, in
+    // the data dir itself.
+    let data_dir = conn
+        .path()
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .and_then(|db_file| db_file.parent().map(|p| p.to_path_buf()));
+    let Some(data_dir) = data_dir else {
+        eprintln!("drogond: pre-migration backup skipped (cannot resolve database path)");
+        return;
+    };
+    if let Err(e) = create_pre_migration_backup(&data_dir, conn, &pending) {
+        eprintln!(
+            "drogond: pre-migration backup FAILED for {} (continuing; migrations are rollback-safe): {e}",
+            data_dir.display()
+        );
+    } else if let Ok(backups) = std::fs::read_dir(data_dir.join("backups")) {
+        let newest = backups.filter_map(|e| e.ok()).map(|e| e.path()).max();
+        if let Some(newest) = newest {
+            eprintln!(
+                "drogond: pre-migration backup created at {} before migrating this data dir forward",
+                newest.display()
+            );
+        }
+    }
+}
+
+/// Builds one backup directory. Exposed `pub(crate)` for the upgrade-safety
+/// tests; the retention policy lives in [`prune_pre_migration_backups`].
+pub(crate) fn create_pre_migration_backup(
+    data_dir: &Path,
+    conn: &Connection,
+    pending: &[PendingMigration],
+) -> std::io::Result<std::path::PathBuf> {
+    let backups_dir = data_dir.join("backups");
+    std::fs::create_dir_all(&backups_dir)?;
+    let dir = backups_dir.join(format!("pre-migration-{}", crate::now_unix_ms()));
+    std::fs::create_dir(&dir)?;
+    // VACUUM INTO copies a consistent snapshot of the whole database
+    // (WAL included) into a fresh file; it refuses to overwrite, which also
+    // guards against a colliding directory name.
+    let target = dir.join(DB_FILE_NAME);
+    conn.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
+        .map_err(|e| {
+            let _ = std::fs::remove_dir_all(&dir);
+            std::io::Error::other(format!("VACUUM INTO snapshot failed: {e}"))
+        })?;
+    let pending_json: Vec<serde_json::Value> = pending
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "component": p.component,
+                "recorded_version": p.recorded,
+                "migrating_to": p.target,
+            })
+        })
+        .collect();
+    let manifest = serde_json::json!({
+        "kind": "drogon-pre-migration-backup",
+        "created_at": crate::now_rfc3339(),
+        "data_dir": data_dir.to_string_lossy(),
+        "database_file": DB_FILE_NAME,
+        "writer_build_version": env!("CARGO_PKG_VERSION"),
+        "reason": "a newer Drogon build migrated this data dir forward",
+        "pending_migrations": pending_json,
+    });
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest)
+            .map_err(|e| std::io::Error::other(e.to_string()))?,
+    )?;
+    prune_pre_migration_backups(&backups_dir);
+    Ok(dir)
+}
+
+/// Keeps only the newest [`PRE_MIGRATION_BACKUP_RETENTION`] backup
+/// directories. Directory names embed unix ms of constant width (13 digits
+/// until the year 2286), so a numeric-suffix sort is the time sort; names
+/// without a numeric suffix sort last and go first. Prune failures are
+/// swallowed: a stale extra backup never justifies failing the startup
+/// path.
+fn prune_pre_migration_backups(backups_dir: &Path) {
+    let mut backups: Vec<(u64, std::path::PathBuf)> = match std::fs::read_dir(backups_dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("pre-migration-"))
+            })
+            .map(|p| {
+                let stamp = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.strip_prefix("pre-migration-"))
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .unwrap_or(0);
+                (stamp, p)
+            })
+            .collect(),
+        Err(_) => return,
+    };
+    backups.sort_by_key(|(stamp, _)| *stamp);
+    while backups.len() > PRE_MIGRATION_BACKUP_RETENTION {
+        let Some((_, oldest)) = backups.first() else {
+            break;
+        };
+        let _ = std::fs::remove_dir_all(oldest);
+        backups.remove(0);
+    }
+}
+
 /// Main schema, capability migrations, recovery and host identity commit together.
 pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
+    // Before anything migrates: if this build is about to move an older
+    // data dir forward, snapshot it first (best-effort; see the fn doc).
+    create_pre_migration_backup_if_needed(conn);
     let tx = automations_storage::begin_immediate(conn).map_err(StartupError::Automations)?;
     create_tables(&tx)?;
     automations_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Automations)?;
