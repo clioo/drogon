@@ -204,8 +204,12 @@ export function BotsPanel({
                 }
                 onRunResponsibility={
                   onRunResponsibility
-                    ? (responsibilityId) =>
-                        runResponsibility(selectedBot.id, responsibilityId)
+                    ? (responsibilityId) => {
+                        void runResponsibility(
+                          selectedBot.id,
+                          responsibilityId,
+                        );
+                      }
                     : undefined
                 }
               />
@@ -213,6 +217,7 @@ export function BotsPanel({
                 <BotConversation
                   botId={selectedBot.id}
                   harnessId={selectedBot.harnessPolicy.defaultHarness}
+                  explicitModel={selectedBot.harnessPolicy.explicitModel}
                   scope={scope}
                   bridge={bridge}
                   sessionReader={sessionReader}
@@ -294,8 +299,12 @@ export function BotsPanel({
                       }
                       onRunResponsibility={
                         onRunResponsibility
-                          ? (responsibilityId) =>
-                              runResponsibility(row.id, responsibilityId)
+                          ? (responsibilityId) => {
+                              void runResponsibility(
+                                row.id,
+                                responsibilityId,
+                              );
+                            }
                           : undefined
                       }
                     />

@@ -327,9 +327,28 @@ fn parse_display_identity(value: &Value, path: &str) -> PResult<Value> {
     Ok(json!({ "displayName": display_name, "handle": handle, "title": title }))
 }
 
+/// Bound on a stored `explicitModel`: `drogon_harness::plan_launch` refuses a
+/// `--model` value longer than 512 bytes, so anything longer could be stored
+/// but never launched -- reject it at this boundary instead. Measured in
+/// code points like every other string bound in this module (exact for the
+/// ASCII model-id charset; a non-ASCII value at the bound can still be
+/// refused later by the byte-based launch check).
+const MAX_EXPLICIT_MODEL_LEN: usize = 512;
+
 const HARNESS_POLICY_FIELDS: &[&str] = &["defaultHarness", "explicitModel"];
 
-/// `HarnessPolicy`: `{ defaultHarness: Harness, explicitModel: z.null() }.strict()`.
+/// `HarnessPolicy`: `{ defaultHarness: Harness, explicitModel: string | null }.strict()`.
+///
+/// DELIBERATE deviation from the pinned source (whose `HarnessPolicy` is
+/// `explicitModel: z.null()`): the fork's own renderer sends
+/// `explicitModel: model.trim() || null`, its stored contract keeps
+/// `string | null`, and its launch helper consumes the string as the Pi
+/// `--model` arg -- only the create boundary rejected it, stranding the
+/// form's Model field. Accepting the string here (trimmed, empty-to-null,
+/// code-point-bounded against the harness adapter's model length bound) is
+/// what lets a Bot created for Pi carry its provider/model selection
+/// through to `bot.run`. See the re-baselined
+/// `bot_create/explicit_model_string_rejected` parity fixture.
 fn parse_harness_policy(value: &Value, path: &str) -> PResult<Value> {
     let obj = as_object(value, path)?;
     reject_unknown_fields(obj, HARNESS_POLICY_FIELDS, path)?;
@@ -344,9 +363,30 @@ fn parse_harness_policy(value: &Value, path: &str) -> PResult<Value> {
     let explicit_model = obj
         .get("explicitModel")
         .ok_or_else(|| missing(&explicit_model_path))?;
-    require_null(explicit_model, &explicit_model_path)?;
+    // Nullable model string (see the `HarnessPolicy` doc above): `null` stays
+    // `null`; a string is JS-trimmed, folds empty-to-null like the fork's
+    // stored normalize (`trim() || null`), and is bounded in code points by
+    // the harness adapter's own model length bound.
+    let explicit_model = match explicit_model {
+        Value::Null => Value::Null,
+        value => {
+            let raw = as_string(value, &explicit_model_path)?;
+            let trimmed = js_trim(raw);
+            if trimmed.is_empty() {
+                Value::Null
+            } else {
+                if codepoint_len(trimmed) > MAX_EXPLICIT_MODEL_LEN {
+                    return Err(BotInputError::new(
+                        InvalidInputCategory::OutOfRange,
+                        explicit_model_path,
+                    ));
+                }
+                Value::String(trimmed.to_string())
+            }
+        }
+    };
 
-    Ok(json!({ "defaultHarness": default_harness, "explicitModel": Value::Null }))
+    Ok(json!({ "defaultHarness": default_harness, "explicitModel": explicit_model }))
 }
 
 fn parse_memories(value: &Value, path: &str) -> PResult<Vec<Value>> {

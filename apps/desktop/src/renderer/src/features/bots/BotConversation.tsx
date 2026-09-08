@@ -13,6 +13,33 @@ import type {
   BotScope,
   BotSessionReader,
 } from "../../../../shared/bot-contract";
+import { buildBotRunHarness } from "./bots-page-model";
+
+/** Renders PTY output as plain text: strips ANSI/VT escape sequences (CSI,
+ *  OSC, charset selects) the harness TUI emits, drops carriage returns from
+ *  spinner redraws, and collapses consecutive duplicate lines so a status
+ *  line redrawn fifty times reads once. Display-only -- the raw bytes stay
+ *  in the session buffer. */
+export function readableTerminalText(raw: string): string {
+  const stripped = raw
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-9:;<=>?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[()][0-9A-Z]/g, "")
+    .replace(/\r/g, "");
+  const lines = stripped.split("\n");
+  const collapsed: string[] = [];
+  for (const line of lines) {
+    if (
+      collapsed.length > 0 &&
+      collapsed[collapsed.length - 1] === line &&
+      line.trim() !== ""
+    ) {
+      continue;
+    }
+    collapsed.push(line);
+  }
+  return collapsed.join("\n");
+}
 
 function decodeBase64Utf8(base64: string): string {
   if (base64.length === 0) return "";
@@ -61,7 +88,11 @@ function ReplyView({
           setState({ status: "unavailable" });
           return;
         }
-        const text = decodeBase64Utf8(response.result.dataBase64);
+        // PTY bytes carry the harness TUI's escape sequences; render the
+        // readable text (raw bytes stay in the session buffer).
+        const text = readableTerminalText(
+          decodeBase64Utf8(response.result.dataBase64),
+        );
         const verdict = response.result.session.verdict;
         setState({ status: "ready", text, verdict });
         if (text.trim() || verdict !== "live") return;
@@ -107,6 +138,7 @@ function ReplyView({
 export function BotConversation({
   botId,
   harnessId,
+  explicitModel,
   scope,
   bridge,
   sessionReader,
@@ -116,6 +148,10 @@ export function BotConversation({
    *  admitted harness override on every call, chat turns included; no
    *  default resolution exists. */
   harnessId: string;
+  /** The bot's own `harnessPolicy.explicitModel`, split into
+   *  provider/model overrides at send time so a Pi bot runs its stored
+   *  local model instead of Pi defaults. */
+  explicitModel?: string | null;
   scope: BotScope & { locale: string };
   bridge: BotBridge;
   sessionReader?: BotSessionReader;
@@ -169,7 +205,7 @@ export function BotConversation({
       ...scope,
       botId,
       prompt,
-      harness: { harnessId },
+      harness: buildBotRunHarness(harnessId, explicitModel ?? null),
       requestId:
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()

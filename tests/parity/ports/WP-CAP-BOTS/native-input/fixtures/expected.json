@@ -5314,6 +5314,7 @@
     {
       "id": "bot_create/explicit_model_string_rejected",
       "parser": "botCreate",
+      "note": "RE-BASELINED (R16-S, coordinator-approved): the pinned source rejects a string explicitModel at its create boundary, but the fork's stored contract is string|null, its own renderer sends model.trim()||null, and its launch helper consumes the string -- only the create boundary rejected it. This repo deliberately accepts the string (trimmed, empty-to-null, 512-code-point bound) so a Bot created for Pi can carry its provider/model selection to bot.run. The id is kept so the deviation stays visible.",
       "input": {
         "characterPreset": "samwell",
         "displayIdentity": {
@@ -5328,8 +5329,21 @@
         "instructions": "Keep evidence linked.",
         "memories": []
       },
-      "expect": "reject",
-      "errorName": "ZodError"
+      "expect": "accept",
+      "output": {
+        "characterPreset": "samwell",
+        "displayIdentity": {
+          "displayName": "Archivist",
+          "handle": null,
+          "title": "Researcher"
+        },
+        "harnessPolicy": {
+          "defaultHarness": "codex",
+          "explicitModel": "gpt-5"
+        },
+        "instructions": "Keep evidence linked.",
+        "memories": []
+      }
     },
     {
       "id": "bot_create/instructions_missing_rejected",

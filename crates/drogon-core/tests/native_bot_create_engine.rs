@@ -312,3 +312,31 @@ fn concurrent_same_request_creates_one_bot_and_identical_responses() {
     assert!(replies.iter().all(|reply| reply == &replies[0]));
     assert_eq!(fx.counts(), (1, 1, 0));
 }
+
+// R16-S: a Pi bot created with a provider/model string keeps it end to end
+// (create receipt and snapshot), so `bot.run` callers can resolve
+// `--provider/--model` from the stored bot.
+#[test]
+fn create_persists_explicit_model_string_for_pi_bots() {
+    let fx = Fixture::new();
+    let mut params = fx.params();
+    params["body"]["harnessPolicy"] = serde_json::json!({"defaultHarness":"pi", "explicitModel":"dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"});
+    let created = success(fx.create("create-model", params));
+    assert_eq!(
+        created["harnessPolicy"],
+        serde_json::json!({"defaultHarness":"pi", "explicitModel":"dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"})
+    );
+    let snapshot = success(fx.engine.dispatch(request(
+        "snapshot-model",
+        "bot.snapshot",
+        serde_json::json!({
+            "hostId":fx.workspace["hostId"], "workspaceId":fx.workspace["id"], "locale":"en-US"
+        }),
+    )));
+    let bots = snapshot["bots"].as_array().expect("bots array");
+    assert_eq!(bots.len(), 1);
+    assert_eq!(
+        bots[0]["harnessPolicy"],
+        serde_json::json!({"defaultHarness":"pi", "explicitModel":"dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"})
+    );
+}

@@ -458,6 +458,100 @@ describe("buildWiredBotsPanelProps", () => {
     });
   });
 
+  it("prefers the panel's fresh harness over the stale registration snapshot and splits provider/model (R16-S)", async () => {
+    const calls: unknown[] = [];
+    const bridge: BotBridge = {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: { ...scope, ...emptySnapshot },
+      }),
+      botRun: async (input) => {
+        calls.push(input);
+        return {
+          ok: true as const,
+          result: {
+            requestId: "r",
+            hostId: scope.hostId,
+            workspaceId: scope.workspaceId,
+            automationRunId: null,
+            responsibilityRunId: null,
+            messageId: null,
+            session: null,
+            outcome: "dispatched" as const,
+            refusal: null,
+            reason: null,
+            error: null,
+            observedAt: null,
+            recordedAt: 0,
+          },
+        };
+      },
+    };
+    // Registration snapshot still names claude with no model (stale: the bot
+    // was switched to Pi with a local model after mount).
+    const withScope = buildWiredBotsPanelProps(
+      bridge,
+      buildBotsPanelProps(snapshotWithBot, undefined, scope),
+    );
+    await withScope.onRunResponsibility?.({
+      botId: "bot-1",
+      responsibilityId: "resp-1",
+      harness: {
+        harnessId: "pi",
+        explicitModel: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      botId: "bot-1",
+      responsibilityId: "resp-1",
+      reason: "manual",
+      harness: {
+        harnessId: "pi",
+        provider: "dgx-spark",
+        model: "qwen3.8-flash-next-nvidia-nvfp4",
+        permissionMode: "unattended",
+      },
+    });
+  });
+
+  it("rejects the returned promise on a refused outcome so the panel can surface it", async () => {
+    const bridge: BotBridge = {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: { ...scope, ...emptySnapshot },
+      }),
+      botRun: async () => ({
+        ok: true as const,
+        result: {
+          requestId: "r",
+          hostId: scope.hostId,
+          workspaceId: scope.workspaceId,
+          automationRunId: null,
+          responsibilityRunId: null,
+          messageId: null,
+          session: null,
+          outcome: "refused" as const,
+          refusal: null,
+          reason: null,
+          error: "responsibility is disabled",
+          observedAt: null,
+          recordedAt: 0,
+        },
+      }),
+    };
+    const withScope = buildWiredBotsPanelProps(
+      bridge,
+      buildBotsPanelProps(snapshotWithBot, undefined, scope),
+    );
+    await expect(
+      withScope.onRunResponsibility?.({
+        botId: "bot-1",
+        responsibilityId: "resp-1",
+      }),
+    ).rejects.toThrow("responsibility is disabled");
+  });
+
   it("never calls bridge.botRun for a bot absent from the snapshot (no harness to resolve)", () => {
     const calls: unknown[] = [];
     const bridge: BotBridge = {

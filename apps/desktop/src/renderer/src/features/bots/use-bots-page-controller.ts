@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   BotBridge,
+  BotRunHarnessSource,
   BotScope,
   BotsPanelSnapshot,
 } from "./bots-panel-contracts";
@@ -37,7 +38,8 @@ export type BotsPageControllerDeps = {
   onRunResponsibility?: (input: {
     botId: string;
     responsibilityId: string;
-  }) => void;
+    harness?: BotRunHarnessSource;
+  }) => void | Promise<void>;
 };
 
 function mintRequestId(prefix: string): string {
@@ -205,11 +207,37 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     [bridge, scope, selectedBotId, refreshSnapshot],
   );
 
+  // Manual run (R16-S): resolves the harness from the LIVE snapshot (never
+  // the mount-time one, which predates in-panel mutations), awaits the
+  // mount's `bot.run` call, then reloads so the new history row appears --
+  // the fork's `await runResponsibility(); await load()`. Failures surface
+  // in the action-error alert instead of vanishing into a void promise.
   const runResponsibility = useCallback(
-    (botId: string, responsibilityId: string): void => {
-      onRunResponsibility?.({ botId, responsibilityId });
+    async (botId: string, responsibilityId: string): Promise<void> => {
+      if (!onRunResponsibility) return;
+      const bot = (localSnapshot ?? snapshot).bots.find(
+        (candidate) => candidate.id === botId,
+      );
+      if (!bot) {
+        setActionError("That bot is no longer in the snapshot; refresh and retry.");
+        return;
+      }
+      setActionError(null);
+      try {
+        await onRunResponsibility({
+          botId,
+          responsibilityId,
+          harness: {
+            harnessId: bot.harnessPolicy.defaultHarness,
+            explicitModel: bot.harnessPolicy.explicitModel,
+          },
+        });
+        await refreshSnapshot();
+      } catch (runFailure) {
+        setActionError(errorMessage(runFailure));
+      }
     },
-    [onRunResponsibility],
+    [onRunResponsibility, localSnapshot, snapshot, refreshSnapshot],
   );
 
   const closeDetail = useCallback((): void => {

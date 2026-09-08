@@ -10,6 +10,7 @@
 // CAPABILITIES list) so this panel is reachable end-to-end.
 
 import { createBotsPanelDescriptor } from "./features/bots/bots-panel-descriptor";
+import { buildBotRunHarness } from "./features/bots/bots-page-model";
 import type {
   BotsPanelHostObservation,
   BotsPanelProps,
@@ -169,25 +170,51 @@ export function buildWiredBotsPanelProps(
   }
   if (panel.scope) {
     const scope = panel.scope;
-    wiredPanel.onRunResponsibility = ({ botId, responsibilityId }) => {
+    wiredPanel.onRunResponsibility = ({ botId, responsibilityId, harness }) => {
       // `bot.run` requires an admitted harness override on every call (no
-      // default resolution exists); the bot's own stored harness policy is
-      // the only real source for it here.
-      const harnessId = panel.snapshot.bots.find(
-        (bot) => bot.id === botId,
-      )?.harnessPolicy.defaultHarness;
-      if (!harnessId) return;
-      void gatedBridge.botRun?.({
-        hostId: scope.hostId,
-        workspaceId: scope.workspaceId,
-        locale: scope.locale,
-        botId,
-        responsibilityId,
-        reason: "manual",
-        eventIdentity: `manual:${Date.now()}`,
-        requestId: mintRequestId(),
-        harness: { harnessId },
-      });
+      // default resolution exists). Prefer the panel's FRESH harness source:
+      // this closure is built at registration time, so its snapshot predates
+      // every in-panel mutation (create included) -- resolving here silently
+      // dropped runs for bots created after mount (R16-S). The snapshot
+      // lookup stays only as a fallback for older callers.
+      const stored = panel.snapshot.bots.find((bot) => bot.id === botId);
+      const source = harness ?? (stored
+        ? {
+            harnessId: stored.harnessPolicy.defaultHarness,
+            explicitModel: stored.harnessPolicy.explicitModel,
+          }
+        : undefined);
+      if (!source) return;
+      // Returned (not voided) so the panel can await settlement, reload
+      // history, and surface a refusal/unsupported outcome instead of
+      // silence -- the fork's `await runResponsibility(); await load()`.
+      return (async () => {
+        const response = await gatedBridge.botRun?.({
+          hostId: scope.hostId,
+          workspaceId: scope.workspaceId,
+          locale: scope.locale,
+          botId,
+          responsibilityId,
+          reason: "manual",
+          eventIdentity: `manual:${Date.now()}`,
+          requestId: mintRequestId(),
+          harness: buildBotRunHarness(
+            source.harnessId,
+            source.explicitModel,
+          ),
+        });
+        if (!response) {
+          throw new Error("This bridge does not support running a Bot.");
+        }
+        if (!response.ok) {
+          throw new Error(response.error.message);
+        }
+        if (response.result.outcome !== "dispatched") {
+          throw new Error(
+            response.result.error ?? `Run ${response.result.outcome}.`,
+          );
+        }
+      })();
     };
   }
   return wiredPanel;

@@ -182,7 +182,75 @@ describe("use-bots-page-controller", () => {
       expect(onRunResponsibility).toHaveBeenCalledWith({
         botId: "bot-2",
         responsibilityId: "bot-2-responsibility",
+        // Resolved from the live snapshot (R16-S), never the mount-time one.
+        harness: { harnessId: "codex", explicitModel: null },
       }),
+    );
+  });
+
+  it("passes the bot's stored harness with the run and reloads history after it settles", async () => {
+    const onRunResponsibility = vi.fn(async () => {});
+    const fake = fakeBridge([]);
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [
+            bot({
+              id: "bot-1",
+              harnessPolicy: {
+                defaultHarness: "pi",
+                explicitModel: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+              },
+              responsibilities: [responsibility({ name: "Nightly duty" })],
+            }),
+          ],
+          history: [],
+        }}
+        bridge={fake.bridge}
+        scope={scope}
+        onRunResponsibility={onRunResponsibility}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Run Nightly duty" }),
+    );
+    await waitFor(() =>
+      expect(onRunResponsibility).toHaveBeenCalledWith({
+        botId: "bot-1",
+        responsibilityId: "resp-1",
+        harness: {
+          harnessId: "pi",
+          explicitModel: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+        },
+      }),
+    );
+    // The reload after settlement is what makes the new history row appear.
+    await waitFor(() => expect(fake.snapshots()).toBeGreaterThan(0));
+  });
+
+  it("surfaces a failed run as an alert instead of silence", async () => {
+    const onRunResponsibility = vi.fn(async () => {
+      throw new Error("Run refused.");
+    });
+    const fake = fakeBridge([]);
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [
+            bot({ responsibilities: [responsibility({ name: "Nightly duty" })] }),
+          ],
+          history: [],
+        }}
+        bridge={fake.bridge}
+        scope={scope}
+        onRunResponsibility={onRunResponsibility}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Run Nightly duty" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("Run refused."),
     );
   });
 

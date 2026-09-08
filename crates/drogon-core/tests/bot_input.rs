@@ -410,3 +410,83 @@ fn importing_this_module_has_no_side_effects_beyond_pure_computation() {
     assert!(input::parse_responsibility_create(&Value::Null).is_err());
     assert!(input::parse_bot_id(&Value::Null).is_err());
 }
+
+// --- R16-S: `explicitModel: string | null` (coordinator-approved deviation
+// from the pinned source's `z.null()` create boundary; the fork's stored
+// contract is string|null and its own renderer sends `model.trim() || null`).
+// Only the create boundary rejected the string, stranding the form's Model
+// field; accepting it here is what lets a Pi bot carry its provider/model
+// selection through to `bot.run`. The re-baselined
+// `bot_create/explicit_model_string_rejected` fixture pins the accept path;
+// these pin the normalization edges. ---
+
+fn bot_create_with_model(model: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "characterPreset": "samwell",
+        "displayIdentity": { "displayName": "Archivist", "handle": null, "title": "Researcher" },
+        "harnessPolicy": { "defaultHarness": "pi", "explicitModel": model },
+        "instructions": "Keep evidence linked.",
+        "memories": []
+    })
+}
+
+#[test]
+fn explicit_model_string_is_accepted_trimmed_and_stored_verbatim() {
+    let result = parse_bot_create(&bot_create_with_model(serde_json::json!(
+        "  dgx-spark/qwen3.8-flash-next-nvidia-nvfp4  "
+    )))
+    .expect("string explicitModel must be accepted");
+    assert_eq!(
+        result["harnessPolicy"],
+        serde_json::json!({
+            "defaultHarness": "pi",
+            "explicitModel": "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"
+        })
+    );
+}
+
+#[test]
+fn explicit_model_empty_string_folds_to_null_like_the_fork_stored_normalize() {
+    for empty in ["", "   ", "\t\n "] {
+        let result = parse_bot_create(&bot_create_with_model(serde_json::json!(empty)))
+            .expect("empty explicitModel must fold, not fail");
+        assert_eq!(
+            result["harnessPolicy"]["explicitModel"],
+            serde_json::Value::Null,
+            "empty input {empty:?} must normalize to null"
+        );
+    }
+}
+
+#[test]
+fn explicit_model_null_still_accepted_and_missing_still_rejected() {
+    let result = parse_bot_create(&bot_create_with_model(serde_json::Value::Null))
+        .expect("null explicitModel stays valid");
+    assert_eq!(
+        result["harnessPolicy"]["explicitModel"],
+        serde_json::Value::Null
+    );
+    let mut missing = bot_create_with_model(serde_json::Value::Null);
+    missing
+        .get_mut("harnessPolicy")
+        .expect("object")
+        .as_object_mut()
+        .expect("object")
+        .remove("explicitModel");
+    assert!(parse_bot_create(&missing).is_err());
+}
+
+#[test]
+fn explicit_model_rejects_non_strings_and_overlong_values() {
+    let wrong_type = parse_bot_create(&bot_create_with_model(serde_json::json!(7)))
+        .expect_err("number explicitModel must be rejected");
+    assert_eq!(wrong_type.category, InvalidInputCategory::WrongType);
+    assert_eq!(wrong_type.path, "harnessPolicy.explicitModel");
+    let overlong = parse_bot_create(&bot_create_with_model(serde_json::json!("m".repeat(513))))
+        .expect_err("over-512-code-point explicitModel must be rejected");
+    assert_eq!(overlong.category, InvalidInputCategory::OutOfRange);
+    assert_eq!(overlong.path, "harnessPolicy.explicitModel");
+    // Exactly at the bound stays launchable-length and is accepted.
+    parse_bot_create(&bot_create_with_model(serde_json::json!("m".repeat(512))))
+        .expect("512-code-point explicitModel must be accepted");
+}

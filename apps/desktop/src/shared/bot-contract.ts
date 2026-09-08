@@ -28,7 +28,7 @@ export type BotCreateInput = BotScope & {
       handle: string | null;
       title: string | null;
     };
-    harnessPolicy: { defaultHarness: string; explicitModel: null };
+    harnessPolicy: { defaultHarness: string; explicitModel: string | null };
     instructions: string;
     memories: string[];
   };
@@ -40,6 +40,15 @@ export type BotRunHarnessOverrides = {
   effort?: string | null;
   provider?: string | null;
   permissionMode?: string | null;
+};
+
+/** Fresh harness source for a `bot.run` call, resolved from the bot's own
+ *  stored policy at call time (R16-S): `explicitModel` is the single
+ *  `provider/model` string the create form collects (the fork's shape),
+ *  split into `provider`/`model` overrides where the call is built. */
+export type BotRunHarnessSource = {
+  harnessId: string;
+  explicitModel: string | null;
 };
 
 /** A `bot.run` call is either a responsibility invocation, or a chat turn
@@ -296,7 +305,12 @@ export type BotsPanelProps = {
   onRunResponsibility?: (input: {
     botId: string;
     responsibilityId: string;
-  }) => void;
+    /** Fresh harness source from the panel's live snapshot (R16-S): the
+     *  mount must prefer this over its registration-time snapshot, which
+     *  predates in-panel mutations. Optional so older callers keep
+     *  compiling; absent means the mount falls back to its own lookup. */
+    harness?: BotRunHarnessSource;
+  }) => void | Promise<void>;
   /** Caller-observed liveness verdicts (live | unverifiable | exited), one per
    *  bot, from a real observation source. The panel renders them verbatim and
    *  never derives a verdict from the persisted record: a stored session is a
