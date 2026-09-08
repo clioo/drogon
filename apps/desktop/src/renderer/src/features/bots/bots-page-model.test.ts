@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BOT_HARNESS_IDS,
+  PRESETS,
+  applyBotCharacterPreset,
   buildBotCreateBody,
   emptyBotCreateForm,
   emptyResponsibilityForm,
@@ -53,6 +55,27 @@ describe("bots-page-model", () => {
     const body = buildBotCreateBody(emptyBotCreateForm());
     expect(body).not.toHaveProperty("responsibilities");
     expect(body).not.toHaveProperty("currentSession");
+  });
+});
+
+describe("character presets (source PRESETS parity)", () => {
+  it("lists every character once, starting with the default preset", () => {
+    expect(PRESETS.length).toBeGreaterThan(6);
+    expect(PRESETS[0]).toEqual({ value: "arya", label: "Arya Stark" });
+    expect(new Set(PRESETS.map((entry) => entry.value)).size).toBe(
+      PRESETS.length,
+    );
+  });
+
+  it("applies the preset without touching the user's purpose", () => {
+    const form = {
+      ...emptyBotCreateForm(),
+      instructions: "Guard the realm.",
+    };
+    expect(applyBotCharacterPreset(form, "tyrion")).toEqual({
+      preset: "tyrion",
+      instructions: "Guard the realm.",
+    });
   });
 });
 

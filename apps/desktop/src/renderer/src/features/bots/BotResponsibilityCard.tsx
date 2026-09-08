@@ -1,20 +1,31 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/bots/BotResponsibilityCard.tsx.
-   Adapters for this repo: the source's Card/CardHeader/CardContent/Badge
-   primitives do not exist here (components/ui has button/input only), so
-   the same structure renders as bordered divs with a badge-like span using
-   admitted main.css tokens; DrogonBotAvatar (character images) is replaced
-   by the initials BotAvatar (see BotAvatar.tsx); getAgentLabel is the local
-   botHarnessLabel; the source's `history` is the full snapshot history and
-   the card filters per bot exactly like the source. The source deletes the
-   bot immediately from its header Delete; here Delete opens the inline
-   confirm dialog below (the source has no confirm copy, so the copy states
-   this repo's own native `bot.delete` effects) and each responsibility
-   row gains a Delete control wired to `bot.responsibility_delete`. */
+   src/renderer/src/components/bots/BotResponsibilityCard.tsx onto the Card
+   and Badge primitives the fork uses (Card, CardHeader, CardTitle,
+   CardDescription, CardContent, Badge) with the fork's header/content
+   classes, icons, copy and ARIA.
+   Adapters for this repo (all pre-existing, kept): getAgentLabel is the
+   local botHarnessLabel; DrogonBotAvatar renders initials on the source's
+   frame (character artwork rights unverified); the header Delete confirms
+   first (the source deletes immediately — the copy states this repo's own
+   native `bot.delete` effects); each responsibility row gains a Delete
+   control for `bot.responsibility_delete` and a mono trigger summary naming
+   the real automation/event behind it; history rows keep the
+   Scheduled/Manual invocation badge the source omits; observed liveness
+   renders only from the caller's observation map, never the stored record.
+   The `data-testid` hooks stay: the packaged probe and contract tests
+   address the card through them. */
 
 import { useEffect, useId, useState } from "react";
 import { CalendarClock, Play, Plus, Zap } from "lucide-react";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../../components/ui/card";
 import type {
   BotsPanelBot,
   BotsPanelHistoryEntry,
@@ -28,12 +39,15 @@ import {
   modelLabel,
   triggerLabel,
 } from "./bots-panel-projection";
-import { BotAvatar } from "./BotAvatar";
+import { DrogonBotAvatar } from "./DrogonBotAvatar";
 import { botHarnessLabel } from "./bots-page-model";
 
 function kindIcon(kind: "reactive" | "scheduled") {
   return kind === "scheduled" ? (
-    <CalendarClock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+    <CalendarClock
+      className="size-3.5 text-muted-foreground"
+      aria-hidden="true"
+    />
   ) : (
     <Zap className="size-3.5 text-muted-foreground" aria-hidden="true" />
   );
@@ -45,7 +59,10 @@ function kindIcon(kind: "reactive" | "scheduled") {
  *  recorded marker. Orphaned rows (deleted responsibility/automation)
  *  keep their null joins visible, never invented. */
 function historyDetail(entry: BotsPanelHistoryEntry): string {
-  if (entry.automationRunNumber !== null && entry.automationRunNumber !== undefined) {
+  if (
+    entry.automationRunNumber !== null &&
+    entry.automationRunNumber !== undefined
+  ) {
     return `${entry.automationName ?? "automation"} · run ${entry.automationRunNumber}`;
   }
   if (entry.run.recipe?.runId) {
@@ -124,31 +141,32 @@ export function BotResponsibilityCard({
     setConfirmingDelete(false);
   }, [bot.id]);
   return (
-    <div
-      data-testid={`bot-${bot.id}`}
-      className="rounded-xl border border-border bg-background text-foreground"
-    >
-      <div className="border-b border-border">
-        <div className="flex items-start justify-between gap-3 p-6 pb-4">
+    <Card data-testid={`bot-${bot.id}`}>
+      <CardHeader className="border-b">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
-              <BotAvatar displayName={bot.displayIdentity.displayName} size={9} />
-              <span className="truncate">{bot.displayIdentity.displayName}</span>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <DrogonBotAvatar
+                preset={bot.characterPreset}
+                alt={`${bot.displayIdentity.displayName} avatar`}
+                className="size-9"
+              />
+              <span className="truncate">
+                {bot.displayIdentity.displayName}
+              </span>
               {bot.characterPreset !== "none" ? (
-                <span className="rounded-md border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                  {bot.characterPreset}
-                </span>
+                <Badge variant="outline">{bot.characterPreset}</Badge>
               ) : null}
-            </h2>
-            <p
+            </CardTitle>
+            <CardDescription
+              className="mt-2"
               data-testid={`bot-description-${bot.id}`}
-              className="mt-2 text-sm text-muted-foreground"
             >
               {botDescription(bot)}
               {bot.displayIdentity.handle
                 ? ` · @${bot.displayIdentity.handle}`
                 : ""}
-            </p>
+            </CardDescription>
             {onOpenSession ? (
               <Button
                 className="mt-3"
@@ -175,7 +193,7 @@ export function BotResponsibilityCard({
           ) : null}
         </div>
         {onDeleteBot && confirmingDelete ? (
-          <div className="px-6 pb-4">
+          <div className="pt-4">
             <BotDeleteConfirmDialog
               botName={bot.displayIdentity.displayName}
               onConfirm={() => {
@@ -186,8 +204,8 @@ export function BotResponsibilityCard({
             />
           </div>
         ) : null}
-      </div>
-      <div className="space-y-5 p-6 pt-6">
+      </CardHeader>
+      <CardContent className="space-y-5 pt-6">
         <div className="grid gap-3 text-sm sm:grid-cols-3">
           <div>
             <p className="text-xs text-muted-foreground">Harness</p>
@@ -222,9 +240,9 @@ export function BotResponsibilityCard({
             >
               {kindIcon(responsibility.kind)}
               <span>{responsibility.name}</span>
-              <span className="rounded-md border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+              <Badge variant="outline">
                 {responsibility.kind === "scheduled" ? "scheduled" : "reactive"}
-              </span>
+              </Badge>
               <span className="font-mono text-muted-foreground">
                 {triggerLabel(responsibility.trigger)}
               </span>
@@ -232,7 +250,7 @@ export function BotResponsibilityCard({
                 onRunResponsibility ? (
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-xs"
                     aria-label={`Run ${responsibility.name}`}
                     data-bot-id={bot.id}
                     data-responsibility-id={responsibility.id}
@@ -283,9 +301,7 @@ export function BotResponsibilityCard({
                   Links to actual automation runs and Mentu evidence.
                 </p>
               </div>
-              <span className="rounded-md bg-secondary px-1.5 py-0.5 text-xs font-medium text-secondary-foreground">
-                {botHistory.length}
-              </span>
+              <Badge variant="secondary">{botHistory.length}</Badge>
             </div>
             <div className="mt-3 space-y-2">
               {botHistory.slice(0, 3).map((entry) => (
@@ -298,9 +314,9 @@ export function BotResponsibilityCard({
                     <span>
                       {entry.responsibilityName ?? "Removed responsibility"}
                     </span>
-                    <span className="rounded-md border border-border px-1.5 py-0.5 font-medium text-muted-foreground">
+                    <Badge variant="outline">
                       {historyTriggerLabel(entry.run.invocation)}
-                    </span>
+                    </Badge>
                   </span>
                   <span className="text-muted-foreground">
                     {historyDetail(entry)}
@@ -310,8 +326,8 @@ export function BotResponsibilityCard({
             </div>
           </div>
         ) : null}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 

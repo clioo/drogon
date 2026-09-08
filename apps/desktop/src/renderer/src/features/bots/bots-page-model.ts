@@ -10,8 +10,12 @@
 
 import type { BotCreateInput } from "../../../../shared/bot-contract";
 import type { BotCharacterPreset } from "./bot-characters";
-import { botDisplayName } from "./bot-characters";
+import { BOT_CHARACTERS, botDisplayName } from "./bot-characters";
 import { previewCronFires } from "../automations/automation-cron-preview";
+
+/** Source `PRESETS` (the fork's bots-page-model re-exports its shared
+ *  character list under this name for the picker). */
+export const PRESETS = BOT_CHARACTERS;
 
 /** The only harness ids `harness.start` admits (see
  *  apps/desktop/src/shared/bridge-validation.ts's harnessLaunch schema). */
@@ -48,6 +52,15 @@ export type BotCreateFormValues = {
   instructions: string;
   memories: string;
 };
+
+/** Source `applyBotCharacterPreset`: character style is composed at launch,
+ *  never written over the user's purpose. */
+export function applyBotCharacterPreset(
+  form: BotCreateFormValues,
+  preset: BotCharacterPreset,
+): Partial<BotCreateFormValues> {
+  return { preset, instructions: form.instructions };
+}
 
 export function emptyBotCreateForm(): BotCreateFormValues {
   return {
