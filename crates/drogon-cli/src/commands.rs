@@ -51,10 +51,14 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
     };
     let data_dir = paths::resolve_data_dir(cli.data_dir.as_deref());
     let json = cli.json;
-    // Skill guides are bundled with the binary: they never touch the runtime,
-    // so they work with no daemon and no data directory at all.
+    // Skill guides and the agent command schema are bundled with the
+    // binary: they never touch the runtime, so they work with no daemon
+    // and no data directory at all.
     if let Command::Skills { action } = &cli.command {
         return skills::run(&request_id, json, action);
+    }
+    if let Command::AgentContext = &cli.command {
+        return crate::agent_context::run(&request_id, json);
     }
     let client = Client::open(&data_dir, &request_id)?;
 
@@ -98,10 +102,13 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Orchestration { command } => {
             crate::orchestration_commands::run(&client, &request_id, json, command).await
         }
-        // Served locally above without a runtime; this arm is unreachable
+        // Served locally above without a runtime; these arms are unreachable
         // (output.rs `render` uses the same convention for impossible pairs).
         Command::Skills { .. } => {
             unreachable!("skills commands are served locally before the client opens")
+        }
+        Command::AgentContext => {
+            unreachable!("agent-context is served locally before the client opens")
         }
         Command::Internal { action } => internal(&client, &request_id, json, action).await,
         Command::Rpc { method, params } => {
@@ -414,6 +421,17 @@ async fn project(
             let list: ProjectList =
                 Client::decode_checked(&call, "project.list", check_project_list)?;
             emit(call, json, || output::project_list(&list), 0, None)
+        }
+        ProjectAction::Remove { id } => {
+            let params = json!({ "id": id });
+            let call = client
+                .call("project.remove", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let requested_id = id.clone();
+            let removed: Removed = Client::decode_checked(&call, "project.remove", |removed| {
+                check_removed(removed, &requested_id)
+            })?;
+            emit(call, json, || output::project_removed(&removed), 0, None)
         }
     }
 }

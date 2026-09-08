@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod agent_context;
 pub mod cli;
 pub mod client;
 pub mod commands;
