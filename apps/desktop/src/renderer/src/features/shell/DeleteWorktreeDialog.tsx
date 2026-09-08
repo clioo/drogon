@@ -19,6 +19,8 @@ import {
 } from "./DeleteWorktreeSkipConfirmOption";
 import { getDeleteWorktreeDialogCopy } from "./delete-worktree-dialog-copy";
 import { getDeleteWorktreeDirtyChangeCount } from "./delete-worktree-dirty-change-counts";
+import { showDeleteWorktreeFailureToast } from "./delete-worktree-failure-toast";
+import { persistDeleteWorktreeConfirmSkipPreference } from "./delete-worktree-preference-toast";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
 import { worktreeDisplayName } from "./project-adapter";
 
@@ -70,9 +72,21 @@ export function DeleteWorktreeDialog({
     try {
       // The preference is a one-shot dialog intent for the primary
       // confirmation only — a force recovery never persists it.
-      if (dontAskAgain && !force) writeSkipDeleteWorktreeConfirm(true);
+      if (dontAskAgain && !force)
+        persistDeleteWorktreeConfirmSkipPreference({
+          persist: () => writeSkipDeleteWorktreeConfirm(true),
+        });
       const failure = await onSubmit(force);
-      if (failure) setError(failure);
+      if (failure) {
+        setError(failure);
+        showDeleteWorktreeFailureToast({
+          error: failure,
+          canForceDelete: false,
+          forceDeleteReason: null,
+          worktreeId: worktree.id,
+          worktreeName: name,
+        });
+      }
     } finally {
       setSending(false);
     }

@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef } from "react";
+import { toast } from "sonner";
 import { FileWarning, RefreshCw, Save } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { Result } from "../../../../shared/session-contract";
@@ -449,6 +450,7 @@ export async function runSave(input: {
       generation,
       message: "The file could not be saved.",
     });
+    toast.error("Failed to save the file. Please try again.");
     return;
   }
   if (result.ok) {
@@ -460,6 +462,7 @@ export async function runSave(input: {
       generation,
       message: result.error.message,
     });
+    toast.error("Failed to save the file. Please try again.");
   }
 }
 

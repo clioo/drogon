@@ -1,8 +1,9 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/right-sidebar/source-control/listing/too-many-changes-banner.tsx.
-// Adapter: no toast library in this repo, so a failed retry reports through
-// the optional onError notice callback instead of a toast.
+// Adapter: a failed retry toasts like the source and also reports through
+// the optional onError notice callback for the panel's inline notice.
 import React, { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 
@@ -54,6 +55,7 @@ export function TooManyChangesBanner({
       // Why: a failed retry must leave the capped warning usable
       // instead of becoming an unhandled click rejection.
       console.warn("[SourceControl] capped status retry failed", error);
+      toast.error("Could not refresh Source Control. Try again.");
       onError?.("Could not refresh Source Control. Try again.");
     } finally {
       window.clearTimeout(timeout);

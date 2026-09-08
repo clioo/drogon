@@ -7,6 +7,7 @@
 // (top bar → list panel / detail pane → editor dialog → delete dialogs)
 // mirror the reference.
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import type {
   AutomationBridge,
   AutomationRunView,
@@ -27,6 +28,7 @@ import {
   setConfirmAutomationDelete,
   shouldConfirmAutomationDelete,
 } from "./AutomationDeleteDialogs";
+import { persistSkipDeleteAutomationConfirm } from "./automation-delete-confirm-preference";
 import type { AutomationTemplate } from "./AutomationListEmptyView";
 import {
   blankAutomationDraft,
@@ -253,6 +255,7 @@ export function AutomationsPageSurface({
       setSaveError("Check the highlighted fields.");
       return;
     }
+    const wasEditing = editingId !== null;
     setSaving(true);
     setSaveError(null);
     try {
@@ -286,9 +289,13 @@ export function AutomationsPageSurface({
       setEditorOpen(false);
       await refresh();
       if (editingId !== null) await loadRuns(editingId);
+      toast.success(wasEditing ? "Automation updated." : "Automation saved.");
     } catch (failure) {
       setSaveError(
         failure instanceof Error ? failure.message : "Could not save the automation.",
+      );
+      toast.error(
+        failure instanceof Error ? failure.message : "Failed to save automation.",
       );
     } finally {
       setSaving(false);
@@ -314,7 +321,11 @@ export function AutomationsPageSurface({
   const confirmDelete = useCallback(
     async (dontAskAgain: boolean) => {
       if (!deleteTarget) return;
-      setConfirmAutomationDelete(!dontAskAgain);
+      if (dontAskAgain)
+        persistSkipDeleteAutomationConfirm({
+          persist: () => setConfirmAutomationDelete(false),
+        });
+      else setConfirmAutomationDelete(true);
       const id = deleteTarget.id;
       setDeleteTarget(null);
       const result = await bridge.remove({ id });
@@ -339,9 +350,13 @@ export function AutomationsPageSurface({
         if (!result.ok) throw new Error(result.error.message);
         await refresh();
         if (selectedId === id) await loadRuns(id);
+        toast.message("Automation run queued.");
       } catch (failure) {
         setError(
           failure instanceof Error ? failure.message : "Could not run the automation.",
+        );
+        toast.error(
+          failure instanceof Error ? failure.message : "Failed to run automation.",
         );
       } finally {
         setRunningId(null);
