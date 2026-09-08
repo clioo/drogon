@@ -217,6 +217,13 @@ ports Orca's `components/task-page/github/{ModeControls,Rows,StatusCell,ReviewCe
 (read-only variants), all at the pinned source revision above. Each ported file
 keeps the MIT notice.
 
+The Mentu recipe editing in `apps/desktop/src/renderer/src/features/mentu/`
+(draft state, inspector edit mode, validation family under `recipe-validation/`)
+ports the Drogon fork's `src/renderer/src/components/mentu/{recipe-pane-editor,mentu-session-draft-state,recipe-pane-inspector}.ts(x)`
+and `src/shared/{mentu-recipe-validation,mentu-recipe-entry-validation,mentu-recipe-fields,mentu-recipe-root-validation,mentu-recipe-value-validation,mentu-recipe-verify-validation,mentu-recipe-serialization,mentu-recipe-file-contract}.ts`
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
+file keeps the MIT notice.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.

@@ -312,6 +312,61 @@ pub fn current_content_hash(workspace_root: &Path, recipe_id: &str) -> Result<St
     Ok(sha256_hex(&bytes))
 }
 
+/// Validates a candidate recipe source with the same rules the load path
+/// enforces (a JSON object with `name` and a `steps` array of labeled
+/// steps), so `mentu.recipe_save` refuses exactly what `mentu.recipe`
+/// could never serve back.
+fn validate_recipe_value(value: &Value) -> Result<(), RpcError> {
+    if !value.is_object() {
+        return Err(error::invalid_argument("Recipe must be a JSON object."));
+    }
+    if recipe_name(value).is_none() {
+        return Err(error::invalid_argument("Recipe is missing \"name\"."));
+    }
+    parse_steps(value)
+        .map(|_| ())
+        .map_err(error::invalid_argument)?;
+    Ok(())
+}
+
+/// Writes `content` as the new source of an existing recipe and returns
+/// the reloaded detail (with the new content hash). The target resolves
+/// through [`resolve_recipe_path`]'s containment and symlink checks, then
+/// the write lands atomically: a temp file in the same directory renamed
+/// over the recipe, so a crash never leaves half a recipe behind.
+pub fn save_recipe(
+    workspace_root: &Path,
+    recipe_id: &str,
+    content: &str,
+) -> Result<MentuRecipeDetail, RpcError> {
+    if content.len() as u64 > MAX_RECIPE_SOURCE_BYTES {
+        return Err(error::invalid_argument(
+            "Updated recipe source exceeds the 1 MiB safety limit.",
+        ));
+    }
+    let path = resolve_recipe_path(workspace_root, recipe_id)?;
+    let value: Value = serde_json::from_str(content)
+        .map_err(|e| error::invalid_argument(format!("Invalid JSON: {e}")))?;
+    validate_recipe_value(&value)?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| error::invalid_argument("Recipe reference is outside .mentu/recipes."))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!(".{file_name}.tmp-{}-{stamp}", std::process::id()));
+    if let Err(e) = fs::write(&tmp, content).and_then(|()| fs::rename(&tmp, &path)) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error::io_error(e.to_string()));
+    }
+    load_recipe(workspace_root, recipe_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,5 +457,55 @@ mod tests {
         for bad in ["../secret", "/etc/passwd", "a/../../b"] {
             assert!(resolve_recipe_path(dir.path(), bad).is_err());
         }
+    }
+
+    #[test]
+    fn save_recipe_rewrites_the_source_and_returns_the_new_hash() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let before = load_recipe(dir.path(), "hello").unwrap();
+        let next = VALID.replace("\"tiny\"", "\"edited\"");
+        let detail = save_recipe(dir.path(), "hello", &next).unwrap();
+        assert_eq!(detail.name, "hello");
+        assert_eq!(detail.source, next);
+        assert_ne!(detail.content_hash, before.content_hash);
+        assert_eq!(detail.content_hash.len(), 64);
+        // The reload path serves the saved bytes back verbatim.
+        assert_eq!(load_recipe(dir.path(), "hello").unwrap(), detail);
+        // No temp files leak beside the recipe.
+        let leftovers: Vec<_> = fs::read_dir(recipes_root(dir.path()))
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn save_recipe_refuses_invalid_content_and_traversal() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        // Missing name.
+        assert!(save_recipe(dir.path(), "hello", r#"{"steps": [{"label": "a"}]}"#).is_err());
+        // Missing steps.
+        assert!(save_recipe(dir.path(), "hello", r#"{"name": "hello"}"#).is_err());
+        // Step without a label.
+        assert!(
+            save_recipe(
+                dir.path(),
+                "hello",
+                r#"{"name": "hello", "steps": [{"backend": "shell"}]}"#,
+            )
+            .is_err()
+        );
+        // Not JSON at all.
+        assert!(save_recipe(dir.path(), "hello", "{not json").is_err());
+        // Traversal never reaches the write.
+        assert!(
+            save_recipe(dir.path(), "../secret", VALID).is_err(),
+            "traversal save must be refused"
+        );
+        // The refused writes left the recipe untouched.
+        assert_eq!(load_recipe(dir.path(), "hello").unwrap().source, VALID);
     }
 }

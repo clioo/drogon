@@ -62,6 +62,46 @@ describe("mentu bridge admission", () => {
     expect(seen).toEqual(["mentu.recipes"]);
   });
 
+  it("maps recipe save to mentu.recipe_save and validates its content", async () => {
+    const seen: Array<[string, unknown]> = [];
+    const spy = async (method: string, params: object): Promise<Result<unknown>> => {
+      seen.push([method, params]);
+      return {
+        ok: true,
+        result: {
+          recipe: {
+            id: "hello",
+            path: ".mentu/recipes/hello.json",
+            name: "hello",
+            contentHash: "a".repeat(64),
+            steps: [],
+            source: "{}",
+          },
+        },
+      };
+    };
+    const saved = await dispatchMentuRequest(
+      "mentuRecipeSave",
+      { workspaceId: "ws1", recipeId: "hello", content: '{"name":"hello","steps":[]}' },
+      spy,
+    );
+    expect(saved.ok).toBe(true);
+    expect(seen[0][0]).toBe("mentu.recipe_save");
+
+    // Empty content never reaches the service.
+    let called = false;
+    const refused = await dispatchMentuRequest(
+      "mentuRecipeSave",
+      { workspaceId: "ws1", recipeId: "hello", content: "" },
+      async () => {
+        called = true;
+        return { ok: true, result: {} };
+      },
+    );
+    expect(refused.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+
   it("passes typed service errors through untouched", async () => {
     const result = await dispatchMentuRequest(
       "mentuRun",
