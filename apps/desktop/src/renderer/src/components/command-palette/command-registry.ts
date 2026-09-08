@@ -6,7 +6,7 @@
  * Rewritten standalone: no i18n, no settings/action split.
  */
 
-import { getKeybindingDefinition } from "../../keybindings/definitions";
+import { getKeybindingDefinition } from "../../../../shared/keybindings/definitions";
 
 /** Live App state a command's availability is derived from. */
 export interface CommandContext {

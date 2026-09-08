@@ -67,10 +67,15 @@ export function SidebarNav({
   route,
   onSelectRoute,
   onOpenPalette,
+  showTasksButton = true,
+  showAutomationsButton = true,
 }: {
   route: string | null;
   onSelectRoute: (route: string | null) => void;
   onOpenPalette: () => void;
+  /** Appearance flags (source showTasksButton / showAutomationsButton, default-on). */
+  showTasksButton?: boolean;
+  showAutomationsButton?: boolean;
 }): React.JSX.Element {
   // Hint labels come from the keybinding labels formatter (⌘J on macOS,
   // Ctrl+Shift+J elsewhere) — never a hardcoded glyph.
@@ -133,18 +138,22 @@ export function SidebarNav({
           ) : null}
         </div>
       ) : null}
-      <ProductNavButton
-        label="Tasks"
-        active={tasksActive}
-        icon={List}
-        onClick={() => onSelectRoute(TASKS_ROUTE_ID)}
-      />
-      <ProductNavButton
-        label="Automations"
-        active={automationsActive}
-        icon={CalendarClock}
-        onClick={() => onSelectRoute(AUTOMATIONS_ROUTE_ID)}
-      />
+      {showTasksButton ? (
+        <ProductNavButton
+          label="Tasks"
+          active={tasksActive}
+          icon={List}
+          onClick={() => onSelectRoute(TASKS_ROUTE_ID)}
+        />
+      ) : null}
+      {showAutomationsButton ? (
+        <ProductNavButton
+          label="Automations"
+          active={automationsActive}
+          icon={CalendarClock}
+          onClick={() => onSelectRoute(AUTOMATIONS_ROUTE_ID)}
+        />
+      ) : null}
       {isDrogonProductSurfaceVisible("mobile") ? (
         <ProductNavButton
           label="Drogon Mobile"

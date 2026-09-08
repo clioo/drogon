@@ -5,7 +5,7 @@ import {
   rankCommands,
   type CommandContext,
 } from "./command-registry";
-import { getKeybindingDefinition } from "../../keybindings/definitions";
+import { getKeybindingDefinition } from "../../../../shared/keybindings/definitions";
 
 const onlineWorkspace: CommandContext = {
   connected: true,

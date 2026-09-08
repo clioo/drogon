@@ -6,8 +6,8 @@
 // groups from the keybinding core table; disabled rows show their reason.
 import { useMemo, useState } from "react";
 import { Input } from "../../components/ui/input";
-import { keybindingGroupOrder } from "../../keybindings/definitions";
-import { formatKeybindingList } from "../../keybindings/labels";
+import { keybindingGroupOrder } from "../../../../shared/keybindings/definitions";
+import { formatKeybindingList } from "../../../../shared/keybindings/labels";
 import {
   buildShortcutList,
   filterShortcuts,

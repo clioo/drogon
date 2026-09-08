@@ -123,6 +123,14 @@ export function AppearanceSection({
   onTerminalFontWeightBoldChange,
   editorFontFamily: editorFontFamilyProp,
   onEditorFontFamilyChange,
+  statusBarVisible,
+  onStatusBarVisibleChange,
+  tasksButtonVisible,
+  onTasksButtonVisibleChange,
+  automationsButtonVisible,
+  onAutomationsButtonVisibleChange,
+  titlebarAppNameVisible,
+  onTitlebarAppNameVisibleChange,
 }: {
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
@@ -143,6 +151,16 @@ export function AppearanceSection({
   onTerminalFontWeightBoldChange?: (weight: number) => void;
   editorFontFamily?: string;
   onEditorFontFamilyChange?: (family: string) => void;
+  /** R14-B appearance flags: same toggles the native View > Appearance
+      submenu checkbox-marks (source default-on settings + status bar). */
+  statusBarVisible: boolean;
+  onStatusBarVisibleChange: (visible: boolean) => void;
+  tasksButtonVisible: boolean;
+  onTasksButtonVisibleChange: (visible: boolean) => void;
+  automationsButtonVisible: boolean;
+  onAutomationsButtonVisibleChange: (visible: boolean) => void;
+  titlebarAppNameVisible: boolean;
+  onTitlebarAppNameVisibleChange: (visible: boolean) => void;
 }): React.JSX.Element {
   const [fontDraft, setFontDraft] = useState<string | null>(null);
   const [fontError, setFontError] = useState<string | null>(null);
@@ -271,6 +289,30 @@ export function AppearanceSection({
                 ariaLabel="Theme"
               />
             }
+          />
+          <SettingsSwitchRow
+            label="Show Status Bar"
+            description="Bottom bar with usage meters, awake, memory, ports and terminals."
+            checked={statusBarVisible}
+            onChange={onStatusBarVisibleChange}
+          />
+          <SettingsSwitchRow
+            label="Show Tasks Button"
+            description="Show the Tasks button at the top of the left sidebar."
+            checked={tasksButtonVisible}
+            onChange={onTasksButtonVisibleChange}
+          />
+          <SettingsSwitchRow
+            label="Show Automations Button"
+            description="Show the Automations button at the top of the left sidebar."
+            checked={automationsButtonVisible}
+            onChange={onAutomationsButtonVisibleChange}
+          />
+          <SettingsSwitchRow
+            label="Show Titlebar App Name"
+            description="Show the app name in the titlebar."
+            checked={titlebarAppNameVisible}
+            onChange={onTitlebarAppNameVisibleChange}
           />
         </div>
         <div className="space-y-2 pt-4">

@@ -6,7 +6,7 @@ import {
   PALETTE_SHORTCUTS,
   paletteChordFor,
 } from "./shortcuts";
-import { getKeybindingDefinition } from "./keybindings/definitions";
+import { getKeybindingDefinition } from "../../shared/keybindings/definitions";
 
 describe("PALETTE_SHORTCUTS", () => {
   test("declares the source palette, quick open and tab-travel ids", () => {

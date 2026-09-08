@@ -10,9 +10,9 @@ import {
   KEYBINDING_DEFINITIONS,
   resolveKeybindingPlatform,
   type KeybindingDefinition,
-} from "../../keybindings/definitions";
-import { formatKeybinding } from "../../keybindings/labels";
-import type { KeybindingPlatform } from "../../keybindings/definitions";
+} from "../../../../shared/keybindings/definitions";
+import { formatKeybinding } from "../../../../shared/keybindings/labels";
+import type { KeybindingPlatform } from "../../../../shared/keybindings/definitions";
 
 export type ShortcutGroup = string;
 
