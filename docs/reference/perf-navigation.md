@@ -7,7 +7,8 @@ reports N samples with median + p95 (default 5) plus the Long Tasks
 overlapping each sample, as JSON on stdout (and `--out <file>`).
 
 Budgets: Drogon within 1.25x of the live orca-drogon reference per metric,
-and every rail page open <= 300 ms absolute.
+every rail page open <= 300 ms absolute, and the pushed worktree-card
+update <= 200 ms median.
 
 ## Reference (attach only)
 
@@ -52,7 +53,10 @@ Metric notes:
   underneath. The median is the user-visible number.
 - `update:worktree-card`: writes into a live shell session and times the
   shared Working badge. Bound by the session-state propagation cadence,
-  not by scripting (Long Tasks stay zero); report-only, no reference.
+  not by scripting (Long Tasks stay zero). Since R16-BF2 the daemon pushes
+  the change (`session.events.poll` → `ui:session-state-changed`) instead
+  of waiting for the 2 s `session.list` poll, so this metric carries an
+  absolute budget (median <= 200 ms, no reference leg).
 - `switch:session-tab`: needs 2+ tabs; honest `fewer-than-2-tabs` without
   fixtures.
 
