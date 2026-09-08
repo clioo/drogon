@@ -41,29 +41,16 @@ jobs:
       - run: pnpm test:renderer-contracts
       - run: pnpm test:packaging
       # R16-BL (#312): since 2026-09-08 the ubuntu-22.04 runners kill the
-      # step's process tree with an external SIGTERM once vitest has recycled
-      # ~50 isolated fork workers (one per test file, ~13 s in). strace shows
-      # the sender is not part of the job's process tree, so this cannot be
-      # fixed in-repo; worker caps and shards were tested and still die. The
-      # wrapper below swallows the SIGTERM aimed at the step shell (the vitest
-      # tree keeps its default disposition and dies), then retries the suite
-      # in a fresh process — the kill has not been observed twice per job.
-      - name: Run pnpm --filter @drogon/desktop test (SIGTERM-resilient)
-        run: |
-          set -e
-          rc=1
-          for attempt in 1 2 3; do
-            echo "=== desktop test attempt $attempt ==="
-            set +e
-            bash -c 'trap "echo wrapper: swallowed SIGTERM >&2" TERM; pnpm --filter @drogon/desktop test'
-            rc=$?
-            set -e
-            echo "attempt $attempt exit=$rc"
-            if [ "$rc" -eq 0 ]; then break; fi
-          done
-          exit "$rc"
-        # Fail fast with a clear message if the desktop suite hangs; three
-        # attempts of the ~1-2 min suite fit well inside this budget.
+      # step tree with an external SIGTERM once the default forks pool has
+      # recycled ~50 per-file isolated workers (~13 s in; strace evidence in
+      # PR #320 shows the sender is outside the job's process tree). The
+      # desktop suite therefore runs with worker reuse (vitest.config.ts:
+      # test.isolate false), which removes the fork/SIGTERM churn entirely;
+      # this is the only configuration observed green on ubuntu since the
+      # regression began (Foundation runs 34243171831 and 34244706496).
+      - run: pnpm --filter @drogon/desktop test
+        # Fail fast with a clear message if the desktop suite hangs; the
+        # suite takes ~1-2 min on every platform.
         timeout-minutes: 15
       # The production bundle (Monaco + renderer) exceeds the default Node
       # heap on macos-14 runners: raise it for this step only.

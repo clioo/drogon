@@ -1,31 +1,36 @@
-# Desktop test SIGTERM resilience on CI (R16-BL)
+# Desktop test worker reuse on CI (R16-BL)
 
-The Foundation workflow's `pnpm --filter @drogon/desktop test` step runs the
-suite inside a small retry wrapper (up to 3 attempts) with a 15-minute step
-timeout.
+`apps/desktop/vitest.config.ts` sets `test.isolate: false` (opt back in with
+`DROGON_VITEST_ISOLATE=1`).
 
-Why: with the default `isolate: true`, vitest 5's forks pool spawns a fresh
-worker process per test file and SIGTERMs the old one — ~335 child processes
-and ~335 SIGTERMs per suite run. Since 2026-09-08 (~11:49Z) the ubuntu-22.04
-hosted runners kill the entire step tree with an external SIGTERM once a
-single vitest process has recycled roughly 50 workers (clioo/drogon#312:
-`Command failed with signal "SIGTERM"` after the same ~49 passing files on
-every main push and PR, while macos-14, windows and dev machines were
-unaffected). strace in a debug run (PR #320) showed the sender sits outside
-the vitest process tree; systemd-oomd/earlyoom are absent, memory is 14 GB
-free, and the trigger tracks the worker-recycle count, not time, output
-volume, worker count, or a specific test file. Because the sender is not
-part of the job, this cannot be fixed in-repo — debugging artifacts live in
-PR #320's runs.
+Vitest 5's default `isolate: true` spawns a fresh forks-pool worker per test
+file and SIGTERMs the old one: ~335 child processes and ~335 SIGTERMs per
+suite run. Since 2026-09-08 (~11:49Z) the ubuntu-22.04 hosted runners kill
+the entire step tree with an external SIGTERM once a single vitest process
+has recycled roughly 50 workers (clioo/drogon#312 — the Foundation job
+failed on every main push and PR with `Command failed with signal
+"SIGTERM"` after the same ~49 passing files, while macos-14, windows and dev
+machines were unaffected). strace in a debug run (PR #320) showed the sender
+sits outside the vitest process tree; systemd-oomd/earlyoom are absent,
+memory is 14 GB free, and the trigger tracks the worker-recycle count, not
+time, output volume, worker count, or a specific test file. Because the
+sender is not part of the job, this cannot be fixed in-repo — worker reuse
+removes the churn and is the only configuration observed green on ubuntu
+since the regression began (Foundation runs 34243171831 and 34244706496).
 
-The resilience trick: the step's shell traps SIGTERM (survives it), so the
-runner does not classify the step as canceled; the vitest tree keeps its
-default disposition and dies like before; the wrapper then simply retries
-the suite in a fresh process. The kill has not been observed twice within
-one job, so attempt 2 completes cleanly on an affected runner. Test
-semantics are exactly main's (forks pool, full per-file isolation) — no
-worker reuse, no shards, no skips; all 339 files / 2670 tests run every
-attempt. Alternatives measured and rejected: `isolate: false` avoids the
-churn but leaks `vi.mock` module mocks across files sharing a worker
-(~30% local failure rate); `--pool=threads` flakes; `--pool=vmThreads`
-fails outright; sharding under the threshold still died.
+Consequences of worker reuse:
+
+- All 339 files / 2670 tests still run; the suite is ~2.5x faster
+  (19.7s → 7.6s locally).
+- Test files sharing a worker must not rely on `vi.mock` fully replacing a
+  module that another file also mocks or imports (mock registries can bleed
+  across files in one worker; observed as a flaky "`Tooltip` must be used
+  within `TooltipProvider`" in `worktree-card-rows.test.tsx` and stale state
+  in `AgentStateIcon.test.tsx`). Prefer rendering with the real component
+  plus explicit providers over broad `vi.mock` factories for UI kit modules.
+- If you need per-file process isolation while debugging a suspicion of
+  cross-file pollution, run:
+
+```sh
+DROGON_VITEST_ISOLATE=1 pnpm --filter @drogon/desktop test
+```
