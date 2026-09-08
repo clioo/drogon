@@ -15,5 +15,10 @@ const isolate = process.env.DROGON_VITEST_ISOLATE === "1";
 export default defineConfig({
   test: {
     isolate,
+    // Windows runners can spend ~95 s transforming modules before the first
+    // test in a file runs. Keep slow CI hosts from timing out synchronous
+    // contract assertions at Vitest's 5 s default.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });
