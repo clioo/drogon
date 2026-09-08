@@ -51,5 +51,22 @@ export function agentStateLabel(state: AgentState): string {
 
 /** Renders `session.agentState ?? "unknown"`; never invents a state. */
 export function agentStateOf(session: Session): AgentState {
+  return sessionDotState(session);
+}
+
+/**
+ * The single agent-dot derivation for the whole shell (journey J1),
+ * ported from the fork's `getAgentDotState` →
+ * `agentRowDotState` (`src/renderer/src/components/sidebar/
+ * worktree-card-agent-summary.ts`, `src/renderer/src/lib/
+ * agent-row-dot-state.ts`: one function feeds the row dot, the card dot
+ * and the summary text so they can never disagree). The fork maps an
+ * agent row's (state, workingMode, interrupted) triple; this repo's
+ * Session contract carries the already-derived `agentState` (daemon
+ * `agent_state::derive`), so the single function reads it, defaulting an
+ * unreported state to `unknown` — never a guess. The tab badge, the card
+ * dot and the card summary text must all go through this function.
+ */
+export function sessionDotState(session: Session): AgentState {
   return session.agentState ?? "unknown";
 }

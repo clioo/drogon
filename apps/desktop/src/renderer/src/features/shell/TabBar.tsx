@@ -22,7 +22,7 @@ import {
   recoveryActionFor,
   recoveryTabLabel,
 } from "../../session-recovery";
-import { agentStateOf } from "./agent-state";
+import { sessionDotState } from "./agent-state";
 import { AgentStateIcon } from "./AgentStateIcon";
 import type { EditorTabState } from "./editor-tab";
 import { ShellIconButton } from "./ShellIconButton";
@@ -451,7 +451,7 @@ export function TabBar({
                     ariaLabel={`${text} ${item.verdict}`}
                     closeLabel={`Close ${text} session`}
                     icon={
-                      <AgentStateIcon state={agentStateOf(item)} size={13} />
+                      <AgentStateIcon state={sessionDotState(item)} size={13} />
                     }
                     retry={
                       retryable ? (
