@@ -13,7 +13,7 @@
 // Adapted: no zustand store, no popovers/menus; data comes from
 // window.drogon.usage and terminal count from the shell's session list.
 // Unavailable sources render "unavailable" with the reason as tooltip.
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   CircleHelp,
   Coffee,
@@ -23,12 +23,19 @@ import {
   Settings,
   TerminalSquare,
 } from "lucide-react";
-import type { AwakeMode, UsageSnapshot } from "../../../../shared/usage-contract";
+import type {
+  AwakeMode,
+  UsageSnapshot,
+} from "../../../../shared/usage-contract";
 import { ClaudeIcon, OpenAIIcon } from "./provider-icons";
 // R16-M (coordinator-approved option A): the daemon connection segment owns
 // its own monitor subscription; the bar only mounts it, leading the right
 // group like the fork's host segment.
 import { DaemonConnectionSegment } from "../../features/status-bar/DaemonConnectionSegment";
+import {
+  observeStatusBarContainer,
+  statusBarCollapseForWidth,
+} from "./status-bar-narrow";
 import {
   awakeStatusLabel,
   hasVisibleUsage,
@@ -64,35 +71,64 @@ function loadSnapshot(): Promise<UsageSnapshot | null> {
 function ProviderMeters({
   provider,
   now,
+  compact,
+  iconOnly,
 }: {
   provider: ProviderUsage;
   now: number;
+  compact: boolean;
+  iconOnly: boolean;
 }): React.JSX.Element {
   const rows = providerMeterRows(provider, now);
   const Icon = provider.provider === "claude" ? ClaudeIcon : OpenAIIcon;
+  const title = providerTitle(provider, now);
   // Source form (StatusBarSurface roster trigger + ProviderSegment, 1440px):
   // provider icon, one quiet mini bar for the tightest window, then the
   // verbose per-window labels joined by "·" — never the provider name.
   // The tooltip keeps the identity and per-window detail.
+  // Narrow tiers (status-bar-narrow.ts): icon-only keeps the icon with the
+  // full detail in the tooltip; compact drops the minibars and keeps the
+  // tightest window label only.
   if (rows.length === 0) {
+    if (iconOnly) {
+      return (
+        <span className="inline-flex items-center gap-1.5" title={title}>
+          <Icon />
+        </span>
+      );
+    }
     return (
-      <span
-        className="inline-flex items-center gap-1.5"
-        title={providerTitle(provider, now)}
-      >
+      <span className="inline-flex items-center gap-1.5" title={title}>
         <Icon />
         <span className="status-bar-unavailable">unavailable</span>
+      </span>
+    );
+  }
+  if (iconOnly) {
+    return (
+      <span className="inline-flex items-center gap-1.5" title={title}>
+        <Icon />
       </span>
     );
   }
   const tightest = rows.reduce((current, candidate) =>
     candidate.used > current.used ? candidate : current,
   );
+  // Compact priority (status-bar-narrow.ts): the tightest window is the
+  // binding constraint, so it is the one label that survives; the rest
+  // stay one hover away in the tooltip.
+  if (compact) {
+    return (
+      <span className="inline-flex items-center gap-1.5" title={title}>
+        <Icon />
+        <span className="tabular-nums" title={tightest.title}>
+          {tightest.label}
+        </span>
+      </span>
+    );
+  }
   return (
-    <span
-      className="inline-flex items-center gap-1.5"
-      title={providerTitle(provider, now)}
-    >
+    <span className="inline-flex items-center gap-1.5" title={title}>
       <Icon />
       {/* Source MiniBar: quiet muted fill; urgency lives in the labels. */}
       <span
@@ -126,6 +162,32 @@ export function StatusBar({
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
   const [fetching, setFetching] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  // Narrow tiers (status-bar-narrow.ts, fork use-status-bar-controller
+  // thresholds): the bar measures its own width so segments collapse to
+  // icons or hide by priority instead of scrolling horizontally.
+  const [containerWidth, setContainerWidth] = useState(900);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const containerRefCallback = useCallback((node: HTMLElement | null) => {
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect();
+      resizeObserverRef.current = null;
+    }
+    if (node) {
+      resizeObserverRef.current = observeStatusBarContainer(
+        node,
+        setContainerWidth,
+      );
+      setContainerWidth(node.getBoundingClientRect().width);
+    }
+  }, []);
+  useEffect(
+    () => () => {
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+    },
+    [],
+  );
+  const collapse = statusBarCollapseForWidth(containerWidth);
 
   useEffect(() => {
     let mounted = true;
@@ -201,6 +263,7 @@ export function StatusBar({
 
   return (
     <footer
+      ref={containerRefCallback}
       className="flex items-center h-6 min-h-[24px] px-3 gap-4 border-t border-border bg-[var(--bg-titlebar,var(--card))] text-xs select-none shrink-0 relative"
       aria-label="Status bar"
       data-testid="status-bar"
@@ -227,8 +290,18 @@ export function StatusBar({
       <div className="status-bar-group status-bar-meters">
         {snapshot ? (
           <>
-            <ProviderMeters provider={snapshot.claude} now={now} />
-            <ProviderMeters provider={snapshot.codex} now={now} />
+            <ProviderMeters
+              provider={snapshot.claude}
+              now={now}
+              compact={collapse.compact}
+              iconOnly={collapse.iconOnly}
+            />
+            <ProviderMeters
+              provider={snapshot.codex}
+              now={now}
+              compact={collapse.compact}
+              iconOnly={collapse.iconOnly}
+            />
           </>
         ) : (
           <span className="status-bar-unavailable" title="Loading usage">
@@ -254,7 +327,10 @@ export function StatusBar({
       <div className="status-bar-spacer" />
 
       <div className="status-bar-group">
-        <DaemonConnectionSegment />
+        <DaemonConnectionSegment
+          compact={collapse.compact}
+          iconOnly={collapse.iconOnly}
+        />
         <button
           type="button"
           className="status-bar-toggle"
@@ -265,7 +341,9 @@ export function StatusBar({
           disabled={!awake}
         >
           <Coffee size={12} />
-          <span>{awakeModeLabel ?? "…"}</span>
+          {collapse.showAwakeLabel ? (
+            <span>{awakeModeLabel ?? "…"}</span>
+          ) : null}
           <span
             aria-hidden
             className={`status-bar-dot${awake?.active ? " status-bar-dot-active" : ""}`}
@@ -276,19 +354,37 @@ export function StatusBar({
           title={snapshot ? memoryTitle(snapshot.memory) : "Memory unavailable"}
         >
           <MemoryStick size={12} />
-          <span>{snapshot ? memoryLabel(snapshot.memory.rssBytes) : "…"}</span>
+          {collapse.showMemoryLabel ? (
+            <span>
+              {snapshot ? memoryLabel(snapshot.memory.rssBytes) : "…"}
+            </span>
+          ) : null}
         </span>
-        <span className="status-bar-segment" title={terminalsTitle(terminalCount)}>
+        <span
+          className="status-bar-segment"
+          title={terminalsTitle(terminalCount)}
+        >
           <TerminalSquare size={12} />
-          <span>{terminalCount}</span>
+          {/* Source resource-trigger form: the session count stays while any
+          session exists, even icon-only. */}
+          {collapse.iconOnly && terminalCount === 0 ? null : (
+            <span>{terminalCount}</span>
+          )}
         </span>
         <span
           className="status-bar-segment"
           title={snapshot ? portsTitle(snapshot.ports) : "Ports unavailable"}
-          aria-label={snapshot ? portsAriaLabel(snapshot.ports) : "Ports unavailable"}
+          aria-label={
+            snapshot ? portsAriaLabel(snapshot.ports) : "Ports unavailable"
+          }
         >
           <Plug size={12} />
-          <span>{snapshot ? portsLabel(snapshot.ports) : "…"}</span>
+          {/* Source PortsStatusSegment form: icon-only keeps the count while
+          any port exists. */}
+          {collapse.iconOnly &&
+          (snapshot?.ports.listening.length ?? 0) === 0 ? null : (
+            <span>{snapshot ? portsLabel(snapshot.ports) : "…"}</span>
+          )}
         </span>
       </div>
     </footer>

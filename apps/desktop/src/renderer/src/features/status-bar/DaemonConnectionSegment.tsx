@@ -59,10 +59,19 @@ function SegmentIcon({ state }: { state: DaemonConnectionState }) {
   return <Server size={12} className="text-emerald-500" />;
 }
 
-export function DaemonConnectionSegment(): React.JSX.Element {
+export function DaemonConnectionSegment({
+  compact = false,
+  iconOnly = false,
+}: {
+  /** Narrow bar: hide the text label, keep icon + status dot (fork
+      SshStatusSegment compact form); the tooltip keeps the full detail. */
+  compact?: boolean;
+  iconOnly?: boolean;
+} = {}): React.JSX.Element {
   useEffect(() => ensureDaemonConnectionMonitor(), []);
   const connection = useDaemonConnection();
   useDaemonDisconnectToast(connection, () => retryDaemonConnectionNow());
+  const showLabel = !compact && !iconOnly;
 
   return (
     <span
@@ -71,9 +80,11 @@ export function DaemonConnectionSegment(): React.JSX.Element {
       title={daemonSegmentTitle(connection)}
     >
       <SegmentIcon state={connection.state} />
-      <span className={daemonConnectionToneClass(connection.state)}>
-        {daemonConnectionStatusLabel(connection.state)}
-      </span>
+      {showLabel ? (
+        <span className={daemonConnectionToneClass(connection.state)}>
+          {daemonConnectionStatusLabel(connection.state)}
+        </span>
+      ) : null}
       <span
         aria-hidden
         className={`inline-block size-1.5 rounded-full ${daemonConnectionDotClass(connection.state)}`}
