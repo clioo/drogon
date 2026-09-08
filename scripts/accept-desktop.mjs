@@ -262,6 +262,39 @@ try {
     })),
     { require: "undefined", process: "undefined" },
   );
+  // Exercise the real left-sidebar click path before any workspace exists.
+  // The shell used to update its route state but immediately replace every
+  // routed page with Landing, making Bots, Tasks and Automations look inert.
+  for (const pageCase of [
+    { button: "Bots", title: "Bots" },
+    { button: "Automations", title: "Automations" },
+  ]) {
+    await page.getByRole("button", { name: pageCase.button, exact: true }).click();
+    await page.getByTestId("no-workspace-page").waitFor();
+    await page
+      .getByTestId("no-workspace-page")
+      .getByRole("heading", { name: pageCase.title, exact: true })
+      .waitFor();
+    assert.equal(
+      await page
+        .getByRole("button", { name: pageCase.button, exact: true })
+        .getAttribute("aria-current"),
+      "page",
+    );
+  }
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await page.getByTestId("tasks-page-host").waitFor();
+  await page.getByRole("button", { name: "Close tasks", exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Tasks", exact: true })
+      .getAttribute("aria-current"),
+    "page",
+  );
+  await page.getByRole("button", { name: "Sessions", exact: true }).click();
+  await page.getByRole("heading", { name: "Drogon", exact: true }).waitFor();
+  report.checks.push("no-workspace-sidebar-navigation-clicks");
+
   // Add Project dialog (ported folder picker): registers the folder as a
   // project AND its implicit workspace, so the sidebar renders its row
   // with one card — the legacy path form registered a bare workspace

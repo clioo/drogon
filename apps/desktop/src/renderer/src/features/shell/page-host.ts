@@ -18,3 +18,30 @@ export function isFullPageRoute(route: string | null): boolean {
     route === AUTOMATIONS_ROUTE_ID
   );
 }
+
+export type NoWorkspacePageCopy = {
+  title: string;
+  description: string;
+};
+
+/**
+ * Bots and Automations are workspace-scoped, but their navigation should not
+ * become inert while the first project is being added. Tasks is intentionally
+ * excluded: its page is project-scoped and can mount before any workspace
+ * exists so the first task can create one.
+ */
+export function noWorkspacePageCopy(
+  route: string | null,
+): NoWorkspacePageCopy | null {
+  if (route === BOTS_ROUTE_ID)
+    return {
+      title: "Bots",
+      description: "Your team of agents, with memory and a purpose.",
+    };
+  if (route === AUTOMATIONS_ROUTE_ID)
+    return {
+      title: "Automations",
+      description: "Schedule repeatable work for your workspaces.",
+    };
+  return null;
+}

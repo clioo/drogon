@@ -76,6 +76,18 @@ fn run_git(cwd: &Path, argv: &[String]) -> Result<String, RpcError> {
     }
 }
 
+fn map_existing_branch_error(error: RpcError, branch: &str) -> RpcError {
+    if error.code == "io_error"
+        && error.message.contains("branch named")
+        && error.message.contains("already exists")
+    {
+        return error::invalid_argument(format!(
+            "branch '{branch}' already exists; choose a new worktree name and use Base ref to start from this branch"
+        ));
+    }
+    error
+}
+
 /// A Project's `name` becomes a directory segment under
 /// `<data-dir>/workspaces/`; this keeps that join safe even for a
 /// user-overridden name containing a path separator, without rejecting the
@@ -382,54 +394,55 @@ impl Engine {
         if let Some(base) = &base_ref {
             argv.push(base.clone());
         }
-        let create_result = run_git(Path::new(&project.path), &argv).and_then(|_| {
-            if sparse.is_empty() {
-                return Ok(());
-            }
+        run_git(Path::new(&project.path), &argv)
+            .map_err(|failure| map_existing_branch_error(failure, &name))?;
+        if !sparse.is_empty() {
             let target_path = Path::new(&target_str);
-            run_git(
-                target_path,
-                &[
+            let sparse_result = (|| {
+                run_git(
+                    target_path,
+                    &[
+                        "sparse-checkout".to_string(),
+                        "init".to_string(),
+                        "--cone".to_string(),
+                    ],
+                )?;
+                let mut set_argv = vec![
                     "sparse-checkout".to_string(),
-                    "init".to_string(),
-                    "--cone".to_string(),
-                ],
-            )?;
-            let mut set_argv = vec![
-                "sparse-checkout".to_string(),
-                "set".to_string(),
-                "--".to_string(),
-            ];
-            set_argv.extend(sparse.iter().cloned());
-            run_git(target_path, &set_argv)?;
-            run_git(target_path, &["checkout".to_string(), branch_name.clone()])?;
-            Ok(())
-        });
-        if let Err(err) = create_result {
-            // Failed-creation rollback (the fork's addSparseWorktree
-            // cleanup): the fresh branch has no user commits, so the
-            // worktree and branch are force-removed rather than left half
-            // created.
-            let removed = run_git(
-                Path::new(&project.path),
-                &[
-                    "worktree".to_string(),
-                    "remove".to_string(),
-                    "--force".to_string(),
-                    target_str.clone(),
-                ],
-            );
-            let branch_deleted = run_git(
-                Path::new(&project.path),
-                &["branch".to_string(), "-D".to_string(), branch_name.clone()],
-            );
-            if removed.is_err() || branch_deleted.is_err() {
-                return Err(error::io_error(format!(
-                    "{} (cleanup also failed — the partially created worktree at \"{}\" may need manual removal)",
-                    err.message, target_str
-                )));
+                    "set".to_string(),
+                    "--".to_string(),
+                ];
+                set_argv.extend(sparse.iter().cloned());
+                run_git(target_path, &set_argv)?;
+                run_git(target_path, &["checkout".to_string(), branch_name.clone()])?;
+                Ok::<(), RpcError>(())
+            })();
+            if let Err(err) = sparse_result {
+                // Failed-creation rollback (the fork's addSparseWorktree
+                // cleanup): the fresh branch has no user commits, so the
+                // worktree and branch are force-removed rather than left half
+                // created.
+                let removed = run_git(
+                    Path::new(&project.path),
+                    &[
+                        "worktree".to_string(),
+                        "remove".to_string(),
+                        "--force".to_string(),
+                        target_str.clone(),
+                    ],
+                );
+                let branch_deleted = run_git(
+                    Path::new(&project.path),
+                    &["branch".to_string(), "-D".to_string(), branch_name.clone()],
+                );
+                if removed.is_err() || branch_deleted.is_err() {
+                    return Err(error::io_error(format!(
+                        "{} (cleanup also failed — the partially created worktree at \"{}\" may need manual removal)",
+                        err.message, target_str
+                    )));
+                }
+                return Err(err);
             }
-            return Err(err);
         }
 
         let canonical_target = std::fs::canonicalize(&target).map_err(|e| {

@@ -174,9 +174,7 @@ function mount({
 
 function fillName(value: string): void {
   fireEvent.change(
-    screen.getByPlaceholderText(
-      "Type a name, #1234, branch, GitHub, GitLab, or Jira URL",
-    ),
+    screen.getByPlaceholderText("e.g. feature/my-worktree"),
     { target: { value } },
   );
 }
@@ -199,12 +197,14 @@ describe("NewWorkspaceComposer chrome (#316 fork anatomy)", () => {
     // The fork's local-host label ("Local Mac" on macOS, "Local computer"
     // elsewhere — jsdom's UA carries no platform token).
     expect(document.body.textContent).toMatch(/Local (Mac|Windows|computer)/);
-    // The fork's name-field label and smart-mode placeholder.
-    expect(document.body.textContent).toContain("Name or 'Create From'");
+    // Git worktrees always create a new branch; an existing branch is chosen
+    // separately through Advanced → Base ref.
+    expect(document.body.textContent).toContain("New branch name");
     expect(document.body.textContent).toContain("[Optional]");
-    const nameInput = screen.getByPlaceholderText(
-      "Type a name, #1234, branch, GitHub, GitLab, or Jira URL",
+    expect(document.body.textContent).toContain(
+      "To start from an existing branch, enter it in Advanced → Base ref.",
     );
+    const nameInput = screen.getByPlaceholderText("e.g. feature/my-worktree");
     expect(nameInput).toBeTruthy();
     // Agent + Advanced + the footer primary action.
     expect(document.body.textContent).toContain("Agent");
@@ -446,7 +446,7 @@ describe("NewWorkspaceComposer submit (#316 unchanged daemon payload)", () => {
       expect(
         (
           screen.getByPlaceholderText(
-            "Type a name, #1234, branch, GitHub, GitLab, or Jira URL",
+            "e.g. feature/my-worktree",
           ) as HTMLInputElement
         ).value,
       ).toBe("");
@@ -458,9 +458,7 @@ describe("NewWorkspaceComposer submit (#316 unchanged daemon payload)", () => {
   test("plain Enter in the name field moves focus to the agent combobox", () => {
     const onSubmitWorktree = vi.fn(async () => null);
     mount({ onSubmitWorktree, harnesses: [piHarness()] });
-    const nameInput = screen.getByPlaceholderText(
-      "Type a name, #1234, branch, GitHub, GitLab, or Jira URL",
-    );
+    const nameInput = screen.getByPlaceholderText("e.g. feature/my-worktree");
     fireEvent.keyDown(nameInput, { key: "Enter" });
     const agentTrigger = document.querySelector(
       '[data-agent-combobox-root="true"][role="combobox"]',

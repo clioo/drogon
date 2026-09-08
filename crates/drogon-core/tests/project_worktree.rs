@@ -307,6 +307,47 @@ fn git_project_create_two_worktrees_list_and_remove() {
 }
 
 #[test]
+fn worktree_create_reports_existing_branch_with_actionable_guidance() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap();
+    let response = engine.dispatch(req(
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "main"}),
+    ));
+
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.code, "invalid_argument");
+    assert_eq!(
+        error.message,
+        "branch 'main' already exists; choose a new worktree name and use Base ref to start from this branch"
+    );
+    assert_eq!(
+        ok(
+            &engine,
+            "worktree.list",
+            "w2",
+            json!({"projectId": project_id}),
+        )["worktrees"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[test]
 fn worktree_create_honors_an_explicit_base_ref() {
     let data_dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(data_dir.path()).unwrap();
