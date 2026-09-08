@@ -101,6 +101,21 @@ fn read_until(
     panic!("timed out waiting for predicate; output so far: {text:?} last session: {last:?}");
 }
 
+/// Polls for a file's existence: the fixture's `touch $DROGON_HOOK_MARKER`
+/// runs on the line right after the echo `read_until` anchors on, so it can
+/// still be in flight (a separate forked process) the instant that text is
+/// observed in the PTY buffer.
+fn wait_for_file(path: &str, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if std::path::Path::new(path).is_file() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out waiting for file to exist: {path}");
+}
+
 /// Restores an env var on drop (prepend-only PATH edits, or a scoped
 /// `OPENCODE_CONFIG_DIR`) so no test here can leak state into another.
 struct SavedEnv {
@@ -214,10 +229,7 @@ fn opencode_harness_start_installs_overlay_and_env_and_removes_it_on_exit() {
         std::path::Path::new(&config_dir),
         "the load marker must live inside the overlay, not the plugins dir"
     );
-    assert!(
-        std::path::Path::new(&marker_path).is_file(),
-        "the fixture's `touch $DROGON_HOOK_MARKER` must have created it"
-    );
+    wait_for_file(&marker_path, Duration::from_secs(5));
 
     let plugins_dir = std::path::Path::new(&config_dir).join("plugins");
     let plugin_files: Vec<_> = std::fs::read_dir(&plugins_dir)
@@ -429,10 +441,7 @@ fn pi_harness_start_installs_extension_and_removes_it_on_exit() {
         format!("{extension_path}.loaded"),
         "the marker must be a sibling of the extension file"
     );
-    assert!(
-        std::path::Path::new(&marker_path).is_file(),
-        "the fixture's `touch $DROGON_HOOK_MARKER` must have created it"
-    );
+    wait_for_file(&marker_path, Duration::from_secs(5));
 
     let stopped = ok(
         &engine,
