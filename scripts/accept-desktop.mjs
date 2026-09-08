@@ -624,7 +624,9 @@ try {
     await page.getByRole("button", { name: "New workspace", exact: true }).click();
     const quickComposer = page.getByRole("dialog", { name: "Create workspace" });
     await quickComposer.getByRole("button", { name: /Quick Session/ }).click();
-    await page.getByRole("heading", { name: "Start a session" }).waitFor();
+    await page
+      .getByRole("button", { name: "Select Quick Session" })
+      .waitFor();
     const quickProject = await page.evaluate(async () => {
       const listed = await window.drogon.project?.projectList?.();
       if (!listed?.ok) throw new Error(listed?.error?.message ?? "project list unavailable");
