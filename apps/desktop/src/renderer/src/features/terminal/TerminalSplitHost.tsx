@@ -221,6 +221,7 @@ function SplitPane({
         onSplitRight={onSplitRight}
         onError={onError}
         onSession={onSession}
+        onFocus={() => onFocusPane(session.id)}
       />
       <TerminalSplitHeaderOverlay
         tabId={tabId}

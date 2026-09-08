@@ -20,6 +20,13 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ILinkProvider, ILink } from "@xterm/xterm";
 import { TerminalInputQueue } from "./terminal-input-queue";
+import { attachTerminalMouseWheelMultiplier } from "./terminal-tui-wheel";
+import { resolveTerminalJisYenInput } from "./terminal-jis-yen-input";
+import {
+  resolveTerminalMacOptionKeyAction,
+  updateTerminalOptionKeyLocation,
+  type TerminalOptionKeyLocation,
+} from "./terminal-option-shortcut-policy";
 import {
   applyTerminalAppearance,
   composeActiveTerminalTheme,
@@ -58,6 +65,11 @@ import TerminalContextMenu, {
 import { splitRightShortcutLabel } from "./terminal-split";
 import { TerminalProcessExitOverlay } from "./TerminalProcessExitOverlay";
 import { DaemonReconnectBanner } from "./DaemonReconnectBanner";
+import {
+  applyTerminalSettings,
+  useTerminalMacOptionDetection,
+  useTerminalSettings,
+} from "./terminal-settings";
 import { useDaemonConnection } from "../shell/daemon-connection-store";
 import {
   isRecoverableAfterReconnect,
@@ -242,6 +254,7 @@ export function TerminalPane({
   recoveryNonce = 0,
   onError,
   onSession,
+  onFocus,
 }: {
   session: Session;
   /** Terminal font size in px, mirrored from the settings store by App. */
@@ -277,11 +290,19 @@ export function TerminalPane({
   recoveryNonce?: number;
   onError(message: string): void;
   onSession(value: Session): void;
+  /** Called when focus-follows-mouse makes this pane active in a split host. */
+  onFocus?(): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLDivElement>(null);
   const callbacks = useRef({ onError, onSession });
   callbacks.current = { onError, onSession };
+  const isMac =
+    typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+  const { settings: terminalSettings } = useTerminalSettings();
+  const detectedMacOption = useTerminalMacOptionDetection(isMac);
+  const terminalSettingsRef = useRef(terminalSettings);
+  terminalSettingsRef.current = terminalSettings;
   const fontSizeRef = useRef(fontSize);
   fontSizeRef.current = fontSize;
   // Typography options resolve once per mount: explicit props win, otherwise
@@ -393,6 +414,23 @@ export function TerminalPane({
     current.syncRenderer();
   }, [fontSize, fontFamily, fontWeight, fontWeightBold, zoomOverride]);
 
+  // Interaction/Advanced settings are mutable xterm options. Existing panes
+  // receive them through the settings event rather than waiting for a session
+  // remount; the wheel callback and keyboard handler read the same ref.
+  useEffect(() => {
+    const current = live.current;
+    if (!current) return;
+    applyTerminalSettings(current.terminal, terminalSettings, {
+      isMac,
+      detectedMacOption,
+    });
+    try {
+      current.terminal.refresh(0, Math.max(0, current.terminal.rows - 1));
+    } catch {
+      // Pane may be mid-teardown.
+    }
+  }, [terminalSettings, detectedMacOption, isMac]);
+
   useEffect(() => {
     const mount = surface.current!;
     const initialScheme = readEffectiveSchemeFromRoot(
@@ -405,7 +443,17 @@ export function TerminalPane({
       fontWeightBold: typographyRef.current.fontWeightBold,
       cursorBlink: true,
       cursorStyle: "block",
-      scrollback: 5000,
+      scrollback: terminalSettingsRef.current.terminalScrollbackRows,
+      scrollSensitivity: terminalSettingsRef.current.terminalScrollSensitivity,
+      fastScrollSensitivity:
+        terminalSettingsRef.current.terminalFastScrollSensitivity,
+      wordSeparator:
+        terminalSettingsRef.current.terminalWordSeparator || undefined,
+      macOptionIsMeta:
+        isMac &&
+        (terminalSettingsRef.current.terminalMacOptionAsAlt === "true" ||
+          (terminalSettingsRef.current.terminalMacOptionAsAlt === "auto" &&
+            detectedMacOption === "us")),
       // Required for the SearchAddon match-decoration colors (proposed API).
       allowProposedApi: true,
       screenReaderMode: true,
@@ -599,7 +647,8 @@ export function TerminalPane({
     };
     const osc52Handler = createOsc52OscHandler({
       // OSC 52 clipboard defaults on (source gate); queries stay blocked.
-      getSettingEnabled: () => true,
+      getSettingEnabled: () =>
+        terminalSettingsRef.current.terminalAllowOsc52Clipboard,
       // True while the initial history catch-up is being painted, so a
       // stale `\e]52;…` in scrollback cannot overwrite a newer clipboard.
       getReplaying: () => !caughtUp.current,
@@ -795,6 +844,12 @@ export function TerminalPane({
     };
     const fileLinkDisposable = terminal.registerLinkProvider(fileLinkProvider);
     terminal.open(mount);
+    // The wheel helper replays discrete reports only while an application has
+    // enabled xterm mouse tracking; ordinary scrollback remains xterm-owned.
+    attachTerminalMouseWheelMultiplier(terminal, {
+      getTuiMouseWheelMultiplier: () =>
+        terminalSettingsRef.current.terminalTuiScrollSensitivity,
+    });
     const inputIdentity = {
       sessionId: session.id,
       incarnation: session.incarnation,
@@ -807,6 +862,52 @@ export function TerminalPane({
       () => !disposed && canWrite,
       report,
     );
+    let optionKeyLocations: TerminalOptionKeyLocation = 0;
+    terminal.attachCustomKeyEventHandler((event) => {
+      optionKeyLocations = updateTerminalOptionKeyLocation(
+        optionKeyLocations,
+        event,
+      );
+      const jisAction = resolveTerminalJisYenInput(event, {
+        enabled: terminalSettingsRef.current.terminalJISYenToBackslash,
+        isMac,
+      });
+      if (jisAction) {
+        if (jisAction.type === "input") void queue.enqueue(jisAction.data);
+        return false;
+      }
+      const optionAction = isMac
+        ? resolveTerminalMacOptionKeyAction(
+            event,
+            terminalSettingsRef.current.terminalMacOptionAsAlt === "auto"
+              ? detectedMacOption === "us"
+                ? "true"
+                : "false"
+              : terminalSettingsRef.current.terminalMacOptionAsAlt,
+            optionKeyLocations,
+          )
+        : null;
+      if (optionAction) {
+        void queue.enqueue(optionAction.data);
+        return false;
+      }
+      return true;
+    });
+    const selection = terminal.onSelectionChange(() => {
+      if (
+        !terminalSettingsRef.current.terminalClipboardOnSelect ||
+        !terminal.hasSelection()
+      ) {
+        return;
+      }
+      void copyTerminalSelection({
+        terminal,
+        writeClipboardText,
+      }).catch(() => {
+        // Copy-on-select is best effort; the selected text remains available
+        // for the explicit Copy action when a clipboard permission is denied.
+      });
+    });
     live.current = {
       terminal,
       fit,
@@ -1163,6 +1264,7 @@ export function TerminalPane({
       setLinkActionRequest(null);
       fileLinkDisposable.dispose();
       subscription.dispose();
+      selection.dispose();
       resize.dispose();
       terminal.dispose();
     };
@@ -1181,9 +1283,6 @@ export function TerminalPane({
     // Keyed on the mode only; the mount effect owns everything else.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gpuMode]);
-
-  const isMac =
-    typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
   const onContainerKeyDown = (event: React.KeyboardEvent) => {
     const zoom = matchFontZoomChord(event, isMac);
@@ -1204,9 +1303,41 @@ export function TerminalPane({
   };
 
   const onContainerContextMenu = (event: React.MouseEvent) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest("[data-terminal-search-root]")
+    ) {
+      return;
+    }
+    if (
+      terminalSettingsRef.current.terminalRightClickToPaste &&
+      !event.ctrlKey
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      setMenu(null);
+      const current = live.current;
+      if (current) {
+        current.pasteFromClipboard("context-menu");
+        current.focus();
+      }
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     setMenu({ x: event.clientX, y: event.clientY });
+  };
+
+  const onContainerMouseEnter = (event: React.MouseEvent) => {
+    if (
+      !terminalSettingsRef.current.terminalFocusFollowsMouse ||
+      event.buttons !== 0 ||
+      (typeof document !== "undefined" && !document.hasFocus())
+    ) {
+      return;
+    }
+    onFocus?.();
+    live.current?.focus();
   };
 
   const current = live.current;
@@ -1331,6 +1462,7 @@ export function TerminalPane({
       aria-label="Session terminal"
       onKeyDown={onContainerKeyDown}
       onContextMenu={onContainerContextMenu}
+      onMouseEnter={onContainerMouseEnter}
     >
       <div ref={surface} style={{ width: "100%", height: "100%" }} />
       {linkTooltip ? (

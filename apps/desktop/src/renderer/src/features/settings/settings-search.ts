@@ -52,7 +52,83 @@ export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
     id: "terminal",
     title: "Terminal",
     description: "Shells, renderer, sessions, and terminal behavior.",
-    keywords: ["terminal", "shell", "shells", "renderer", "sessions", "kill", "refresh", "behavior", "manage"],
+    keywords: [
+      "terminal",
+      "shell",
+      "shells",
+      "renderer",
+      "sessions",
+      "kill",
+      "refresh",
+      "behavior",
+      "manage",
+      "scroll",
+      "scrolling",
+      "speed",
+      "sensitivity",
+      "multiplier",
+      "normal",
+      "fast",
+      "wheel",
+      "mouse",
+      "trackpad",
+      "tui",
+      "opencode",
+      "right click",
+      "right-click",
+      "paste",
+      "context menu",
+      "focus-follows-mouse",
+      "active",
+      "copy-on-select",
+      "focus",
+      "follows",
+      "hover",
+      "pane",
+      "ghostty",
+      "copy",
+      "select",
+      "selection",
+      "auto",
+      "automatic",
+      "clipboard",
+      "x11",
+      "linux",
+      "gnome",
+      "osc 52",
+      "osc52",
+      "zellij",
+      "tmux",
+      "neovim",
+      "nvim",
+      "fzf",
+      "grok",
+      "ssh",
+      "remote",
+      "scrollback",
+      "rows",
+      "buffer",
+      "memory",
+      "word",
+      "separator",
+      "boundary",
+      "double-click",
+      "option",
+      "alt",
+      "key",
+      "meta",
+      "compose",
+      "mac",
+      "macos",
+      "german",
+      "international",
+      "readline",
+      "jis",
+      "yen",
+      "backslash",
+      "japanese",
+      "intl",
+    ],
   },
   {
     id: "appearance",
@@ -80,6 +156,17 @@ function bucketText(bucket: SettingsSectionSearchBucket): string {
     .toLowerCase();
 }
 
+function matchesSearchToken(haystack: string, token: string): boolean {
+  // Short queries such as "cli" should not accidentally match the middle of
+  // unrelated words such as "clipboard"; longer queries retain the source's
+  // forgiving substring behavior ("notify" matches "notifications").
+  if (token.length <= 3) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`).test(haystack);
+  }
+  return haystack.includes(token);
+}
+
 /** Every whitespace-separated token must appear somewhere in the bucket. */
 export function matchesSettingsSearch(
   query: string,
@@ -88,7 +175,9 @@ export function matchesSettingsSearch(
   const normalized = normalizeSettingsSearchQuery(query);
   if (normalized === "") return true;
   const haystack = bucketText(bucket);
-  return normalized.split(" ").every((token) => haystack.includes(token));
+  return normalized
+    .split(" ")
+    .every((token) => matchesSearchToken(haystack, token));
 }
 
 /** Section ids matching the query, in nav order; empty query matches all. */

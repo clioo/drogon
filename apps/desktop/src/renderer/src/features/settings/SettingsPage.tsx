@@ -200,7 +200,9 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                 {visible.includes("git") ? (
                   <GitSection workspacePath={props.workspacePath} />
                 ) : null}
-                {visible.includes("terminal") ? <TerminalSection /> : null}
+                {visible.includes("terminal") ? (
+                  <TerminalSection searchQuery={searchQuery} />
+                ) : null}
                 {visible.includes("appearance") ? (
                   <AppearanceSection
                     theme={props.theme}

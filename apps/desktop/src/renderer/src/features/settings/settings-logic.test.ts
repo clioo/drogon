@@ -72,6 +72,8 @@ describe("settings sections", () => {
     expect(filterSettingsSections("sessions")).toEqual(["terminal"]);
     expect(filterSettingsSections("kill")).toEqual(["terminal"]);
     expect(filterSettingsSections("shells")).toEqual(["terminal"]);
+    expect(filterSettingsSections("scrollback")).toEqual(["terminal"]);
+    expect(filterSettingsSections("clipboard")).toEqual(["terminal"]);
     expect(filterSettingsSections("terminal font")).toEqual(["appearance"]);
   });
 });

@@ -21,10 +21,8 @@
 // session first) rather than the fork's in-process spawner.
 // Interaction (scroll sliders, right-click paste, focus-follows-mouse,
 // copy-on-select, OSC 52) and Advanced (scrollback rows, word separators,
-// option-as-alt, JIS yen) rows are omitted: TerminalPane hardcodes those
-// behaviors (scrollback 5000, OSC 52 always on) and owns the wiring, so a
-// switch here would be dead. Rendering (GPU acceleration, typography)
-// stays under Appearance per the merged R16-G decision.
+// option-as-alt, JIS yen) rows are ported below. Rendering (GPU acceleration,
+// typography) stays under Appearance per the merged R16-G decision.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoaderCircle, RefreshCw, RotateCw, Trash2, X } from "lucide-react";
 import type { Session, Workspace } from "../../../../shared/session-contract";
@@ -34,7 +32,12 @@ import type {
 } from "../../../../shared/daemon-contract";
 import { SESSIONS_INVALIDATE_EVENT } from "../../session-recovery";
 import { Button } from "../../components/ui/button";
+import { Separator } from "../../components/ui/separator";
 import { SettingsSection, SettingsSubsectionHeader } from "./settings-rows";
+import { TerminalInteractionSection } from "./terminal-interaction-section";
+import { TerminalAdvancedSection } from "./terminal-advanced-section";
+import { matchesTerminalSetting } from "./terminal-setting-search";
+import { useTerminalSettings } from "../terminal/terminal-settings";
 
 type ManagedRow = {
   session: Session;
@@ -83,8 +86,14 @@ function sessionLiveness(session: Session): { dot: string; label: string } {
   return { dot: "bg-emerald-500", label: session.agentState ?? "running" };
 }
 
-export function TerminalSection(): React.JSX.Element {
+export function TerminalSection({
+  searchQuery = "",
+}: {
+  searchQuery?: string;
+}): React.JSX.Element {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
+  const { settings: terminalSettings, updateSettings: updateTerminalSettings } =
+    useTerminalSettings();
   const [refreshing, setRefreshing] = useState(false);
   const [killing, setKilling] = useState<string | null>(null);
   const [killingAll, setKillingAll] = useState(false);
@@ -297,6 +306,85 @@ export function TerminalSection(): React.JSX.Element {
 
   const rows = load.status === "ready" ? load.rows : [];
   const busy = refreshing || killing !== null || killingAll || restarting;
+  const showInteraction = matchesTerminalSetting(
+    searchQuery,
+    "Terminal Interaction",
+    "Mouse and clipboard behavior for terminal panes.",
+    [
+      "terminal",
+      "mouse",
+      "clipboard",
+      "scroll",
+      "scrolling",
+      "speed",
+      "wheel",
+      "trackpad",
+      "opencode",
+      "paste",
+      "right",
+      "click",
+      "context",
+      "focus",
+      "follows",
+      "copy",
+      "select",
+      "selection",
+      "auto",
+      "automatic",
+      "x11",
+      "linux",
+      "gnome",
+      "tui",
+      "osc",
+      "52",
+      "osc52",
+      "zellij",
+      "tmux",
+      "neovim",
+      "nvim",
+      "fzf",
+      "grok",
+      "ssh",
+      "remote",
+      "hover",
+      "pane",
+      "ghostty",
+      "fast",
+      "fast scroll",
+    ],
+  );
+  const showManage = matchesTerminalSetting(
+    searchQuery,
+    "Manage Sessions",
+    "Recover from a frozen or misbehaving terminal by killing sessions or restarting the underlying daemon.",
+    ["terminal", "sessions", "kill", "refresh", "restart", "daemon", "manage"],
+  );
+  const showAdvanced = matchesTerminalSetting(
+    searchQuery,
+    "Advanced",
+    "Scrollback, word boundaries, and platform-specific terminal behaviors.",
+    [
+      "terminal",
+      "advanced",
+      "scrollback",
+      "rows",
+      "word",
+      "separator",
+      "boundary",
+      "double-click",
+      "selection",
+      "option",
+      "as",
+      "alt",
+      "mac",
+      "macos",
+      "keyboard",
+      "layout",
+      "jis",
+      "yen",
+      "backslash",
+    ],
+  );
 
   return (
     <SettingsSection
@@ -304,10 +392,20 @@ export function TerminalSection(): React.JSX.Element {
       title="Terminal"
       description="Shells, renderer, sessions, and terminal behavior."
     >
-      <SettingsSubsectionHeader
-        title="Manage Sessions"
-        description="Recover from a frozen or misbehaving terminal by killing sessions or restarting the underlying daemon."
-      />
+      {showInteraction ? (
+        <TerminalInteractionSection
+          settings={terminalSettings}
+          onChange={updateTerminalSettings}
+          searchQuery={searchQuery}
+        />
+      ) : null}
+      {showInteraction && showManage ? <Separator /> : null}
+      {showManage ? (
+        <>
+          <SettingsSubsectionHeader
+            title="Manage Sessions"
+            description="Recover from a frozen or misbehaving terminal by killing sessions or restarting the underlying daemon."
+          />
       <div className="mt-3 flex flex-col overflow-hidden rounded-lg border border-border/60">
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
           <div className="flex items-center gap-2">
@@ -466,6 +564,16 @@ export function TerminalSection(): React.JSX.Element {
           Press Restart daemon again to stop every session and restart the
           daemon.
         </p>
+      ) : null}
+          </>
+      ) : null}
+      {(showInteraction || showManage) && showAdvanced ? <Separator /> : null}
+      {showAdvanced ? (
+        <TerminalAdvancedSection
+          settings={terminalSettings}
+          onChange={updateTerminalSettings}
+          searchQuery={searchQuery}
+        />
       ) : null}
     </SettingsSection>
   );

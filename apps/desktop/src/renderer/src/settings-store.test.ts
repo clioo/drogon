@@ -17,6 +17,17 @@ const defaults: SettingsSubset = {
   inspectorVisible: true,
   locale: "en",
   terminalFontSize: 14,
+  terminalScrollSensitivity: 1.15,
+  terminalFastScrollSensitivity: 5,
+  terminalTuiScrollSensitivity: 1,
+  terminalRightClickToPaste: false,
+  terminalFocusFollowsMouse: false,
+  terminalClipboardOnSelect: false,
+  terminalAllowOsc52Clipboard: true,
+  terminalScrollbackRows: 5000,
+  terminalWordSeparator: "",
+  terminalMacOptionAsAlt: "auto",
+  terminalJISYenToBackslash: false,
   terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
   terminalFontWeight: 500,
   terminalFontWeightBold: 700,
@@ -204,6 +215,17 @@ describe("persistence round-trip through injected storage", () => {
         inspectorVisible: true,
         locale: "es",
         terminalFontSize: 14,
+        terminalScrollSensitivity: 1.15,
+        terminalFastScrollSensitivity: 5,
+        terminalTuiScrollSensitivity: 1,
+        terminalRightClickToPaste: false,
+        terminalFocusFollowsMouse: false,
+        terminalClipboardOnSelect: false,
+        terminalAllowOsc52Clipboard: true,
+        terminalScrollbackRows: 5000,
+        terminalWordSeparator: "",
+        terminalMacOptionAsAlt: "auto",
+        terminalJISYenToBackslash: false,
         terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
         terminalFontWeight: 500,
         terminalFontWeightBold: 700,
@@ -232,6 +254,20 @@ describe("persistence round-trip through injected storage", () => {
     expect(second.get("theme")).toBe("dark");
     expect(second.get("inspectorVisible")).toBe(false);
     expect(second.get("locale")).toBe("en");
+  });
+  it("does not clobber an external terminal settings write on an unrelated flush", () => {
+    const storage = new MemoryStorage();
+    const store = new SettingsStore(storage, { namespace: "ui" });
+    storage.seed(
+      settingsStorageKey("ui"),
+      JSON.stringify({ settings: { terminalScrollbackRows: 25_000 } }),
+    );
+    store.set("locale", "es");
+    store.flush();
+    expect(
+      JSON.parse(storage.peek(settingsStorageKey("ui")) as string).settings
+        .terminalScrollbackRows,
+    ).toBe(25_000);
   });
   it("debounces writes by 1s", () => {
     const storage = new MemoryStorage();
@@ -416,6 +452,17 @@ describe("unknown-key forward compatibility on read-modify-write", () => {
       inspectorVisible: true,
       locale: "es",
       terminalFontSize: 14,
+      terminalScrollSensitivity: 1.15,
+      terminalFastScrollSensitivity: 5,
+      terminalTuiScrollSensitivity: 1,
+      terminalRightClickToPaste: false,
+      terminalFocusFollowsMouse: false,
+      terminalClipboardOnSelect: false,
+      terminalAllowOsc52Clipboard: true,
+      terminalScrollbackRows: 5000,
+      terminalWordSeparator: "",
+      terminalMacOptionAsAlt: "auto",
+      terminalJISYenToBackslash: false,
       terminalFontFamily: SETTINGS_DEFAULTS.terminalFontFamily,
       terminalFontWeight: 500,
       terminalFontWeightBold: 700,
