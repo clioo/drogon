@@ -3,8 +3,9 @@
    and menu chrome), tab-bar-static-create-menu.tsx (default-order static
    entries: New Terminal, New Browser Tab, Mentu) and
    TabBarCreateEntry.tsx / tab-create-entry-copy.ts (the search combobox).
-   Adapter: no dnd-kit, simulator/recipe-markdown-open entries (mobile and
-   markdown surfaces are out of MVP scope — see NOT_PORTED below), no
+   Adapter: no dnd-kit, simulator/open-markdown entries (mobile is out of
+   MVP scope and Open Markdown lives in the Explorer — see NOT_PORTED
+   below), no
    open-tab/history/file/URL result routing (the combobox filters the
    menu's own entries; full omnibox routing is a follow-up); the
    per-harness entries open this repo's harness launch form (folded in from
@@ -12,7 +13,7 @@
    in for the shadcn menu, and harness icons are the source's brand glyphs
    (see TabCreateMenuIcons.tsx). */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Globe, Network, Plus, Settings as SettingsIcon, TerminalSquare } from "lucide-react";
+import { FilePlus, Globe, Network, Plus, Settings as SettingsIcon, TerminalSquare } from "lucide-react";
 import { DropdownMenu, Popover, Tooltip } from "radix-ui";
 import type {
   Harness,
@@ -30,6 +31,7 @@ import {
   normalizeHarnessLaunchInput,
   type HarnessLaunchFormValues,
 } from "../../harness-launch-form";
+import { resolvePiModelField } from "./pi-model-mapping";
 import {
   isPristineLaunchForm,
   resolveLaunchDefaults,
@@ -53,7 +55,8 @@ function menuChordPlatform(): TabCreateMenuChordPlatform {
 
 /**
  * Entries deliberately not ported from the fork's create menu, and why:
- * - New Markdown / Open Markdown: Drogon has no markdown tab surface.
+ * - Open Markdown: Drogon opens markdown through the Explorer, not a menu
+ *   file picker.
  * - New Mobile Emulator + promo card: mobile is out of the MVP; the fork
  *   renders the promo only conditionally, so omitting it matches the
  *   unconditional render.
@@ -61,7 +64,6 @@ function menuChordPlatform(): TabCreateMenuChordPlatform {
  *   ships only Claude, Pi, OpenCode and Antigravity harnesses.
  */
 export const TAB_CREATE_MENU_NOT_PORTED: readonly string[] = [
-  "New Markdown",
   "Open Markdown...",
   "New Mobile Emulator",
   "Mobile Emulator promo card",
@@ -85,10 +87,14 @@ const STATIC_ITEM_CLASS =
   "tab-create-item gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium";
 
 /** Fork menu-option keywords (tab-create-menu-options.ts), trimmed to what Drogon renders. */
-const STATIC_ENTRY_KEYWORDS: Record<"terminal" | "browser" | "mentu", string> = {
+const STATIC_ENTRY_KEYWORDS: Record<
+  "terminal" | "browser" | "mentu" | "markdown",
+  string
+> = {
   terminal: "terminal shell new terminal new shell",
   browser: "browser new browser browser tab web",
   mentu: "mentu recipe workflow run steps",
+  markdown: "markdown new file untitled",
 };
 
 /** Every whitespace-separated query token must appear in the haystack. */
@@ -112,9 +118,10 @@ export function matchesTabCreateQuery(
 
 /**
  * The tab strip "+" menu, in the fork's order: New Terminal, New Browser
- * Tab, Mentu, then one entry per harness (opening the launch form), then
- * Agent settings. The trigger keeps the source's accessible name so the
- * palette's "Launch harness…" row can open the real menu.
+ * Tab, Mentu, New Markdown, then one entry per harness (opening the
+ * launch form), then Agent settings. The trigger keeps the source's
+ * accessible name so the palette's "Launch harness…" row can open the
+ * real menu.
  */
 export function TabCreateMenu({
   workspaceId,
@@ -126,6 +133,7 @@ export function TabCreateMenu({
   onOpenMentu,
   mentuAvailable,
   onOpenAgentSettings,
+  onNewMarkdown,
   newTerminalShortcut,
   newBrowserShortcut,
   onCreateTerminal,
@@ -157,6 +165,10 @@ export function TabCreateMenu({
   /** Opens Settings on the Agents section. Rendered only when provided —
    *  thread it from the shell (TabBar/App) to show the row. */
   onOpenAgentSettings?: () => void;
+  /** Creates an untitled markdown file and opens it as an editor tab.
+   *  Rendered only when provided — thread it from the shell to show the
+   *  row (fork `onNewFileTab`). */
+  onNewMarkdown?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -165,6 +177,10 @@ export function TabCreateMenu({
     emptyHarnessLaunchForm(),
   );
   const [submitting, setSubmitting] = useState(false);
+  // Fork-parity model validation (#192): a Model value that cannot map to
+  // provider/model shows here and blocks the launch — input is never
+  // silently dropped, and no `startHarness` call is made until it maps.
+  const [formError, setFormError] = useState<string | null>(null);
   // Synchronous guard against a rapid double-invoke (e.g. two fast
   // keyboard-driven `onSelect`s) that `submitting` state alone might not
   // catch before its next render commits.
@@ -194,11 +210,13 @@ export function TabCreateMenu({
 
   const showMentu = !!onOpenMentu && !!mentuAvailable;
   const showAgentSettings = !!onOpenAgentSettings;
+  const showNewMarkdown = !!onNewMarkdown;
   const chordPlatform = menuChordPlatform();
   const terminalShortcut =
     tabCreateMenuChord("tab.newTerminal", chordPlatform) || newTerminalShortcut;
   const browserShortcut =
     tabCreateMenuChord("tab.newBrowser", chordPlatform) || newBrowserShortcut;
+  const markdownShortcut = tabCreateMenuChord("tab.newMarkdown", chordPlatform);
 
   const terminalVisible = matchesTabCreateQuery(
     "New Terminal",
@@ -213,6 +231,13 @@ export function TabCreateMenu({
   const mentuVisible =
     showMentu &&
     matchesTabCreateQuery("Mentu", STATIC_ENTRY_KEYWORDS.mentu, query);
+  const markdownVisible =
+    showNewMarkdown &&
+    matchesTabCreateQuery(
+      "New Markdown",
+      STATIC_ENTRY_KEYWORDS.markdown,
+      query,
+    );
   const visibleHarnesses = useMemo(
     () =>
       harnesses.filter((harness) =>
@@ -225,7 +250,8 @@ export function TabCreateMenu({
     [harnesses, query],
   );
   const hasQuery = query.trim() !== "";
-  const staticVisible = terminalVisible || browserVisible || mentuVisible;
+  const staticVisible =
+    terminalVisible || browserVisible || mentuVisible || markdownVisible;
   const agentBlockVisible =
     visibleHarnesses.length > 0 || (showAgentSettings && !hasQuery);
   const noMatches = hasQuery && !staticVisible && visibleHarnesses.length === 0;
@@ -253,6 +279,10 @@ export function TabCreateMenu({
       onOpenMentu?.();
       return;
     }
+    if (markdownVisible) {
+      onNewMarkdown?.();
+      return;
+    }
     const first = visibleHarnesses[0];
     if (first && first.availability === "available") openFormFor(first);
   };
@@ -260,6 +290,7 @@ export function TabCreateMenu({
   const closeForm = () => {
     setSelected(null);
     setValues(emptyHarnessLaunchForm());
+    setFormError(null);
     lastAttempt.current = null;
   };
 
@@ -288,11 +319,25 @@ export function TabCreateMenu({
     // regardless of the (disabled) submit button's own attribute — this
     // must reject that path too, not just the visible button click.
     if (!selected || disabled || !hostId) return;
-    const params = normalizeHarnessLaunchInput(
-      workspaceId,
-      selected.harnessId,
-      values,
-    );
+    // #192: the Model field maps to provider/model first (fork
+    // `provider/model-id` semantics, plus a pasted flags string). An
+    // unmappable value blocks here with the fork's error — the launch
+    // never fires, so the input cannot be silently dropped.
+    const mapped = resolvePiModelField({
+      harnessId: selected.harnessId,
+      model: values.model,
+      provider: values.provider,
+    });
+    if ("error" in mapped) {
+      setFormError(mapped.error);
+      return;
+    }
+    setFormError(null);
+    const params = normalizeHarnessLaunchInput(workspaceId, selected.harnessId, {
+      ...values,
+      model: mapped.model ?? "",
+      provider: mapped.provider ?? "",
+    });
     const key = JSON.stringify(params);
     const requestId =
       lastAttempt.current?.key === key
@@ -495,6 +540,18 @@ export function TabCreateMenu({
                   Mentu
                 </DropdownMenu.Item>
               )}
+              {markdownVisible && (
+                <DropdownMenu.Item
+                  className={STATIC_ITEM_CLASS}
+                  onSelect={() => onNewMarkdown?.()}
+                >
+                  <FilePlus className="size-4 text-muted-foreground" />
+                  New Markdown
+                  {markdownShortcut && (
+                    <span className="tab-create-shortcut">{markdownShortcut}</span>
+                  )}
+                </DropdownMenu.Item>
+              )}
               {agentBlockVisible && (
                 <DropdownMenu.Separator className="harness-menu-separator" />
               )}
@@ -557,10 +614,16 @@ export function TabCreateMenu({
                   placeholder="Harness default"
                   value={values.model}
                   disabled={submitting}
-                  onChange={(event) =>
-                    setValues((v) => ({ ...v, model: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    setFormError(null);
+                    setValues((v) => ({ ...v, model: event.target.value }));
+                  }}
                 />
+                {selected.harnessId === "pi" && (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    Use an exact Pi provider/model ID. Blank uses Pi settings.
+                  </span>
+                )}
               </label>
               <label>
                 Initial prompt (optional)
@@ -616,6 +679,11 @@ export function TabCreateMenu({
                     : "Skip permission prompts (unattended)"}
                 </label>
               </details>
+              {formError && (
+                <p role="alert" className="text-xs leading-5 text-destructive">
+                  {formError}
+                </p>
+              )}
               <div className="form-actions">
                 <Button
                   type="submit"

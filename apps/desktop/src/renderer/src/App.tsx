@@ -110,6 +110,7 @@ import {
 } from "./features/shell/connection-ready-reload";
 import type { ProjectGroup } from "./features/shell/project-adapter";
 import type { ProjectAction } from "./features/shell/ProjectList";
+import { createUntitledMarkdown } from "./features/shell/untitled-markdown";
 import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import { openCommandPalette } from "./features/shell/open-palette";
 import { CommandPaletteHost } from "./components/command-palette";
@@ -1962,6 +1963,34 @@ export function App() {
     setActiveEditorTabId(tabId);
     setActiveBrowserTabId(null);
   };
+  // #197 New Markdown (fork `onNewFileTab`): the first free
+  // untitled[-N].md at the workspace root via files.create, then the
+  // shared open-file funnel (Explorer reveal + editor tab). Creation
+  // failures surface through the App error banner via `action` — a tab
+  // for a file that does not exist is never opened. No editor internals
+  // involved: the file exists on disk before the tab opens, so R16-X's
+  // surface needs no seam.
+  const createNewMarkdownTab = () =>
+    action(async () => {
+      const workspace = workspaces.find((item) => item.id === selected);
+      const hostId = workspace?.hostId || status?.hostId;
+      if (!workspace || !hostId) {
+        throw new Error("Choose a workspace to create the file in.");
+      }
+      const create = filesGatedBridge.fileCreate;
+      if (!create) {
+        throw new Error(
+          "Creating files needs a newer daemon with files.create support.",
+        );
+      }
+      const scope = { hostId, workspaceId: workspace.id };
+      const name = await createUntitledMarkdown(async (candidate) => {
+        const result = await create({ ...scope, path: candidate, kind: "file" });
+        if (result.ok) return { ok: true as const };
+        return { ok: false as const, message: result.error.message };
+      });
+      openFileInFiles(name);
+    });
   const selectEditorTab = (tabId: string) => {
     setActiveEditorTabId(tabId);
     setActiveBrowserTabId(null);
@@ -2628,6 +2657,9 @@ export function App() {
       ),
       // tab.newBrowser (definitions-core-2.ts): the strip's New Browser Tab.
       "tab.newBrowser": guardHandler(() => void newBrowserTab(), isDisabled),
+      // #197 tab.newMarkdown (definitions-core-2.ts, Mod+Shift+M): the
+      // create menu's New Markdown row; same disabled gate as New Terminal.
+      "tab.newMarkdown": guardHandler(() => void createNewMarkdownTab(), isDisabled),
       "worktree.history.back": guardHandler(goBackViewHistory, () =>
         !canGoBackView(viewHistory, liveWorkspaceIds),
       ),
@@ -3021,6 +3053,8 @@ export function App() {
                 onNewBrowserTab={() => void newBrowserTab()}
                 onOpenMentu={() => setRoute(MENTU_ROUTE_ID)}
                 mentuAvailable={mentuAvailable}
+                onOpenAgentSettings={() => openSettings("agents")}
+                onNewMarkdown={() => void createNewMarkdownTab()}
               />
               <div
                 id="active-session-panel"

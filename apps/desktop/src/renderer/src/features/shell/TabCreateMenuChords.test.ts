@@ -25,10 +25,14 @@ function tableChord(id: TabCreateMenuChordId, platform: "darwin" | "other"): str
 
 describe("tabCreateMenuChord", () => {
   test("covers exactly the static rows with a chord hint", () => {
-    expect([...TAB_CREATE_MENU_CHORD_IDS]).toEqual(["tab.newTerminal", "tab.newBrowser"]);
+    expect([...TAB_CREATE_MENU_CHORD_IDS]).toEqual([
+      "tab.newTerminal",
+      "tab.newBrowser",
+      "tab.newMarkdown",
+    ]);
   });
 
-  test.each([["tab.newTerminal"], ["tab.newBrowser"]] as const)(
+  test.each([["tab.newTerminal"], ["tab.newBrowser"], ["tab.newMarkdown"]] as const)(
     "matches the shared table on %s (darwin and other)",
     (id) => {
       expect(tabCreateMenuChord(id, "darwin")).toBe(tableChord(id, "darwin"));
@@ -39,5 +43,6 @@ describe("tabCreateMenuChord", () => {
   test("renders the fork chords on macOS", () => {
     expect(tabCreateMenuChord("tab.newTerminal", "darwin")).toBe("⌘T");
     expect(tabCreateMenuChord("tab.newBrowser", "darwin")).toBe("⌘⇧B");
+    expect(tabCreateMenuChord("tab.newMarkdown", "darwin")).toBe("⌘⇧M");
   });
 });

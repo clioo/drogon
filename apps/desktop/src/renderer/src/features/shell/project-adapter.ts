@@ -20,6 +20,7 @@ import {
   PROJECT_CAPABILITY,
   WORKTREE_CAPABILITY,
 } from "../../../../shared/project-contract";
+import { cardDotState } from "./worktree-card-agent-summary";
 
 /** True exactly when the live service advertises project RPCs. */
 export function isProjectsAvailable(capabilities: readonly string[]): boolean {
@@ -389,35 +390,34 @@ export type CardAgentSummary = {
 };
 
 /**
- * Summarizes the sessions attached to one worktree card. The freshest
- * report by agentStateAt wins; sessions without a stamp sort last and
- * ties break toward needs_input so attention is never hidden. No
- * session (or no stamp anywhere) yields `unknown` with an empty stamp.
+ * Summarizes the sessions attached to one worktree card (#194). The dot
+ * state comes from the same grouped derivation as the summary text
+ * (`cardDotState`: first SUMMARY_STATE_ORDER group present), never from
+ * the freshest timestamp, so the dot can never disagree with the text it
+ * sits next to. The stamp stays the freshest live `agentStateAt` across
+ * the attached sessions — the last real state change the daemon reported
+ * — recomputed from the current session list on every render, never a
+ * value captured at mount. No stamp anywhere yields an empty stamp.
  */
 export function summarizeCardSessions(
   sessions: Session[],
   nowMs: number = Date.now(),
 ): CardAgentSummary {
-  const ranked = [...sessions].sort((a, b) => {
-    const aAt = a.agentStateAt ? Date.parse(a.agentStateAt) : NaN;
-    const bAt = b.agentStateAt ? Date.parse(b.agentStateAt) : NaN;
-    const aTime = Number.isNaN(aAt) ? -1 : aAt;
-    const bTime = Number.isNaN(bAt) ? -1 : bAt;
-    if (aTime !== bTime) return bTime - aTime;
-    const rank = (state: AgentState | undefined) =>
-      state === "needs_input" ? 0 : 1;
-    return rank(a.agentState) - rank(b.agentState);
-  });
-  const freshest = ranked[0];
+  let freshestAt: string | null = null;
+  let freshestMs = -1;
+  for (const session of sessions) {
+    if (!session.agentStateAt) continue;
+    const at = Date.parse(session.agentStateAt);
+    if (Number.isNaN(at) || at <= freshestMs) continue;
+    freshestMs = at;
+    freshestAt = session.agentStateAt;
+  }
   const unread = sessions.some(
     (session) => (session.agentState ?? "unknown") === "needs_input",
   );
   return {
-    state: freshest?.agentState ?? "unknown",
+    state: cardDotState(sessions),
     unread,
-    activeRelative: relativeActivityTime(
-      freshest?.agentStateAt ?? null,
-      nowMs,
-    ),
+    activeRelative: relativeActivityTime(freshestAt, nowMs),
   };
 }

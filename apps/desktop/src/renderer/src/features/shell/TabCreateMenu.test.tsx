@@ -6,7 +6,13 @@
 // stay exposed to assistive tech like the fork's DropdownMenuShortcut.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { Tooltip } from "radix-ui";
 import type { Harness } from "../../../../shared/session-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
@@ -100,12 +106,13 @@ describe("matchesTabCreateQuery", () => {
 describe("TabCreateMenu order and copy", () => {
   it("lists static entries, harness entries, then Agent settings in fork order", () => {
     const onOpenAgentSettings = vi.fn();
-    mount({ onOpenAgentSettings });
+    mount({ onOpenAgentSettings, onNewMarkdown: () => {} });
     openMenu();
     expect(menuItemNames()).toEqual([
       `New Terminal${TABLE_TERMINAL_CHORD}`,
       `New Browser Tab${TABLE_BROWSER_CHORD}`,
       "Mentu",
+      `New Markdown${tabCreateMenuChord("tab.newMarkdown", "other")}`,
       "Claude",
       "Pi",
       "OpenCode",
@@ -214,7 +221,7 @@ describe("TabCreateMenu order and copy", () => {
 
   it("documents the entries intentionally not ported from the fork", () => {
     for (const entry of [
-      "New Markdown",
+      "Open Markdown...",
       "Codex",
       "Gemini",
       "Kimi",
@@ -223,5 +230,111 @@ describe("TabCreateMenu order and copy", () => {
     ]) {
       expect(TAB_CREATE_MENU_NOT_PORTED).toContain(entry);
     }
+    // #197 ports New Markdown out of the not-ported list.
+    expect(TAB_CREATE_MENU_NOT_PORTED).not.toContain("New Markdown");
+  });
+
+  it("shows New Markdown with its table chord and calls through (#197)", () => {
+    const onNewMarkdown = vi.fn();
+    mount({ onNewMarkdown });
+    openMenu();
+    const item = screen.getByRole("menuitem", {
+      name: `New Markdown${tabCreateMenuChord("tab.newMarkdown", "other")}`,
+    });
+    expect(item.textContent).toContain("Ctrl+Shift+M");
+    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
+    fireEvent.click(item);
+    expect(onNewMarkdown).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits New Markdown without a handler and matches it by search", () => {
+    mount();
+    openMenu();
+    expect(screen.queryByRole("menuitem", { name: /New Markdown/ })).toBeNull();
+
+    cleanup();
+    mount({ onNewMarkdown: () => {} });
+    openMenu();
+    fireEvent.change(
+      screen.getByRole("combobox", { name: TAB_CREATE_SEARCH_PLACEHOLDER }),
+      { target: { value: "untitled" } },
+    );
+    expect(menuItemNames()).toEqual([
+      `New Markdown${tabCreateMenuChord("tab.newMarkdown", "other")}`,
+    ]);
+  });
+});
+
+describe("TabCreateMenu harness launch form (#192)", () => {
+  function openPiForm() {
+    mount();
+    openMenu();
+    const item = screen.getByRole("menuitem", { name: "Pi" });
+    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
+    fireEvent.click(item);
+    return screen.getByPlaceholderText("Harness default");
+  }
+
+  it("carries a pasted flags string to the launch as provider+model", async () => {
+    let launched: unknown;
+    const onLaunch = vi.fn(async (input: unknown) => {
+      launched = input;
+      return true;
+    });
+    mount({ onLaunch });
+    openMenu();
+    const item = screen.getByRole("menuitem", { name: "Pi" });
+    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
+    fireEvent.click(item);
+    fireEvent.change(screen.getByPlaceholderText("Harness default"), {
+      target: {
+        value: "--provider dgx-spark --model qwen3.8-flash-next-nvidia-nvfp4",
+      },
+    });
+    fireEvent.change(
+      screen.getByLabelText("Initial prompt (optional)", {
+        selector: "input",
+      }),
+      { target: { value: "Say the single word: PONG" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(1));
+    expect(launched).toMatchObject({
+      workspaceId: "ws",
+      harnessId: "pi",
+      provider: "dgx-spark",
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+      prompt: "Say the single word: PONG",
+      permissionMode: "inherit",
+    });
+  });
+
+  it("blocks an invalid model with the fork error and never launches", async () => {
+    const onLaunch = vi.fn(() => Promise.resolve(true));
+    mount({ onLaunch });
+    openMenu();
+    const item = screen.getByRole("menuitem", { name: "Pi" });
+    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
+    fireEvent.click(item);
+    fireEvent.change(screen.getByPlaceholderText("Harness default"), {
+      target: { value: "--bogus x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/Unsupported flag/);
+    expect(onLaunch).not.toHaveBeenCalled();
+  });
+
+  it("shows the fork hint under the Pi model field", () => {
+    openPiForm();
+    expect(
+      screen.getByText(
+        "Use an exact Pi provider/model ID. Blank uses Pi settings.",
+      ),
+    ).not.toBeNull();
   });
 });

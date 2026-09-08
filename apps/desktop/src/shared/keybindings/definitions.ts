@@ -238,6 +238,17 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     status: IMPLEMENTED,
   },
   {
+    // Fork definitions-core-2.ts `tab.newMarkdown` verbatim (title, group,
+    // scope, Mod+Shift+M on every platform); wired to the create menu's
+    // New Markdown row (#197).
+    id: "tab.newMarkdown",
+    title: "New markdown tab",
+    group: "Tabs",
+    scope: "tabs",
+    defaultBindings: same(["Mod+Shift+M"]),
+    status: IMPLEMENTED,
+  },
+  {
     id: "tab.close",
     title: "Close active tab",
     group: "Tabs",

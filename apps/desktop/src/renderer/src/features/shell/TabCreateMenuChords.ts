@@ -15,7 +15,11 @@ import {
 } from "../../../../shared/keybindings";
 
 /** Static create-menu rows that carry a chord hint, in fork menu order. */
-export const TAB_CREATE_MENU_CHORD_IDS = ["tab.newTerminal", "tab.newBrowser"] as const;
+export const TAB_CREATE_MENU_CHORD_IDS = [
+  "tab.newTerminal",
+  "tab.newBrowser",
+  "tab.newMarkdown",
+] as const;
 
 export type TabCreateMenuChordId = (typeof TAB_CREATE_MENU_CHORD_IDS)[number];
 

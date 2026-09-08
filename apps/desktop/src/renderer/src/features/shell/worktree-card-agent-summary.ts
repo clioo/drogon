@@ -5,6 +5,7 @@
    group-order/count projection runs over `agentState` values instead.
    Pure functions, unit-tested.) */
 import type { AgentState, Session } from "../../../../shared/session-contract";
+import { sessionDotState } from "./agent-state";
 
 // Why: the source's SUMMARY_STATE_ORDER (waiting, blocked, working,
 // monitoring, interrupted, done, unverifiable, idle) puts the stale-channel
@@ -55,11 +56,25 @@ export function formatWorktreeCardSummaryLine(
   return activeRelative ? `${agentSummary} · ${activeRelative}` : agentSummary;
 }
 
+/**
+ * The card dot: the first SUMMARY_STATE_ORDER group with a session in it
+ * — the same grouped states the summary text counts, so the dot can never
+ * name a state the text does not contain (a card reading "2 working, 1
+ * idle" dots working; only "All sessions idle" dots idle). Empty input
+ * dots `unknown`, like the text hides.
+ */
+export function cardDotState(sessions: Session[]): AgentState {
+  if (sessions.length === 0) return "unknown";
+  const present = new Set<AgentState>();
+  for (const session of sessions) present.add(sessionDotState(session));
+  return SUMMARY_STATE_ORDER.find((state) => present.has(state)) ?? "unknown";
+}
+
 export function summarizeCardAgentStates(sessions: Session[]): string {
   if (sessions.length === 0) return "";
   const counts = new Map<AgentState, number>();
   for (const session of sessions) {
-    const state = session.agentState ?? "unknown";
+    const state = sessionDotState(session);
     counts.set(state, (counts.get(state) ?? 0) + 1);
   }
   const parts = SUMMARY_STATE_ORDER.flatMap((state) => {

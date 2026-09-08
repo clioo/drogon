@@ -22,7 +22,7 @@ import {
   recoveryActionFor,
   recoveryTabLabel,
 } from "../../session-recovery";
-import { agentStateOf } from "./agent-state";
+import { sessionDotState } from "./agent-state";
 import { AgentStateIcon } from "./AgentStateIcon";
 import type { EditorTabState } from "./editor-tab";
 import { ShellIconButton } from "./ShellIconButton";
@@ -97,6 +97,8 @@ export function TabBar({
   onNewBrowserTab,
   onOpenMentu,
   mentuAvailable,
+  onOpenAgentSettings,
+  onNewMarkdown,
 }: {
   sessions: Session[];
   activeSessionId: string;
@@ -139,6 +141,10 @@ export function TabBar({
    *  Mentu activity item lands. */
   onOpenMentu?: () => void;
   mentuAvailable?: boolean;
+  /** Create-menu Agent settings row (Settings → Agents); hidden without it. */
+  onOpenAgentSettings?: () => void;
+  /** Create-menu New Markdown row; hidden without it. */
+  onNewMarkdown?: () => void;
 }) {
   const sessionById = new Map(sessions.map((item) => [item.id, item]));
   const browserById = new Map(browserTabs.map((tab) => [tab.tabId, tab]));
@@ -451,7 +457,7 @@ export function TabBar({
                     ariaLabel={`${text} ${item.verdict}`}
                     closeLabel={`Close ${text} session`}
                     icon={
-                      <AgentStateIcon state={agentStateOf(item)} size={13} />
+                      <AgentStateIcon state={sessionDotState(item)} size={13} />
                     }
                     retry={
                       retryable ? (
@@ -519,6 +525,8 @@ export function TabBar({
         onNewBrowserTab={onNewBrowserTab}
         onOpenMentu={onOpenMentu}
         mentuAvailable={mentuAvailable}
+        onOpenAgentSettings={onOpenAgentSettings}
+        onNewMarkdown={onNewMarkdown}
       />
     </div>
   );
