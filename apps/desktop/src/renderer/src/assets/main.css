@@ -2690,3 +2690,35 @@
   -webkit-appearance: none;
   margin: 0;
 }
+
+/* ── Sidebar drag reorder (R16-K) ─────────────────────────────────── */
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
+   src/renderer/src/assets/main.css ([data-worktree-sidebar-drag-preview]
+   and the WorktreeSidebarDropIndicator recipe): the drop line itself is
+   Tailwind classes in ProjectList.tsx (dot-line-dot on the
+   worktree-sidebar ring token, like the source component); only the
+   positioning anchor, the header affordance and the floating card
+   preview live here. */
+.shell-projects {
+  position: relative;
+}
+
+/* The whole project header is the drag handle (actions opt out via the
+   action selector in project-header-drag-contract.ts); grab signals the
+   affordance without stealing the row's click. */
+.shell-project-row[data-project-header-drag-handle] {
+  cursor: grab;
+}
+
+[data-worktree-card-drag-preview='true'] {
+  z-index: 2147483000;
+  overflow: visible;
+  border-radius: var(--radius);
+  opacity: 0.96;
+  filter: drop-shadow(0 10px 24px color-mix(in srgb, var(--foreground) 18%, transparent));
+  will-change: transform;
+}
+
+[data-worktree-card-drag-preview='true'] * {
+  cursor: grabbing !important;
+}

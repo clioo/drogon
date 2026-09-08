@@ -41,6 +41,9 @@ export function WorktreeCard({
   implicitFolderWorktree,
   pr = null,
   onSelect,
+  cardIndex = 0,
+  onCardPointerDown,
+  onCardClickCapture,
   onRemove,
   onRename,
   onCreateWorktree,
@@ -55,6 +58,15 @@ export function WorktreeCard({
   /** Known PR for the chip; null hides it (no PR store yet). */
   pr?: WorktreeCardPrDisplay | null;
   onSelect: (workspaceId: string) => void;
+  /** Zero-based index among the project's visible cards (drag geometry). */
+  cardIndex?: number;
+  /** Arms the pointer drag session; absent disables card dragging. */
+  onCardPointerDown?: (
+    event: React.PointerEvent<HTMLElement>,
+    worktreeId: string,
+  ) => void;
+  /** Capture-phase click guard that swallows the select click after a drag. */
+  onCardClickCapture?: (event: React.MouseEvent<HTMLElement>) => void;
   /** Null for implicit folder worktrees, which have nothing to remove. */
   onRemove: (() => void) | null;
   /**
@@ -100,6 +112,15 @@ export function WorktreeCard({
       <div
         className="shell-worktree-card"
         data-active={selected}
+        data-worktree-card-id={worktree.id}
+        data-worktree-card-project={worktree.projectId}
+        data-worktree-card-index={cardIndex}
+        onPointerDown={
+          onCardPointerDown
+            ? (event) => onCardPointerDown(event, worktree.id)
+            : undefined
+        }
+        onClickCapture={onCardClickCapture}
         aria-label={`${name}${summary.unread ? ", needs input" : ""}`}
       >
         <button
