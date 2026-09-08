@@ -6,10 +6,13 @@ import { fileURLToPath } from "node:url";
 import { packager } from "@electron/packager";
 import {
   APP_BUNDLE_ID,
+  APP_ICON_BUILDER_FILE,
+  APP_ICON_SOURCE_FILE,
   BUNDLE_ICON_FILE,
   STOCK_ELECTRON_ICON_FILE,
   bundleIconFile,
   bundlePaths,
+  ensureAppIcon,
   fingerprintBundle,
   mentuRuntimeSignIgnore,
   verifiedBuildInfo,
@@ -104,14 +107,18 @@ await writeFile(infoPath, JSON.stringify(info, null, 2) + "\n");
 // Ships it when present, skips cleanly otherwise — the sealed acceptance
 // stays green without it, same as before this runtime existed.
 const bundledMentuRuntime = path.join(root, "apps", "desktop", "resources", "mentu-runtime");
-// R16-Z2 (#201): original Drogon icon. The .icns is a committed build
-// artifact of apps/desktop/resources/icon.svg — regenerate with
-// `node scripts/build-app-icon.mjs` after replacing the SVG, never by hand.
-const appIcon = path.join(root, "apps", "desktop", "resources", "icon.icns");
-assert.ok(
-  existsSync(appIcon),
-  "Missing committed app icon: run node scripts/build-app-icon.mjs (Fixes #201)",
-);
+// R16-Z2 (#201) + R16-BO (#319): original Drogon icon. The .icns is a
+// committed build artifact of apps/desktop/resources/icon.svg — a missing
+// icon or one older than the SVG (or the builder) is rebuilt in-process
+// through the same build-app-icon code path before any bundle byte exists,
+// and a failed rebuild aborts here instead of shipping stock electron.icns.
+const resourcesDir = path.join(root, "apps", "desktop", "resources");
+const appIcon = path.join(resourcesDir, BUNDLE_ICON_FILE);
+await ensureAppIcon({
+  svg: path.join(resourcesDir, APP_ICON_SOURCE_FILE),
+  icns: appIcon,
+  builder: path.join(root, "scripts", APP_ICON_BUILDER_FILE),
+});
 const [packagedDirectory] = await packager({
   dir: source,
   name: "Drogon",

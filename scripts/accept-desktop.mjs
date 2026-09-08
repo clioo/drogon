@@ -29,9 +29,11 @@ import {
 } from "./probe-packaged-surfaces.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import {
+  BUNDLE_ICON_FILE,
   bundlePaths,
   sealedBundleDigest,
   verifiedBuildInfo,
+  verifyBundleCarriesDrogonIcon,
   verifySealedBundle,
 } from "./desktop-artifacts.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
@@ -174,6 +176,20 @@ async function launchDesktop() {
     .waitFor();
 }
 try {
+  if (bundle) {
+    // R16-BO (#319): prove the sealed bundle carries the Drogon icon
+    // before any rendered journey runs, so PASSED implies installable.
+    await verifyBundleCarriesDrogonIcon(bundle, {
+      expectedIcon: path.join(
+        root,
+        "apps",
+        "desktop",
+        "resources",
+        BUNDLE_ICON_FILE,
+      ),
+    });
+    report.checks.push("bundle-carries-drogon-icon");
+  }
   let daemonError;
   if (!packaged) {
     daemon = startAcceptanceProcess(

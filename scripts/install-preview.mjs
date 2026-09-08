@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import {
   APP_BUNDLE_ID,
   assertSealedInstallAuthorization,
+  lenientPreviousBuildInfo,
   previewArchiveName,
   verifiedBuildInfo,
   verifySealedBundle,
@@ -101,7 +102,21 @@ try {
       relative && !relative.startsWith("..") && !path.isAbsolute(relative),
       "Refuse to replace an unrelated application link",
     );
-    await verifiedBuildInfo(previous);
+    // R16-BO (#319): the previous build is kept only for rollback, so an
+    // old preview that predates a newer invariant (e.g. the #201 icon)
+    // warns and continues instead of refusing this install. The incoming
+    // bundle above stays strictly verified.
+    const previousCheck = await lenientPreviousBuildInfo(previous);
+    if (!previousCheck.strict) {
+      console.warn(
+        JSON.stringify({
+          status: "PREVIOUS-BUILD-LENIENT",
+          previousBundle: previous,
+          previousRevision: previousCheck.info?.revision ?? null,
+          warning: previousCheck.warning,
+        }),
+      );
+    }
   }
   const finalDirectory = path.join(
     builds,
