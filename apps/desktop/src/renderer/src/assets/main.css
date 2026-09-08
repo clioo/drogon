@@ -2728,3 +2728,47 @@
     animation: none;
   }
 }
+
+/* ── Split terminal (R16-N, issue #129) ─────────────────────────────── */
+/* MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
+   src/renderer/src/assets/terminal.css (`.pane-divider.is-vertical` line
+   art and the `.pane-title-bar[data-chromeless]` overlay rules, already
+   ported to terminal.css): only the Drogon flexbox host geometry lives
+   here. The divider element is a wide transparent hit area; the visible
+   line is drawn by terminal.css ::after. */
+.terminal-split-host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: row;
+  align-items: stretch;
+}
+.terminal-split-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.terminal-split-pane > .terminal-surface {
+  display: flex;
+  flex-direction: column;
+}
+/* Divider hit box between the two panes (the fork's pane-manager
+   positions its dividers absolutely; the flex row needs an explicit
+   box and cursor here). */
+.terminal-split-host > .pane-divider.is-vertical {
+  position: relative;
+  flex: 0 0 auto;
+  width: 9px;
+  margin: 0 -2px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.terminal-split-host > .pane-divider.is-vertical:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}

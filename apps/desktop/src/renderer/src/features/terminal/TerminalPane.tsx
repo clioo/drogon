@@ -55,6 +55,7 @@ import TerminalSearch, { type TerminalSearchState } from "./TerminalSearch";
 import TerminalContextMenu, {
   type TerminalContextMenuPoint,
 } from "./TerminalContextMenu";
+import { splitRightShortcutLabel } from "./terminal-split";
 import {
   TerminalProcessExitOverlay,
 } from "./TerminalProcessExitOverlay";
@@ -212,6 +213,8 @@ export function TerminalPane({
   fontWeight,
   fontWeightBold,
   gpuMode,
+  canSplit,
+  onSplitRight,
   onError,
   onSession,
 }: {
@@ -229,6 +232,14 @@ export function TerminalPane({
   fontWeightBold?: number;
   /** Settings-owned GPU mode (App passes it; tests may omit it). */
   gpuMode?: TerminalGpuAcceleration;
+  /**
+   * Split Terminal Right availability for this pane's context menu (false
+   * once the tab already holds two panes). Defaults to false so existing
+   * single-pane hosts keep today's menu.
+   */
+  canSplit?: boolean;
+  /** Split entry point for this pane (context menu item). */
+  onSplitRight?: () => void;
   onError(message: string): void;
   onSession(value: Session): void;
 }) {
@@ -998,6 +1009,11 @@ export function TerminalPane({
     current.pasteFromClipboard("context-menu");
     focus();
   };
+  const splitRight = () => {
+    setMenu(null);
+    onSplitRight?.();
+    current?.focus();
+  };
   const copyTerminalId = () => {
     setMenu(null);
     void copyTerminalHandleForPane({
@@ -1097,6 +1113,9 @@ export function TerminalPane({
         onCopy={copySelection}
         onSelectAll={selectAll}
         onPaste={pasteClipboard}
+        canSplit={canSplit ?? false}
+        splitShortcut={splitRightShortcutLabel(isMac)}
+        onSplitRight={splitRight}
         onCopyTerminalId={copyTerminalId}
         onClearScreen={clearScreen}
         onClosePane={closePane}

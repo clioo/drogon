@@ -143,16 +143,19 @@ describe("tab-strip persistence", () => {
       order: ["a", "b"],
       pinned: ["a"],
       titles: { b: "Custom" },
+      splits: {},
     });
     expect(loadTabStripState(storage, "ws-1")).toEqual({
       order: ["a", "b"],
       pinned: ["a"],
       titles: { b: "Custom" },
+      splits: {},
     });
     expect(loadTabStripState(storage, "ws-2")).toEqual({
       order: [],
       pinned: [],
       titles: {},
+      splits: {},
     });
   });
 
@@ -165,12 +168,42 @@ describe("tab-strip persistence", () => {
       order: [],
       pinned: [],
       titles: {},
+      splits: {},
     });
     expect(
       parseTabStripState(
         JSON.stringify({ state: { order: ["a"], pinned: ["ghost"], titles: { a: 7 } } }),
       ),
-    ).toEqual({ order: ["a"], pinned: [], titles: {} });
+    ).toEqual({ order: ["a"], pinned: [], titles: {}, splits: {} });
+  });
+
+  it("round-trips splits additively and reads pre-split envelopes", () => {
+    const storage = memStorage();
+    saveTabStripState(storage, "ws-1", {
+      order: ["a"],
+      pinned: [],
+      titles: {},
+      splits: {
+        a: { panes: ["a", "b"], active: "b", sizes: [0.6, 0.4] },
+      },
+    });
+    expect(loadTabStripState(storage, "ws-1").splits).toEqual({
+      a: { panes: ["a", "b"], active: "b", sizes: [0.6, 0.4] },
+    });
+    // Pre-split envelopes (no splits key) hydrate to no splits.
+    expect(
+      parseTabStripState(
+        JSON.stringify({ state: { order: ["a"], pinned: [], titles: {} } }),
+      ).splits,
+    ).toEqual({});
+    // Malformed splits never survive the boundary.
+    expect(
+      parseTabStripState(
+        JSON.stringify({
+          state: { order: ["a"], pinned: [], titles: {}, splits: { a: { panes: ["a", "a"] } } },
+        }),
+      ).splits,
+    ).toEqual({});
   });
 });
 
