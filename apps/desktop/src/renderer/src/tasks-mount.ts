@@ -23,6 +23,10 @@ import type { PanelDescriptor, RouteRegistry } from "./route-panel-contract";
 /** Branded form of the feature route id; empty ids throw at import. */
 export const TASKS_ROUTE_ID = routeId(FEATURE_TASKS_ROUTE_ID);
 
+/** The keep-alive host section's test id (shared with the page's Escape
+ *  visibility check — see features/tasks/task-page-global-escape.ts). */
+export { TASKS_PAGE_HOST_TESTID } from "./features/tasks";
+
 export { TASKS_CAPABILITY, isTasksAvailable };
 
 /**

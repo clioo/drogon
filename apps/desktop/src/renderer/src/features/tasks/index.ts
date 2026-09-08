@@ -8,4 +8,5 @@ export {
   type TasksPanelDescriptor,
   type TasksPanelProps,
 } from "./TasksPage";
+export { TASKS_PAGE_HOST_TESTID } from "./task-page-global-escape";
 export { refreshWorktreeIssueLinks } from "./issue-links";

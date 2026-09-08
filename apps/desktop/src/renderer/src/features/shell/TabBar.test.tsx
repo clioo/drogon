@@ -346,3 +346,36 @@ describe("TabBar editor tabs", () => {
     expect(onCopyText).toHaveBeenCalledWith("src/a.ts");
   });
 });
+
+describe("TabBar no per-workspace session cap (#272)", () => {
+  it("renders every session tab — 25 sessions in, 25 tabs out", () => {
+    // The R16-AT load fixture: a worktree with more sessions than fit on
+    // screen. The strip must render all of them (the fork's overflow
+    // chevrons/scroll handle the width); nothing may slice the list.
+    const sessions = Array.from({ length: 25 }, (_, index) =>
+      session(`s-${index + 1}`),
+    );
+    // Newest-first stored order, like a strip that has been used a while.
+    const stripOrder = sessions.map((item) => item.id).reverse();
+    renderStrip({ sessions, stripOrder });
+    expect(tabIds()).toEqual(sessions.map((item) => item.id).reverse());
+    expect(screen.getAllByRole("tab")).toHaveLength(25);
+  });
+
+  it("keeps every session tab when the list grows past the stored order", () => {
+    // Reconcile semantics: sessions beyond the stored order still append;
+    // ids unknown to storage are never dropped (#272 newest-invisible).
+    const known = Array.from(
+      { length: 18 },
+      (_, index) => session(`k-${index + 1}`),
+    );
+    const late = [session("late-1"), session("late-2")];
+    renderStrip({
+      sessions: [...known, ...late],
+      stripOrder: known.map((item) => item.id),
+    });
+    const ids = tabIds();
+    expect(ids).toHaveLength(20);
+    expect(ids.slice(-2)).toEqual(["late-1", "late-2"]);
+  });
+});

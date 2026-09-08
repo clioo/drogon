@@ -106,6 +106,36 @@ describe("diffAgentStates", () => {
     ]);
     expect(transitions).toEqual([]);
   });
+
+  it("#272: with emitFirstSightings a new session is forwarded without notifying", () => {
+    const first = diffAgentStates(new Map(), [session("a", "working")], {
+      emitFirstSightings: true,
+    });
+    // Primed but genuinely new sessions forward so the selected
+    // workspace's strip refetches (#272); the event never notifies.
+    expect(first.transitions).toEqual([
+      { session: expect.objectContaining({ id: "a" }), entered: false },
+    ]);
+    const second = diffAgentStates(
+      first.next,
+      [session("a", "working"), session("b", "idle")],
+      { emitFirstSightings: true },
+    );
+    expect(second.transitions).toEqual([
+      { session: expect.objectContaining({ id: "b" }), entered: false },
+    ]);
+  });
+
+  it("#272: emitFirstSightings still notifies a session that arrives already waiting", () => {
+    const { transitions } = diffAgentStates(
+      new Map(),
+      [session("a", "needs_input")],
+      { emitFirstSightings: true },
+    );
+    expect(transitions).toEqual([
+      { session: expect.objectContaining({ id: "a" }), entered: true },
+    ]);
+  });
 });
 
 describe("sessionLabelFor", () => {
