@@ -1,24 +1,70 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/right-sidebar/source-control/panel/header-toolbar.tsx
-// (filter toggle + expanded filter input + overflow menu + branch context
-// row). Adapter: the Create-PR/hosted-review toolbar slots have no MVP
-// backend here — Create PR lives in the sync row — so the collapsed toolbar
-// is refresh + filter + overflow; the branch row below keeps the source's
-// placement and spacing.
+// (Create-PR toolbar button + filter toggle + expanded filter input +
+// overflow menu + branch context row). Adapter: hosted-review probes,
+// base refs and conflict state have no MVP backend, so the Create-PR rule
+// is expressed over the daemon's upstream status (see create-pr-action.ts);
+// manual refresh lives in the overflow menu, like the fork's Refresh
+// branch compare entry — the collapsed toolbar keeps exactly the fork's
+// slots: Create PR, filter, overflow.
 import React, { useCallback, useEffect, useRef } from "react";
-import { RefreshCw, Search, X } from "lucide-react";
+import { GitPullRequestArrow, Loader2, Search, X } from "lucide-react";
 import { Tooltip } from "radix-ui";
 import { Button } from "../../components/ui/button";
 import { cn } from "./panel-class-names";
 import { SourceControlBranchContextRow } from "./branch-context-row";
 import { SourceControlHeaderOverflowMenu } from "./header-overflow-menu";
+import type { CreatePrToolbarAction } from "./create-pr-action";
 import type { SourceControlViewMode } from "./section-file-list";
+
+function CreatePrHeaderButton({
+  action,
+  isCreatingPr,
+  onClick,
+}: {
+  action: CreatePrToolbarAction;
+  isCreatingPr: boolean;
+  onClick: () => void;
+}): React.JSX.Element {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <span className="inline-flex shrink-0">
+          <Button
+            type="button"
+            size="xs"
+            disabled={action.disabled || isCreatingPr}
+            onClick={onClick}
+            className="h-6 shrink-0 px-2 text-[11px]"
+            title={action.title}
+            aria-label={action.label}
+          >
+            {isCreatingPr ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <GitPullRequestArrow className="size-3.5" aria-hidden="true" />
+            )}
+            {action.label}
+          </Button>
+        </span>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content side="bottom" sideOffset={6} className="tooltip max-w-72">
+          {action.title}
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
 
 export function SourceControlHeaderToolbar({
   filterQuery,
   filterExpanded,
   onFilterQueryChange,
   onFilterExpandedChange,
+  createPrAction,
+  isCreatingPr,
+  onCreatePr,
   sourceControlViewMode,
   onToggleViewMode,
   onRefresh,
@@ -29,11 +75,16 @@ export function SourceControlHeaderToolbar({
   behind,
   lineTotalAdded,
   lineTotalRemoved,
+  reviewUrl,
+  onOpenReviewPage,
 }: {
   filterQuery: string;
   filterExpanded: boolean;
   onFilterQueryChange: (value: string) => void;
   onFilterExpandedChange: (expanded: boolean) => void;
+  createPrAction: CreatePrToolbarAction | null;
+  isCreatingPr: boolean;
+  onCreatePr: () => void;
   sourceControlViewMode: SourceControlViewMode;
   onToggleViewMode: () => void;
   onRefresh: () => void;
@@ -44,6 +95,8 @@ export function SourceControlHeaderToolbar({
   behind: number | null;
   lineTotalAdded: number;
   lineTotalRemoved: number;
+  reviewUrl: string | null;
+  onOpenReviewPage: () => void;
 }): React.JSX.Element {
   const filterInputRef = useRef<HTMLInputElement>(null);
   const normalizedFilter = filterQuery.trim();
@@ -80,30 +133,19 @@ export function SourceControlHeaderToolbar({
       >
         {showCollapsedToolbar ? (
           <>
-            {/* Why: keep filter/overflow pinned right without stretching the refresh action. */}
-            <span className="min-w-0 flex-1" aria-hidden="true" />
-            <Tooltip.Root>
-              <Tooltip.Trigger asChild>
-                <span className="inline-flex shrink-0">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-                    disabled={refreshDisabled}
-                    onClick={onRefresh}
-                    aria-label="Refresh source control status"
-                  >
-                    <RefreshCw className={cn("size-3.5", refreshDisabled && "animate-spin")} />
-                  </Button>
-                </span>
-              </Tooltip.Trigger>
-              <Tooltip.Portal>
-                <Tooltip.Content side="bottom" sideOffset={6} className="tooltip">
-                  Refresh source control status
-                </Tooltip.Content>
-              </Tooltip.Portal>
-            </Tooltip.Root>
+            {createPrAction ? (
+              <CreatePrHeaderButton
+                action={createPrAction}
+                isCreatingPr={isCreatingPr}
+                onClick={onCreatePr}
+              />
+            ) : (
+              <span className="min-w-0 flex-1" aria-hidden="true" />
+            )}
+            {createPrAction ? (
+              // Why: keep filter/overflow pinned right without stretching Create PR.
+              <span className="min-w-0 flex-1" aria-hidden="true" />
+            ) : null}
             <button
               type="button"
               data-testid="source-control-filter-toggle"
@@ -175,6 +217,8 @@ export function SourceControlHeaderToolbar({
           lineTotalAdded={lineTotalAdded}
           lineTotalRemoved={lineTotalRemoved}
           onRefresh={onRefresh}
+          reviewUrl={reviewUrl}
+          onOpenReviewPage={onOpenReviewPage}
         />
       </div>
     </div>

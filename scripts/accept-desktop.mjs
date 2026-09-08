@@ -268,7 +268,7 @@ try {
     .last()
     .click();
   await page
-    .getByRole("menuitem", { name: "New Terminal", exact: true })
+    .getByRole("menuitem", { name: /^New Terminal/ })
     .click();
   await page.getByRole("tab").first().waitFor();
   await page.locator(".xterm-helper-textarea").focus();
@@ -323,7 +323,7 @@ try {
   }
   await page.getByRole("button", { name: "New tab", exact: true }).click();
   await page
-    .getByRole("menuitem", { name: "New Terminal", exact: true })
+    .getByRole("menuitem", { name: /^New Terminal/ })
     .click();
   await page.waitForFunction(
     () => document.querySelectorAll('[role="tab"]').length === 2,

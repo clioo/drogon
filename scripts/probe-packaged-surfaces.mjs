@@ -307,7 +307,7 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
     .getByRole("button", { name: "New tab", exact: true })
     .first()
     .click();
-  await page.getByRole("menuitem", { name: "New Terminal", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^New Terminal/ }).click();
   await page.waitForFunction(
     ({ selector, count }) => document.querySelectorAll(selector).length === count,
     { selector: SESSION_TABS, count: before + 1 },
@@ -324,7 +324,7 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
     .first()
     .click();
   await page
-    .getByRole("menuitem", { name: "New Browser Tab", exact: true })
+    .getByRole("menuitem", { name: /^New Browser Tab/ })
     .click();
   const pane = page.locator('[data-testid="browser-pane"]');
   await pane.waitFor();

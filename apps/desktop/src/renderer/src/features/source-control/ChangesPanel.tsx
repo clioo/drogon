@@ -58,6 +58,8 @@ import type { SourceControlViewMode } from "./section-file-list";
 import { handleSourceControlCommitShortcut } from "./commit-shortcut";
 import { getDiscardAllPaths, runDiscardAllForArea } from "./discard-sequence";
 import { getDiscardFailureToastCopy } from "./discard-failure-toast";
+import { toGitDisplayError } from "./git-error-copy";
+import { resolveCreatePrToolbarAction } from "./create-pr-action";
 import { parseUnifiedDiff } from "./unified-diff";
 import { reconstructDiffContent } from "./diff/diff-hunk-reconstruction";
 import { DiffNavigationProvider, useDiffNavigation } from "./diff/diff-navigation-context";
@@ -117,9 +119,14 @@ type DiffLoad =
   | { phase: "ready"; diff: string; truncated: boolean }
   | { phase: "error"; message: string };
 
-function errorMessage(value: Result<unknown>): string {
+function errorMessage(value: Result<unknown>, fallback: string): string {
   if (value.ok) return "";
-  return value.error.message || `Request failed (${value.error.code}).`;
+  // Raw daemon text (command echoes, exit-status wrappers) never reaches
+  // the UI: it is logged inside toGitDisplayError (see #136).
+  return toGitDisplayError(
+    value.error.message || `Request failed (${value.error.code}).`,
+    fallback,
+  );
 }
 
 const mono: React.CSSProperties = { fontFamily: "var(--font-mono)" };
@@ -232,7 +239,10 @@ export function ChangesPanel({
     void bridge.gitStatus(scope).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
-        setLoad({ phase: "error", message: errorMessage(result) });
+        setLoad({
+          phase: "error",
+          message: errorMessage(result, "Unable to load source control status."),
+        });
         return;
       }
       setLoad({
@@ -332,7 +342,7 @@ export function ChangesPanel({
       .then((result) => {
         if (cancelled) return;
         if (!result.ok) {
-          setDiff({ phase: "error", message: errorMessage(result) });
+          setDiff({ phase: "error", message: errorMessage(result, "Unable to load the diff.") });
           return;
         }
         setDiff({
@@ -351,13 +361,14 @@ export function ChangesPanel({
       kind: string,
       run: () => Promise<Result<unknown>>,
       failureToastTitle?: string,
+      failureFallback = "Stage operation failed.",
     ) => {
       setBusy(kind);
       setNotice(null);
       try {
         const result = await run();
         if (!result.ok) {
-          const message = errorMessage(result);
+          const message = errorMessage(result, failureFallback);
           setNotice(errorNotice(message));
           if (failureToastTitle) toast.error(failureToastTitle, { description: message });
           return false;
@@ -373,7 +384,12 @@ export function ChangesPanel({
 
   const stagePaths = useCallback(
     (paths: readonly string[], failureToastTitle?: string) =>
-      mutate("stage", () => bridge.gitStage({ ...scope, paths: [...paths] }), failureToastTitle),
+      mutate(
+        "stage",
+        () => bridge.gitStage({ ...scope, paths: [...paths] }),
+        failureToastTitle,
+        "Staging failed.",
+      ),
     [bridge, mutate, scope],
   );
   const unstagePaths = useCallback(
@@ -382,6 +398,7 @@ export function ChangesPanel({
         "unstage",
         () => bridge.gitUnstage({ ...scope, paths: [...paths] }),
         failureToastTitle,
+        "Unstaging failed.",
       ),
     [bridge, mutate, scope],
   );
@@ -405,7 +422,7 @@ export function ChangesPanel({
               paths: [path],
               untracked: isUntracked,
             });
-            if (!response.ok) throw new Error(errorMessage(response));
+            if (!response.ok) throw new Error(errorMessage(response, "Discard failed."));
           },
           onError: (path, error) => {
             if (firstFailureMessage === undefined)
@@ -442,7 +459,7 @@ export function ChangesPanel({
         if (!unstaged) return false;
         const fresh = await bridge.gitStatus(scope);
         if (!fresh.ok) {
-          setNotice(errorNotice(errorMessage(fresh)));
+          setNotice(errorNotice(errorMessage(fresh, "Unable to load source control status.")));
           setRevision((value) => value + 1);
           return false;
         }
@@ -528,7 +545,7 @@ export function ChangesPanel({
         ...(amend ? { amend: true } : null),
       });
       if (!result.ok) {
-        setCommitError(errorMessage(result));
+        setCommitError(errorMessage(result, "Commit failed."));
         return;
       }
       setCommitMessage("");
@@ -551,7 +568,7 @@ export function ChangesPanel({
         ...(amend ? { amend: true } : null),
       });
       if (!result.ok) {
-        setCommitError(errorMessage(result));
+        setCommitError(errorMessage(result, "Commit failed."));
         return;
       }
       setCommitMessage("");
@@ -559,7 +576,7 @@ export function ChangesPanel({
       setSyncBusy("push");
       try {
         const push = await bridge.gitPush(scope);
-        if (!push.ok) setRemoteError(errorMessage(push));
+        if (!push.ok) setRemoteError(errorMessage(push, "Push failed."));
       } finally {
         setSyncBusy(null);
       }
@@ -574,7 +591,7 @@ export function ChangesPanel({
     setRemoteError(null);
     try {
       const result = await bridge.gitPush(scope);
-      if (!result.ok) setRemoteError(errorMessage(result));
+      if (!result.ok) setRemoteError(errorMessage(result, "Push failed."));
     } finally {
       setSyncBusy(null);
       setRevision((value) => value + 1);
@@ -587,7 +604,7 @@ export function ChangesPanel({
     setRemoteError(null);
     try {
       const result = await bridge.gitPull(scope);
-      if (!result.ok) setRemoteError(errorMessage(result));
+      if (!result.ok) setRemoteError(errorMessage(result, "Pull failed."));
     } finally {
       setSyncBusy(null);
       setRevision((value) => value + 1);
@@ -600,7 +617,7 @@ export function ChangesPanel({
     setRemoteError(null);
     try {
       const result = await bridge.gitFetch(scope);
-      if (!result.ok) setRemoteError(errorMessage(result));
+      if (!result.ok) setRemoteError(errorMessage(result, "Fetch failed."));
     } finally {
       setSyncBusy(null);
       setRevision((value) => value + 1);
@@ -616,7 +633,10 @@ export function ChangesPanel({
         (selection ? `Update ${selection.path}` : "Update");
       const result = await bridge.gitPrCreate({ ...scope, title });
       if (!result.ok) {
-        setPrNotice({ message: errorNotice(errorMessage(result)), tone: "destructive" });
+        setPrNotice({
+          message: errorNotice(errorMessage(result, "Could not create a pull request.")),
+          tone: "destructive",
+        });
         return;
       }
       setPrUrl(result.result.url);
@@ -639,6 +659,27 @@ export function ChangesPanel({
     },
     [discardAvailable, rows],
   );
+
+  const createPrAction = useMemo(
+    () =>
+      resolveCreatePrToolbarAction({
+        busy: busy !== null || syncBusy !== null,
+        upstream: branch.upstream,
+        ahead: branch.ahead,
+        hasUncommitted: rows.length > 0,
+      }),
+    [busy, syncBusy, branch.upstream, branch.ahead, rows.length],
+  );
+
+  const openReviewPage = useCallback(() => {
+    if (!prUrl || typeof window === "undefined") return;
+    const shell = (
+      window as unknown as {
+        drogon?: { shell?: { openExternal?: (url: string) => unknown } };
+      }
+    ).drogon?.shell;
+    if (typeof shell?.openExternal === "function") void shell.openExternal(prUrl);
+  }, [prUrl]);
 
   const hasUncommitted = rows.length > 0;
   const showEmpty = !hasUncommitted && !filterState.normalizedFilter && !filterState.tooLarge;
@@ -675,6 +716,9 @@ export function ChangesPanel({
         filterExpanded={filterExpanded}
         onFilterQueryChange={setFilterQuery}
         onFilterExpandedChange={setFilterExpanded}
+        createPrAction={createPrAction}
+        isCreatingPr={syncBusy === "pr"}
+        onCreatePr={() => void doPrCreate()}
         sourceControlViewMode={viewMode}
         onToggleViewMode={toggleViewMode}
         onRefresh={refresh}
@@ -685,6 +729,8 @@ export function ChangesPanel({
         behind={branch.behind}
         lineTotalAdded={lineTotal.added}
         lineTotalRemoved={lineTotal.removed}
+        reviewUrl={prUrl}
+        onOpenReviewPage={openReviewPage}
       />
       <SyncRow
         upstream={branch.upstream}
@@ -695,7 +741,6 @@ export function ChangesPanel({
         onPush={() => void doPush()}
         onPull={() => void doPull()}
         onFetch={() => void doFetch()}
-        onCreatePr={() => void doPrCreate()}
       />
       <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
         {load.phase === "error" && (
@@ -721,7 +766,7 @@ export function ChangesPanel({
         {showEmpty && (
           <EmptyState
             heading="No changes on this branch"
-            supportingText="This workspace is clean. Staged, unstaged and untracked changes will appear here."
+            supportingText={`This workspace is clean and this branch has no changes ahead of ${branch.upstream ?? "base"}`}
           />
         )}
         {filterState.tooLarge && (

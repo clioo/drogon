@@ -3,10 +3,11 @@
 // (toolbar-button pattern and ahead copy) plus the push/pull/fetch half of
 // commit/use-commit-flows and sync/use-status-refresh. Adapter: the sync
 // row reports the daemon's upstream status and drives the git.push,
-// git.pull, git.fetch and git.pr_create RPCs; branch-compare and hosted
-// review have no MVP backend and are not ported.
+// git.pull and git.fetch RPCs; PR creation lives in the header toolbar
+// (see create-pr-action.ts), and branch-compare and hosted review have no
+// MVP backend and are not ported.
 import React from "react";
-import { ArrowDown, ArrowUp, GitPullRequestArrow, Loader2, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, Loader2, RefreshCw } from "lucide-react";
 import { Tooltip } from "radix-ui";
 import { Button } from "../../components/ui/button";
 
@@ -64,7 +65,6 @@ export function SyncRow({
   onPush,
   onPull,
   onFetch,
-  onCreatePr,
 }: {
   upstream: string | null;
   ahead: number | null;
@@ -74,7 +74,6 @@ export function SyncRow({
   onPush: () => void;
   onPull: () => void;
   onFetch: () => void;
-  onCreatePr: () => void;
 }): React.JSX.Element {
   const busy = busyKind !== null;
   const aheadCount = ahead ?? 0;
@@ -133,14 +132,6 @@ export function SyncRow({
           icon={<RefreshCw className="size-3.5" aria-hidden="true" />}
         />
       )}
-      <SyncRowButton
-        label={busyKind === "pr" ? "Creating…" : "New PR"}
-        title="Create a pull request with gh"
-        busy={busyKind === "pr"}
-        disabled={busy}
-        onClick={onCreatePr}
-        icon={<GitPullRequestArrow className="size-3.5" aria-hidden="true" />}
-      />
     </div>
   );
 }
