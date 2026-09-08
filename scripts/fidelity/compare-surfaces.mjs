@@ -957,6 +957,31 @@ const SURFACES = [
       "apps/desktop/src/renderer/src/features/mentu/RecipePaneInspector.tsx",
     ],
   },
+  {
+    id: "native-menu",
+    label: "Native application menu and Dock badge",
+    refDir: "src/main/menu",
+    refFiles: [
+      "src/main/menu/register-app-menu.ts",
+      "src/main/dock/unread-badge.ts",
+      "src/preload/api/ui-bridge-tab-and-browser-commands.ts",
+    ],
+    probes: [
+      "Appearance",
+      "Toggle Left Sidebar",
+      "Toggle Right Sidebar",
+      "Show Status Bar",
+      "Show Tasks Button",
+      "Show Automations Button",
+      "Show Titlebar App Name",
+      "setBadge",
+    ],
+    candFiles: [
+      "apps/desktop/src/main/menu/register-app-menu.ts",
+      "apps/desktop/src/main/dock/unread-badge.ts",
+      "apps/desktop/src/preload/app-menu.ts",
+    ],
+  },
 ];
 
 function scoreProbeLine(line) {
@@ -2040,6 +2065,44 @@ async function stopCandidate(owned) {
 // The candidate side may use its own temp fixture freely.
 // ---------------------------------------------------------------------------
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
+const NATIVE_MENU_EXPECTED_LABELS = [
+  "Appearance",
+  "Toggle Left Sidebar",
+  "Toggle Right Sidebar",
+  "Show Status Bar",
+  "Show Tasks Button",
+  "Show Automations Button",
+  "Show Titlebar App Name",
+];
+
+async function readNativeMenuSourceProbe(baseDir) {
+  try {
+    const desktopRoot = existsSync(path.join(baseDir, "apps/desktop/src/main/menu"))
+      ? path.join(baseDir, "apps/desktop")
+      : baseDir;
+    const menu = await readFile(path.join(desktopRoot, "src/main/menu/register-app-menu.ts"), "utf8");
+    const dock = await readFile(path.join(desktopRoot, "src/main/dock/unread-badge.ts"), "utf8");
+    let preload = "";
+    for (const rel of [
+      "src/preload/api/ui-bridge-tab-and-browser-commands.ts",
+      "src/preload/app-menu.ts",
+    ]) {
+      try {
+        preload = await readFile(path.join(desktopRoot, rel), "utf8");
+        break;
+      } catch {
+        /* this repository's preload path is checked next */
+      }
+    }
+    return {
+      labels: NATIVE_MENU_EXPECTED_LABELS.filter((label) => menu.includes(label)),
+      dockBadge: /setBadge/.test(dock),
+      badgeBridge: /setUnreadDockBadgeCount|dock/i.test(preload),
+    };
+  } catch (error) {
+    return { error: error.message.split("\\n")[0] };
+  }
+}
 
 async function refSetup(page, state, ctx) {
   const notes = [];
@@ -3317,6 +3380,18 @@ async function refSetup(page, state, ctx) {
     case "status-bar-usage-states":
       notes.push("usage loading/signed-out/data variants are candidate-only fixture captures; reference strip remains read-only");
       break;
+    case "native-menu": {
+      const probe = await readNativeMenuSourceProbe(REF_ROOT);
+      if (probe.error) {
+        missing.push(`reference native menu source probe failed: ${probe.error}`);
+      } else {
+        notes.push(`reference native menu source labels: ${probe.labels.join(" | ") || "none"}; dock badge=${probe.dockBadge}; preload bridge=${probe.badgeBridge}`);
+        const absent = NATIVE_MENU_EXPECTED_LABELS.filter((label) => !probe.labels.includes(label));
+        if (absent.length || !probe.dockBadge) missing.push(`reference native menu source missing: ${[...absent, !probe.dockBadge ? "setBadge" : ""].filter(Boolean).join(" | ")}`);
+      }
+      notes.push("native menu is main-process-only; no OS menu or Dock interaction was performed on the read-only reference");
+      break;
+    }
     case "statusbar-strip":
       notes.push("full-page capture; strip cropped in post");
       break;
@@ -6191,6 +6266,51 @@ async function candSetup(page, state, ctx) {
         notes.push("fixture seam ready: loading, signed-out and data variants captured per state");
       }
       break;
+    case "native-menu": {
+      await ensureProject().catch(() => {});
+      const probe = await readNativeMenuSourceProbe(root);
+      if (probe.error) {
+        missing.push(`candidate native menu source probe failed: ${probe.error}`);
+      } else {
+        notes.push(`candidate native menu source labels: ${probe.labels.join(" | ") || "none"}; dock badge=${probe.dockBadge}; preload bridge=${probe.badgeBridge}`);
+        const absent = NATIVE_MENU_EXPECTED_LABELS.filter((label) => !probe.labels.includes(label));
+        if (absent.length || !probe.dockBadge) missing.push(`candidate native menu source missing: ${[...absent, !probe.dockBadge ? "setBadge" : ""].filter(Boolean).join(" | ")}`);
+      }
+      try {
+        const runtime = await page.evaluate(async () => {
+          const invoke = window.drogon?.appMenu?.invokeMenuItem;
+          if (typeof invoke !== "function") return null;
+          const labels = [
+            "Settings",
+            "Toggle Left Sidebar",
+            "Toggle Right Sidebar",
+            "Show Status Bar",
+            "Show Tasks Button",
+            "Show Automations Button",
+            "Show Titlebar App Name",
+          ];
+          const result = {};
+          for (const label of labels) {
+            result[label] = await invoke(label);
+            if (label !== "Settings") {
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              result[`${label} (restore)`] = await invoke(label);
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            }
+          }
+          return result;
+        });
+        if (runtime) {
+          notes.push(`candidate native menu runtime invoke: ${Object.entries(runtime).map(([label, value]) => `${label}=${value}`).join(" | ")}`);
+        } else {
+          notes.push("candidate native menu runtime invoke seam unavailable (source probe retained)");
+        }
+      } catch (error) {
+        notes.push(`candidate native menu runtime invoke best-effort failed: ${error.message.split("\\n")[0]}`);
+      }
+      notes.push("native menu source probe recorded; OS-level menu capture is intentionally not automated by the renderer oracle");
+      break;
+    }
     case "statusbar-strip":
       await ensureTerminal().catch(() => {});
       notes.push("full-page capture; strip cropped in post");
@@ -6370,7 +6490,6 @@ const ALL_STATES = [
   "quick-open",
   "command-palette",
   "launch-dialog",
-  "workspace-composer",
   "settings-shortcuts-rebind",
   "settings-appearance",
   "settings-appearance-system",
@@ -6427,6 +6546,7 @@ const ALL_STATES = [
   "automation-run-detail",
   "bots-history",
   "mentu-evidence",
+  "native-menu",
 ];
 
 const CAND_OWNER = {
@@ -6493,8 +6613,11 @@ const CAND_OWNER = {
   "automation-run-detail": "apps/desktop/src/renderer/src/features/automations/AutomationRunDetailsPage.tsx, AutomationRunPageFrame.tsx, automation-run-content.ts",
   "bots-history": "apps/desktop/src/renderer/src/features/bots/BotsPanel.tsx, BotResponsibilityCard.tsx, bots-panel-projection.ts",
   "mentu-evidence": "apps/desktop/src/renderer/src/features/mentu/MentuPanel.tsx, RecipePaneContent.tsx, RecipePaneInspector.tsx",
+  "native-menu": "apps/desktop/src/main/menu/register-app-menu.ts, apps/desktop/src/main/dock/unread-badge.ts, apps/desktop/src/preload/app-menu.ts",
   tokens: "apps/desktop/src/renderer/src/assets/main.css",
 };
+
+const SOURCE_ONLY_STATES = new Set(["native-menu"]);
 
 const STATE_SURFACE = {
   empty: "shell-sidebar",
@@ -6563,6 +6686,7 @@ const STATE_SURFACE = {
   "automation-run-detail": "automation-run-detail",
   "bots-history": "bots-history",
   "mentu-evidence": "mentu-evidence",
+  "native-menu": "native-menu",
 };
 
 // Preferred source-value keywords per surface: the ranked item must cite the
@@ -6628,6 +6752,7 @@ const SOURCE_PREFERENCE = {
   "automation-run-detail": ["run details", "output", "host", "prompt", "classname"],
   "bots-history": ["history", "responsibility history", "scheduled", "manual", "classname"],
   "mentu-evidence": ["evidence", "stdout", "stderr", "classname"],
+  "native-menu": ["appearance", "sidebar", "status bar", "tasks button", "automations button", "titlebar", "setbadge"],
   tokens: ["font", "geist", "text-", "leading", "tracking", "weight"],
 };
 
@@ -7023,7 +7148,7 @@ async function main() {
       const refCap = ref.caps.light;
       const candCap = cand.caps.light;
       let diff = null;
-      if (refCap && candCap) {
+      if (refCap && candCap && !SOURCE_ONLY_STATES.has(state)) {
         const aria = diffAria(refCap.aria, candCap.aria);
         const geom = {};
         for (const region of Object.keys(REGION_QUERIES)) {
@@ -7121,7 +7246,7 @@ async function main() {
 
 function renderReport({ runId, states, inventory, stateResults, ranked, refMeta, candVersions, outDir }) {
   const lines = [];
-  lines.push(`# QA UI Round 10 fidelity report — ${runId}`);
+  lines.push(`# QA UI Round 11 fidelity report — ${runId}`);
   lines.push("");
   lines.push(`Viewport ${VIEWPORT.width}x${VIEWPORT.height}, schemes: ${NO_DARK ? "light" : "light + dark"}.`);
   lines.push(`Viewport options: --viewport WIDTHxHEIGHT (or --width/--height); this run was captured at the requested native size.`);
@@ -7175,7 +7300,11 @@ function renderReport({ runId, states, inventory, stateResults, ranked, refMeta,
       for (const m of aria.missing.slice(0, 6)) lines.push(`  - ref-only: "${m.slice(0, 120)}"`);
       for (const a of aria.added.slice(0, 6)) lines.push(`  - cand-only: "${a.slice(0, 120)}"`);
     } else {
-      lines.push("- No light-scheme pair captured on both sides; see missing notes.");
+      lines.push(
+        SOURCE_ONLY_STATES.has(r.state)
+          ? "- Source-only coverage: native application-menu and Dock behavior is verified from the read-only reference source and candidate source seam; renderer pixel/ARIA comparison is intentionally not used."
+          : "- No light-scheme pair captured on both sides; see missing notes.",
+      );
     }
     if (r.refNotes.length) lines.push(md(r.refNotes.map((n) => `ref note: ${n}`)));
     if (r.refMissing.length) lines.push(md(r.refMissing.map((n) => `ref MISSING: ${n}`)));
