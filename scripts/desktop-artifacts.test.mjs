@@ -20,6 +20,11 @@ import {
   treeDigest,
   verifiedBuildInfo,
 } from "./desktop-artifacts.mjs";
+import {
+  assertIconRaster,
+  decodePng,
+  iconRasterStats,
+} from "./build-app-icon.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -148,6 +153,15 @@ test("committed icon.icns is a real iconset, not the stock Electron icon", async
     createHash("sha256").update(stockBytes).digest("hex"),
     "icon.icns must differ from the stock Electron icon",
   );
+});
+
+test("committed icon.png keeps the dark tile, flame and transparent corners", async () => {
+  // Regression guard for #201: a white-key fallback once shipped a white
+  // blob on transparent. decodePng is dependency-free so this runs anywhere.
+  const png = path.join(root, "apps", "desktop", "resources", "icon.png");
+  assert.ok(existsSync(png), "run node scripts/build-app-icon.mjs");
+  const stats = iconRasterStats(decodePng(await readFile(png)));
+  assertIconRaster(stats, "apps/desktop/resources/icon.png");
 });
 
 test("sealed-bundle identity covers the icon bytes", async (context) => {
