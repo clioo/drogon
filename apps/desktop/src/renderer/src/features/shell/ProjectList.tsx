@@ -64,6 +64,7 @@ import {
 import { useProjectHeaderDrag } from "./project-header-drag";
 import { useWorktreeCardDrag } from "./worktree-card-drag";
 import { WorktreeCard } from "./WorktreeCard";
+import type { TabStripState } from "./tab-order";
 
 /**
  * Drop line between project headers / worktree cards while dragging.
@@ -261,6 +262,9 @@ export function ProjectList({
   workspaces,
   sessions,
   selectedWorkspaceId,
+  activeSessionId,
+  tabStrip,
+  onSelectSession,
   disabled,
   addDisabled,
   sidebarWidth,
@@ -282,6 +286,12 @@ export function ProjectList({
   workspaces: Workspace[];
   sessions: Session[];
   selectedWorkspaceId: string;
+  /** Active session tab id for the card rows' focused highlight. */
+  activeSessionId: string;
+  /** Strip order/pins/renames so card rows read exactly like tab titles. */
+  tabStrip: TabStripState;
+  /** Selects a session tab when a nested card row is clicked. */
+  onSelectSession: (sessionId: string) => void;
   disabled: boolean;
   addDisabled: boolean;
   sidebarWidth: number;
@@ -594,6 +604,9 @@ export function ProjectList({
           onCardPointerDown={cardDrag.onCardPointerDown}
           onCardClickCapture={cardDrag.onCardClickCapture}
           onSelectWorkspace={onSelectWorkspace}
+          activeSessionId={activeSessionId}
+          tabStrip={tabStrip}
+          onSelectSession={onSelectSession}
           onNewWorktree={() => onCreateWorkspace(group.project.id)}
           onRemoveWorktree={(worktree) => {
             // The persisted "Don't ask again" preference bypasses the
@@ -702,6 +715,9 @@ function ProjectRow({
   onCardPointerDown,
   onCardClickCapture,
   onSelectWorkspace,
+  activeSessionId,
+  tabStrip,
+  onSelectSession,
   onNewWorktree,
   onRemoveWorktree,
   onRenameWorktree,
@@ -714,6 +730,9 @@ function ProjectRow({
   workspaces: Workspace[];
   sessions: Session[];
   selectedWorkspaceId: string;
+  activeSessionId: string;
+  tabStrip: TabStripState;
+  onSelectSession: (sessionId: string) => void;
   disabled: boolean;
   worktreesAvailable: boolean;
   onProjectHandlePointerDown: (
@@ -793,6 +812,9 @@ function ProjectRow({
             }
             onCardClickCapture={onCardClickCapture}
             onSelect={onSelectWorkspace}
+            onSelectSession={onSelectSession}
+            activeSessionId={activeSessionId}
+            tabStrip={tabStrip}
             onRemove={
               worktreesAvailable && !isImplicitFolderWorktree(worktree)
                 ? () => onRemoveWorktree(worktree)

@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { Tooltip } from "radix-ui";
 import { ProjectList } from "./ProjectList";
+import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
 
 function render(sidebarWidth = 280): string {
   return renderToString(
@@ -14,6 +15,9 @@ function render(sidebarWidth = 280): string {
         workspaces: [],
         sessions: [],
         selectedWorkspaceId: "",
+        activeSessionId: "",
+        tabStrip: EMPTY_TAB_STRIP_STATE,
+        onSelectSession: () => {},
         disabled: false,
         addDisabled: false,
         sidebarWidth,

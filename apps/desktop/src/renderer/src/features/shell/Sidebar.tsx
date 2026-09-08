@@ -13,6 +13,7 @@ import type {
 } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "./project-adapter";
 import { SidebarNav } from "./SidebarNav";
+import type { TabStripState } from "./tab-order";
 import { ProjectList } from "./ProjectList";
 import type { ProjectAction } from "./ProjectList";
 import { SidebarFooter } from "./sidebar-footer";
@@ -36,6 +37,9 @@ export function Sidebar({
   workspaces,
   sessions,
   selectedWorkspaceId,
+  activeSessionId,
+  tabStrip,
+  onSelectSession,
   workspaceDisabled,
   addDisabled,
   onSelectWorkspace,
@@ -65,6 +69,12 @@ export function Sidebar({
   workspaces: Workspace[];
   sessions: Session[];
   selectedWorkspaceId: string;
+  /** Active session tab id for the card rows' focused highlight. */
+  activeSessionId: string;
+  /** Strip order/pins/renames so card rows read exactly like tab titles. */
+  tabStrip: TabStripState;
+  /** Selects a session tab when a nested card row is clicked. */
+  onSelectSession: (sessionId: string) => void;
   workspaceDisabled: boolean;
   addDisabled: boolean;
   onSelectWorkspace: (workspaceId: string) => void;
@@ -149,6 +159,9 @@ export function Sidebar({
               workspaces={workspaces}
               sessions={sessions}
               selectedWorkspaceId={selectedWorkspaceId}
+              activeSessionId={activeSessionId}
+              tabStrip={tabStrip}
+              onSelectSession={onSelectSession}
               disabled={workspaceDisabled}
               addDisabled={addDisabled}
               sidebarWidth={width}
