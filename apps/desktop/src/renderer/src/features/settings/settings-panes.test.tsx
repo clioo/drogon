@@ -213,6 +213,11 @@ describe("notifications projection", () => {
     );
     expect(html).toContain("Enable Notifications");
     expect(html).toContain("Native system notifications for background events.");
+    expect(html).toContain("Agent Task Complete");
+    expect(html).toContain("A coding agent finishes and becomes idle.");
+    expect(html).toContain("Terminal Bell");
+    expect(html).toContain("A background terminal emits a bell character.");
+    expect(html).toContain("Suppress While Focused");
     expect(html).toContain('role="switch"');
   });
 });

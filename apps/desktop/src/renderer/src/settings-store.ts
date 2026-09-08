@@ -6,8 +6,8 @@
 // (no durability or encryption promise).
 //
 // Scope: the UI-chrome subset plus the J10 settings additions (terminal font
-// size, default harness, per-harness launch defaults, agent-input
-// notification switch). Anchored to the frozen catalog
+// size, default harness, per-harness launch defaults, and the fork-shaped
+// notification master/event switches). Anchored to the frozen catalog
 // docs/migration/parity-settings-properties.json (schema
 // drogon.parity-settings-properties/2): `theme` is declared
 // 'system' | 'dark' | 'light' with builder default 'system'. `inspectorVisible`
@@ -79,8 +79,12 @@ export type SettingsSubset = {
   defaultHarnessId: string;
   /** Per-harness launch defaults keyed by harness id; absent key = all defaults. */
   harnessDefaults: Record<string, HarnessAgentDefault>;
-  /** Master switch for agent-needs-input native notifications (wired by another task). */
+  /** Master switch for native notifications (`enabled` in the fork). */
   notifyOnAgentNeedsInput: boolean;
+  /** Fork event toggles; absent persisted values use the fork defaults. */
+  notifyOnAgentTaskComplete: boolean;
+  notifyOnTerminalBell: boolean;
+  notifySuppressWhenFocused: boolean;
   /** Terminal renderer policy: auto/on/off xterm.js WebGL gate (source terminalGpuAcceleration). */
   terminalGpuAcceleration: TerminalGpuAcceleration;
   // R14-B appearance flags (source global-settings showTasksButton /
@@ -112,6 +116,9 @@ export const SETTINGS_DEFAULTS: SettingsSubset = {
   defaultHarnessId: "",
   harnessDefaults: {},
   notifyOnAgentNeedsInput: true,
+  notifyOnAgentTaskComplete: true,
+  notifyOnTerminalBell: false,
+  notifySuppressWhenFocused: true,
   terminalGpuAcceleration: "auto",
   statusBarVisible: true,
   tasksButtonVisible: true,
@@ -289,6 +296,12 @@ export function parsePersistedSettings(
     }
     if (typeof candidate.notifyOnAgentNeedsInput === "boolean")
       out.notifyOnAgentNeedsInput = candidate.notifyOnAgentNeedsInput;
+    if (typeof candidate.notifyOnAgentTaskComplete === "boolean")
+      out.notifyOnAgentTaskComplete = candidate.notifyOnAgentTaskComplete;
+    if (typeof candidate.notifyOnTerminalBell === "boolean")
+      out.notifyOnTerminalBell = candidate.notifyOnTerminalBell;
+    if (typeof candidate.notifySuppressWhenFocused === "boolean")
+      out.notifySuppressWhenFocused = candidate.notifySuppressWhenFocused;
     if (isGpuAcceleration(candidate.terminalGpuAcceleration))
       out.terminalGpuAcceleration = candidate.terminalGpuAcceleration;
     for (const key of [

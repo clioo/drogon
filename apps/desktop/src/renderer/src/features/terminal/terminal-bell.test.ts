@@ -2,7 +2,13 @@
 // fork's BEL copy and the trigger gates (master switch, focus suppression,
 // per-session cooldown).
 import { describe, expect, it, vi } from "vitest";
-import { installTerminalBell, terminalBellToast } from "./terminal-bell";
+import {
+  installTerminalBell,
+  readBellNotificationsEnabled,
+  readBellSuppressWhenFocused,
+  terminalBellToast,
+} from "./terminal-bell";
+import { settingsStorageKey } from "../../settings-store";
 
 describe("terminalBellToast", () => {
   it("uses the fork's bell copy", () => {
@@ -44,6 +50,27 @@ function install(sinkOverrides: Record<string, unknown> = {}) {
     },
   };
 }
+
+describe("bell settings", () => {
+  it("uses the fork defaults and persisted per-event values", () => {
+    const storage = {
+      value: null as string | null,
+      getItem: () => storage.value,
+    };
+    expect(readBellNotificationsEnabled(storage)).toBe(false);
+    expect(readBellSuppressWhenFocused(storage)).toBe(true);
+    storage.value = JSON.stringify({
+      settings: {
+        notifyOnAgentNeedsInput: true,
+        notifyOnTerminalBell: true,
+        notifySuppressWhenFocused: false,
+      },
+    });
+    expect(readBellNotificationsEnabled(storage)).toBe(true);
+    expect(readBellSuppressWhenFocused(storage)).toBe(false);
+    expect(settingsStorageKey("ui")).toBe("drogon:settings:ui");
+  });
+});
 
 describe("installTerminalBell", () => {
   it("notifies with the fork copy on BEL", () => {

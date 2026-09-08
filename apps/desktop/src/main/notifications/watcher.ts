@@ -25,6 +25,19 @@ export type SessionTransition = {
   entered: boolean;
 };
 
+/** Fork rule for the Agent Task Complete source: only work that was observed
+ * running and then settles into idle/waiting counts as a completed task.
+ * First sightings and shell idle decay are deliberately not completions. */
+export function isAgentTaskCompleteTransition(
+  previousState: string | undefined,
+  nextState: string,
+): boolean {
+  return (
+    previousState === "working" &&
+    (nextState === "idle" || nextState === "needs_input")
+  );
+}
+
 function normalizedState(session: WatchedSession): string {
   return session.agentState ?? "unknown";
 }
@@ -146,5 +159,20 @@ export function formatNeedsInput(
   return {
     title: `${context} - ${label} needs input`,
     body: `${label} needs input.`,
+  };
+}
+
+/** Fork copy for the Agent Task Complete row. The rewrite's daemon exposes
+ * `idle` and `needs_input` rather than the fork's `done`/`blocked` labels. */
+export function formatAgentTaskComplete(
+  session: WatchedSession,
+  workspaceName: string | null,
+): { title: string; body: string } {
+  const label = sessionLabelFor(session.command, session.harnessId);
+  const status = session.agentState === "needs_input" ? "needs input" : "finished";
+  const context = workspaceName || "workspace";
+  return {
+    title: `${context} - ${label} ${status}`,
+    body: `${label} ${status}.`,
   };
 }

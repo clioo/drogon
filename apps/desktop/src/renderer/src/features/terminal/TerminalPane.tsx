@@ -86,6 +86,7 @@ import { installTerminalLinkifierClickPriming } from "./terminal-linkifier-click
 import {
   installTerminalBell,
   readBellNotificationsEnabled,
+  readBellSuppressWhenFocused,
 } from "./terminal-bell";
 import {
   closeTerminalLinkActionRequest,
@@ -612,22 +613,23 @@ export function TerminalPane({
     terminal.parser.registerOscHandler(52, (data) => osc52Handler(data));
     // Fork parity (pane-pty-visibility-bind.ts onBell): BEL raises an
     // attention signal, debounced so completion bursts surface once. The
-    // renderer cannot reach the native notification service, so the signal
-    // is a toast with the fork's copy, gated by the master switch and
-    // silent while this window is focused.
+    // renderer forwards the event to main; main re-checks the master/event
+    // settings, focus rule and background suppression before showing native UI.
     const disposeBell = installTerminalBell(terminal, {
-      notificationsEnabled: () => {
-        try {
-          return readBellNotificationsEnabled(window.localStorage);
-        } catch {
-          return true;
-        }
-      },
+      notificationsEnabled: () =>
+        readBellNotificationsEnabled(window.localStorage),
+      suppressWhenFocused: () =>
+        readBellSuppressWhenFocused(window.localStorage),
       terminalFocused: () =>
         typeof document !== "undefined" && document.hasFocus(),
       labels: () => ({}),
-      notify: (title, body) => {
-        void toast(title, { description: body });
+      notify: () => {
+        void (
+          window.drogon.notifications?.notifyBell({
+            sessionId: sessionRef.current.id,
+            workspaceId: sessionRef.current.workspaceId,
+          }) ?? Promise.resolve(false)
+        ).catch(() => {});
       },
     });
     // Fork parity (terminal-url-link-hit-testing.ts openTerminalHttpLink +

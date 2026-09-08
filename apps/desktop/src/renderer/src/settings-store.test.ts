@@ -24,6 +24,9 @@ const defaults: SettingsSubset = {
   defaultHarnessId: "",
   harnessDefaults: {},
   notifyOnAgentNeedsInput: true,
+  notifyOnAgentTaskComplete: true,
+  notifyOnTerminalBell: false,
+  notifySuppressWhenFocused: true,
   terminalGpuAcceleration: "auto",
   statusBarVisible: true,
   tasksButtonVisible: true,
@@ -208,6 +211,9 @@ describe("persistence round-trip through injected storage", () => {
         defaultHarnessId: "",
         harnessDefaults: {},
         notifyOnAgentNeedsInput: true,
+        notifyOnAgentTaskComplete: true,
+        notifyOnTerminalBell: false,
+        notifySuppressWhenFocused: true,
         terminalGpuAcceleration: "auto",
         statusBarVisible: true,
         tasksButtonVisible: true,
@@ -270,6 +276,9 @@ describe("J10 additive keys (terminal font size, harness defaults, notifications
     expect(store.get("defaultHarnessId")).toBe("");
     expect(store.get("harnessDefaults")).toEqual({});
     expect(store.get("notifyOnAgentNeedsInput")).toBe(true);
+    expect(store.get("notifyOnAgentTaskComplete")).toBe(true);
+    expect(store.get("notifyOnTerminalBell")).toBe(false);
+    expect(store.get("notifySuppressWhenFocused")).toBe(true);
     expect(SETTINGS_DEFAULTS.terminalFontSize).toBe(14);
     expect(SETTINGS_DEFAULTS.notifyOnAgentNeedsInput).toBe(true);
   });
@@ -288,6 +297,9 @@ describe("J10 additive keys (terminal font size, harness defaults, notifications
       pi: { model: "opus", effort: "high", permissionMode: "unattended" },
     });
     store.set("notifyOnAgentNeedsInput", false);
+    store.set("notifyOnAgentTaskComplete", false);
+    store.set("notifyOnTerminalBell", true);
+    store.set("notifySuppressWhenFocused", false);
     store.flush();
     const reloaded = new SettingsStore(storage, { namespace: "ui" });
     expect(reloaded.get("terminalFontSize")).toBe(15);
@@ -296,6 +308,9 @@ describe("J10 additive keys (terminal font size, harness defaults, notifications
       pi: { model: "opus", effort: "high", permissionMode: "unattended" },
     });
     expect(reloaded.get("notifyOnAgentNeedsInput")).toBe(false);
+    expect(reloaded.get("notifyOnAgentTaskComplete")).toBe(false);
+    expect(reloaded.get("notifyOnTerminalBell")).toBe(true);
+    expect(reloaded.get("notifySuppressWhenFocused")).toBe(false);
   });
   it("drops malformed J10 values individually, keeping the well-typed ones", () => {
     expect(
@@ -408,6 +423,9 @@ describe("unknown-key forward compatibility on read-modify-write", () => {
       defaultHarnessId: "",
       harnessDefaults: {},
       notifyOnAgentNeedsInput: true,
+      notifyOnAgentTaskComplete: true,
+      notifyOnTerminalBell: false,
+      notifySuppressWhenFocused: true,
       terminalGpuAcceleration: "auto",
       statusBarVisible: true,
       tasksButtonVisible: true,

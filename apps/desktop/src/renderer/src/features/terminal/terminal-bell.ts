@@ -3,21 +3,17 @@
 // (onBell) and src/main/ipc/notification-options.ts (bell copy).
 // Adapted: Orca delivers BEL through the main-process notification service
 // (unread markers, per-source settings, OS notification with cooldown).
-// Drogon exposes no renderer-callable native notify primitive, so the
-// debounced signal surfaces as a toast with the fork's copy while the
-// terminal is unfocused — the same trigger, an in-app channel. The master
-// notifications switch gates it like the fork's `enabled` gate.
+// Drogon forwards the debounced xterm signal over the additive notifications
+// IPC channel; main owns native delivery, preference gating and click focus.
 import type { IDisposable } from "@xterm/xterm";
 import {
   parsePersistedSettings,
   settingsStorageKey,
 } from "../../settings-store";
 
-/**
- * Reads the master notifications switch straight from the persisted envelope
- * (default on, matching SETTINGS_DEFAULTS), so the bell source needs no
- * App-level prop thread — same pattern as the GPU/typography readers.
- */
+/** Reads the master and Terminal Bell event switch from the persisted
+ * envelope, so the source needs no App-level prop thread. The fork defaults
+ * the bell row off while keeping its master on. */
 export function readBellNotificationsEnabled(storage: {
   getItem(key: string): string | null;
 }): boolean {
@@ -25,7 +21,23 @@ export function readBellNotificationsEnabled(storage: {
     const parsed = parsePersistedSettings(
       storage.getItem(settingsStorageKey("ui")),
     );
-    return parsed.notifyOnAgentNeedsInput ?? true;
+    return (
+      (parsed.notifyOnAgentNeedsInput ?? true) &&
+      (parsed.notifyOnTerminalBell ?? false)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function readBellSuppressWhenFocused(storage: {
+  getItem(key: string): string | null;
+}): boolean {
+  try {
+    return (
+      parsePersistedSettings(storage.getItem(settingsStorageKey("ui")))
+        .notifySuppressWhenFocused ?? true
+    );
   } catch {
     return true;
   }
@@ -49,6 +61,8 @@ export type TerminalBellSink = {
   notificationsEnabled(): boolean;
   /** Focused terminal needs no attention signal (fork suppressWhenFocused). */
   terminalFocused(): boolean;
+  /** Optional per-event override; omitted keeps the fork's default. */
+  suppressWhenFocused?: () => boolean;
   /** Labels for the fork copy, resolved at fire time. */
   labels(): { worktreeLabel?: string | null; repoLabel?: string | null };
   notify(title: string, body: string): void;
@@ -70,7 +84,7 @@ export function installTerminalBell(
   let lastNotifiedAt = Number.NEGATIVE_INFINITY;
   return terminal.onBell(() => {
     if (!sink.notificationsEnabled()) return;
-    if (sink.terminalFocused()) return;
+    if ((sink.suppressWhenFocused?.() ?? true) && sink.terminalFocused()) return;
     const at = now();
     if (at - lastNotifiedAt < cooldownMs) return;
     lastNotifiedAt = at;

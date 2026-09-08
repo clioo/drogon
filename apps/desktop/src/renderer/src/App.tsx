@@ -510,6 +510,15 @@ export function App() {
   const [notifyOnAgentNeedsInput, setNotifyOnAgentNeedsInput] = useState(
     () => settings.get("notifyOnAgentNeedsInput"),
   );
+  const [notifyOnAgentTaskComplete, setNotifyOnAgentTaskComplete] = useState(
+    () => settings.get("notifyOnAgentTaskComplete"),
+  );
+  const [notifyOnTerminalBell, setNotifyOnTerminalBell] = useState(
+    () => settings.get("notifyOnTerminalBell"),
+  );
+  const [notifySuppressWhenFocused, setNotifySuppressWhenFocused] = useState(
+    () => settings.get("notifySuppressWhenFocused"),
+  );
   // R14-B appearance flags (source default-on settings the native View >
   // Appearance submenu checkbox-marks; consumed by the shell below).
   const [appearanceFlags, setAppearanceFlags] = useState(() => ({
@@ -2738,6 +2747,18 @@ export function App() {
     setNotifyOnAgentNeedsInput(next);
     settings.set("notifyOnAgentNeedsInput", next);
   };
+  const changeNotifyOnAgentTaskComplete = (next: boolean) => {
+    setNotifyOnAgentTaskComplete(next);
+    settings.set("notifyOnAgentTaskComplete", next);
+  };
+  const changeNotifyOnTerminalBell = (next: boolean) => {
+    setNotifyOnTerminalBell(next);
+    settings.set("notifyOnTerminalBell", next);
+  };
+  const changeNotifySuppressWhenFocused = (next: boolean) => {
+    setNotifySuppressWhenFocused(next);
+    settings.set("notifySuppressWhenFocused", next);
+  };
   // Gear icons and Cmd+, open the settings page; "Back to app" returns to
   // the route that was visible before (null is the Terminals home view).
   const openSettings = (initialSection?: SettingsSectionId) => {
@@ -3621,6 +3642,12 @@ export function App() {
                   onHarnessDefaultChange={changeHarnessDefault}
                   notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
                   onNotifyChange={changeNotifyOnAgentNeedsInput}
+                  notifyOnAgentTaskComplete={notifyOnAgentTaskComplete}
+                  onAgentTaskCompleteChange={changeNotifyOnAgentTaskComplete}
+                  notifyOnTerminalBell={notifyOnTerminalBell}
+                  onTerminalBellChange={changeNotifyOnTerminalBell}
+                  notifySuppressWhenFocused={notifySuppressWhenFocused}
+                  onSuppressWhenFocusedChange={changeNotifySuppressWhenFocused}
                   workspacePath={current?.path ?? null}
                   initialSection={settingsInitialSection}
                   project={settingsProject}

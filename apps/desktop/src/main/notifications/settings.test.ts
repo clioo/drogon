@@ -24,6 +24,25 @@ describe("NotificationsSettings", () => {
     expect(new NotificationsSettings(file).getEnabled()).toBe(false);
   });
 
+  it("uses the fork event defaults and persists each event independently", () => {
+    const file = tempFile();
+    const settings = new NotificationsSettings(file);
+    expect(settings.getPreferences()).toEqual({
+      enabled: true,
+      agentTaskComplete: true,
+      terminalBell: false,
+      suppressWhenFocused: true,
+    });
+    settings.setPreferences({ agentTaskComplete: false, terminalBell: true });
+    settings.setEnabled(false);
+    expect(new NotificationsSettings(file).getPreferences()).toEqual({
+      enabled: false,
+      agentTaskComplete: false,
+      terminalBell: true,
+      suppressWhenFocused: true,
+    });
+  });
+
   it("round-trips back to true", () => {
     const file = tempFile();
     const settings = new NotificationsSettings(file);
