@@ -40,9 +40,19 @@ jobs:
       - run: pnpm typecheck:renderer-contracts
       - run: pnpm test:renderer-contracts
       - run: pnpm test:packaging
-      - run: pnpm --filter @drogon/desktop test
+      # R16-BL (#312): since 2026-09-08 the ubuntu-22.04 runners kill the
+      # step tree with an external SIGTERM once a single vitest process has
+      # recycled ~50 isolated fork workers (one per test file). Sharding the
+      # suite keeps every process under that budget; all files still run.
+      - name: Run pnpm --filter @drogon/desktop test (8 shards)
+        run: |
+          set -e
+          for i in 1 2 3 4 5 6 7 8; do
+            echo "=== desktop test shard $i/8 ==="
+            pnpm --filter @drogon/desktop test -- --shard=$i/8
+          done
         # Fail fast with a clear message if the desktop suite hangs; the
-        # suite itself takes ~30-90 s on every platform.
+        # full sharded suite takes ~2-3 min on every platform.
         timeout-minutes: 15
       # The production bundle (Monaco + renderer) exceeds the default Node
       # heap on macos-14 runners: raise it for this step only.
