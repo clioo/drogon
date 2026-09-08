@@ -47,6 +47,7 @@ import {
   TERMINAL_FONT_WEIGHT_STEP,
 } from "./terminal-typography";
 import { FontAutocomplete } from "./font-autocomplete";
+import { reportThemeChoice } from "./native-theme-sync";
 import {
   SettingsFieldError,
   SettingsRow,
@@ -285,7 +286,17 @@ export function AppearanceSection({
             control={
               <SettingsSegmentedControl<Theme>
                 value={theme}
-                onChange={onThemeChange}
+                onChange={(next) => {
+                  // R16-AD3 (#241): mirror the choice into Electron's
+                  // nativeTheme.themeSource (reference ipc/settings.ts:188)
+                  // and into the native-theme sync (its resolution must not
+                  // race the store's debounced flush).
+                  reportThemeChoice(next);
+                  void window.drogon.nativeTheme?.setThemeSource(next).catch(
+                    () => {},
+                  );
+                  onThemeChange(next);
+                }}
                 options={THEME_SEGMENT_OPTIONS}
                 ariaLabel="Theme"
               />

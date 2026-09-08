@@ -1,7 +1,8 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
 // Projection tests for the editable Shortcuts section: every implemented
-// source action renders a recorder button (not static text), the search box
-// and group headers stay, and every source default remains visible.
+// action renders a recorder button (not static text), the status rail and
+// group headers stay, and non-implemented rows keep their reason without
+// a recorder.
 import { describe, expect, test } from "vitest";
 import { renderToString } from "react-dom/server";
 import { ShortcutsSection } from "./shortcuts-section";
@@ -14,15 +15,18 @@ describe("ShortcutsSection edit surface", () => {
   test("implemented rows render recorder buttons", () => {
     const html = render();
     expect(html).toContain("Change shortcut for Toggle Sidebar");
-    expect(html).toContain("Search shortcuts");
     expect(html).toContain("Keyboard shortcuts");
   });
-  test("source defaults remain editable in the rebinding pane", () => {
+  test("the status rail replaces the bare search box (#245)", () => {
     const html = render();
-    expect(html).toContain("Change shortcut for Force Reload");
-    expect(html).toContain("Change shortcut for Close active tab");
-    expect(html).toContain("Show Ports");
-    expect(html).toContain("Add shortcut for Show Ports");
+    expect(html).toContain("Find shortcuts");
+    expect(html).toContain("Search command or keys");
+    expect(html).toContain('aria-label="Shortcut status filters"');
+  });
+  test("implemented rows carry the fork's Disable control (#244)", () => {
+    const html = render();
+    expect(html).toContain("Disable Go to File");
+    expect(html).toContain("Disable Toggle Sidebar");
   });
   test("rows advertise immediate effect and reset affordance copy", () => {
     const html = render();

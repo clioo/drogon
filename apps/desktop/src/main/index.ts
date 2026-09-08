@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen, session, shell } from "electron";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -74,6 +74,7 @@ import {
 // R16-AD2: Manage Sessions "Restart daemon" — the orchestration lives in
 // daemon-restart.ts; this file only gates the channel and builds its deps.
 import { handleDaemonRestart } from "./daemon-restart";
+import { installNativeThemeBridge } from "./native-theme-bridge";
 // R1-A: self-registering usage IPC (snapshot/refresh/awake); the module owns
 // its channels and validation, this line only loads it.
 import { registerUsageIpc } from "./usage/service";
@@ -623,6 +624,18 @@ function registerDaemonRestart() {
   });
 }
 
+/**
+ * R16-AD3 nativeTheme relay (additive, #241): `drogon:nativeThemeState` /
+ * `drogon:nativeThemeSource` channels plus a 'updated' broadcast, so the
+ * renderer resolves the "System" theme from main's shouldUseDarkColors with
+ * live OS updates. No stored theme lives in main (renderer-owned store);
+ * the source mirror arrives from the renderer over the source channel
+ * (reference: main-process-ready-runtime.ts:91 + ipc/settings.ts:188).
+ */
+function registerNativeThemeBridge() {
+  installNativeThemeBridge({ nativeTheme, ipcMain, getWindow: () => window });
+}
+
 // Isolated acceptance profiles intentionally run multiple instances side by
 // side (each with its own userData/data directory); the OS-level
 // single-instance lock must not treat those as duplicates of each other.
@@ -651,6 +664,7 @@ if (!holdsSingleInstanceLock) {
     registerAppMenuIpc();
     registerBridge();
     registerDaemonRestart();
+    registerNativeThemeBridge();
     registerAutomationIpc(
       (event) =>
         window !== null &&
