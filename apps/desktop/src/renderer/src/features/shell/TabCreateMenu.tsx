@@ -3,8 +3,9 @@
    and menu chrome), tab-bar-static-create-menu.tsx (default-order static
    entries: New Terminal, New Browser Tab, Mentu) and
    TabBarCreateEntry.tsx / tab-create-entry-copy.ts (the search combobox).
-   Adapter: no dnd-kit, simulator/recipe-markdown-open entries (mobile and
-   markdown surfaces are out of MVP scope — see NOT_PORTED below), no
+   Adapter: no dnd-kit, simulator/open-markdown entries (mobile is out of
+   MVP scope and Open Markdown lives in the Explorer — see NOT_PORTED
+   below), no
    open-tab/history/file/URL result routing (the combobox filters the
    menu's own entries; full omnibox routing is a follow-up); the
    per-harness entries open this repo's harness launch form (folded in from
@@ -12,7 +13,7 @@
    in for the shadcn menu, and harness icons are the source's brand glyphs
    (see TabCreateMenuIcons.tsx). */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Globe, Network, Plus, Settings as SettingsIcon, TerminalSquare } from "lucide-react";
+import { FilePlus, Globe, Network, Plus, Settings as SettingsIcon, TerminalSquare } from "lucide-react";
 import { DropdownMenu, Popover, Tooltip } from "radix-ui";
 import type {
   Harness,
@@ -54,7 +55,8 @@ function menuChordPlatform(): TabCreateMenuChordPlatform {
 
 /**
  * Entries deliberately not ported from the fork's create menu, and why:
- * - New Markdown / Open Markdown: Drogon has no markdown tab surface.
+ * - Open Markdown: Drogon opens markdown through the Explorer, not a menu
+ *   file picker.
  * - New Mobile Emulator + promo card: mobile is out of the MVP; the fork
  *   renders the promo only conditionally, so omitting it matches the
  *   unconditional render.
@@ -62,7 +64,6 @@ function menuChordPlatform(): TabCreateMenuChordPlatform {
  *   ships only Claude, Pi, OpenCode and Antigravity harnesses.
  */
 export const TAB_CREATE_MENU_NOT_PORTED: readonly string[] = [
-  "New Markdown",
   "Open Markdown...",
   "New Mobile Emulator",
   "Mobile Emulator promo card",
@@ -86,10 +87,14 @@ const STATIC_ITEM_CLASS =
   "tab-create-item gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium";
 
 /** Fork menu-option keywords (tab-create-menu-options.ts), trimmed to what Drogon renders. */
-const STATIC_ENTRY_KEYWORDS: Record<"terminal" | "browser" | "mentu", string> = {
+const STATIC_ENTRY_KEYWORDS: Record<
+  "terminal" | "browser" | "mentu" | "markdown",
+  string
+> = {
   terminal: "terminal shell new terminal new shell",
   browser: "browser new browser browser tab web",
   mentu: "mentu recipe workflow run steps",
+  markdown: "markdown new file untitled",
 };
 
 /** Every whitespace-separated query token must appear in the haystack. */
@@ -113,9 +118,10 @@ export function matchesTabCreateQuery(
 
 /**
  * The tab strip "+" menu, in the fork's order: New Terminal, New Browser
- * Tab, Mentu, then one entry per harness (opening the launch form), then
- * Agent settings. The trigger keeps the source's accessible name so the
- * palette's "Launch harness…" row can open the real menu.
+ * Tab, Mentu, New Markdown, then one entry per harness (opening the
+ * launch form), then Agent settings. The trigger keeps the source's
+ * accessible name so the palette's "Launch harness…" row can open the
+ * real menu.
  */
 export function TabCreateMenu({
   workspaceId,
@@ -127,6 +133,7 @@ export function TabCreateMenu({
   onOpenMentu,
   mentuAvailable,
   onOpenAgentSettings,
+  onNewMarkdown,
   newTerminalShortcut,
   newBrowserShortcut,
   onCreateTerminal,
@@ -158,6 +165,10 @@ export function TabCreateMenu({
   /** Opens Settings on the Agents section. Rendered only when provided —
    *  thread it from the shell (TabBar/App) to show the row. */
   onOpenAgentSettings?: () => void;
+  /** Creates an untitled markdown file and opens it as an editor tab.
+   *  Rendered only when provided — thread it from the shell to show the
+   *  row (fork `onNewFileTab`). */
+  onNewMarkdown?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -199,11 +210,13 @@ export function TabCreateMenu({
 
   const showMentu = !!onOpenMentu && !!mentuAvailable;
   const showAgentSettings = !!onOpenAgentSettings;
+  const showNewMarkdown = !!onNewMarkdown;
   const chordPlatform = menuChordPlatform();
   const terminalShortcut =
     tabCreateMenuChord("tab.newTerminal", chordPlatform) || newTerminalShortcut;
   const browserShortcut =
     tabCreateMenuChord("tab.newBrowser", chordPlatform) || newBrowserShortcut;
+  const markdownShortcut = tabCreateMenuChord("tab.newMarkdown", chordPlatform);
 
   const terminalVisible = matchesTabCreateQuery(
     "New Terminal",
@@ -218,6 +231,13 @@ export function TabCreateMenu({
   const mentuVisible =
     showMentu &&
     matchesTabCreateQuery("Mentu", STATIC_ENTRY_KEYWORDS.mentu, query);
+  const markdownVisible =
+    showNewMarkdown &&
+    matchesTabCreateQuery(
+      "New Markdown",
+      STATIC_ENTRY_KEYWORDS.markdown,
+      query,
+    );
   const visibleHarnesses = useMemo(
     () =>
       harnesses.filter((harness) =>
@@ -230,7 +250,8 @@ export function TabCreateMenu({
     [harnesses, query],
   );
   const hasQuery = query.trim() !== "";
-  const staticVisible = terminalVisible || browserVisible || mentuVisible;
+  const staticVisible =
+    terminalVisible || browserVisible || mentuVisible || markdownVisible;
   const agentBlockVisible =
     visibleHarnesses.length > 0 || (showAgentSettings && !hasQuery);
   const noMatches = hasQuery && !staticVisible && visibleHarnesses.length === 0;
@@ -256,6 +277,10 @@ export function TabCreateMenu({
     }
     if (mentuVisible) {
       onOpenMentu?.();
+      return;
+    }
+    if (markdownVisible) {
+      onNewMarkdown?.();
       return;
     }
     const first = visibleHarnesses[0];
@@ -513,6 +538,18 @@ export function TabCreateMenu({
                 >
                   <Network className="size-4 text-muted-foreground" />
                   Mentu
+                </DropdownMenu.Item>
+              )}
+              {markdownVisible && (
+                <DropdownMenu.Item
+                  className={STATIC_ITEM_CLASS}
+                  onSelect={() => onNewMarkdown?.()}
+                >
+                  <FilePlus className="size-4 text-muted-foreground" />
+                  New Markdown
+                  {markdownShortcut && (
+                    <span className="tab-create-shortcut">{markdownShortcut}</span>
+                  )}
                 </DropdownMenu.Item>
               )}
               {agentBlockVisible && (

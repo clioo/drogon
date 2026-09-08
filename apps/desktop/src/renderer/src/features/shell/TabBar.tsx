@@ -97,6 +97,8 @@ export function TabBar({
   onNewBrowserTab,
   onOpenMentu,
   mentuAvailable,
+  onOpenAgentSettings,
+  onNewMarkdown,
 }: {
   sessions: Session[];
   activeSessionId: string;
@@ -139,6 +141,10 @@ export function TabBar({
    *  Mentu activity item lands. */
   onOpenMentu?: () => void;
   mentuAvailable?: boolean;
+  /** Create-menu Agent settings row (Settings → Agents); hidden without it. */
+  onOpenAgentSettings?: () => void;
+  /** Create-menu New Markdown row; hidden without it. */
+  onNewMarkdown?: () => void;
 }) {
   const sessionById = new Map(sessions.map((item) => [item.id, item]));
   const browserById = new Map(browserTabs.map((tab) => [tab.tabId, tab]));
@@ -519,6 +525,8 @@ export function TabBar({
         onNewBrowserTab={onNewBrowserTab}
         onOpenMentu={onOpenMentu}
         mentuAvailable={mentuAvailable}
+        onOpenAgentSettings={onOpenAgentSettings}
+        onNewMarkdown={onNewMarkdown}
       />
     </div>
   );

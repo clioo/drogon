@@ -106,12 +106,13 @@ describe("matchesTabCreateQuery", () => {
 describe("TabCreateMenu order and copy", () => {
   it("lists static entries, harness entries, then Agent settings in fork order", () => {
     const onOpenAgentSettings = vi.fn();
-    mount({ onOpenAgentSettings });
+    mount({ onOpenAgentSettings, onNewMarkdown: () => {} });
     openMenu();
     expect(menuItemNames()).toEqual([
       `New Terminal${TABLE_TERMINAL_CHORD}`,
       `New Browser Tab${TABLE_BROWSER_CHORD}`,
       "Mentu",
+      `New Markdown${tabCreateMenuChord("tab.newMarkdown", "other")}`,
       "Claude",
       "Pi",
       "OpenCode",
@@ -220,7 +221,7 @@ describe("TabCreateMenu order and copy", () => {
 
   it("documents the entries intentionally not ported from the fork", () => {
     for (const entry of [
-      "New Markdown",
+      "Open Markdown...",
       "Codex",
       "Gemini",
       "Kimi",
@@ -229,6 +230,39 @@ describe("TabCreateMenu order and copy", () => {
     ]) {
       expect(TAB_CREATE_MENU_NOT_PORTED).toContain(entry);
     }
+    // #197 ports New Markdown out of the not-ported list.
+    expect(TAB_CREATE_MENU_NOT_PORTED).not.toContain("New Markdown");
+  });
+
+  it("shows New Markdown with its table chord and calls through (#197)", () => {
+    const onNewMarkdown = vi.fn();
+    mount({ onNewMarkdown });
+    openMenu();
+    const item = screen.getByRole("menuitem", {
+      name: `New Markdown${tabCreateMenuChord("tab.newMarkdown", "other")}`,
+    });
+    expect(item.textContent).toContain("Ctrl+Shift+M");
+    fireEvent.pointerDown(item, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(item, { pointerType: "mouse", button: 0 });
+    fireEvent.click(item);
+    expect(onNewMarkdown).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits New Markdown without a handler and matches it by search", () => {
+    mount();
+    openMenu();
+    expect(screen.queryByRole("menuitem", { name: /New Markdown/ })).toBeNull();
+
+    cleanup();
+    mount({ onNewMarkdown: () => {} });
+    openMenu();
+    fireEvent.change(
+      screen.getByRole("combobox", { name: TAB_CREATE_SEARCH_PLACEHOLDER }),
+      { target: { value: "untitled" } },
+    );
+    expect(menuItemNames()).toEqual([
+      `New Markdown${tabCreateMenuChord("tab.newMarkdown", "other")}`,
+    ]);
   });
 });
 
@@ -244,7 +278,11 @@ describe("TabCreateMenu harness launch form (#192)", () => {
   }
 
   it("carries a pasted flags string to the launch as provider+model", async () => {
-    const onLaunch = vi.fn(() => Promise.resolve(true));
+    let launched: unknown;
+    const onLaunch = vi.fn(async (input: unknown) => {
+      launched = input;
+      return true;
+    });
     mount({ onLaunch });
     openMenu();
     const item = screen.getByRole("menuitem", { name: "Pi" });
@@ -264,7 +302,7 @@ describe("TabCreateMenu harness launch form (#192)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(1));
-    expect(onLaunch.mock.calls[0][0]).toMatchObject({
+    expect(launched).toMatchObject({
       workspaceId: "ws",
       harnessId: "pi",
       provider: "dgx-spark",
