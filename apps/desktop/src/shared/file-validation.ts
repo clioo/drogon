@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  MAX_DELETE_PATHS,
   MAX_DIRECTORY_ENTRIES,
   MAX_FILE_BYTES,
   MAX_FILE_SEARCH_QUERY_BYTES,
@@ -58,6 +59,48 @@ export const fileResultSchemas = {
   "files.write": scope.extend({
     size: size.max(MAX_FILE_BYTES),
     mtime: z.string().max(128),
+  }),
+  // Explorer mutations (R16-L #156/#157): the daemon echoes the request
+  // identity back (create: scope+kind, rename: from/to, delete: the deleted
+  // paths in order). `callNative` parses EVERY daemon reply through this
+  // table, so a missing entry turns a successful on-disk mutation into a
+  // malformed-contract error and the tree never refreshes. Shapes mirror
+  // the daemon's `workspace_file_rpc` echoes exactly.
+  "files.create": scope.extend({
+    kind: z.enum(["file", "directory"]),
+  }),
+  "files.rename": z.object({
+    hostId: id,
+    workspaceId: id,
+    from: z
+      .string()
+      .refine(
+        (value) =>
+          !value.includes("\0") &&
+          new TextEncoder().encode(value).length <= 32_768,
+      ),
+    to: z
+      .string()
+      .refine(
+        (value) =>
+          !value.includes("\0") &&
+          new TextEncoder().encode(value).length <= 32_768,
+      ),
+  }),
+  "files.delete": z.object({
+    hostId: id,
+    workspaceId: id,
+    deleted: z
+      .array(
+        z
+          .string()
+          .refine(
+            (value) =>
+              !value.includes("\0") &&
+              new TextEncoder().encode(value).length <= 32_768,
+          ),
+      )
+      .max(MAX_DELETE_PATHS),
   }),
   // Bounded quick-open search (R12-B): the daemon echoes the trimmed
   // query with at most `limit` paths; the main bridge re-checks identity

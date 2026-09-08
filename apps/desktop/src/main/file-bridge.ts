@@ -1,3 +1,5 @@
+import { watch } from "node:fs";
+import { BrowserWindow } from "electron";
 import { z } from "zod";
 import {
   fileBridgeSchemas,
@@ -10,6 +12,7 @@ import {
   MAX_FILE_SEARCH_QUERY_BYTES,
   MAX_FILE_SEARCH_RESULTS,
 } from "../shared/file-contract";
+import type { FilesChangedTick } from "../shared/file-contract";
 import type { Result } from "../shared/session-contract";
 import { callNative } from "./native-client";
 
@@ -246,6 +249,12 @@ export async function dispatchFileRequest(
         MAX_DIRECTORY_ENTRIES)
   )
     return invalid();
+  if (method === "fileList") {
+    // A listed workspace earns a filesystem watcher for live external
+    // ticks (R16-L #157). Fire-and-forget: watching never blocks or
+    // fails the listing it follows.
+    void ensureWorkspaceWatch(hostId, workspaceId, call).catch(() => undefined);
+  }
   if (
     method === "fileWrite" &&
     "size" in output &&
@@ -322,4 +331,211 @@ async function dispatchExplorerRequest(
       return invalid();
   }
   return { ok: true, result: output };
+}
+
+/** Push channel the renderer subscribes to through the preload bridge. */
+export const FILES_CHANGED_CHANNEL = "drogon:filesChanged";
+/** Bound on simultaneously watched workspace roots (LRU-evicted past it). */
+export const MAX_WATCHED_WORKSPACES = 8;
+// Producer-side batching (the fork's shared/filesystem-watch-batch-window
+// role: its producers flush on a trailing window, so the renderer's own
+// scheduler adds no extra latency): trailing edge with a max-wait cap so
+// a sustained storm still reconciles instead of deferring forever.
+const WATCH_TRAILING_MS = 150;
+const WATCH_MAX_WAIT_MS = 800;
+
+type FilesWatcherHandle = { close(): void };
+export type FilesWatcherDeps = {
+  watchRoot?: (
+    root: string,
+    recursive: boolean,
+    onEvent: () => void,
+    onError: () => void,
+  ) => FilesWatcherHandle;
+  broadcast?: (tick: FilesChangedTick) => void;
+  platform?: NodeJS.Platform;
+};
+
+let watcherDeps: FilesWatcherDeps = {};
+
+/** Test seam (and only test seam): production always uses the defaults. */
+export function setFilesWatcherDeps(deps: FilesWatcherDeps | null): void {
+  watcherDeps = deps ?? {};
+}
+
+type WatchedEntry = {
+  workspaceId: string;
+  root: string;
+  watcher: FilesWatcherHandle;
+  timer: ReturnType<typeof setTimeout> | null;
+  firstEventAt: number | null;
+  lastUsed: number;
+};
+
+const watchedWorkspaces = new Map<string, WatchedEntry>();
+
+/** Visible for tests: how many workspace roots are currently watched. */
+export function watchedWorkspaceCount(): number {
+  return watchedWorkspaces.size;
+}
+
+/** Stops every watcher (tests and shutdown); production exits with the app. */
+export function stopFilesWatchers(): void {
+  for (const entry of watchedWorkspaces.values()) {
+    if (entry.timer) clearTimeout(entry.timer);
+    try {
+      entry.watcher.close();
+    } catch {
+      // A closing watcher never fails the caller.
+    }
+  }
+  watchedWorkspaces.clear();
+}
+
+function broadcastFilesChanged(tick: FilesChangedTick): void {
+  const send = watcherDeps.broadcast;
+  if (send) {
+    send(tick);
+    return;
+  }
+  // No index.ts wiring needed: main already owns every window, so the
+  // tick is pushed directly. Absent in unit tests (the electron package
+  // exposes no BrowserWindow outside Electron), where it is a no-op.
+  if (typeof BrowserWindow === "undefined") return;
+  for (const window of BrowserWindow.getAllWindows()) {
+    try {
+      window.webContents.send(FILES_CHANGED_CHANNEL, tick);
+    } catch {
+      // One dead window never blocks the rest.
+    }
+  }
+}
+
+function fireWatchTick(key: string): void {
+  const entry = watchedWorkspaces.get(key);
+  if (!entry) return;
+  if (entry.timer) {
+    clearTimeout(entry.timer);
+    entry.timer = null;
+  }
+  entry.firstEventAt = null;
+  broadcastFilesChanged({ workspaceId: entry.workspaceId });
+}
+
+function noteWorkspaceEvent(key: string): void {
+  const entry = watchedWorkspaces.get(key);
+  if (!entry) return;
+  const now = Date.now();
+  entry.firstEventAt ??= now;
+  if (entry.timer) clearTimeout(entry.timer);
+  const elapsed = now - (entry.firstEventAt ?? now);
+  if (elapsed >= WATCH_MAX_WAIT_MS) {
+    fireWatchTick(key);
+    return;
+  }
+  entry.timer = setTimeout(
+    () => fireWatchTick(key),
+    Math.min(WATCH_TRAILING_MS, WATCH_MAX_WAIT_MS - elapsed),
+  );
+}
+
+/**
+ * Ensures one filesystem watcher for the workspace behind a successful
+ * `fileList`, so external edits (terminal, git, another app) refresh the
+ * tree without a manual Refresh — the fork's Electron-side watcher
+ * feeding its `fs:changed` bus, adapted to this repo's coarse
+ * workspace ticks. Fail-closed throughout: an unresolvable root, a
+ * watch error, or a deleted root only ever means "no live ticks".
+ */
+export async function ensureWorkspaceWatch(
+  hostId: string,
+  workspaceId: string,
+  call: NativeCall = callNative,
+): Promise<void> {
+  const key = `${hostId}${workspaceId}`;
+  const existing = watchedWorkspaces.get(key);
+  if (existing) {
+    existing.lastUsed = Date.now();
+    return;
+  }
+  let root: string | null = null;
+  try {
+    const listed = await call("workspace.list", {});
+    if (listed.ok) {
+      const workspaces = (
+        listed.result as {
+          workspaces?: Array<{
+            id?: unknown;
+            path?: unknown;
+            hostId?: unknown;
+          }>;
+        }
+      ).workspaces;
+      const match = (workspaces ?? []).find(
+        (candidate) =>
+          candidate.id === workspaceId &&
+          (candidate.hostId === undefined || candidate.hostId === hostId),
+      );
+      if (typeof match?.path === "string" && match.path !== "") {
+        root = match.path;
+      }
+    }
+  } catch {
+    root = null;
+  }
+  if (!root) return;
+  if (watchedWorkspaces.size >= MAX_WATCHED_WORKSPACES) {
+    let oldestKey: string | null = null;
+    let oldestUsed = Number.POSITIVE_INFINITY;
+    for (const [candidateKey, candidate] of watchedWorkspaces) {
+      if (candidate.lastUsed < oldestUsed) {
+        oldestUsed = candidate.lastUsed;
+        oldestKey = candidateKey;
+      }
+    }
+    if (oldestKey !== null) {
+      const evicted = watchedWorkspaces.get(oldestKey);
+      watchedWorkspaces.delete(oldestKey);
+      if (evicted?.timer) clearTimeout(evicted.timer);
+      try {
+        evicted?.watcher.close();
+      } catch {
+        // Eviction never fails the new watch.
+      }
+    }
+  }
+  const platform = watcherDeps.platform ?? process.platform;
+  // `fs.watch` recursion is macOS/Windows-only; elsewhere the root level
+  // still reports the renames/deletes that matter most to the tree.
+  const recursive = platform === "darwin" || platform === "win32";
+  const watchRoot =
+    watcherDeps.watchRoot ??
+    ((rootPath: string, wantRecursive: boolean, onEvent: () => void, onError: () => void) => {
+      const watcher = watch(rootPath, { recursive: wantRecursive }, () => onEvent());
+      watcher.on("error", () => onError());
+      return watcher;
+    });
+  let watcher: FilesWatcherHandle;
+  try {
+    watcher = watchRoot(root, recursive, () => noteWorkspaceEvent(key), () => {
+      const stale = watchedWorkspaces.get(key);
+      watchedWorkspaces.delete(key);
+      if (stale?.timer) clearTimeout(stale.timer);
+      try {
+        stale?.watcher.close();
+      } catch {
+        // A dead root cleans itself up quietly.
+      }
+    });
+  } catch {
+    return;
+  }
+  watchedWorkspaces.set(key, {
+    workspaceId,
+    root,
+    watcher,
+    timer: null,
+    firstEventAt: null,
+    lastUsed: Date.now(),
+  });
 }

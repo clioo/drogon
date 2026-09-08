@@ -55,28 +55,44 @@ export function InlineInputRow({
     [onSubmit],
   );
 
+  // Fork contract (file-explorer-inline-input-row.tsx): a rename starts
+  // with the stem selected so typing replaces it and never appends to the
+  // old name. Applied synchronously (focus is synchronous) so the
+  // selection never depends on a frame arriving before the first key.
+  const applyStemSelection = useCallback(
+    (el: HTMLInputElement) => {
+      if (inlineInput.type !== "rename" || !inlineInput.existingName) return;
+      const dotIndex = inlineInput.existingName.lastIndexOf(".");
+      if (dotIndex > 0) el.setSelectionRange(0, dotIndex);
+      else el.select();
+    },
+    [inlineInput.existingName, inlineInput.type],
+  );
+
   const setInputRef = useCallback(
     (el: HTMLInputElement | null) => {
       inputRef.current = el;
       if (!el) return;
       submitted.current = false;
       focusSettled.current = false;
+      el.focus();
+      applyStemSelection(el);
       requestAnimationFrame(() => {
         if (inputRef.current !== el) return;
         el.focus();
-        if (inlineInput.type === "rename" && inlineInput.existingName) {
-          const dotIndex = inlineInput.existingName.lastIndexOf(".");
-          if (dotIndex > 0) el.setSelectionRange(0, dotIndex);
-          else el.select();
+        // Menu-close focus management can steal focus right after mount
+        // and drop the selection with it: re-assert it, but only while
+        // the value is still untouched so typed text is never disturbed.
+        if (el.value === (inlineInput.existingName ?? "")) {
+          applyStemSelection(el);
         }
-        // Menu-close focus management can steal focus right after mount;
-        // only blurs past this window count as the user leaving the edit.
+        // Only blurs past this window count as the user leaving the edit.
         setTimeout(() => {
           focusSettled.current = true;
         }, 200);
       });
     },
-    [inlineInput.existingName, inlineInput.type],
+    [applyStemSelection, inlineInput.existingName],
   );
 
   return (

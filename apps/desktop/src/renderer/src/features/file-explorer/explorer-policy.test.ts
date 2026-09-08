@@ -4,6 +4,7 @@ import {
   buildRowMenuItems,
   deleteConfirmationFor,
   deleteShortcutLabel,
+  renameShortcutLabel,
   revealLabel,
   validateInlineName,
   type ExplorerCapabilities,
@@ -38,6 +39,19 @@ describe("deleteShortcutLabel and revealLabel", () => {
     expect(deleteShortcutLabel("Linux")).toBe("Delete");
     expect(revealLabel("Linux")).toBe("Open Containing Folder");
     expect(revealLabel("Windows")).toBe("Reveal in File Explorer");
+  });
+});
+
+describe("renameShortcutLabel", () => {
+  test("macOS shows ↩ like the fork, elsewhere Enter", () => {
+    expect(renameShortcutLabel("Mac OS")).toBe("↩");
+    expect(renameShortcutLabel("Linux")).toBe("Enter");
+    expect(renameShortcutLabel("Windows")).toBe("Enter");
+  });
+
+  test("the row menu carries the platform rename shortcut", () => {
+    const mac = buildRowMenuItems(fileNode, 1, mutable).find((item) => item.id === "rename");
+    expect(mac?.shortcut).toBe(renameShortcutLabel());
   });
 });
 

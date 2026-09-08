@@ -42,6 +42,75 @@ export interface FileExplorerDataSource {
   ): Promise<Result<null>>;
   rename?(from: string, to: string): Promise<Result<null>>;
   remove?(paths: string[]): Promise<Result<null>>;
+  /**
+   * Live change ticks (R16-L #157, fork `fs:changed` ordering). OPTIONAL:
+   * absent means the tree refreshes on its own mutations only. The
+   * explorer reloads its loaded directories on each tick and defers the
+   * reload while an inline edit is open (rows must not shift under the
+   * editor — fork design §6.2).
+   */
+  subscribeFilesChanged?(listener: () => void): () => void;
+}
+
+function isPathOrDescendant(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}/`);
+}
+
+/**
+ * Daemon-confirmed deletion, applied synchronously so the rows disappear
+ * the moment the delete succeeds; the parent reload that follows
+ * reconciles with the daemon's truth. Listings of deleted directories
+ * are dropped whole; anything underneath a deleted path goes with it.
+ */
+function dropDeletedPaths(
+  prev: Readonly<Record<string, readonly ExplorerNode[]>>,
+  paths: readonly string[],
+): Readonly<Record<string, readonly ExplorerNode[]>> {
+  let changed = false;
+  const next: Record<string, readonly ExplorerNode[]> = {};
+  for (const [dir, entries] of Object.entries(prev)) {
+    if (dir !== "" && paths.some((deleted) => isPathOrDescendant(dir, deleted))) {
+      changed = true;
+      continue;
+    }
+    const kept = entries.filter(
+      (entry) => !paths.some((deleted) => isPathOrDescendant(entry.path, deleted)),
+    );
+    if (kept.length !== entries.length) changed = true;
+    next[dir] = kept;
+  }
+  return changed ? next : prev;
+}
+
+/**
+ * Daemon-confirmed rename, applied synchronously (same ordering as the
+ * delete path): the entry keeps its kind/depth, and a renamed directory
+ * rewrites its subtree keys and descendant paths. The parent reload that
+ * follows reconciles with the daemon's truth.
+ */
+function renamePathInCache(
+  prev: Readonly<Record<string, readonly ExplorerNode[]>>,
+  from: string,
+  to: string,
+  name: string,
+): Readonly<Record<string, readonly ExplorerNode[]>> {
+  const next: Record<string, readonly ExplorerNode[]> = {};
+  for (const [dir, entries] of Object.entries(prev)) {
+    const mappedDir =
+      dir === from
+        ? to
+        : isPathOrDescendant(dir, from)
+          ? `${to}${dir.slice(from.length)}`
+          : dir;
+    next[mappedDir] = entries.map((entry) => {
+      if (entry.path === from) return { ...entry, name, path: to };
+      if (isPathOrDescendant(entry.path, from)) {
+        return { ...entry, path: `${to}${entry.path.slice(from.length)}` };
+      }
+      return entry;
+    });
+  }
+  return next;
 }
 
 export interface FileExplorerProps {
@@ -115,6 +184,10 @@ export function FileExplorer({
 
   const generation = useRef(0);
   const filterGeneration = useRef(0);
+  // Watch ticks that arrive while an inline edit is open wait for the
+  // edit to close (fork design §6.2: rows must not shift under the
+  // editor); the post-mutation reload already covers the edit itself.
+  const pendingWatchRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const spinnerTimer = useRef<number | null>(null);
   const isRefreshingRef = useRef(false);
@@ -206,6 +279,22 @@ export function FileExplorer({
     [loadDir],
   );
 
+  // Live tick handler: re-read every LOADED directory (bounded by the
+  // daemon's entry cap), never the whole tree walk the filter uses.
+  const reloadLoadedDirs = useCallback(() => {
+    if (!sourceRef.current) return;
+    if (inlineRef.current) {
+      pendingWatchRef.current = true;
+      return;
+    }
+    const gen = generation.current;
+    for (const dir of Object.keys(childrenRef.current)) {
+      loadDir(dir, gen, showDotfilesRef.current);
+    }
+  }, [loadDir]);
+  const reloadLoadedDirsRef = useRef(reloadLoadedDirs);
+  reloadLoadedDirsRef.current = reloadLoadedDirs;
+
   const refreshAll = useCallback(() => {
     if (!sourceRef.current || isRefreshingRef.current) return;
     isRefreshingRef.current = true;
@@ -251,6 +340,23 @@ export function FileExplorer({
       generation.current += 1;
     };
   }, [workspaceId, source, loadDir]);
+
+  // Live change subscription follows the mounted source (one workspace);
+  // a missing channel leaves post-mutation reloads as the only refresh.
+  useEffect(() => {
+    if (!source?.subscribeFilesChanged) return;
+    return source.subscribeFilesChanged(() => {
+      reloadLoadedDirsRef.current();
+    });
+  }, [source]);
+
+  // Replay a watch tick deferred by an inline edit once the edit closes.
+  useEffect(() => {
+    if (inline === null && pendingWatchRef.current) {
+      pendingWatchRef.current = false;
+      reloadLoadedDirsRef.current();
+    }
+  }, [inline]);
 
   // Dotfile toggle re-lists from the root (the daemon owns the filter).
   const toggleDotfiles = useCallback(() => {
@@ -507,6 +613,24 @@ export function FileExplorer({
               setActionError(result.error.message);
               return;
             }
+            // Daemon-confirmed: swap the row synchronously so the tree
+            // shows the new name at once; the reload reconciles after.
+            // Expansion follows the rename so an open directory stays
+            // open under its new path.
+            setChildren((prev) => renamePathInCache(prev, from, to, name));
+            setExpanded((prev) => {
+              if (!prev.has(from)) return prev;
+              const next = new Set(prev);
+              next.delete(from);
+              next.add(to);
+              for (const open of [...next]) {
+                if (open !== to && isPathOrDescendant(open, from)) {
+                  next.delete(open);
+                  next.add(`${to}${open.slice(from.length)}`);
+                }
+              }
+              return next;
+            });
             loadDir(input.parentPath, gen, showDotfiles);
             const renamed: ExplorerNode = {
               name,
@@ -589,9 +713,26 @@ export function FileExplorer({
           return;
         }
         setConfirmDelete(null);
+        // Daemon-confirmed: drop the rows synchronously so the tree
+        // reflects the delete at once (R16-L #157); the parent reloads
+        // reconcile with the daemon's truth right after.
+        setChildren((prev) => dropDeletedPaths(prev, paths));
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          for (const path of paths) {
+            for (const open of next) {
+              if (isPathOrDescendant(open, path)) next.delete(open);
+            }
+          }
+          return next;
+        });
         setSelectedPaths((prev) => {
           const next = new Set(prev);
-          for (const path of paths) next.delete(path);
+          for (const path of paths) {
+            for (const selected of next) {
+              if (isPathOrDescendant(selected, path)) next.delete(selected);
+            }
+          }
           return next;
         });
         for (const parent of parents) loadDir(parent, gen, showDotfiles);

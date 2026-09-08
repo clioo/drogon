@@ -31,8 +31,10 @@ export {
   buildRowMenuItems,
   deleteConfirmationFor,
   deleteShortcutLabel,
+  renameShortcutLabel,
   revealLabel,
   validateInlineName,
   type ExplorerCapabilities,
 } from "./explorer-policy";
+export { subscribeWorkspaceFilesChanged } from "./files-watch";
 export { getFileTypeIcon } from "./file-type-icons";

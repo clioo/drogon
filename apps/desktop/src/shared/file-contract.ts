@@ -42,6 +42,25 @@ export type FileDeleteResult = {
 /** Upper bound on one `files.delete` call; larger batches must be split by the caller. */
 export const MAX_DELETE_PATHS = 128;
 /**
+ * Coarse workspace-changed tick (R16-L #157): main's filesystem watcher
+ * reports WHICH workspace changed, never what — the renderer re-reads its
+ * loaded directories (bounded by MAX_DIRECTORY_ENTRIES) to reconcile, the
+ * fork's `fs:changed` ordering without its per-path payload.
+ */
+export type FilesChangedTick = {
+  workspaceId: string;
+};
+/**
+ * Live change subscription for one mounted explorer. OPTIONAL until the
+ * preload exposes the channel: an absent method means change events never
+ * arrive and the tree refreshes on its own mutations only, never a crash.
+ */
+export interface FilesWatchBridge {
+  onFilesChanged(
+    listener: (tick: FilesChangedTick) => void,
+  ): () => void;
+}
+/**
  * Upper bound on one `files.search` call, mirroring the protocol's
  * `MAX_FILE_SEARCH_RESULTS`. Quick open ranks client-side, so the daemon
  * only ever returns a bounded candidate list.

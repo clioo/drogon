@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge } from "../shared/session-contract";
+import type {
+  FilesChangedTick,
+  FilesWatchBridge,
+} from "../shared/file-contract";
 import { automationBridge } from "./automation";
 import { installBrowserWindowCloseGuard } from "./browser-window-close-installation";
 import { usageBridge } from "./usage";
@@ -61,10 +65,31 @@ const bridge: DesktopBridge = {
 // runtime-only merge before the freeze, so no existing key changes shape.
 // R14-B adds the appMenu namespace (native menu commands, appearance state,
 // dock badge).
+/**
+ * Live workspace-change ticks from main's filesystem watcher (R16-L
+ * #157): one coarse `{ workspaceId }` push per debounced batch. Payloads
+ * are shape-checked before reaching the renderer; anything else is
+ * dropped, never forwarded.
+ */
+const filesWatch: FilesWatchBridge = {
+  onFilesChanged: (listener: (tick: FilesChangedTick) => void) => {
+    const wrapped = (_event: unknown, payload: unknown) => {
+      const tick = payload as Partial<FilesChangedTick> | null;
+      if (tick && typeof tick.workspaceId === "string") {
+        listener({ workspaceId: tick.workspaceId });
+      }
+    };
+    ipcRenderer.on("drogon:filesChanged", wrapped);
+    return () => {
+      ipcRenderer.removeListener("drogon:filesChanged", wrapped);
+    };
+  },
+};
 Object.assign(
   bridge,
   { git, browser, notifications, shell, tasks, project, mentu },
   botBridgeExtras,
   { appMenu },
+  { filesWatch },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));
