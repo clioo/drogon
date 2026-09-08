@@ -16,6 +16,7 @@ import {
 } from "react";
 import { Globe } from "lucide-react";
 import { cn } from "../tasks/cn";
+import { shouldOverlayBrowserAddressBar } from "./browser-address-bar-expansion";
 import { buildBrowserAddressBarSuggestions } from "./browser-address-bar-suggestions";
 import {
   consumeBrowserAddressBarEditSession,
@@ -67,6 +68,24 @@ export default function BrowserAddressBar({
   const openedAtRef = useRef(0);
   const blurCloseTimerRef = useRef<number | null>(null);
   const closingResetTimerRef = useRef<number | null>(null);
+  const slotRef = useRef<HTMLDivElement | null>(null);
+  const [inlineWidth, setInlineWidth] = useState<number | null>(null);
+
+  // Why: the slot keeps its flex width even while the bar overlays the toolbar,
+  // so measuring it here (not the form) cannot oscillate with the overlay.
+  useEffect(() => {
+    const slot = slotRef.current;
+    if (!slot || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const syncWidth = (): void => setInlineWidth(slot.getBoundingClientRect().width);
+    syncWidth();
+    const observer = new ResizeObserver(syncWidth);
+    observer.observe(slot);
+    return () => observer.disconnect();
+  }, []);
+
+  const overlay = shouldOverlayBrowserAddressBar({ inlineWidth, focused: open });
 
   const editSessionPageId = editSessionTabId ?? null;
   const liveEditRef = useRef({ value, open });
@@ -340,14 +359,32 @@ export default function BrowserAddressBar({
     // affordance for reopening the URL field.
     // Why stretch: the toolbar row pins the address slot's height, and the bar must fill it rather
     // than size itself — otherwise it and the document chip drift apart again.
-    <div className="relative flex min-w-11 flex-1 items-stretch">
+    <div
+      ref={slotRef}
+      className={cn(
+        "flex min-w-11 flex-1 items-stretch",
+        // Why: the overlay form positions against the toolbar row, so the
+        // slot stays unpositioned while overlaying — otherwise the form would
+        // size to the squeezed slot instead of the row. It stays relative
+        // otherwise so the suggestion dropdown anchors to the slot (the fork
+        // anchors its dropdown to a Popover portal instead).
+        !overlay && "relative",
+      )}
+    >
       <form
         ref={setAddressBarFormRef}
+        data-drogon-browser-address-bar-overlay={overlay ? "true" : undefined}
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-border bg-background px-3 py-1 shadow-sm",
+          "flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-1 shadow-sm",
+          // Why: the toolbar row is the positioned ancestor, so the overlay
+          // spans it edge to edge (matching its px-3) instead of the few
+          // pixels the squeezed slot has left.
+          overlay
+            ? "absolute inset-x-3 top-1/2 z-30 -translate-y-1/2 shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
+            : "min-w-0 flex-1",
         )}
-        // Why: clicks land on the form padding when the input is narrow —
-        // forward them to the input so it focuses and edits.
+        // Why: when squeezed the input is zero-width, so clicks land on the
+        // form padding — forward them to the input so it expands and edits.
         onClick={() => inputRef.current?.focus()}
         onSubmit={(event) => {
           event.preventDefault();
