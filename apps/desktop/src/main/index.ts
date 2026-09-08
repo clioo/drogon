@@ -69,7 +69,6 @@ function registerBridge() {
   registerTasksBridge(() => window);
   registerBotBridge(() => window);
   registerMentuBridge(() => window);
-  registerShellBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
     ipcMain.handle(`drogon:${method}`, async (event, input: unknown) => {
       if (
