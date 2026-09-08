@@ -673,7 +673,7 @@ export function ShortcutsSection(): React.JSX.Element {
   return (
     <SettingsSection
       id="shortcuts"
-      title="Keyboard shortcuts"
+      title="Keyboard Shortcuts"
       description="What each shortcut does in this window. Activate a shortcut to record a new chord; changes apply immediately."
     >
       {/* Below xl the rail stacks above the list in one column; pin the rail
