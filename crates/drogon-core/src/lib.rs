@@ -567,7 +567,13 @@ impl Engine {
 
     fn do_session_start(&self, params: &Value) -> Result<Value, RpcError> {
         let workspace_id = require_str(params, "workspaceId")?.to_string();
-        let command = require_str(params, "command")?.to_string();
+        // Additive (R12-E restart reuse): `command` is optional. Absent, the
+        // daemon spawns its own default interactive shell — the same spawn a
+        // desktop/CLI caller previously had to spell out. A restart passes
+        // the prior session's recorded argv back verbatim instead.
+        let command = optional_str(params, "command")?
+            .map(str::to_string)
+            .unwrap_or_else(default_session_command);
         if command.contains('\0') {
             return Err(error::invalid_argument("command must not contain NUL"));
         }
@@ -608,6 +614,7 @@ impl Engine {
             &cwd,
             command,
             args,
+            None,
             cols,
             rows,
         )?;
@@ -626,7 +633,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at FROM sessions ORDER BY created_at",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id FROM sessions ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         let rows: Vec<_> = stmt
@@ -698,7 +705,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at FROM sessions WHERE id = ?1",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id FROM sessions WHERE id = ?1",
                 [session_id],
                 row_to_session_json,
             )
@@ -741,6 +748,16 @@ impl Engine {
 /// derive `working`/`idle`/`needs_input` from here — only the durable
 /// verdict is known. `session::to_json` is the path that has a live handle
 /// and computes the full activity-based state.
+/// The daemon-side default session shell, matching what the desktop main
+/// process sends for an ordinary new terminal. Used when `session.start`
+/// omits `command` (additive restart-reuse path).
+fn default_session_command() -> String {
+    if cfg!(windows) {
+        return std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_string());
+    }
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+}
+
 fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
     let id: String = r.get(0)?;
     let args_json: String = r.get(5)?;
@@ -767,6 +784,7 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "createdAt": r.get::<_, String>(10)?,
             "agentState": agent_state,
             "agentStateAt": Value::Null,
+            "harnessId": r.get::<_, Option<String>>(11)?,
         }),
     ))
 }

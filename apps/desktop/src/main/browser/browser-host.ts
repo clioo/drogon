@@ -19,6 +19,7 @@ import {
 } from "../../shared/browser-contract";
 import { resolveViewBounds } from "./browser-bounds";
 import { mapGuestLoadError } from "./browser-errors";
+import { installGuestBrowserChordForwarding } from "./browser-guest-chord-forwarding";
 import {
   applyHostAction,
   initialHostSnapshot,
@@ -179,6 +180,7 @@ export type HostBlocked = { blocked: string; code?: string };
 export class BrowserHost {
   private state: BrowserHostSnapshot = initialHostSnapshot();
   private views = new Map<string, GuestViewLike | WebContentsView>();
+  private chordDisposers = new Map<string, () => void>();
   private lastRect: BrowserBounds | null = null;
 
   constructor(
@@ -385,6 +387,21 @@ export class BrowserHost {
     });
     window.contentView.addChildView(view as WebContentsView);
     this.views.set(tabId, view);
+    // Additive (R12-E): a focused guest never lets keyboard events reach the
+    // renderer, so pane chords (Mod+L/R/F) are captured here and forwarded;
+    // the disposer rides the same close path as the view itself.
+    this.chordDisposers.set(
+      tabId,
+      installGuestBrowserChordForwarding({
+        tabId,
+        guest: view.webContents as unknown as Parameters<
+          typeof installGuestBrowserChordForwarding
+        >[0]["guest"],
+        isMac: process.platform === "darwin",
+        forward: (event) =>
+          this.sendGuestEvent(browserIpcChannels.chord, event),
+      }),
+    );
     this.update({ type: "tab-opened", tabId, workspaceId, url: normalized.url });
     this.applyVisibility();
     console.log(
@@ -399,6 +416,9 @@ export class BrowserHost {
   closeTab(tabId: string): boolean {
     const view = this.viewFor(tabId);
     if (!view) return false;
+    // Additive (R12-E): drop the chord forwarder before the guest dies.
+    this.chordDisposers.get(tabId)?.();
+    this.chordDisposers.delete(tabId);
     try {
       (view.webContents as GuestContentsLike).stopFindInPage("clearSelection");
     } catch {

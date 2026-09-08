@@ -49,7 +49,7 @@ import {
 } from "./terminal-process-exit";
 import {
   extractTerminalFileLinks,
-  handleTerminalFileLink,
+  requestTerminalFileOpen,
   TERMINAL_FILE_OPEN_EVENT,
   type TerminalFileOpenDetail,
 } from "./terminal-file-link";
@@ -60,6 +60,17 @@ import {
   isTerminalLinkDirectActivation,
   terminalLinkModifierHint,
 } from "./terminal-link-activation";
+import {
+  installTerminalLinkPointerGesture,
+  type TerminalLinkPointerGesture,
+} from "./terminal-link-pointer-gesture";
+import {
+  closeTerminalLinkActionRequest,
+  requestTerminalLinkAction,
+  type TerminalLinkActionContext,
+  type TerminalLinkActionRequest,
+} from "./terminal-link-action-request";
+import { TerminalLinkActionPopover } from "./TerminalLinkActionPopover";
 import { copyTerminalSelection } from "./terminal-selection-copy";
 import { copyTerminalHandleForPane } from "./terminal-handle-copy";
 import { createOsc52OscHandler } from "./osc52-clipboard";
@@ -68,11 +79,20 @@ import {
   showOsc52ClipboardFailedToast,
 } from "./osc52-clipboard-toast";
 import {
+  markTerminalBracketedPasteInterrupted,
+  observeTerminalBracketedPasteModeOutput,
+} from "./terminal-bracketed-paste";
+import {
+  createTerminalPanePaste,
+  registerTerminalPanePasteListeners,
+} from "./terminal-pane-paste";
+import {
   createBrowserAuthoritySource,
   windowBrowserBridge,
 } from "../browser/browser-bridge";
 import { requestWindowOpenDecision } from "../browser/browser-nav-state";
 import type { Session } from "../../../../shared/session-contract";
+import type { TerminalPasteSource } from "./terminal-paste-model";
 
 /**
  * Dispatched by the App-level `terminal.clear` chord (Cmd+K, source id from
@@ -227,6 +247,12 @@ export function TerminalPane({
   const [processExit, setProcessExit] = useState<TerminalProcessExit | null>(
     () => projectTerminalProcessExit(session),
   );
+  // R12-E: the source's link action popover — plain clicks on a file link
+  // open this instead of doing nothing; direct (⌘/Ctrl) clicks still open.
+  const [linkActionRequest, setLinkActionRequest] =
+    useState<TerminalLinkActionRequest | null>(null);
+  const linkPointerGesture = useRef<TerminalLinkPointerGesture | null>(null);
+  const linkActionContext = useRef<TerminalLinkActionContext | null>(null);
   const dismissedExitKey = useRef<string | null>(null);
   const [linkTooltip, setLinkTooltip] = useState<string | null>(null);
   const live = useRef<{
@@ -235,6 +261,7 @@ export function TerminalPane({
     search: SearchAddon;
     input: TerminalInputQueue;
     focus: () => void;
+    pasteFromClipboard: (source: TerminalPasteSource) => void;
   } | null>(null);
 
   const showExit = (exit: TerminalProcessExit | null) => {
@@ -394,7 +421,10 @@ export function TerminalPane({
     );
     const fileLinkProvider: ILinkProvider = {
       provideLinks: (bufferLineNumber, callback) => {
-        const line = terminal.buffer.active.getLine(bufferLineNumber);
+        // Why -1: xterm hands the provider a 1-based buffer line number;
+        // getLine is 0-based. The #68 port read the row below the cursor,
+        // so file links never hit-tested on the row they print on.
+        const line = terminal.buffer.active.getLine(bufferLineNumber - 1);
         const text = line?.translateToString(true) ?? "";
         if (!text.includes("/")) {
           callback(undefined);
@@ -412,17 +442,49 @@ export function TerminalPane({
             text: parsed.path,
             activate: (_event, linkText) => {
               const mouse = _event as MouseEvent | undefined;
-              if (!isTerminalLinkDirectActivation(mouse)) return;
-              mouse?.preventDefault?.();
-              handleTerminalFileLink(
-                parsed.path,
-                parsed.line,
-                parsed.column,
-                mouse,
-                { workspaceId: sessionRef.current.workspaceId },
-              );
-              terminal.clearSelection();
-              setLinkTooltip(null);
+              // Direct activation (⌘/Ctrl+click) opens as before; a plain
+              // click raises the source's link action popover instead of
+              // being ignored (R12-E remainder).
+              if (isTerminalLinkDirectActivation(mouse)) {
+                mouse?.preventDefault?.();
+                requestTerminalFileOpen({
+                  path: parsed.path,
+                  line: parsed.line,
+                  column: parsed.column,
+                  workspaceId: sessionRef.current.workspaceId,
+                  openWithSystemDefault: Boolean(mouse?.shiftKey),
+                });
+                terminal.clearSelection();
+                setLinkTooltip(null);
+                return;
+              }
+              requestTerminalLinkAction(mouse, linkActionContext.current, {
+                destination: parsed.path,
+                kind: "file",
+                primary: {
+                  label: "Open file",
+                  run: () =>
+                    requestTerminalFileOpen({
+                      path: parsed.path,
+                      line: parsed.line,
+                      column: parsed.column,
+                      workspaceId: sessionRef.current.workspaceId,
+                      openWithSystemDefault: false,
+                    }),
+                },
+                alternate: {
+                  label: isMac ? "Open in Finder" : "Open folder",
+                  run: () =>
+                    requestTerminalFileOpen({
+                      path: parsed.path,
+                      line: parsed.line,
+                      column: parsed.column,
+                      workspaceId: sessionRef.current.workspaceId,
+                      openWithSystemDefault: true,
+                    }),
+                },
+              });
+              void linkText;
             },
             hover: (_event, linkText) => {
               setLinkTooltip(
@@ -452,6 +514,45 @@ export function TerminalPane({
       search,
       input: queue,
       focus: () => terminal.focus(),
+      pasteFromClipboard: (source: TerminalPasteSource) => paste.pasteFromClipboard(source),
+    };
+    // Paste policy target (R12-E): plan/execute writes bracketed or chunked
+    // paste payloads through the same policy modules as the source. The
+    // chunked path writes the PTY directly (source parity); direct and
+    // bracketed paths go through xterm's input/paste, i.e. the same queue
+    // as keyboard input.
+    const paste = createTerminalPanePaste({
+      sessionIdentity: inputIdentity,
+      writePty: (data) =>
+        window.drogon
+          .write({ ...inputIdentity, text: data })
+          .then((result) => {
+            if (!result.ok) {
+              report(result.error.message);
+              return false;
+            }
+            return true;
+          })
+          .catch(() => false),
+      isTargetCurrent: () => !disposed && canWrite,
+      report,
+    });
+    paste.bindTerminal(terminal);
+    const disposePasteListeners = registerTerminalPanePasteListeners({
+      container: mount,
+      paste,
+      isMac: typeof navigator !== "undefined" && navigator.userAgent.includes("Mac"),
+    });
+    // The gesture + action context back the file-link popover: a plain click
+    // (no drag, no selection) on a link raises the popover; PTY mouse-report
+    // suppression is out of MVP scope, so the claim always succeeds.
+    linkPointerGesture.current = installTerminalLinkPointerGesture(terminal);
+    linkActionContext.current = {
+      paneId: 1,
+      pointerGesture: linkPointerGesture.current,
+      claimPtyMouse: () => true,
+      request: setLinkActionRequest,
+      focusTerminal: () => terminal.focus(),
     };
     const media = matchMedia("(prefers-color-scheme: dark)");
     const updateTheme = () => {
@@ -481,6 +582,9 @@ export function TerminalPane({
       callbacks.current.onSession(lastObserved);
     };
     const subscription = terminal.onData((text) => {
+      // Source parity: Ctrl+C can leave xterm's bracketed-paste bit stale;
+      // the mark lets the next single-line paste skip the wrappers.
+      if (text === "\x03") markTerminalBracketedPasteInterrupted(terminal);
       void queue.enqueue(text);
     });
     const fitTerminal = () => {
@@ -522,6 +626,12 @@ export function TerminalPane({
         const bytes = Uint8Array.from(atob(value.dataBase64), (char) =>
           char.charCodeAt(0),
         );
+        // Track DECA 2004 (bracketed paste) transitions in the PTY output so
+        // the paste policy brackets/decrypts exactly when the app asked.
+        observeTerminalBracketedPasteModeOutput(
+          terminal,
+          new TextDecoder().decode(bytes),
+        );
         await new Promise<void>((resolve) => terminal.write(bytes, resolve));
         if (disposed) return;
         cursor = value.nextCursor;
@@ -551,6 +661,11 @@ export function TerminalPane({
       media.removeEventListener("change", updateTheme);
       rootObserver.disconnect();
       observer.disconnect();
+      disposePasteListeners();
+      linkPointerGesture.current?.dispose();
+      linkPointerGesture.current = null;
+      linkActionContext.current = null;
+      setLinkActionRequest(null);
       fileLinkDisposable.dispose();
       subscription.dispose();
       resize.dispose();
@@ -607,25 +722,9 @@ export function TerminalPane({
   const pasteClipboard = () => {
     setMenu(null);
     if (!current) return;
-    const queue = current.input;
     const focus = current.focus;
-    if (
-      typeof navigator === "undefined" ||
-      !navigator.clipboard ||
-      typeof navigator.clipboard.readText !== "function"
-    ) {
-      callbacks.current.onError("Paste failed: clipboard unavailable.");
-      return;
-    }
-    void navigator.clipboard
-      .readText()
-      .then((text) => {
-        if (text) void queue.enqueue(text);
-        focus();
-      })
-      .catch(() => {
-        callbacks.current.onError("Paste failed: clipboard unavailable.");
-      });
+    current.pasteFromClipboard("context-menu");
+    focus();
   };
   const copyTerminalId = () => {
     setMenu(null);
@@ -729,6 +828,14 @@ export function TerminalPane({
         onCopyTerminalId={copyTerminalId}
         onClearScreen={clearScreen}
         onClosePane={closePane}
+      />
+      <TerminalLinkActionPopover
+        request={linkActionRequest}
+        onClose={(dismissed) =>
+          setLinkActionRequest((currentRequest) =>
+            closeTerminalLinkActionRequest(currentRequest, dismissed),
+          )
+        }
       />
     </div>
   );

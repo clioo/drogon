@@ -75,7 +75,8 @@ fn open_fixture() -> Mutex<Connection> {
             rows INTEGER NOT NULL,
             verdict TEXT NOT NULL,
             exit_code INTEGER,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            harness_id TEXT
         );",
     )
     .expect("sessions schema");
@@ -94,7 +95,7 @@ fn reserve_committed(
 ) -> PreparedSession {
     let conn = db.lock().unwrap();
     let tx = begin_immediate(&conn);
-    let plan = reserve(&tx, "host-1", "ws-1", cwd, command, args, 80, 24).expect("reserve");
+    let plan = reserve(&tx, "host-1", "ws-1", cwd, command, args, None, 80, 24).expect("reserve");
     tx.commit().expect("commit reservation");
     plan
 }
@@ -165,14 +166,25 @@ fn pending_row_visible_only_after_commit() {
                 id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, host_id TEXT NOT NULL,
                 incarnation TEXT NOT NULL, command TEXT NOT NULL, args_json TEXT NOT NULL,
                 cols INTEGER NOT NULL, rows INTEGER NOT NULL, verdict TEXT NOT NULL,
-                exit_code INTEGER, created_at TEXT NOT NULL
+                exit_code INTEGER, created_at TEXT NOT NULL, harness_id TEXT
             );",
         )
         .expect("schema");
     let conn_b = Connection::open(&path).expect("db B");
 
     let tx = begin_immediate(&conn_a);
-    let plan = reserve(&tx, "host-1", "ws-1", "/tmp", "/bin/echo", &[], 80, 24).expect("reserve");
+    let plan = reserve(
+        &tx,
+        "host-1",
+        "ws-1",
+        "/tmp",
+        "/bin/echo",
+        &[],
+        None,
+        80,
+        24,
+    )
+    .expect("reserve");
     let hidden: i64 = conn_b
         .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
         .expect("count");
@@ -203,6 +215,7 @@ fn rollback_reservation_spawns_no_child() {
             dir.path().to_str().expect("utf8"),
             "/bin/sh",
             &["-c".into(), format!("touch {}", marker.display())],
+            None,
             80,
             24,
         )
@@ -310,6 +323,7 @@ fn default_spawn_matches_reserve_commit_launch() {
         "/tmp",
         "/bin/echo".into(),
         vec!["hello".into()],
+        None,
         80,
         24,
     )

@@ -30,7 +30,15 @@ const bridge: DesktopBridge = {
   addWorkspace: (value) => ipcRenderer.invoke("drogon:addWorkspace", value),
   chooseFolder: () => ipcRenderer.invoke("drogon:chooseFolder"),
   sessions: (value) => ipcRenderer.invoke("drogon:sessions", value),
-  start: (value) => ipcRenderer.invoke("drogon:start", value),
+  // Additive (R12-E restart reuse): the optional launch argv rides the same
+  // channel as an object; the bare-string shape is unchanged.
+  start: (value, launch) =>
+    ipcRenderer.invoke(
+      "drogon:start",
+      launch
+        ? { workspaceId: value, ...(launch.command !== undefined ? { command: launch.command } : {}), ...(launch.args !== undefined ? { args: launch.args } : {}) }
+        : value,
+    ),
   read: (value) => ipcRenderer.invoke("drogon:read", value),
   write: (value) => ipcRenderer.invoke("drogon:write", value),
   resize: (value) => ipcRenderer.invoke("drogon:resize", value),

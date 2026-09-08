@@ -2,6 +2,7 @@ import { ipcRenderer } from "electron";
 import {
   browserIpcChannels,
   type BrowserBridge,
+  type BrowserChordEvent,
   type BrowserContextMenuEvent,
   type BrowserFindResultEvent,
   type BrowserStateEvent,
@@ -43,5 +44,13 @@ export const browser: BrowserBridge = {
       listener(menu);
     ipcRenderer.on(browserIpcChannels.contextMenu, wrapped);
     return () => ipcRenderer.removeListener(browserIpcChannels.contextMenu, wrapped);
+  },
+  // Additive (R12-E): pane chords captured from the focused guest
+  // webContents (main-side before-input-event forwarder).
+  onChord: (listener: (event: BrowserChordEvent) => void) => {
+    const wrapped = (_event: unknown, chord: BrowserChordEvent) =>
+      listener(chord);
+    ipcRenderer.on(browserIpcChannels.chord, wrapped);
+    return () => ipcRenderer.removeListener(browserIpcChannels.chord, wrapped);
   },
 };

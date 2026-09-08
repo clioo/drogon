@@ -40,6 +40,7 @@ function fakeBridge(
     openDevTools: okNull as BrowserBridge["openDevTools"],
     onFindResult: () => () => {},
     onContextMenu: () => () => {},
+    onChord: () => () => {},
     ...overrides,
   };
 }

@@ -444,16 +444,9 @@ export function BrowserPanel({
     writeCaptureWindowOpen(next);
   };
 
-  // Reference keyboard, scoped to the active browser tab: the pane container
-  // owns Mod+L (address bar), Mod+R (reload) and Mod+F (find) exactly like
-  // the terminal owns its chords — preventDefault plus stopPropagation so
-  // the window-level registry (Mod+L toggles the right sidebar) never sees
-  // them while the user is in the page chrome.
-  const onPaneKeyDown = (event: React.KeyboardEvent) => {
-    const chord = matchBrowserPaneChord(event, isMacPlatform());
-    if (!chord || !active) return;
-    event.preventDefault();
-    event.stopPropagation();
+  // One chord runner shared by the pane keydown handler and the forwarded
+  // guest chords (R12-E): focus the address bar, reload, open find.
+  const runBrowserPaneChord = (chord: "focus-address-bar" | "reload" | "find") => {
     if (chord === "focus-address-bar") {
       dismissSuggestionsRef.current?.();
       addressInputRef.current?.focus();
@@ -464,6 +457,31 @@ export function BrowserPanel({
       setFindOpen(true);
     }
   };
+
+  // Reference keyboard, scoped to the active browser tab: the pane container
+  // owns Mod+L (address bar), Mod+R (reload) and Mod+F (find) exactly like
+  // the terminal owns its chords — preventDefault plus stopPropagation so
+  // the window-level registry (Mod+L toggles the right sidebar) never sees
+  // them while the user is in the page chrome.
+  const onPaneKeyDown = (event: React.KeyboardEvent) => {
+    const chord = matchBrowserPaneChord(event, isMacPlatform());
+    if (!chord || !active) return;
+    event.preventDefault();
+    event.stopPropagation();
+    runBrowserPaneChord(chord);
+  };
+
+  // Additive (R12-E): the same chords arrive via IPC while the guest
+  // (WebContentsView) has focus — main captures them from the guest's
+  // before-input-event and forwards here; only the tab that owns the
+  // focused guest acts, and only while it is still this pane's active tab.
+  useEffect(() => {
+    const dispose = bridge.onChord((event) => {
+      if (!active || event.tabId !== active.tabId) return;
+      runBrowserPaneChord(event.chord);
+    });
+    return dispose;
+  });
 
   const reloadKind = resolveBrowserReloadButtonLabelKind({
     loading: active?.loading ?? false,

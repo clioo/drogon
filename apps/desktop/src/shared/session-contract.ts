@@ -59,6 +59,13 @@ export type Session = {
    */
   agentState?: AgentState;
   agentStateAt?: string | null;
+  /**
+   * Additive (R12-E terminal restart): which harness launched this session
+   * (`harness.start`), so the exit overlay's Restart can re-launch the same
+   * harness. `null`/absent for plain `session.start` shells, whose restart
+   * re-uses `command`/`args` verbatim instead.
+   */
+  harnessId?: HarnessId | null;
 };
 export type Status = {
   hostId: string;
@@ -88,6 +95,15 @@ export type HarnessLaunchInput = {
   permissionMode: PermissionMode;
   requestId: string;
 };
+/**
+ * Additive (R12-E terminal restart): explicit launch argv for
+ * `start`, letting a restart re-launch the exact prior session command
+ * instead of the default shell.
+ */
+export type SessionLaunchReuse = {
+  command?: string;
+  args?: string[];
+};
 export type ReadResult = {
   session: Session;
   dataBase64: string;
@@ -104,7 +120,14 @@ export interface DesktopBridge extends FileBridge, BotBridge {
   addWorkspace(path: string): Promise<Result<Workspace>>;
   chooseFolder(): Promise<string | null>;
   sessions(workspaceId: string): Promise<Result<{ sessions: Session[] }>>;
-  start(workspaceId: string): Promise<Result<Session>>;
+  /**
+   * `launch` is additive (R12-E restart reuse): pass the prior session's
+   * recorded argv to re-launch it, or omit for the default shell.
+   */
+  start(
+    workspaceId: string,
+    launch?: SessionLaunchReuse,
+  ): Promise<Result<Session>>;
   harnesses(): Promise<Result<{ hostId: string; harnesses: Harness[] }>>;
   startHarness(input: HarnessLaunchInput): Promise<Result<Session>>;
   read(input: Identity & { cursor: number }): Promise<Result<ReadResult>>;

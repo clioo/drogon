@@ -27,7 +27,8 @@ mod session_admission_tests;
 pub(crate) type LaunchedSession = (String, Arc<SessionHandle>, Value);
 
 /// One sessions row as read back for verification: workspace, host,
-/// incarnation, command, args JSON, cols, rows, verdict, creation time.
+/// incarnation, command, args JSON, cols, rows, verdict, creation time,
+/// launch harness id (additive; part of the checked admission identity).
 type AdmissionRow = (
     String,
     String,
@@ -38,6 +39,7 @@ type AdmissionRow = (
     i64,
     String,
     String,
+    Option<String>,
 );
 
 pub(crate) struct PreparedSession {
@@ -48,6 +50,7 @@ pub(crate) struct PreparedSession {
     cwd: String,
     command: String,
     args: Vec<String>,
+    harness_id: Option<String>,
     cols: u16,
     rows: u16,
     created_at: String,
@@ -210,6 +213,7 @@ pub(crate) fn reserve(
     cwd: &str,
     command: &str,
     args: &[String],
+    harness_id: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<PreparedSession, RpcError> {
@@ -227,13 +231,14 @@ pub(crate) fn reserve(
         cwd: cwd.into(),
         command: command.into(),
         args: args.to_vec(),
+        harness_id,
         cols,
         rows,
         created_at: crate::now_rfc3339(),
     };
     tx.execute(
-        "INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', NULL, ?9)",
+        "INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', NULL, ?9, ?10)",
         rusqlite::params![
             plan.session_id,
             plan.workspace_id,
@@ -244,6 +249,7 @@ pub(crate) fn reserve(
             plan.cols,
             plan.rows,
             plan.created_at,
+            plan.harness_id,
         ],
     )
     .map_err(error::from_sqlite)?;
@@ -294,6 +300,7 @@ pub(crate) fn launch_reserved(
                 plan.host_id.clone(),
                 plan.command.clone(),
                 plan.args.clone(),
+                plan.harness_id.clone(),
                 plan.created_at.clone(),
                 plan.cols,
                 plan.rows,
@@ -321,7 +328,7 @@ pub(crate) fn launch_reserved(
 fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), RpcError> {
     let row: Option<AdmissionRow> = conn
         .query_row(
-            "SELECT workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, created_at \
+            "SELECT workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, created_at, harness_id \
              FROM sessions WHERE id = ?1",
             [&plan.session_id],
             |r| {
@@ -335,6 +342,7 @@ fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), Rpc
                     r.get(6)?,
                     r.get(7)?,
                     r.get(8)?,
+                    r.get(9)?,
                 ))
             },
         )
@@ -350,6 +358,7 @@ fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), Rpc
         rows,
         verdict,
         created_at,
+        harness_id,
     )) = row
     else {
         return Err(error::unverifiable(
@@ -370,6 +379,7 @@ fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), Rpc
         || cols != i64::from(plan.cols)
         || rows != i64::from(plan.rows)
         || created_at != plan.created_at
+        || harness_id != plan.harness_id
     {
         return Err(error::internal_error("reservation does not match its plan"));
     }

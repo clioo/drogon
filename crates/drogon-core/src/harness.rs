@@ -58,6 +58,7 @@ impl Engine {
                 &cwd,
                 &plan.command,
                 &args,
+                Some(harness_id_wire(request.harness_id).to_string()),
                 cols,
                 rows,
             )?;
@@ -126,4 +127,16 @@ pub(crate) fn resolve_launch(
         .executable
         .ok_or_else(|| error::not_found("Harness is not installed on this execution host"))?;
     plan_launch(request, &executable)
+}
+
+/// The wire spelling of the harness id, matching the shared session
+/// contract's `HarnessId` union ("claude" | "pi" | "opencode" |
+/// "antigravity") so a session record round-trips into `harness.start`.
+fn harness_id_wire(harness_id: HarnessId) -> &'static str {
+    match harness_id {
+        HarnessId::Claude => "claude",
+        HarnessId::Pi => "pi",
+        HarnessId::Opencode => "opencode",
+        HarnessId::Antigravity => "antigravity",
+    }
 }

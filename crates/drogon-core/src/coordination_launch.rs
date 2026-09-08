@@ -181,6 +181,7 @@ impl Engine {
             &cwd,
             &plan.harness.command,
             &plan.harness.args,
+            None,
             100,
             32,
         )?;
