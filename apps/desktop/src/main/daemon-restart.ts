@@ -20,6 +20,17 @@ import {
   type NativeCall,
 } from "../shared/daemon-contract";
 import type { Status } from "../shared/session-contract";
+import { z } from "zod";
+import { resultSchemas } from "../shared/result-validation";
+
+// This method is only used by the daemon restart flow and therefore is kept
+// out of the coordinator-owned shared result map. Native-client still needs a
+// strict schema before it can accept the daemon's successful reply.
+resultSchemas["runtime.shutdown"] = z.object({
+  hostId: z.string().min(1).max(128),
+  serviceInstanceId: z.string().min(1).max(128),
+  accepted: z.literal(true),
+});
 
 export type DaemonRestartDeps = {
   isPackaged: boolean;
@@ -242,10 +253,9 @@ export async function handleDaemonRestart(
         shutdown.error.message.includes("expected contract");
       // Refusals (busy, stale fences, bad args) are final: waiting would
       // only burn the shutdown budget watching a daemon that said no. An
-      // `internal_error` here is most likely the admitted reply failing
-      // this app's own result schema (which has no `runtime.shutdown`
-      // entry), and `unverifiable` is transport loss that may already be
-      // the daemon going away — both are verified by effect below.
+      // `unverifiable` is transport loss that may already be the daemon
+      // going away. Keep the legacy contract-gap tolerance for an older
+      // daemon, but successful replies are validated by the local schema.
       if (code !== "unverifiable" && !contractGap)
         return notRestarted(
           deps,

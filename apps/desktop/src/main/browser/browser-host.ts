@@ -66,7 +66,12 @@ export type GuestContentsLike = {
   getURL(): string;
   getTitle(): string;
   executeJavaScript(code: string): Promise<unknown>;
-  navigationHistory: { canGoBack(): boolean; canGoForward(): boolean };
+  navigationHistory: {
+    canGoBack(): boolean;
+    canGoForward(): boolean;
+    goBack(): void;
+    goForward(): void;
+  };
   session: GuestSessionLike;
   setWindowOpenHandler(
     handler: (details: { url: string }) => { action: "deny" },
@@ -162,6 +167,8 @@ export function buildFillScript(selector: string, text: string): string {
 
 type GuestVerdict = { ok?: unknown; error?: unknown };
 
+type PendingNavigation = { url: string };
+
 function verdictError(verdict: unknown): string | null {
   if (
     verdict &&
@@ -181,6 +188,9 @@ export class BrowserHost {
   private state: BrowserHostSnapshot = initialHostSnapshot();
   private views = new Map<string, GuestViewLike | WebContentsView>();
   private chordDisposers = new Map<string, () => void>();
+  /** Main-frame target until commit/failure; getURL() is only last-commit truth. */
+  private pendingNavigations = new Map<string, PendingNavigation>();
+  private committedUrls = new Map<string, string>();
   private lastRect: BrowserBounds | null = null;
 
   constructor(
@@ -250,7 +260,7 @@ export class BrowserHost {
     const bounds = this.currentBounds();
     const record = this.state.tabs.find((tab) => tab.tabId === active);
     this.debug(
-      `visibility active=${active} phase=${record?.phase} committed=${record?.committed} bounds=${JSON.stringify(bounds)} views=${this.views.size}`,
+      `visibility active=${active} url=${record?.url} title=${record?.title} phase=${record?.phase} committed=${record?.committed} back=${record?.canGoBack} forward=${record?.canGoForward} bounds=${JSON.stringify(bounds)} views=${this.views.size}`,
     );
     for (const [tabId, view] of this.views) {
       const visible =
@@ -293,6 +303,114 @@ export class BrowserHost {
     });
   }
 
+  private rememberRequestedNavigation(tabId: string, url: string): void {
+    this.pendingNavigations.set(tabId, { url });
+  }
+
+  private navigationStarted(tabId: string, url: string): void {
+    this.pendingNavigations.set(tabId, { url });
+    this.update({ type: "load-started", tabId, url });
+  }
+
+  private navigationMatches(tabId: string, url: string): boolean {
+    const pending = this.pendingNavigations.get(tabId);
+    // Every loadURL call records a target before Electron emits events. A
+    // missing pending record means that navigation already settled; late
+    // failures/commits must not rewrite the next document.
+    return pending !== undefined && (!url || pending.url === url);
+  }
+
+  private committedUrl(tabId: string, contents: GuestContentsLike): string {
+    return this.committedUrls.get(tabId) || contents.getURL() || "about:blank";
+  }
+
+  private commitNavigation(
+    tabId: string,
+    url: string,
+    allowWithoutPending = false,
+  ): void {
+    const contents = this.contentsOf(tabId);
+    const pending = this.pendingNavigations.get(tabId);
+    if (
+      !contents ||
+      (!allowWithoutPending && !pending) ||
+      (pending && !this.navigationMatches(tabId, url))
+    )
+      return;
+    const committed = url || contents.getURL() || "about:blank";
+    this.pendingNavigations.delete(tabId);
+    this.committedUrls.set(tabId, committed);
+    this.update({ type: "navigation-committed", tabId, url: committed });
+    this.refreshHistory(tabId);
+  }
+
+  private abortNavigation(tabId: string): void {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return;
+    this.pendingNavigations.delete(tabId);
+    this.update({
+      type: "navigation-aborted",
+      tabId,
+      url: this.committedUrl(tabId, contents),
+    });
+    this.refreshHistory(tabId);
+  }
+
+  private failNavigation(
+    tabId: string,
+    errorCode: number,
+    errorDescription: string,
+    validatedURL: string,
+  ): void {
+    const contents = this.contentsOf(tabId);
+    if (!contents || !this.navigationMatches(tabId, validatedURL)) return;
+    this.pendingNavigations.delete(tabId);
+    const message = mapGuestLoadError({
+      errorCode,
+      errorDescription,
+      validatedURL,
+    });
+    if (message === null) {
+      this.abortNavigation(tabId);
+      return;
+    }
+    this.update({
+      type: "load-failed",
+      tabId,
+      message,
+      loadError: {
+        kind: "failed",
+        code: errorCode,
+        description: errorDescription,
+        url: validatedURL,
+      },
+    });
+    this.refreshHistory(tabId);
+  }
+
+  private loadURL(tabId: string, url: string): void {
+    const contents = this.contentsOf(tabId);
+    if (!contents) return;
+    this.rememberRequestedNavigation(tabId, url);
+    let result: Promise<void> | void;
+    try {
+      result = contents.loadURL(url);
+    } catch (error) {
+      this.failNavigation(tabId, -2, String(error), url);
+      return;
+    }
+    // Electron returns a promise, while injected test guests may model the
+    // call as fire-and-forget. Both are valid adapters; only attach a catch
+    // when the adapter actually returned a thenable.
+    if (result && typeof result.then === "function") {
+      void result.catch((error) => {
+        const text = String(error);
+        const aborted = text.includes("ERR_ABORTED") || text.includes("(-3)");
+        this.failNavigation(tabId, aborted ? -3 : -2, text, url);
+      });
+    }
+  }
+
   createTab(workspaceId: string, rawUrl?: string): BrowserTabState | { blocked: string } {
     const window = this.getWindow();
     if (!window) return { blocked: "Browser window is not ready." };
@@ -314,18 +432,85 @@ export class BrowserHost {
       this.createTab(workspaceId, url);
       return { action: "deny" };
     });
+    contents.on("did-start-navigation", (
+      _event: never,
+      url: never,
+      _isInPlace: never,
+      isMainFrame: never,
+    ) => {
+      if (!isMainFrame) return;
+      const target = url as string;
+      this.debug(`did-start-navigation tab=${tabId} url=${target}`);
+      this.navigationStarted(tabId, target);
+    });
+    const commitEvent = (eventName: string, url: string): void => {
+      this.debug(`${eventName} tab=${tabId} url=${url}`);
+      this.commitNavigation(tabId, url);
+    };
+    contents.on("did-navigate", (
+      _event: never,
+      url: never,
+      _httpResponseCode: never,
+      _httpStatusText: never,
+    ) => {
+      // Electron's did-navigate is main-frame-only (unlike
+      // did-frame-navigate, which is filtered below).
+      commitEvent("did-navigate", url as string);
+    });
+    // Electron 44 emits did-frame-navigate for WebContentsView main-frame
+    // commits where did-navigate is not delivered. It carries the same
+    // authoritative URL and is filtered to the main frame, so Forward cannot
+    // remain stuck on the outgoing document when did-stop-loading wins the
+    // race.
+    contents.on("did-frame-navigate", (
+      _event: never,
+      url: never,
+      _httpResponseCode: never,
+      _httpStatusText: never,
+      isMainFrame: never,
+    ) => {
+      if (!isMainFrame) return;
+      commitEvent("did-frame-navigate", url as string);
+    });
+    contents.on("did-redirect-navigation", (
+      _event: never,
+      url: never,
+      _isInPlace: never,
+      isMainFrame: never,
+    ) => {
+      if (!isMainFrame) return;
+      const pending = this.pendingNavigations.get(tabId);
+      if (pending) {
+        pending.url = url as string;
+        this.debug(`did-redirect-navigation tab=${tabId} url=${pending.url}`);
+      }
+    });
+    contents.on("did-navigate-in-page", (
+      _event: never,
+      url: never,
+      isMainFrame: never,
+    ) => {
+      if (!isMainFrame) return;
+      const committed = url as string;
+      this.debug(`did-navigate-in-page tab=${tabId} url=${committed}`);
+      this.commitNavigation(tabId, committed, true);
+    });
     contents.on("did-start-loading", () => {
-      // Before commit getURL() is still the previous (possibly empty or
-      // about:blank) URL; the requested URL was already recorded by
-      // createTab/navigate, so a blank read must never clobber it back —
-      // an unsafe-port failure would otherwise strand the tab on
-      // about:blank with an error for another URL.
-      const url = contents.getURL();
-      if (url && url !== "about:blank")
-        this.update({ type: "load-started", tabId, url });
+      // `getURL()` is the previous committed URL until navigation commits;
+      // did-start-navigation above is the only event allowed to choose the
+      // address-bar target. Keep this event for diagnostics only.
+      this.debug(`did-start-loading tab=${tabId} getURL=${contents.getURL()}`);
     });
     contents.on("did-stop-loading", () => {
-      this.update({ type: "load-stopped", tabId, url: contents.getURL() });
+      // did-stop-loading carries no navigation URL and can arrive after a
+      // superseded request. History is safe to refresh here; readiness and
+      // URL selection belong to the commit/failure events above. The small
+      // fallback only serves adapters that omit navigation events entirely.
+      const pending = this.pendingNavigations.get(tabId);
+      this.debug(`did-stop-loading tab=${tabId} getURL=${contents.getURL()}`);
+      if (pending === undefined) {
+        this.update({ type: "load-stopped", tabId, url: contents.getURL() });
+      }
       this.refreshHistory(tabId);
     });
     contents.on(
@@ -335,29 +520,14 @@ export class BrowserHost {
         const code = errorCode as number;
         const description = errorDescription as string;
         const failedUrl = validatedURL as string;
-        const message = mapGuestLoadError({
-          errorCode: code,
-          errorDescription: description,
-          validatedURL: failedUrl,
-        });
-        // Abort (-3) is a caller-initiated stop: report the stop, no error.
-        if (message === null) {
-          this.update({
-            type: "load-stopped",
-            tabId,
-            url: contents.getURL(),
-          });
-          return;
-        }
-        this.update({
-          type: "load-failed",
-          tabId,
-          message,
-          loadError: { kind: "failed", code, description, url: failedUrl },
-        });
+        this.debug(
+          `did-fail-load tab=${tabId} code=${code} description=${description} validatedURL=${failedUrl} getURL=${contents.getURL()}`,
+        );
+        this.failNavigation(tabId, code, description, failedUrl);
       },
     );
     contents.on("page-title-updated", (_event: never, title: never) => {
+      this.debug(`page-title-updated tab=${tabId} title=${String(title)} getURL=${contents.getURL()}`);
       this.update({ type: "title-changed", tabId, title: title as string });
     });
     // Additive (R11-B chrome): guest find matches and context-menu requests
@@ -407,7 +577,8 @@ export class BrowserHost {
     console.log(
       `[drogon] browser guest created: tab=${tabId} preload=none nodeIntegration=false sandbox=true permissions=denied downloads=blocked`,
     );
-    void contents.loadURL(normalized.url);
+    this.debug(`create-load tab=${tabId} url=${normalized.url}`);
+    this.loadURL(tabId, normalized.url);
     const created = publicTabStates(this.state).find((tab) => tab.tabId === tabId);
     if (created) this.events.onPopupRouted?.(created);
     return created ?? { blocked: "Tab was closed before it loaded." };
@@ -432,6 +603,8 @@ export class BrowserHost {
     if (typeof contents.close === "function") contents.close();
     else if (typeof contents.destroy === "function") contents.destroy();
     this.views.delete(tabId);
+    this.pendingNavigations.delete(tabId);
+    this.committedUrls.delete(tabId);
     this.update({ type: "tab-closed", tabId });
     this.applyVisibility();
     return true;
@@ -456,7 +629,8 @@ export class BrowserHost {
     // Optimistic request record: the address bar follows immediately, and
     // the host's commit/fail event for this navigation settles it.
     this.update({ type: "load-started", tabId, url: normalized.url });
-    void contents.loadURL(normalized.url);
+    this.debug(`navigate-load tab=${tabId} url=${normalized.url}`);
+    this.loadURL(tabId, normalized.url);
     this.applyVisibility();
     const tab = publicTabStates(this.state).find((item) => item.tabId === tabId);
     return tab ?? { blocked: "Tab is not open." };
@@ -467,7 +641,12 @@ export class BrowserHost {
     if (!contents) return { blocked: "Tab is not open." };
     if (!contents.navigationHistory.canGoBack())
       return { blocked: "No earlier page in this tab." };
-    contents.goBack();
+    this.debug(`go-back tab=${tabId}`);
+    try {
+      contents.navigationHistory.goBack();
+    } catch {
+      return { blocked: "The page could not go back." };
+    }
     return this.describe(tabId);
   }
 
@@ -476,7 +655,12 @@ export class BrowserHost {
     if (!contents) return { blocked: "Tab is not open." };
     if (!contents.navigationHistory.canGoForward())
       return { blocked: "No later page in this tab." };
-    contents.goForward();
+    this.debug(`go-forward tab=${tabId}`);
+    try {
+      contents.navigationHistory.goForward();
+    } catch {
+      return { blocked: "The page could not go forward." };
+    }
     return this.describe(tabId);
   }
 
@@ -490,7 +674,12 @@ export class BrowserHost {
   stop(tabId: string): BrowserTabState | { blocked: string } {
     const contents = this.contentsOf(tabId);
     if (!contents) return { blocked: "Tab is not open." };
-    contents.stop();
+    this.abortNavigation(tabId);
+    try {
+      contents.stop();
+    } catch {
+      return { blocked: "The page could not be stopped." };
+    }
     return this.describe(tabId);
   }
 
