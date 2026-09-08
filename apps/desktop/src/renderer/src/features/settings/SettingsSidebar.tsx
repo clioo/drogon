@@ -24,8 +24,11 @@ export function SettingsSidebar({
   searchAutoFocus = false,
   onBack,
   onSelectSection,
+  projectNav = null,
+  onSelectProject,
 }: {
-  activeSectionId: SettingsSectionId;
+  /** "project" selects the dynamic per-project row (R14-A). */
+  activeSectionId: SettingsSectionId | "project";
   /** While searching, the nav lists every match (reference behavior). */
   visibleSectionIds?: readonly SettingsSectionId[];
   searchQuery: string;
@@ -34,6 +37,9 @@ export function SettingsSidebar({
   searchAutoFocus?: boolean;
   onBack: () => void;
   onSelectSection: (sectionId: SettingsSectionId) => void;
+  /** Per-project row (R14-A): shown only while a project section is open. */
+  projectNav?: { title: string; active: boolean } | null;
+  onSelectProject?: () => void;
 }): React.JSX.Element {
   return (
     <aside className="flex w-[280px] shrink-0 flex-col border-r border-border bg-sidebar">
@@ -96,6 +102,22 @@ export function SettingsSidebar({
               </button>
             );
           })}
+          {projectNav ? (
+            <button
+              key="project"
+              type="button"
+              aria-current={projectNav.active ? "page" : undefined}
+              data-current={projectNav.active ? "true" : undefined}
+              onClick={() => onSelectProject?.()}
+              className={
+                projectNav.active
+                  ? "flex w-full items-center gap-2 rounded-lg bg-sidebar-accent px-3 py-1.5 text-left text-[13px] font-medium text-foreground outline-none ring-1 ring-ring/25 transition-colors duration-150 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  : "flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] text-muted-foreground outline-none transition-colors duration-150 hover:bg-sidebar-accent/60 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              }
+            >
+              <span className="truncate">{projectNav.title}</span>
+            </button>
+          ) : null}
         </div>
       </div>
     </aside>

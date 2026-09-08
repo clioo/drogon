@@ -7,7 +7,7 @@
 // (no accounts/agents-catalog/repo sections); search filters both the nav
 // and the pane, and ⌘F focuses the search field.
 import { useEffect, useRef, useState } from "react";
-import type { Harness } from "../../../../shared/session-contract";
+import type { Harness, Project } from "../../../../shared/session-contract";
 import type { HarnessAgentDefault, Theme, TerminalGpuAcceleration } from "../../settings-store";
 import { AgentsSection } from "./agents-section";
 import { AppearanceSection } from "./appearance-section";
@@ -21,6 +21,16 @@ import {
   type SettingsSectionId,
 } from "./settings-sections";
 import { filterSettingsSections } from "./settings-search";
+import {
+  matchesProjectSettingsQuery,
+  ProjectSettingsSection,
+  ProjectSettingsSectionChrome,
+} from "./project-settings-section";
+
+/** Page-level section: the five static sections plus the dynamic
+   per-project section (R14-A). The static vocabulary in
+   settings-sections.ts is untouched — existing tests pin it. */
+export type SettingsPageSection = SettingsSectionId | "project";
 
 export type SettingsPageProps = {
   theme: Theme;
@@ -53,13 +63,19 @@ export type SettingsPageProps = {
   onNotifyChange: (next: boolean) => void;
   /** Selected workspace path for the git probe; null renders the honest empty state. */
   workspacePath: string | null;
-  initialSection?: SettingsSectionId;
+  initialSection?: SettingsPageSection;
+  /** Per-project section model (R14-A); null hides the project section. */
+  project?: Project | null;
+  /** Removes the project registration; the page closes on success. */
+  onRemoveProject?: (projectId: string) => void;
   onBack: () => void;
 };
 
 export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
-  const [section, setSection] = useState<SettingsSectionId>(
-    props.initialSection && isSettingsSectionId(props.initialSection)
+  const [section, setSection] = useState<SettingsPageSection>(
+    props.initialSection &&
+      (props.initialSection === "project" ||
+        isSettingsSectionId(props.initialSection))
       ? props.initialSection
       : DEFAULT_SETTINGS_SECTION,
   );
@@ -94,16 +110,31 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
   // While searching the pane stacks every match (the reference keeps the
   // pane on the selected match; stacking is this page's honest variant and
   // keeps every control reachable without extra navigation).
-  const visible: SettingsSectionId[] = searching
-    ? matches
-    : matches.includes(section)
-      ? [section]
-      : matches;
+  const visible: SettingsSectionId[] =
+    section === "project"
+      ? []
+      : searching
+        ? matches
+        : matches.includes(section)
+          ? [section]
+          : matches;
+  // The dynamic per-project section (R14-A): selected explicitly, or
+  // stacked with the static matches while searching on name/path.
+  const showProject =
+    props.project != null &&
+    (section === "project" ||
+      (searching && matchesProjectSettingsQuery(searchQuery, props.project)));
 
   return (
     <div className="settings-view-shell flex min-h-0 flex-1 overflow-hidden bg-background">
       <SettingsSidebar
-        activeSectionId={visible.includes(section) ? section : (visible[0] ?? section)}
+        activeSectionId={
+          section === "project"
+            ? "project"
+            : visible.includes(section)
+              ? section
+              : (visible[0] ?? section)
+        }
         visibleSectionIds={searching ? matches : undefined}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -111,11 +142,20 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
         searchAutoFocus
         onBack={props.onBack}
         onSelectSection={setSection}
+        projectNav={
+          props.project
+            ? {
+                title: `Project Settings > ${props.project.name}`,
+                active: section === "project",
+              }
+            : null
+        }
+        onSelectProject={() => setSection("project")}
       />
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-10 px-8 pb-24 pt-10">
-            {visible.length === 0 ? (
+            {visible.length === 0 && !showProject ? (
               <div className="flex min-h-[24rem] items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/30 text-sm text-muted-foreground">
                 No settings found for &ldquo;{searchQuery.trim()}&rdquo;
               </div>
@@ -164,6 +204,16 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                   />
                 ) : null}
                 {visible.includes("shortcuts") ? <ShortcutsSection /> : null}
+                {showProject && props.project ? (
+                  <ProjectSettingsSectionChrome project={props.project}>
+                    <ProjectSettingsSection
+                      project={props.project}
+                      onRemoveProject={(projectId) =>
+                        props.onRemoveProject?.(projectId)
+                      }
+                    />
+                  </ProjectSettingsSectionChrome>
+                ) : null}
               </>
             )}
           </div>

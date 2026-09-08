@@ -20,6 +20,7 @@ import type {
   AgentState,
   Harness,
   HarnessLaunchInput,
+  Project,
   Result,
   Session,
   Status,
@@ -436,7 +437,13 @@ export function App() {
     null,
   );
   const [settingsInitialSection, setSettingsInitialSection] =
-    useState<SettingsSectionId>("appearance");
+    useState<SettingsSectionId | "project">("appearance");
+  // Per-project settings section (task R14-A): the project whose
+  // "Project Settings > {name}" section the settings page shows. Null
+  // hides the project section; set together with the initial section.
+  const [settingsProject, setSettingsProject] = useState<Project | null>(
+    null,
+  );
   const [revision, setRevision] = useState(0);
   const [harnessCapability, setHarnessCapability] = useState(false);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
@@ -1566,6 +1573,42 @@ export function App() {
     }
     return null;
   };
+  // Project removal (task R14-A) behind the remove-project dialog and the
+  // project settings section. Removes the registration only — never files
+  // (the source's dialog promises exactly that, with no counts and no
+  // refusal, so no gating here). Same submit contract as the worktree
+  // submit above: verbatim daemon error, or null on success.
+  const submitRemoveProject = async (project: {
+    id: string;
+  }): Promise<string | null> => {
+    const bridge = windowProjectBridge(window.drogon);
+    if (typeof bridge.projectRemove !== "function")
+      return "Projects unavailable: service does not advertise project.v1";
+    try {
+      const result = await bridge.projectRemove({ id: project.id });
+      if (!result.ok) return result.error.message;
+    } catch {
+      return "Could not remove the project. Retry the connection.";
+    }
+    setProjectAction(null);
+    setSettingsProject((current) =>
+      current?.id === project.id ? null : current,
+    );
+    await refresh();
+    // The removed project's workspaces are gone with its worktree
+    // registrations: move selection to the first remaining workspace.
+    try {
+      const listed = await window.drogon.workspaces();
+      if (
+        listed.ok &&
+        !listed.result.workspaces.some((item) => item.id === selected)
+      )
+        selectWorkspaceId(listed.result.workspaces[0]?.id ?? "");
+    } catch {
+      // Selection stays: the refreshed lists already dropped the project.
+    }
+    return null;
+  };
   // Worktree display-title rename (task R9-A): renames the card title
   // only, never the branch or directory; refresh re-reads the title.
   const submitRenameWorktree = async (
@@ -1799,6 +1842,23 @@ export function App() {
     );
     if (initialSection) setSettingsInitialSection(initialSection);
     setRoute(SETTINGS_ROUTE_ID);
+  };
+  // Per-project settings (task R14-A): the sidebar "Project Settings" row
+  // opens the settings page on this project's section.
+  const openProjectSettings = (project: Project) => {
+    setSettingsProject(project);
+    setSettingsReturnRoute((current) =>
+      route === SETTINGS_ROUTE_ID ? current : route,
+    );
+    setSettingsInitialSection("project");
+    setRoute(SETTINGS_ROUTE_ID);
+  };
+  // Project settings section removal: on success the page closes back to
+  // the route the settings page was opened from.
+  const removeProjectFromSettings = (projectId: string) => {
+    void submitRemoveProject({ id: projectId }).then((failure) => {
+      if (!failure) closeSettings();
+    });
   };
   const closeSettings = () => setRoute(settingsReturnRoute);
   // The session-details panel lives in the right sidebar; its visible
@@ -2186,7 +2246,9 @@ export function App() {
             onBrowseProject={browseProject}
             onSubmitAddProject={submitAddProject}
             onSubmitRemoveWorktree={submitRemoveWorktree}
+            onSubmitRemoveProject={submitRemoveProject}
             onSubmitRenameWorktree={submitRenameWorktree}
+            onOpenProjectSettings={openProjectSettings}
             onOpenSettings={openSettings}
           />
         ) : null}
@@ -2201,6 +2263,7 @@ export function App() {
                 style={{ flex: 1 }}
               >
                 <SettingsPage
+                  key={`settings:${settingsInitialSection}:${settingsProject?.id ?? "-"}`}
                   theme={theme}
                   onThemeChange={changeTheme}
                   terminalFontSize={terminalFontSize}
@@ -2218,6 +2281,8 @@ export function App() {
                   onNotifyChange={changeNotifyOnAgentNeedsInput}
                   workspacePath={current?.path ?? null}
                   initialSection={settingsInitialSection}
+                  project={settingsProject}
+                  onRemoveProject={removeProjectFromSettings}
                   onBack={closeSettings}
                 />
               </section>

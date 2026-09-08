@@ -30,18 +30,36 @@ import type {
   Workspace,
 } from "../../../../shared/session-contract";
 import { Button } from "../../components/ui/button";
+import {
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from "../../components/ui/dropdown-menu";
 import type { ProjectGroup } from "./project-adapter";
 import { filterProjectGroups } from "./project-adapter";
 import { isWideSidebarHeader } from "./app-chrome-layout";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
 import { readSkipDeleteWorktreeConfirm } from "./DeleteWorktreeSkipConfirmOption";
+import {
+  PROJECT_HEADER_ACTIONS_CLASS_NAME,
+  ProjectActionsMenu,
+} from "./project-actions-menu";
+import { RemoveProjectDialog } from "./RemoveProjectDialog";
+import {
+  filterGroupsBySelectedProjects,
+  getProjectsFilterVisibilityLabel,
+} from "./sidebar-options-show";
 import { WorktreeCard } from "./WorktreeCard";
 
 /** Which project dialog the sidebar currently shows, if any. */
 export type ProjectAction =
   | { kind: "add" }
-  | { kind: "remove"; worktreeId: string };
+  | { kind: "remove"; worktreeId: string }
+  | { kind: "remove-project"; projectId: string };
 
 /** Small ghost icon button with a tooltip, like the source header uses. */
 function HeaderIconButton({
@@ -82,20 +100,94 @@ function HeaderIconButton({
   );
 }
 
-/** The options menu body: Add Project plus this repo's text filter. */
+/**
+ * The options menu body: the source's "Workspace options" label and Show
+ * section (Projects row with the nested multi-select panel), then this
+ * repo's Add Project entry and text filter. Group by / Sort by / display
+ * rows are absent — no backing stores in the MVP (see the PR not-ported
+ * list).
+ */
 function OptionsMenuContent({
+  groups,
+  selectedProjectIds,
+  onToggleProject,
+  onClearProjects,
   filter,
   onFilterChange,
   addDisabled,
   onAddProject,
 }: {
+  groups: ProjectGroup[];
+  selectedProjectIds: readonly string[];
+  onToggleProject: (projectId: string) => void;
+  onClearProjects: () => void;
   filter: string;
   onFilterChange: (value: string) => void;
   addDisabled: boolean;
   onAddProject: () => void;
 }): React.JSX.Element {
+  const projects = groups.map((group) => group.project);
+  const selectedCount = projects.filter((project) =>
+    selectedProjectIds.includes(project.id),
+  ).length;
+  const hasProjectsFilter = selectedCount > 0;
+  const visibilityLabel = getProjectsFilterVisibilityLabel(
+    projects,
+    selectedProjectIds,
+  );
   return (
     <>
+      <DropdownMenuLabel className="pb-0 text-sm text-foreground">
+        Workspace options
+      </DropdownMenuLabel>
+      {groups.length > 1 && (
+        <>
+          <DropdownMenuLabel>Show</DropdownMenuLabel>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <span className="flex flex-1 items-center justify-between gap-3">
+                <span>Projects</span>
+                <span className="min-w-0 truncate text-[11px] font-medium text-muted-foreground">
+                  {visibilityLabel}
+                </span>
+              </span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-64">
+              <div className="flex items-center justify-between px-2 py-1">
+                <span className="text-[11px] font-semibold text-muted-foreground">
+                  Projects
+                  {hasProjectsFilter && (
+                    <span className="ml-1.5 font-medium text-foreground">
+                      · {selectedCount}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={onClearProjects}
+                  className="rounded-full px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40 disabled:hover:bg-transparent"
+                  disabled={!hasProjectsFilter}
+                >
+                  Clear
+                </button>
+              </div>
+              {projects.map((project) => (
+                <DropdownMenuCheckboxItem
+                  key={project.id}
+                  checked={selectedProjectIds.includes(project.id)}
+                  // Keep the menu open so people can compare selections
+                  // without reopening the same panel.
+                  onSelect={(event) => event.preventDefault()}
+                  onCheckedChange={() => onToggleProject(project.id)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSeparator />
+        </>
+      )}
       <DropdownMenu.Item
         className="sidebar-menu-item"
         disabled={addDisabled}
@@ -139,9 +231,11 @@ export function ProjectList({
   onCreateWorkspace,
   onOpenAction,
   onCloseAction,
+  onOpenProjectSettings,
   onBrowse,
   onSubmitAdd,
   onSubmitRemove,
+  onSubmitRemoveProject,
   onSubmitRename,
 }: {
   groups: ProjectGroup[];
@@ -159,31 +253,55 @@ export function ProjectList({
   onCreateWorkspace: (projectId?: string) => void;
   onOpenAction: (action: ProjectAction) => void;
   onCloseAction: () => void;
+  /** Opens the settings page on the given project's section. */
+  onOpenProjectSettings: (project: Project) => void;
   onBrowse: () => Promise<string | null>;
   onSubmitAdd: (input: {
     path: string;
     name?: string;
   }) => Promise<string | null>;
   onSubmitRemove: (worktree: Worktree, force: boolean) => Promise<string | null>;
+  /** Removes the project registration (never files); resolves an error verbatim, or null. */
+  onSubmitRemoveProject: (project: Project) => Promise<string | null>;
   onSubmitRename: (worktree: Worktree, name: string) => Promise<string | null>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const [activityOnly, setActivityOnly] = useState(false);
-  const visible = filterProjectGroups(groups, workspaces, filter);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const visible = filterGroupsBySelectedProjects(
+    filterProjectGroups(groups, workspaces, filter),
+    selectedProjectIds,
+  );
   const active = activityOnly
     ? visible.filter((group) => groupHasLiveSession(group, sessions))
     : visible;
   const filterActive = filter.trim() !== "";
+  const projectsFilterCount = groups.filter((group) =>
+    selectedProjectIds.includes(group.project.id),
+  ).length;
+  const activeFilterCount =
+    (filterActive ? 1 : 0) + projectsFilterCount;
+  const hasAnyFilter = activeFilterCount > 0;
+  const activeFilterLabel = `${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"}`;
   const removeTarget = findWorktree(groups, action);
+  const removeProjectTarget = findProject(groups, action);
   const activityLabel = activityOnly ? "Turn off activity view" : "View activity";
-  const optionsLabel = filterActive
-    ? "Workspace options (1 filter active)"
+  const optionsLabel = hasAnyFilter
+    ? `Workspace options (${activeFilterLabel} active)`
     : "Workspace options";
+  const toggleProject = (projectId: string) => {
+    setSelectedProjectIds((current) =>
+      current.includes(projectId)
+        ? current.filter((id) => id !== projectId)
+        : [...current, projectId],
+    );
+  };
   const wide = isWideSidebarHeader(sidebarWidth);
   const clearFilters = () => {
     setFilter("");
     setActivityOnly(false);
+    setSelectedProjectIds([]);
   };
   return (
     <section className="shell-projects">
@@ -220,12 +338,12 @@ export function ProjectList({
                         className="size-3.5"
                         strokeWidth={2.25}
                       />
-                      {filterActive && (
+                      {hasAnyFilter && (
                         <span
                           aria-hidden
                           className="absolute -top-0.5 -right-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-medium leading-none text-primary-foreground"
                         >
-                          1
+                          {activeFilterCount > 9 ? "9+" : activeFilterCount}
                         </span>
                       )}
                     </Button>
@@ -249,6 +367,10 @@ export function ProjectList({
                   sideOffset={8}
                 >
                   <OptionsMenuContent
+                    groups={groups}
+                    selectedProjectIds={selectedProjectIds}
+                    onToggleProject={toggleProject}
+                    onClearProjects={() => setSelectedProjectIds([])}
                     filter={filter}
                     onFilterChange={setFilter}
                     addDisabled={addDisabled}
@@ -280,12 +402,12 @@ export function ProjectList({
                       aria-label="More workspace actions"
                     >
                       <Ellipsis className="size-3.5" strokeWidth={2.25} />
-                      {filterActive && (
+                      {hasAnyFilter && (
                         <span
                           aria-hidden
                           className="absolute -top-0.5 -right-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-medium leading-none text-primary-foreground"
                         >
-                          1
+                          {activeFilterCount > 9 ? "9+" : activeFilterCount}
                         </span>
                       )}
                     </Button>
@@ -309,6 +431,10 @@ export function ProjectList({
                   sideOffset={8}
                 >
                   <OptionsMenuContent
+                    groups={groups}
+                    selectedProjectIds={selectedProjectIds}
+                    onToggleProject={toggleProject}
+                    onClearProjects={() => setSelectedProjectIds([])}
                     filter={filter}
                     onFilterChange={setFilter}
                     addDisabled={addDisabled}
@@ -355,6 +481,10 @@ export function ProjectList({
             onOpenAction({ kind: "remove", worktreeId: worktree.id });
           }}
           onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
+          onOpenProjectSettings={onOpenProjectSettings}
+          onRemoveProject={(project) =>
+            onOpenAction({ kind: "remove-project", projectId: project.id })
+          }
         />
       ))}
       {removeTarget && (
@@ -367,10 +497,18 @@ export function ProjectList({
           onClose={onCloseAction}
         />
       )}
+      {removeProjectTarget && (
+        <RemoveProjectDialog
+          project={removeProjectTarget}
+          disabled={disabled}
+          onSubmit={onSubmitRemoveProject}
+          onClose={onCloseAction}
+        />
+      )}
       {active.length === 0 && (
         <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground">
           <span>No workspaces found</span>
-          {(filterActive || activityOnly) && (
+          {(hasAnyFilter || activityOnly) && (
             <Button
               variant="secondary"
               size="sm"
@@ -411,6 +549,17 @@ function findWorktree(
   return null;
 }
 
+function findProject(
+  groups: ProjectGroup[],
+  action: ProjectAction | null,
+): Project | null {
+  if (action?.kind !== "remove-project") return null;
+  return (
+    groups.find((group) => group.project.id === action.projectId)?.project ??
+    null
+  );
+}
+
 function ProjectRow({
   group,
   workspaces,
@@ -422,6 +571,8 @@ function ProjectRow({
   onNewWorktree,
   onRemoveWorktree,
   onRenameWorktree,
+  onOpenProjectSettings,
+  onRemoveProject,
 }: {
   group: ProjectGroup;
   workspaces: Workspace[];
@@ -433,29 +584,44 @@ function ProjectRow({
   onNewWorktree: () => void;
   onRemoveWorktree: (worktree: Worktree) => void;
   onRenameWorktree: (worktree: Worktree, name: string) => Promise<string | null>;
+  onOpenProjectSettings: (project: Project) => void;
+  onRemoveProject: (project: Project) => void;
 }) {
   const project: Project = group.project;
   const canCreate =
     worktreesAvailable && project.kind === "git" && !project.id.startsWith("folder:");
   return (
     <div className="shell-project">
-      <div className="shell-project-row" title={project.path}>
+      <div className="shell-project-row group relative" title={project.path}>
         {project.kind === "git" ? (
           <FolderGit2 size={15} aria-hidden="true" />
         ) : null}
         <span className="shell-project-name">{project.name}</span>
-        {canCreate && (
-          <button
-            type="button"
-            className="shell-icon-button"
-            aria-label={`New worktree in ${project.name}`}
-            title={`New worktree in ${project.name}`}
+        <div
+          className={PROJECT_HEADER_ACTIONS_CLASS_NAME}
+          data-project-header-actions=""
+        >
+          {canCreate && (
+            <button
+              type="button"
+              className="shell-icon-button"
+              data-project-header-action=""
+              aria-label={`New worktree in ${project.name}`}
+              title={`New worktree in ${project.name}`}
+              disabled={disabled}
+              onClick={onNewWorktree}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <Plus size={15} />
+            </button>
+          )}
+          <ProjectActionsMenu
+            project={project}
             disabled={disabled}
-            onClick={onNewWorktree}
-          >
-            <Plus size={15} />
-          </button>
-        )}
+            onOpenSettings={onOpenProjectSettings}
+            onRemove={onRemoveProject}
+          />
+        </div>
       </div>
       <div className="shell-project-cards">
         {group.worktrees.map((worktree) => (
