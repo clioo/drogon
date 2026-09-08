@@ -6,6 +6,7 @@
 // already encodes via kind + `state` (open|closed|all).
 
 import { GithubIcon } from "./github-icon";
+import type { TaskIssueState } from "../../../../shared/tasks-contract";
 
 export type GitHubTaskKind = "issues" | "pulls";
 
@@ -16,13 +17,6 @@ export type SourceOption = {
   disabled?: boolean;
 };
 
-export type GitHubStateFilterId = "open" | "closed" | "all";
-
-export type GitHubStateFilter = {
-  id: GitHubStateFilterId;
-  label: string;
-};
-
 export function getSourceOptions(): SourceOption[] {
   return [
     {
@@ -30,14 +24,6 @@ export function getSourceOptions(): SourceOption[] {
       label: "GitHub",
       Icon: ({ className }) => <GithubIcon className={className} />,
     },
-  ];
-}
-
-export function getGitHubStateFilters(): GitHubStateFilter[] {
-  return [
-    { id: "open", label: "Open" },
-    { id: "closed", label: "Closed" },
-    { id: "all", label: "All" },
   ];
 }
 
@@ -126,4 +112,23 @@ export function projectTasksDaemonQuery(applied: string): string | undefined {
     .join(" ")
     .trim();
   return remainder === "" ? undefined : remainder;
+}
+
+// Fork parity (#238): the fork has no Open/Closed/All row — closed is
+// expressed through the search text (`is:closed`), exactly like its state
+// dropdown does by rewriting the query. The daemon `state` is derived from
+// the same applied query the `query` projection above reads, so one filter
+// bar drives both: `is:closed` (without `is:open`) narrows to closed, a
+// query with no state qualifier widens to all, and everything else
+// (including every preset) stays on open.
+export function projectTasksDaemonState(applied: string): TaskIssueState {
+  const tokens = applied
+    .split(/\s+/)
+    .map((token) => token.toLowerCase())
+    .filter((token) => token !== "");
+  const hasClosed = tokens.includes("is:closed");
+  const hasOpen = tokens.includes("is:open");
+  if (hasClosed && !hasOpen) return "closed";
+  if (!hasClosed && !hasOpen) return "all";
+  return "open";
 }

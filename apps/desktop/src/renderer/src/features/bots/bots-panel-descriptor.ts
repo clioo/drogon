@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { BotsPanel } from "./BotsPanel";
+import type { BotsPanelHydrationProps } from "./BotsPanel";
 import type { BotsPanelProps } from "./bots-panel-contracts";
 
 // PanelDescriptor factory for the Bots panel (V4-B4), adapted to the shared
@@ -34,8 +35,10 @@ export type BotsPanelDescriptorInput = {
   /** Panel title rendered by the shell; threaded verbatim. */
   title: string;
   /** Caller-supplied panel data: list/history snapshot, optional dispatch
-   *  callback, optional caller-observed liveness map. No store is invented. */
-  panel: BotsPanelProps;
+   *  callback, optional caller-observed liveness map, optional mount
+   *  hydration flag (local BotsPanelHydrationProps, never shared). No
+   *  store is invented. */
+  panel: BotsPanelHydrationProps;
   /** Optional service-capability gate (Status.capabilities); admission is
    *  validated by the registry at registration time, never here. */
   capability?: string;

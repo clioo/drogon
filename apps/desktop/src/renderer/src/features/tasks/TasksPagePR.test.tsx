@@ -76,8 +76,6 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
       { id: "pulls", label: "PRs" },
     ],
     showPRManagementColumns,
-    stateFilter: "open",
-    onStateFilter: () => {},
     activeTaskPreset: "prs",
     onSelectTaskPreset: () => {},
     taskSearchInput: "",

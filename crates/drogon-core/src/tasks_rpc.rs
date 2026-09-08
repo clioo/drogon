@@ -412,6 +412,27 @@ fn parse_task_query(query: &str) -> TaskQueryFilter {
     }
 }
 
+/// Whether a parsed query needs the full bounded stream (#238): any
+/// free text or assignee/author constraint must see every row before
+/// slicing, while the default (unfiltered) view keeps the cheap
+/// one-window probe below.
+fn task_query_is_filtered(filter: &TaskQueryFilter) -> bool {
+    !filter.text.trim().is_empty() || filter.assignee.is_some() || filter.author.is_some()
+}
+
+/// Upper bound for the `gh` fetch behind one `tasks.list` call (#238).
+/// Filtered lists fetch the full bounded stream
+/// (`MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1` rows); the default view
+/// fetches only its window plus the one row that proves a next page.
+fn tasks_fetch_limit(filtered: bool, page: u64, per_page: u64) -> u64 {
+    let ceiling = MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1;
+    if filtered {
+        ceiling
+    } else {
+        (page * per_page + 1).min(ceiling)
+    }
+}
+
 /// Client-side filter over one `gh` row: title contains
 /// (case-insensitive), or an exact issue-number match (`123` or `#123`),
 /// plus the parsed `assignee:`/`author:` constraints. `gh --search` needs
@@ -806,13 +827,8 @@ impl Engine {
         if let Some(author) = filter.author.take() {
             filter.author = Some(resolve_me_login(&project_path, &author)?);
         }
-        let filtered =
-            !filter.text.trim().is_empty() || filter.assignee.is_some() || filter.author.is_some();
-        let fetch_limit = if filtered {
-            MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1
-        } else {
-            (page * per_page + 1).min(MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1)
-        };
+        let filtered = task_query_is_filtered(&filter);
+        let fetch_limit = tasks_fetch_limit(filtered, page, per_page);
         let stdout = match mode {
             TasksListMode::Issues => run_gh(
                 Path::new(&project_path),
@@ -1331,5 +1347,43 @@ mod tests {
         // Unknown qualifier-shaped tokens keep the historical substring
         // behavior: never widened, never silently dropped.
         assert!(!query("review-requested:@me"));
+    }
+
+    #[test]
+    fn default_tasks_list_uses_the_cheap_paging_window() {
+        use drogon_protocol::tasks::DEFAULT_TASKS_PER_PAGE;
+        // The default view (no query: the renderer strips the `is:issue
+        // is:open` preset before sending) must not pay for the full
+        // bounded stream — one window plus the next-page probe row.
+        let default = parse_task_query("");
+        assert!(!task_query_is_filtered(&default));
+        assert_eq!(
+            tasks_fetch_limit(false, 1, DEFAULT_TASKS_PER_PAGE),
+            DEFAULT_TASKS_PER_PAGE + 1
+        );
+        // Later unfiltered pages still fetch only their own window.
+        assert_eq!(
+            tasks_fetch_limit(false, 3, DEFAULT_TASKS_PER_PAGE),
+            3 * DEFAULT_TASKS_PER_PAGE + 1
+        );
+        // Any real filter (free text, assignee, author) needs the full
+        // bounded stream before slicing, or matches past the window
+        // would silently vanish.
+        let ceiling = MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1;
+        for filtered in [
+            "sidebar",
+            "assignee:octocat",
+            "author:clioo",
+            "assignee:@me",
+        ] {
+            let parsed = parse_task_query(filtered);
+            assert!(task_query_is_filtered(&parsed), "{filtered} must filter");
+            assert_eq!(tasks_fetch_limit(true, 1, DEFAULT_TASKS_PER_PAGE), ceiling);
+        }
+        // Daemon-implied `is:` qualifiers alone never count as filtered.
+        let implied = parse_task_query("assignee:@me is:issue is:open");
+        assert!(task_query_is_filtered(&implied));
+        let bare_implied = parse_task_query("is:issue is:open");
+        assert!(!task_query_is_filtered(&bare_implied));
     }
 }

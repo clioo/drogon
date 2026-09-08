@@ -943,16 +943,32 @@ export function App() {
   // Bots header Back closes the page like the fork: it rides a ref because
   // the view-history handler is defined further down this component.
   const botsCloseRef = useRef<() => void>(() => {});
+  // #237: the Bots page registers the moment its scope exists — over an
+  // empty placeholder snapshot with snapshotPending — so the nav switch
+  // paints the fork's page chrome (header + loading state) in the same
+  // commit that hides the terminal. The live snapshot hydrates after
+  // without blocking first paint; a scope mismatch falls back to the
+  // placeholder, never stale rows for another workspace.
+  const freshBotsLoad =
+    botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope)
+      ? botsLoad
+      : null;
   const panelRegistry = useMemo(() => {
-    if (botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope))
+    if (botsAvailable && botsScope)
       return registerBotsRoute(filesBaseRegistry, botsGatedBridge, {
-        ...buildBotsPanelProps(botsLoad.snapshot, undefined, botsScope),
+        ...buildBotsPanelProps(
+          freshBotsLoad?.snapshot ?? { bots: [], history: [] },
+          undefined,
+          botsScope,
+        ),
+        snapshotPending: freshBotsLoad === null,
         onClose: () => botsCloseRef.current(),
       });
     return filesBaseRegistry;
   }, [
     filesBaseRegistry,
     botsGatedBridge,
+    botsAvailable,
     botsLoad,
     botsScopeHost,
     botsScopeWorkspace,
@@ -1318,10 +1334,12 @@ export function App() {
   )
     tasksAliveRef.current = false;
   const tasksAlive = tasksAliveRef.current;
-  const botsScopeMatch =
-    botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope);
+  // #237: the descriptor resolves as soon as the page is alive with a
+  // scope — over the placeholder while the snapshot is in flight — so the
+  // section never falls back to the bare "Loading bots…" stub. Stale-scope
+  // safety lives in the registry build above (placeholder, not old rows).
   const botsDescriptor: PanelDescriptor | null =
-    botsAlive && filesProps && botsScopeMatch
+    botsAlive && filesProps && botsAvailable && botsScope
       ? resolveRoute(panelRegistry, BOTS_ROUTE_ID)
       : null;
   // Full pages replace the session view, like the fork's ActivePage: no

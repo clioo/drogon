@@ -41,6 +41,14 @@ import { useBotsPageController } from "./use-bots-page-controller";
 // capability behind it" rule the run button already followed, so a caller
 // that supplies neither renders the exact pre-R2-S read-only view.
 
+export type BotsPanelHydrationProps = BotsPanelProps & {
+  /** Set by the mount while the first snapshot for the live scope is still
+   *  in flight: the controller paints the fork's loading state over the
+   *  placeholder snapshot instead of flashing the empty state. Cleared on
+   *  hydration; never part of the shared contract. */
+  snapshotPending?: boolean;
+};
+
 export function BotsPanel({
   snapshot,
   onClose,
@@ -49,7 +57,8 @@ export function BotsPanel({
   bridge,
   scope,
   sessionReader,
-}: BotsPanelProps) {
+  snapshotPending,
+}: BotsPanelHydrationProps) {
   const canMutate = Boolean(bridge && scope);
   // Add/delete gate on their own bridge methods, not bare scope: a caller
   // whose bridge predates R7-E renders the read-only card (same rule the
@@ -67,6 +76,7 @@ export function BotsPanel({
     scope,
     onClose,
     onRunResponsibility,
+    snapshotPending,
   });
   const {
     effective,
