@@ -192,7 +192,7 @@ async function probeExplorerSurface({ page, workspace, output }) {
   await writeFile(path.join(workspace, file), "sidebar explorer body\n");
   await ensureRightSidebar(page);
   const panel = page.locator('section[aria-label="Files"]');
-  await panel.getByRole("treeitem", { name: file, exact: true }).click();
+  await panel.getByRole("button", { name: file, exact: true }).click();
   await waitForEditorRegistered(page, file);
   assert.equal(await readEditorValue(page, file), "sidebar explorer body\n");
   await page.screenshot({

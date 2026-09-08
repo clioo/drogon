@@ -3,8 +3,9 @@
 // Adapter: file-type icons come from lucide (no file-type icon catalog in
 // this repo) tinted with the row's status color; conflict, submodule and
 // review-note affordances have no MVP data and are not ported. Row identity
-// (test id, data attrs), the hover action overlay and keyboard focusability
-// match the source.
+// (test id, data attrs) and the hover action overlay match the source; the
+// row is a non-interactive div like the source (click opens the diff, the
+// Discard/Stage buttons are the only tab stops) — no role=button wrapper.
 
 import React from "react";
 import { File, Minus, Plus, Trash, Undo2 } from "lucide-react";
@@ -94,18 +95,6 @@ export const UncommittedEntryRow = React.memo(function UncommittedEntryRow({
           }
           onOpen(entry);
         }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            if (onSelect) {
-              onSelect(entryKey);
-            }
-            onOpen(entry);
-          }
-        }}
-        tabIndex={0}
-        role="button"
-        aria-label={`${fileName} (${STATUS_LABELS[entry.status]})`}
         title={entry.origPath ? `renamed from ${entry.origPath}` : entry.path}
       >
         <File

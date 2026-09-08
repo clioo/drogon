@@ -110,10 +110,11 @@ export function FileExplorerTreePane(props: FileExplorerTreePaneProps) {
 
   const slots = buildSlots(rows, inline);
 
+  // Why no tree role: the source (FileExplorerFilesTreePane) renders its rows
+  // in a plain scroll container with plain buttons — no role="tree" and no
+  // role="treeitem" (see FileExplorerRow). Keyboard stays container-owned.
   return (
     <div
-      role="tree"
-      aria-label="Workspace files"
       className="file-explorer-scroll h-full min-h-0 overflow-auto py-2"
       onContextMenu={(event) => {
         if (inInteractiveSurface(event.target)) return;

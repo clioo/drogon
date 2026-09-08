@@ -2,12 +2,11 @@
    src/renderer/src/components/right-sidebar/FileExplorerRow.tsx (row DOM,
    indent math, chevron/folder/file affordances, git-status and
    git-ignored decorations) and status-display.ts (STATUS_LABELS).
-   Adapted, all called out: rows carry role="treeitem" with
-   aria-selected/aria-expanded/aria-level (the source leaves the row
-   role-less; the tree role here makes the tree operable and keeps the
-   rendered acceptance querying treeitems by name), drag-and-drop is out of
-   MVP scope so the draggable wiring is gone, and the Radix context menu
-   becomes a parent-owned `onContextMenu` callback. */
+   Adapted, all called out: drag-and-drop is out of MVP scope so the
+   draggable wiring is gone, and the Radix context menu becomes a
+   parent-owned `onContextMenu` callback. Rows stay plain buttons with no
+   treeitem role, exactly like the source; selection/expansion live in
+   data attributes and keyboard stays container-owned (FileExplorer). */
 
 import { ChevronRight, CircleSlash, Folder, FolderOpen, Link, Loader2 } from "lucide-react";
 import { getFileTypeIcon } from "./file-type-icons";
@@ -62,10 +61,6 @@ export function FileExplorerRow({
   return (
     <button
       type="button"
-      role="treeitem"
-      aria-selected={isSelected}
-      aria-expanded={node.isDirectory ? isExpanded : undefined}
-      aria-level={node.depth + 1}
       data-file-explorer-row=""
       data-row-index={rowIndex}
       data-path={node.path}
