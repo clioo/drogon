@@ -56,8 +56,19 @@ import {
 import { resolveHarnessPermissionMode } from "../../shared/agent-defaults";
 import { TabBar } from "./features/shell/TabBar";
 import { tabCreateMenuChord } from "./features/shell/TabCreateMenuChords";
-import { editorTabId, type EditorTabState } from "./features/shell/editor-tab";
+import {
+  editorDiffTabId,
+  editorTabId,
+  type EditorTabDiffArea,
+  type EditorTabState,
+} from "./features/shell/editor-tab";
 import { EditorHost, planEditorRehydrate } from "./features/editor";
+import { EditorDiffHost } from "./features/editor/EditorDiffHost";
+import { useEditorTabMissingReconciler } from "./features/editor/editor-tab-missing-reconciler";
+import {
+  parseSourceControlRowOpenDetail,
+  SOURCE_CONTROL_ROW_OPEN_EVENT,
+} from "./features/source-control/row-open-event";
 import { TitlebarLeftControls } from "./features/shell/TitlebarLeftControls";
 import { RightSidebar } from "./features/right-sidebar/RightSidebar";
 import { SessionDetailsPanel } from "./features/right-sidebar/SessionDetailsPanel";
@@ -220,6 +231,7 @@ import { TasksPage } from "./features/tasks/TasksPage";
 import { loadBotSnapshot } from "./bots-loader";
 import type { BotsLoadResult } from "./bots-loader";
 import { FILES_CAPABILITY } from "../../shared/file-contract";
+import { subscribeWorkspaceFilesChanged } from "./features/file-explorer/files-watch";
 import {
   applyPanelFocus,
   checkAvailability,
@@ -2102,12 +2114,55 @@ export function App() {
   // because the terminal file-link opener can switch workspaces and open
   // a tab there in the SAME handler call, before `selected` itself has
   // re-rendered — the caller already knows the target workspace.
-  const openEditorTab = (workspaceId: string, path: string) => {
+  // R16-BJ: `view` carries the fork's editorViewMode — a row click on
+  // unstaged markdown re-opens with the Changes view active.
+  const openEditorTab = (
+    workspaceId: string,
+    path: string,
+    opts?: { view?: "changes" },
+  ) => {
     const tabId = editorTabId(workspaceId, path);
+    setEditorTabs((tabs) => {
+      const existing = tabs.find((tab) => tab.tabId === tabId);
+      if (existing) {
+        // A plain open (no view request) never touches the stored view
+        // mode — the fork's editorViewMode persists per file until the
+        // toggle or a row click changes it.
+        if (opts?.view === undefined || existing.view === opts.view) return tabs;
+        return tabs.map((tab) =>
+          tab.tabId === tabId ? { ...tab, view: opts.view } : tab,
+        );
+      }
+      return [
+        ...tabs,
+        {
+          tabId,
+          workspaceId,
+          path,
+          dirty: false,
+          ...(opts?.view ? { view: opts.view } : null),
+        },
+      ];
+    });
+    setActiveEditorTabId(tabId);
+    setActiveBrowserTabId(null);
+  };
+  // R16-BJ (#294, fork openDiff): the Source Control row's diff opens as
+  // its own editor tab, keyed by path AND diff area — the staged and
+  // unstaged tabs of one file coexist, and a second click on the same row
+  // focuses the existing tab instead of minting a duplicate (fork
+  // buildDiffEditorFileId reuse). Diff tabs are session-scoped: the strip
+  // persistence is path-shaped, so they are never written to it.
+  const openEditorDiffTab = (
+    workspaceId: string,
+    path: string,
+    area: EditorTabDiffArea,
+  ) => {
+    const tabId = editorDiffTabId(workspaceId, area, path);
     setEditorTabs((tabs) =>
       tabs.some((tab) => tab.tabId === tabId)
         ? tabs
-        : [...tabs, { tabId, workspaceId, path, dirty: false }],
+        : [...tabs, { tabId, workspaceId, path, dirty: false, diff: area }],
     );
     setActiveEditorTabId(tabId);
     setActiveBrowserTabId(null);
@@ -2155,6 +2210,57 @@ export function App() {
       ),
     );
   };
+  // R16-BJ: the tab's stored view mode follows the user's toggle (fork
+  // setEditorViewMode). Undefined reads as "edit", so toggling back to
+  // Edit clears the stored request and a later tab switch lands on Edit,
+  // exactly like the fork's per-file view mode.
+  const setEditorTabView = (tabId: string, view: "edit" | "changes") => {
+    const next = view === "changes" ? ("changes" as const) : undefined;
+    setEditorTabs((tabs) =>
+      tabs.map((tab) =>
+        tab.tabId === tabId && tab.view !== next ? { ...tab, view: next } : tab,
+      ),
+    );
+  };
+  // R16-BJ (#302): the tab's file vanished from disk. Only the probe-confirmed
+  // kind "deleted" is ever written today (see editor-tab-missing-reconciler.ts);
+  // reappearing paths clear the tombstone, like the fork's create event.
+  const applyEditorTabMissing = (tabId: string, kind: "deleted" | "renamed" | null) => {
+    setEditorTabs((tabs) =>
+      tabs.map((tab) => {
+        if (tab.tabId !== tabId || tab.diff !== undefined) return tab;
+        if (kind === null) return tab.missing !== undefined ? { ...tab, missing: undefined } : tab;
+        return tab.missing !== kind ? { ...tab, missing: kind } : tab;
+      }),
+    );
+  };
+  // #302 tombstone reconciler: on every workspace change tick, every open
+  // file tab's directory is re-listed and vanished paths mark their tab
+  // ("deleted" badge + struck label on the tab; the surface freezes on
+  // its last snapshot). Diff tabs are exempt — their content comes from
+  // git, not the working file. The selected workspace only: tabs of
+  // other workspaces reconcile when the user switches there.
+  const subscribeSelectedFilesChanged = useCallback(
+    (listener: () => void) => subscribeWorkspaceFilesChanged(selected, listener),
+    [selected],
+  );
+  useEditorTabMissingReconciler({
+    scope: { hostId: status?.hostId ?? "", workspaceId: selected ?? "" },
+    tabs: useMemo(
+      () =>
+        (selected ? visibleEditorTabs : [])
+          // Diff tabs read git, not the working file, so they never
+          // tombstone; missing tabs KEEP being probed — a reappearance
+          // clears their tombstone (fork: create clears externalMutation).
+          .filter((tab) => tab.diff === undefined)
+          .map((tab) => ({ tabId: tab.tabId, path: tab.path })),
+      [selected, visibleEditorTabs],
+    ),
+    bridge: filesGatedBridge,
+    subscribeFilesChanged: subscribeSelectedFilesChanged,
+    onMissing: applyEditorTabMissing,
+    onPresent: (tabId) => applyEditorTabMissing(tabId, null),
+  });
   const closeEditorTab = (tabId: string) => {
     setEditorTabs((tabs) => tabs.filter((tab) => tab.tabId !== tabId));
     if (activeEditorTabId !== tabId) return;
@@ -2251,6 +2357,10 @@ export function App() {
     const editors = editorsSettledRef.current.has(selected)
       ? editorTabs
           .filter((tab) => tab.workspaceId === selected)
+          // Diff tabs (#294) are session-scoped: the persisted editors
+          // list is path-shaped, so writing a diff tab's path would
+          // resurrect it as a plain file tab on the next launch.
+          .filter((tab) => tab.diff === undefined)
           .map((tab) => tab.path)
       : prev.editors;
     const browsers = browsersSettledRef.current.has(selected)
@@ -3049,6 +3159,36 @@ export function App() {
       window.removeEventListener(MENTU_OPEN_TAB_EVENT, onOpenMentuTab);
   }, []);
   useEffect(() => {
+    // Source Control row open (#294): the panel dispatches a window event
+    // because App owns the main tab strip — the exact shape of the
+    // terminal file-open contract above. The handler is first-render
+    // closure over openEditorTab/openEditorDiffTab, which only touch
+    // stable tab setters (same discipline as onOpenFile in the effect
+    // above); the workspace always rides the detail (the panel is
+    // mounted for the current workspace), with the selected workspace as
+    // the honest fallback.
+    const onRowOpen = (event: Event) => {
+      const detail = parseSourceControlRowOpenDetail(
+        (event as CustomEvent<unknown>).detail,
+      );
+      if (!detail) return;
+      const workspaceId =
+        detail.workspaceId || selectedRef.current;
+      if (!workspaceId) return;
+      if (detail.kind === "diff") {
+        openEditorDiffTab(workspaceId, detail.path, detail.area);
+        return;
+      }
+      // Fork use-row-opening.ts: unstaged markdown opens its edit tab
+      // with the Changes view active instead of a diff tab.
+      openEditorTab(workspaceId, detail.path, { view: "changes" });
+    };
+    window.addEventListener(SOURCE_CONTROL_ROW_OPEN_EVENT, onRowOpen);
+    return () =>
+      window.removeEventListener(SOURCE_CONTROL_ROW_OPEN_EVENT, onRowOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
     // Source-parity window chords (keybindings/definitions.ts) are matched by
     // one shell dispatcher. Palette-owned ids and pane-local ids deliberately
     // have no handler here, so the focused palette/browser/editor/terminal can
@@ -3742,23 +3882,45 @@ export function App() {
                 }}
               >
                 {editorHostAlive && current && status ? (
-                  // Full-width Monaco in the main pane (fixes #133): the
-                  // fill wrapper mirrors the browser pane above — the host
-                  // was built for a full-width column, not this row.
-                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                    <EditorHost
-                      bridge={filesGatedBridge}
-                      scope={{ hostId: status.hostId, workspaceId: current.id }}
-                      path={activeEditorTab?.path ?? null}
-                      onClose={() =>
-                        activeEditorTabId && closeEditorTab(activeEditorTabId)
-                      }
-                      onDirtyChange={(_path, dirty) => {
-                        if (activeEditorTabId)
-                          setEditorTabDirty(activeEditorTabId, dirty);
-                      }}
-                    />
-                  </div>
+                  activeEditorTab?.diff ? (
+                    // R16-BJ (#294, fork openDiff): a Source Control row's
+                    // diff renders as the tab area surface — read-only
+                    // Monaco diff under the fork's diff-surface header.
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                      <EditorDiffHost
+                        scope={{ hostId: status.hostId, workspaceId: current.id }}
+                        path={activeEditorTab.path}
+                        area={activeEditorTab.diff}
+                        onClose={() =>
+                          activeEditorTabId && closeEditorTab(activeEditorTabId)
+                        }
+                      />
+                    </div>
+                  ) : (
+                    // Full-width Monaco in the main pane (fixes #133): the
+                    // fill wrapper mirrors the browser pane above — the
+                    // host was built for a full-width column, not this row.
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                      <EditorHost
+                        bridge={filesGatedBridge}
+                        scope={{ hostId: status.hostId, workspaceId: current.id }}
+                        path={activeEditorTab?.path ?? null}
+                        missing={activeEditorTab?.missing}
+                        initialView={activeEditorTab?.view}
+                        onViewModeChange={(view) => {
+                          if (activeEditorTabId)
+                            setEditorTabView(activeEditorTabId, view);
+                        }}
+                        onClose={() =>
+                          activeEditorTabId && closeEditorTab(activeEditorTabId)
+                        }
+                        onDirtyChange={(_path, dirty) => {
+                          if (activeEditorTabId)
+                            setEditorTabDirty(activeEditorTabId, dirty);
+                        }}
+                      />
+                    </div>
+                  )
                 ) : null}
               </div>
             </section>

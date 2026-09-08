@@ -230,6 +230,10 @@ fn run_status(
     // remote" without a second RPC (see #176). `git remote` is config-only
     // (no network) and prints names, never URLs.
     parsed.remotes = run_remote_names(workspace_root, budget, git_bin)?;
+    // The default base ref rides along too (see #176's residual): the
+    // clean-state sentence needs "ahead of origin/main", not a literal
+    // "base", and the resolution is config/ref-local (no network).
+    parsed.base_ref = run_default_base_ref(workspace_root, budget, git_bin)?;
     Ok(ParsedGitOutput::Status(parsed))
 }
 
@@ -250,6 +254,89 @@ fn run_remote_names(
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .collect())
+}
+
+/// Refs probed (in order) when `origin/HEAD` is unresolvable, with the
+/// display form each resolves to. Fork parity
+/// (src/main/git/repo-default-base-ref.ts `DEFAULT_BASE_REF_PROBES`):
+/// the remote default wins over the local branch of the same name.
+pub(crate) const DEFAULT_BASE_REF_PROBES: [(&str, &str); 4] = [
+    ("refs/remotes/origin/main", "origin/main"),
+    ("refs/remotes/origin/master", "origin/master"),
+    ("refs/heads/main", "main"),
+    ("refs/heads/master", "master"),
+];
+
+/// Resolves the repo's default base ref without inventing a fallback:
+/// a verified `refs/remotes/origin/HEAD` target first (stripped to its
+/// `origin/<branch>` display form), then the fixed probe ladder above.
+/// Every probe is a local, network-free ref lookup; failures mean "no
+/// candidate resolves", which maps to `Ok(None)` (the UI says the literal
+/// "base"), never an RPC error.
+fn run_default_base_ref(
+    workspace_root: &Path,
+    budget: &GitProbeBudget,
+    git_bin: &Path,
+) -> Result<Option<String>, RpcError> {
+    if let Some(target) = run_origin_head_target(workspace_root, budget, git_bin)? {
+        return Ok(Some(strip_refs_remotes_prefix(&target)));
+    }
+    for (full_ref, display) in DEFAULT_BASE_REF_PROBES {
+        if ref_exists(workspace_root, full_ref, budget, git_bin)? {
+            return Ok(Some(display.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// `git symbolic-ref --quiet refs/remotes/origin/HEAD`, kept separate so
+/// the quiet-exit-1 "no such symbolic ref" case stays a probe result (a
+/// verified target or nothing), not an RPC failure.
+fn run_origin_head_target(
+    workspace_root: &Path,
+    budget: &GitProbeBudget,
+    git_bin: &Path,
+) -> Result<Option<String>, RpcError> {
+    let argv = symbolic_ref_argv();
+    let outcome = spawn_git_and_capture(workspace_root, &argv, budget, git_bin)?;
+    // Exit 1 (`--quiet`) means the symref does not exist or is
+    // unresolvable: a probe result (the ladder decides next), not an RPC
+    // failure. Every non-exit verdict (timeout, cap, unfinished capture,
+    // invalid UTF-8) stays a hard error through `require_success`.
+    let target = match &outcome {
+        SpawnOutcome::Exited { status, .. } if !status.success() => return Ok(None),
+        _ => require_success(&outcome, &argv)?.trim().to_string(),
+    };
+    if target.is_empty() || !ref_exists(workspace_root, &target, budget, git_bin)? {
+        return Ok(None);
+    }
+    Ok(Some(target))
+}
+
+/// `git rev-parse --verify --quiet <ref>`: true when the ref resolves.
+/// A non-zero exit is "no such ref"; every non-exit verdict stays a hard
+/// error, so a bounded-cleanup kill can never be misread as absence.
+fn ref_exists(
+    workspace_root: &Path,
+    full_ref: &str,
+    budget: &GitProbeBudget,
+    git_bin: &Path,
+) -> Result<bool, RpcError> {
+    let argv = rev_parse_verify_argv(full_ref);
+    let outcome = spawn_git_and_capture(workspace_root, &argv, budget, git_bin)?;
+    match &outcome {
+        SpawnOutcome::Exited { status, .. } => Ok(status.success()),
+        _ => Err(require_success(&outcome, &argv).unwrap_err()),
+    }
+}
+
+/// `refs/remotes/origin/main` -> `origin/main`; anything else passes
+/// through unchanged (the local-branch probes are already display form).
+fn strip_refs_remotes_prefix(ref_name: &str) -> String {
+    ref_name
+        .strip_prefix("refs/remotes/")
+        .unwrap_or(ref_name)
+        .to_string()
 }
 
 /// Bounded wait for a Follower: how long to poll `CapabilityCache::is_in_flight`
@@ -467,6 +554,31 @@ pub(crate) fn status_argv() -> Vec<String> {
 pub(crate) fn remote_argv() -> Vec<String> {
     let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
     argv.push("remote".to_string());
+    argv
+}
+
+/// Fixed `git symbolic-ref` argv for the repo's origin HEAD. `--quiet`
+/// keeps the missing-symref case a clean exit-1 probe, never stderr noise.
+pub(crate) fn symbolic_ref_argv() -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.extend([
+        "symbolic-ref".to_string(),
+        "--quiet".to_string(),
+        "refs/remotes/origin/HEAD".to_string(),
+    ]);
+    argv
+}
+
+/// Fixed `git rev-parse --verify --quiet` argv: resolves one ref or exits
+/// non-zero. Read-only, local, no network.
+pub(crate) fn rev_parse_verify_argv(full_ref: &str) -> Vec<String> {
+    let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
+    argv.extend([
+        "rev-parse".to_string(),
+        "--verify".to_string(),
+        "--quiet".to_string(),
+        full_ref.to_string(),
+    ]);
     argv
 }
 

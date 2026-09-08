@@ -28,6 +28,7 @@ import {
 } from "./file-read-write";
 import { createFilesDraftStore } from "../workspaces/files-draft-store";
 import { subscribeWorkspaceFilesChanged } from "../file-explorer/files-watch";
+import type { EditorTabMissingKind } from "../shell/editor-tab";
 import { MAX_FILE_BYTES, type FileBridge } from "../../../../shared/file-contract";
 import type { Result } from "../../../../shared/session-contract";
 
@@ -36,18 +37,31 @@ export interface EditorHostProps {
   scope: EditorScope;
   /** The active editor tab's path, or null while no editor tab is active. */
   path: string | null;
+  /** The active tab's file has vanished from its path (#302, fork
+   *  externalMutation): stop the tick-driven re-read so the stale snapshot
+   *  stays put (the fork does not reload a deleted file) and suppress the
+   *  read-error banner while any content exists to show. */
+  missing?: EditorTabMissingKind;
   /** Close affordance in the editor header; wired to the active tab's close. */
   onClose?: () => void;
   /** Fires whenever the open path's dirty state changes, for the tab dot. */
   onDirtyChange?: (path: string, dirty: boolean) => void;
+  /** View the pane lands on when the path changes (fork editorViewMode;
+   *  a Source Control row click on unstaged markdown opens Changes). */
+  initialView?: "changes";
+  /** Reports the user's toggle so the tab's stored view mode follows. */
+  onViewModeChange?: (view: "edit" | "changes") => void;
 }
 
 export function EditorHost({
   bridge,
   scope,
   path,
+  missing,
   onClose,
   onDirtyChange,
+  initialView,
+  onViewModeChange,
 }: EditorHostProps) {
   // Descriptor-lifetime stores: one instance for the life of this host (it
   // stays mounted for as long as any editor tab exists), never per path.
@@ -89,7 +103,10 @@ export function EditorHost({
     const invalidate = () => {
       readGeneration.current += 1;
     };
-    if (path === null) {
+    if (path === null || missing !== undefined) {
+      // Missing: the tombstone freezes the surface on its last-confirmed
+      // snapshot; re-reading a deleted path would only resurrect the
+      // file-not-found banner (#302).
       setRead({ key: null, phase: "idle", content: null, message: "" });
       return invalidate;
     }
@@ -113,7 +130,7 @@ export function EditorHost({
     });
     return invalidate;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bridge, stableScope.hostId, stableScope.workspaceId, path, reloadTick, drafts]);
+  }, [bridge, stableScope.hostId, stableScope.workspaceId, path, reloadTick, drafts, missing]);
 
   // Seeds the tab dot for a path that already had a dirty retained draft
   // when it becomes active again (e.g. reselecting a tab after typing in
@@ -229,10 +246,22 @@ export function EditorHost({
       path={path}
       restoredDraft={restoredDraft}
       content={baselineContent}
-      readError={readErrorFor(read, stableScope, path)}
+      readError={
+        // Tombstone honesty rule: with a snapshot to show, the stale
+        // content + struck tab is the whole story (fork parity — its
+        // deleted tab keeps the last content and never re-reads). Only a
+        // tab with NO confirmed content (deleted before its first read)
+        // still surfaces the load error, matching the fork's
+        // "Unable to load file" revisit state.
+        missing !== undefined && baselineContent !== null
+          ? null
+          : readErrorFor(read, stableScope, path)
+      }
       onReload={reload}
       onSave={onSave}
       loadChanges={loadChanges}
+      initialView={initialView}
+      onViewModeChange={onViewModeChange}
       onClose={onClose}
       onDraftChange={(draft) => {
         drafts.recordDraft(stableScope, path, draft);

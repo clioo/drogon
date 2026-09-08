@@ -6,15 +6,15 @@
 // sync/use-upstream-status-fetch.
 // Adapter: Orca's zustand store becomes local state over the existing
 // git.* bridge; review/AI/notes/submodules/history-graph have no MVP
-// backend and are not ported. R12-A: selecting a file now opens the
-// source's Monaco DiffViewer (see diff/DiffViewer.tsx) instead of the
-// plain-text unified-diff viewer; unified-diff.ts's parser stays as the
-// SSR/Node-safe fallback (see `hasDom` below) since Monaco cannot run
-// there.
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+// backend and are not ported. R16-BJ (#294): selecting a file no longer
+// renders an inline diff strip — the row click routes through
+// row-open-event.ts to the main tab strip, opening the file's diff as an
+// editor tab exactly like the source's use-row-opening.ts (openDiff),
+// including its unstaged-markdown special case (an edit tab with the
+// Changes view).
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { X, ChevronDown, ChevronUp, Columns2, Rows2 } from "lucide-react";
 import {
   GIT_CAPABILITY,
   type GitBridge,
@@ -30,7 +30,6 @@ import type {
 import { Button } from "../../components/ui/button";
 import { SourceControlHeaderToolbar } from "./header-toolbar";
 import { SourceControlUncommittedSections } from "./uncommitted-sections";
-import { SourceControlBranchLineTotalChip } from "./branch-line-total-chip";
 import { CommitArea } from "./commit-area";
 import {
   SourceControlDiscardDialog,
@@ -50,7 +49,6 @@ import {
 import type { SourceControlDisplaySectionId } from "./section-order";
 import {
   canCommitEntries,
-  rowKey,
   rowsForEntry,
   type SourceControlEntry,
 } from "./source-control-entry";
@@ -60,20 +58,14 @@ import { getDiscardAllPaths, runDiscardAllForArea } from "./discard-sequence";
 import { getDiscardFailureToastCopy } from "./discard-failure-toast";
 import { toGitDisplayError, toPrCreateDisplayError } from "./git-error-copy";
 import { resolveCreatePrToolbarAction } from "./create-pr-action";
-import { parseUnifiedDiff } from "./unified-diff";
+import {
+  dispatchSourceControlRowOpen,
+  type SourceControlDiffArea,
+  type SourceControlRowOpenDetail,
+} from "./row-open-event";
 import { cn } from "../../lib/utils";
-import { reconstructDiffContent } from "./diff/diff-hunk-reconstruction";
-import { DiffNavigationProvider, useDiffNavigation } from "./diff/diff-navigation-context";
-import { useEditorScheme } from "../editor/editor-theme";
+import { monacoLanguageForPath } from "../editor/editor-language-by-extension";
 import { useGitStatusExternalRefresh } from "./use-git-status-external-refresh";
-
-// Why lazy: `monaco-editor` assumes a browser global environment; ChangesPanel
-// has no test today that renders it via `renderToString`, but this mirrors
-// the same guard EditorPane.tsx uses so neither surface can accidentally
-// evaluate Monaco under a non-browser test environment.
-const DiffViewer = lazy(() =>
-  import("./diff/DiffViewer").then((mod) => ({ default: mod.DiffViewer })),
-);
 
 export const CHANGES_ROUTE_ID = "changes";
 export const CHANGES_TITLE = "Changes";
@@ -99,8 +91,6 @@ export type ChangesPanelDescriptor = {
   capability: string;
 };
 
-type Selection = { area: "staged" | "unstaged" | "untracked"; path: string };
-
 type StatusLoad =
   | { phase: "loading" }
   | {
@@ -116,13 +106,10 @@ type StatusLoad =
       // Null means unknown (older daemon): the panel falls back to the
       // upstream-only states and never claims "No remote" it cannot prove.
       remotes: string[] | null;
+      // #176 residual: the repo's default base ref ("origin/main"); null
+      // falls back to the literal "base" in the clean-state sentence.
+      baseRef: string | null;
     }
-  | { phase: "error"; message: string };
-
-type DiffLoad =
-  | { phase: "idle" }
-  | { phase: "loading" }
-  | { phase: "ready"; diff: string; truncated: boolean }
   | { phase: "error"; message: string };
 
 function errorMessage(value: Result<unknown>, fallback: string): string {
@@ -135,71 +122,23 @@ function errorMessage(value: Result<unknown>, fallback: string): string {
   );
 }
 
-const mono: React.CSSProperties = { fontFamily: "var(--font-mono)" };
 // Why a hoisted constant: a fresh `[]` per render re-armed the line-counts
 // effect every pass — its `setCounts(new Map())` then re-rendered with a
 // new Map, looping forever while the status load is not ready (or the
 // bridge lacks gitLineCounts). A module-level empty array keeps the effect
 // deps stable.
 const EMPTY_STATUS_ENTRIES: GitStatusEntry[] = [];
+// Why: the fork highlights the row whose diff is open in the editor
+// (active-open row keys read from its store). The panel cannot see the
+// main tab strip in this build, so no row is ever highlighted; the
+// constant keeps the sections prop identity stable.
+const EMPTY_ACTIVE_OPEN_ROW_KEYS: ReadonlySet<string> = new Set();
 
 function errorNotice(message: string): string {
   return message.startsWith("Error") ? message : `Error: ${message}`;
 }
 
-/** Diff header controls: change count + prev/next (Monaco's own diff nav) and the side-by-side toggle. Renders inside DiffNavigationProvider. */
-function DiffNavToolbar({
-  sideBySide,
-  onToggleSideBySide,
-}: {
-  sideBySide: boolean;
-  onToggleSideBySide: () => void;
-}) {
-  const { goToPreviousDiff, goToNextDiff, changeCount } = useDiffNavigation();
-  return (
-    <span className="shrink-0 flex items-center gap-1">
-      {changeCount > 0 && (
-        <>
-          <span className="tabular-nums text-[10px] text-muted-foreground">
-            {changeCount} {changeCount === 1 ? "change" : "changes"}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label="Previous change"
-            onClick={goToPreviousDiff}
-          >
-            <ChevronUp className="size-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label="Next change"
-            onClick={goToNextDiff}
-          >
-            <ChevronDown className="size-3.5" />
-          </Button>
-        </>
-      )}
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-6"
-        aria-label={sideBySide ? "Switch to inline diff" : "Switch to side-by-side diff"}
-        onClick={onToggleSideBySide}
-      >
-        {sideBySide ? <Rows2 className="size-3.5" /> : <Columns2 className="size-3.5" />}
-      </Button>
-    </span>
-  );
-}
-
-/** Effectful container: loads status/counts/diff through the injected GitBridge. */
+/** Effectful container: loads status/counts through the injected GitBridge. */
 export function ChangesPanel({
   workspace,
   status,
@@ -216,10 +155,7 @@ export function ChangesPanel({
 
   const [load, setLoad] = useState<StatusLoad>({ phase: "loading" });
   const [counts, setCounts] = useState<Map<string, GitLineCount>>(new Map());
-  const [selection, setSelection] = useState<Selection | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set());
-  const [diff, setDiff] = useState<DiffLoad>({ phase: "idle" });
-  const [sideBySide, setSideBySide] = useState(true);
   const [commitMessage, setCommitMessage] = useState("");
   const [amend, setAmend] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -273,6 +209,7 @@ export function ChangesPanel({
         behind: result.result.branch.behind ?? null,
         oid: result.result.branch.oid ?? null,
         remotes: result.result.branch.remotes ?? null,
+        baseRef: result.result.branch.baseRef ?? null,
       });
     });
     return () => {
@@ -352,40 +289,19 @@ export function ChangesPanel({
           behind: load.behind,
           oid: load.oid,
           remotes: load.remotes,
+          baseRef: load.baseRef,
         }
-      : { head: null, upstream: null, ahead: null, behind: null, oid: null, remotes: null };
+      : {
+          head: null,
+          upstream: null,
+          ahead: null,
+          behind: null,
+          oid: null,
+          remotes: null,
+          baseRef: null,
+        };
   // #176: null (unknown daemon) never counts as no-remote.
   const hasRemote = branch.remotes === null ? null : branch.remotes.length > 0;
-
-  useEffect(() => {
-    if (!selection) {
-      setDiff({ phase: "idle" });
-      return;
-    }
-    // Why no untracked special case: the daemon synthesizes an all-added
-    // `--no-index` diff against /dev/null for untracked paths (the fork
-    // shows the same whole-file-as-added diff), so every area loads the
-    // same way.
-    let cancelled = false;
-    setDiff({ phase: "loading" });
-    void bridge
-      .gitDiff({ ...scope, path: selection.path, staged: selection.area === "staged" })
-      .then((result) => {
-        if (cancelled) return;
-        if (!result.ok) {
-          setDiff({ phase: "error", message: errorMessage(result, "Unable to load the diff.") });
-          return;
-        }
-        setDiff({
-          phase: "ready",
-          diff: result.result.diff,
-          truncated: result.result.truncated,
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [bridge, scope, selection]);
 
   const mutate = useCallback(
     async (
@@ -523,9 +439,31 @@ export function ChangesPanel({
     })();
   }, [discardSelection, pendingDiscard]);
 
-  const openDiff = useCallback((entry: SourceControlEntry) => {
-    setSelection({ area: entry.area, path: entry.path });
-  }, []);
+  // #294 (fork use-row-opening.ts handleOpenDiff): the row click opens the
+  // file's diff as an EDITOR TAB in the main tab group (App owns the tab
+  // strip; this panel only fires the request). Staged rows get a staged
+  // diff tab; every other area rides as unstaged. Fork special case kept:
+  // an unstaged (or untracked — the fork's untracked rows carry area
+  // 'unstaged') markdown file opens its EDIT tab with the Changes view
+  // active instead of a diff tab.
+  const openDiff = useCallback(
+    (entry: SourceControlEntry) => {
+      if (!workspace.id) return;
+      const detail: SourceControlRowOpenDetail =
+        entry.area !== "staged" && monacoLanguageForPath(entry.path) === "markdown"
+          ? { kind: "edit-changes", workspaceId: workspace.id, path: entry.path }
+          : {
+              kind: "diff",
+              workspaceId: workspace.id,
+              path: entry.path,
+              area: (entry.area === "staged"
+                ? "staged"
+                : "unstaged") satisfies SourceControlDiffArea,
+            };
+      dispatchSourceControlRowOpen(detail);
+    },
+    [workspace.id],
+  );
   const selectRow = useCallback((key: string) => {
     setSelectedKeys(new Set([key]));
   }, []);
@@ -665,7 +603,7 @@ export function ChangesPanel({
     try {
       const title =
         commitMessage.trim() ||
-        (selection ? `Update ${selection.path}` : "Update");
+        "Update";
       const result = await bridge.gitPrCreate({ ...scope, title });
       if (!result.ok) {
         // Raw `gh` stderr (argv echoes, exit-status wrappers) never reaches
@@ -684,7 +622,7 @@ export function ChangesPanel({
       setSyncBusy(null);
       setRevision((value) => value + 1);
     }
-  }, [bridge, commitMessage, hasRemote, scope, selection]);
+  }, [bridge, commitMessage, hasRemote, scope]);
 
   const requestDiscardAllInArea = useCallback(
     (area: "staged" | "unstaged" | "untracked", paths?: readonly string[]) => {
@@ -740,14 +678,6 @@ export function ChangesPanel({
     !filterState.tooLarge &&
     filterState.normalizedFilter !== "" &&
     displaySections.length === 0;
-
-  const parsed = diff.phase === "ready" ? parseUnifiedDiff(diff.diff) : { hunks: [], truncated: false };
-  const reconstructed =
-    diff.phase === "ready"
-      ? reconstructDiffContent(diff.diff)
-      : { original: "", modified: "", hasContent: false, truncated: false };
-  const hasDom = typeof document !== "undefined";
-  const scheme = useEditorScheme();
 
   return (
     <div
@@ -819,7 +749,11 @@ export function ChangesPanel({
         {showEmpty && (
           <EmptyState
             heading="No changes on this branch"
-            supportingText={`This workspace is clean and this branch has no changes ahead of ${branch.upstream ?? "base"}`}
+            // #176 residual, fork parity (content-status.tsx): the sentence
+            // names the repo's default base ref ("ahead of origin/main"),
+            // resolved daemon-side; the fork's literal-"base" fallback
+            // applies only when no candidate resolves.
+            supportingText={`This workspace is clean and this branch has no changes ahead of ${branch.baseRef ?? "base"}`}
           />
         )}
         {!hasUncommitted && prNotice && (
@@ -901,9 +835,7 @@ export function ChangesPanel({
             setPendingDiscard({ kind: "area", area, paths });
           }}
           selectedKeySet={selectedKeys}
-          activeOpenRowKeys={
-            new Set(selection ? [rowKey(selection.area, selection.path)] : [])
-          }
+          activeOpenRowKeys={EMPTY_ACTIVE_OPEN_ROW_KEYS}
           handleSelect={selectRow}
           handleContextMenu={selectRow}
           handleOpenDiff={openDiff}
@@ -917,122 +849,6 @@ export function ChangesPanel({
             setPendingDiscard({ kind: "entry", entry });
           }}
         />
-        <div aria-label="Diff and commit" className="border-t border-border">
-          <DiffNavigationProvider>
-          <div
-            aria-label="Unified diff"
-            className="flex flex-col p-3 text-xs"
-            style={{ ...mono, height: selection ? 420 : "auto" }}
-          >
-            {!selection && <p className="text-muted-foreground">Select a file to view its diff.</p>}
-            {selection && (
-              <div className="mb-2 flex shrink-0 items-center gap-2">
-                <span className="min-w-0 flex-1 truncate font-medium">{selection.path}</span>
-                <span className="shrink-0 text-[10px] uppercase text-muted-foreground">
-                  {selection.area}
-                </span>
-                {(selection.area === "staged" || selection.area === "unstaged") && (
-                  <span className="shrink-0">
-                    <SourceControlBranchLineTotalChip
-                      added={
-                        selection.area === "staged"
-                          ? (counts.get(selection.path)?.stagedAdded ?? 0)
-                          : (counts.get(selection.path)?.unstagedAdded ?? 0)
-                      }
-                      removed={
-                        selection.area === "staged"
-                          ? (counts.get(selection.path)?.stagedRemoved ?? 0)
-                          : (counts.get(selection.path)?.unstagedRemoved ?? 0)
-                      }
-                    />
-                  </span>
-                )}
-                {diff.phase === "ready" && reconstructed.hasContent && hasDom && (
-                  <DiffNavToolbar
-                    sideBySide={sideBySide}
-                    onToggleSideBySide={() => setSideBySide((value) => !value)}
-                  />
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-6 shrink-0"
-                  aria-label="Close diff"
-                  onClick={() => setSelection(null)}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              </div>
-            )}
-            {diff.phase === "loading" && <p className="text-muted-foreground">Loading diff…</p>}
-            {diff.phase === "error" && <p role="alert">{diff.message}</p>}
-            {diff.phase === "ready" && !reconstructed.hasContent && (
-              <p className="text-muted-foreground">No diff for this file.</p>
-            )}
-            {diff.phase === "ready" && reconstructed.hasContent && (
-              <div className="min-h-0 flex-1 overflow-hidden">
-                {hasDom ? (
-                  <Suspense
-                    fallback={<div className="text-muted-foreground">Loading diff editor…</div>}
-                  >
-                    <DiffViewer
-                      // Why a key: forces a remount per selected file so
-                      // `onMount` re-registers with diff-navigation-context
-                      // under the new file, mirroring EditorPane's Monaco
-                      // remount-per-path (see MonacoFileEditor.tsx).
-                      key={`${selection?.path}:${selection?.area}`}
-                      path={selection?.path ?? ""}
-                      original={reconstructed.original}
-                      modified={reconstructed.modified}
-                      scheme={scheme}
-                      sideBySide={sideBySide}
-                    />
-                  </Suspense>
-                ) : (
-                  <div className="h-full overflow-auto">
-                    {parsed.hunks.map((hunk, index) => (
-                <div key={index} className="mb-2">
-                  {hunk.header && <div className="text-muted-foreground">{hunk.header}</div>}
-                  {hunk.lines.map((line, lineIndex) => (
-                    <div
-                      key={lineIndex}
-                      style={
-                        line.kind === "add"
-                          ? {
-                              background:
-                                "color-mix(in srgb, var(--foreground) 8%, transparent)",
-                            }
-                          : line.kind === "del"
-                            ? {
-                                color: "var(--destructive)",
-                                background:
-                                  "color-mix(in srgb, var(--destructive) 8%, transparent)",
-                              }
-                            : line.kind === "hunk" ||
-                                line.kind === "file" ||
-                                line.kind === "noeol"
-                              ? { color: "var(--muted-foreground)" }
-                              : undefined
-                      }
-                    >
-                      {line.text === "" ? " " : line.text}
-                    </div>
-                  ))}
-                </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {diff.phase === "ready" && (parsed.truncated || diff.truncated) && (
-              <p role="status" className="shrink-0 text-muted-foreground">
-                Diff truncated to the display budget.
-              </p>
-            )}
-          </div>
-          </DiffNavigationProvider>
-        </div>
       </div>
       <SourceControlDiscardDialog
         pendingDiscard={pendingDiscard}

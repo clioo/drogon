@@ -368,6 +368,11 @@ pub struct ParsedStatus {
     /// Empty when the repo has no remote configured. Filled by the status
     /// runner, not the porcelain parser (porcelain carries no remote list).
     pub remotes: Vec<String>,
+    /// The repo's default base ref for clean-state copy ("ahead of
+    /// origin/main"), resolved fork-parity: verified `origin/HEAD` first,
+    /// then the fixed probe ladder, `None` when nothing resolves (the UI
+    /// falls back to the literal "base"). Filled by the status runner.
+    pub base_ref: Option<String>,
 }
 
 fn parse_ab(field: &str) -> Result<(Option<i64>, Option<i64>), RpcError> {
@@ -648,6 +653,8 @@ pub fn parse_status_porcelain_v2(input: &str) -> Result<ParsedStatus, RpcError> 
         // The porcelain carries no remote list; the status runner fills
         // this from `git remote` after parsing.
         remotes: Vec::new(),
+        // Likewise filled by the status runner (see `run_default_base_ref`).
+        base_ref: None,
     })
 }
 
@@ -759,6 +766,8 @@ pub fn parse_status_porcelain_v2_z(input: &str) -> Result<ParsedStatus, RpcError
         // The porcelain carries no remote list; the status runner fills
         // this from `git remote` after parsing.
         remotes: Vec::new(),
+        // Likewise filled by the status runner (see `run_default_base_ref`).
+        base_ref: None,
     })
 }
 

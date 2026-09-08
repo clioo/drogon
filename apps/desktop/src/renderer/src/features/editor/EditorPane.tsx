@@ -88,6 +88,16 @@ export interface EditorPaneProps {
    * injects the `gitDiff` call so the pane never touches the bridge.
    */
   loadChanges?: (path: string) => Promise<ChangesLoadResult>;
+  /**
+   * View the pane lands on when `path` changes (fork `editorViewMode`):
+   * a row click on unstaged markdown opens the file's edit tab with the
+   * Changes view active. Absent reads as "edit". Applied by the same
+   * per-file reset that otherwise always lands back on Edit.
+   */
+  initialView?: EditorToggleValue;
+  /** Reports the user's toggle so the tab's stored view mode follows (fork
+   * setEditorViewMode); the host forwards it to the tab strip's owner. */
+  onViewModeChange?: (view: EditorToggleValue) => void;
 }
 
 /** Per-file retained editing state; survives switching between files. */
@@ -625,6 +635,8 @@ export function EditorPane({
   onDraftChange,
   onClose,
   loadChanges,
+  initialView,
+  onViewModeChange,
 }: EditorPaneProps) {
   const [csvSourceMode, setCsvSourceMode] = useState(false);
   // Fork parity (EditorPanelHeader): the Edit/Changes toggle plus the
@@ -670,10 +682,12 @@ export function EditorPane({
   }, [scope, path, content]);
   useEffect(() => {
     // The view is per-file chrome (like the fork's per-file toggle mode):
-    // switching files always lands back in Edit, never in a stale diff.
-    setView("edit");
+    // switching files lands on the requested view when one rides the open
+    // (a Source Control row click on unstaged markdown), else back on
+    // Edit — never a stale diff from the previous file.
+    setView(initialView ?? "edit");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope.hostId, scope.workspaceId, path]);
+  }, [scope.hostId, scope.workspaceId, path, initialView]);
 
   const readConfirmed = isReadConfirmed(state);
   // Prop/state fence: before the effect dispatches, state still describes
@@ -839,7 +853,13 @@ export function EditorPane({
           </span>
         )}
         {showToggle && (
-          <EditorViewToggle value={view} onChange={setView} />
+          <EditorViewToggle
+            value={view}
+            onChange={(next) => {
+              setView(next);
+              onViewModeChange?.(next);
+            }}
+          />
         )}
         <EditorPanelMarkdownActionsMenu
           isMarkdown={isMarkdown}
@@ -893,7 +913,10 @@ export function EditorPane({
             wordWrap={wordWrap}
             showWhitespace={showWhitespace}
             loadChanges={loadChanges}
-            onBackToEdit={() => setView("edit")}
+            onBackToEdit={() => {
+              setView("edit");
+              onViewModeChange?.("edit");
+            }}
           />
         ) : showCsvTable ? (
           <CsvViewer content={state.draft} path={path} />

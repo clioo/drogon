@@ -59,6 +59,10 @@ impl Engine {
             // #176: remote names (never URLs) so the panel distinguishes
             // "no remote configured" from "no upstream on a remote".
             "remotes": parsed.remotes,
+            // #176 residual: the repo's default base ref for the
+            // clean-state sentence ("ahead of origin/main"); null falls
+            // back to the literal "base" in the UI.
+            "baseRef": parsed.base_ref,
         });
         let mut entries = Vec::with_capacity(parsed.entries.len());
         let mut remaining = MAX_FRAME_BYTES / 2;
