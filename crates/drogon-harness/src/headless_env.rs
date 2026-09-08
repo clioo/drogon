@@ -87,7 +87,7 @@ pub fn plan_headless_env(
                 link_files,
             })
         }
-        HarnessId::Claude | HarnessId::Opencode | HarnessId::Antigravity => None,
+        HarnessId::Claude | HarnessId::Opencode | HarnessId::Antigravity | HarnessId::Codex => None,
     }
 }
 
@@ -149,6 +149,7 @@ mod tests {
             HarnessId::Claude,
             HarnessId::Opencode,
             HarnessId::Antigravity,
+            HarnessId::Codex,
         ] {
             assert_eq!(
                 plan_headless_env(harness, Path::new("/data/x"), "n-1", None),
