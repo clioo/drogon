@@ -2,7 +2,7 @@
 // The dropdown/context components themselves need a DOM; the policy that
 // gates every row is pure and tested here.
 import { describe, expect, test } from "vitest";
-import { resolveBrowserToolbarMenuPolicy } from "./browser-toolbar-menu";
+import { resolveBrowserToolbarMenuPolicy } from "./browser-menu-policy";
 import {
   isBrowserPageMenuCopyRow,
   isBrowserPageMenuLinkRow,

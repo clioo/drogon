@@ -59,7 +59,12 @@ export type {
   BrowserAddressBarSelection,
 } from "./browser-address-bar-edit-session";
 export { BrowserToolbarMenu } from "./browser-toolbar-menu";
+export {
+  resolveBrowserToolbarMenuPolicy,
+  type BrowserToolbarMenuPolicy,
+} from "./browser-menu-policy";
 export { default as BrowserFind } from "./browser-find-bar";
+export { nextFindRequest, type BrowserFindRequestDirection } from "./browser-find-state";
 export {
   BrowserPageContextMenu,
   isBrowserPageMenuCopyRow,
@@ -96,3 +101,13 @@ export type {
 } from "./browser-reload-state";
 export { matchBrowserPaneChord } from "./browser-pane-keyboard";
 export type { BrowserPaneChord } from "./browser-pane-keyboard";
+export {
+  formatByteCount,
+  formatDownloadFinishedNotice,
+  formatDownloadProgressNotice,
+  formatDownloadStartedNotice,
+  formatLoadFailureRecoveryHint,
+  formatPermissionNotice,
+  formatPopupNotice,
+  formatRemoteDownloadSavedMessage,
+} from "./browser-notices";

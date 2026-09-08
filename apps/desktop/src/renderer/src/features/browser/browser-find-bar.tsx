@@ -11,27 +11,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { getFindRequestQuery } from "../terminal/find-query-bounds";
 import type { BrowserBridge } from "./browser-bridge";
+import { nextFindRequest } from "./browser-find-state";
 
-/**
- * Pure find-session step, exported for tests: the first request for a query
- * starts a new guest session (findNext: true); follow-ups in either
- * direction advance it (findNext: false). Null when there is no live query
- * or the debounced repeat already ran for it.
- */
-export function nextFindRequest(input: {
-  requestQuery: string | null;
-  activeQuery: string | null;
-  direction: "next" | "previous" | "start";
-}): { query: string; forward: boolean; findNext: boolean } | null {
-  const { requestQuery, activeQuery, direction } = input;
-  if (!requestQuery) return null;
-  if (direction === "start" && activeQuery === requestQuery) return null;
-  return {
-    query: requestQuery,
-    forward: direction !== "previous",
-    findNext: activeQuery !== requestQuery,
-  };
-}
+export { nextFindRequest };
 
 type BrowserFindProps = {
   tabId: string;
