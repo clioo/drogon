@@ -9,6 +9,7 @@ import {
   watchedWorkspaceCount,
 } from "./file-bridge";
 import { resultSchemas } from "../shared/result-validation";
+import { bridgeSchemas } from "../shared/bridge-validation";
 
 const scope = { hostId: "host", workspaceId: "workspace", path: "hello.txt" };
 const file = { ...scope, content: "é", size: 2, mtime: "2026-09-07T00:00:00Z" };
@@ -119,6 +120,15 @@ describe("file bridge admission", () => {
       // the fake answers no workspaces, so nothing is watched.
       ["workspace.list", {}],
     ]);
+  });
+
+  it("the generic drogon:* IPC gate preserves includeHidden (no zod strip)", () => {
+    // Regression: main/index.ts validates with bridgeSchemas before
+    // dispatchFileRequest runs; a schema without the key silently dropped
+    // the explorer's Show Dotfiles flag on the way to the daemon.
+    const parsed = bridgeSchemas.fileList.safeParse({ ...scope, includeHidden: false });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.includeHidden).toBe(false);
   });
 
   it("omits includeHidden from the wire params when not requested", async () => {
@@ -328,6 +338,68 @@ describe("file bridge admission", () => {
     );
     expect(overLimit).toMatchObject({ ok: false, error: { code: "invalid_argument" } });
   });
+
+  it("maps fileIgnored onto files.ignored and echoes only queried rows", async () => {
+    const seen: unknown[] = [];
+    const input = {
+      hostId: "host",
+      workspaceId: "workspace",
+      paths: ["a.txt", "ignored-dir", "b.log"],
+    };
+    const response = {
+      hostId: "host",
+      workspaceId: "workspace",
+      ignored: ["ignored-dir", "b.log"],
+    };
+    const accepted = await dispatchFileRequest(
+      "fileIgnored",
+      input,
+      async (method, params) => {
+        seen.push([method, params]);
+        return { ok: true, result: response };
+      },
+    );
+    expect(accepted).toEqual({ ok: true, result: response });
+    expect(seen).toEqual([["files.ignored", input]]);
+    // A surprising daemon answer decorates nothing: unqueried rows are cut.
+    const surprising = await dispatchFileRequest("fileIgnored", input, async () => ({
+      ok: true,
+      result: { ...response, ignored: ["ignored-dir", "elsewhere.txt"] },
+    }));
+    expect(surprising).toEqual({
+      ok: true,
+      result: { ...response, ignored: ["ignored-dir"] },
+    });
+    // Identity mismatch and oversized batches fail closed.
+    const mismatched = await dispatchFileRequest("fileIgnored", input, async () => ({
+      ok: true,
+      result: { ...response, workspaceId: "other" },
+    }));
+    expect(mismatched).toMatchObject({ ok: false, error: { code: "internal_error" } });
+    let called = false;
+    const oversized = await dispatchFileRequest(
+      "fileIgnored",
+      { ...input, paths: new Array(201).fill("a.txt") },
+      async () => {
+        called = true;
+        return { ok: true, result: response };
+      },
+    );
+    expect(oversized.ok).toBe(false);
+    expect(called).toBe(false);
+    // An older host without the method reports method-not-found verbatim.
+    const missing = {
+      code: "method_not_found",
+      message: "Unsupported method.",
+      retryable: false,
+    };
+    expect(
+      await dispatchFileRequest("fileIgnored", input, async () => ({
+        ok: false,
+        error: missing,
+      })),
+    ).toEqual({ ok: false, error: missing });
+  });
 });
 
 describe("explorer mutation result contracts (R16-L #156/#157)", () => {
@@ -336,7 +408,7 @@ describe("explorer mutation result contracts (R16-L #156/#157)", () => {
     // through this table, so a missing entry turned a successful on-disk
     // rename/delete into a malformed-contract error and the tree never
     // refreshed. This guards the table, not just the bridge above it.
-    for (const method of ["files.create", "files.rename", "files.delete"]) {
+    for (const method of ["files.create", "files.rename", "files.delete", "files.ignored"]) {
       expect(
         resultSchemas[method],
         `${method} must have a result schema`,

@@ -32,6 +32,8 @@ const bridge: DesktopBridge = {
   fileRename: (value) => ipcRenderer.invoke("drogon:fileRename", value),
   fileDelete: (value) => ipcRenderer.invoke("drogon:fileDelete", value),
   fileSearch: (value) => ipcRenderer.invoke("drogon:fileSearch", value),
+  // R16-AM (coordinator-owned one-liner): git-ignored visible rows.
+  fileIgnored: (value) => ipcRenderer.invoke("drogon:fileIgnored", value),
   status: () => ipcRenderer.invoke("drogon:status"),
   workspaces: () => ipcRenderer.invoke("drogon:workspaces"),
   addWorkspace: (value) => ipcRenderer.invoke("drogon:addWorkspace", value),

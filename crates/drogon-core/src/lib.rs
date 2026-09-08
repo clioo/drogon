@@ -392,6 +392,9 @@ impl Engine {
             "automation.run" => self.automation_run(request),
             "bot.history" => self.bot_history(&request.params),
             "files.list" => self.do_files_list(&request.params),
+            // R16-AM (coordinator-owned one-liner): read-only ignored-paths
+            // query behind the explorer's git-ignored dimming.
+            "files.ignored" => self.do_files_ignored(&request.params),
             "files.search" => self.do_files_search(&request.params),
             "files.read" => self.do_files_read(&request.params),
             "files.write" => self.mutating(request, Self::do_files_write),

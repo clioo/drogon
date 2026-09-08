@@ -281,6 +281,20 @@ export function createExplorerSource(
             .fileDelete({ ...scope, paths })
             .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
         : unsupported("files.delete"),
+    // Git-ignored visible rows (R16-AM, coordinator-owned additive lines):
+    // the explorer dims ignored rows like the reference; an absent bridge
+    // method (older daemon) decorates nothing, never errors.
+    ignored: (paths) =>
+      bridge.fileIgnored
+        ? bridge
+            .fileIgnored({ ...scope, paths: [...paths] })
+            .then((result): Result<readonly string[]> =>
+              result.ok ? { ok: true, result: result.result.ignored } : result,
+            )
+        : Promise.resolve({
+            ok: true as const,
+            result: [] as readonly string[],
+          }),
     // Live external ticks (R16-L #157): the explorer reloads its loaded
     // directories on each tick and defers while an inline edit is open.
     subscribeFilesChanged: (listener) =>
@@ -469,6 +483,7 @@ function FilesPanel({
       <FileExplorer
         workspaceId={workspaceId}
         workspaceName={workspace.name}
+        isGitWorkspace={workspace.kind === "git"}
         source={explorerSource}
         activePath={effectiveOpenPath}
         onSelect={openEntry}

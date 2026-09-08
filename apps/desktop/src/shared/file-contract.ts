@@ -116,4 +116,28 @@ export interface FileBridge {
    * (falls back to the `files.list` walk), never as a crash.
    */
   fileSearch?(input: FileSearchScope): Promise<Result<FileSearchResult>>;
+  /**
+   * Git-ignored query for the explorer's visible rows (additive R16-AM):
+   * reports which of the given workspace-relative paths git ignores so the
+   * tree can dim them like the reference. OPTIONAL until the daemon wires
+   * `files.ignored` dispatch and the preload exposes the channel: an
+   * absent method means no row is ever decorated, never a crash.
+   */
+  fileIgnored?(input: FileIgnoredScope): Promise<Result<FileIgnoredResult>>;
 }
+/**
+ * Upper bound on one `files.ignored` call. Mirrors the daemon's
+ * `MAX_IGNORED_PATHS` in `crates/drogon-core/src/workspace_files.rs`
+ * exactly; the renderer batches visible rows to stay under it.
+ */
+export const MAX_IGNORED_PATHS = 200;
+export type FileIgnoredScope = {
+  hostId: string;
+  workspaceId: string;
+  paths: string[];
+};
+export type FileIgnoredResult = {
+  hostId: string;
+  workspaceId: string;
+  ignored: string[];
+};

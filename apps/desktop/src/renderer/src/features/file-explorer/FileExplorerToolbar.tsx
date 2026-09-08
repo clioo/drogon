@@ -2,9 +2,11 @@
    src/renderer/src/components/right-sidebar/FileExplorerToolbar.tsx.
    Adapted: New File / New Folder / Reveal Active File buttons lead (the
    task's toolbar contract) ahead of Collapse All and Refresh; the overflow
-   menu keeps Show Dotfiles and drops the git-ignored toggle, Open-in
-   destinations and search-view concerns (out of MVP scope). Tooltips are
-   `title` attributes: this panel mounts outside any tooltip provider. */
+   menu keeps Show Dotfiles and Show Git Ignored Files (git workspaces
+   only, like the source's activeRepoSupportsGit gate) and drops Open-in
+   destinations (user-configured editor apps — no Drogon settings yet) and
+   search-view concerns (out of MVP scope). Tooltips are `title`
+   attributes: this panel mounts outside any tooltip provider. */
 
 import { useEffect, useRef, useState } from "react";
 import { Check, FilePlus, FolderPlus, ListCollapse, Loader2, LocateFixed, MoreHorizontal, RefreshCw } from "lucide-react";
@@ -26,6 +28,10 @@ export interface FileExplorerToolbarProps {
   onRevealActive: () => void;
   showDotfiles: boolean;
   onToggleDotfiles: () => void;
+  /** Source gate (activeRepoSupportsGit): the toggle exists for git repos. */
+  showGitIgnoredFilesToggle?: boolean;
+  showGitIgnoredFiles?: boolean;
+  onToggleGitIgnoredFiles?: () => void;
 }
 
 function ToolbarButton({
@@ -83,6 +89,9 @@ export function FileExplorerToolbar({
   onRevealActive,
   showDotfiles,
   onToggleDotfiles,
+  showGitIgnoredFilesToggle = false,
+  showGitIgnoredFiles = true,
+  onToggleGitIgnoredFiles,
 }: FileExplorerToolbarProps) {
   return (
     <div className="flex h-8 min-h-8 items-center gap-2 border-b border-border px-2">
@@ -136,6 +145,9 @@ export function FileExplorerToolbar({
       <MoreExplorerActions
         showDotfiles={showDotfiles}
         onToggleDotfiles={onToggleDotfiles}
+        showGitIgnoredFilesToggle={showGitIgnoredFilesToggle}
+        showGitIgnoredFiles={showGitIgnoredFiles}
+        onToggleGitIgnoredFiles={onToggleGitIgnoredFiles}
       />
     </div>
   );
@@ -144,9 +156,15 @@ export function FileExplorerToolbar({
 function MoreExplorerActions({
   showDotfiles,
   onToggleDotfiles,
+  showGitIgnoredFilesToggle,
+  showGitIgnoredFiles,
+  onToggleGitIgnoredFiles,
 }: {
   showDotfiles: boolean;
   onToggleDotfiles: () => void;
+  showGitIgnoredFilesToggle: boolean;
+  showGitIgnoredFiles: boolean;
+  onToggleGitIgnoredFiles?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -194,6 +212,23 @@ function MoreExplorerActions({
             </span>
             Show Dotfiles
           </button>
+          {showGitIgnoredFilesToggle && (
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={showGitIgnoredFiles}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent"
+              onClick={() => {
+                onToggleGitIgnoredFiles?.();
+                setOpen(false);
+              }}
+            >
+              <span className="size-3 shrink-0">
+                {showGitIgnoredFiles && <Check className="size-3" aria-hidden />}
+              </span>
+              Show Git Ignored Files
+            </button>
+          )}
         </div>
       )}
     </div>

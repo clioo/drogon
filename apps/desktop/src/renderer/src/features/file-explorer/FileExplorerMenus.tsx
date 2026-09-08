@@ -7,9 +7,9 @@
    (download, Copy, duplicate, browser/markdown previews, collapse-folder,
    find-in-folder, add-as-project) are out of MVP scope and never appear.
    Reveal in Finder and Open in Terminal are present per the task contract:
-   reveal has no shell bridge in this repo (disabled with the reason as its
-   title — see FileExplorerTreePane for the attempted wiring), while Open
-   in Terminal is hosted by the Files panel through session.start. */
+   reveal calls the shell bridge (showItemInFolder, like the source's
+   shell.openPath handler), while Open in Terminal is hosted by the Files
+   panel through session.start. */
 
 import { useEffect, useRef } from "react";
 import { Copy, ExternalLink, FilePlus, FolderPlus, Pencil, SquareTerminal, Trash2 } from "lucide-react";

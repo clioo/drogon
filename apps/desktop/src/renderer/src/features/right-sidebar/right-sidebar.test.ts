@@ -26,6 +26,9 @@ import {
   getVisibleRightSidebarActivityItems,
 } from "./activity-bar-items";
 import { formatSidebarChord } from "./shortcut-label";
+// Read-only import of the coordinator-owned registry: asserts the R16-AM
+// ports chord the rail button advertises is actually dispatchable.
+import { getKeybindingDefinition } from "../../../../shared/keybindings";
 
 describe("normalizeRightSidebarTab", () => {
   it("keeps the MVP tabs", () => {
@@ -163,6 +166,18 @@ describe("activity-bar-items", () => {
     // Source Control, in the source's relative order.
     assert.equal(items[3].title, "Ports");
     assert.equal(activityItemAriaLabel(items[3]), "Ports (⌘⇧I)");
+  });
+  it("registers sidebar.ports.toggle in the shared table (R16-AM: the rail chord must dispatch)", () => {
+    // Fork-verbatim (definitions-core-1.ts): Show Ports on Mod+Shift+I for
+    // macOS only; other platforms carry no binding and route via the rail.
+    const ports = getKeybindingDefinition("sidebar.ports.toggle");
+    assert.ok(ports, "sidebar.ports.toggle must exist in the shared table");
+    assert.equal(ports.title, "Show Ports");
+    assert.deepEqual([...ports.defaultBindings.darwin], ["Mod+Shift+I"]);
+    assert.deepEqual([...ports.defaultBindings.linux], []);
+    assert.deepEqual([...ports.defaultBindings.win32], []);
+    // The advertised rail label stays in sync with the registered chord.
+    assert.equal(formatSidebarChord("CmdOrCtrl+Shift+I", "darwin"), "⌘⇧I");
   });
   it("formats chords per platform", () => {
     assert.equal(

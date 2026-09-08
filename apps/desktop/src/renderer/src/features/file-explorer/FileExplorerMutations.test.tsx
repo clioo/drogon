@@ -294,3 +294,38 @@ describe("live watch ticks", () => {
     await waitFor(() => expect(row("outside.txt")).toBeTruthy());
   });
 });
+
+describe("reveal in finder (fork shell.openPath → showItemInFolder semantics)", () => {
+  const revealName = /Reveal in Finder|Open Containing Folder|Reveal in File Explorer/;
+
+  afterEach(() => {
+    delete (window as { drogon?: unknown }).drogon;
+  });
+
+  it("reveals the row path through the shell bridge, no inline error", async () => {
+    const showItemInFolder = vi.fn(async () => ({ ok: true as const, result: { shown: true } }));
+    (window as { drogon?: unknown }).drogon = { shell: { showItemInFolder } };
+    const harness = makeSource([node("notes.txt", "notes.txt")]);
+    await renderExplorer(harness);
+
+    fireEvent.contextMenu(row("notes.txt"));
+    fireEvent.click(screen.getByRole("menuitem", { name: revealName }));
+
+    await waitFor(() =>
+      expect(showItemInFolder).toHaveBeenCalledWith({ path: "notes.txt" }),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("fails closed with an inline error when the shell bridge is absent", async () => {
+    const harness = makeSource([node("notes.txt", "notes.txt")]);
+    await renderExplorer(harness);
+
+    fireEvent.contextMenu(row("notes.txt"));
+    fireEvent.click(screen.getByRole("menuitem", { name: revealName }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("shell bridge"),
+    );
+  });
+});

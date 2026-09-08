@@ -55,6 +55,23 @@ export function ancestorPaths(path: string): string[] {
 }
 
 /**
+ * Port of the source status-display.ts isPathIgnored: a row counts as
+ * git-ignored when it or any ancestor directory is in the ignored set
+ * (children of an ignored directory render and hide with it).
+ */
+export function isPathIgnored(
+  ignored: ReadonlySet<string>,
+  relativePath: string,
+): boolean {
+  if (ignored.size === 0) return false;
+  if (ignored.has(relativePath)) return true;
+  for (const ancestor of ancestorPaths(relativePath)) {
+    if (ignored.has(ancestor)) return true;
+  }
+  return false;
+}
+
+/**
  * Depth-first projection of the rows the user can currently see: every
  * loaded child of an expanded directory, in listing order. Mirrors the
  * source's flat visible-row projection over the lazy per-directory cache.

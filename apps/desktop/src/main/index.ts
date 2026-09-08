@@ -281,6 +281,8 @@ function registerBridge() {
         case "fileRename":
         case "fileDelete":
         case "fileSearch":
+        // R16-AM (coordinator-owned one-liner): git-ignored visible rows.
+        case "fileIgnored":
           return dispatchFileRequest(method, value);
         case "status":
           return callNative("status", {});

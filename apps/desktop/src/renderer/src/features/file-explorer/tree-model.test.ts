@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   ancestorPaths,
+  isPathIgnored,
   buildVisibleRows,
   collectLoadedNodes,
   depthOf,
@@ -59,6 +60,19 @@ describe("ancestorPaths", () => {
   test("yields parents nearest-first", () => {
     expect(ancestorPaths("a/b/c")).toEqual(["a/b", "a"]);
     expect(ancestorPaths("top")).toEqual([]);
+  });
+});
+
+describe("isPathIgnored (fork status-display.ts)", () => {
+  test("matches the path itself, any ancestor, and nothing else", () => {
+    const ignored = new Set(["dist", "build.log"]);
+    expect(isPathIgnored(ignored, "dist")).toBe(true);
+    expect(isPathIgnored(ignored, "dist/bundle.js")).toBe(true);
+    expect(isPathIgnored(ignored, "dist/sub/deep.js")).toBe(true);
+    expect(isPathIgnored(ignored, "build.log")).toBe(true);
+    expect(isPathIgnored(ignored, "src/build.log")).toBe(false);
+    expect(isPathIgnored(ignored, "dist2")).toBe(false);
+    expect(isPathIgnored(new Set(), "dist")).toBe(false);
   });
 });
 

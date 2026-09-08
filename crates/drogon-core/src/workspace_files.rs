@@ -784,6 +784,89 @@ fn try_search_via_git_ls_files(root: &Path, collector: &mut SearchCollector) -> 
     true
 }
 
+/// Upper bound on one `files.ignored` call: the explorer queries visible
+/// rows only (the reference debounces one query per expansion), so 200
+/// covers any realistic panel without letting one call enumerate a tree.
+pub(crate) const MAX_IGNORED_PATHS: usize = 200;
+
+/// Reports which workspace-relative paths git ignores, via
+/// `git check-ignore --stdin -z` (NUL-safe both ways). Non-git workspaces,
+/// a missing git binary, or any git failure yield an empty set — never an
+/// error, mirroring `try_search_via_git_ls_files`' fallible-git posture:
+/// the explorer then simply decorates nothing. Every path is validated
+/// with [`validate_rel`] first, so an absolute path or `..` escape fails
+/// the whole call with `invalid_argument` before git ever runs.
+pub(crate) fn check_ignored(root: &Path, paths: &[String]) -> Result<Vec<String>, RpcError> {
+    if paths.len() > MAX_IGNORED_PATHS {
+        return Err(error::invalid_argument(
+            "too many paths for one ignored-paths query",
+        ));
+    }
+    for path in paths {
+        validate_rel(path)?;
+        if path.len() > drogon_protocol::workspace_files::MAX_FILE_PATH_BYTES {
+            return Err(error::invalid_argument(
+                "workspace-relative file path is too long",
+            ));
+        }
+    }
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stdin_bytes = Vec::new();
+    for path in paths {
+        stdin_bytes.extend_from_slice(path.as_bytes());
+        stdin_bytes.push(0);
+    }
+    let mut child = match std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["check-ignore", "--stdin", "-z"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        // No git binary: nothing is knowably ignored.
+        Err(_) => return Ok(Vec::new()),
+    };
+    use std::io::Write as _;
+    let write_ok = child
+        .stdin
+        .as_mut()
+        .map(|stdin| stdin.write_all(&stdin_bytes).is_ok())
+        .unwrap_or(false);
+    if !write_ok {
+        let _ = child.wait();
+        return Ok(Vec::new());
+    }
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(_) => return Ok(Vec::new()),
+    };
+    // check-ignore exits 0 (some ignored), 1 (none ignored), 128 (not a
+    // repo): all three are answers, never failures.
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Ok(Vec::new());
+    }
+    let mut ignored = Vec::new();
+    for chunk in output.stdout.split(|byte| *byte == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        // Lossy is deliberate here, matching the ls-files path above: git
+        // paths that are not UTF-8 cannot round-trip the JSON wire anyway.
+        // Echo-checking against the query keeps a surprising git answer
+        // (e.g. a symlinked worktree root) from decorating unknown rows.
+        let path = String::from_utf8_lossy(chunk).replace('\\', "/");
+        if paths.iter().any(|candidate| candidate == &path) {
+            ignored.push(path);
+        }
+    }
+    Ok(ignored)
+}
+
 /// Plain breadth-first walk over the `cap_std` root handle for non-git
 /// workspaces, applying the same blocklist the git path gets from
 /// `--exclude-standard` plus [`search_path_blocked`]. Descends only into

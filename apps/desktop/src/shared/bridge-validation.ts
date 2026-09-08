@@ -46,6 +46,9 @@ export const bridgeSchemas = {
   // object here; main/file-bridge.ts re-validates the shape strictly
   // before the native call, so the two never drift apart.
   fileSearch: z.object({}).passthrough(),
+  // Git-ignored visible-row query (R16-AM, coordinator-owned one-liner):
+  // same passthrough posture; main/file-bridge.ts re-validates strictly.
+  fileIgnored: z.object({}).passthrough(),
   status: z.undefined(),
   workspaces: z.undefined(),
   chooseFolder: z.undefined(),

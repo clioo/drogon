@@ -11,6 +11,7 @@ import {
   MAX_FILE_BYTES,
   MAX_FILE_SEARCH_QUERY_BYTES,
   MAX_FILE_SEARCH_RESULTS,
+  MAX_IGNORED_PATHS,
 } from "../shared/file-contract";
 import type { FilesChangedTick } from "../shared/file-contract";
 import type { Result } from "../shared/session-contract";
@@ -102,12 +103,16 @@ const fileSearchResultSchema = z.object({
 });
 
 export type FileSearchMethod = "fileSearch";
+export type FileIgnoredMethod = "fileIgnored";
 
 export async function dispatchFileRequest(
-  method: FileMethod | ExplorerFileMethod | FileSearchMethod,
+  method: FileMethod | ExplorerFileMethod | FileSearchMethod | FileIgnoredMethod,
   input: unknown,
   call: NativeCall = callNative,
 ): Promise<Result<unknown>> {
+  if (method === "fileIgnored") {
+    return dispatchFileIgnoredRequest(input, call);
+  }
   if (method === "fileSearch") {
     const parsed = fileSearchBridgeSchema.safeParse(input);
     if (!parsed.success)
@@ -198,13 +203,10 @@ export async function dispatchFileRequest(
     params = fileBridgeSchemas.fileRead.parse(value);
   } else {
     nativeMethod = "files.list";
-    // `includeHidden` is newer than the frozen validation schemas: admit it
-    // with a local extension (zod strips unknown keys, so the base schema
-    // alone would swallow it) and pass it to the wire as the protocol's
-    // `include_hidden` flag; omitted means show-everything, as before.
-    const listInput = fileBridgeSchemas.fileList
-      .extend({ includeHidden: z.boolean().optional() })
-      .parse(input);
+    // includeHidden rides the base schema (file-validation.ts); zod strips
+    // unknown keys, so a schema that lacks it would swallow the flag at the
+    // generic drogon:* IPC gate before this dispatcher ever ran.
+    const listInput = fileBridgeSchemas.fileList.parse(input);
     params = {
       ...fileBridgeSchemas.fileList.parse(value),
       ...(typeof listInput.includeHidden === "boolean"
@@ -266,6 +268,80 @@ export async function dispatchFileRequest(
   )
     return invalid();
   return { ok: true, result: output };
+}
+
+/**
+ * Read-only `files.ignored` fan-out (R16-AM): validates the visible-row
+ * batch locally, asks the daemon which rows git ignores, and echoes only
+ * queried rows back — a surprising daemon answer decorates nothing.
+ * An older host without the method reports method-not-found verbatim
+ * (fail-closed, like the explorer mutations above).
+ */
+const fileIgnoredBridgeSchema = z.object({
+  hostId: opaqueId,
+  workspaceId: opaqueId,
+  paths: z.array(relPath).max(MAX_IGNORED_PATHS),
+});
+const fileIgnoredResultSchema = z.object({
+  hostId: opaqueId,
+  workspaceId: opaqueId,
+  ignored: z.array(z.string()),
+});
+
+async function dispatchFileIgnoredRequest(
+  input: unknown,
+  call: NativeCall,
+): Promise<Result<unknown>> {
+  const parsed = fileIgnoredBridgeSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: {
+        code: "invalid_argument",
+        message: "Invalid ignored-paths request.",
+        retryable: false,
+      },
+    };
+  const asked = parsed.data;
+  const result = await call("files.ignored", {
+    hostId: asked.hostId,
+    workspaceId: asked.workspaceId,
+    paths: asked.paths,
+  });
+  if (!result.ok) return result;
+  const checked = fileIgnoredResultSchema.safeParse(result.result);
+  if (!checked.success)
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The ignored-paths response does not match the requested identity.",
+        retryable: false,
+      },
+    };
+  const output = checked.data;
+  if (
+    output.hostId !== asked.hostId ||
+    output.workspaceId !== asked.workspaceId
+  )
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The ignored-paths response does not match the requested identity.",
+        retryable: false,
+      },
+    };
+  const queried = new Set(asked.paths);
+  return {
+    ok: true,
+    result: {
+      ...output,
+      ignored: output.ignored.filter((entry) => queried.has(entry)),
+    },
+  };
 }
 
 async function dispatchExplorerRequest(

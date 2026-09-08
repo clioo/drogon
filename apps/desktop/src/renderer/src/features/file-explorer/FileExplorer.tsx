@@ -21,9 +21,17 @@ import {
   ancestorPaths,
   buildVisibleRows,
   formatPathsForClipboard,
+  isPathIgnored,
   projectNameFilter,
   type ExplorerNode,
 } from "./tree-model";
+import {
+  defaultPrefsStorage,
+  loadShowDotfiles,
+  loadShowGitIgnoredFiles,
+  saveShowDotfiles,
+  saveShowGitIgnoredFiles,
+} from "./explorer-display-prefs";
 import { applyNavigation, type SelectionMode } from "./keyboard-navigation";
 import {
   deleteConfirmationFor,
@@ -31,6 +39,15 @@ import {
   type ExplorerCapabilities,
   type RowMenuItemId,
 } from "./explorer-policy";
+import { MAX_IGNORED_PATHS } from "../../../../shared/file-contract";
+import { useFileExplorerIgnoredPaths } from "./use-file-explorer-ignored-paths";
+import type { ShellBridge } from "../shell/worktree-bridges";
+
+/** Defensive shell-bridge read (jsdom hosts have no window.drogon at all). */
+function revealShellBridge(): ShellBridge | null {
+  const drogon = (window as { drogon?: { shell?: ShellBridge } }).drogon;
+  return drogon?.shell ?? null;
+}
 
 /** Lazy backend surface the explorer touches — injected, never imported. */
 export interface FileExplorerDataSource {
@@ -42,6 +59,12 @@ export interface FileExplorerDataSource {
   ): Promise<Result<null>>;
   rename?(from: string, to: string): Promise<Result<null>>;
   remove?(paths: string[]): Promise<Result<null>>;
+  /**
+   * Git-ignored classification for visible rows (R16-AM, fork
+   * `useFileExplorerIgnoredPaths` parity). OPTIONAL until the bridge
+   * exposes `files.ignored`: absent means no row is ever decorated.
+   */
+  ignored?(paths: readonly string[]): Promise<Result<readonly string[]>>;
   /**
    * Live change ticks (R16-L #157, fork `fs:changed` ordering). OPTIONAL:
    * absent means the tree refreshes on its own mutations only. The
@@ -121,6 +144,8 @@ export interface FileExplorerProps {
   source: FileExplorerDataSource | null;
   /** Open editor file: auto-revealed and highlighted on change. */
   activePath: string | null;
+  /** Git workspaces gain the source's "Show Git Ignored Files" toggle. */
+  isGitWorkspace?: boolean;
   onSelect?(node: ExplorerNode): void;
   /** Host opens a terminal rooted at the given workspace-relative dir. */
   onOpenTerminal?(cwd: string): void;
@@ -154,6 +179,7 @@ export function FileExplorer({
   workspaceId,
   workspaceName,
   workspaceRoot,
+  isGitWorkspace = false,
   source,
   activePath,
   onSelect,
@@ -171,7 +197,14 @@ export function FileExplorer({
   const [filterLoading, setFilterLoading] = useState(false);
   const [filterError, setFilterError] = useState<string | null>(null);
   const [fullCache, setFullCache] = useState<readonly ExplorerNode[] | null>(null);
-  const [showDotfiles, setShowDotfiles] = useState(true);
+  // Fork FileExplorer.tsx: showDotfiles is per-worktree (default true).
+  const [showDotfiles, setShowDotfiles] = useState(() =>
+    loadShowDotfiles(defaultPrefsStorage(), workspaceId),
+  );
+  // Fork settings.showGitIgnoredFiles: global, default true.
+  const [showGitIgnoredFiles, setShowGitIgnoredFiles] = useState(() =>
+    loadShowGitIgnoredFiles(defaultPrefsStorage()),
+  );
   const [inline, setInline] = useState<{ input: InlineInput; error: string | null } | null>(null);
   const [menu, setMenu] = useState<MenuState>(null);
   const [confirmDelete, setConfirmDelete] = useState<readonly ExplorerNode[] | null>(null);
@@ -215,9 +248,10 @@ export function FileExplorer({
       // explicit error surfaced inline (or in the delete dialog) — the
       // shape never depends on method-sniffing.
       canMutate: true,
-      // No shell bridge exists in this repo: the item stays visible but
-      // disabled with its reason, never a dead click.
-      canReveal: false,
+      // Reveal uses the shell bridge (fork semantics: showItemInFolder);
+      // the bridge is resolved at click time so a missing bridge fails
+      // closed with an inline error, never a dead click.
+      canReveal: true,
       canOpenTerminal: !!onOpenTerminal,
     }),
     [onOpenTerminal],
@@ -317,9 +351,14 @@ export function FileExplorer({
 
   // Workspace/source switch: drop every cached scope (children, expansion,
   // selection, filter) so another workspace's listing can never leak in.
+  // The per-worktree dotfile preference (fork showDotfilesByWorktree)
+  // follows the new scope and drives the first listing.
   useEffect(() => {
     generation.current += 1;
     const gen = generation.current;
+    const storedDotfiles = loadShowDotfiles(defaultPrefsStorage(), workspaceId);
+    setShowDotfiles(storedDotfiles);
+    showDotfilesRef.current = storedDotfiles;
     setChildren({});
     setExpanded(new Set());
     setPendingDirs(new Set());
@@ -335,7 +374,7 @@ export function FileExplorer({
     setConfirmDelete(null);
     lastRevealed.current = null;
     if (!workspaceId || !source) return;
-    loadDir("", gen, true);
+    loadDir("", gen, storedDotfiles);
     return () => {
       generation.current += 1;
     };
@@ -362,11 +401,20 @@ export function FileExplorer({
   const toggleDotfiles = useCallback(() => {
     const next = !showDotfilesRef.current;
     setShowDotfiles(next);
+    saveShowDotfiles(defaultPrefsStorage(), workspaceId, next);
     const gen = ++generation.current;
     setChildren({});
     setFilterReloadTick((tick) => tick + 1);
     reloadExpanded(gen, next);
-  }, [reloadExpanded]);
+  }, [reloadExpanded, workspaceId]);
+
+  const toggleGitIgnoredFiles = useCallback(() => {
+    setShowGitIgnoredFiles((prev) => {
+      const next = !prev;
+      saveShowGitIgnoredFiles(defaultPrefsStorage(), next);
+      return next;
+    });
+  }, []);
 
   const toggleDir = useCallback(
     (dirPath: string) => {
@@ -435,15 +483,45 @@ export function FileExplorer({
     };
   }, [hasFilter, filter, filterReloadTick, source, workspaceId]);
 
-  const visibleRows = useMemo(
+  const visibleRowsAll = useMemo(
     () => buildVisibleRows(children, expanded),
     [children, expanded],
   );
-  const rows: readonly ExplorerNode[] = useMemo(() => {
-    if (!hasFilter) return visibleRows;
+  // Fork useFileExplorerVisibleRowProjection: the ignored-path query runs
+  // over the pre-hide projection (tree or name filter) regardless of the
+  // Show Git Ignored Files toggle, then the toggle hides those rows from
+  // the rendered projection.
+  const rowsAll: readonly ExplorerNode[] = useMemo(() => {
+    if (!hasFilter) return visibleRowsAll;
     if (!fullCache) return [];
     return projectNameFilter(fullCache, filter, { showDotfiles });
-  }, [hasFilter, visibleRows, fullCache, filter, showDotfiles]);
+  }, [hasFilter, visibleRowsAll, fullCache, filter, showDotfiles]);
+  // Git-ignored dimming (R16-AM, fork useFileExplorerIgnoredPaths parity):
+  // one debounced daemon query over the visible rows; a missing source
+  // method (older daemon) decorates nothing, never errors.
+  const ignoredQuery = useMemo(() => {
+    const query = source?.ignored;
+    if (!query) return null;
+    return async (paths: readonly string[]): Promise<ReadonlySet<string>> => {
+      const result = await query(paths.slice(0, MAX_IGNORED_PATHS));
+      if (!result.ok) return new Set();
+      return new Set(result.result);
+    };
+  }, [source]);
+  const ignoredRowPaths = useMemo(() => rowsAll.map((row) => row.path), [rowsAll]);
+  const ignoredPaths = useFileExplorerIgnoredPaths({
+    scopeKey: workspaceId,
+    relativePaths: ignoredRowPaths,
+    shouldDebounce: hasFilter,
+    queryIgnored: ignoredQuery,
+  });
+  const rows: readonly ExplorerNode[] = useMemo(
+    () =>
+      showGitIgnoredFiles
+        ? rowsAll
+        : rowsAll.filter((row) => !isPathIgnored(ignoredPaths, row.path)),
+    [rowsAll, showGitIgnoredFiles, ignoredPaths],
+  );
   const rowsByPath = useMemo(() => new Map(rows.map((row) => [row.path, row])), [rows]);
 
   // Why no `.focus()` here: the fork's autoReveal only scrolls the row into
@@ -803,9 +881,20 @@ export function FileExplorer({
             onOpenTerminal(primary.isDirectory ? primary.path : parentDirOf(primary.path));
           }
           break;
-        case "reveal-in-finder":
-          setActionError("Reveal in Finder needs the shell bridge, which is not wired in this build.");
+        case "reveal-in-finder": {
+          // Fork file-explorer-row-context-menu.tsx: shell.openPath(node.path),
+          // whose main handler reveals (showItemInFolder) — call the explicit
+          // reveal channel here. No remote gate: Drogon has no SSH workspaces.
+          const shell = revealShellBridge();
+          if (!shell) {
+            setActionError("Reveal in Finder needs the shell bridge, which is not wired in this build.");
+            break;
+          }
+          void shell.showItemInFolder({ path: primary.path }).then((result) => {
+            if (!result.ok) setActionError(result.error.message);
+          });
           break;
+        }
         case "rename":
           startRename(primary);
           break;
@@ -1006,6 +1095,9 @@ export function FileExplorer({
         onRevealActive={() => setRevealTick((tick) => tick + 1)}
         showDotfiles={showDotfiles}
         onToggleDotfiles={toggleDotfiles}
+        showGitIgnoredFilesToggle={isGitWorkspace}
+        showGitIgnoredFiles={showGitIgnoredFiles}
+        onToggleGitIgnoredFiles={toggleGitIgnoredFiles}
       />
       <FileExplorerQueryStrip>
         <FileExplorerNameFilter
@@ -1043,6 +1135,7 @@ export function FileExplorer({
             expanded={expanded}
             pendingDirs={pendingDirs}
             selectedPaths={selectedPaths}
+            ignoredPaths={ignoredPaths}
             inline={inline}
             hasFilter={hasFilter}
             filterLoading={filterLoading}

@@ -216,7 +216,14 @@ async function connect(session) {
   // sealed acceptance met the same wall, so wait generously here.
   for (let i = 0; i < 360 && !page; i++) {
     const pages = browser.contexts().flatMap((context) => context.pages());
-    page = pages.find((candidate) => !/^https?:/.test(candidate.url())) ?? pages[0] ?? null;
+    // The main renderer is the file: page; a restored browser guest whose
+    // URL died while the app was closed shows chrome-error://, which is not
+    // http(s) and would otherwise hijack every command.
+    page =
+      pages.find((candidate) => candidate.url().startsWith("file:")) ??
+      pages.find((candidate) => !/^https?:/.test(candidate.url())) ??
+      pages[0] ??
+      null;
     if (!page) await new Promise((resolve) => setTimeout(resolve, 250));
   }
   if (!page) die("Electron has no page yet.");
