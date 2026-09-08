@@ -48,8 +48,6 @@ describe("appearance projection", () => {
         onTerminalFontSizeChange={() => {}}
         terminalGpuAcceleration="auto"
         onTerminalGpuAccelerationChange={() => {}}
-        inspectorVisible={true}
-        onInspectorChange={() => {}}
         statusBarVisible={true}
         onStatusBarVisibleChange={() => {}}
         tasksButtonVisible={true}
@@ -67,7 +65,12 @@ describe("appearance projection", () => {
     expect(html).toContain("Light");
     expect(html).toContain('role="radiogroup"');
     expect(html).toContain('aria-label="Terminal font size"');
-    expect(html).toContain("Show session details");
+    // #132: the source has no session-details switch; visibility flags live
+    // under the source's Window & Sidebar section instead.
+    expect(html).not.toContain("Show session details");
+    expect(html).toContain("Window &amp; Sidebar");
+    expect(html).toContain("Show Status Bar");
+    expect(html).toContain("Show Tasks Button");
     expect(html).toContain('role="switch"');
   });
 
@@ -84,8 +87,6 @@ describe("appearance projection", () => {
         terminalFontWeight={400}
         terminalFontWeightBold={800}
         editorFontFamily=""
-        inspectorVisible={true}
-        onInspectorChange={() => {}}
         statusBarVisible={true}
         onStatusBarVisibleChange={() => {}}
         tasksButtonVisible={true}

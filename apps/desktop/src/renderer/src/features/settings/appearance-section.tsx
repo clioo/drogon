@@ -13,12 +13,15 @@
 //   src/renderer/src/components/settings/FontAutocomplete.tsx
 //     (font combobox; the component lives in font-autocomplete.tsx)
 // Adapted: the MVP keeps this repo's real controls (theme, terminal font
-// size, session details) grouped under Interface/Terminal subsection
-// headers, plus the source's Terminal Rendering GPU-acceleration control
-// (src/renderer/src/components/settings/TerminalRenderingSection.tsx copy);
-// typography rows below are controlled when the caller passes values and
-// otherwise read/write the persisted envelope directly (same pattern as the
-// GPU reader/writer), so App.tsx needs no new prop thread.
+// size, window/sidebar visibility) grouped under the source's
+// Interface/Terminal/Window-&-Sidebar subsection headers, plus the source's
+// Terminal Rendering GPU-acceleration control
+// (src/renderer/src/components/settings/TerminalRenderingSection.tsx copy).
+// The source has no session-details switch (visibility toggles through the
+// right sidebar's session tab), so Appearance renders none. Typography rows
+// below are controlled when the caller passes values and otherwise
+// read/write the persisted envelope directly (same pattern as the GPU
+// reader/writer), so App.tsx needs no new prop thread.
 import { useCallback, useRef, useState } from "react";
 import { Input } from "../../components/ui/input";
 import type { TerminalGpuAcceleration, Theme } from "../../settings-store";
@@ -113,8 +116,6 @@ export function AppearanceSection({
   onTerminalFontSizeChange,
   terminalGpuAcceleration,
   onTerminalGpuAccelerationChange,
-  inspectorVisible,
-  onInspectorChange,
   terminalFontFamily: terminalFontFamilyProp,
   onTerminalFontFamilyChange,
   terminalFontWeight: terminalFontWeightProp,
@@ -138,8 +139,6 @@ export function AppearanceSection({
   onTerminalFontSizeChange: (size: number) => void;
   terminalGpuAcceleration: TerminalGpuAcceleration;
   onTerminalGpuAccelerationChange: (mode: TerminalGpuAcceleration) => void;
-  inspectorVisible: boolean;
-  onInspectorChange: (visible: boolean) => void;
   /** Source typography knobs. Optional: when omitted the rows read/write
    *  the persisted envelope directly (GPU-reader pattern), so App.tsx
    *  needs no new prop thread. */
@@ -270,7 +269,7 @@ export function AppearanceSection({
     <SettingsSection
       id="appearance"
       title="Appearance"
-      description="Theme and terminal typography. Changes apply immediately."
+      description="Theme, terminal typography, and window chrome. Changes apply immediately."
     >
       <div className="divide-y divide-border/40">
         <div className="space-y-2 pb-4">
@@ -289,6 +288,17 @@ export function AppearanceSection({
                 ariaLabel="Theme"
               />
             }
+          />
+        </div>
+        <div className="space-y-2 py-4">
+          {/* Source section name (AppearancePane windowSidebarTitle): the
+          window/sidebar visibility flags this build backs with real
+          settings. The source's Language, UI Zoom, IDE font, terminal
+          theme catalog and per-provider status-bar toggles have no backing
+          here and stay out. */}
+          <SettingsSubsectionHeader
+            title="Window & Sidebar"
+            description="Window chrome and sidebar visibility."
           />
           <SettingsSwitchRow
             label="Show Status Bar"
@@ -402,12 +412,6 @@ export function AppearanceSection({
             }
           />
           <SettingsFieldError message={editorFontError} />
-          <SettingsSwitchRow
-            label="Show session details"
-            description="Side pane with the active session's command and state."
-            checked={inspectorVisible}
-            onChange={onInspectorChange}
-          />
         </div>
       </div>
     </SettingsSection>
