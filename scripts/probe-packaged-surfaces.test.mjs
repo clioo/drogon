@@ -5,8 +5,10 @@ import {
   browserSnapshotShowsGuest,
   classifyTasksList,
   declaredStatusBarHeight,
+  findCreatedStripTabName,
   fixtureHasBinary,
   FIXTURE_PATH,
+  folderViewSettled,
   paletteOpenChord,
   registryLiveness,
   summarizeAutomationHistory,
@@ -221,5 +223,61 @@ describe("registryLiveness", () => {
 
   it("names an empty registry", () => {
     assert.equal(registryLiveness(0, 0), "empty");
+  });
+});
+
+describe("findCreatedStripTabName", () => {
+  it("returns the added tab by name, wherever it sits", () => {
+    assert.equal(
+      findCreatedStripTabName(
+        ["sidebar-explorer.txt"],
+        ["Terminal 1 live", "sidebar-explorer.txt"],
+      ),
+      "Terminal 1 live",
+    );
+  });
+
+  it("returns null when nothing was added", () => {
+    assert.equal(
+      findCreatedStripTabName(["a", "b"], ["a", "b"]),
+      null,
+    );
+  });
+
+  it("ignores removed tabs and reports the addition", () => {
+    assert.equal(
+      findCreatedStripTabName(["old", "kept"], ["kept", "new"]),
+      "new",
+    );
+  });
+});
+
+describe("folderViewSettled", () => {
+  it("settles on the empty-state heading with no tabs", () => {
+    assert.equal(
+      folderViewSettled({ headings: ["Start a session"], tabCount: 0, headerNames: [], workspaceName: "folder" }),
+      true,
+    );
+  });
+
+  it("settles on restored tabs under the workspace header", () => {
+    assert.equal(
+      folderViewSettled({ headings: [], tabCount: 2, headerNames: ["folder"], workspaceName: "folder" }),
+      true,
+    );
+  });
+
+  it("does not settle on another workspace's tabs", () => {
+    assert.equal(
+      folderViewSettled({ headings: [], tabCount: 2, headerNames: ["changes-wt"], workspaceName: "folder" }),
+      false,
+    );
+  });
+
+  it("does not settle on tabs without the header", () => {
+    assert.equal(
+      folderViewSettled({ headings: [], tabCount: 1, headerNames: [], workspaceName: "folder" }),
+      false,
+    );
   });
 });
