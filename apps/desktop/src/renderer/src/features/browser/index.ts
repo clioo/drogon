@@ -36,6 +36,11 @@ export { BrowserNavigationControlRow } from "./browser-navigation-control-row";
 export type { BrowserNavigationControls } from "./browser-navigation-control-row";
 export { BrowserReloadControl } from "./browser-reload-control";
 export { default as BrowserAddressBar } from "./browser-address-bar";
+export {
+  BROWSER_ADDRESS_BAR_MIN_INLINE_WIDTH,
+  isBrowserAddressBarCollapsed,
+  shouldOverlayBrowserAddressBar,
+} from "./browser-address-bar-expansion";
 export { default as BrowserAddressBarSuggestionList } from "./browser-address-bar-suggestion-list";
 export {
   MAX_BROWSER_ADDRESS_BAR_SUGGESTIONS,
