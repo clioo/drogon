@@ -21,6 +21,16 @@ const cron = z
   .max(256)
   .regex(/^[^\x00-\x1f\x7f]+$/);
 const harnessId = z.enum(["claude", "pi", "opencode", "antigravity"]);
+// Pinned harness model/provider override (additive): the daemon stores and
+// launches with these when present; absent means the harness default.
+const harnessOption = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(/^[^\x00-\x1f\x7f]+$/)
+  .refine((value) => !value.startsWith("-"), {
+    message: "must not be flag-shaped",
+  });
 
 export type AutomationCreateInput = {
   name: string;
@@ -30,6 +40,8 @@ export type AutomationCreateInput = {
   prompt: string;
   enabled?: boolean;
   graceMinutes?: number;
+  model?: string;
+  provider?: string;
 };
 
 export type AutomationUpdateInput = {
@@ -41,6 +53,8 @@ export type AutomationUpdateInput = {
   prompt?: string;
   enabled?: boolean;
   graceMinutes?: number;
+  model?: string;
+  provider?: string;
 };
 
 export type AutomationLastRun = {
@@ -58,6 +72,8 @@ export type AutomationSummary = {
   cron: string;
   workspaceId: string | null;
   harness: string;
+  model?: string;
+  provider?: string;
   prompt: string;
   enabled: boolean;
   nextRunAt: number;
@@ -163,6 +179,8 @@ export const automationInputSchemas = {
     prompt: text(32768).refine((value) => value.trim().length > 0),
     enabled: z.boolean().optional(),
     graceMinutes: z.number().min(0).max(10_080).optional(),
+    model: harnessOption.optional(),
+    provider: harnessOption.optional(),
   }),
   update: z.object({
     id,
@@ -175,6 +193,8 @@ export const automationInputSchemas = {
       .optional(),
     enabled: z.boolean().optional(),
     graceMinutes: z.number().min(0).max(10_080).optional(),
+    model: harnessOption.optional(),
+    provider: harnessOption.optional(),
   }),
   delete: z.object({ id }),
   runNow: z.object({ id }),
@@ -218,6 +238,8 @@ const summarySchema = z.object({
   cron: z.string(),
   workspaceId: z.string().nullable(),
   harness: z.string(),
+  model: z.string().optional(),
+  provider: z.string().optional(),
   prompt: z.string(),
   enabled: z.boolean(),
   nextRunAt: z.number(),

@@ -33,7 +33,9 @@ use drogon_protocol::{
     },
 };
 
-use crate::automations::direct::{DirectLookupError, DirectPlan, DirectPrepareOutcome, Reschedule};
+use crate::automations::direct::{
+    DirectLookupError, DirectPlan, DirectPrepareOutcome, Reschedule, plain_text_snapshot_tail,
+};
 use crate::automations::execution::InvocationReason;
 use crate::automations::records::{
     Automation, AutomationRun, AutomationRunStatus, AutomationRunTrigger, ExecutionTargetType,
@@ -132,6 +134,44 @@ fn require_grace(value: Option<f64>) -> Result<f64, RpcError> {
         )));
     }
     Ok(grace)
+}
+
+/// Harness model/provider override admission, mirroring the bounds
+/// `drogon-harness::plan_launch` enforces at dispatch (1..=512 bytes, no
+/// control characters, never flag-shaped) so a stored override can never
+/// be one the launcher itself would refuse. Empty/blank is rejected
+/// rather than stored as "unset": callers spell unset by omitting the
+/// key (update leaves a stored override unchanged on absent/null).
+fn require_harness_option(value: Option<String>, what: &str) -> Result<Option<String>, RpcError> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    if raw.is_empty()
+        || raw.len() > 512
+        || raw.chars().any(char::is_control)
+        || raw.starts_with('-')
+    {
+        return Err(invalid_argument(format!(
+            "{what} must be 1..=512 UTF-8 bytes without control characters and must not start with '-'"
+        )));
+    }
+    Ok(Some(raw))
+}
+
+/// Provider selection is a Pi-only launcher feature (see
+/// `drogon-harness::plan_launch`); refusing it at admission keeps a
+/// non-Pi automation from recording runs that can only DispatchFailed.
+fn require_provider_for_harness(
+    provider: Option<String>,
+    harness_id: &str,
+) -> Result<Option<String>, RpcError> {
+    let provider = require_harness_option(provider, "provider")?;
+    if provider.is_some() && harness_id != "pi" {
+        return Err(invalid_argument(
+            "provider selection is available only for the pi harness",
+        ));
+    }
+    Ok(provider)
 }
 
 /// Local-host-only workspace admission: the row must exist and belong to
@@ -249,7 +289,12 @@ fn resolve_output_snapshot(
         return (None, false);
     }
     let outcome = crate::session::read_tail(&handle);
-    let content = String::from_utf8_lossy(&outcome.bytes).trim().to_string();
+    // The tail is raw PTY bytes but the snapshot promises plain text:
+    // terminal markup is reduced (the visible text stays) so the detail
+    // page never renders escape garbage.
+    let content = plain_text_snapshot_tail(&String::from_utf8_lossy(&outcome.bytes))
+        .trim()
+        .to_string();
     if content.is_empty() {
         // A session that exists but has produced no retained output gives
         // no snapshot rather than an empty one.
@@ -293,6 +338,8 @@ fn summarize(conn: &Connection, automation: &Automation) -> Result<AutomationSum
         cron: automation.rrule.clone(),
         workspace_id: automation.workspace_id.clone(),
         harness: automation.agent_id.clone(),
+        model: automation.model.clone(),
+        provider: automation.provider.clone(),
         prompt: automation.prompt.clone(),
         enabled: automation.enabled,
         next_run_at: automation.next_run_at,
@@ -310,6 +357,8 @@ struct NewAutomation {
     prompt: String,
     enabled: bool,
     grace: f64,
+    model: Option<String>,
+    provider: Option<String>,
     now_ms: f64,
 }
 
@@ -329,6 +378,8 @@ fn build_automation(
         prompt: new.prompt,
         precheck: None,
         agent_id: new.harness,
+        model: new.model,
+        provider: new.provider,
         run_context: None,
         source_context: None,
         project_id: new.workspace_id.clone(),
@@ -374,6 +425,8 @@ impl crate::Engine {
         let prompt = require_prompt(&params.prompt)?;
         let enabled = params.enabled.unwrap_or(true);
         let grace = require_grace(params.grace_minutes)?;
+        let model = require_harness_option(params.model, "model")?;
+        let provider = require_provider_for_harness(params.provider, &harness)?;
         let _gate = self.lifecycle_gate.read().unwrap();
         self.ledger.run_atomic(
             &self.db,
@@ -395,6 +448,8 @@ impl crate::Engine {
                         prompt: prompt.clone(),
                         enabled,
                         grace,
+                        model: model.clone(),
+                        provider: provider.clone(),
                         now_ms,
                     },
                 )?;
@@ -446,6 +501,8 @@ impl crate::Engine {
         if let Some(grace) = params.grace_minutes {
             require_grace(Some(grace))?;
         }
+        let model = require_harness_option(params.model, "model")?;
+        let provider_raw = require_harness_option(params.provider, "provider")?;
         let _gate = self.lifecycle_gate.read().unwrap();
         self.ledger.run_atomic(
             &self.db,
@@ -466,6 +523,23 @@ impl crate::Engine {
                 }
                 if let Some(harness) = harness.clone() {
                     automation.agent_id = harness;
+                }
+                if let Some(model) = model.clone() {
+                    automation.model = Some(model);
+                }
+                if let Some(provider) = provider_raw.clone() {
+                    if automation.agent_id != "pi" {
+                        return Err(invalid_argument(
+                            "provider selection is available only for the pi harness",
+                        ));
+                    }
+                    automation.provider = Some(provider);
+                }
+                if automation.agent_id != "pi" && automation.provider.is_some() {
+                    return Err(invalid_argument(
+                        "automation pins a provider but its harness is not pi: \
+                         change the harness back to pi or recreate it without a provider",
+                    ));
                 }
                 if let Some(workspace_id) = workspace_id.clone() {
                     admit_workspace(tx, &self.host_id, &workspace_id)?;
@@ -576,9 +650,9 @@ impl crate::Engine {
                         .ok_or_else(|| not_found(format!("automation {id} not found")))?;
                     let harness = HarnessLaunchParams {
                         harness_id: automation.agent_id.clone(),
-                        model: None,
+                        model: automation.model.clone(),
                         effort: None,
-                        provider: None,
+                        provider: automation.provider.clone(),
                         permission_mode: None,
                     };
                     (automation, harness)

@@ -3,6 +3,10 @@
 // src/shared/automation-schedules.ts (classify + format helpers). Adaptation:
 // English-only copy (no i18n catalog) and plain cron input (this repo stores
 // `cron`, not `rrule`); classification and local-time rendering are literal.
+import {
+  localToUtcOffsetMinutes,
+  utcCronPartsToLocal,
+} from "./automation-local-cron";
 export type AutomationScheduleDescriptor =
   | { kind: "hourly"; minute: number }
   | { kind: "daily"; hour: number; minute: number }
@@ -191,25 +195,43 @@ export function describeAutomationSchedule(
   return { kind: "custom" };
 }
 
-/** Localized (here: English) schedule label for UI surfaces. */
+/**
+ * Localized (here: English) schedule label for UI surfaces. The descriptor
+ * carries UTC cron parts; they render as the local wall clock, like the
+ * reference. `offsetMinutes` defaults to the live local offset; tests pass
+ * explicit values.
+ */
 export function formatUiAutomationScheduleDescriptor(
   descriptor: AutomationScheduleDescriptor,
+  offsetMinutes: number = localToUtcOffsetMinutes(),
 ): string {
   if (descriptor.kind === "invalid") return "Invalid schedule";
   if (descriptor.kind === "custom") return "Custom schedule";
   if (descriptor.kind === "hourly") {
     return `Hourly at :${String(descriptor.minute).padStart(2, "0")}`;
   }
-  const time = formatAutomationScheduleTime(descriptor.hour, descriptor.minute);
+  const dayOfWeek =
+    descriptor.kind === "weekly" ? descriptor.dayOfWeek : null;
+  const local = utcCronPartsToLocal(
+    descriptor.hour,
+    descriptor.minute,
+    dayOfWeek,
+    offsetMinutes,
+  );
+  const time = formatAutomationScheduleTime(local.hour, local.minute);
   if (descriptor.kind === "daily") return `Daily at ${time}`;
   if (descriptor.kind === "weekdays") return `Weekdays at ${time}`;
-  return `${EN_DAY_NAMES[descriptor.dayOfWeek]}s at ${time}`;
+  return `${EN_DAY_NAMES[local.dayOfWeek ?? descriptor.dayOfWeek]}s at ${time}`;
 }
 
 /** Convenience wrapper for callers that hold the raw cron expression. */
-export function formatUiAutomationSchedule(scheduleExpression: string): string {
+export function formatUiAutomationSchedule(
+  scheduleExpression: string,
+  offsetMinutes: number = localToUtcOffsetMinutes(),
+): string {
   return formatUiAutomationScheduleDescriptor(
     describeAutomationSchedule(scheduleExpression),
+    offsetMinutes,
   );
 }
 

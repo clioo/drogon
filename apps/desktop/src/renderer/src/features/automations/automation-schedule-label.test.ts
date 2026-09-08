@@ -58,17 +58,29 @@ describe("formatUiAutomationSchedule", () => {
   });
 
   it("renders daily labels in the user's local time", () => {
-    expect(formatUiAutomationSchedule("0 9 * * *")).toBe(
+    // Explicit zero offset: the stored UTC parts render unchanged.
+    expect(formatUiAutomationSchedule("0 9 * * *", 0)).toBe(
       `Daily at ${localTime(9, 0)}`,
     );
-    expect(formatUiAutomationSchedule("0 9 * * 1-5")).toBe(
+    expect(formatUiAutomationSchedule("0 9 * * 1-5", 0)).toBe(
+      `Weekdays at ${localTime(9, 0)}`,
+    );
+    // 15:00 UTC is 9 AM at UTC-6.
+    expect(formatUiAutomationSchedule("0 15 * * *", 360)).toBe(
+      `Daily at ${localTime(9, 0)}`,
+    );
+    expect(formatUiAutomationSchedule("0 15 * * 1-5", 360)).toBe(
       `Weekdays at ${localTime(9, 0)}`,
     );
   });
 
   it("renders weekly labels with the English day name", () => {
-    expect(formatUiAutomationSchedule("30 14 * * 2")).toBe(
+    expect(formatUiAutomationSchedule("30 14 * * 2", 0)).toBe(
       `Tuesdays at ${localTime(14, 30)}`,
+    );
+    // Monday 03:00 UTC is Sunday 9 PM at UTC-6: day and hour shift jointly.
+    expect(formatUiAutomationSchedule("0 3 * * 1", 360)).toBe(
+      `Sundays at ${localTime(21, 0)}`,
     );
   });
 

@@ -5,8 +5,8 @@
 import { cn } from "./automation-class-names";
 import type { AutomationEditorDraft, AutomationSchedulePreset } from "./automation-editor-validation";
 import { AutomationCustomCronPanel } from "./AutomationCustomCronPanel";
-import { AutomationTimeField, parseAutomationTime } from "./AutomationTimeField";
-import { buildAutomationCronSchedule } from "./automation-editor-validation";
+import { AutomationTimeField } from "./AutomationTimeField";
+import { draftCron } from "./automation-editor-validation";
 import { weekdayName } from "./automation-schedule-label";
 
 const FIELD_CONTROL_CLASS = "border-input bg-input/30 shadow-xs dark:bg-input/30";
@@ -20,7 +20,10 @@ export const AUTOMATION_SCHEDULE_PRESET_OPTIONS = [
   ["custom", "Custom cron"],
 ] as const satisfies readonly (readonly [AutomationSchedulePreset, string])[];
 
-function buildCustomScheduleSeed(draft: AutomationEditorDraft): string {
+function buildCustomScheduleSeed(
+  draft: AutomationEditorDraft,
+  offsetMinutes?: number,
+): string {
   const existing = draft.customSchedule.trim();
   if (existing) {
     return draft.customSchedule;
@@ -28,22 +31,25 @@ function buildCustomScheduleSeed(draft: AutomationEditorDraft): string {
   if (draft.preset === "custom") {
     return "";
   }
-  const { hour, minute } = parseAutomationTime(draft.time);
-  return buildAutomationCronSchedule({
-    preset: draft.preset,
-    hour,
-    minute,
-    dayOfWeek: Number(draft.dayOfWeek),
-  });
+  // The preset is still the previous one here, so draftCron converts the
+  // same local wall time the preset would have stored: switching to custom
+  // seeds the equivalent expression instead of shifting the schedule.
+  return offsetMinutes === undefined
+    ? draftCron(draft)
+    : draftCron(draft, offsetMinutes);
 }
 
 export function getSchedulePresetDraft(
   current: AutomationEditorDraft,
   preset: AutomationSchedulePreset,
+  offsetMinutes?: number,
 ): Pick<AutomationEditorDraft, "preset" | "customSchedule" | "scheduleWarning"> {
   return {
     preset,
-    customSchedule: preset === "custom" ? buildCustomScheduleSeed(current) : current.customSchedule,
+    customSchedule:
+      preset === "custom"
+        ? buildCustomScheduleSeed(current, offsetMinutes)
+        : current.customSchedule,
     scheduleWarning: null,
   };
 }

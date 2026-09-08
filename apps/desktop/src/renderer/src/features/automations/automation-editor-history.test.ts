@@ -8,6 +8,7 @@ import {
   draftCron,
   validateAutomationDraft,
 } from "./automation-editor-validation";
+import { getSchedulePresetDraft } from "./AutomationSchedulePicker";
 import {
   formatAutomationRunCountLabel,
   getAutomationHistoryStatusLabel,
@@ -43,7 +44,13 @@ describe("validateAutomationDraft", () => {
       prompt: "sweep",
     };
     expect(validateAutomationDraft(draft)).toEqual({});
-    expect(draftCron(draft)).toBe("0 9 * * *");
+    // Explicit zero offset: local 9 AM stores unchanged.
+    expect(draftCron(draft, 0)).toBe("0 9 * * *");
+    // 9 AM at UTC-6 stores as 15:00 UTC.
+    expect(draftCron(draft, 360)).toBe("0 15 * * *");
+    expect(draftCron({ ...draft, preset: "custom", customSchedule: "*/5 * * * *" }, 360)).toBe(
+      "*/5 * * * *",
+    );
   });
 
   it("flags blank name, prompt and workspace", () => {
@@ -65,6 +72,23 @@ describe("validateAutomationDraft", () => {
     });
     expect(errors.schedule).toContain("valid five-field cron");
     expect(errors.graceMinutes).toContain("0..=10080");
+  });
+
+  it("seeds custom cron with the equivalent converted expression", () => {
+    const draft = {
+      ...blankAutomationDraft("w1"),
+      preset: "daily" as const,
+      time: "09:00",
+    };
+    // Same 9 AM local wall time the preset would store at UTC-6.
+    expect(getSchedulePresetDraft(draft, "custom", 360).customSchedule).toBe(
+      "0 15 * * *",
+    );
+    // An existing custom expression is never overwritten by the seed.
+    expect(
+      getSchedulePresetDraft({ ...draft, customSchedule: "* * * * *" }, "custom", 360)
+        .customSchedule,
+    ).toBe("* * * * *");
   });
 
   it("builds preset crons for every cadence", () => {

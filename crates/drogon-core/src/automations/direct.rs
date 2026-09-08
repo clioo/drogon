@@ -426,6 +426,264 @@ pub fn record_skip(
     Ok(run_id)
 }
 
+/// Session evidence the scheduler tick reads off a live handle for one
+/// `Dispatched` run: the wire `verdict`/`agentState` strings from
+/// [`crate::session::snapshot`], never re-derived here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionEvidence {
+    pub verdict: String,
+    pub exit_code: Option<i64>,
+    pub agent_state: String,
+    pub agent_state_at: Option<String>,
+    pub incarnation: String,
+}
+
+/// What the tick's reconciliation concludes about one `Dispatched` run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconcileOutcome {
+    /// The session exited: the run is done, with this exit code.
+    Exited { exit_code: Option<i64> },
+    /// The session is live but its hook wait-signal postdates dispatch:
+    /// the agent's turn ended and it now waits for follow-up input that
+    /// an automation never sends. Known gap: a tool-approval request
+    /// raises the same signal and cannot be distinguished here
+    /// (`session.rs` keeps only the stamp, not the event name); the run
+    /// detail keeps resolving the live snapshot, so an approval prompt
+    /// stays visible rather than hidden.
+    TurnEnded,
+    /// No handle for the run's session in this process (daemon restarted
+    /// or the session was swept): closed out without claiming completion,
+    /// mirroring the reference's stranded-run close-out.
+    Stranded,
+    /// Still running, or the live handle is another incarnation than the
+    /// run's (a stale replay must never finalize another session's run).
+    Running,
+}
+
+/// Strict parser for this crate's own UTC RFC3339 writer format
+/// (`YYYY-MM-DDTHH:MM:SSZ`, second resolution -- see
+/// `crate::now_rfc3339`): returns whole seconds since the Unix epoch.
+/// Anything else (including a future format change) is `None`, which the
+/// decision treats as "edge unproven", never as completion.
+fn rfc3339_to_secs(raw: &str) -> Option<i64> {
+    let bytes = raw.as_bytes();
+    if bytes.len() != 20 {
+        return None;
+    }
+    const IDX: [usize; 6] = [0, 5, 8, 11, 14, 17];
+    const LEN: [usize; 6] = [4, 2, 2, 2, 2, 2];
+    let mut part = [0i64; 6];
+    for (i, (at, len)) in IDX.iter().zip(LEN.iter()).enumerate() {
+        let slice = bytes.get(*at..at + len)?;
+        if !slice.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        part[i] = std::str::from_utf8(slice).ok()?.parse().ok()?;
+    }
+    if &raw[4..5] != "-"
+        || &raw[7..8] != "-"
+        || &raw[10..11] != "T"
+        || &raw[13..14] != ":"
+        || &raw[16..17] != ":"
+        || &raw[19..20] != "Z"
+    {
+        return None;
+    }
+    let [year, month, day, hour, minute, second] = part;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    // Month-length/leap validation would need the civil calendar; a
+    // day-of-month past the month's end still yields a deterministic
+    // (if uncalendared) instant, which is all an ordering proof needs.
+    let days = days_from_civil(year as i32, month as u32, day as u32);
+    Some(days * 86_400 + hour * 3600 + minute * 60 + second)
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year } as i64;
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (month as i64 + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Pure reconciliation decision for one `Dispatched` run. Never touches
+/// storage; the scheduler applies the outcome with [`apply_reconcile`].
+pub fn reconcile_decision(
+    run: &AutomationRun,
+    session: Option<&SessionEvidence>,
+) -> ReconcileOutcome {
+    let Some(evidence) = session else {
+        return ReconcileOutcome::Stranded;
+    };
+    if let Some(incarnation) = &run.session_incarnation
+        && *incarnation != evidence.incarnation
+    {
+        return ReconcileOutcome::Running;
+    }
+    if evidence.verdict == "exited" {
+        return ReconcileOutcome::Exited {
+            exit_code: evidence.exit_code,
+        };
+    }
+    if evidence.agent_state == "needs_input" {
+        // The stamp is second-truncated at write time, so it can read up
+        // to just under a second *before* the true signal instant; the
+        // +999 ms tolerance makes the edge exact, not approximate: a
+        // signal stamped a full second (or more) before dispatch can only
+        // predate this run.
+        let edge_proven = match (
+            evidence.agent_state_at.as_deref().and_then(rfc3339_to_secs),
+            run.dispatched_at,
+        ) {
+            (Some(signal_secs), Some(dispatched_at)) => {
+                signal_secs * 1000 + 999 >= dispatched_at as i64
+            }
+            _ => false,
+        };
+        if edge_proven {
+            return ReconcileOutcome::TurnEnded;
+        }
+    }
+    ReconcileOutcome::Running
+}
+
+/// Applies a non-`Running` [`reconcile_decision`] to the stored run row in
+/// one `BEGIN IMMEDIATE`: finalizes `Dispatched` rows only, so a
+/// `Completed` row (or a row another tick already finalized) is never
+/// regressed. Returns whether the row changed.
+pub fn apply_reconcile(
+    conn: &Connection,
+    run_id: &str,
+    outcome: ReconcileOutcome,
+    observed_at: f64,
+) -> Result<bool, automations_storage::StorageError> {
+    if outcome == ReconcileOutcome::Running {
+        return Ok(false);
+    }
+    let tx = automations_storage::begin_immediate(conn)?;
+    let Some(mut run) = automations_storage::get_automation_run(&tx, run_id)? else {
+        tx.commit()?;
+        return Ok(false);
+    };
+    if run.status != AutomationRunStatus::Dispatched {
+        tx.commit()?;
+        return Ok(false);
+    }
+    match outcome {
+        ReconcileOutcome::Exited { exit_code } => {
+            run.status = AutomationRunStatus::Completed;
+            run.exit_code = exit_code;
+            run.observed_at = Some(observed_at);
+        }
+        ReconcileOutcome::TurnEnded => {
+            run.status = AutomationRunStatus::Completed;
+            run.observed_at = Some(observed_at);
+        }
+        ReconcileOutcome::Stranded => {
+            run.status = AutomationRunStatus::DispatchFailed;
+            run.error = Some(
+                "Drogon lost the terminal for this run before it reported completion.".to_string(),
+            );
+            run.observed_at = Some(observed_at);
+        }
+        ReconcileOutcome::Running => unreachable!(),
+    }
+    automations_storage::upsert_automation_run(&tx, &run)?;
+    tx.commit()?;
+    Ok(true)
+}
+
+/// Reduces a raw PTY tail to the `plain_text` the run detail promises.
+/// Control sequences do not survive: CSI/OSC/DCS color, cursor, title and
+/// hyperlink markup is dropped while the visible text (including link URLs
+/// and targets) stays. Line discipline: CRLF folds to LF (the PTY's ONLCR),
+/// a lone CR becomes LF (progress repaint), other C0 controls and DEL go.
+/// No blank-line squeezing, no truncation here: the snapshot stays a
+/// faithful tail, only without terminal markup.
+pub fn plain_text_snapshot_tail(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            match chars.peek() {
+                None => break,
+                Some('[') => {
+                    chars.next();
+                    for seq in chars.by_ref() {
+                        if ('\x40'..='\x7E').contains(&seq) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') | Some('P') | Some('X') | Some('^') | Some('_') => {
+                    chars.next();
+                    consume_until_string_terminator(&mut chars);
+                }
+                Some('(') | Some(')') | Some('#') => {
+                    chars.next();
+                    chars.next();
+                }
+                Some(_) => {
+                    chars.next();
+                }
+            }
+            continue;
+        }
+        // C1 singletons only ever decode from real C1 bytes, never from
+        // UTF-8 text continuations, so they are safe to treat as openers.
+        if c == '\u{9b}' {
+            for seq in chars.by_ref() {
+                if ('\x40'..='\x7E').contains(&seq) {
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '\u{9d}' {
+            consume_until_string_terminator(&mut chars);
+            continue;
+        }
+        if c.is_control() {
+            match c {
+                '\n' | '\t' => out.push(c),
+                '\r' => {
+                    if chars.peek() == Some(&'\n') {
+                        continue;
+                    }
+                    out.push('\n');
+                }
+                _ => {}
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Consumes an OSC/DCS/APC/PM/SOS payload through its string
+/// terminator: BEL, or ESC followed by backslash. A lone backslash inside
+/// (Windows paths, regex payloads) never terminates; a bare ESC aborts the
+/// payload per ECMA-48 and is itself consumed.
+fn consume_until_string_terminator(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    let mut previous = '\0';
+    for c in chars.by_ref() {
+        if c == '\x07' || (c == '\\' && previous == '\x1b') {
+            break;
+        }
+        previous = c;
+    }
+}
+
 fn apply_reschedule(
     conn: &Connection,
     automation_id: &str,

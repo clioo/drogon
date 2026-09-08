@@ -53,7 +53,10 @@ use std::time::Duration;
 use croner::time::{CivilDate, CivilDateTime, CivilTime, Resolution, Weekday};
 use croner::{Cron, CronDateTime};
 
-use super::direct::{self, DirectLookupError, DirectPlan, DirectPrepareOutcome, Reschedule};
+use super::direct::{
+    self, DirectLookupError, DirectPlan, DirectPrepareOutcome, ReconcileOutcome, Reschedule,
+    SessionEvidence,
+};
 use super::execution::InvocationReason;
 use super::records::{Automation, AutomationRunStatus, AutomationRunTrigger};
 use super::runner::{EngineDispatchSeam, HarnessLaunchParams, RunRefusal, RunUnsupported};
@@ -207,14 +210,21 @@ pub struct TickSummary {
     pub skipped_missed: usize,
     pub refused: usize,
     pub failed: usize,
+    /// Previously `Dispatched` runs the tick finalized as `Completed`
+    /// (session exited, or the agent's turn ended after dispatch).
+    pub completed: usize,
+    /// Previously `Dispatched` runs whose session is gone from this
+    /// process: closed out as `DispatchFailed` without claiming
+    /// completion, never silently left behind.
+    pub stranded: usize,
 }
 
 fn harness_for(automation: &Automation) -> HarnessLaunchParams {
     HarnessLaunchParams {
         harness_id: automation.agent_id.clone(),
-        model: None,
+        model: automation.model.clone(),
         effort: None,
-        provider: None,
+        provider: automation.provider.clone(),
         permission_mode: None,
     }
 }
@@ -437,7 +447,95 @@ pub fn tick_once(engine: &Engine, now_ms: f64) -> TickSummary {
             TickFire::Failed => summary.failed += 1,
         }
     }
+    reconcile_outstanding(engine, now_ms, &mut summary);
     summary
+}
+
+/// Reads one live handle's verdict/agent-state projection without holding
+/// any database guard: `snapshot` only locks the handle's own cells.
+fn session_evidence(engine: &Engine, session_id: &str) -> Option<SessionEvidence> {
+    let handle = engine.sessions.lock().unwrap().get(session_id).cloned()?;
+    let snap = crate::session::snapshot(&handle);
+    Some(SessionEvidence {
+        verdict: snap.get("verdict")?.as_str()?.to_string(),
+        exit_code: snap.get("exitCode").and_then(serde_json::Value::as_i64),
+        agent_state: snap.get("agentState")?.as_str()?.to_string(),
+        agent_state_at: snap
+            .get("agentStateAt")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        incarnation: snap.get("incarnation")?.as_str()?.to_string(),
+    })
+}
+
+/// Finalizes previously `Dispatched` runs whose terminal state is now
+/// provable: an exited session, or a live session whose agent turn ended
+/// after dispatch (the reference's busy-to-idle edge, adapted to this
+/// build's hook wait-signal). Sessions gone from this process close out
+/// as stranded, never as completed. Holds no database guard across the
+/// per-handle snapshot reads; each row finalizes in its own transaction.
+fn reconcile_outstanding(engine: &Engine, now_ms: f64, summary: &mut TickSummary) {
+    let candidates = {
+        let conn = engine.db.lock().unwrap();
+        match super::storage::list_all_automation_runs(&conn) {
+            Ok(all) => all
+                .into_iter()
+                .flat_map(|(_, runs)| runs)
+                .filter(|run| {
+                    run.status == AutomationRunStatus::Dispatched
+                        && run.terminal_session_id.is_some()
+                })
+                .map(|run| {
+                    (
+                        run.id.clone(),
+                        run.terminal_session_id.clone().unwrap_or_default(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Err(e) => {
+                eprintln!("[automations] reconcile list failed: {e}");
+                return;
+            }
+        }
+    };
+    for (run_id, session_id) in candidates {
+        let evidence = session_evidence(engine, &session_id);
+        let outcome = {
+            let conn = engine.db.lock().unwrap();
+            let run = match super::storage::get_automation_run(&conn, &run_id) {
+                Ok(Some(run)) if run.status == AutomationRunStatus::Dispatched => run,
+                Ok(_) => continue,
+                Err(e) => {
+                    eprintln!("[automations] reconcile read failed for {run_id}: {e}");
+                    continue;
+                }
+            };
+            direct::reconcile_decision(&run, evidence.as_ref())
+        };
+        match outcome {
+            ReconcileOutcome::Running => {}
+            ReconcileOutcome::Exited { .. } | ReconcileOutcome::TurnEnded => {
+                match direct::apply_reconcile(&engine.db.lock().unwrap(), &run_id, outcome, now_ms)
+                {
+                    Ok(true) => summary.completed += 1,
+                    Ok(false) => {}
+                    Err(e) => {
+                        eprintln!("[automations] reconcile finalize failed for {run_id}: {e}")
+                    }
+                }
+            }
+            ReconcileOutcome::Stranded => {
+                match direct::apply_reconcile(&engine.db.lock().unwrap(), &run_id, outcome, now_ms)
+                {
+                    Ok(true) => summary.stranded += 1,
+                    Ok(false) => {}
+                    Err(e) => {
+                        eprintln!("[automations] reconcile strand failed for {run_id}: {e}")
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Owned background tick loop. [`shutdown`](SchedulerHandle::shutdown)

@@ -298,6 +298,10 @@ fn build_responsibility_automation(
         prompt: new.prompt,
         precheck: None,
         agent_id: new.harness,
+        // Bot-owned responsibility automations run the bot's own harness
+        // mapping at dispatch; they pin no model/provider of their own.
+        model: None,
+        provider: None,
         run_context: None,
         source_context: None,
         project_id: new.workspace_id.clone(),
