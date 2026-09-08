@@ -12,6 +12,7 @@ import type {
   HarnessLaunchInput,
   Workspace,
 } from "../../../../shared/session-contract";
+import type { HarnessAgentDefault } from "../../settings-store";
 import type { ProjectGroup } from "../shell/project-adapter";
 import { NewWorkspaceComposer } from "./NewWorkspaceComposer";
 import {
@@ -33,6 +34,7 @@ export function NewWorkspaceComposerModal({
   disabled,
   harnesses,
   defaultHarnessId,
+  harnessDefaults,
   onSubmitWorktree,
   onLaunchAgent,
   onSelectWorkspace,
@@ -46,6 +48,8 @@ export function NewWorkspaceComposerModal({
   /** Listed harnesses for the composer's Agent picker. */
   harnesses: Harness[];
   defaultHarnessId: string;
+  /** Stored per-harness defaults driving the chained agent launch. */
+  harnessDefaults: Record<string, HarnessAgentDefault>;
   /** Resolves a verbatim daemon error, or null on success (then closes). */
   onSubmitWorktree: (input: {
     projectId: string;
@@ -108,6 +112,7 @@ export function NewWorkspaceComposerModal({
             nameInputRef={nameInputRef}
             harnesses={harnesses}
             defaultHarnessId={defaultHarnessId}
+            harnessDefaults={harnessDefaults}
             onProjectChange={setProjectId}
             onSubmitWorktree={onSubmitWorktree}
             onLaunchAgent={onLaunchAgent}

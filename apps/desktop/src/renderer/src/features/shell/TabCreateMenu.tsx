@@ -1,41 +1,34 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/tab-bar/tab-bar-surface.tsx (the "+" trigger
    and menu chrome), tab-bar-static-create-menu.tsx (default-order static
-   entries: New Terminal, New Browser Tab, Mentu) and
-   TabBarCreateEntry.tsx / tab-create-entry-copy.ts (the search combobox).
+   entries: New Terminal, New Browser Tab, Mentu),
+   TabBarCreateEntry.tsx / tab-create-entry-copy.ts (the search combobox)
+   and use-tab-bar-create-menu-controller.ts (`launchAgentFromNewTabEntry`:
+   an agent row launches immediately with the stored agent defaults — no
+   per-launch dialog, exactly like the fork).
    Adapter: no dnd-kit, simulator/open-markdown entries (mobile is out of
    MVP scope and Open Markdown lives in the Explorer — see NOT_PORTED
    below), no
    open-tab/history/file/URL result routing (the combobox filters the
-   menu's own entries; full omnibox routing is a follow-up); the
-   per-harness entries open this repo's harness launch form (folded in from
-   HarnessLaunchMenu, which this menu replaces), radix-ui primitives stand
-   in for the shadcn menu, and harness icons are the source's brand glyphs
-   (see TabCreateMenuIcons.tsx). */
+   menu's own entries; full omnibox routing is a follow-up);
+   radix-ui primitives stand in for the shadcn menu, and harness icons are
+   the source's brand glyphs (see TabCreateMenuIcons.tsx). The interrupted-
+   launch "Retry" row is Drogon-specific (the fork has no recovery); it
+   replays the exact stored input. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FilePlus, Globe, Network, Plus, Settings as SettingsIcon, TerminalSquare } from "lucide-react";
-import { DropdownMenu, Popover, Tooltip } from "radix-ui";
+import { DropdownMenu, Tooltip } from "radix-ui";
 import type {
   Harness,
   HarnessLaunchInput,
 } from "../../../../shared/session-contract";
-import { Button } from "../../components/ui/button";
+import { buildImmediateHarnessLaunch } from "../../../../shared/agent-defaults";
 import { Input } from "../../components/ui/input";
 import {
   tabCreateMenuChord,
   type TabCreateMenuChordPlatform,
 } from "./TabCreateMenuChords";
 import { HarnessMenuIcon } from "./TabCreateMenuIcons";
-import {
-  emptyHarnessLaunchForm,
-  normalizeHarnessLaunchInput,
-  type HarnessLaunchFormValues,
-} from "../../harness-launch-form";
-import { resolvePiModelField } from "./pi-model-mapping";
-import {
-  isPristineLaunchForm,
-  resolveLaunchDefaults,
-} from "../settings/agent-defaults";
 import type { HarnessAgentDefault } from "../../settings-store";
 import {
   clearPendingHarnessLaunch,
@@ -118,10 +111,10 @@ export function matchesTabCreateQuery(
 
 /**
  * The tab strip "+" menu, in the fork's order: New Terminal, New Browser
- * Tab, Mentu, New Markdown, then one entry per harness (opening the
- * launch form), then Agent settings. The trigger keeps the source's
- * accessible name so the palette's "Launch harness…" row can open the
- * real menu.
+ * Tab, Mentu, New Markdown, then one entry per harness (launching
+ * immediately with the Settings → Agents defaults, like the fork), then
+ * Agent settings. The trigger keeps the source's accessible name so the
+ * palette's "Launch harness…" row can open the real menu.
  */
 export function TabCreateMenu({
   workspaceId,
@@ -145,7 +138,7 @@ export function TabCreateMenu({
   hostId: string | null;
   harnesses: Harness[];
   disabled: boolean;
-  /** Stored default harness (badged in the menu) and per-harness field defaults used to pre-fill a pristine form. Read-only here; edited in Settings. */
+  /** Stored default harness (badged in the menu) and per-harness defaults a row click launches with. Read-only here; edited in Settings. */
   defaultHarnessId?: string;
   launchDefaults?: Record<string, HarnessAgentDefault>;
   /**
@@ -172,15 +165,7 @@ export function TabCreateMenu({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Harness | null>(null);
-  const [values, setValues] = useState<HarnessLaunchFormValues>(
-    emptyHarnessLaunchForm(),
-  );
   const [submitting, setSubmitting] = useState(false);
-  // Fork-parity model validation (#192): a Model value that cannot map to
-  // provider/model shows here and blocks the launch — input is never
-  // silently dropped, and no `startHarness` call is made until it maps.
-  const [formError, setFormError] = useState<string | null>(null);
   // Synchronous guard against a rapid double-invoke (e.g. two fast
   // keyboard-driven `onSelect`s) that `submitting` state alone might not
   // catch before its next render commits.
@@ -284,14 +269,7 @@ export function TabCreateMenu({
       return;
     }
     const first = visibleHarnesses[0];
-    if (first && first.availability === "available") openFormFor(first);
-  };
-
-  const closeForm = () => {
-    setSelected(null);
-    setValues(emptyHarnessLaunchForm());
-    setFormError(null);
-    lastAttempt.current = null;
+    if (first && first.availability === "available") launchImmediately(first);
   };
 
   const launch = async (input: HarnessLaunchInput) => {
@@ -314,38 +292,24 @@ export function TabCreateMenu({
     }
   };
 
-  const submit = async () => {
-    // A form's `onSubmit` fires on an Enter-key implicit submission
-    // regardless of the (disabled) submit button's own attribute — this
-    // must reject that path too, not just the visible button click.
-    if (!selected || disabled || !hostId) return;
-    // #192: the Model field maps to provider/model first (fork
-    // `provider/model-id` semantics, plus a pasted flags string). An
-    // unmappable value blocks here with the fork's error — the launch
-    // never fires, so the input cannot be silently dropped.
-    const mapped = resolvePiModelField({
-      harnessId: selected.harnessId,
-      model: values.model,
-      provider: values.provider,
-    });
-    if ("error" in mapped) {
-      setFormError(mapped.error);
-      return;
-    }
-    setFormError(null);
-    const params = normalizeHarnessLaunchInput(workspaceId, selected.harnessId, {
-      ...values,
-      model: mapped.model ?? "",
-      provider: mapped.provider ?? "",
-    });
+  // A harness row launches at once with the Settings → Agents defaults —
+  // the fork's `launchAgentFromNewTabEntry` behavior. The menu closes on
+  // select; the keyboard-first-match path closes it explicitly below.
+  const launchImmediately = (harness: Harness) => {
+    if (disabled || !hostId || harness.availability !== "available") return;
+    const params = buildImmediateHarnessLaunch(
+      workspaceId,
+      harness.harnessId,
+      launchDefaults ?? {},
+    );
     const key = JSON.stringify(params);
     const requestId =
       lastAttempt.current?.key === key
         ? lastAttempt.current.requestId
         : crypto.randomUUID();
     lastAttempt.current = { key, requestId };
-    const launched = await launch({ ...params, requestId });
-    if (launched) closeForm();
+    setMenuOpen(false);
+    void launch({ ...params, requestId });
   };
 
   const recover = async () => {
@@ -362,48 +326,15 @@ export function TabCreateMenu({
     await launch(recoverable);
   };
 
-  const openFormFor = (harness: Harness) => {
-    setSelected(harness);
-    // A pristine form inherits the stored per-harness defaults; any
-    // user-typed value is never clobbered.
-    setValues((prev) => {
-      if (
-        !isPristineLaunchForm({
-          model: prev.model,
-          effort: prev.effort,
-          unattended: prev.unattended,
-        })
-      )
-        return prev;
-      const resolved = resolveLaunchDefaults(
-        harness.harnessId,
-        launchDefaults ?? {},
-      );
-      return {
-        ...prev,
-        model: resolved.model,
-        effort: resolved.effort,
-        unattended: resolved.unattended,
-      };
-    });
-  };
-
   return (
-    <Popover.Root
-      open={selected !== null}
+    <DropdownMenu.Root
+      open={menuOpen}
       onOpenChange={(open) => {
-        if (!open) closeForm();
+        setMenuOpen(open);
+        if (!open) setQuery("");
       }}
+      modal={false}
     >
-      <Popover.Anchor>
-        <DropdownMenu.Root
-          open={menuOpen}
-          onOpenChange={(open) => {
-            setMenuOpen(open);
-            if (!open) setQuery("");
-          }}
-          modal={false}
-        >
           <Tooltip.Root>
             <Tooltip.Trigger asChild>
               <DropdownMenu.Trigger asChild>
@@ -430,10 +361,6 @@ export function TabCreateMenu({
               className="z-[70] w-72 max-w-[calc(100vw-1rem)] rounded-[11px] border border-border/80 bg-popover p-1 shadow-[0_16px_36px_rgba(0,0,0,0.24)]"
               align="start"
               sideOffset={6}
-              onCloseAutoFocus={(event) => {
-                // Why: Radix restores focus to the "+" trigger on close, stealing it from a freshly-opened form.
-                if (selected) event.preventDefault();
-              }}
             >
               {recoverable && (
                 <>
@@ -560,7 +487,7 @@ export function TabCreateMenu({
                   key={harness.harnessId}
                   className={STATIC_ITEM_CLASS}
                   disabled={harness.availability !== "available"}
-                  onSelect={() => openFormFor(harness)}
+                  onSelect={() => launchImmediately(harness)}
                 >
                   <HarnessMenuIcon
                     harnessId={harness.harnessId}
@@ -590,121 +517,6 @@ export function TabCreateMenu({
               )}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
-        </DropdownMenu.Root>
-      </Popover.Anchor>
-      <Popover.Portal>
-        <Popover.Content
-          className="harness-launch-form"
-          align="start"
-          sideOffset={4}
-          collisionPadding={8}
-        >
-          {selected && (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void submit();
-              }}
-            >
-              <h2>{selected.displayName}</h2>
-              <label>
-                Model
-                <Input
-                  autoFocus
-                  placeholder="Harness default"
-                  value={values.model}
-                  disabled={submitting}
-                  onChange={(event) => {
-                    setFormError(null);
-                    setValues((v) => ({ ...v, model: event.target.value }));
-                  }}
-                />
-                {selected.harnessId === "pi" && (
-                  <span className="text-xs font-normal text-muted-foreground">
-                    Use an exact Pi provider/model ID. Blank uses Pi settings.
-                  </span>
-                )}
-              </label>
-              <label>
-                Initial prompt (optional)
-                <Input
-                  value={values.prompt}
-                  disabled={submitting}
-                  onChange={(event) =>
-                    setValues((v) => ({ ...v, prompt: event.target.value }))
-                  }
-                />
-              </label>
-              <details className="harness-advanced">
-                <summary>Advanced</summary>
-                {selected.harnessId === "pi" && (
-                  <label>
-                    Provider
-                    <Input
-                      value={values.provider}
-                      disabled={submitting}
-                      onChange={(event) =>
-                        setValues((v) => ({
-                          ...v,
-                          provider: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                )}
-                <label>
-                  Effort
-                  <Input
-                    value={values.effort}
-                    disabled={submitting}
-                    onChange={(event) =>
-                      setValues((v) => ({ ...v, effort: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="harness-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={values.unattended}
-                    disabled={submitting}
-                    onChange={(event) =>
-                      setValues((v) => ({
-                        ...v,
-                        unattended: event.target.checked,
-                      }))
-                    }
-                  />
-                  {selected.harnessId === "pi"
-                    ? "Trust project files"
-                    : "Skip permission prompts (unattended)"}
-                </label>
-              </details>
-              {formError && (
-                <p role="alert" className="text-xs leading-5 text-destructive">
-                  {formError}
-                </p>
-              )}
-              <div className="form-actions">
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={submitting || disabled}
-                >
-                  Launch
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={closeForm}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          )}
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+    </DropdownMenu.Root>
   );
 }

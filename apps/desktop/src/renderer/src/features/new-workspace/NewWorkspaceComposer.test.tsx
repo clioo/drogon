@@ -81,6 +81,7 @@ function render(
       nameInputRef: createRef<HTMLInputElement>(),
       harnesses,
       defaultHarnessId,
+      harnessDefaults: {},
       onProjectChange: () => {},
       onSubmitWorktree: async () => null,
       onLaunchAgent: async () => null,

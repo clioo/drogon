@@ -6,8 +6,8 @@
    (adapter: MVP subset — project selector, name, base ref, agent picker
    with model/provider, create — over this repo's Project/Worktree RPC
    contract and `harness.start`; no remote hosts, smart-name sources,
-   setup, sparse-checkout, effort/prompt/unattended sections — the "+"
-   launch form covers those). */
+   setup, sparse-checkout, effort/prompt/unattended sections — effort and
+   permission mode come from Settings → Agents). */
 import { useEffect, useRef, useState } from "react";
 import { CornerDownLeft, FolderPlus } from "lucide-react";
 import type {
@@ -16,6 +16,7 @@ import type {
   Project,
   Workspace,
 } from "../../../../shared/session-contract";
+import type { HarnessAgentDefault } from "../../settings-store";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import type { ProjectGroup } from "../shell/project-adapter";
@@ -55,6 +56,7 @@ export function NewWorkspaceComposer({
   nameInputRef,
   harnesses,
   defaultHarnessId,
+  harnessDefaults,
   onProjectChange,
   onSubmitWorktree,
   onLaunchAgent,
@@ -71,6 +73,8 @@ export function NewWorkspaceComposer({
   harnesses: Harness[];
   /** Stored default harness, preselected when actually available. */
   defaultHarnessId: string;
+  /** Stored per-harness defaults driving the chained agent launch. */
+  harnessDefaults: Record<string, HarnessAgentDefault>;
   onProjectChange: (projectId: string | null) => void;
   /** Resolves a verbatim daemon error, or null on success (then closes). */
   onSubmitWorktree: (input: {
@@ -150,6 +154,7 @@ export function NewWorkspaceComposer({
           resolved.target.workspaceId,
           mappedAgent,
           crypto.randomUUID(),
+          harnessDefaults,
         );
         if (!launch) {
           onClose();

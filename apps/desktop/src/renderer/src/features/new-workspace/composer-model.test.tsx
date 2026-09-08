@@ -56,6 +56,7 @@ function mount({
       nameInputRef={createRef<HTMLInputElement>()}
       harnesses={harnesses}
       defaultHarnessId="pi"
+      harnessDefaults={{}}
       onProjectChange={() => {}}
       onSubmitWorktree={onSubmitWorktree}
       onLaunchAgent={onLaunchAgent as never}

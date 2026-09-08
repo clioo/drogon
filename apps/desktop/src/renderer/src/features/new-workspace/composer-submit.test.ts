@@ -306,6 +306,54 @@ describe("composerAgentLaunchInput", () => {
       )?.provider,
     ).toBeUndefined();
   });
+
+  test("the stored defaults drive permission mode and effort (#231)", () => {
+    expect(
+      composerAgentLaunchInput("ws-1", piAgent(), "req-1", {
+        pi: { model: "", effort: "high", permissionMode: "unattended" },
+      }),
+    ).toEqual({
+      workspaceId: "ws-1",
+      harnessId: "pi",
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+      provider: "dgx-spark",
+      effort: "high",
+      prompt: undefined,
+      permissionMode: "unattended",
+      requestId: "req-1",
+    });
+  });
+
+  test("a blank composer model falls back to the stored default model", () => {
+    expect(
+      composerAgentLaunchInput(
+        "ws-1",
+        { harnessId: "pi", model: "  ", provider: "" },
+        "req-1",
+        {
+          pi: {
+            model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+            effort: "",
+            permissionMode: "inherit",
+          },
+        },
+      ),
+    ).toMatchObject({
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+      provider: "dgx-spark",
+      permissionMode: "inherit",
+    });
+  });
+
+  test("Claude Code inherits the fork yolo default with no stored entry", () => {
+    expect(
+      composerAgentLaunchInput(
+        "ws-1",
+        { harnessId: "claude", model: "", provider: "" },
+        "req-1",
+      )?.permissionMode,
+    ).toBe("unattended");
+  });
 });
 
 describe("resolveComposerAgentModel", () => {

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
   buildHarnessAgentDefault,
-  isPristineLaunchForm,
   resolveLaunchDefaults,
   validateAgentDefaultField,
 } from "./agent-defaults";
@@ -77,12 +76,36 @@ describe("settings sections", () => {
 });
 
 describe("agent defaults resolution", () => {
-  test("an absent harness entry resolves to empty values with prompts kept", () => {
+  test("an absent harness entry resolves to the fork defaults (#231)", () => {
+    // Fresh Orca launches Claude Code and Antigravity yolo/unattended and
+    // keeps prompts for Pi and OpenCode (YOLO_TUI_AGENT_ARGS).
     expect(resolveLaunchDefaults("pi", {})).toEqual({
       model: "",
       effort: "",
       unattended: false,
     });
+    expect(resolveLaunchDefaults("opencode", {})).toEqual({
+      model: "",
+      effort: "",
+      unattended: false,
+    });
+    expect(resolveLaunchDefaults("claude", {})).toEqual({
+      model: "",
+      effort: "",
+      unattended: true,
+    });
+    expect(resolveLaunchDefaults("antigravity", {})).toEqual({
+      model: "",
+      effort: "",
+      unattended: true,
+    });
+  });
+  test("a stored entry always wins over the fork default", () => {
+    expect(
+      resolveLaunchDefaults("claude", {
+        claude: { model: "", effort: "", permissionMode: "inherit" },
+      }).unattended,
+    ).toBe(false);
   });
   test("a stored entry maps permissionMode to the unattended flag", () => {
     expect(
@@ -107,17 +130,7 @@ describe("agent defaults resolution", () => {
     expect(validateAgentDefaultField("effort", "x".repeat(257))).not.toBeNull();
     expect(validateAgentDefaultField("model", "x".repeat(4097))).not.toBeNull();
   });
-  test("pristine detection only matches untouched empty values", () => {
-    expect(
-      isPristineLaunchForm({ model: "", effort: "", unattended: false }),
-    ).toBe(true);
-    expect(
-      isPristineLaunchForm({ model: "m", effort: "", unattended: false }),
-    ).toBe(false);
-    expect(
-      isPristineLaunchForm({ model: "", effort: "", unattended: true }),
-    ).toBe(false);
-  });
+
 });
 
 describe("shortcut labels", () => {
