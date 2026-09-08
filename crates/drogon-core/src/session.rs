@@ -517,7 +517,6 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
                     if marked || cleared {
                         crate::session_events::record_snapshot(&snapshot(&handle));
                     }
-                    }
                 }
                 Err(_) => break,
             }
@@ -531,24 +530,28 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
     });
 }
 
-/// Reap without blocking. Only ever takes each lock for the instant needed
-/// to check/call `try_wait`, never across a sleep — every caller (`stop`'s
-/// poll loop, this module's own background poller, `write`'s liveness
-/// check) can interleave freely with each other.
+/// Observe and reap without waiting for the child. The exit lock is held
+/// while the child's cleanup artifacts are removed so no reader can observe
+/// `exited` before cleanup has completed. The child lock is released before
+/// filesystem work; callers only hold the exit lock across that work, never
+/// across a sleep.
 fn try_reap(handle: &SessionHandle) -> Option<i64> {
     let mut exit = handle.exit_code.lock().unwrap();
     if let Some(code) = *exit {
         return Some(code);
     }
-    let mut child = handle.child.lock().unwrap();
-    match child.try_wait() {
-        Ok(Some(status)) => {
-            let code = status.exit_code() as i64;
-            *exit = Some(code);
-            Some(code)
+    let code = {
+        let mut child = handle.child.lock().unwrap();
+        match child.try_wait() {
+            Ok(Some(status)) => status.exit_code() as i64,
+            _ => return None,
         }
-        _ => None,
+    };
+    for path in handle.take_hook_cleanup_paths() {
+        crate::hooks::remove_settings_file(&path);
     }
+    *exit = Some(code);
+    Some(code)
 }
 
 /// Polls (never blocks, never holds a lock across the sleep) until the
@@ -559,9 +562,6 @@ fn poll_until_exit(handle: &SessionHandle) {
     loop {
         if let Some(code) = try_reap(handle) {
             if persist_exit(handle, code).is_ok() {
-                for path in handle.take_hook_cleanup_paths() {
-                    crate::hooks::remove_settings_file(&path);
-                }
                 // A headless daemon run's exit IS its completion signal:
                 // advance the linked run rows to their terminal state now,
                 // while the linkage is still provable in this process.
@@ -958,9 +958,6 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
     use drogon_protocol::orchestration_worker::ProcessAction;
 
     if let Some(code) = try_reap(handle) {
-        for path in handle.take_hook_cleanup_paths() {
-            crate::hooks::remove_settings_file(&path);
-        }
         try_release_native(handle);
         return StopObservation {
             process_action: ProcessAction::None,
@@ -977,9 +974,6 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
     let deadline = Instant::now() + STOP_VERIFY_TIMEOUT;
     loop {
         if let Some(code) = try_reap(handle) {
-            for path in handle.take_hook_cleanup_paths() {
-                crate::hooks::remove_settings_file(&path);
-            }
             try_release_native(handle);
             return StopObservation {
                 process_action,
