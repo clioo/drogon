@@ -145,3 +145,72 @@ describe("usage store", () => {
     expect(calls).toBe(3);
   });
 });
+
+describe("store fixture seam and dispose", () => {
+  test("a fixture snapshot is served whole, without probing anything", async () => {
+    let probes = 0;
+    const store = new UsageStore({
+      readFixture: () =>
+        Promise.resolve({
+          claude: okProvider("claude", 55),
+          codex: { ...okProvider("codex", 12), weekly: null },
+          memory: { rssBytes: 931_135_488, processCount: 4, unavailableReason: null },
+          ports: { listening: [{ port: 3000, process: "node" }], unavailableReason: null },
+        }),
+      readClaude: () => {
+        probes += 1;
+        return Promise.resolve(okProvider("claude", 1));
+      },
+      readCodex: () => {
+        probes += 1;
+        return Promise.resolve(okProvider("codex", 1));
+      },
+      readMemory: () => {
+        probes += 1;
+        return Promise.resolve({ rssBytes: 1, processCount: 1, unavailableReason: null });
+      },
+      readPorts: () => {
+        probes += 1;
+        return Promise.resolve({ listening: [], unavailableReason: null });
+      },
+      readWorkspaceProbes: () => Promise.resolve([]),
+    });
+    const snap = await store.refresh();
+    expect(snap.claude.session?.usedPercent).toBe(55);
+    expect(snap.memory.rssBytes).toBe(931_135_488);
+    expect(snap.ports.listening).toHaveLength(1);
+    expect(probes).toBe(0);
+  });
+  test("a missing fixture falls back to real probing", async () => {
+    let probed = false;
+    const store = new UsageStore({
+      readFixture: () => Promise.resolve(null),
+      readClaude: () => {
+        probed = true;
+        return Promise.resolve(okProvider("claude", 7));
+      },
+      readCodex: () => Promise.resolve(okProvider("codex", 7)),
+      readMemory: () =>
+        Promise.resolve({ rssBytes: null, processCount: null, unavailableReason: "n" }),
+      readPorts: () => Promise.resolve({ listening: [], unavailableReason: null }),
+      readWorkspaceProbes: () => Promise.resolve([]),
+    });
+    const snap = await store.refresh();
+    expect(probed).toBe(true);
+    expect(snap.claude.session?.usedPercent).toBe(7);
+  });
+  test("dispose releases the owned caffeinate child", () => {
+    const killed: boolean[] = [];
+    const awake = {
+      getSnapshot: () => ({ mode: "on", active: true, supported: true }),
+      setMode: () => ({ mode: "on", active: true, supported: true }),
+      dispose: () => killed.push(true),
+    };
+    const store = new UsageStore({
+      awake: awake as never,
+      readWorkspaceProbes: () => Promise.resolve([]),
+    });
+    store.dispose();
+    expect(killed).toEqual([true]);
+  });
+});

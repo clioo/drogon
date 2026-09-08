@@ -2,7 +2,6 @@
 // covered by status-bar-copy.test.ts; StatusBar.tsx only arranges the output.
 import {
   clampUsedPercent,
-  formatBytes,
   formatResetCountdown,
   formatWindowChipLabel,
   type PortsSnapshot,
@@ -62,6 +61,52 @@ export function providerDisplayName(provider: "claude" | "codex"): string {
   return provider === "claude" ? "Claude" : "Codex";
 }
 
+/**
+ * Source status-label copy (usage-error-copy.ts getProviderUsageStatusLabel),
+ * classified from this repo's reader error strings (the fork keys off
+ * structured failureKind metadata Drogon's readers do not ship):
+ * a failed network request is a network issue, a provider-side rate-limit
+ * refusal is "Limited", everything else is a failed refresh.
+ */
+export function providerStatusLabel(provider: ProviderUsage): string | null {
+  if (provider.status !== "error") return null;
+  const message = provider.error ?? "";
+  if (/unreachable|network/i.test(message)) return "Network issue";
+  if (/\brate[- ]?limits?\b|\brate[- ]?limited\b/i.test(message)) return "Limited";
+  return "Refresh failed";
+}
+
+/** Source icon-only letter badge letters (StatusBarProviderSegment). */
+export function providerBadgeLetter(provider: ProviderUsage["provider"]): string {
+  return provider === "claude" ? "C" : "X";
+}
+
+/** Source resource-manager copy (resource-manager-terminal-copy.ts). */
+export function resourceManagerSessionCount(count: number): string {
+  return `${count} terminal ${count === 1 ? "session" : "sessions"}`;
+}
+
+export function resourceManagerAriaLabel(sessionCount: number): string {
+  return `Resource Manager, ${resourceManagerSessionCount(sessionCount)}`;
+}
+
+/**
+ * Source tooltip lines (getResourceManagerTooltipLines): summary, then the
+ * grouped-by-workspace hint; an unmeasured memory figure degrades to the
+ * source's "memory unavailable" wording inside the summary.
+ */
+export function resourceManagerTooltipLines(
+  memory: string | null,
+  sessionCount: number,
+): string[] {
+  return [
+    `Resource Manager - ${memory === null ? "memory unavailable" : memory} - ${resourceManagerSessionCount(sessionCount)}`,
+    sessionCount > 0
+      ? "Terminal sessions are grouped by workspace."
+      : "No terminal sessions yet.",
+  ];
+}
+
 /** Group tooltip: name plus one line per meter, or the honest failure reason. */
 export function providerTitle(provider: ProviderUsage, now: number): string {
   const name = providerDisplayName(provider.provider);
@@ -75,50 +120,38 @@ export function providerTitle(provider: ProviderUsage, now: number): string {
   return `${name}: no usage yet`;
 }
 
-export function memoryLabel(rssBytes: number | null): string {
-  return formatBytes(rssBytes) ?? "unavailable";
-}
-
-export function memoryTitle(args: {
-  rssBytes: number | null;
-  processCount: number | null;
-  unavailableReason: string | null;
-}): string {
-  if (args.rssBytes === null) return `Memory unavailable: ${args.unavailableReason ?? "no reason given"}`;
-  const processes =
-    args.processCount === null ? "process tree" : `${args.processCount} processes`;
-  return `Memory used by the Drogon process tree (${processes}): ${formatBytes(args.rssBytes)}`;
+/**
+ * Source badge format (resource-usage-metrics.tsx formatMemory): KB rounded
+ * to whole units below 1 MB, one decimal in MB, two in GB; the fork renders
+ * an em dash while the resource snapshot has never arrived.
+ */
+export function memoryBadge(rssBytes: number | null): string {
+  if (rssBytes === null || !Number.isFinite(rssBytes) || rssBytes < 0) return "—";
+  if (rssBytes < 1024 * 1024) return `${Math.round(rssBytes / 1024)} KB`;
+  if (rssBytes < 1024 * 1024 * 1024) {
+    return `${(rssBytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(rssBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 /** Source PortsStatusSegment form: the workspace port count only (the
     word "ports" lives in the aria-label and tooltip, not the strip). */
 export function portsLabel(ports: PortsSnapshot): string {
-  if (ports.unavailableReason !== null) return "unavailable";
   return `${ports.listening.length}`;
 }
 
 export function portsAriaLabel(ports: PortsSnapshot): string {
-  if (ports.unavailableReason !== null) return "Ports unavailable";
   const count = ports.listening.length;
   return `Ports, ${count} workspace ${count === 1 ? "port" : "ports"}`;
 }
 
+/** Source tooltip copy (PortsStatusSegment tooltip content). */
 export function portsTitle(ports: PortsSnapshot): string {
   if (ports.unavailableReason !== null) {
     return `Ports unavailable: ${ports.unavailableReason}`;
   }
-  if (ports.listening.length === 0) return "Ports: none listening";
-  const listed = ports.listening
-    .slice(0, 5)
-    .map((port) => `${port.port} (${port.process})`)
-    .join(", ");
-  const extra =
-    ports.listening.length > 5 ? `, +${ports.listening.length - 5} more` : "";
-  return `Listening ports: ${listed}${extra}`;
-}
-
-export function terminalsTitle(terminalCount: number): string {
-  return `${terminalCount} ${terminalCount === 1 ? "live terminal" : "live terminals"}`;
+  const count = ports.listening.length;
+  return `Ports — ${count} workspace ${count === 1 ? "port" : "ports"}`;
 }
 
 /**

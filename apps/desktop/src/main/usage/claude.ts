@@ -20,6 +20,17 @@ const OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const API_TIMEOUT_MS = 10_000;
 const KEYCHAIN_TIMEOUT_MS = 3_000;
 
+/**
+ * Request headers, literal from the source
+ * (src/main/rate-limits/claude-oauth-usage-request.ts): the OAuth usage
+ * endpoint throttles unfamiliar clients (HTTP 429 for anything else), so
+ * the product UA stays `claude-code/2.1.0`.
+ */
+export const CLAUDE_OAUTH_REQUEST_HEADERS: Record<string, string> = {
+  "anthropic-beta": "oauth-2025-04-20",
+  "User-Agent": "claude-code/2.1.0",
+};
+
 type OAuthUsageLimit = {
   kind?: string;
   percent?: number;
@@ -122,8 +133,7 @@ async function defaultFetchJson(token: string, signal: AbortSignal): Promise<OAu
   const response = await fetch(OAUTH_USAGE_URL, {
     headers: {
       Authorization: `Bearer ${token}`,
-      "anthropic-beta": "oauth-2025-04-20",
-      "User-Agent": "drogon-desktop/0.1.0",
+      ...CLAUDE_OAUTH_REQUEST_HEADERS,
     },
     signal,
   });

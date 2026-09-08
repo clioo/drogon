@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { readClaudeUsage } from "./claude";
+import { CLAUDE_OAUTH_REQUEST_HEADERS, readClaudeUsage } from "./claude";
 
 describe("claude usage reader (fail closed)", () => {
+  test("OAuth request headers stay literal with the fork (UA-gated endpoint)", () => {
+    // The fork's claude-oauth-usage-request.ts sends `claude-code/2.1.0`;
+    // anything else gets HTTP 429 from the usage endpoint.
+    expect(CLAUDE_OAUTH_REQUEST_HEADERS["User-Agent"]).toBe("claude-code/2.1.0");
+    expect(CLAUDE_OAUTH_REQUEST_HEADERS["anthropic-beta"]).toBe("oauth-2025-04-20");
+  });
   test("no token anywhere resolves unavailable, never throws", async () => {
     const result = await readClaudeUsage({
       readKeychainToken: () => Promise.resolve(null),

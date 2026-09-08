@@ -22,6 +22,12 @@ export function setUsageStore(next: UsageStore | null): void {
   store = next;
 }
 
+/** Release the store's owned processes (the caffeinate child) on app quit. */
+export function disposeUsage(): void {
+  store?.dispose();
+  store = null;
+}
+
 function errorResult(message: string): UsageResult<never> {
   return { ok: false, error: { code: "internal_error", message, retryable: false } };
 }

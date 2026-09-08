@@ -10,6 +10,7 @@ import type {
 import { AwakeController } from "./awake";
 import { readClaudeUsage } from "./claude";
 import { readCodexUsage } from "./codex";
+import { readUsageFixture, usageFixturePath, type UsageFixture } from "./fixture";
 import { readMemory, readWorkspacePorts } from "./system";
 import { readWorkspaceProbes } from "./workspace-paths";
 import type { WorkspacePortProbe } from "./workspace-ports";
@@ -73,6 +74,8 @@ export type UsageStoreDeps = {
   /** Receives the daemon's workspace probes; only workspace-owned listeners count. */
   readPorts?: (workspaces: readonly WorkspacePortProbe[]) => Promise<PortsSnapshot>;
   readWorkspaceProbes?: () => Promise<WorkspacePortProbe[]>;
+  /** Env-gated fixture seam (DROGON_USAGE_FIXTURE); null probes for real. */
+  readFixture?: () => Promise<UsageFixture | null>;
   awake?: AwakeController;
   now?: () => number;
 };
@@ -109,9 +112,12 @@ export class UsageStore {
     claude: null,
     codex: null,
   };
-  private readonly deps: Required<Omit<UsageStoreDeps, "awake" | "now">> & {
+  private readonly deps: Required<
+    Omit<UsageStoreDeps, "awake" | "now" | "readFixture">
+  > & {
     awake: AwakeController;
     now: () => number;
+    readFixture: () => Promise<UsageFixture | null>;
   };
 
   constructor(deps: UsageStoreDeps = {}) {
@@ -122,6 +128,7 @@ export class UsageStore {
       readMemory: deps.readMemory ?? readMemory,
       readPorts: deps.readPorts ?? readWorkspacePorts,
       readWorkspaceProbes: deps.readWorkspaceProbes ?? readWorkspaceProbes,
+      readFixture: deps.readFixture ?? (() => readUsageFixture(usageFixturePath())),
       awake,
       now: deps.now ?? Date.now,
     };
@@ -141,6 +148,11 @@ export class UsageStore {
 
   awakeSnapshot(): AwakeSnapshot {
     return this.deps.awake.getSnapshot();
+  }
+
+  /** Release the owned caffeinate child (app quit). */
+  dispose(): void {
+    this.deps.awake.dispose();
   }
 
   setAwake(mode: "on" | "off"): AwakeSnapshot {
@@ -172,6 +184,17 @@ export class UsageStore {
   }
 
   private async probeAll(force: boolean): Promise<UsageSnapshot> {
+    // Fixture seam: the whole snapshot comes from the file; nothing local is
+    // read and no provider CLI is spawned.
+    const fixture = await this.deps.readFixture();
+    if (fixture) {
+      this.snapshot = {
+        ...fixture,
+        awake: this.deps.awake.getSnapshot(),
+        updatedAt: this.deps.now(),
+      };
+      return this.snapshot;
+    }
     const forced = forcedUnavailableProviders();
     const workspaces = await this.deps.readWorkspaceProbes().catch(
       (): WorkspacePortProbe[] => [],
