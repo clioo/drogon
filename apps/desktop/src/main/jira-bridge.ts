@@ -39,6 +39,13 @@ const nativeMethodFor: Record<JiraMethod, string> = {
   jiraListCreateFields: "jira.listCreateFields",
   jiraListPriorities: "jira.listPriorities",
   jiraSearchUsers: "jira.searchUsers",
+  jiraGetIssue: "jira.getIssue",
+  jiraComments: "jira.comments",
+  jiraListTransitions: "jira.transitions",
+  jiraCreateIssue: "jira.createIssue",
+  jiraUpdateIssue: "jira.updateIssue",
+  jiraAddComment: "jira.addComment",
+  jiraStartIssue: "jira.startIssue",
 };
 
 const channelFor: Record<JiraMethod, string> = {
@@ -55,6 +62,13 @@ const channelFor: Record<JiraMethod, string> = {
   jiraListCreateFields: "drogon:jiraListCreateFields",
   jiraListPriorities: "drogon:jiraListPriorities",
   jiraSearchUsers: "drogon:jiraSearchUsers",
+  jiraGetIssue: "drogon:jiraGetIssue",
+  jiraComments: "drogon:jiraComments",
+  jiraListTransitions: "drogon:jiraListTransitions",
+  jiraCreateIssue: "drogon:jiraCreateIssue",
+  jiraUpdateIssue: "drogon:jiraUpdateIssue",
+  jiraAddComment: "drogon:jiraAddComment",
+  jiraStartIssue: "drogon:jiraStartIssue",
 };
 
 const invalid = {

@@ -273,6 +273,10 @@ pub fn map_jira_issue(site: &JiraSite, raw: &serde_json::Value) -> JiraIssue {
                 &key
             },
         ),
+        // List mapping deliberately omits `description` (ADF parse is the
+        // hot-path cost the fork avoids on the list path); the R17-C
+        // detail mapper fills it.
+        description: None,
         url: issue_url(site, &key),
         project: map_project(fields.get("project"), Some(site)),
         issue_type: map_issue_type(fields.get("issuetype")),

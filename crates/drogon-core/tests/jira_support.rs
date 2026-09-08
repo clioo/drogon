@@ -135,9 +135,17 @@ impl TestContext {
     }
 
     pub fn call(&self, method: &str, params: Value) -> Response {
+        // A monotonic request id per call: R17-C's `jira.startIssue` rides
+        // the mutating ledger (like `tasks.start`), which dedupes a reused
+        // (requestId, params) pair; R17-A's read-only methods never cared.
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let request_id = format!(
+            "jira-test-{}",
+            NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         self.engine.dispatch(Request {
             protocol: 1,
-            request_id: "test-1".to_string(),
+            request_id,
             auth: None,
             method: method.to_string(),
             params,

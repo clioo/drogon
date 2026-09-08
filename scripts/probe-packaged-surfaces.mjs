@@ -11,6 +11,10 @@ import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { readEditorValue, waitForEditorRegistered } from "./acceptance-editor-text.mjs";
 import { decodePng } from "./build-app-icon.mjs";
 
+// R16-BB: scheduled fixtures must never fire (and hammer the local model)
+// during the sealed run.
+export const FAR_FUTURE_CRON = "0 0 1 1 *";
+
 // Extended packaged-acceptance surfaces (journey J11): palette, Settings,
 // Changes, Automations, Bots, status bar and Tasks, each as a real CDP
 // journey with a screenshot. Nothing here mocks the service or the UI.
@@ -253,7 +257,9 @@ async function probeMentuSurface({ page, workspace, output }) {
     path.join(recipesDir, "acceptance-hello.json"),
     JSON.stringify(MENTU_FIXTURE_RECIPE, null, 2) + "\n",
   );
-  await page.getByRole("button", { name: "Mentu" }).click();
+  await page
+    .locator('.right-sidebar-header-drag button[aria-label="Mentu"]')
+    .click();
   const panel = page.locator('[data-testid="mentu-panel"]');
   await panel.waitFor();
   // R11-D ported the fork's Radix Select: the trigger is a combobox that stays
@@ -658,7 +664,9 @@ async function probeAutomationsCreateAndRun({ page, cli, dataDir, workspaceId, o
       "--name",
       name,
       "--cron",
-      "* * * * *",
+      // The row and manual run are what this check proves; keep the schedule
+      // dormant for the rest of the sealed run.
+      FAR_FUTURE_CRON,
       "--workspace",
       workspaceId,
       "--harness",
@@ -749,7 +757,9 @@ async function probeBotsCreateAndResponsibility({ page, output }) {
   const responsibility = page.locator('[data-testid="responsibility-form"]');
   await responsibility.waitFor();
   await responsibility.getByLabel("Name").fill("Acceptance duty");
-  await responsibility.getByLabel("Cron expression (UTC)").fill("* * * * *");
+  await responsibility
+    .getByLabel("Cron expression (UTC)")
+    .fill(FAR_FUTURE_CRON);
   await responsibility.getByLabel("Prompt").fill("Probe the scheduled duty.");
   await responsibility
     .getByRole("button", { name: "Save responsibility", exact: true })
@@ -786,6 +796,24 @@ async function probeStatusBarOverflow({ page, output }) {
           metrics,
           `status-bar@${width}px-${colorScheme}`,
         );
+        // J12 segments: left chrome, provider meters, and the right-hand
+        // daemon/awake/memory/terminals/ports group. Use the rendered
+        // segment contracts rather than incidental title copy or ARIA state.
+        await statusBar
+          .getByRole("button", { name: "Settings", exact: true })
+          .waitFor();
+        await statusBar.locator('[aria-label="Help"]').waitFor();
+        await statusBar
+          .locator('[data-provider-segment="claude"]')
+          .waitFor();
+        await statusBar
+          .locator('[data-provider-segment="codex"]')
+          .waitFor();
+        await statusBar.locator('[data-testid="awake-segment"]').waitFor();
+        await statusBar
+          .locator('[data-testid="resource-usage-segment"]')
+          .waitFor();
+        await statusBar.locator('[data-testid="ports-segment"]').waitFor();
         await page.screenshot({
           path: path.join(output, `status-bar-${width}-${colorScheme}.png`),
           animations: "disabled",
@@ -796,7 +824,10 @@ async function probeStatusBarOverflow({ page, output }) {
     if (original) await page.setViewportSize(original);
     await page.emulateMedia({ colorScheme: "light" });
   }
-  return ["status-bar-no-overflow-at-1440-1100-900-760-light-and-dark"];
+  return [
+    "status-bar-no-overflow-at-1440-1100-900-760-light-and-dark",
+    "status-bar-segments-present-at-760-and-1440",
+  ];
 }
 
 /**
