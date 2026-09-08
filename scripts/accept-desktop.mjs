@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -114,7 +115,8 @@ async function stopOwned(child, label) {
   report.cleanup.push(`${label}: ${result.verdict}`);
   return result;
 }
-async function launchDesktop() {
+async function launchDesktop(overrideDataDir = null) {
+  const activeDataDir = overrideDataDir ?? dataDir;
   const child = startAcceptanceProcess(
     packaged?.executable ?? electron,
     [...(packaged ? [] : [appDir]), "--remote-debugging-port=0"],
@@ -122,7 +124,7 @@ async function launchDesktop() {
       stdio: ["ignore", "ignore", "pipe"],
       env: {
         ...process.env,
-        DROGON_DATA_DIR: dataDir,
+        DROGON_DATA_DIR: activeDataDir,
         DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
         DROGON_BACKGROUND_WINDOW: "1",
         ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
@@ -677,6 +679,248 @@ try {
         },
       })),
     );
+  }
+  // R16-BP: upgrade-from-previous-build. Runs ONLY when a previous sealed
+  // bundle is available on this machine (DROGON_UPGRADE_FROM_BUNDLE pointing
+  // at an older sealed Drogon.app); otherwise it is skipped with an explicit
+  // reason so a plain `--bundle` acceptance is never blocked. The check
+  // seeds a scratch data dir through the PREVIOUS bundle's own daemon/CLI
+  // (2 projects: git + folder, 3 worktrees, shell + local-model Pi
+  // sessions, one cron automation), opens it with the CANDIDATE bundle and
+  // verifies every seeded record is present and usable, then simulates a
+  // future schema version (exactly what a newer build leaves behind) and
+  // verifies the candidate refuses it with the renderer's downgrade dialog.
+  const previousBundlePath = process.env.DROGON_UPGRADE_FROM_BUNDLE
+    ? path.resolve(process.env.DROGON_UPGRADE_FROM_BUNDLE)
+    : null;
+  const upgradeSkipReason = !previousBundlePath
+    ? "no previous sealed bundle configured (set DROGON_UPGRADE_FROM_BUNDLE=<old Drogon.app>)"
+    : !existsSync(previousBundlePath)
+      ? `DROGON_UPGRADE_FROM_BUNDLE does not exist: ${previousBundlePath}`
+      : !bundle
+        ? "requires --bundle: the upgrade target must be a packaged candidate"
+        : null;
+  if (upgradeSkipReason) {
+    report.checks.push(`upgrade-from-previous-build: SKIPPED (${upgradeSkipReason})`);
+  } else {
+    const previousPaths = bundlePaths(previousBundlePath);
+    for (const artifact of [
+      previousPaths.executable,
+      previousPaths.daemon,
+      previousPaths.cli,
+    ])
+      assert.ok(existsSync(artifact), `previous bundle artifact missing: ${artifact}`);
+    const upgradeDataDir = path.join(fixture, "upgrade-data");
+    await mkdir(upgradeDataDir, { recursive: true });
+    const gitProject = path.join(fixture, "upgrade-git");
+    const folderProject = path.join(fixture, "upgrade-folder");
+    await mkdir(path.join(gitProject, ".git"), { recursive: true });
+    await mkdir(folderProject, { recursive: true });
+    await writeFile(path.join(gitProject, "README.md"), "seed\n");
+    await runAcceptanceProcess("git", ["init", "--initial-branch=main", gitProject], {});
+    await runAcceptanceProcess("git", ["-C", gitProject, "config", "user.email", "accept@example.invalid"], {});
+    await runAcceptanceProcess("git", ["-C", gitProject, "config", "user.name", "Accept"], {});
+    await runAcceptanceProcess("git", ["-C", gitProject, "add", "."], {});
+    await runAcceptanceProcess("git", ["-C", gitProject, "commit", "-m", "seed"], {});
+    const oldCli = async (args, options = {}) =>
+      JSON.parse(
+        (
+          await runAcceptanceProcess(
+            previousPaths.cli,
+            ["--data-dir", upgradeDataDir, "--json", ...args],
+            options,
+          )
+        ).stdout,
+      );
+    // Seed through the PREVIOUS bundle's own daemon + CLI.
+    let oldDaemon = startAcceptanceProcess(
+      previousPaths.daemon,
+      ["--data-dir", upgradeDataDir],
+      { stdio: "ignore" },
+    );
+    try {
+      const seedDeadline = Date.now() + 15_000;
+      for (;;) {
+        try {
+          const status = await oldCli(["status"], { timeout: 1000 });
+          assert.equal(status.ok, true);
+          break;
+        } catch (error) {
+          if (Date.now() >= seedDeadline) throw error;
+          await delay(50);
+        }
+      }
+      const projects = [];
+      for (const seedPath of [gitProject, folderProject]) {
+        const added = await oldCli(["project", "add", seedPath]);
+        assert.equal(added.ok, true, `previous CLI project add failed: ${seedPath}`);
+        projects.push(added.result);
+      }
+      assert.equal(projects[0].kind, "git");
+      assert.equal(projects[1].kind, "folder");
+      for (const name of ["alpha", "beta", "gamma"]) {
+        const worktree = await oldCli([
+          "worktree",
+          "create",
+          "--project",
+          projects[0].id,
+          "--name",
+          name,
+        ]);
+        assert.equal(worktree.ok, true, `worktree ${name} failed`);
+      }
+      const gitWorkspaces = JSON.parse(
+        (
+          await runAcceptanceProcess(
+            previousPaths.cli,
+            [
+              "--data-dir",
+              upgradeDataDir,
+              "--json",
+              "worktree",
+              "list",
+              "--project",
+              projects[0].id,
+            ],
+            {},
+          )
+        ).stdout,
+      );
+      assert.equal(gitWorkspaces.ok, true);
+      const gitWorkspaceId = gitWorkspaces.result.worktrees[0]?.workspaceId ?? null;
+      assert.ok(gitWorkspaceId, "git project must expose a workspace");
+      for (const command of [["/bin/sh", "-l"], ["/bin/echo", "seeded"]]) {
+        const session = await oldCli([
+          "terminal",
+          "create",
+          "--workspace",
+          gitWorkspaceId,
+          "--",
+          ...command,
+        ]);
+        assert.equal(session.ok, true, "shell session seed failed");
+      }
+      // The free LOCAL model only (never paid): Pi on dgx-spark.
+      const piSession = await oldCli([
+        "harness",
+        "start",
+        "--workspace",
+        gitWorkspaceId,
+        "--harness",
+        "pi",
+        "--provider",
+        "dgx-spark",
+        "--model",
+        "qwen3.8-flash-next-nvidia-nvfp4",
+        "--prompt",
+        "reply with the single word ready",
+      ]);
+      assert.equal(piSession.ok, true, `local Pi seed failed: ${piSession.error?.message ?? ""}`);
+      const automation = await oldCli([
+        "automation",
+        "create",
+        "--name",
+        "upgrade-seed",
+        "--cron",
+        "* * * * *",
+        "--workspace",
+        gitWorkspaceId,
+        "--harness",
+        "pi",
+        "--prompt",
+        "reply with the single word ready",
+        "--disabled",
+      ]);
+      assert.equal(automation.ok, true, `automation seed failed: ${automation.error?.message ?? ""}`);
+    } finally {
+      await stopOwned(oldDaemon, "previous-bundle daemon");
+    }
+    // The CANDIDATE build opens the same data dir: everything survives.
+    await launchDesktop(upgradeDataDir);
+    try {
+      await emulatePageFocus(page);
+      const refusalOverlay = await page.locator("[data-dadir-refusal-overlay]").count();
+      assert.equal(refusalOverlay, 0, "a same-or-older data dir must never show the refusal dialog");
+      const status = await page.evaluate(() => window.drogon.status());
+      assert.equal(status.ok, true, "candidate daemon must serve the upgraded dir");
+      const snapshot = await page.locator("body").ariaSnapshot();
+      for (const name of [path.basename(gitProject), path.basename(folderProject)])
+        assert.ok(
+          snapshot.includes(name),
+          `project card for ${name} must render after upgrade`,
+        );
+      const sessions = JSON.parse(
+        (
+          await runAcceptanceProcess(
+            packaged.cli,
+            ["--data-dir", upgradeDataDir, "--json", "terminal", "list"],
+            {},
+          )
+        ).stdout,
+      );
+      assert.equal(sessions.ok, true);
+      assert.ok(
+        sessions.result.sessions.length >= 3,
+        `seeded sessions must survive the upgrade, saw ${sessions.result.sessions.length}`,
+      );
+      const worktrees = JSON.parse(
+        (
+          await runAcceptanceProcess(
+            packaged.cli,
+            [
+              "--data-dir",
+              upgradeDataDir,
+              "--json",
+              "worktree",
+              "list",
+              "--project",
+              projects[0].id,
+            ],
+            {},
+          )
+        ).stdout,
+      );
+      assert.equal(worktrees.ok, true);
+      assert.ok(worktrees.result.worktrees.length >= 3, "seeded worktrees must survive");
+      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-after.png") });
+      report.checks.push("upgrade-from-previous-build-data-survives");
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+      await stopOwned(desktop, "upgrade desktop");
+      desktop = null;
+      browser = null;
+      page = null;
+    }
+    // Downgrade refusal: a future schema version is exactly what a newer
+    // build leaves behind. The candidate must refuse with the dialog naming
+    // the data dir — never a hang, never a silent blank window.
+    await runAcceptanceProcess(
+      "/usr/bin/sqlite3",
+      [
+        path.join(upgradeDataDir, "drogon.sqlite3"),
+        "UPDATE schema_versions SET version = 99 WHERE component = 'bots';",
+      ],
+      {},
+    );
+    await launchDesktop(upgradeDataDir);
+    try {
+      await emulatePageFocus(page);
+      const dialog = page.locator("[data-dadir-refusal-overlay]");
+      await dialog.waitFor({ state: "visible", timeout: 30_000 });
+      const dialogText = await dialog.innerText();
+      assert.ok(
+        dialogText.includes("is newer than") && dialogText.includes(upgradeDataDir),
+        `refusal dialog must name the marker and the data dir, got: ${dialogText.slice(0, 400)}`,
+      );
+      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-refusal.png") });
+      report.checks.push("upgrade-from-previous-build-downgrade-refusal-dialog");
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+      await stopOwned(desktop, "refusal desktop");
+      desktop = null;
+      browser = null;
+      page = null;
+    }
   }
   report.status = "PASSED";
 } catch (error) {

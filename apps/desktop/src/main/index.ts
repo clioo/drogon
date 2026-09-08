@@ -433,6 +433,13 @@ function registerBridge() {
   }
 }
 
+/**
+ * Set once by `bootstrapDaemon` when the bundled daemon refused the data dir
+ * as written by a newer build; `createWindow` forwards it to the renderer as
+ * a query param for the downgrade dialog. Null in every healthy path.
+ */
+let dataDirRefusal: { dataDir: string; reason: string } | null = null;
+
 function createWindow() {
   // Window-state restore (source createMainWindow + Store.windowBounds):
   // saved bounds win only when bigger than the minimum and meaningfully
@@ -504,9 +511,31 @@ function createWindow() {
   }
   console.log("[window] Window bounds at startup:", window.getBounds(),
     "maximized:", window.isMaximized());
-  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL)
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL);
-  else void window.loadFile(path.join(__dirname, "../renderer/index.html"));
+  const rendererUrl = app.isPackaged
+    ? null
+    : process.env.ELECTRON_RENDERER_URL;
+  if (rendererUrl) {
+    const target = dataDirRefusal
+      ? `${rendererUrl}${
+          rendererUrl.includes("?") ? "&" : "?"
+        }dataDirRefusal=${encodeURIComponent(
+          JSON.stringify({
+            dataDir: dataDirRefusal.dataDir,
+            reason: dataDirRefusal.reason,
+          }),
+        )}`
+      : rendererUrl;
+    void window.loadURL(target);
+  } else if (dataDirRefusal) {
+    void window.loadFile(path.join(__dirname, "../renderer/index.html"), {
+      query: {
+        dataDirRefusal: JSON.stringify({
+          dataDir: dataDirRefusal.dataDir,
+          reason: dataDirRefusal.reason,
+        }),
+      },
+    });
+  } else void window.loadFile(path.join(__dirname, "../renderer/index.html"));
 }
 
 /**
@@ -580,6 +609,17 @@ async function bootstrapDaemon(): Promise<void> {
     pollIntervalMs: 250,
     deadlineMs: 10_000,
   });
+  if (
+    outcome.kind === "spawned-then-refused" &&
+    dataDirRefusal === null
+  ) {
+    // Downgrade refusal (R16-BP): the bundled daemon refused to start
+    // because a newer build already migrated this data dir. The renderer
+    // shows a dedicated dialog naming the directory and the recovery path;
+    // it rides the renderer URL as a query param since the refusal exists
+    // only in this main-process scope.
+    dataDirRefusal = { dataDir, reason: outcome.reason };
+  }
   if (outcome.kind !== "already-healthy" && outcome.kind !== "not-packaged")
     // Honest, observable failure reporting: the renderer's own "Connect to
     // Drogon" state already surfaces an unreachable service; this is the
@@ -634,7 +674,7 @@ function registerDaemonRestart() {
       call: (method, params) => callNative(method, params),
       observeEndpoint: (signal) => observeDataDirEndpoint(dataDir, signal),
       spawn: (binaryPath, args, env) =>
-        spawnDetachedDaemon(binaryPath, args, env),
+        spawnDetachedDaemon(binaryPath, args, env).then(() => undefined),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       pollIntervalMs: 250,
       shutdownWaitMs: 12_000,

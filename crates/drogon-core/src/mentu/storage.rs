@@ -61,6 +61,21 @@ pub fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()> {
             |r| r.get(0),
         )
         .optional()?;
+    if let Some(found) = existing
+        && found > MENTU_SCHEMA_VERSION
+    {
+        // Downgrade guard, same contract as the other components: a data
+        // dir written by a newer build must never be silently modified by
+        // this one. Before this guard existed any recorded version fell
+        // through as a no-op, so an older build could write v1 rows into a
+        // future mentu schema it cannot understand.
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_SCHEMA),
+            Some(format!(
+                "mentu schema version {found} is newer than supported {MENTU_SCHEMA_VERSION}"
+            )),
+        ));
+    }
     if existing.is_none() {
         create_v1_tables(tx)?;
         tx.execute(

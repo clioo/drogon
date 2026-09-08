@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   bootstrapNativeRuntime,
+  classifyDaemonRefusal,
   spawnDetachedDaemon,
   type BootstrapDeps,
 } from "./native-runtime-bootstrap";
@@ -215,6 +216,48 @@ describe("native runtime bootstrap", () => {
     );
     expect(outcome).toEqual({ kind: "spawned-then-timed-out" });
     expect(spawnDaemon).toHaveBeenCalledTimes(1);
+  });
+
+  test("a daemon that dies with a schema refusal is reported as spawned-then-refused with the daemon's own reason", async () => {
+    const stderrTail = vi.fn(async () =>
+      [
+        "drogond: startup schema/recovery gate: bots: bots schema version 4 is newer than the 3 this build supports; refusing to modify it (data dir: /Users/x/Library/Application Support/Drogon)",
+      ].join("\n"),
+    );
+    const outcome = await bootstrapNativeRuntime(
+      baseDeps({
+        spawnDaemon: vi.fn(async () => ({ stderrTail })),
+        checkStatus: async () => unverifiable,
+      }),
+    );
+    expect(outcome).toEqual({
+      kind: "spawned-then-refused",
+      reason:
+        "startup schema/recovery gate: bots: bots schema version 4 is newer than the 3 this build supports; refusing to modify it (data dir: /Users/x/Library/Application Support/Drogon)",
+    });
+  });
+
+  test("a daemon whose stderr closes without a refusal marker keeps the honest timeout outcome", async () => {
+    const stderrTail = vi.fn(async () => "drogond: sqlite error: disk I/O error");
+    const outcome = await bootstrapNativeRuntime(
+      baseDeps({
+        spawnDaemon: vi.fn(async () => ({ stderrTail })),
+        checkStatus: async () => unverifiable,
+      }),
+    );
+    expect(outcome).toEqual({ kind: "spawned-then-timed-out" });
+  });
+
+  test("classifyDaemonRefusal keeps the last refusal line and strips the drogond prefix", () => {
+    const stderr = [
+      "drogond: pre-migration backup created at /x/backups/pre-migration-1",
+      "drogond: startup schema/recovery gate: projects schema version 3 is newer than supported 2 (data dir: /d)",
+    ].join("\n");
+    expect(classifyDaemonRefusal(stderr)).toBe(
+      "startup schema/recovery gate: projects schema version 3 is newer than supported 2 (data dir: /d)",
+    );
+    expect(classifyDaemonRefusal("")).toBeNull();
+    expect(classifyDaemonRefusal("drogond: refusing a symlinked --data-dir")).toBeNull();
   });
 
   test("Windows never attempts a spawn, even when the service is absent", async () => {
