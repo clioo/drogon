@@ -62,29 +62,38 @@ impl Engine {
         // path now, the file/overlay gains the real identity after
         // admission and before spawn.
         let mut args = plan.args;
-        let pending = match request.harness_id {
-            HarnessId::Claude => {
-                let nonce = uuid::Uuid::new_v4().to_string();
-                let path = crate::hooks::nonce_settings_path(&self.data_dir, &nonce);
-                args.push("--settings".to_string());
-                args.push(path.to_string_lossy().into_owned());
-                PendingHookInstall::Claude { path }
+        // Headless daemon runs (`pi -p`, `claude -p`, `opencode run`,
+        // `agy -p`) consume the prompt and exit: no TUI to report wait
+        // signals from, so no hook install either — installing one would
+        // only risk pinning the run at `needs_input` with nobody able to
+        // answer (issue #186).
+        let pending = if request.headless {
+            PendingHookInstall::None
+        } else {
+            match request.harness_id {
+                HarnessId::Claude => {
+                    let nonce = uuid::Uuid::new_v4().to_string();
+                    let path = crate::hooks::nonce_settings_path(&self.data_dir, &nonce);
+                    args.push("--settings".to_string());
+                    args.push(path.to_string_lossy().into_owned());
+                    PendingHookInstall::Claude { path }
+                }
+                HarnessId::Opencode => PendingHookInstall::Opencode {
+                    nonce: uuid::Uuid::new_v4().to_string(),
+                    // Why: mirrors the reference's `buildPtyHostEnv`, which
+                    // resolves the user's existing config dir from its own
+                    // process env rather than guessing OpenCode's default path.
+                    existing_config_dir: std::env::var("OPENCODE_CONFIG_DIR").ok(),
+                },
+                HarnessId::Pi => {
+                    let nonce = uuid::Uuid::new_v4().to_string();
+                    let path = harness_hooks::pi::nonce_extension_path(&self.data_dir, &nonce);
+                    args.push("--extension".to_string());
+                    args.push(path.to_string_lossy().into_owned());
+                    PendingHookInstall::Pi { path }
+                }
+                HarnessId::Antigravity => PendingHookInstall::None,
             }
-            HarnessId::Opencode => PendingHookInstall::Opencode {
-                nonce: uuid::Uuid::new_v4().to_string(),
-                // Why: mirrors the reference's `buildPtyHostEnv`, which
-                // resolves the user's existing config dir from its own
-                // process env rather than guessing OpenCode's default path.
-                existing_config_dir: std::env::var("OPENCODE_CONFIG_DIR").ok(),
-            },
-            HarnessId::Pi => {
-                let nonce = uuid::Uuid::new_v4().to_string();
-                let path = harness_hooks::pi::nonce_extension_path(&self.data_dir, &nonce);
-                args.push("--extension".to_string());
-                args.push(path.to_string_lossy().into_owned());
-                PendingHookInstall::Pi { path }
-            }
-            HarnessId::Antigravity => PendingHookInstall::None,
         };
         let cols = require_dimension(params, "cols", 80)?;
         let rows = require_dimension(params, "rows", 24)?;
@@ -152,6 +161,9 @@ impl Engine {
                 return Err(err);
             }
         };
+        if request.headless {
+            handle.set_headless();
+        }
         if let Some(ready) = ready {
             for path in ready.cleanup_paths {
                 handle.add_hook_cleanup_path(path);

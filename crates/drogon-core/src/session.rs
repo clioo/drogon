@@ -85,6 +85,12 @@ pub(crate) struct SessionHandle {
     /// clearing `needs_input_at` would make "waiting for you" a lie. Claude
     /// and plain sessions keep the default generic-activity clear.
     explicit_wait_clear: AtomicBool,
+    /// Daemon-run mode (bot/automation headless launches: `pi -p`,
+    /// `claude -p`, `opencode run`, `agy -p`). Set once by `harness.start`
+    /// right after launch. A headless run has no approval-answer surface,
+    /// so hook wait signals are ignored for it (see `hooks.rs`) and its
+    /// exit advances the linked run rows (see `run_completion.rs`).
+    headless: AtomicBool,
     db: Arc<Mutex<Connection>>,
 }
 
@@ -128,6 +134,7 @@ impl SessionHandle {
             needs_input_at: Mutex::new(None),
             hook_cleanup_paths: Mutex::new(Vec::new()),
             explicit_wait_clear: AtomicBool::new(false),
+            headless: AtomicBool::new(false),
             db,
         })
     }
@@ -157,6 +164,18 @@ impl SessionHandle {
     /// right after launch — see the field doc for why.
     pub(crate) fn set_explicit_wait_clear(&self) {
         self.explicit_wait_clear.store(true, Ordering::Release);
+    }
+
+    /// Marks this session as a headless daemon run. Called once by
+    /// `harness.start` right after launch, before the handle is published —
+    /// no hook event or exit can observe it unset. See the field doc.
+    pub(crate) fn set_headless(&self) {
+        self.headless.store(true, Ordering::Release);
+    }
+
+    /// Whether this session is a headless daemon run.
+    pub(crate) fn is_headless(&self) -> bool {
+        self.headless.load(Ordering::Acquire)
     }
 
     /// Remembers one per-session hook install artifact so the exit paths
@@ -373,6 +392,27 @@ fn poll_until_exit(handle: &SessionHandle) {
                 for path in handle.take_hook_cleanup_paths() {
                     crate::hooks::remove_settings_file(&path);
                 }
+                // A headless daemon run's exit IS its completion signal:
+                // advance the linked run rows to their terminal state now,
+                // while the linkage is still provable in this process.
+                // Interactive sessions never carry run linkage (runs always
+                // launch headless), so they skip this. A failure here must
+                // never disturb the already-persisted exit.
+                if handle.is_headless() {
+                    let observed_at = crate::now_unix_ms() as f64;
+                    if let Err(e) = advance_headless_run_records(
+                        &handle.db,
+                        &handle.session_id,
+                        &handle.incarnation,
+                        code,
+                        observed_at,
+                    ) {
+                        eprintln!(
+                            "[session] failed to advance headless run records for {}: {e}",
+                            handle.session_id
+                        );
+                    }
+                }
                 try_release_native(handle);
                 return;
             }
@@ -381,6 +421,131 @@ fn poll_until_exit(handle: &SessionHandle) {
             std::thread::sleep(CHILD_POLL_INTERVAL);
         }
     }
+}
+
+/// Advances the run rows linked to one exited headless session to their
+/// terminal state: `automation_runs` rows admitted for this exact
+/// session/incarnation move `dispatched` -> `completed` (with the reaped
+/// exit code); their linked `bot_responsibility_runs` rows move to
+/// `exited` with `ended_at`; `bot_messages` (chat turns) for this exact
+/// session/incarnation gain `exited`/`ended_at`. Anything already terminal
+/// is left untouched (earliest `ended_at` wins), and rows for other
+/// sessions/incarnations are never matched: the session fence is the
+/// `(session id, incarnation)` pair, the same linkage dispatch recorded.
+///
+/// Rows are JSON payloads (`payload_json`), so the match pre-filters in SQL
+/// with `json_extract` (precedent: `bot_snapshot_rpc.rs`) and the status
+/// guard is applied on the parsed struct in Rust. One `BEGIN IMMEDIATE`
+/// for the whole advancement; returns how many rows moved.
+pub(crate) fn advance_headless_run_records(
+    db: &std::sync::Arc<std::sync::Mutex<Connection>>,
+    session_id: &str,
+    incarnation: &str,
+    exit_code: i64,
+    observed_at: f64,
+) -> Result<AdvanceSummary, crate::automations::storage::StorageError> {
+    use crate::automations::records::{AutomationRun, AutomationRunStatus};
+    use crate::automations::storage::StorageError;
+    use crate::bots::records::{BotMessage, HostObservation, ResponsibilityRun};
+
+    let mut summary = AdvanceSummary::default();
+    let conn = db.lock().unwrap();
+    let tx = crate::automations::storage::begin_immediate(&conn)?;
+    let mut advanced_automation_run_ids = Vec::new();
+    {
+        let mut select = tx.prepare(
+            "SELECT id, payload_json FROM automation_runs \
+             WHERE json_extract(payload_json, '$.terminalSessionId') = ?1",
+        )?;
+        let rows: Vec<(String, String)> = select
+            .query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (id, payload) in rows {
+            let Ok(mut run): Result<AutomationRun, _> = serde_json::from_str(&payload) else {
+                continue;
+            };
+            if run.session_incarnation.as_deref() != Some(incarnation)
+                || run.status != AutomationRunStatus::Dispatched
+            {
+                continue;
+            }
+            run.status = AutomationRunStatus::Completed;
+            run.exit_code = Some(exit_code);
+            run.observed_at = Some(observed_at);
+            let payload = serde_json::to_string(&run).map_err(StorageError::Json)?;
+            tx.execute(
+                "UPDATE automation_runs SET payload_json = ?1 WHERE id = ?2",
+                rusqlite::params![payload, id],
+            )?;
+            advanced_automation_run_ids.push(id);
+            summary.automation_runs += 1;
+        }
+    }
+    for automation_run_id in &advanced_automation_run_ids {
+        let mut select = tx.prepare(
+            "SELECT id, payload_json FROM bot_responsibility_runs WHERE automation_run_id = ?1",
+        )?;
+        let rows: Vec<(String, String)> = select
+            .query_map([automation_run_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (id, payload) in rows {
+            let Ok(mut run): Result<ResponsibilityRun, _> = serde_json::from_str(&payload) else {
+                continue;
+            };
+            if run.host_observation == Some(HostObservation::Exited) {
+                continue;
+            }
+            run.host_observation = Some(HostObservation::Exited);
+            run.ended_at = Some(observed_at);
+            let payload = serde_json::to_string(&run).map_err(StorageError::Json)?;
+            tx.execute(
+                "UPDATE bot_responsibility_runs SET payload_json = ?1 WHERE id = ?2",
+                rusqlite::params![payload, id],
+            )?;
+            summary.responsibility_runs += 1;
+        }
+    }
+    {
+        let mut select = tx.prepare(
+            "SELECT id, payload_json FROM bot_messages \
+             WHERE json_extract(payload_json, '$.sessionId') = ?1",
+        )?;
+        let rows: Vec<(String, String)> = select
+            .query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (id, payload) in rows {
+            let Ok(mut message): Result<BotMessage, _> = serde_json::from_str(&payload) else {
+                continue;
+            };
+            // The observation decides, not `ended_at`: `record_chat` stamps
+            // `ended_at` at dispatch-observation time even for a live turn,
+            // so gating on it would skip every observed turn. Already-exited
+            // rows keep their earliest `ended_at`.
+            if message.incarnation.as_deref() != Some(incarnation)
+                || message.host_observation == Some(HostObservation::Exited)
+            {
+                continue;
+            }
+            message.host_observation = Some(HostObservation::Exited);
+            message.ended_at = Some(observed_at);
+            let payload = serde_json::to_string(&message).map_err(StorageError::Json)?;
+            tx.execute(
+                "UPDATE bot_messages SET payload_json = ?1 WHERE id = ?2",
+                rusqlite::params![payload, id],
+            )?;
+            summary.messages += 1;
+        }
+    }
+    tx.commit()?;
+    Ok(summary)
+}
+
+/// How many rows [`advance_headless_run_records`] moved to terminal state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct AdvanceSummary {
+    pub automation_runs: usize,
+    pub responsibility_runs: usize,
+    pub messages: usize,
 }
 
 /// Drops the PTY master and writer exactly once, and only after BOTH facts
@@ -677,4 +842,203 @@ pub(crate) fn base64_decode(text: &str) -> Result<Vec<u8>, RpcError> {
     base64::engine::general_purpose::STANDARD
         .decode(text)
         .map_err(|_| error::invalid_argument("dataBase64 is not valid base64"))
+}
+
+#[cfg(test)]
+mod headless_completion_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn open_engine() -> (tempfile::TempDir, crate::Engine) {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = crate::Engine::open(dir.path()).unwrap();
+        (dir, engine)
+    }
+
+    fn insert_automation_run(
+        engine: &crate::Engine,
+        id: &str,
+        session_id: Option<&str>,
+        incarnation: Option<&str>,
+        status: &str,
+    ) {
+        let payload = json!({
+            "id": id,
+            "automationId": "auto-1",
+            "title": "t",
+            "scheduledFor": 1.0,
+            "status": status,
+            "trigger": "manual",
+            "terminalSessionId": session_id,
+            "sessionIncarnation": incarnation,
+            "sessionKind": "terminal",
+            "createdAt": 1.0,
+        });
+        engine
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO automation_runs (id, automation_id, payload_json) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, "auto-1", payload.to_string()],
+            )
+            .unwrap();
+    }
+
+    fn insert_responsibility_run(
+        engine: &crate::Engine,
+        id: &str,
+        automation_run_id: Option<&str>,
+        observation: Option<&str>,
+    ) {
+        let payload = json!({
+            "id": id,
+            "botId": "bot-1",
+            "responsibilityId": "resp-1",
+            "automationId": "auto-1",
+            "automationRunId": automation_run_id,
+            "startedAt": 1.0,
+            "endedAt": null,
+            "recipe": null,
+            "hostObservation": observation,
+        });
+        engine
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO bot_responsibility_runs (id, bot_id, automation_run_id, started_at, payload_json) VALUES (?1, ?2, ?3, 1.0, ?4)",
+                rusqlite::params![id, "bot-1", automation_run_id, payload.to_string()],
+            )
+            .unwrap();
+    }
+
+    fn insert_message(
+        engine: &crate::Engine,
+        id: &str,
+        session_id: Option<&str>,
+        observation: &str,
+        ended_at: Value,
+    ) {
+        let payload = json!({
+            "id": id,
+            "botId": "bot-1",
+            "requestId": "req-1",
+            "prompt": "hi",
+            "sessionId": session_id,
+            "incarnation": "inc-1",
+            "hostObservation": observation,
+            "error": null,
+            "startedAt": 1.0,
+            "endedAt": ended_at,
+        });
+        engine
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO bot_messages (id, bot_id, started_at, payload_json) VALUES (?1, ?2, 1.0, ?3)",
+                rusqlite::params![id, "bot-1", payload.to_string()],
+            )
+            .unwrap();
+    }
+
+    fn read_payload(engine: &crate::Engine, table: &str, id: &str) -> Value {
+        let conn = engine.db.lock().unwrap();
+        let text: String = conn
+            .query_row(
+                &format!("SELECT payload_json FROM {table} WHERE id = ?1"),
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    #[test]
+    fn exit_advances_the_linked_rows_to_their_terminal_state() {
+        let (_dir, engine) = open_engine();
+        insert_automation_run(&engine, "ar:1", Some("sess-1"), Some("inc-1"), "dispatched");
+        insert_responsibility_run(&engine, "rr-1", Some("ar:1"), Some("live"));
+        // A dispatch-observed live turn carries `ended_at` already (the
+        // dispatch observation time): the exit still advances it, moving
+        // `ended_at` to the exit time.
+        insert_message(&engine, "msg-1", Some("sess-1"), "live", json!(2.0));
+
+        let summary = advance_headless_run_records(&engine.db, "sess-1", "inc-1", 0, 42.0).unwrap();
+        assert_eq!(
+            summary,
+            AdvanceSummary {
+                automation_runs: 1,
+                responsibility_runs: 1,
+                messages: 1,
+            }
+        );
+
+        let run = read_payload(&engine, "automation_runs", "ar:1");
+        assert_eq!(run["status"], "completed");
+        assert_eq!(run["exitCode"], 0);
+        assert_eq!(run["observedAt"], 42.0);
+        // Untouched fields survive the payload round-trip.
+        assert_eq!(run["trigger"], "manual");
+
+        let responsibility = read_payload(&engine, "bot_responsibility_runs", "rr-1");
+        assert_eq!(responsibility["hostObservation"], "exited");
+        assert_eq!(responsibility["endedAt"], 42.0);
+
+        let message = read_payload(&engine, "bot_messages", "msg-1");
+        assert_eq!(message["hostObservation"], "exited");
+        assert_eq!(message["endedAt"], 42.0);
+    }
+
+    #[test]
+    fn exit_leaves_terminal_foreign_and_unlinked_rows_untouched() {
+        let (_dir, engine) = open_engine();
+        // Already terminal: never regressed, earliest ended_at wins.
+        insert_automation_run(
+            &engine,
+            "ar:done",
+            Some("sess-1"),
+            Some("inc-1"),
+            "completed",
+        );
+        insert_responsibility_run(&engine, "rr:done", Some("ar:done"), Some("exited"));
+        // Same session id, different incarnation: a different run.
+        insert_automation_run(
+            &engine,
+            "ar:other-inc",
+            Some("sess-1"),
+            Some("inc-9"),
+            "dispatched",
+        );
+        // No session linkage at all (dispatch failed / skipped rows).
+        insert_automation_run(&engine, "ar:bare", None, None, "dispatched");
+        insert_responsibility_run(&engine, "rr:bare", None, Some("live"));
+        // Already exited: keeps its earliest `ended_at`.
+        insert_message(&engine, "msg:done", Some("sess-1"), "exited", json!(2.0));
+
+        let summary = advance_headless_run_records(&engine.db, "sess-1", "inc-1", 3, 42.0).unwrap();
+        assert_eq!(summary, AdvanceSummary::default());
+
+        assert_eq!(
+            read_payload(&engine, "automation_runs", "ar:done")["status"],
+            "completed"
+        );
+        assert_eq!(
+            read_payload(&engine, "automation_runs", "ar:other-inc")["status"],
+            "dispatched"
+        );
+        assert_eq!(
+            read_payload(&engine, "automation_runs", "ar:bare")["status"],
+            "dispatched"
+        );
+        assert_eq!(
+            read_payload(&engine, "bot_responsibility_runs", "rr:done")["hostObservation"],
+            "exited"
+        );
+        assert_eq!(
+            read_payload(&engine, "bot_responsibility_runs", "rr:bare")["hostObservation"],
+            "live"
+        );
+    }
 }

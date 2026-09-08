@@ -233,6 +233,43 @@ describe("BotResponsibilityCard", () => {
     expect(recorded).toContain("Recorded");
   });
 
+  it("appends the stored terminal state to history rows, never a live claim", () => {
+    const exited = render({
+      bot: bot(),
+      history: [
+        historyEntry({
+          run: { ...historyEntry().run, id: "done", hostObservation: "exited" },
+        }),
+      ],
+    });
+    expect(exited).toContain("run 3 · exited");
+    const unverifiable = render({
+      bot: bot(),
+      history: [
+        historyEntry({
+          automationRunNumber: null,
+          run: {
+            ...historyEntry().run,
+            id: "lost",
+            recipe: null,
+            hostObservation: "unverifiable",
+          },
+        }),
+      ],
+    });
+    expect(unverifiable).toContain("Recorded · unverifiable");
+    const live = render({
+      bot: bot(),
+      history: [
+        historyEntry({
+          run: { ...historyEntry().run, id: "live", hostObservation: "live" },
+        }),
+      ],
+    });
+    expect(live).toContain("run 3");
+    expect(live).not.toContain("run 3 · live");
+  });
+
   it("renders no history section without rows", () => {
     expect(render({ bot: bot(), history: [] })).not.toContain(
       "Responsibility history",

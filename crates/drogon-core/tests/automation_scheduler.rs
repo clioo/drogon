@@ -100,6 +100,7 @@ fn harness_params() -> HarnessLaunchParams {
         effort: None,
         provider: None,
         permission_mode: None,
+        headless: false,
     }
 }
 
@@ -358,6 +359,30 @@ fn ready_direct_plan_carries_harness_start_params() {
     assert_eq!(plan.params["harnessId"], json!("pi"));
     assert_eq!(plan.params["prompt"], json!("do the thing"));
     assert!(plan.request_id.starts_with("automation-run:"));
+}
+
+#[test]
+fn headless_direct_runs_carry_the_headless_flag_into_harness_start() {
+    let c = mem_conn();
+    insert_workspace(&c, "w1", HOST);
+    let automation = sample_automation("a1");
+    storage::upsert_automation(&c, &automation).unwrap();
+    let mut headless = harness_params();
+    headless.headless = true;
+    let plan = ready_direct(
+        prepare_direct(
+            &c,
+            HOST,
+            "a1",
+            &InvocationReason::ScheduledDue,
+            AutomationRunTrigger::Scheduled,
+            "slot-1",
+            &headless,
+            2000.0,
+        )
+        .unwrap(),
+    );
+    assert_eq!(plan.params["headless"], json!(true));
 }
 
 #[test]

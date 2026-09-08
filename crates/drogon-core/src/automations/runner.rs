@@ -51,6 +51,11 @@ pub struct HarnessLaunchParams {
     pub effort: Option<String>,
     pub provider: Option<String>,
     pub permission_mode: Option<String>,
+    /// Every run through this seam is a headless daemon run (`pi -p`,
+    /// `claude -p`, `opencode run`, `agy -p`): no TUI, no approval-answer
+    /// surface. Always `true` on run paths; user-facing tabs never build
+    /// this struct (they call `harness.start` directly, headless absent).
+    pub headless: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -387,6 +392,9 @@ fn build_harness_start_params(
     }
     if let Some(permission_mode) = &harness_params.permission_mode {
         params["permissionMode"] = json!(permission_mode);
+    }
+    if harness_params.headless {
+        params["headless"] = json!(true);
     }
     params
 }
