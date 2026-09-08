@@ -3,15 +3,22 @@
 //   src/main/dock/unread-badge.test.ts
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { setBadgeMock } = vi.hoisted(() => ({
-  setBadgeMock: vi.fn(),
-}));
+const { setBadgeMock, dockShowMock, setActivationPolicyMock, appFocusMock } =
+  vi.hoisted(() => ({
+    setBadgeMock: vi.fn(),
+    dockShowMock: vi.fn(),
+    setActivationPolicyMock: vi.fn(),
+    appFocusMock: vi.fn(),
+  }));
 
 vi.mock("electron", () => ({
   app: {
     dock: {
       setBadge: setBadgeMock,
+      show: dockShowMock,
     },
+    setActivationPolicy: setActivationPolicyMock,
+    focus: appFocusMock,
   },
 }));
 
@@ -23,6 +30,10 @@ describe("unread Dock badge", () => {
       Object.defineProperty(process, "platform", originalPlatform);
     }
     setBadgeMock.mockReset();
+    dockShowMock.mockReset();
+    setActivationPolicyMock.mockReset();
+    appFocusMock.mockReset();
+    delete process.env.DROGON_BACKGROUND_WINDOW;
     vi.resetModules();
   });
 
@@ -76,4 +87,25 @@ describe("unread Dock badge", () => {
     setUnreadDockBadgeCount(-3);
     expect(setBadgeMock).toHaveBeenLastCalledWith("");
   });
+
+  it.each(["1", undefined] as const)(
+    "only ever touches app.dock.setBadge, never the activation policy (background flag: %s)",
+    async (flag) => {
+      if (flag === undefined) delete process.env.DROGON_BACKGROUND_WINDOW;
+      else process.env.DROGON_BACKGROUND_WINDOW = flag;
+      Object.defineProperty(process, "platform", {
+        configurable: true,
+        value: "darwin",
+      });
+      const { setUnreadDockBadgeCount } = await import("./unread-badge");
+
+      setUnreadDockBadgeCount(3);
+      setUnreadDockBadgeCount(0);
+
+      expect(setBadgeMock.mock.calls).toEqual([["3"], [""]]);
+      expect(dockShowMock).not.toHaveBeenCalled();
+      expect(setActivationPolicyMock).not.toHaveBeenCalled();
+      expect(appFocusMock).not.toHaveBeenCalled();
+    },
+  );
 });

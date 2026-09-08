@@ -100,6 +100,27 @@ function makePersister(statePath: string) {
   };
 }
 
+/**
+ * Ready-to-show reveal of the restored window (source revealInitialWindow:
+ * maximize-then-show). Under the background/acceptance flag the window is
+ * revealed inactive (the source's showWindowWithoutStealingFocus) and never
+ * shown focused, focused programmatically, or raised; maximize() itself is a
+ * bounds op that precedes the reveal in both paths.
+ */
+export function revealRestoredWindow(args: {
+  window: Pick<
+    BrowserWindow,
+    "maximize" | "show" | "showInactive" | "focus" | "moveTop"
+  >;
+  savedMaximized: boolean;
+  backgroundWindow: boolean;
+}): void {
+  const { window, savedMaximized, backgroundWindow } = args;
+  if (savedMaximized) window.maximize();
+  if (backgroundWindow) window.showInactive();
+  else window.show();
+}
+
 /** Reads the persisted pair; anything unreadable falls back to first launch. */
 export function loadWindowState(): RestoredWindowState {
   return parseWindowStateFile(safeReadFile(stateFilePath()));
