@@ -6,6 +6,34 @@ import path from "node:path";
 
 export const APP_BUNDLE_ID = "ai.clioo.drogon";
 
+/**
+ * Signing-boundary predicate for the pinned Mentu runtime (fork parity:
+ * reference `config/scripts/mentu-runtime-package.cjs`
+ * `mentuRuntimeSignIgnore` + `mentu-runtime-signing.test.mjs`, adapted from
+ * electron-builder `mac.signIgnore` to @electron/packager `osxSign.ignore`).
+ * Matches ONLY the exact nested ad-hoc unsigned runtime path: signing it
+ * would append an LC_CODE_SIGNATURE and break the byte sha256 the daemon's
+ * `mentu.runtime_install` verifies against the lock. This flow is ad-hoc
+ * local only (journey J11), so — unlike the fork, which re-signs everything
+ * under Developer ID for release — the exemption is unconditional here.
+ * `codesign --verify --deep --strict` still passes with the nested binary
+ * unsigned (proven on the sealed bundle, not assumed).
+ */
+export function mentuRuntimeSignIgnore(revision) {
+  assert.match(revision ?? "", /^[a-f0-9]{40}$/);
+  const suffix = [
+    "Contents",
+    "Resources",
+    "mentu-runtime",
+    revision,
+    "bin",
+    process.platform === "win32" ? "mentu-recipes.exe" : "mentu-recipes",
+  ].join("/");
+  return (file) =>
+    typeof file === "string" &&
+    file.split("\\").join("/").endsWith(suffix);
+}
+
 // Detached sealed-bundle identity version. Bumped only when the canonical
 // sealed-tree encoding changes; acceptance reports and installers refuse
 // unknown versions instead of comparing digests across encodings.

@@ -7,6 +7,7 @@ import {
   APP_BUNDLE_ID,
   bundlePaths,
   fingerprintBundle,
+  mentuRuntimeSignIgnore,
   previewArchiveName,
   treeDigest,
   verifiedBuildInfo,
@@ -81,3 +82,26 @@ test(
     await assert.rejects(() => treeDigest(directory), /Unexpected link/);
   },
 );
+
+test("mentu signing boundary preserves only the exact nested runtime", () => {
+  const revision = "b".repeat(40);
+  const ignore = mentuRuntimeSignIgnore(revision);
+  const packaged = `/tmp/Drogon.app/Contents/Resources/mentu-runtime/${revision}/bin/mentu-recipes`;
+  assert.equal(ignore(packaged), true);
+  for (const unrelated of [
+    `${packaged}.replacement`,
+    `${packaged}/child`,
+    packaged.replace(revision, "a".repeat(40)),
+    packaged.replace("mentu-runtime", "unrelated-runtime"),
+    "/tmp/Drogon.app/Contents/MacOS/Drogon",
+    "/tmp/Drogon.app/Contents/Resources/mentu-runtime",
+    null,
+    undefined,
+  ]) {
+    assert.equal(ignore(unrelated), false, String(unrelated));
+  }
+});
+
+test("mentu signing boundary rejects a malformed revision", () => {
+  assert.throws(() => mentuRuntimeSignIgnore("short"), /[a-f0-9]/);
+});
