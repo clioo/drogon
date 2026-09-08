@@ -55,6 +55,7 @@ const okBridge = {
     },
   }),
   tasksLinks: async () => ({ ok: true as const, result: { links: [] } }),
+  tasksRemotes: async () => ({ ok: true as const, result: {} }),
   tasksProjects: async () => ({ ok: true as const, result: { projects: [] } }),
   tasksWorktrees: async () => ({ ok: true as const, result: { worktrees: [] } }),
 };
@@ -74,6 +75,7 @@ describe("tasks mount", () => {
       await gated.tasksShow({ projectId: "p", number: 1 }),
       await gated.tasksStart({ projectId: "p", number: 1 }),
       await gated.tasksLinks({ projectId: "p" }),
+      await gated.tasksRemotes({ projectId: "p" }),
       await gated.tasksProjects(),
       await gated.tasksWorktrees({}),
     ]) {

@@ -163,4 +163,23 @@ describe("responsibility form model", () => {
       ),
     ).toBe(false);
   });
+
+  it("accepts yearly and leap-day schedules (#236: rare crons stay saveable)", () => {
+    for (const cron of ["0 0 1 1 *", "0 0 29 2 *"]) {
+      expect(
+        isResponsibilityFormReady(
+          { name: "Duty", cron, prompt: "Do it." },
+          NOW,
+        ),
+      ).toBe(true);
+    }
+    // A valid-shaped cron that never fires stays unsaveable (the daemon's
+    // croner check rejects it too).
+    expect(
+      isResponsibilityFormReady(
+        { name: "Duty", cron: "0 0 31 2 *", prompt: "Do it." },
+        NOW,
+      ),
+    ).toBe(false);
+  });
 });

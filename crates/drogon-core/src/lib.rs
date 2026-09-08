@@ -453,6 +453,7 @@ impl Engine {
             "tasks.show" => self.do_tasks_show(&request.params),
             "tasks.start" => self.mutating(request, Self::do_tasks_start),
             "tasks.links" => self.do_tasks_links(&request.params),
+            "tasks.remotes" => self.do_tasks_remotes(&request.params),
             "mentu.recipes" => self.mentu_recipes(&request.params),
             "mentu.recipe" => self.mentu_recipe(&request.params),
             "mentu.recipe_save" => self.mentu_recipe_save(request),

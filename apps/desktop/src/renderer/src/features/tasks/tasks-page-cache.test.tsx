@@ -54,6 +54,7 @@ function fakeBridge(tasksList: TasksBridge["tasksList"]): TasksBridge {
     tasksStart: () =>
       Promise.resolve({ ok: false as const, error: { code: "x", message: "x", retryable: false } }),
     tasksLinks: () => Promise.resolve({ ok: true as const, result: { links: [] } }),
+    tasksRemotes: () => Promise.resolve({ ok: true as const, result: {} }),
     tasksProjects: () => Promise.resolve({ ok: true as const, result: { projects: [] } }),
     tasksWorktrees: () => Promise.resolve({ ok: true as const, result: { worktrees: [] } }),
   };
@@ -104,7 +105,7 @@ describe("tasks default load and result cache", () => {
       mode: "issues",
     });
     expect(
-      readTasksPageCache({ projectId: "p1", kind: "issues", state: "open", query: undefined, page: 1 })
+      readTasksPageCache({ projectId: "p1", kind: "issues", state: "open", query: undefined, page: 1, source: "auto" })
         ?.workItems.map((item) => item.title),
     ).toEqual(["Cached row one"]);
   });

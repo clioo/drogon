@@ -118,6 +118,61 @@ describe("tasks bridge admission", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("passes the issue-source pin through and serves tasks.remotes", async () => {
+    let seenMethod: unknown = null;
+    let seenParams: unknown = null;
+    const listed = await dispatchTasksRequest(
+      "tasksList",
+      { projectId: "p", source: "origin" },
+      async (method, params) => {
+        seenMethod = method;
+        seenParams = params;
+        return { ok: true, result: listResult };
+      },
+    );
+    expect(listed.ok).toBe(true);
+    expect(seenMethod).toBe("tasks.list");
+    expect(seenParams).toMatchObject({ projectId: "p", source: "origin" });
+
+    // A bad source value never reaches the daemon.
+    let called = false;
+    const rejected = await dispatchTasksRequest(
+      "tasksList",
+      { projectId: "p", source: "fork" },
+      async () => {
+        called = true;
+        return { ok: true, result: listResult };
+      },
+    );
+    expect(rejected.ok).toBe(false);
+    expect(called).toBe(false);
+
+    const remotes = await dispatchTasksRequest(
+      "tasksRemotes",
+      { projectId: "p" },
+      async (method) => {
+        seenMethod = method;
+        return {
+          ok: true,
+          result: { origin: "example/repo", upstream: "upstream-org/repo" },
+        };
+      },
+    );
+    expect(seenMethod).toBe("tasks.remotes");
+    expect(remotes).toMatchObject({
+      ok: true,
+      result: { origin: "example/repo", upstream: "upstream-org/repo" },
+    });
+
+    // A single-remote topology (upstream key absent) passes validation.
+    const sparse = await dispatchTasksRequest(
+      "tasksRemotes",
+      { projectId: "p" },
+      async () => ({ ok: true, result: { origin: "example/repo" } }),
+    );
+    expect(sparse.ok).toBe(true);
+  });
+
   it("passes paging fields through to the daemon and back", async () => {
     let seen: unknown = null;
     const paged = {

@@ -62,6 +62,8 @@ export function createGatedTasksBridge(
       isAllowed() ? source.tasksStart(input) : refused(),
     tasksLinks: (input) =>
       isAllowed() ? source.tasksLinks(input) : refused(),
+    tasksRemotes: (input) =>
+      isAllowed() ? source.tasksRemotes(input) : refused(),
     tasksProjects: () => (isAllowed() ? source.tasksProjects() : refused()),
     tasksWorktrees: (input) =>
       isAllowed() ? source.tasksWorktrees(input) : refused(),

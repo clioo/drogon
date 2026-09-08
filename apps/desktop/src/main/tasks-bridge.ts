@@ -29,6 +29,7 @@ const nativeMethodFor: Record<TasksMethod, string> = {
   tasksShow: "tasks.show",
   tasksStart: "tasks.start",
   tasksLinks: "tasks.links",
+  tasksRemotes: "tasks.remotes",
   tasksProjects: "project.list",
   tasksWorktrees: "worktree.list",
 };
@@ -259,6 +260,7 @@ const channelFor: Record<TasksMethod, string> = {
   tasksShow: "drogon:tasksShow",
   tasksStart: "drogon:tasksStart",
   tasksLinks: "drogon:tasksLinks",
+  tasksRemotes: "drogon:tasksRemotes",
   tasksProjects: "drogon:tasksProjects",
   tasksWorktrees: "drogon:tasksWorktrees",
 };

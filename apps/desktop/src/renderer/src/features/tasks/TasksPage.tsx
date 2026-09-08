@@ -39,6 +39,24 @@ import {
   projectTasksDaemonState,
 } from "./task-page-localized-options";
 import { windowShellOpenExternal } from "../landing/github-star";
+import type {
+  GitHubOwnerRepo,
+  IssueSourcePreference,
+} from "./issue-source-selector";
+import {
+  loadIssueSourcePreference,
+  saveIssueSourcePreference,
+} from "./issue-source-preference";
+
+/** `tasks.remotes` reports slugs as `owner/repo`; anything else is treated
+ *  as absent rather than trusted (the selector's null rules decide from
+ *  the two parsed candidates). */
+function parseTaskRepoSlug(slug: string | undefined): GitHubOwnerRepo | null {
+  if (!slug) return null;
+  const slash = slug.indexOf("/");
+  if (slash <= 0 || slash === slug.length - 1) return null;
+  return { owner: slug.slice(0, slash), repo: slug.slice(slash + 1) };
+}
 
 export const TASKS_ROUTE_ID = "tasks";
 export const TASKS_TITLE = "Tasks";
@@ -104,6 +122,9 @@ export type TasksPageCacheKey = {
   state: string;
   query: string | undefined;
   page: number;
+  /** The issue-source pin (or "auto"): rows listed from upstream must
+   *  never seed a view pinned to origin or vice versa. */
+  source: string;
 };
 
 export type TasksPageCachedResult = {
@@ -116,7 +137,7 @@ export type TasksPageCachedResult = {
 const tasksPageResultCache = new Map<string, TasksPageCachedResult>();
 
 function tasksPageCacheKeyString(key: TasksPageCacheKey): string {
-  return [key.projectId ?? "", key.kind, key.state, key.query ?? "", String(key.page)].join("|");
+  return [key.projectId ?? "", key.kind, key.state, key.query ?? "", String(key.page), key.source].join("|");
 }
 
 /** Test seam: drops every cached result between cases. */
@@ -172,6 +193,13 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
       state: projectTasksDaemonState(defaultQuery),
       query: projectTasksDaemonQuery(defaultQuery),
       page: 1,
+      source:
+        (() => {
+          const initial = pickDefaultProject(loadGroups());
+          return initial === null
+            ? "auto"
+            : (loadIssueSourcePreference(initial) ?? "auto");
+        })(),
     };
     return { key, cached: readTasksPageCache(key) };
   });
@@ -186,6 +214,20 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   const [loadingTargetPage, setLoadingTargetPage] = useState<number | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [taskLinks, setTaskLinks] = useState<TaskLink[]>([]);
+  // Issue-source selector (#246): the selected repo's GitHub remote
+  // topology (null until `tasks.remotes` answers) and the persisted
+  // per-project pin (undefined = the fork's `'auto'`).
+  const [issueSourceTopology, setIssueSourceTopology] = useState<{
+    projectId: string;
+    origin: GitHubOwnerRepo | null;
+    upstream: GitHubOwnerRepo | null;
+  } | null>(null);
+  const [issueSourcePreference, setIssueSourcePreference] = useState<
+    IssueSourcePreference | undefined
+  >(() => {
+    const initial = pickDefaultProject(loadGroups());
+    return initial === null ? undefined : loadIssueSourcePreference(initial);
+  });
   const [startBusyNumber, setStartBusyNumber] = useState<number | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const githubListScrollRef = useRef<HTMLDivElement | null>(null);
@@ -268,6 +310,59 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     refreshLinks();
   }, [refreshLinks]);
 
+  // The pin is per project: switching repos adopts the stored choice of
+  // the newly selected repo (or `'auto'` when it was never pinned).
+  useEffect(() => {
+    setIssueSourcePreference(
+      projectId === null ? undefined : loadIssueSourcePreference(projectId),
+    );
+  }, [projectId]);
+
+  // Remote topology for the selector: local git config via the daemon, so
+  // it answers even before (or without) a successful `gh` list. Re-probes
+  // on Refresh so an added/removed upstream remote shows up.
+  useEffect(() => {
+    if (projectId === null) {
+      setIssueSourceTopology(null);
+      return;
+    }
+    let cancelled = false;
+    void bridge
+      .tasksRemotes({ projectId })
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
+          setIssueSourceTopology(null);
+          return;
+        }
+        setIssueSourceTopology({
+          projectId,
+          origin: parseTaskRepoSlug(result.result.origin),
+          upstream: parseTaskRepoSlug(result.result.upstream),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setIssueSourceTopology(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge, projectId, refreshNonce]);
+
+  // Fork setIssueSourcePreference: any click writes the explicit pin and
+  // the list refetches from the chosen remote's repo (the load effect
+  // depends on issueSourcePreference).
+  const handleSelectIssueSource = useCallback(
+    (next: IssueSourcePreference) => {
+      if (projectId === null) return;
+      saveIssueSourcePreference(projectId, next);
+      setIssueSourcePreference(next);
+      setPage(1);
+      setFurthestPage(1);
+    },
+    [projectId],
+  );
+
   // Reloads the list whenever the project, kind, applied query (which
   // carries the daemon state), page or refresh nonce changes. A late
   // response for an older window is dropped, never rendered. Success
@@ -286,10 +381,11 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     const state = tasksDaemonState;
     const kind = githubTaskKind;
     const daemonQuery = projectTasksDaemonQuery(appliedTaskSearch);
+    const source = issueSourcePreference ?? "auto";
     // Stale-while-revalidate (#238): a visited request paints its last
     // rows instantly (kind/project/page switches back never re-skeleton)
     // while the fetch below revalidates underneath.
-    const seed = readTasksPageCache({ projectId, kind, state, query: daemonQuery, page });
+    const seed = readTasksPageCache({ projectId, kind, state, query: daemonQuery, page, source });
     if (seed) {
       setWorkItems(seed.workItems);
       setRepo(seed.repo);
@@ -304,6 +400,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
         page,
         perPage: TASKS_PAGE_SIZE,
         mode: kind,
+        source: issueSourcePreference,
       })
       .then((result) => {
         if (cancelled) return;
@@ -330,7 +427,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
         setHasNextPage(result.result.hasNextPage);
         setFurthestPage((current) => Math.max(current, result.result.page));
         writeTasksPageCache(
-          { projectId, kind, state, query: daemonQuery, page },
+          { projectId, kind, state, query: daemonQuery, page, source },
           {
             repo: result.result.repo,
             workItems: nextItems,
@@ -351,7 +448,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     return () => {
       cancelled = true;
     };
-  }, [bridge, projectId, githubTaskKind, tasksDaemonState, appliedTaskSearch, page, refreshNonce]);
+  }, [bridge, projectId, githubTaskKind, tasksDaemonState, appliedTaskSearch, page, refreshNonce, issueSourcePreference]);
 
   // Why: the pagination bar speaks 0-based pages (source contract); the
   // daemon RPC is 1-based, so the adapter converts at the boundary.
@@ -405,7 +502,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
       setStartBusyNumber(item.number);
       setStartError(null);
       void bridge
-        .tasksStart({ projectId, number: item.number, mode: githubTaskKind })
+        .tasksStart({ projectId, number: item.number, mode: githubTaskKind, source: issueSourcePreference })
         .then((result) => {
           if (!result.ok) {
             setStartError(result.error.message);
@@ -421,7 +518,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
           setStartBusyNumber(null);
         });
     },
-    [bridge, projectId, startBusyNumber, refreshLinks, onOpenTerminal, githubTaskKind],
+    [bridge, projectId, startBusyNumber, refreshLinks, onOpenTerminal, githubTaskKind, issueSourcePreference],
   );
 
   const selectedRepo = selectedRepos[0] ?? null;
@@ -504,6 +601,12 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     showGitHubTaskSkeletons,
     githubTaskGridClass:
       githubTaskKind === "pulls" ? GITHUB_PR_TASK_GRID_CLASS : GITHUB_TASK_GRID_CLASS,
+    issueSourceOrigin:
+      issueSourceTopology?.projectId === projectId ? issueSourceTopology.origin : null,
+    issueSourceUpstream:
+      issueSourceTopology?.projectId === projectId ? issueSourceTopology.upstream : null,
+    issueSourcePreference,
+    onSelectIssueSource: handleSelectIssueSource,
     currentPage: page - 1,
     totalPages,
     loadingTargetPage: loadingTargetPage === null ? null : loadingTargetPage - 1,

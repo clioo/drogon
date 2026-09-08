@@ -19,6 +19,10 @@ import type {
   SourceOption,
 } from "./task-page-localized-options";
 import type { RepoBackedTaskEmptyState } from "./task-page-empty-state";
+import type {
+  GitHubOwnerRepo,
+  IssueSourcePreference,
+} from "./issue-source-selector";
 
 /** One row of the GitHub list: a TaskIssue/TaskPullRequest projected into the source's work-item shape. */
 export type TaskPageWorkItem = GitHubWorkItemLike & {
@@ -135,6 +139,17 @@ export type TaskPageModel = {
   newGitHubIssueUrl: string | null;
   /** System-browser opener (`window.drogon.shell.openExternal`); null off-app (tests/SSR). */
   openExternal: TasksOpenExternal | null;
+
+  // Issue source (fork Filters.tsx bottom row): the Upstream/Origin
+  // segmented control, rendered only when the selected repo's origin and
+  // upstream remotes resolve to different GitHub slugs.
+  /** Origin slug from `tasks.remotes`; null while unresolved/absent. */
+  issueSourceOrigin: GitHubOwnerRepo | null;
+  /** Upstream slug from `tasks.remotes`; null when the repo has none. */
+  issueSourceUpstream: GitHubOwnerRepo | null;
+  /** The persisted per-repo pin; undefined is the fork's `'auto'`. */
+  issueSourcePreference: IssueSourcePreference | undefined;
+  onSelectIssueSource: (next: IssueSourcePreference) => void;
 
   // List state.
   selectedRepos: TaskPickerRepo[];
