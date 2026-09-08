@@ -30,7 +30,7 @@ export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
     id: "general",
     title: "General",
     description: "Workspace defaults, app setup, and maintenance.",
-    keywords: ["general", "workspace", "delete", "deleting", "ask", "ask before", "confirm", "confirmation", "automation", "cli", "shell command", "drogon-cli", "star", "github", "support"],
+    keywords: ["general", "workspace", "delete", "deleting", "ask", "ask before", "confirm", "confirmation", "automation", "cli", "shell command", "drogon-cli", "star", "github", "support", "browser", "search", "search engine", "google", "duckduckgo", "bing", "kagi", "address bar"],
   },
   {
     id: "git",

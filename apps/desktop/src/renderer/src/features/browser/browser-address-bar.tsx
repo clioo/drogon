@@ -2,7 +2,8 @@
 // Ported from the Orca reference (read-only):
 //   src/renderer/src/components/browser-pane/assemble-chrome/BrowserAddressBar.tsx
 // Adapted: history comes in as a `recentUrls` prop (workspace-local recents,
-// no store, no search engine, no Kagi/doc rows); the suggestion dropdown is
+// no store, no Kagi/doc rows — the engine comes from the persisted
+// preference, default google); the suggestion dropdown is
 // a plain absolutely-positioned listbox (no Popover/Command primitives in
 // this feature); dismissal on window blur is kept. Focus/edit-session,
 // preview, Enter-to-navigate and Escape-to-restore semantics are unchanged.
@@ -17,6 +18,7 @@ import {
 import { Globe } from "lucide-react";
 import { cn } from "../tasks/cn";
 import { shouldOverlayBrowserAddressBar } from "./browser-address-bar-expansion";
+import { readBrowserSearchEngine } from "./browser-search-engine";
 import { buildBrowserAddressBarSuggestions } from "./browser-address-bar-suggestions";
 import {
   consumeBrowserAddressBarEditSession,
@@ -162,9 +164,17 @@ export default function BrowserAddressBar({
     [clearAddressBarTimers],
   );
 
+  // Why once per mount: the Settings page unmounts the browser pane, so a
+  // saved engine is always re-read before the next edit.
+  const [searchEngine] = useState(readBrowserSearchEngine);
   const suggestions = useMemo(
-    () => buildBrowserAddressBarSuggestions({ recentUrls, value: autocompleteQuery }),
-    [recentUrls, autocompleteQuery],
+    () =>
+      buildBrowserAddressBarSuggestions({
+        recentUrls,
+        value: autocompleteQuery,
+        searchEngine,
+      }),
+    [recentUrls, autocompleteQuery, searchEngine],
   );
 
   const clearSuggestionPreview = useCallback((): void => {

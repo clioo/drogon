@@ -2,10 +2,11 @@
 // Ported from the Orca reference (read-only):
 //   src/renderer/src/components/browser-pane/assemble-chrome/BrowserAddressBarSuggestionList.tsx
 // Adapted: the cmdk Command primitives are a plain listbox — same roles,
-// icons and title/subtitle rows. Hover previews the row (the source's
-// cmdk value change); mousedown selects before the input's blur closes the
-// list; click still picks a row directly.
-import { Globe } from "lucide-react";
+// icons (Search for the engine row, Globe for destinations) and
+// title/subtitle rows. Hover previews the row (the source's cmdk value
+// change); mousedown selects before the input's blur closes the list;
+// click still picks a row directly.
+import { Globe, Search } from "lucide-react";
 import { cn } from "../tasks/cn";
 import type { BrowserAddressBarSuggestion } from "./browser-address-bar-suggestions";
 
@@ -50,9 +51,11 @@ export default function BrowserAddressBarSuggestionList({
               onSelect(entry.url);
             }}
           >
-            {/* Why always the globe: every row here navigates — there is no
-                search-engine row in this build, so no row reads as search. */}
-            <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+            {entry.isSearch ? (
+              <Search className="size-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-sm">{entry.title}</span>
               {entry.subtitle ? (

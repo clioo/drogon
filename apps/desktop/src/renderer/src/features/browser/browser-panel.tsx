@@ -66,6 +66,8 @@ import {
   recordBrowserRecentUrl,
   type BrowserRecentUrl,
 } from "./browser-recent-urls";
+import { normalizeAddressBarInput } from "./browser-address-bar-suggestions";
+import { readBrowserSearchEngine } from "./browser-search-engine";
 
 function workspaceTabs(event: BrowserStateEvent, workspaceId: string): BrowserTabState[] {
   return event.tabs.filter((tab) => tab.workspaceId === workspaceId);
@@ -311,8 +313,16 @@ export function BrowserPanel({
   }, [bridge, workspaceId, tabsEmpty, controlled]);
 
   const go = (value: string) => {
-    const url = value.trim();
-    if (!url) return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    // Why through the fork classifier: bare words become a search URL on
+    // the configured engine (default google) — never https://<word>.
+    // Already-resolved suggestion URLs pass through unchanged (https).
+    const url = normalizeAddressBarInput(trimmed, readBrowserSearchEngine());
+    if (!url) {
+      setNotice("Enter a valid http(s) or localhost URL.");
+      return;
+    }
     setNotice("");
     setDismissedBanner(null);
     dismissSuggestionsRef.current?.();

@@ -42,6 +42,7 @@ export {
   shouldOverlayBrowserAddressBar,
 } from "./browser-address-bar-expansion";
 export { default as BrowserAddressBarSuggestionList } from "./browser-address-bar-suggestion-list";
+export { BrowserFavicon } from "./browser-favicon";
 export {
   MAX_BROWSER_ADDRESS_BAR_SUGGESTIONS,
   buildBrowserAddressBarSuggestions,
@@ -88,6 +89,15 @@ export {
   recordBrowserRecentUrl,
 } from "./browser-recent-urls";
 export type { BrowserRecentUrl } from "./browser-recent-urls";
+export {
+  DEFAULT_SEARCH_ENGINE,
+  isSearchEngine,
+  listSearchEngines,
+  readBrowserSearchEngine,
+  SEARCH_ENGINE_LABELS,
+  writeBrowserSearchEngine,
+} from "./browser-search-engine";
+export type { SearchEngine } from "./browser-search-engine";
 export {
   browserReloadButtonLabel,
   resolveBrowserReloadButtonLabelKind,
