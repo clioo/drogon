@@ -239,6 +239,22 @@ const SURFACES = [
     candFiles: ["apps/desktop/src/renderer/src/settings-panel.tsx"],
   },
   {
+    id: "settings-appearance-system",
+    label: "Settings (Appearance — System theme)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/AppearancePane.tsx",
+      "src/renderer/src/components/settings/AppearanceInterfaceSection.tsx",
+      "src/renderer/src/components/settings/AdvancedPane.tsx",
+    ],
+    probes: ["Theme", "System", "Dark", "Light", "prefers-color-scheme", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/settings/appearance-section.tsx",
+      "apps/desktop/src/renderer/src/features/settings/native-theme-sync.ts",
+      "apps/desktop/src/renderer/src/theme.ts",
+    ],
+  },
+  {
     id: "changes",
     label: "Changes / diff",
     refDir: "src/renderer/src/components/right-sidebar/source-control",
@@ -274,6 +290,37 @@ const SURFACES = [
     ],
     probes: ["Automations", "Schedule", "cron", "aria-label"],
     candFiles: ["apps/desktop/src/renderer/src/features/automations/"],
+  },
+  {
+    id: "shortcuts-status-rail",
+    label: "Settings (Shortcut status rail)",
+    refDir: "src/renderer/src/components/settings",
+    refFiles: [
+      "src/renderer/src/components/settings/ShortcutsPane.tsx",
+      "src/renderer/src/components/settings/ShortcutFilterRail.tsx",
+      "src/renderer/src/components/settings/ShortcutRowsList.tsx",
+    ],
+    probes: ["Modified", "Unassigned", "Conflicts", "Shortcut status", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx",
+      "apps/desktop/src/renderer/src/features/settings/shortcut-status-rail.tsx",
+    ],
+  },
+  {
+    id: "automation-editor-cron-preview",
+    label: "Automation editor (custom cron preview)",
+    refDir: "src/renderer/src/components/automations",
+    refFiles: [
+      "src/renderer/src/components/automations/AutomationEditorDialog.tsx",
+      "src/renderer/src/components/automations/AutomationSchedulePicker.tsx",
+      "src/renderer/src/components/automations/AutomationCustomCronPanel.tsx",
+    ],
+    probes: ["Custom cron", "Cron expression", "Next runs", "preview", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/automations/AutomationEditorDialog.tsx",
+      "apps/desktop/src/renderer/src/features/automations/AutomationSchedulePicker.tsx",
+      "apps/desktop/src/renderer/src/features/automations/AutomationCustomCronPanel.tsx",
+    ],
   },
   {
     id: "browser",
@@ -332,6 +379,22 @@ const SURFACES = [
     ],
     probes: ["Unstaged", "Untracked", "Commit message", "aria-label"],
     candFiles: ["apps/desktop/src/renderer/src/features/source-control/uncommitted-sections.tsx"],
+  },
+  {
+    id: "bots-empty-and-list",
+    label: "Bots page (empty and list states)",
+    refDir: "src/renderer/src/components/bots",
+    refFiles: [
+      "src/renderer/src/components/bots/BotsPage.tsx",
+      "src/renderer/src/components/bots/BotsPageStates.tsx",
+      "src/renderer/src/components/bots/BotResponsibilityCard.tsx",
+    ],
+    probes: ["No Bots yet", "Create Bot", "role=\"list\"", "Bots", "aria-label"],
+    candFiles: [
+      "apps/desktop/src/renderer/src/features/bots/BotsPanel.tsx",
+      "apps/desktop/src/renderer/src/features/bots/BotsPageStates.tsx",
+      "apps/desktop/src/renderer/src/features/bots/BotResponsibilityCard.tsx",
+    ],
   },
   {
     id: "bots",
@@ -1210,14 +1273,19 @@ async function toastTexts(page, limit = 6) {
 // navigation only; every step is recorded.
 async function ensureHome(page, notes) {
   await ensureClean(page, notes);
-  // The back row only counts when the settings search field is also visible:
-  // a lone name match must never drive navigation.
+  // The settings full-page view is identified by its visible search field;
+  // a lone button/name match must never drive navigation.
+  const settingsSearch = page.getByRole("textbox", { name: "Search settings" }).first();
   const settingsOpen = async () =>
-    (await page.getByRole("button", { name: "Back to app", exact: true }).count().catch(() => 0)) > 0 &&
-    (await page.getByRole("textbox", { name: "Search settings" }).count().catch(() => 0)) > 0;
+    (await settingsSearch.count().catch(() => 0)) > 0 &&
+    await settingsSearch.isVisible().catch(() => false);
   if (await settingsOpen()) {
-    await tryClick(page, "button", "Back to app", 1500);
-    notes.push("home: Back to app from full-page view");
+    const back = page.getByRole("button", { name: "Back to app", exact: true }).first();
+    if ((await back.count().catch(() => 0)) > 0) {
+      await refInteract(page, "click Back to app", () => back.click({ timeout: 2500, force: true })).catch(() => {});
+      notes.push("home: Back to app from full-page view");
+      await delay(500);
+    }
     await ensureClean(page, notes);
   }
   try {
@@ -1624,6 +1692,38 @@ async function refSetup(page, state, ctx) {
       return `query typing best-effort only: ${error.message.split("\n")[0]}`;
     }
   };
+  const openRefSettings = async () => {
+    const search = page.getByRole("textbox", { name: "Search settings" }).first();
+    if ((await search.count().catch(() => 0)) > 0 && await search.isVisible().catch(() => false)) return true;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const button = page.getByRole("button", { name: "Settings", exact: true }).first();
+        await button.waitFor({ state: "visible", timeout: 3500 });
+        await refInteract(page, "click reference Settings", () => button.click({ timeout: 3500, force: true }));
+        await page.getByRole("textbox", { name: "Search settings" }).waitFor({ timeout: 5000 });
+        return true;
+      } catch {
+        await delay(500);
+      }
+    }
+    return false;
+  };
+  const openRefNav = async (name, markerRole, markerName) => {
+    const marker = page.getByRole(markerRole, { name: markerName }).first();
+    if ((await marker.count().catch(() => 0)) > 0 && await marker.isVisible().catch(() => false)) return true;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const button = page.getByRole("button", { name, exact: true }).first();
+        await button.waitFor({ state: "visible", timeout: 3500 });
+        await refInteract(page, `click reference ${name}`, () => button.click({ timeout: 3500, force: true }));
+        await page.getByRole(markerRole, { name: markerName }).first().waitFor({ timeout: 5000 });
+        return true;
+      } catch {
+        await delay(500);
+      }
+    }
+    return false;
+  };
   switch (state) {
     case "worktree-card-rows":
       missing.push("ref non-coverage: creating 2–3 sessions (including Pi local-model) is forbidden on the reference");
@@ -1806,17 +1906,105 @@ async function refSetup(page, state, ctx) {
         } else missing.push("Settings click acted but the settings marker never appeared (capture may show the previous view)");
       } else missing.push("no Settings button reachable");
       break;
+    case "settings-appearance-system": {
+      // R8: inspect the persisted System choice without changing the
+      // reference. The dark/light captures below emulate the OS media query;
+      // the source's System branch should follow that signal.
+      if (await openRefSettings()) {
+        await tryClick(page, "button", "Appearance", 1500).catch(() => {});
+        await tryClick(page, "tab", "Appearance", 1500).catch(() => {});
+        if (!(await waitForAria(page, "textbox", "Search settings"))) {
+          missing.push("Settings click acted but the settings marker never appeared");
+          break;
+        }
+        const system = page.getByRole("radio", { name: "System", exact: true }).first();
+        const count = await system.count().catch(() => 0);
+        if (count === 0) {
+          missing.push("reference Theme/System control unavailable");
+        } else {
+          const checked = await system.getAttribute("aria-checked").catch(() => null);
+          notes.push(`reference Theme=System checked=${checked ?? "unknown"}`);
+          if (checked !== "true") missing.push("reference persisted theme is not System; left unchanged");
+        }
+        notes.push(`reference OS media dark=${await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches).catch(() => false)}`);
+      } else missing.push("no Settings button reachable");
+      break;
+    }
+    case "shortcuts-status-rail": {
+      if (await openRefSettings()) {
+        let opened = await tryClick(page, "button", "Shortcuts", 1800);
+        if (!opened) {
+          try {
+            await page.getByRole("tab", { name: "Shortcuts" }).first().click({ timeout: 1800 });
+            await delay(350);
+            opened = true;
+          } catch {
+            opened = false;
+          }
+        }
+        if (!opened) {
+          missing.push("no Shortcuts nav reachable");
+          break;
+        }
+        const rail = page.getByRole("navigation", { name: "Shortcut status filters" }).first();
+        try {
+          await rail.waitFor({ state: "visible", timeout: 8000 });
+        } catch {
+          missing.push("Shortcut status filter rail missing");
+          break;
+        }
+        notes.push("Shortcuts status rail opened");
+        const modified = page.getByRole("button", { name: /^Modified\b/ }).first();
+        if ((await modified.count()) > 0) {
+          await refInteract(page, "click Modified shortcut status filter", () => modified.click({ timeout: 2500 }));
+          await delay(350);
+          notes.push("Modified status filter selected (view-only)");
+        } else missing.push("Modified status filter unavailable");
+      } else missing.push("no Settings button reachable");
+      break;
+    }
     case "changes":
       missing.push("ref git fixture intentionally not created (reference is read-only)");
       if (await tryClick(page, "button", "Changes", 1200)) notes.push("Changes view opened");
       else notes.push("no Changes nav; captured current view");
       break;
     case "automations":
-      if (await tryClick(page, "button", "Automations")) {
-        if (await waitForAria(page, "heading", "Automations")) notes.push("Automations opened (marker visible)");
-        else missing.push("Automations click acted but the page marker never appeared");
-      } else missing.push("no Automations nav reachable");
+      if (await openRefNav("Automations", "heading", "Automations")) notes.push("Automations opened (marker visible)");
+      else missing.push("no Automations nav reachable");
       break;
+    case "automation-editor-cron-preview": {
+      // Opening the reference editor is safe, but creating an automation or
+      // typing a yearly expression would mutate its draft/data. Capture the
+      // source-backed editor only and record that non-coverage explicitly.
+      if (!openRefNav("Automations", "heading", "Automations")) {
+        missing.push("no Automations nav reachable");
+        break;
+      }
+      let opened = false;
+      for (const label of ["New Automation", "New automation"]) {
+        if (opened) break;
+        const trigger = page.getByRole("button", { name: label, exact: true }).first();
+        try {
+          await trigger.waitFor({ state: "visible", timeout: 8000 });
+          await refInteract(page, `click reference ${label}`, () => trigger.click({ timeout: 3500, force: true }));
+          opened = true;
+        } catch {
+          /* try the alternate label */
+        }
+      }
+      if (opened) {
+        try {
+          await page.getByRole("dialog").first().waitFor({ state: "visible", timeout: 8000 });
+          notes.push("automation editor opened without changing reference data");
+        } catch {
+          missing.push("New Automation editor unavailable on reference");
+        }
+      } else {
+        missing.push("New Automation editor unavailable on reference");
+      }
+      missing.push("ref non-coverage: typing a yearly cron in the reference editor is forbidden; compare source and candidate fixture");
+      break;
+    }
     case "browser":
       if (await tryClick(page, "button", "Browser", 1200)) notes.push("Browser opened");
       else {
@@ -1838,11 +2026,19 @@ async function refSetup(page, state, ctx) {
       else missing.push("no Tasks nav reachable");
       break;
     case "bots":
-      if (await tryClick(page, "button", "Bots")) {
-        if (await waitForAria(page, "heading", "Bots")) notes.push("Bots opened (marker visible)");
-        else missing.push("Bots click acted but the page marker never appeared");
-      } else missing.push("no Bots nav reachable");
+      if (await openRefNav("Bots", "heading", "Bots")) notes.push("Bots opened (marker visible)");
+      else missing.push("no Bots nav reachable");
       break;
+    case "bots-empty-and-list": {
+      if (!openRefNav("Bots", "heading", "Bots")) {
+        missing.push("no Bots nav reachable");
+        break;
+      }
+      const empty = await page.getByText("No Bots yet", { exact: true }).count().catch(() => 0);
+      notes.push(empty > 0 ? "reference empty Bots state visible" : "reference Bots list/empty state captured as-is");
+      notes.push("ref non-coverage: creating the requested bot is forbidden on the reference");
+      break;
+    }
     case "explorer": {
       // View navigation only: open the panel when closed, never toggle a
       // visible panel shut. The activity button precedes panel content in DOM
@@ -2350,7 +2546,8 @@ async function refTeardown(page, state) {
     state === "command-palette" ||
     state === "quick-open" ||
     state === "launch-dialog" ||
-    state === "settings-shortcuts-rebind"
+    state === "settings-shortcuts-rebind" ||
+    state === "automation-editor-cron-preview"
   ) {
     // R6: the palette / create menu / shortcut recorder are not all
     // visible to the overlay census on the reference side, so Escape
@@ -3234,6 +3431,74 @@ async function candSetup(page, state, ctx) {
       } else missing.push("no Settings affordance reachable");
       break;
     }
+    case "settings-appearance-system": {
+      const opened =
+        (await tryClick(page, "button", "Settings")) ||
+        (await tryClick(page, "button", "Settings", 2500));
+      if (!opened) {
+        missing.push("no Settings affordance reachable");
+        break;
+      }
+      await tryClick(page, "button", "Appearance", 1200).catch(() => {});
+      await tryClick(page, "tab", "Appearance", 1200).catch(() => {});
+      if (!(await waitForAria(page, "heading", "Appearance"))) {
+        missing.push("Appearance marker never appeared");
+        break;
+      }
+      const system = page.getByRole("radio", { name: "System", exact: true }).first();
+      if ((await system.count()) === 0) {
+        missing.push("candidate Theme/System control unavailable");
+      } else {
+        const checked = await system.getAttribute("aria-checked").catch(() => null);
+        if (checked !== "true") {
+          await system.click({ timeout: 2500 });
+          await delay(500);
+        }
+        notes.push(`candidate Theme=System (checked=${await system.getAttribute("aria-checked").catch(() => "unknown")})`);
+      }
+      notes.push(`candidate media dark=${await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches).catch(() => false)}`);
+      break;
+    }
+    case "shortcuts-status-rail": {
+      const opened =
+        (await tryClick(page, "button", "Settings")) ||
+        (await tryClick(page, "button", "Settings", 2500));
+      if (!opened) {
+        missing.push("no Settings affordance reachable");
+        break;
+      }
+      if (!(await waitForAria(page, "textbox", "Search settings"))) {
+        missing.push("Settings click acted but the settings marker never appeared");
+        break;
+      }
+      let done = await tryClick(page, "button", "Keyboard shortcuts", 1500);
+      if (!done) {
+        try {
+          await page.getByRole("tab", { name: "Keyboard shortcuts" }).first().click({ timeout: 1500 });
+          await delay(350);
+          done = true;
+        } catch {
+          done = false;
+        }
+      }
+      if (!done) {
+        missing.push("no Keyboard shortcuts section reachable");
+        break;
+      }
+      const rail = page.getByRole("navigation", { name: "Shortcut status filters" }).first();
+      if ((await rail.count()) === 0) {
+        missing.push("Shortcut status filter rail missing");
+        break;
+      }
+      notes.push("Shortcuts status rail opened");
+      const modified = page.getByRole("button", { name: /^Modified\b/ }).first();
+      if ((await modified.count()) > 0) {
+        await modified.click({ timeout: 2500 });
+        await delay(350);
+        notes.push("Modified status filter selected");
+      } else missing.push("Modified status filter unavailable");
+      break;
+    }
     case "changes": {
       if (await ensureProject()) {
         try {
@@ -3269,6 +3534,65 @@ async function candSetup(page, state, ctx) {
         else missing.push("Automations click acted but the page marker never appeared");
       } else missing.push("no Automations nav reachable");
       break;
+    case "automation-editor-cron-preview": {
+      // R8 owned fixture: create a disabled yearly automation through the CLI
+      // (no scheduler/model work), then open its editor so the shared preview
+      // renders the next yearly fires.
+      await ensureProject().catch(() => {});
+      const workspaceId = await workspaceIdForFixture();
+      const cliBin = path.join(root, "target", "debug", process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli");
+      if (!workspaceId || !ctx.dataDir) {
+        missing.push("workspace id unavailable for automation fixture");
+        break;
+      }
+      try {
+        const created = await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json", "automation", "create",
+          "--name", "Yearly QA fixture", "--cron", "0 0 1 1 *",
+          "--workspace", workspaceId, "--harness", "pi",
+          "--prompt", "Deterministic yearly QA fixture.", "--disabled",
+        ]);
+        const payload = JSON.parse(created.stdout);
+        ctx.automationFixtureId = payload.result?.id ?? payload.id ?? null;
+        notes.push("fixture: disabled yearly automation created through drogon-cli");
+      } catch (error) {
+        missing.push(`yearly automation fixture failed: ${error.message.split("\\n")[0]}`);
+        break;
+      }
+      if (!(await tryClick(page, "button", "Automations"))) {
+        missing.push("no Automations nav reachable");
+        break;
+      }
+      if (!(await waitForAria(page, "heading", "Automations"))) {
+        missing.push("Automations page marker never appeared");
+        break;
+      }
+      try {
+        const row = page.getByTestId(`automation-row-${ctx.automationFixtureId}`).first();
+        await row.waitFor({ timeout: 15000 });
+        const actions = row.getByRole("button", { name: "Automation actions for Yearly QA fixture", exact: true });
+        if ((await actions.count()) > 0) {
+          await actions.click({ timeout: 3000 });
+          await delay(350);
+          const edit = page.getByRole("menuitem", { name: "Edit", exact: true }).first();
+          if ((await edit.count()) > 0) await edit.click({ timeout: 3000 });
+        }
+        await page.getByRole("dialog").waitFor({ timeout: 8000 });
+      } catch {
+        // Keep a deterministic fallback: open a blank editor and type only in
+        // the owned candidate, while retaining the CLI fixture evidence.
+        await tryClick(page, "button", "New Automation", 3000);
+        await page.getByRole("dialog").waitFor({ timeout: 8000 }).catch(() => {});
+        const cadence = page.getByRole("combobox", { name: "Cadence", exact: true }).first();
+        if ((await cadence.count()) > 0) await cadence.selectOption("custom");
+        const cron = page.locator('input[placeholder="0 9 * * 1-5"]').first();
+        if ((await cron.count()) > 0) await cron.fill("0 0 1 1 *");
+      }
+      const preview = page.getByTestId("automations-preview").first();
+      if ((await preview.count()) > 0) notes.push(`yearly cron preview: ${(await preview.innerText()).replace(/\\s+/g, " ").slice(0, 240)}`);
+      else missing.push("automation editor preview unavailable");
+      break;
+    }
     case "browser":
       await ensureProject().catch(() => {});
       // R6-B: Browser is a tab, opened from the strip "+" static create
@@ -3366,6 +3690,100 @@ async function candSetup(page, state, ctx) {
         else missing.push("Bots click acted but the page marker never appeared");
       } else missing.push("no Bots nav reachable");
       break;
+    case "bots-empty-and-list": {
+      await ensureProject().catch(() => {});
+      // Earlier Round 8 states may leave the git fixture selected. Bots are
+      // scoped to the active workspace, so select the stable folder fixture
+      // before creating the bot rather than creating it in a hidden scope.
+      try {
+        const fixtureName = path.basename(ctx.workspace);
+        const select = page.getByRole("button", { name: new RegExp(`^Select ${fixtureName.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}`) }).first();
+        await select.waitFor({ state: "visible", timeout: 6000 });
+        await select.click({ timeout: 3000 });
+        await delay(600);
+        notes.push(`fixture workspace selected: ${fixtureName}`);
+      } catch {
+        notes.push("fixture workspace selection best-effort only");
+      }
+      if (!(await tryClick(page, "button", "Bots"))) {
+        missing.push("no Bots nav reachable");
+        break;
+      }
+      if (!(await waitForAria(page, "heading", "Bots"))) {
+        missing.push("Bots page marker never appeared");
+        break;
+      }
+      try {
+        await page.getByText("No Bots yet", { exact: true }).waitFor({ timeout: 12000 });
+        notes.push("candidate empty Bots state observed before fixture create");
+      } catch {
+        notes.push("candidate empty Bots state was not visible before fixture create");
+      }
+      const workspaceId = await workspaceIdForFixture();
+      const cliBin = path.join(root, "target", "debug", process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli");
+      if (!workspaceId || !ctx.dataDir) {
+        missing.push("workspace id unavailable for bot fixture");
+        break;
+      }
+      try {
+        const statusOut = await execFileAsync(cliBin, ["--data-dir", ctx.dataDir, "--json", "status"]);
+        const status = JSON.parse(statusOut.stdout);
+        const hostId = status.result?.hostId ?? status.result?.status?.hostId ?? status.status?.hostId ?? status.hostId;
+        if (!hostId) throw new Error("status response did not include hostId");
+        const body = {
+          workspaceId,
+          hostId,
+          locale: "en",
+          body: {
+            characterPreset: "arya",
+            displayIdentity: { displayName: "Fidelity Bot", handle: null, title: "QA fixture" },
+            harnessPolicy: { defaultHarness: "claude", explicitModel: null },
+            instructions: "Deterministic fidelity bot fixture.",
+            memories: [],
+          },
+        };
+        await execFileAsync(cliBin, [
+          "--data-dir", ctx.dataDir, "--json", "rpc", "bot.create", "--params", JSON.stringify(body),
+        ]);
+        notes.push("fixture: one bot created through drogon-cli (no run/inference)");
+      } catch (error) {
+        missing.push(`bot fixture failed: ${error.message.split("\\n")[0]}`);
+        break;
+      }
+      const refresh = page.getByRole("button", { name: "Refresh Bots", exact: true }).first();
+      if ((await refresh.count()) > 0) {
+        await refresh.click({ timeout: 3000 });
+        await delay(900);
+      } else {
+        await page.reload();
+        await emulatePageFocus(page).catch(() => {});
+        await page.getByRole("button", { name: "Reveal active workspace", exact: true }).waitFor({ timeout: 25000 }).catch(() => {});
+        await tryClick(page, "button", "Bots");
+      }
+      const waitForBotList = async () => {
+        await page.getByRole("list", { name: "Bots", exact: true }).waitFor({ timeout: 12000 });
+        await page.getByText("Fidelity Bot", { exact: true }).waitFor({ timeout: 12000 });
+      };
+      try {
+        await waitForBotList();
+        notes.push("candidate Bots list rendered one fixture bot");
+      } catch {
+        // A refresh button can retain the route while the page model misses
+        // the mutation event; reload the owned candidate once before calling
+        // this a parity failure.
+        try {
+          await page.reload({ waitUntil: "domcontentloaded", timeout: 15000 });
+          await emulatePageFocus(page).catch(() => {});
+          await page.getByRole("button", { name: "Reveal active workspace", exact: true }).waitFor({ timeout: 25000 });
+          await tryClick(page, "button", "Bots", 3000);
+          await waitForBotList();
+          notes.push("candidate Bots list rendered one fixture bot after reload");
+        } catch {
+          missing.push("candidate Bots list did not render the fixture bot");
+        }
+      }
+      break;
+    }
     case "explorer": {
       await ensureProject().catch(() => {});
       // Own temp fixture: one file so the tree is never empty. The reference
@@ -4297,7 +4715,7 @@ async function dismissBrowserAddressEdit(page) {
 async function candTeardown(page, state) {
   const notes = [];
   await dismissBrowserAddressEdit(page);
-  if (state === "launch-dialog" || state === "settings-shortcuts-rebind" || state === "editor-header") {
+  if (state === "launch-dialog" || state === "settings-shortcuts-rebind" || state === "editor-header" || state === "automation-editor-cron-preview") {
     // R6: the harness launch Popover and the shortcut recorder are
     // invisible to the overlay census, so Escape unconditionally first
     // (closes the form, cancels recording); the generic path below
@@ -4315,6 +4733,7 @@ async function candTeardown(page, state) {
     state === "browser" ||
     state === "browser-find" ||
     state === "launch-dialog" ||
+    state === "automation-editor-cron-preview" ||
     state === "editor-tab" ||
     state === "editor-header" ||
     state === "split-terminal" ||
@@ -4433,13 +4852,17 @@ const ALL_STATES = [
   "launch-dialog",
   "settings-shortcuts-rebind",
   "settings-appearance",
+  "settings-appearance-system",
+  "shortcuts-status-rail",
   "changes",
   "automations",
+  "automation-editor-cron-preview",
   "browser",
   "tasks",
   "tasks-rows",
   "tasks-filters",
   "bots",
+  "bots-empty-and-list",
   "statusbar-strip",
   "explorer",
   "source-control",
@@ -4479,6 +4902,7 @@ const CAND_OWNER = {
   settings: "apps/desktop/src/renderer/src/settings-panel.tsx",
   changes: "apps/desktop/src/renderer/src/features/source-control/",
   automations: "apps/desktop/src/renderer/src/features/automations/",
+  "automation-editor-cron-preview": "apps/desktop/src/renderer/src/features/automations/AutomationEditorDialog.tsx, AutomationSchedulePicker.tsx, AutomationCustomCronPanel.tsx",
   browser: "apps/desktop/src/renderer/src/features/browser/",
   tasks: "apps/desktop/src/renderer/src/features/shell/SidebarNav.tsx (placeholder; J6 owner builds the page)",
   "tasks-rows": "apps/desktop/src/renderer/src/features/tasks/task-page/github/Rows.tsx, List.tsx, ../PaginationBar.tsx",
@@ -4486,7 +4910,10 @@ const CAND_OWNER = {
   "command-palette": "apps/desktop/src/renderer/src/components/command-palette/CommandPalette.tsx + features/jump-palette/",
   "launch-dialog": "apps/desktop/src/renderer/src/features/shell/TabCreateMenu.tsx, pi-model-mapping.ts",
   "settings-shortcuts-rebind": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, keybinding-overrides.ts",
+  "settings-appearance-system": "apps/desktop/src/renderer/src/features/settings/appearance-section.tsx, native-theme-sync.ts, apps/desktop/src/renderer/src/theme.ts",
+  "shortcuts-status-rail": "apps/desktop/src/renderer/src/features/settings/shortcuts-section.tsx, shortcut-status-rail.tsx",
   bots: "apps/desktop/src/renderer/src/features/bots/",
+  "bots-empty-and-list": "apps/desktop/src/renderer/src/features/bots/BotsPanel.tsx, BotsPageStates.tsx, BotResponsibilityCard.tsx",
   explorer: "apps/desktop/src/renderer/src/features/file-explorer/",
   "source-control-dirty": "apps/desktop/src/renderer/src/features/source-control/ChangesPanel.tsx, uncommitted-sections.tsx, section-header.tsx",
   "sidebar-menus": "apps/desktop/src/renderer/src/features/shell/ProjectList.tsx, project-actions-menu.tsx, WorktreeContextMenu.tsx",
@@ -4522,8 +4949,11 @@ const STATE_SURFACE = {
   palette: "palette",
   "quick-open": "palette",
   "settings-appearance": "settings",
+  "settings-appearance-system": "settings-appearance-system",
+  "shortcuts-status-rail": "shortcuts-status-rail",
   changes: "changes",
   automations: "automations",
+  "automation-editor-cron-preview": "automation-editor-cron-preview",
   browser: "browser",
   tasks: "tasks",
   "tasks-rows": "tasks",
@@ -4532,6 +4962,7 @@ const STATE_SURFACE = {
   "launch-dialog": "launch-dialog",
   "settings-shortcuts-rebind": "settings-shortcuts",
   bots: "bots",
+  "bots-empty-and-list": "bots-empty-and-list",
   "statusbar-strip": "status-bar",
   explorer: "explorer",
   "source-control": "changes",
@@ -4589,6 +5020,10 @@ const SOURCE_PREFERENCE = {
   "settings-notifications": ["notifications", "enable", "sound", "classname"],
   "settings-git": ["git", "branch", "compare", "classname"],
   "settings-shortcuts": ["shortcuts", "chord", "keyboard", "classname"],
+  "settings-appearance-system": ["theme", "system", "dark", "classname"],
+  "shortcuts-status-rail": ["shortcut status filters", "modified", "unassigned", "conflicts", "classname"],
+  "automation-editor-cron-preview": ["cron", "next runs", "preview", "classname"],
+  "bots-empty-and-list": ["bots", "empty", "list", "character", "classname"],
   "terminal-find": ["search", "find", "match", "classname"],
   "browser-find": ["find in page", "match", "classname"],
   mentu: ["recipe", "run", "evidence", "classname"],
@@ -5066,7 +5501,7 @@ async function main() {
 
 function renderReport({ runId, states, inventory, stateResults, ranked, refMeta, candVersions, outDir }) {
   const lines = [];
-  lines.push(`# QA UI Round 7 fidelity report — ${runId}`);
+  lines.push(`# QA UI Round 8 fidelity report — ${runId}`);
   lines.push("");
   lines.push(`Viewport ${VIEWPORT.width}x${VIEWPORT.height}, schemes: ${NO_DARK ? "light" : "light + dark"}.`);
   lines.push(`Reference (read-only, confirmation only): CDP ${REF_CDP} — title "${refMeta.title}", url ${refMeta.url}.`);
