@@ -10,6 +10,7 @@
 // unified-diff viewer (see unified-diff.ts).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { X } from "lucide-react";
 import {
   GIT_CAPABILITY,
@@ -53,6 +54,7 @@ import {
 import type { SourceControlViewMode } from "./section-file-list";
 import { handleSourceControlCommitShortcut } from "./commit-shortcut";
 import { getDiscardAllPaths, runDiscardAllForArea } from "./discard-sequence";
+import { getDiscardFailureToastCopy } from "./discard-failure-toast";
 import { parseUnifiedDiff } from "./unified-diff";
 
 export const CHANGES_ROUTE_ID = "changes";
@@ -278,13 +280,19 @@ export function ChangesPanel({
   }, [bridge, scope, selection]);
 
   const mutate = useCallback(
-    async (kind: string, run: () => Promise<Result<unknown>>) => {
+    async (
+      kind: string,
+      run: () => Promise<Result<unknown>>,
+      failureToastTitle?: string,
+    ) => {
       setBusy(kind);
       setNotice(null);
       try {
         const result = await run();
         if (!result.ok) {
-          setNotice(errorNotice(errorMessage(result)));
+          const message = errorMessage(result);
+          setNotice(errorNotice(message));
+          if (failureToastTitle) toast.error(failureToastTitle, { description: message });
           return false;
         }
         return true;
@@ -297,13 +305,17 @@ export function ChangesPanel({
   );
 
   const stagePaths = useCallback(
-    (paths: readonly string[]) =>
-      mutate("stage", () => bridge.gitStage({ ...scope, paths: [...paths] })),
+    (paths: readonly string[], failureToastTitle?: string) =>
+      mutate("stage", () => bridge.gitStage({ ...scope, paths: [...paths] }), failureToastTitle),
     [bridge, mutate, scope],
   );
   const unstagePaths = useCallback(
-    (paths: readonly string[]) =>
-      mutate("unstage", () => bridge.gitUnstage({ ...scope, paths: [...paths] })),
+    (paths: readonly string[], failureToastTitle?: string) =>
+      mutate(
+        "unstage",
+        () => bridge.gitUnstage({ ...scope, paths: [...paths] }),
+        failureToastTitle,
+      ),
     [bridge, mutate, scope],
   );
 
@@ -317,6 +329,7 @@ export function ChangesPanel({
       }
       setBusy("discard");
       setNotice(null);
+      let firstFailureMessage: string | undefined;
       try {
         const result = await runDiscardAllForArea(paths, untracked, {
           discardOne: async (path, isUntracked) => {
@@ -327,15 +340,23 @@ export function ChangesPanel({
             });
             if (!response.ok) throw new Error(errorMessage(response));
           },
-          onError: (path, error) =>
+          onError: (path, error) => {
+            if (firstFailureMessage === undefined)
+              firstFailureMessage =
+                error instanceof Error ? error.message : undefined;
             setNotice((prev) =>
               prev
                 ? prev
                 : errorNotice(
                     error instanceof Error ? `${path}: ${error.message}` : `${path}: discard failed`,
                   ),
-            ),
+            );
+          },
         });
+        if (result.failed.length > 0) {
+          const copy = getDiscardFailureToastCopy(result.failed, firstFailureMessage);
+          toast.error(copy.title, { description: copy.description });
+        }
         setRevision((value) => value + 1);
         return result.failed.length === 0;
       } finally {
@@ -672,8 +693,12 @@ export function ChangesPanel({
           toggleSection={toggleSection}
           isExecutingBulk={busy !== null}
           requestDiscardAllInArea={requestDiscardAllInArea}
-          handleStageAllPaths={(paths) => stagePaths(paths).then(() => {})}
-          handleUnstagePaths={(paths) => unstagePaths(paths).then(() => {})}
+          handleStageAllPaths={(paths) =>
+            stagePaths(paths, "Bulk stage/unstage failed").then(() => {})
+          }
+          handleUnstagePaths={(paths) =>
+            unstagePaths(paths, "Bulk stage/unstage failed").then(() => {})
+          }
           sourceControlViewMode={viewMode}
           collapsedTreeDirs={collapsedTreeDirs}
           toggleTreeDir={toggleTreeDir}

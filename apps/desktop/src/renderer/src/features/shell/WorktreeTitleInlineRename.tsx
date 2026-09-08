@@ -10,6 +10,7 @@
    keydown/blur handlers fire normally — so the commit reads the live DOM
    value instead of mirrored state. Plain input over this repo's theme.) */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 export type WorktreeTitleRenameCommit =
   | { kind: "cancel" }
@@ -115,11 +116,15 @@ export function WorktreeTitleInlineRename({
         if (!mountedRef.current) return;
         if (failure) {
           setError(failure || worktreeRenameFailureCopy());
+          toast.error(failure || worktreeRenameFailureCopy());
           return;
         }
         setEditingMode(false);
       } catch {
-        if (mountedRef.current) setError(worktreeRenameFailureCopy());
+        if (mountedRef.current) {
+          setError(worktreeRenameFailureCopy());
+          toast.error(worktreeRenameFailureCopy());
+        }
       } finally {
         if (mountedRef.current) setSaving(false);
       }

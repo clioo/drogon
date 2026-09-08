@@ -26,6 +26,7 @@ import type {
   Workspace,
 } from "../../shared/session-contract";
 import { Button } from "./components/ui/button";
+import { Toaster } from "./components/ui/sonner";
 import {
   isSessionDismissed,
   loadDismissedSessions,
@@ -2708,6 +2709,7 @@ export function App() {
         />
       )}
       <StatusBar terminalCount={sessions.length} onOpenSettings={() => openSettings()} />
+      <Toaster closeButton toastOptions={{ className: "font-sans text-sm" }} />
     </Tooltip.Provider>
   );
 }

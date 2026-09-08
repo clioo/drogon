@@ -8,6 +8,7 @@
 // osc52-clipboard.ts, TerminalProcessExitOverlay.tsx and
 // terminal-renderer-policy.ts.
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -55,6 +56,10 @@ import {
 import { copyTerminalSelection } from "./terminal-selection-copy";
 import { copyTerminalHandleForPane } from "./terminal-handle-copy";
 import { createOsc52OscHandler } from "./osc52-clipboard";
+import {
+  showOsc52ClipboardBlockedToast,
+  showOsc52ClipboardFailedToast,
+} from "./osc52-clipboard-toast";
 import {
   createBrowserAuthoritySource,
   windowBrowserBridge,
@@ -267,9 +272,11 @@ export function TerminalPane({
       // stale `\e]52;…` in scrollback cannot overwrite a newer clipboard.
       getReplaying: () => !caughtUp.current,
       writeClipboardText,
-      showBlockedWriteToast: () => {},
-      showWriteFailedToast: () =>
-        void report("Terminal clipboard write failed."),
+      showBlockedWriteToast: () => showOsc52ClipboardBlockedToast(),
+      showWriteFailedToast: () => {
+        void report("Terminal clipboard write failed.");
+        showOsc52ClipboardFailedToast();
+      },
     });
     terminal.parser.registerOscHandler(52, (data) => osc52Handler(data));
     const openHttpUrl = async (
@@ -555,9 +562,14 @@ export function TerminalPane({
     void copyTerminalHandleForPane({
       handle: sessionRef.current.id,
       writeClipboardText,
-    }).catch(() => {
-      callbacks.current.onError("Copy failed: clipboard unavailable.");
-    });
+    })
+      .then(() => {
+        void toast.success("Terminal ID copied");
+      })
+      .catch(() => {
+        callbacks.current.onError("Copy failed: clipboard unavailable.");
+        void toast.error("Unable to copy terminal ID");
+      });
   };
   const clearScreen = () => {
     setMenu(null);

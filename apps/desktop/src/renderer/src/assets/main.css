@@ -2575,3 +2575,72 @@
 .quick-open-dir {
   margin-left: 0;
 }
+
+/* R13-C toasts (Orca port, MIT Copyright (c) 2026 Lovecast Inc.,
+   verbatim from the source main.css [data-sonner-toaster] section). */
+[data-sonner-toaster] {
+  font-family: var(--font-sans);
+  z-index: 40 !important;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow-floating);
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-icon] {
+  margin-top: 2px;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-content] {
+  min-width: 0;
+  flex: 1 1 calc(100% - 30px);
+  gap: 6px;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-button] {
+  /* Why: Sonner's native action slots otherwise share the copy row and squeeze
+     long notices; indent the wrapped footer to align with text after the icon. */
+  margin-top: 2px;
+  margin-left: 26px;
+  margin-right: 0;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-button] ~ [data-button] {
+  margin-left: 0;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-title] {
+  line-height: 1.35;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-description] {
+  /* Why: match the 80% body-copy opacity used by the custom-React toast bodies
+     (delete-worktree-failure, local-base-ref-suggestion) so string and JSX
+     descriptions read at the same weight. */
+  color: color-mix(in srgb, var(--popover-foreground) 80%, transparent);
+  line-height: 1.45;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-close-button] {
+  /* Why: Sonner's dark-theme defaults can resolve the close icon and button
+     background to the same color; keep the X readable on both Orca themes. */
+  color: var(--popover-foreground);
+  background: var(--popover);
+  border-color: rgb(0 0 0 / 0.14);
+}
+
+[data-sonner-toaster][data-sonner-theme='dark']
+  [data-sonner-toast][data-styled='true']
+  [data-close-button] {
+  color: var(--popover-foreground);
+  background: var(--popover);
+  border-color: rgb(255 255 255 / 0.14);
+}
+
+.dark [data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-close-button] {
+  border-color: rgb(255 255 255 / 0.14);
+}
