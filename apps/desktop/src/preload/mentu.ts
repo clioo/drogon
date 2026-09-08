@@ -12,6 +12,8 @@ export const mentu: MentuBridge = {
   mentuRuns: (value) => ipcRenderer.invoke("drogon:mentuRuns", value),
   mentuRunStatus: (value) =>
     ipcRenderer.invoke("drogon:mentuRunStatus", value),
+  mentuRunEvidence: (value) =>
+    ipcRenderer.invoke("drogon:mentuRunEvidence", value),
   mentuRetry: (value) => ipcRenderer.invoke("drogon:mentuRetry", value),
   mentuCancel: (value) => ipcRenderer.invoke("drogon:mentuCancel", value),
 };

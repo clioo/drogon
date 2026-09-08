@@ -11,7 +11,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use drogon_protocol::RpcError;
-use drogon_protocol::mentu::{MentuRunStatus, MentuStepRun, MentuStepVerification};
+use drogon_protocol::mentu::{
+    MAX_MENTU_EVIDENCE_BYTES, MENTU_EVIDENCE_CONTENT_TRUNCATED, MENTU_EVIDENCE_OUTSIDE_RUN_DIR,
+    MentuReferencedOutput, MentuRunStatus, MentuStepEvidence, MentuStepRun, MentuStepVerification,
+};
 use serde_json::Value;
 
 use crate::error;
@@ -229,6 +232,140 @@ pub fn list_run_directory_names(workspace_root: &Path) -> std::collections::Hash
         .collect()
 }
 
+fn outside_run_dir(reference: &str) -> MentuReferencedOutput {
+    MentuReferencedOutput {
+        reference: reference.to_string(),
+        path: None,
+        content: None,
+        error: Some(MENTU_EVIDENCE_OUTSIDE_RUN_DIR.to_string()),
+    }
+}
+
+/// Reads one stdio evidence file a run record references (`output_file` /
+/// `error_file`), a narrowed Rust port of the fork's `readMentuOutput`
+/// (`src/main/mentu/mentu-run-evidence-files.ts`): the reference must be a
+/// bare file name resolving inside `canonical_run_dir` — empty, absolute
+/// and escaping references are refused, as are paths the OS will not
+/// resolve to a file inside the run dir (a missing stream included, like
+/// the fork's failed `realpath`). At most [`MAX_MENTU_EVIDENCE_BYTES`] are
+/// read; longer streams keep their head bytes (lossy UTF-8, like the
+/// fork's buffer `toString`) with `content_truncated`. Other read failures
+/// keep the candidate path with the OS error message.
+///
+/// `canonical_run_dir` must already be canonicalized (the caller resolves
+/// it once per run); every candidate is canonicalized too, so a symlink
+/// pointing outside the run dir is refused rather than followed.
+pub fn read_evidence_output(canonical_run_dir: &Path, reference: &str) -> MentuReferencedOutput {
+    if reference.is_empty() || reference.contains('\0') || Path::new(reference).is_absolute() {
+        return outside_run_dir(reference);
+    }
+    let candidate = canonical_run_dir.join(reference);
+    // Lexical escape (`..`) before touching the filesystem.
+    if !candidate.starts_with(canonical_run_dir) {
+        return outside_run_dir(reference);
+    }
+    let resolved = match candidate.canonicalize() {
+        Ok(resolved) if resolved.starts_with(canonical_run_dir) => resolved,
+        _ => return outside_run_dir(reference),
+    };
+    let mut file = match fs::File::open(&resolved) {
+        Ok(file) => file,
+        Err(e) => {
+            return MentuReferencedOutput {
+                reference: reference.to_string(),
+                path: Some(candidate.to_string_lossy().into_owned()),
+                content: None,
+                error: Some(e.to_string()),
+            };
+        }
+    };
+    use std::io::Read as _;
+    let mut head = Vec::with_capacity(MAX_MENTU_EVIDENCE_BYTES.min(8192));
+    // One byte past the cap decides truncation without reading a
+    // multi-gigabyte stream into memory.
+    let mut tail = [0u8; 1];
+    let truncated = match file
+        .by_ref()
+        .take(MAX_MENTU_EVIDENCE_BYTES as u64)
+        .read_to_end(&mut head)
+    {
+        Ok(_) => matches!(file.read(&mut tail), Ok(1)),
+        Err(e) => {
+            return MentuReferencedOutput {
+                reference: reference.to_string(),
+                path: Some(resolved.to_string_lossy().into_owned()),
+                content: None,
+                error: Some(e.to_string()),
+            };
+        }
+    };
+    MentuReferencedOutput {
+        reference: reference.to_string(),
+        path: Some(resolved.to_string_lossy().into_owned()),
+        content: Some(String::from_utf8_lossy(&head).into_owned()),
+        error: if truncated {
+            Some(MENTU_EVIDENCE_CONTENT_TRUNCATED.to_string())
+        } else {
+            None
+        },
+    }
+}
+
+/// Loads the stdio evidence for every step label in `run.json`'s `steps`
+/// array, first-seen label order with the newest record winning per label —
+/// the same overwrite order the fork's `readMentuRunEvidence` uses for
+/// `outputs[label]`. `Ok(None)` means the run directory or its record does
+/// not exist yet (a run that just started), distinct from a read/parse
+/// failure, which propagates as `Err`. Steps carrying neither `output_file`
+/// nor `error_file` contribute no entry; a stream whose key is absent reads
+/// as an empty, unresolvable reference.
+pub fn read_run_evidence(
+    workspace_root: &Path,
+    mentu_run_id: &str,
+) -> Result<Option<Vec<MentuStepEvidence>>, RpcError> {
+    let run_dir = match run_dir(workspace_root, mentu_run_id)?.canonicalize() {
+        Ok(dir) => dir,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(error::io_error(e.to_string())),
+    };
+    let Some(run_json) = read_run_json(workspace_root, mentu_run_id)? else {
+        return Ok(None);
+    };
+    let Some(steps) = run_json.get("steps").and_then(Value::as_array) else {
+        return Ok(Some(Vec::new()));
+    };
+    let mut order: Vec<String> = Vec::new();
+    let mut by_label: std::collections::HashMap<String, MentuStepEvidence> =
+        std::collections::HashMap::new();
+    for step in steps {
+        let Some(label) = step.get("label").and_then(Value::as_str) else {
+            continue;
+        };
+        let output_file = step.get("output_file").and_then(Value::as_str);
+        let error_file = step.get("error_file").and_then(Value::as_str);
+        if output_file.is_none() && error_file.is_none() {
+            continue;
+        }
+        if !by_label.contains_key(label) {
+            order.push(label.to_string());
+        }
+        by_label.insert(
+            label.to_string(),
+            MentuStepEvidence {
+                label: label.to_string(),
+                stdout: read_evidence_output(&run_dir, output_file.unwrap_or("")),
+                stderr: read_evidence_output(&run_dir, error_file.unwrap_or("")),
+            },
+        );
+    }
+    Ok(Some(
+        order
+            .into_iter()
+            .filter_map(|label| by_label.remove(&label))
+            .collect(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,5 +474,159 @@ mod tests {
         fs::create_dir(runs.join("run_new")).unwrap();
         let discovered = discover_new_run_id(workspace.path(), &before);
         assert_eq!(discovered.as_deref(), Some("run_new"));
+    }
+
+    fn evidence_workspace() -> tempfile::TempDir {
+        let workspace = tempfile::tempdir().unwrap();
+        let run_dir = workspace
+            .path()
+            .join(".mentu")
+            .join("runs")
+            .join("run_evidence1");
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::write(run_dir.join("step.stdout"), "hello stdout\n").unwrap();
+        fs::write(run_dir.join("step.stderr"), "boom\n").unwrap();
+        workspace
+    }
+
+    #[test]
+    fn evidence_output_reads_streams_with_fork_error_reasons() {
+        let workspace = evidence_workspace();
+        let run_dir = workspace
+            .path()
+            .join(".mentu")
+            .join("runs")
+            .join("run_evidence1")
+            .canonicalize()
+            .unwrap();
+        let stdout = read_evidence_output(&run_dir, "step.stdout");
+        assert_eq!(stdout.reference, "step.stdout");
+        assert_eq!(stdout.content.as_deref(), Some("hello stdout\n"));
+        assert!(stdout.error.is_none());
+        assert!(
+            stdout
+                .path
+                .as_deref()
+                .is_some_and(|p| p.ends_with("step.stdout"))
+        );
+        // A missing stream is unresolvable, like the fork's failed realpath.
+        let missing = read_evidence_output(&run_dir, "absent.stdout");
+        assert_eq!(missing.content, None);
+        assert_eq!(
+            missing.error.as_deref(),
+            Some(MENTU_EVIDENCE_OUTSIDE_RUN_DIR)
+        );
+        // Absolute, empty and escaping references never touch the filesystem.
+        for bad in ["", "/etc/hostname", "../escape", "sub/../../escape"] {
+            let refused = read_evidence_output(&run_dir, bad);
+            assert_eq!(refused.content, None);
+            assert_eq!(
+                refused.error.as_deref(),
+                Some(MENTU_EVIDENCE_OUTSIDE_RUN_DIR),
+                "reference {bad:?} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn evidence_output_truncates_at_the_fork_cap_and_keeps_the_head() {
+        let workspace = evidence_workspace();
+        let run_dir = workspace
+            .path()
+            .join(".mentu")
+            .join("runs")
+            .join("run_evidence1")
+            .canonicalize()
+            .unwrap();
+        let big = "x".repeat(MAX_MENTU_EVIDENCE_BYTES + 1024);
+        fs::write(run_dir.join("big.stdout"), &big).unwrap();
+        let output = read_evidence_output(&run_dir, "big.stdout");
+        assert_eq!(
+            output.error.as_deref(),
+            Some(MENTU_EVIDENCE_CONTENT_TRUNCATED)
+        );
+        let content = output.content.unwrap();
+        assert_eq!(content.len(), MAX_MENTU_EVIDENCE_BYTES);
+        assert!(big.starts_with(&content));
+        // Exactly at the cap: no truncation flag.
+        let exact = "y".repeat(MAX_MENTU_EVIDENCE_BYTES);
+        fs::write(run_dir.join("exact.stdout"), &exact).unwrap();
+        let output = read_evidence_output(&run_dir, "exact.stdout");
+        assert!(output.error.is_none());
+        assert_eq!(output.content.as_deref(), Some(exact.as_str()));
+    }
+
+    #[test]
+    fn evidence_output_refuses_a_symlink_escaping_the_run_dir() {
+        let workspace = evidence_workspace();
+        let run_dir = workspace
+            .path()
+            .join(".mentu")
+            .join("runs")
+            .join("run_evidence1")
+            .canonicalize()
+            .unwrap();
+        let outside = workspace.path().join("secret.txt");
+        fs::write(&outside, "secret").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, run_dir.join("link.stdout")).unwrap();
+        let output = read_evidence_output(&run_dir, "link.stdout");
+        assert_eq!(output.content, None);
+        assert_eq!(
+            output.error.as_deref(),
+            Some(MENTU_EVIDENCE_OUTSIDE_RUN_DIR)
+        );
+    }
+
+    #[test]
+    fn run_evidence_loads_every_step_label_with_newest_attempt_winning() {
+        let workspace = evidence_workspace();
+        let run_dir = workspace
+            .path()
+            .join(".mentu")
+            .join("runs")
+            .join("run_evidence1");
+        fs::write(
+            run_dir.join("run.json"),
+            json!({
+                "run_id": "run_evidence1",
+                "recipe_name": "demo",
+                "started_at": "2026-01-01T00:00:00Z",
+                "outcome": "ok",
+                "steps": [
+                    {"label": "step", "backend": "shell", "exit_code": 1,
+                     "output_file": "step.stdout", "error_file": "step.stderr"},
+                    {"label": "step", "backend": "shell", "exit_code": 0,
+                     "output_file": "step.stdout", "error_file": "step.stderr"},
+                    {"label": "quiet", "backend": "shell", "exit_code": 0},
+                ],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let evidence = read_run_evidence(workspace.path(), "run_evidence1")
+            .unwrap()
+            .unwrap();
+        // `quiet` carries no file keys and contributes no entry; the
+        // repeated `step` label collapses to one entry (newest wins, same
+        // files here so the content is the shared head).
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].label, "step");
+        assert_eq!(
+            evidence[0].stdout.content.as_deref(),
+            Some("hello stdout\n")
+        );
+        assert_eq!(evidence[0].stderr.content.as_deref(), Some("boom\n"));
+    }
+
+    #[test]
+    fn run_evidence_is_absent_before_the_record_exists() {
+        let workspace = tempfile::tempdir().unwrap();
+        // No `.mentu/runs` at all: a run that just started.
+        assert!(
+            read_run_evidence(workspace.path(), "run_nothing")
+                .unwrap()
+                .is_none()
+        );
     }
 }

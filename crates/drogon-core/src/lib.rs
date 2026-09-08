@@ -452,6 +452,7 @@ impl Engine {
             "mentu.run" => self.mentu_run(request),
             "mentu.runs" => self.mentu_runs(&request.params),
             "mentu.run_status" => self.mentu_run_status(&request.params),
+            "mentu.run_evidence" => self.mentu_run_evidence(&request.params),
             "mentu.retry" => self.mentu_retry(request),
             "mentu.cancel" => self.mentu_cancel(request),
             "orchestration.runCreate"

@@ -588,3 +588,72 @@ fn recipe_save_invalidates_the_old_approval_and_the_new_hash_runs() {
     let finished = fx.wait_for_completion(&run_id);
     assert_eq!(finished["status"], "succeeded");
 }
+
+#[test]
+fn run_evidence_reads_the_finished_run_stdout_content_with_fork_shapes() {
+    let fx = Fixture::new();
+    fx.write_recipe("success");
+    let approval_id = fx.approve("success");
+    let started = fx.run("success", &approval_id);
+    let run_id = started["id"].as_str().unwrap().to_string();
+    let finished = fx.wait_for_completion(&run_id);
+    assert_eq!(finished["status"], "succeeded");
+
+    let result = ok(&fx.engine, "mentu.run_evidence", json!({"runId": run_id}));
+    assert_eq!(result["runId"], run_id);
+    assert_eq!(result["mentuRunId"], finished["mentuRunId"]);
+    let evidence = result["evidence"].as_array().unwrap();
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0]["label"], "fixture-step");
+    let stdout = &evidence[0]["stdout"];
+    assert_eq!(stdout["reference"], "fixture-step.stdout");
+    assert!(
+        stdout["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("fixture-step.stdout"))
+    );
+    assert!(
+        stdout["content"]
+            .as_str()
+            .is_some_and(|c| c.contains("fixture stdout for success"))
+    );
+    assert!(stdout.get("error").is_none());
+    // The fixture writes an empty stderr: captured, present, empty.
+    let stderr = &evidence[0]["stderr"];
+    assert_eq!(stderr["reference"], "fixture-step.stderr");
+    assert_eq!(stderr["content"], "");
+    assert!(stderr.get("error").is_none());
+}
+
+#[test]
+fn run_evidence_reports_a_failed_run_step_error_and_refuses_unknown_runs() {
+    let fx = Fixture::new();
+    fx.write_recipe("failure");
+    let approval_id = fx.approve("failure");
+    let started = fx.run("failure", &approval_id);
+    let run_id = started["id"].as_str().unwrap().to_string();
+    let finished = fx.wait_for_completion(&run_id);
+    assert_eq!(finished["status"], "failed");
+
+    let result = ok(&fx.engine, "mentu.run_evidence", json!({"runId": run_id}));
+    let evidence = result["evidence"].as_array().unwrap();
+    assert_eq!(evidence.len(), 1);
+    assert!(
+        evidence[0]["stdout"]["content"]
+            .as_str()
+            .is_some_and(|c| c.contains("fixture stdout for failure"))
+    );
+
+    assert_eq!(
+        err_code(
+            &fx.engine,
+            "mentu.run_evidence",
+            json!({"runId": "no-such-run"}),
+        ),
+        "not_found"
+    );
+    assert_eq!(
+        err_code(&fx.engine, "mentu.run_evidence", json!({"runId": ""})),
+        "invalid_argument"
+    );
+}

@@ -9,6 +9,7 @@ describe("mentuStore", () => {
       activeRunId: null,
       mode: "graph",
       selectedNodeId: null,
+      evidenceByRunId: {},
     });
   });
 
@@ -22,6 +23,7 @@ describe("mentuStore", () => {
       activeRunId: null,
       mode: "graph",
       selectedNodeId: null,
+      evidenceByRunId: {},
     });
   });
 

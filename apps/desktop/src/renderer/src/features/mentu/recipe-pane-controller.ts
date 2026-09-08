@@ -18,6 +18,7 @@ import type {
   MentuRecipeSummary,
   MentuRun,
   MentuRuntimeInfo,
+  MentuStepEvidence,
 } from "../../../../shared/mentu-contract";
 import type { MentuPaneMode } from "../../../../shared/persistence-contracts/mentu-pane-types";
 import { buildRecipeGraph, type RecipeGraph } from "./recipe-graph";
@@ -70,6 +71,11 @@ export type MentuPaneController = {
   review: MentuReview | null;
   run: MentuRun | null;
   runs: MentuRun[];
+  /** Loaded stdio evidence for the current run (null until the daemon
+   *  answers); shared across mounts through the store cache. */
+  evidence: MentuStepEvidence[] | null;
+  evidenceLoading: boolean;
+  evidenceError: string | null;
   graph: RecipeGraph | null;
   selectedNodeId: string | null;
   setSelectedNodeId: (nodeId: string) => void;
@@ -120,6 +126,12 @@ export function useMentuPaneController(
   const [review, setReview] = useState<MentuReview | null>(null);
   const [run, setRun] = useState<MentuRun | null>(null);
   const [runs, setRuns] = useState<MentuRun[]>([]);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  // The `${runId}:${status}` the cached evidence was loaded for: the
+  // status poll replaces the `run` object every 750 ms, and only a new id
+  // or a status transition justifies re-reading the evidence files.
+  const evidenceLoadedKey = useRef<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -214,6 +226,43 @@ export function useMentuPaneController(
       clearInterval(timer);
     };
   }, [bridge, run]);
+
+  // Stdio evidence for the current run, loaded once per run id (and again
+  // on every status transition, so a finished run's files replace the
+  // partial ones). A separate `mentu.run_evidence` call — never part of
+  // the status poll — mirroring the fork's separate `mentu.run.read`.
+  const evidence = run ? (state.evidenceByRunId[run.id] ?? null) : null;
+  useEffect(() => {
+    if (!run || !run.mentuRunId) return;
+    const key = `${run.id}:${run.status}`;
+    if (evidenceLoadedKey.current === key) return;
+    if (run.status !== "running" && state.evidenceByRunId[run.id] !== undefined) {
+      evidenceLoadedKey.current = key;
+      return;
+    }
+    // Older preload builds have no evidence method: the view falls back
+    // to path-only rows instead of failing the whole pane.
+    if (!bridge.mentuRunEvidence) return;
+    let cancelled = false;
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    void bridge.mentuRunEvidence({ runId: run.id }).then((result) => {
+      if (cancelled) return;
+      setEvidenceLoading(false);
+      if (result.ok) {
+        setState({
+          evidenceByRunId: { ...state.evidenceByRunId, [run.id]: result.result.evidence },
+        });
+        evidenceLoadedKey.current = key;
+      } else {
+        setEvidenceError(result.error.message);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setState is stable per workspace; the key ref guards re-entry
+  }, [bridge, run?.id, run?.status]);
 
   const graph = useMemo(
     () => (recipe ? buildRecipeGraph(recipe.steps) : null),
@@ -569,6 +618,9 @@ export function useMentuPaneController(
     review,
     run,
     runs,
+    evidence,
+    evidenceLoading,
+    evidenceError,
     graph,
     selectedNodeId: state.selectedNodeId,
     setSelectedNodeId,

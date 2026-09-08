@@ -31,6 +31,7 @@ const nativeMethodFor: Record<MentuMethod, string> = {
   mentuRun: "mentu.run",
   mentuRuns: "mentu.runs",
   mentuRunStatus: "mentu.run_status",
+  mentuRunEvidence: "mentu.run_evidence",
   mentuRetry: "mentu.retry",
   mentuCancel: "mentu.cancel",
 };
@@ -79,6 +80,7 @@ const channelFor: Record<MentuMethod, string> = {
   mentuRun: "drogon:mentuRun",
   mentuRuns: "drogon:mentuRuns",
   mentuRunStatus: "drogon:mentuRunStatus",
+  mentuRunEvidence: "drogon:mentuRunEvidence",
   mentuRetry: "drogon:mentuRetry",
   mentuCancel: "drogon:mentuCancel",
 };
